@@ -1,74 +1,91 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import AuthLayout from "../components/Layout/AuthLayout";
-import TextField from "../components/UI/TextField";
-import Button from "../components/UI/Button";
-import { login } from "../services/auth";
+// src/pages/DashboardPage.tsx
+import React from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { getContext } from "../services/auth";
+import { decodeAmoCertFromUrl } from "../utils/amo";
 
-const LoginPage: React.FC = () => {
+const niceLabel = (dept: string) => {
+  switch (dept) {
+    case "planning":
+      return "Planning";
+    case "production":
+      return "Production";
+    case "quality":
+      return "Quality & Compliance";
+    case "safety":
+      return "Safety Management";
+    case "stores":
+      return "Procurement & Stores";
+    case "engineering":
+      return "Engineering";
+    case "workshops":
+      return "Workshops";
+    case "admin":
+      return "System Admin";
+    default:
+      return dept;
+  }
+};
+
+const DashboardPage: React.FC = () => {
+  const params = useParams<{ amoCode?: string; department?: string }>();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
+  const ctx = getContext();
+  const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
+  const department = params.department ?? ctx.department ?? "planning";
 
-    if (!email || !password) {
-      setErrorMsg("Please enter both email and password.");
-      return;
-    }
+  const amoDisplay =
+    amoSlug !== "UNKNOWN" ? decodeAmoCertFromUrl(amoSlug) : "AMO";
 
-    try {
-      setLoading(true);
-      await login(email, password);
-      navigate("/", { replace: true });
-    } catch (err: any) {
-      console.error(err);
-      setErrorMsg("Invalid email or password.");
-    } finally {
-      setLoading(false);
-    }
+  const isCRSDept = department === "planning" || department === "production";
+
+  const handleNewCrs = () => {
+    navigate(`/maintenance/${amoSlug}/${department}/crs/new`);
   };
 
+  console.log("DashboardPage", { amoSlug, amoDisplay, department, params, ctx });
+
   return (
-    <AuthLayout
-      title="Sign in to AMO Portal"
-      subtitle="Use your Safarilink AMO credentials."
-    >
-      <form className="auth-form" onSubmit={handleSubmit}>
-        {errorMsg && <div className="auth-form__error">{errorMsg}</div>}
+    <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
+      <header className="page-header">
+        <h1 className="page-header__title">
+          {niceLabel(department)} · {amoDisplay}
+        </h1>
+        <p className="page-header__subtitle">
+          Welcome to the {niceLabel(department).toLowerCase()} dashboard for AMO{" "}
+          <strong>{amoDisplay}</strong>.
+        </p>
+      </header>
 
-        <TextField
-          label="Email"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          name="email"
-          required
-        />
+      {isCRSDept && (
+        <section className="page-section">
+          <h2 className="page-section__title">
+            Certificates of Release to Service
+          </h2>
+          <p className="page-section__body">
+            Create, track, and download CRS forms for completed maintenance.
+          </p>
+          <button
+            type="button"
+            className="primary-chip-btn"
+            onClick={handleNewCrs}
+          >
+            + New CRS
+          </button>
+        </section>
+      )}
 
-        <TextField
-          label="Password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          name="password"
-          required
-        />
-
-        <div className="auth-form__actions">
-          <Button type="submit" loading={loading}>
-            Sign in
-          </Button>
-        </div>
-      </form>
-    </AuthLayout>
+      {!isCRSDept && (
+        <section className="page-section">
+          <p className="page-section__body">
+            Department widgets for {niceLabel(department)} will appear here.
+          </p>
+        </section>
+      )}
+    </DepartmentLayout>
   );
 };
 
-export default LoginPage;
+export default DashboardPage;

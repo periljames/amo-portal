@@ -1,3 +1,4 @@
+// src/components/Layout/AuthLayout.tsx
 import React from "react";
 
 interface AuthLayoutProps {
@@ -6,19 +7,22 @@ interface AuthLayoutProps {
   children: React.ReactNode;
 }
 
-const AuthLayout: React.FC<AuthLayoutProps> = ({ title, subtitle, children }) => {
+const AuthLayout: React.FC<AuthLayoutProps> = ({
+  title,
+  subtitle,
+  children,
+}) => {
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <div className="auth-card__header">
-          <div className="auth-logo">AMO Portal</div>
-          <h1 className="auth-title">{title}</h1>
-          {subtitle && <p className="auth-subtitle">{subtitle}</p>}
+    <div className="auth-layout">
+      <div className="auth-layout__card">
+        <div className="auth-layout__badge">
+          <span>AMO PORTAL</span>
         </div>
-        <div className="auth-card__body">{children}</div>
-        <div className="auth-card__footer">
-          <p>© {new Date().getFullYear()} Safarilink AMO · Internal Use Only</p>
-        </div>
+        <h1 className="auth-layout__title">{title}</h1>
+        {subtitle && (
+          <p className="auth-layout__subtitle">{subtitle}</p>
+        )}
+        {children}
       </div>
     </div>
   );

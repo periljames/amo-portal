@@ -1,29 +1,62 @@
+// src/router.tsx
 import React from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
+import CRSNewPage from "./pages/CRSNewPage";
 import { isAuthenticated } from "./services/auth";
 
-const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+// RequireAuth wrapper
+const RequireAuth: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const location = useLocation();
+  const { amoCode } = useParams<{ amoCode?: string }>();
+
   if (!isAuthenticated()) {
-    return <Navigate to="/login" replace />;
+    const target = amoCode ? `/maintenance/${amoCode}/login` : "/login";
+    return (
+      <Navigate
+        to={target}
+        replace
+        state={{ from: location.pathname + location.search }}
+      />
+    );
   }
+
   return children;
 };
 
 export const AppRouter: React.FC = () => {
   return (
     <Routes>
+      {/* Global login */}
       <Route path="/login" element={<LoginPage />} />
+
+      {/* AMO-specific login */}
+      <Route path="/maintenance/:amoCode/login" element={<LoginPage />} />
+
+      {/* Department dashboard */}
       <Route
-        path="/"
+        path="/maintenance/:amoCode/:department"
         element={
-          <ProtectedRoute>
+          <RequireAuth>
             <DashboardPage />
-          </ProtectedRoute>
+          </RequireAuth>
         }
       />
-      <Route path="*" element={<Navigate to="/" replace />} />
+
+      {/* New CRS page */}
+      <Route
+        path="/maintenance/:amoCode/:department/crs/new"
+        element={
+          <RequireAuth>
+            <CRSNewPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Default root & catch-all */}
+      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
 };

@@ -12,7 +12,11 @@ from . import models
 from .database import get_db
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["pbkdf2_sha256"],
+    default="pbkdf2_sha256",
+    deprecated="auto",
+)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-key")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
