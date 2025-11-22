@@ -1,13 +1,15 @@
 # backend/amodb/apps/crs/router.py
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ..work import models as work_models
+from ..fleet import models as fleet_models
 from . import models as crs_models
 from . import schemas as crs_schemas
 from .utils import generate_crs_serial
@@ -16,13 +18,201 @@ from .pdf_renderer import create_crs_pdf
 router = APIRouter(prefix="/crs", tags=["crs"])
 
 
-@router.post("/", response_model=crs_schemas.CRSRead, status_code=status.HTTP_201_CREATED)
+# --------------------------------------------------------------------------
+# PREFILL ENDPOINT
+# --------------------------------------------------------------------------
+
+@router.get(
+    "/prefill/{wo_no}",
+    response_model=crs_schemas.CRSPrefill,
+    summary="Prefill CRS fields from Aircraft + Components + WorkOrder",
+)
+def prefill_crs_for_work_order(
+    wo_no: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Given a work order number, pull:
+
+      - WorkOrder (to get check_type, aircraft_serial_number, dates)
+      - Aircraft (type, registration, MSN, total hours/cycles, base, owner)
+      - AircraftComponent (L/R engines with hours/cycles)
+
+    and return a CRSPrefill object the UI can use to initialise a new
+    CRS form. This keeps users from re-typing aircraft & engine data.
+    """
+    work_order = (
+        db.query(work_models.WorkOrder)
+        .filter(work_models.WorkOrder.wo_number == wo_no)
+        .first()
+    )
+    if not work_order:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Work order {wo_no} not found.",
+        )
+
+    ac = (
+        db.query(fleet_models.Aircraft)
+        .filter(fleet_models.Aircraft.serial_number == work_order.aircraft_serial_number)
+        .first()
+    )
+    if not ac:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Aircraft with serial {work_order.aircraft_serial_number} not found.",
+        )
+
+    # Pull all components for this aircraft
+    components = (
+        db.query(fleet_models.AircraftComponent)
+        .filter(
+            fleet_models.AircraftComponent.aircraft_serial_number
+            == ac.serial_number
+        )
+        .all()
+    )
+
+    def find_engine(side_keywords: List[str]) -> Optional[fleet_models.AircraftComponent]:
+        side_keywords_upper = [k.upper() for k in side_keywords]
+        for c in components:
+            pos = (c.position or "").upper()
+            if "ENG" in pos or "ENGINE" in pos:
+                if any(k in pos for k in side_keywords_upper):
+                    return c
+        return None
+
+    lh = find_engine(["LH", "L "])
+    rh = find_engine(["RH", "R "])
+
+    # Default next_maintenance_due text based on WO.check_type
+    nmd_map = {
+        "200HR": "200 HRS CHECK",
+        "A": "A CHECK",
+        "C": "C CHECK",
+    }
+    next_due = nmd_map.get(work_order.check_type or "", None)
+
+    # Default airframe limit unit – almost always hours for you
+    default_unit = crs_schemas.AirframeLimitUnit.HOURS
+
+    today = datetime.utcnow().date()
+    completion_date = work_order.due_date or work_order.open_date or today
+
+    return crs_schemas.CRSPrefill(
+        aircraft_serial_number=ac.serial_number,
+        wo_no=work_order.wo_number,
+        releasing_authority=crs_schemas.ReleasingAuthority.KCAA,  # can make configurable later
+        operator_contractor=ac.owner or "SAFARILINK AVIATION LTD",
+        job_no=work_order.wo_number,
+        location=ac.home_base or "",
+        aircraft_type=ac.template or ac.make or "",
+        aircraft_reg=ac.registration,
+        msn=ac.serial_number,
+        lh_engine_type=lh.part_number if lh else None,
+        rh_engine_type=rh.part_number if rh else None,
+        lh_engine_sno=lh.serial_number if lh else None,
+        rh_engine_sno=rh.serial_number if rh else None,
+        aircraft_tat=ac.total_hours,
+        aircraft_tac=ac.total_cycles,
+        lh_hrs=lh.current_hours if lh else None,
+        lh_cyc=lh.current_cycles if lh else None,
+        rh_hrs=rh.current_hours if rh else None,
+        rh_cyc=rh.current_cycles if rh else None,
+        airframe_limit_unit=default_unit,
+        next_maintenance_due=next_due,
+        date_of_completion=completion_date,
+        crs_issue_date=today,
+    )
+
+
+# --------------------------------------------------------------------------
+# CREATE
+# --------------------------------------------------------------------------
+
+@router.post(
+    "/",
+    response_model=crs_schemas.CRSRead,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_crs(
     payload: crs_schemas.CRSCreate,
     db: Session = Depends(get_db),
 ):
-    # Create CRS row first (without serial so we can use the DB id)
+    # ----------------------------------------------------------
+    # 1) Enforce chain: Aircraft -> WorkOrder (+tasks) -> CRS
+    # ----------------------------------------------------------
+
+    # Work order number comes from the form (wo_no field)
+    if not payload.wo_no:
+        raise HTTPException(
+            status_code=400,
+            detail="wo_no (work order number) is required to create a CRS.",
+        )
+
+    work_order = (
+        db.query(work_models.WorkOrder)
+        .filter(work_models.WorkOrder.wo_number == payload.wo_no)
+        .first()
+    )
+    if not work_order:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Work order {payload.wo_no} not found.",
+        )
+
+    # Confirm aircraft exists and matches
+    ac = (
+        db.query(fleet_models.Aircraft)
+        .filter(fleet_models.Aircraft.serial_number == work_order.aircraft_serial_number)
+        .first()
+    )
+    if not ac:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Aircraft with serial {work_order.aircraft_serial_number} not found.",
+        )
+
+    # Cross-check payload.aircraft_serial_number (from UI) with WO's aircraft
+    if payload.aircraft_serial_number and payload.aircraft_serial_number != ac.serial_number:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Aircraft mismatch: payload has {payload.aircraft_serial_number} "
+                f"but work order {work_order.wo_number} is for {ac.serial_number}."
+            ),
+        )
+
+    # Ensure there is at least one task under this WO
+    has_task = (
+        db.query(work_models.WorkOrderTask.id)
+        .filter(work_models.WorkOrderTask.work_order_id == work_order.id)
+        .first()
+    )
+    if not has_task:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create CRS: work order has no tasks.",
+        )
+
+    # Only certain check types get a CRS
+    allowed_types = {"200HR", "A", "C"}
+    if not work_order.check_type or work_order.check_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Work order {work_order.wo_number} has check_type "
+                f"'{work_order.check_type}'. No CRS required for this type."
+            ),
+        )
+
+    # ----------------------------------------------------------
+    # 2) Create CRS row (without serial first)
+    # ----------------------------------------------------------
     crs = crs_models.CRS(
+        aircraft_serial_number=ac.serial_number,  # from WO, not from client
+        work_order_id=work_order.id,
+        check_type=work_order.check_type,
         releasing_authority=payload.releasing_authority.value,
         operator_contractor=payload.operator_contractor,
         job_no=payload.job_no,
@@ -54,7 +244,7 @@ def create_crs(
         amm_revision=payload.amm_revision,
         amm_issue_date=payload.amm_issue_date,
         add_mtx_data=payload.add_mtx_data,
-        work_order_no=payload.work_order_no,
+        work_order_no=payload.work_order_no or payload.wo_no,
         airframe_limit_unit=payload.airframe_limit_unit.value,
         expiry_date=payload.expiry_date,
         hrs_to_expiry=payload.hrs_to_expiry,
@@ -70,8 +260,14 @@ def create_crs(
     db.add(crs)
     db.flush()  # get crs.id in the same transaction
 
-    # Non-repeating CRS identity – based on DB id
-    crs.crs_serial = generate_crs_serial(crs.id)
+    # ----------------------------------------------------------
+    # 3) Generate CRS serial in YYXNNN format
+    # ----------------------------------------------------------
+    crs.crs_serial = generate_crs_serial(
+        db=db,
+        check_type=work_order.check_type,
+        issue_date=payload.crs_issue_date,
+    )
     crs.barcode_value = crs.crs_serial
 
     # Child sign-off rows
@@ -91,6 +287,10 @@ def create_crs(
     return crs
 
 
+# --------------------------------------------------------------------------
+# LIST / GET / UPDATE / ARCHIVE are unchanged
+# --------------------------------------------------------------------------
+
 @router.get("/", response_model=List[crs_schemas.CRSRead])
 def list_crs(
     skip: int = 0,
@@ -101,7 +301,12 @@ def list_crs(
     query = db.query(crs_models.CRS)
     if only_active:
         query = query.filter(crs_models.CRS.is_archived.is_(False))
-    return query.order_by(crs_models.CRS.id.desc()).offset(skip).limit(limit).all()
+    return (
+        query.order_by(crs_models.CRS.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get("/{crs_id}", response_model=crs_schemas.CRSRead)
@@ -164,7 +369,7 @@ def archive_crs(crs_id: int, db: Session = Depends(get_db)):
 
 
 # --------------------------------------------------------------------------
-# CRS PDF DOWNLOAD ENDPOINT
+# CRS PDF DOWNLOAD ENDPOINT (unchanged)
 # --------------------------------------------------------------------------
 
 @router.get(

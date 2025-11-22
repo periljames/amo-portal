@@ -1,18 +1,30 @@
 // src/router.tsx
 import React from "react";
-import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  useParams,
+} from "react-router-dom";
+
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import CRSNewPage from "./pages/CRSNewPage";
-import { isAuthenticated } from "./services/auth";
+import AircraftImportPage from "./pages/AircraftImportPage";
 
-// RequireAuth wrapper
-const RequireAuth: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+import { isAuthenticated } from "./services/crs";
+
+// Wrapper that ensures user is authenticated before showing protected pages
+const RequireAuth: React.FC<{ children: React.ReactElement }> = ({
+  children,
+}) => {
   const location = useLocation();
   const { amoCode } = useParams<{ amoCode?: string }>();
 
   if (!isAuthenticated()) {
     const target = amoCode ? `/maintenance/${amoCode}/login` : "/login";
+
     return (
       <Navigate
         to={target}
@@ -31,10 +43,10 @@ export const AppRouter: React.FC = () => {
       {/* Global login */}
       <Route path="/login" element={<LoginPage />} />
 
-      {/* AMO-specific login */}
+      {/* AMO-specific login, e.g. /maintenance/XLK/login */}
       <Route path="/maintenance/:amoCode/login" element={<LoginPage />} />
 
-      {/* Department dashboard */}
+      {/* Department dashboard, e.g. /maintenance/XLK/engineering */}
       <Route
         path="/maintenance/:amoCode/:department"
         element={
@@ -44,7 +56,7 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      {/* New CRS page */}
+      {/* New CRS: /maintenance/XLK/engineering/crs/new */}
       <Route
         path="/maintenance/:amoCode/:department/crs/new"
         element={
@@ -54,7 +66,17 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      {/* Default root & catch-all */}
+      {/* Aircraft import: /maintenance/XLK/engineering/aircraft-import */}
+      <Route
+        path="/maintenance/:amoCode/:department/aircraft-import"
+        element={
+          <RequireAuth>
+            <AircraftImportPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Default root & catch-all -> login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>

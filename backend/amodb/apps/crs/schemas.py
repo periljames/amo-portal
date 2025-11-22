@@ -6,7 +6,8 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
-# --- Enums for radio buttons ---
+# --- Enums for radio buttons / check type ---
+
 
 class ReleasingAuthority(str, Enum):
     KCAA = "KCAA"
@@ -19,10 +20,23 @@ class AirframeLimitUnit(str, Enum):
     CYCLES = "CYCLES"
 
 
+class CRSCheckType(str, Enum):
+    """
+    Only check types that are allowed to have a CRS.
+
+    L-checks, 100-hour checks, etc. are intentionally NOT here
+    because they must never generate a CRS.
+    """
+    H200 = "200HR"
+    A = "A"
+    C = "C"
+
+
 # --- Sign-off table ---
 
+
 class CRSSignoffBase(BaseModel):
-    category: str                      # 'AEROPLANES', 'C-ENGINES', etc
+    category: str  # 'AEROPLANES', 'C-ENGINES', etc
     sign_date: Optional[date] = None
     full_name_and_signature: Optional[str] = None
     internal_auth_ref: Optional[str] = None
@@ -40,14 +54,18 @@ class CRSSignoffRead(CRSSignoffBase):
         from_attributes = True
 
 
-# --- CRS main record ---
+# --- CRS main record (request/response) ---
+
 
 class CRSBase(BaseModel):
+    # Link back to aircraft (WinAir serial) and WO number
+    aircraft_serial_number: str
+    wo_no: str
+
     # Header
     releasing_authority: ReleasingAuthority
     operator_contractor: str
     job_no: Optional[str] = None
-    wo_no: Optional[str] = None
     location: str
 
     # Aircraft & engines
@@ -111,11 +129,15 @@ class CRSCreate(CRSBase):
 class CRSUpdate(BaseModel):
     """
     Full update; all fields optional. Only those provided will be changed.
+    Note: check_type is NOT exposed here – it is derived from the Work Order.
     """
+
+    aircraft_serial_number: Optional[str] = None
+    wo_no: Optional[str] = None
+
     releasing_authority: Optional[ReleasingAuthority] = None
     operator_contractor: Optional[str] = None
     job_no: Optional[str] = None
-    wo_no: Optional[str] = None
     location: Optional[str] = None
 
     aircraft_type: Optional[str] = None
@@ -170,6 +192,10 @@ class CRSRead(CRSBase):
     id: int
     crs_serial: str
     barcode_value: str
+
+    # Derived from WorkOrder.check_type; read-only on the API
+    check_type: Optional[CRSCheckType] = None
+
     created_by_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
@@ -181,3 +207,44 @@ class CRSRead(CRSBase):
 
     class Config:
         from_attributes = True
+
+
+# ---------------- PREFILL RESPONSE ----------------
+
+class CRSPrefill(BaseModel):
+    """
+    Lightweight object used to pre-populate a new CRS form from
+    Aircraft + AircraftComponent + WorkOrder.
+
+    Most fields are optional; the UI can decide what to lock and what
+    to allow the user to edit.
+    """
+    aircraft_serial_number: str
+    wo_no: str
+
+    releasing_authority: ReleasingAuthority
+    operator_contractor: str
+    job_no: Optional[str] = None
+    location: str
+
+    aircraft_type: Optional[str] = None
+    aircraft_reg: Optional[str] = None
+    msn: Optional[str] = None
+
+    lh_engine_type: Optional[str] = None
+    rh_engine_type: Optional[str] = None
+    lh_engine_sno: Optional[str] = None
+    rh_engine_sno: Optional[str] = None
+
+    aircraft_tat: Optional[float] = None
+    aircraft_tac: Optional[float] = None
+    lh_hrs: Optional[float] = None
+    lh_cyc: Optional[float] = None
+    rh_hrs: Optional[float] = None
+    rh_cyc: Optional[float] = None
+
+    airframe_limit_unit: Optional[AirframeLimitUnit] = None
+    next_maintenance_due: Optional[str] = None
+
+    date_of_completion: Optional[date] = None
+    crs_issue_date: Optional[date] = None

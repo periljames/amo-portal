@@ -2,7 +2,7 @@
 import React from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { getContext } from "../services/auth";
+import { getContext } from "../services/crs";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 
 const niceLabel = (dept: string) => {

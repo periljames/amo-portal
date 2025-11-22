@@ -21,9 +21,8 @@ class CRS(Base):
     """
     Main CRS record.
 
-    Note: some fields (aircraft_* and *_engine_*) will normally be
-    read-only in the UI and filled from aircraft / engine tables.
-    They are stored here as a snapshot so the PDF is reproducible.
+    Chain:
+      Aircraft -> WorkOrder -> WorkOrderTask(s) -> CRS
     """
 
     __tablename__ = "crs"
@@ -34,6 +33,20 @@ class CRS(Base):
     crs_serial = Column(String(50), unique=True, index=True, nullable=False)
     barcode_value = Column(String(255), nullable=False)
 
+    # Links
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    work_order_id = Column(
+        Integer,
+        ForeignKey("work_orders.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # For quick filtering (A, C, 200HR)
+    check_type = Column(String(20))
+
     # Section 1 – Releasing authority & job header
     releasing_authority = Column(String(10), nullable=False)  # 'KCAA', 'ECAA', 'GCAA'
     operator_contractor = Column(String(255), nullable=False)
@@ -41,7 +54,7 @@ class CRS(Base):
     wo_no = Column(String(100))
     location = Column(String(255))
 
-    # Aircraft & engines (usually read-only – from DB)
+    # Aircraft & engines (snapshot)
     aircraft_type = Column(String(100), nullable=False)
     aircraft_reg = Column(String(50), nullable=False, index=True)
     msn = Column(String(50))
@@ -83,15 +96,15 @@ class CRS(Base):
     airframe_limit_unit = Column(String(10), nullable=False)  # 'HOURS' / 'CYCLES'
     expiry_date = Column(Date)
     hrs_to_expiry = Column(Float)
-    sum_airframe_tat_expiry = Column(Float)  # SUM(Aircraft TAT, Hrs to Expiry)
+    sum_airframe_tat_expiry = Column(Float)
     next_maintenance_due = Column(String(255))
 
     # Certificate issued by (Section 14)
     issuer_full_name = Column(String(255), nullable=False)
     issuer_auth_ref = Column(String(255), nullable=False)
-    issuer_license = Column(String(100), nullable=False)  # Category (A&C) licence
+    issuer_license = Column(String(100), nullable=False)
     crs_issue_date = Column(Date, nullable=False)
-    crs_issuing_stamp = Column(String(255))  # could be a path / code for the stamp
+    crs_issuing_stamp = Column(String(255))
 
     # Audit trail / retention
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -107,12 +120,11 @@ class CRS(Base):
         onupdate=datetime.utcnow,
     )
 
-    # 36-month retention – we *archive* here; purge job can clean after expires_at
     is_archived = Column(Boolean, nullable=False, default=False)
     archived_at = Column(DateTime(timezone=True))
     expires_at = Column(DateTime(timezone=True))
 
-    # Child rows – category sign-offs (“A – Aeroplanes”, “C – Engines”, etc)
+    # Relationships
     signoffs = relationship(
         "CRSSignoff",
         back_populates="crs",
@@ -120,12 +132,13 @@ class CRS(Base):
         lazy="joined",
     )
 
+    aircraft = relationship("Aircraft", back_populates="crs_list")
+    work_order = relationship("WorkOrder", back_populates="crs_list")
+
 
 class CRSSignoff(Base):
     """
-    One row in the category table (A – Aeroplanes, C – Engines, etc).
-
-    The PDF has 7 rows; store them all in one table keyed by `category`.
+    Category rows (A – Aeroplanes, C – Engines, etc.).
     """
 
     __tablename__ = "crs_signoff"

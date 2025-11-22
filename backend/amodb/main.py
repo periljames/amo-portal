@@ -1,3 +1,4 @@
+# backend/amodb/main.py
 from datetime import datetime
 import base64
 import json
@@ -19,13 +20,17 @@ from .security import (
     get_password_hash,
 )
 from .user_id import generate_user_id
-from .apps.crs.router import router as crs_router  # <-- single import
+
+# App routers
+from .apps.fleet.router import router as fleet_router
+from .apps.work.router import router as work_router
+from .apps.crs.router import router as crs_router
 
 # --------------------------------------------------------------------
 # CONFIG
 # --------------------------------------------------------------------
 
-# Create DB tables (includes app models imported via amodb.__init__)
+# Make sure all tables exist (includes app models via routers above)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="AMO Portal API", version="1.0.0")
@@ -124,7 +129,13 @@ async def login_for_access_token(
         )
 
     access_token = create_access_token(data={"sub": user.email})
-    log_activity(db, actor=user, target_user=user, action="login", description="User logged in")
+    log_activity(
+        db,
+        actor=user,
+        target_user=user,
+        action="login",
+        description="User logged in",
+    )
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -231,12 +242,18 @@ def update_user(
 
     if user_in.role is not None:
         if current_user.role.lower() not in {"admin", "quality_manager", "hr_manager"}:
-            raise HTTPException(status_code=403, detail="Only admins/HR/Quality can change roles")
+            raise HTTPException(
+                status_code=403,
+                detail="Only admins/HR/Quality can change roles",
+            )
         user.role = user_in.role
 
     if user_in.is_active is not None:
         if current_user.role.lower() not in {"admin", "quality_manager", "hr_manager"}:
-            raise HTTPException(status_code=403, detail="Only admins/HR/Quality can change active flag")
+            raise HTTPException(
+                status_code=403,
+                detail="Only admins/HR/Quality can change active flag",
+            )
         user.is_active = user_in.is_active
 
     if user_in.password is not None:
@@ -402,5 +419,11 @@ def retention_cleanup(
 # REGISTER APP ROUTERS
 # --------------------------------------------------------------------
 
-# CRS router already has prefix="/crs" and tags=["crs"] inside router.py
+# Fleet / aircraft master data
+app.include_router(fleet_router)
+
+# Work orders + tasks (must exist before CRS)
+app.include_router(work_router)
+
+# CRS (tied to aircraft + work orders)
 app.include_router(crs_router)

@@ -1,8 +1,13 @@
 # backend/amodb/__init__.py
-from .database import Base, engine, SessionLocal  # noqa: F401
 
-# Core models (User, etc.)
-from . import models  # noqa: F401
+from . import models as core_models  # users, archived users, etc.
+from .apps.fleet import models as fleet_models
+from .apps.work import models as work_models
+from .apps.crs import models as crs_models
 
-# CRS app models
-from .apps.crs import models as crs_models  # noqa: F401
+__all__ = [
+    "core_models",
+    "fleet_models",
+    "work_models",
+    "crs_models",
+]

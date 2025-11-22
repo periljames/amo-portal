@@ -48,9 +48,8 @@ body::-webkit-scrollbar-thumb,
   border-radius: 999px;
 }
 
-/* ---------- Time-of-day theme variables ---------- */
+/* ---------- Core theme variables (default: dark glass) ---------- */
 
-/* Default (used if JS doesn’t run) – neutral daylight */
 :root {
   --bg-base: #0f172a;
   --bg-base-alt: #020617;
@@ -78,36 +77,91 @@ body::-webkit-scrollbar-thumb,
   --blur-strength: 20px;
 }
 
+/* ---------- Light vs dark color schemes ---------- */
+
+/* Light mode – subtle white glass, easy to read */
+body[data-color-scheme="light"] {
+  --bg-base: #e5e7eb;
+  --bg-base-alt: #f3f4f6;
+  --bg-accent: rgba(59, 130, 246, 0.18);
+  --bg-accent-2: rgba(16, 185, 129, 0.16);
+
+  --surface: rgba(255, 255, 255, 0.86);
+  --surface-elevated: rgba(255, 255, 255, 0.9);
+  --surface-soft: rgba(255, 255, 255, 0.8);
+  --surface-border: rgba(148, 163, 184, 0.5);
+
+  --text-primary: #0f172a;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+
+  --accent-primary: #2563eb;
+  --accent-primary-soft: rgba(37, 99, 235, 0.08);
+  --accent-warning: #d97706;
+  --accent-danger: #b91c1c;
+
+  --border-subtle: rgba(148, 163, 184, 0.5);
+
+  --shadow-soft: 0 18px 45px rgba(15, 23, 42, 0.18);
+
+  --blur-strength: 18px;
+}
+
+/* Light scheme panel overrides */
+body[data-color-scheme="light"] .app-shell__sidebar {
+  background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.96),
+      rgba(255, 255, 255, 0.9)
+    ),
+    radial-gradient(circle at top, rgba(59, 130, 246, 0.25), transparent 55%);
+}
+
+body[data-color-scheme="light"] .app-shell__main {
+  background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.96),
+      rgba(249, 250, 251, 0.96)
+    ),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.2), transparent);
+}
+
+body[data-color-scheme="light"] .crs-form__section {
+  background: var(--surface);
+}
+
+body[data-color-scheme="light"] .auth-layout__card {
+  background: radial-gradient(circle at top, rgba(59, 130, 246, 0.14), transparent),
+    radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.14), transparent),
+    var(--surface-elevated);
+}
+
+/* ---------- Time-of-day tints (accents only) ---------- */
+
 /* Morning – slightly warmer, softer contrast */
 body[data-theme="morning"] {
-  --bg-base: #0b1220;
-  --bg-base-alt: #020617;
   --bg-accent: rgba(251, 191, 36, 0.35);
   --bg-accent-2: rgba(45, 212, 191, 0.3);
-
   --accent-primary: #22c55e;
 }
 
 /* Day – a bit cooler and crisper */
 body[data-theme="day"] {
-  --bg-base: #020617;
-  --bg-base-alt: #020617;
   --bg-accent: rgba(56, 189, 248, 0.4);
   --bg-accent-2: rgba(59, 130, 246, 0.4);
 }
 
-/* Evening – warmer accent, same neutrals */
+/* Evening – warmer accent */
 body[data-theme="evening"] {
   --bg-accent: rgba(248, 113, 113, 0.4);
   --bg-accent-2: rgba(251, 191, 36, 0.4);
   --accent-primary: #f97316;
 }
 
-/* Night – slightly dimmer surfaces for eye comfort */
+/* Night – keep neutrals, maybe slightly richer accents */
 body[data-theme="night"] {
-  --surface: rgba(15, 23, 42, 0.82);
-  --surface-elevated: rgba(15, 23, 42, 0.9);
-  --surface-soft: rgba(15, 23, 42, 0.75);
+  --bg-accent: rgba(56, 189, 248, 0.32);
+  --bg-accent-2: rgba(52, 211, 153, 0.32);
 }
 
 /* ---------- Generic glass panel ---------- */
@@ -233,7 +287,11 @@ body[data-theme="night"] {
   padding: 10px 11px;
   border-radius: 11px;
   border: 1px solid rgba(148, 163, 184, 0.6);
-  background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.8), rgba(15, 23, 42, 0.95));
+  background: radial-gradient(
+    circle at top left,
+    rgba(15, 23, 42, 0.8),
+    rgba(15, 23, 42, 0.95)
+  );
   color: var(--text-primary);
   font-size: 13px;
   outline: none;
@@ -250,7 +308,11 @@ body[data-theme="night"] {
 .auth-form__select:focus {
   border-color: rgba(56, 189, 248, 0.9);
   box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.65);
-  background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.98));
+  background: radial-gradient(
+    circle at top left,
+    rgba(15, 23, 42, 0.9),
+    rgba(15, 23, 42, 0.98)
+  );
   transform: translateY(-0.5px);
 }
 
@@ -317,16 +379,21 @@ button,
 /* ---------- App shell / Dashboard ---------- */
 
 .app-shell {
-  display: flex;
-  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  height: 100vh;
   padding: 18px;
   gap: 16px;
 }
 
-/* Sidebar */
+.app-shell--collapsed {
+  grid-template-columns: 80px minmax(0, 1fr);
+}
+
+/* Sidebar outer panel */
 
 .app-shell__sidebar {
-  width: 250px;
+  width: 100%;
   display: flex;
   flex-direction: column;
   padding: 16px 14px;
@@ -341,29 +408,56 @@ button,
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(var(--blur-strength));
   -webkit-backdrop-filter: blur(var(--blur-strength));
+  position: relative;
 }
 
-.app-shell__logo {
+/* DepartmentLayout sidebar inner structure */
+
+.sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sidebar__title {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-bottom: 18px;
 }
 
-.app-shell__logo span {
-  font-size: 13px;
-  letter-spacing: 0.16em;
+.sidebar__app {
+  font-size: 11px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
 
-.app-shell__logo small {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  color: var(--text-muted);
+.sidebar__amo {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-primary);
 }
 
-.app-shell__nav {
+.sidebar__collapse-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #f9fafb;
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar__nav {
   margin-top: 6px;
   flex: 1;
   display: flex;
@@ -371,38 +465,48 @@ button,
   gap: 4px;
 }
 
-.app-shell__nav-item {
+.sidebar__item {
   display: flex;
   align-items: center;
   padding: 8px 11px;
   border-radius: 999px;
   color: var(--text-secondary);
   font-size: 13px;
-  text-decoration: none;
+  text-align: left;
   border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
   transition: background 110ms ease-out, color 110ms ease-out,
     border-color 110ms ease-out, transform 80ms ease-out;
 }
 
-.app-shell__nav-item:hover {
+.sidebar__item:hover {
   background: rgba(148, 163, 184, 0.14);
   color: var(--text-primary);
   border-color: rgba(148, 163, 184, 0.35);
   transform: translateY(-0.5px);
 }
 
-.app-shell__nav-item--active {
-  background: linear-gradient(
-    135deg,
-    var(--accent-primary),
-    #15803d
-  );
+.sidebar__item--active {
+  background: linear-gradient(135deg, var(--accent-primary), #15803d);
   color: #ecfdf5;
   border-color: transparent;
 }
 
-.app-shell__logout {
-  margin-top: 8px;
+.sidebar__item-label {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.sidebar__footer {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar__logout-btn {
   padding: 7px 10px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.5);
@@ -414,10 +518,31 @@ button,
     border-color 110ms ease-out, transform 80ms ease-out;
 }
 
-.app-shell__logout:hover {
+.sidebar__logout-btn:hover {
   background: rgba(248, 113, 113, 0.08);
   color: #fecaca;
   border-color: rgba(248, 113, 113, 0.8);
+}
+
+/* Theme toggle button */
+
+.sidebar__theme-toggle {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(15, 23, 42, 0.2);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.sidebar__theme-toggle:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
 }
 
 /* Main */
@@ -440,6 +565,14 @@ button,
   flex-direction: column;
   gap: 16px;
 }
+
+.app-shell__main-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Dashboard header (if used elsewhere) */
 
 .app-shell__header {
   display: flex;
@@ -495,17 +628,17 @@ button,
 
 @media (max-width: 900px) {
   .app-shell {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: auto;
   }
 
   .app-shell__sidebar {
-    width: 100%;
     flex-direction: row;
     align-items: center;
     gap: 12px;
   }
 
-  .app-shell__nav {
+  .sidebar__nav {
     flex-direction: row;
     flex-wrap: wrap;
   }
@@ -515,35 +648,8 @@ button,
   }
 }
 
-.app-shell {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  height: 100vh;
-}
+/* ---------- CRS form layout ---------- */
 
-.app-shell--collapsed {
-  grid-template-columns: 80px minmax(0, 1fr);
-}
-
-.app-shell__sidebar {
-  position: relative;
-}
-
-.sidebar-toggle {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(12px);
-  color: #fff;
-  font-size: 14px;
-  cursor: pointer;
-}
-/* --- CRS form layout --- */
 .crs-form {
   display: flex;
   flex-direction: column;

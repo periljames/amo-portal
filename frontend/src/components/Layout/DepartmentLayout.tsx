@@ -1,8 +1,8 @@
 // src/components/Layout/DepartmentLayout.tsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
-import { logout } from "../../services/auth";
+import { logout } from "../../services/crs";
 
 type Props = {
   amoCode: string;
@@ -21,6 +21,8 @@ const DEPARTMENTS = [
   { id: "admin", label: "System Admin" },
 ];
 
+type ColorScheme = "dark" | "light";
+
 const DepartmentLayout: React.FC<Props> = ({
   amoCode,
   activeDepartment,
@@ -28,28 +30,56 @@ const DepartmentLayout: React.FC<Props> = ({
 }) => {
   const theme = useTimeOfDayTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const [colorScheme, setColorScheme] = useState<ColorScheme>("dark");
   const navigate = useNavigate();
 
+  // Apply time-of-day theme to <body data-theme="...">
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.dataset.theme = theme;
+  }, [theme]);
+
+  // Initialise color scheme from localStorage
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    const stored = window.localStorage.getItem("amo_color_scheme") as
+      | ColorScheme
+      | null;
+
+    const initial: ColorScheme =
+      stored === "light" || stored === "dark" ? stored : "dark";
+
+    setColorScheme(initial);
+    document.body.dataset.colorScheme = initial;
+  }, []);
+
+  // Keep <body data-color-scheme="..."> in sync and persist choice
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    document.body.dataset.colorScheme = colorScheme;
+    window.localStorage.setItem("amo_color_scheme", colorScheme);
+  }, [colorScheme]);
+
+  const toggleColorScheme = () => {
+    setColorScheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
   const handleNav = (deptId: string) => {
-    navigate(`/maintenance/${amoCode}/${deptId}`);
+    // Router path is /maintenance.:amoCode/:department
+    navigate(`/maintenance.${amoCode}/${deptId}`);
   };
 
   const handleLogout = () => {
     logout();
-    navigate(`/maintenance/${amoCode}/login`, { replace: true });
+    navigate("/login", { replace: true });
   };
 
   const amoLabel = amoCode.toUpperCase();
+  const shellClassName = collapsed ? "app-shell app-shell--collapsed" : "app-shell";
 
   return (
-    <div className={`app-shell app-shell--${theme}`}>
-      <aside
-        className={
-          collapsed
-            ? "app-shell__sidebar app-shell__sidebar--collapsed"
-            : "app-shell__sidebar"
-        }
-      >
+    <div className={shellClassName}>
+      <aside className="app-shell__sidebar">
         <div className="sidebar__header">
           <div className="sidebar__title">
             <span className="sidebar__app">AMO PORTAL</span>
@@ -84,6 +114,14 @@ const DepartmentLayout: React.FC<Props> = ({
         </nav>
 
         <div className="sidebar__footer">
+          <button
+            type="button"
+            className="sidebar__theme-toggle"
+            onClick={toggleColorScheme}
+          >
+            {colorScheme === "dark" ? "🌞 Light mode" : "🌙 Dark mode"}
+          </button>
+
           <button
             type="button"
             className="sidebar__logout-btn"
