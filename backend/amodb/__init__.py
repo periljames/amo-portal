@@ -1,12 +1,20 @@
 # backend/amodb/__init__.py
+"""
+Import ORM models from each app so that:
 
-from . import models as core_models  # users, archived users, etc.
-from .apps.fleet import models as fleet_models
-from .apps.work import models as work_models
-from .apps.crs import models as crs_models
+- Alembic (later) and Base.metadata.create_all() see all tables.
+- The package exposes a clear surface.
+
+The actual model classes are kept in amodb/apps/*/models.py.
+"""
+
+from .apps.accounts import models as accounts_models  # AMO / users / auth
+from .apps.fleet import models as fleet_models        # aircraft + components
+from .apps.work import models as work_models          # work orders + tasks
+from .apps.crs import models as crs_models            # CRS + signoffs
 
 __all__ = [
-    "core_models",
+    "accounts_models",
     "fleet_models",
     "work_models",
     "crs_models",

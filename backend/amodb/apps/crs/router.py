@@ -1,4 +1,5 @@
 # backend/amodb/apps/crs/router.py
+
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
@@ -8,8 +9,10 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ...security import get_current_active_user
 from ..work import models as work_models
 from ..fleet import models as fleet_models
+from ..accounts import services as accounts_services, models as accounts_models
 from . import models as crs_models
 from . import schemas as crs_schemas
 from .utils import generate_crs_serial
@@ -138,7 +141,32 @@ def prefill_crs_for_work_order(
 def create_crs(
     payload: crs_schemas.CRSCreate,
     db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
 ):
+    # ----------------------------------------------------------
+    # 0) Ensure current user is allowed to issue a CRS
+    # ----------------------------------------------------------
+    try:
+        # We use the CRS issue date as the "as-of" date for authorisation.
+        auth = accounts_services.require_user_can_issue_crs(
+            db,
+            user=current_user,
+            at_date=payload.crs_issue_date,
+            maintenance_scope=None,
+            regulatory_authority=current_user.regulatory_authority,
+        )
+    except accounts_services.AuthorisationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e),
+        )
+
+    if not current_user.licence_number:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Certifying staff must have a licence_number configured before issuing a CRS.",
+        )
+
     # ----------------------------------------------------------
     # 1) Enforce chain: Aircraft -> WorkOrder (+tasks) -> CRS
     # ----------------------------------------------------------
@@ -250,9 +278,10 @@ def create_crs(
         hrs_to_expiry=payload.hrs_to_expiry,
         sum_airframe_tat_expiry=payload.sum_airframe_tat_expiry,
         next_maintenance_due=payload.next_maintenance_due,
-        issuer_full_name=payload.issuer_full_name,
-        issuer_auth_ref=payload.issuer_auth_ref,
-        issuer_license=payload.issuer_license,
+        # Certificate issued by – derived from authenticated user + authorisation
+        issuer_full_name=current_user.full_name,
+        issuer_auth_ref=str(auth.id),
+        issuer_license=current_user.licence_number,
         crs_issue_date=payload.crs_issue_date,
         crs_issuing_stamp=payload.crs_issuing_stamp,
     )
@@ -270,15 +299,15 @@ def create_crs(
     )
     crs.barcode_value = crs.crs_serial
 
-    # Child sign-off rows
+    # Child sign-off rows – default to the same certifying staff if fields are missing
     for s in payload.signoffs:
         signoff = crs_models.CRSSignoff(
             crs=crs,
             category=s.category,
             sign_date=s.sign_date,
-            full_name_and_signature=s.full_name_and_signature,
-            internal_auth_ref=s.internal_auth_ref,
-            stamp=s.stamp,
+            full_name_and_signature=s.full_name_and_signature or current_user.full_name,
+            internal_auth_ref=s.internal_auth_ref or str(auth.id),
+            stamp=s.stamp or payload.crs_issuing_stamp,
         )
         db.add(signoff)
 
@@ -288,7 +317,7 @@ def create_crs(
 
 
 # --------------------------------------------------------------------------
-# LIST / GET / UPDATE / ARCHIVE are unchanged
+# LIST / GET / UPDATE / ARCHIVE
 # --------------------------------------------------------------------------
 
 @router.get("/", response_model=List[crs_schemas.CRSRead])
@@ -369,7 +398,7 @@ def archive_crs(crs_id: int, db: Session = Depends(get_db)):
 
 
 # --------------------------------------------------------------------------
-# CRS PDF DOWNLOAD ENDPOINT (unchanged)
+# CRS PDF DOWNLOAD ENDPOINT
 # --------------------------------------------------------------------------
 
 @router.get(
