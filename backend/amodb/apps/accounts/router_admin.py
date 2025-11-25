@@ -1,8 +1,6 @@
-# backend/amodb/apps/accounts/router_admin.py
-
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -20,6 +18,19 @@ router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
 
 
 def _require_superuser(current_user: models.User) -> models.User:
+    """
+    Internal helper: platform superuser gate.
+
+    - Blocks system/AI accounts even if they somehow had is_superuser=True.
+    - Requires is_superuser=True (GOD mode).
+    """
+    # System / AI / service accounts must never act as platform superuser.
+    if getattr(current_user, "is_system_account", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System/service accounts cannot use superuser endpoints.",
+        )
+
     if not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -39,6 +50,12 @@ def create_amo(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
+    """
+    Create a new AMO.
+
+    Only the platform SUPERUSER can call this. Normal AMO admins cannot
+    create new organisations.
+    """
     _require_superuser(current_user)
 
     existing = (
@@ -81,12 +98,17 @@ def list_amos(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
+    """
+    List all AMOs in the platform.
+
+    Only SUPERUSER can see the full list.
+    """
     _require_superuser(current_user)
     return db.query(models.AMO).order_by(models.AMO.amo_code.asc()).all()
 
 
 # ---------------------------------------------------------------------------
-# DEPARTMENTS (AMO ADMIN)
+# DEPARTMENTS (AMO ADMIN / SUPERUSER)
 # ---------------------------------------------------------------------------
 
 
@@ -94,14 +116,20 @@ def list_amos(
     "/departments",
     response_model=schemas.DepartmentRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Create department within current user's AMO",
+    summary="Create department within current user's AMO (or any AMO for superuser)",
 )
 def create_department(
     payload: schemas.DepartmentCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    # Only admins of this AMO can create departments
+    """
+    Create a department.
+
+    - Normal AMO admins: can only create departments in their own AMO.
+    - SUPERUSER: can create departments in any AMO.
+    """
+    # Only admins of this AMO can create departments unless superuser
     if payload.amo_id != current_user.amo_id and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -139,22 +167,33 @@ def create_department(
 @router.get(
     "/departments",
     response_model=List[schemas.DepartmentRead],
-    summary="List departments for current user's AMO",
+    summary="List departments (current AMO by default; any AMO for superuser)",
 )
 def list_departments(
+    amo_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    return (
-        db.query(models.Department)
-        .filter(models.Department.amo_id == current_user.amo_id)
-        .order_by(models.Department.sort_order.asc())
-        .all()
-    )
+    """
+    List departments.
+
+    - Normal users / AMO admins: always scoped to their own AMO.
+    - SUPERUSER: can optionally pass `amo_id` to inspect another AMO;
+      if omitted, sees departments for their own (ROOT/system) AMO.
+    """
+    q = db.query(models.Department)
+
+    if current_user.is_superuser:
+        if amo_id:
+            q = q.filter(models.Department.amo_id == amo_id)
+    else:
+        q = q.filter(models.Department.amo_id == current_user.amo_id)
+
+    return q.order_by(models.Department.sort_order.asc()).all()
 
 
 # ---------------------------------------------------------------------------
-# USER MANAGEMENT (AMO ADMIN)
+# USER MANAGEMENT (AMO ADMIN / SUPERUSER)
 # ---------------------------------------------------------------------------
 
 
@@ -162,18 +201,24 @@ def list_departments(
     "/users",
     response_model=schemas.UserRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Create user in current AMO",
+    summary="Create user in current AMO (or any AMO for superuser)",
 )
 def create_user_admin(
     payload: schemas.UserCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
+    """
+    Create a user.
+
+    - Normal AMO admins: payload.amo_id is forced to their AMO.
+    - SUPERUSER: can set any amo_id in payload.
+    """
     # Force user to current AMO unless superuser explicitly sets another
     if not current_user.is_superuser:
         payload = payload.copy(update={"amo_id": current_user.amo_id})
 
-    # Check duplicates
+    # Check duplicates within the chosen AMO
     existing = (
         db.query(models.User)
         .filter(
@@ -195,24 +240,35 @@ def create_user_admin(
 @router.get(
     "/users",
     response_model=List[schemas.UserRead],
-    summary="List users in current AMO",
+    summary="List users (current AMO by default; any AMO for superuser)",
 )
 def list_users_admin(
+    amo_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    return (
-        db.query(models.User)
-        .filter(models.User.amo_id == current_user.amo_id)
-        .order_by(models.User.full_name.asc())
-        .all()
-    )
+    """
+    List users.
+
+    - Normal AMO admins: see only users in their own AMO.
+    - SUPERUSER: can optionally pass `amo_id` to list users for that AMO;
+      if omitted, sees users for their own (ROOT/system) AMO.
+    """
+    q = db.query(models.User)
+
+    if current_user.is_superuser:
+        if amo_id:
+            q = q.filter(models.User.amo_id == amo_id)
+    else:
+        q = q.filter(models.User.amo_id == current_user.amo_id)
+
+    return q.order_by(models.User.full_name.asc()).all()
 
 
 @router.put(
     "/users/{user_id}",
     response_model=schemas.UserRead,
-    summary="Update user in current AMO",
+    summary="Update user (scoped to current AMO for admins; any AMO for superuser)",
 )
 def update_user_admin(
     user_id: str,
@@ -220,21 +276,30 @@ def update_user_admin(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    user = (
-        db.query(models.User)
-        .filter(models.User.id == user_id)
-        .filter(models.User.amo_id == current_user.amo_id)
-        .first()
-    )
+    """
+    Update a user.
+
+    - Normal AMO admins: can only update users in their AMO.
+    - SUPERUSER: can update any user by id (no AMO restriction).
+    """
+    q = db.query(models.User).filter(models.User.id == user_id)
+    if not current_user.is_superuser:
+        q = q.filter(models.User.amo_id == current_user.amo_id)
+
+    user = q.first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found in your AMO.",
+            detail="User not found or not in your AMO.",
         )
 
     # Only superuser can toggle is_superuser; AMO admin can toggle is_amo_admin
     update_data = payload.model_dump(exclude_unset=True)
-    if "is_amo_admin" in update_data and not current_user.is_amo_admin and not current_user.is_superuser:
+    if (
+        "is_amo_admin" in update_data
+        and not current_user.is_amo_admin
+        and not current_user.is_superuser
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You cannot modify is_amo_admin flag.",
@@ -245,11 +310,25 @@ def update_user_admin(
 
 
 # ---------------------------------------------------------------------------
-# AUTHORISATIONS (AMO ADMIN / QUALITY MANAGER)
+# AUTHORISATIONS (AMO ADMIN / QUALITY MANAGER / SUPERUSER)
 # ---------------------------------------------------------------------------
 
 
 def _require_quality_or_admin(user: models.User) -> models.User:
+    """
+    Helper gate for authorisation management.
+
+    - SUPERUSER or AMO admin always allowed.
+    - QUALITY_MANAGER allowed for their AMO.
+    - System/AI accounts are blocked even if flags are set.
+    """
+    # Again, system/AI accounts must not manage authorisations.
+    if getattr(user, "is_system_account", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System/service accounts cannot manage authorisations.",
+        )
+
     if user.is_superuser or user.is_amo_admin:
         return user
     if user.role == models.AccountRole.QUALITY_MANAGER:
@@ -264,13 +343,19 @@ def _require_quality_or_admin(user: models.User) -> models.User:
     "/authorisation-types",
     response_model=schemas.AuthorisationTypeRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Create authorisation type for current AMO",
+    summary="Create authorisation type for an AMO",
 )
 def create_authorisation_type(
     payload: schemas.AuthorisationTypeCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
+    """
+    Create an authorisation type.
+
+    - Normal admins / QMs: can only create for their AMO.
+    - SUPERUSER: can create for any AMO by setting payload.amo_id.
+    """
     _require_quality_or_admin(current_user)
 
     if not current_user.is_superuser and payload.amo_id != current_user.amo_id:
@@ -314,18 +399,29 @@ def create_authorisation_type(
 @router.get(
     "/authorisation-types",
     response_model=List[schemas.AuthorisationTypeRead],
-    summary="List authorisation types for current AMO",
+    summary="List authorisation types (current AMO by default; any AMO for superuser)",
 )
 def list_authorisation_types(
+    amo_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    return (
-        db.query(models.AuthorisationType)
-        .filter(models.AuthorisationType.amo_id == current_user.amo_id)
-        .order_by(models.AuthorisationType.code.asc())
-        .all()
-    )
+    """
+    List authorisation types.
+
+    - Normal users / admins: see types only for their AMO.
+    - SUPERUSER: can optionally pass `amo_id` to view another AMO; if omitted,
+      sees types for their own (ROOT/system) AMO.
+    """
+    q = db.query(models.AuthorisationType)
+
+    if current_user.is_superuser:
+        if amo_id:
+            q = q.filter(models.AuthorisationType.amo_id == amo_id)
+    else:
+        q = q.filter(models.AuthorisationType.amo_id == current_user.amo_id)
+
+    return q.order_by(models.AuthorisationType.code.asc()).all()
 
 
 @router.post(
@@ -339,6 +435,12 @@ def grant_user_authorisation(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
+    """
+    Grant a specific authorisation type to a user.
+
+    - SUPERUSER: can grant for any AMO as long as user and type share the same AMO.
+    - AMO Admin / QM: can only grant within their AMO.
+    """
     _require_quality_or_admin(current_user)
 
     user = db.query(models.User).filter(models.User.id == payload.user_id).first()
@@ -348,7 +450,21 @@ def grant_user_authorisation(
         .first()
     )
 
-    if not user or not atype or user.amo_id != current_user.amo_id or atype.amo_id != current_user.amo_id:
+    if not user or not atype:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User or authorisation type not found.",
+        )
+
+    # Ensure user and authorisation type belong to the same AMO
+    if user.amo_id != atype.amo_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User and authorisation type must belong to the same AMO.",
+        )
+
+    # Non-superusers must be in the same AMO as the target user/type
+    if not current_user.is_superuser and user.amo_id != current_user.amo_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User or authorisation type invalid for this AMO.",

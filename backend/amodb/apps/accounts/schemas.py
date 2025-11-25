@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, date
-from typing import Optional, List
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -50,7 +50,6 @@ class AMORead(AMOBase):
         from_attributes = True
 
 
-
 class DepartmentBase(BaseModel):
     code: str = Field(..., description="Short code, e.g. 'PLANNING'")
     name: str
@@ -78,7 +77,6 @@ class DepartmentRead(DepartmentBase):
         from_attributes = True
 
 
-
 # ---------------------------------------------------------------------------
 # USER SCHEMAS
 # ---------------------------------------------------------------------------
@@ -86,7 +84,12 @@ class DepartmentRead(DepartmentBase):
 
 class UserBase(BaseModel):
     email: EmailStr
-    full_name: str
+
+    # split names + optional full_name for convenience
+    first_name: str
+    last_name: str
+    full_name: Optional[str] = None
+
     role: AccountRole
     position_title: Optional[str] = None
     phone: Optional[str] = None
@@ -105,7 +108,10 @@ class UserCreate(UserBase):
 
 
 class UserUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     full_name: Optional[str] = None
+
     role: Optional[AccountRole] = None
     position_title: Optional[str] = None
     phone: Optional[str] = None
@@ -125,6 +131,8 @@ class UserSelfUpdate(BaseModel):
     Fields that a normal user is allowed to change about themselves.
     """
 
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     full_name: Optional[str] = None
     position_title: Optional[str] = None
     phone: Optional[str] = None
@@ -135,6 +143,10 @@ class UserRead(UserBase):
     amo_id: str
     department_id: Optional[str] = None
     staff_code: str
+
+    # For reads we guarantee full_name is present
+    full_name: str
+
     is_active: bool
     is_superuser: bool
     is_amo_admin: bool
@@ -146,6 +158,34 @@ class UserRead(UserBase):
     class Config:
         from_attributes = True
 
+
+# ---------------------------------------------------------------------------
+# BOOTSTRAP: FIRST SUPERUSER PAYLOAD
+# ---------------------------------------------------------------------------
+
+
+class FirstSuperuserCreate(BaseModel):
+    """
+    Payload for /auth/first-superuser.
+
+    NOTE:
+    - No role
+    - No amo_id
+    - No licence fields
+
+    The endpoint will:
+    - create (or reuse) a ROOT AMO
+    - force role = SUPERUSER
+    - set is_superuser = True, is_amo_admin = True
+    """
+    email: EmailStr
+    first_name: str
+    last_name: str
+    full_name: Optional[str] = None
+    staff_code: str
+    password: str
+    position_title: Optional[str] = None
+    phone: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +230,6 @@ class AuthorisationTypeRead(AuthorisationTypeBase):
         from_attributes = True
 
 
-
 class UserAuthorisationBase(BaseModel):
     authorisation_type_id: str
     scope_text: Optional[str] = None
@@ -221,7 +260,6 @@ class UserAuthorisationRead(UserAuthorisationBase):
 
     class Config:
         from_attributes = True
-
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ Database configuration for AMOdb.
 Key goals:
 - Separate read and write engines (ready for replicas later).
 - Sensible connection pooling for 24/7 uptime.
-- Backwards compatibility: `engine` and `get_db` still work.
+- Backwards compatibility: `engine`, `SessionLocal` and `get_db` still work.
 """
 
 import os
@@ -84,7 +84,6 @@ ReadSessionLocal = sessionmaker(
 # Declarative base for all models
 Base = declarative_base()
 
-
 # -------------------------------------------------------------------
 # DEPENDENCIES (for FastAPI)
 # -------------------------------------------------------------------
@@ -119,6 +118,8 @@ def get_read_db():
 # BACKWARDS-COMPATIBILITY (existing imports)
 # -------------------------------------------------------------------
 
-# Older code uses `engine` and `get_db`. They now point to the WRITE side.
+# Older code uses `engine`, `SessionLocal` and `get_db`.
+# They now point to the WRITE side.
 engine = write_engine
+SessionLocal = WriteSessionLocal
 get_db = get_write_db

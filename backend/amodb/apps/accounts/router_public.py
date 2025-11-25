@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -15,46 +13,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 # ---------------------------------------------------------------------------
-# ONE-TIME SUPERUSER CREATION
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/first-superuser",
-    response_model=schemas.UserRead,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create the very first platform superuser (one-time only)",
-)
-def create_first_superuser(
-    payload: schemas.UserCreate,
-    db: Session = Depends(get_db),
-):
-    """
-    Open endpoint used ONLY on a brand-new system.
-
-    - If ANY user already exists, this returns 403.
-    - Creates a SUPERUSER not tied to a specific AMO initially, or you can
-      treat this as your first AMO admin by setting amo_id accordingly.
-
-    Frontend: show this form only if the backend reports zero users.
-    """
-    user_count = db.query(models.User).count()
-    if user_count > 0:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Superuser already provisioned.",
-        )
-
-    user = services.create_user(db, payload)
-    user.is_superuser = True
-    user.is_amo_admin = True  # first user can administer initial AMO
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-# ---------------------------------------------------------------------------
 # LOGIN
 # ---------------------------------------------------------------------------
 
@@ -62,52 +20,44 @@ def create_first_superuser(
 @router.post(
     "/login",
     response_model=schemas.Token,
-    summary="Login with email/password for a specific AMO slug",
+    summary="Login with AMO slug, email and password",
 )
 def login(
-    login_req: schemas.LoginRequest,
-    request: Request,
+    payload: schemas.LoginRequest,
     db: Session = Depends(get_db),
 ):
     """
-    Password-based login with:
+    Normal login:
 
-    - AMO slug (multi-tenant)
-    - Email
-    - Password
+    - `amo_slug` = AMO login slug (e.g. `maintenance.safa03`)
+    - `email`    = user email
+    - `password` = user password
 
-    Includes:
-    - lockout after repeated failures,
-    - security event logging,
-    - JWT with amo_id / department_id / role in payload.
+    Special case for global superuser:
+    - If `amo_slug` is empty / `system` / `root`, the platform owner
+      (SUPERUSER) can log in even if their AMO is the ROOT AMO.
     """
-    ip: Optional[str] = request.client.host if request.client else None
-    ua: Optional[str] = request.headers.get("User-Agent")
-
     user = services.authenticate_user(
         db=db,
-        login_req=login_req,
-        ip=ip,
-        user_agent=ua,
+        login_req=payload,
+        ip=None,
+        user_agent="swagger-ui",
     )
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials or account locked.",
+            detail="Incorrect email, password or AMO slug.",
         )
 
     token, expires_in = services.issue_access_token_for_user(user)
 
-    amo = user.amo
-    dept = user.department
-
     return schemas.Token(
         access_token=token,
-        token_type="bearer",
         expires_in=expires_in,
         user=user,
-        amo=amo,
-        department=dept,
+        amo=user.amo,
+        department=user.department,
     )
 
 
@@ -118,56 +68,64 @@ def login(
 
 @router.post(
     "/password-reset/request",
-    status_code=status.HTTP_200_OK,
-    summary="Request password reset (email with token is sent)",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request password reset email",
 )
 def request_password_reset(
     payload: schemas.PasswordResetRequest,
-    request: Request,
     db: Session = Depends(get_db),
 ):
     """
-    Password reset request.
+    Request a password reset.
 
-    - Always returns 200 to avoid leaking whether the email exists.
-    - If the user exists, a reset token is generated.
-    - In production, you must send the token via email (or SMS/SSO).
+    - We do NOT reveal whether the account exists.
+    - For now, the raw token is returned in the response for testing.
+    - In production you would email the token or a reset link.
     """
-    ip: Optional[str] = request.client.host if request.client else None
-    ua: Optional[str] = request.headers.get("User-Agent")
+    amo = (
+        db.query(models.AMO)
+        .filter(
+            models.AMO.login_slug == payload.amo_slug,
+            models.AMO.is_active.is_(True),
+        )
+        .first()
+    )
 
-    user = services.get_user_for_login(
+    # If AMO or user not found, always return generic 202.
+    if not amo:
+        return {"message": "If the account exists, a reset email will be sent."}
+
+    user = services.get_active_user_by_email(
         db=db,
-        amo_slug=payload.amo_slug,
+        amo_id=amo.id,
         email=payload.email,
     )
-    if user and user.is_active:
-        raw_token = services.create_password_reset_token(
-            db=db,
-            user=user,
-            ip=ip,
-            user_agent=ua,
-        )
-        # TODO: integrate real email sending.
-        # For now, you might log raw_token server-side during dev.
+    if not user:
+        return {"message": "If the account exists, a reset email will be sent."}
 
-    return {"status": "ok"}
+    raw_token = services.create_password_reset_token(
+        db=db,
+        user=user,
+        ip=None,
+        user_agent="swagger-ui",
+    )
+
+    # WARNING: token in response is for development only.
+    return {
+        "message": "If the account exists, a reset email will be sent.",
+        "token_demo_only": raw_token,
+    }
 
 
 @router.post(
     "/password-reset/confirm",
     status_code=status.HTTP_200_OK,
-    summary="Confirm password reset with token",
+    summary="Confirm password reset using token",
 )
 def confirm_password_reset(
     payload: schemas.PasswordResetConfirm,
     db: Session = Depends(get_db),
 ):
-    """
-    Redeem a password reset token and set a new password.
-
-    Returns 400 if token invalid/expired/used.
-    """
     user = services.redeem_password_reset_token(
         db=db,
         raw_token=payload.token,
@@ -176,13 +134,13 @@ def confirm_password_reset(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired token.",
+            detail="Invalid or expired reset token.",
         )
-    return {"status": "ok"}
+    return {"message": "Password has been reset successfully."}
 
 
 # ---------------------------------------------------------------------------
-# CURRENT USER ENDPOINT
+# CURRENT USER
 # ---------------------------------------------------------------------------
 
 
@@ -191,7 +149,107 @@ def confirm_password_reset(
     response_model=schemas.UserRead,
     summary="Get current logged-in user",
 )
-def get_me(
+def read_current_user(
     current_user: models.User = Depends(get_current_active_user),
 ):
     return current_user
+
+
+# ---------------------------------------------------------------------------
+# BOOTSTRAP: FIRST SUPERUSER
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/first-superuser",
+    response_model=schemas.UserRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Bootstrap first platform superuser",
+    description=(
+        "Bootstrap endpoint used once when the platform is empty.\n\n"
+        "**Behaviour:**\n"
+        "- If any user already exists, this endpoint returns **400**.\n"
+        "- If no AMO exists, a default `ROOT` AMO is created automatically.\n"
+        "- Creates a user with:\n"
+        "  - `role = SUPERUSER`\n"
+        "  - `is_superuser = True`\n"
+        "  - `is_amo_admin = True`\n\n"
+        "The caller does NOT supply `amo_id` or licence fields; these are "
+        "handled on the server."
+    ),
+)
+def create_first_superuser(
+    payload: schemas.FirstSuperuserCreate,
+    db: Session = Depends(get_db),
+):
+    # 1) Ensure there are no users yet
+    existing_user = db.query(models.User).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Users already exist; bootstrap endpoint is disabled.",
+        )
+
+    # 2) Find (or create) a ROOT AMO for the platform owner
+    root_amo = (
+        db.query(models.AMO)
+        .order_by(models.AMO.created_at.asc())
+        .first()
+    )
+    if root_amo is None:
+        root_amo = models.AMO(
+            amo_code="ROOT",
+            name="Platform Root AMO",
+            icao_code=None,
+            country=None,
+            login_slug="system",  # reserved slug for global superuser login
+            contact_email=payload.email,
+            contact_phone=payload.phone,
+            time_zone="UTC",
+            is_active=True,
+        )
+        db.add(root_amo)
+        db.commit()
+        db.refresh(root_amo)
+
+    # 3) Build a normal UserCreate with forced SUPERUSER role and ROOT AMO
+    first_name = payload.first_name.strip()
+    last_name = payload.last_name.strip()  # <- fixed: call strip(), not .strip
+    full_name = (payload.full_name or f"{first_name} {last_name}").strip()
+
+    user_create = schemas.UserCreate(
+        email=payload.email,
+        first_name=first_name,
+        last_name=last_name,
+        full_name=full_name,
+        role=models.AccountRole.SUPERUSER,
+        position_title=payload.position_title or "System Owner",
+        phone=payload.phone,
+        regulatory_authority=None,
+        licence_number=None,
+        licence_state_or_country=None,
+        licence_expires_on=None,
+        amo_id=root_amo.id,
+        department_id=None,
+        staff_code=payload.staff_code,
+        password=payload.password,
+    )
+
+    # 4) Use the normal user-creation path (enforces uniqueness, hashing, etc.)
+    try:
+        user = services.create_user(db, user_create)
+    except ValueError as exc:
+        # e.g. invalid AMO id (should not normally happen here)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    # 5) Elevate flags and save
+    user.is_superuser = True
+    user.is_amo_admin = True
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return user

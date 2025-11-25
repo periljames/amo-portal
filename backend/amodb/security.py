@@ -1,5 +1,3 @@
-# backend/amodb/security.py
-
 from datetime import datetime, timedelta
 import os
 from typing import Optional
@@ -10,11 +8,13 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from . import models
 from .database import get_db  # write DB for auth flows
+from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts.models import AccountRole
 
-# Used by FastAPI’s OAuth2 flow docs
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
+# Used by FastAPI’s OAuth2 flow docs / OpenAPI
+# This is the endpoint that issues tokens now.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 pwd_context = CryptContext(
     schemes=["pbkdf2_sha256"],
@@ -45,28 +45,24 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(
     *,
-    user: models.User,
+    data: dict,
     expires_delta: Optional[timedelta] = None,
 ) -> str:
     """
-    Create a JWT for the given user.
+    Create a JWT with arbitrary payload.
 
-    - sub: stringified user.id (not email)
-    - embeds role / AMO / department for quick routing on frontend.
+    Common fields in `data`:
+    - sub: user.id (string)
+    - amo_id: AMO id (string or None)
+    - department_id: Department id (string or None)
+    - role: user's role (e.g. 'CERTIFYING_ENGINEER')
+    - is_superuser / is_amo_admin: boolean flags for admin logic
     """
+    to_encode = data.copy()
     expire = datetime.utcnow() + (
         expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-
-    to_encode = {
-        "sub": str(user.id),
-        "exp": expire,
-        "role": user.role,
-        "amo_code": user.amo_code,
-        "department_code": user.department_code,
-        "is_superuser": user.is_superuser,
-        "is_amo_admin": user.is_amo_admin,
-    }
+    to_encode.update({"exp": expire})
 
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -75,24 +71,12 @@ def create_access_token(
 # LOOKUPS
 # -------------------------------------------------------------------
 
-def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
-    return db.query(models.User).filter(models.User.email == email).first()
-
-
-def get_user_by_id(db: Session, user_id: int) -> Optional[models.User]:
-    return db.query(models.User).filter(models.User.id == user_id).first()
-
-
-def authenticate_user(db: Session, email: str, password: str) -> Optional[models.User]:
-    """
-    Email + password login. Returns the user or None.
-    """
-    user = get_user_by_email(db, email=email)
-    if not user:
-        return None
-    if not verify_password(password, user.hashed_password):
-        return None
-    return user
+def get_user_by_id(db: Session, user_id: str) -> Optional[account_models.User]:
+    return (
+        db.query(account_models.User)
+        .filter(account_models.User.id == user_id)
+        .first()
+    )
 
 
 # -------------------------------------------------------------------
@@ -102,9 +86,9 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[models
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
-) -> models.User:
+) -> account_models.User:
     """
-    Decode JWT, load user from DB, and fail hard if anything is wrong.
+    Decode JWT, load accounts.User from DB, and fail hard if anything is wrong.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -117,7 +101,7 @@ async def get_current_user(
         sub = payload.get("sub")
         if sub is None:
             raise credentials_exception
-        user_id = int(sub)
+        user_id = str(sub)
     except (JWTError, ValueError):
         raise credentials_exception
 
@@ -128,8 +112,8 @@ async def get_current_user(
 
 
 async def get_current_active_user(
-    current_user: models.User = Depends(get_current_user),
-) -> models.User:
+    current_user: account_models.User = Depends(get_current_user),
+) -> account_models.User:
     """
     Reject inactive accounts early.
     """
@@ -138,24 +122,43 @@ async def get_current_active_user(
     return current_user
 
 
+def require_superuser(
+    current_user: account_models.User = Depends(get_current_active_user),
+) -> account_models.User:
+    """
+    Global platform owner gate.
+
+    Use this for operations that must only be done by the root/system owner,
+    such as environment-wide configuration, AI system setup, etc.
+    """
+    if current_user.is_superuser:
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Superuser privileges required",
+    )
+
+
 def require_admin(
-    current_user: models.User = Depends(get_current_active_user),
-) -> models.User:
+    current_user: account_models.User = Depends(get_current_active_user),
+) -> account_models.User:
     """
     Admin gate:
 
     - Global superuser (platform owner), OR
     - AMO admin (per-organisation admin), OR
-    - Certain high-privilege roles for backwards compatibility.
+    - Quality/Safety managers where appropriate.
+
+    This is what accounts_admin router depends on.
     """
     if current_user.is_superuser or current_user.is_amo_admin:
         return current_user
 
-    # Backwards compatibility with role-driven access
-    if current_user.role and current_user.role.lower() in {
-        "admin",
-        "quality_manager",
-        "hr_manager",
+    # Allow Quality Manager (and optionally Safety Manager) as admin-level
+    if current_user.role in {
+        AccountRole.QUALITY_MANAGER,
+        AccountRole.SAFETY_MANAGER,
     }:
         return current_user
 

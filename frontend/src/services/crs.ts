@@ -73,6 +73,20 @@ export type PortalUser = {
 type TokenResponse = {
   access_token: string;
   token_type: string;
+  expires_in: number;
+  user: PortalUser;
+  amo: {
+    id: string;
+    amo_code: string;
+    name: string;
+    login_slug: string;
+  };
+  department?: {
+    id: string;
+    code: string;
+    name: string;
+    default_route?: string | null;
+  } | null;
 };
 
 // ---- token helpers ----
@@ -126,35 +140,57 @@ export function clearCachedUser() {
 }
 
 // ---- auth helpers ----
+
 export function isAuthenticated(): boolean {
   return !!getToken();
 }
 
-export async function login(email: string, password: string): Promise<void> {
-  const formData = new URLSearchParams();
-  formData.append("username", email.trim());
-  formData.append("password", password);
-  formData.append("grant_type", "password");
-  formData.append("scope", "");
-  formData.append("client_id", "");
-  formData.append("client_secret", "");
+/**
+ * Login using AMO slug + email + password.
+ *
+ * This matches the backend /auth/login endpoint which expects:
+ * { amo_slug, email, password } and returns Token (JWT + user + amo).
+ */
+export async function login(
+  amoSlug: string,
+  email: string,
+  password: string
+): Promise<void> {
+  const payload = {
+    amo_slug: amoSlug,
+    email: email.trim(),
+    password,
+  };
 
-  const data = await apiPost<TokenResponse>("/auth/token", formData, {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-  });
+  const data = await apiPost<TokenResponse>(
+    "/auth/login",
+    JSON.stringify(payload),
+    {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
 
   saveToken(data.access_token);
+
+  // Cache basic user info for quick access in the UI
+  if (data.user) {
+    cacheCurrentUser(data.user);
+  }
 }
 
+/**
+ * Fetch the current logged-in user from the backend.
+ * Uses /auth/me (aligned with router_public.py).
+ */
 export async function fetchCurrentUser(): Promise<PortalUser> {
   const token = getToken();
   if (!token) {
     throw new Error("No auth token");
   }
 
-  const res = await fetch(`${API_BASE_URL}/users/me`, {
+  const res = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

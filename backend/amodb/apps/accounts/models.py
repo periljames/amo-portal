@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 
 from sqlalchemy import (
     Boolean,
@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from amodb.database import Base
+# GUID-like IDs for portability and multi-tenant separation
 from amodb.user_id import generate_user_id
 
 
@@ -134,7 +135,6 @@ class AMO(Base):
         return f"<AMO {self.amo_code} {self.name}>"
 
 
-
 class Department(Base):
     """
     Logical department within an AMO (Planning, Production, Quality, etc.).
@@ -188,7 +188,6 @@ class Department(Base):
         return f"<Department {self.amo.amo_code if self.amo else '?'}:{self.code}>"
 
 
-
 # ---------------------------------------------------------------------------
 # USER & SECURITY
 # ---------------------------------------------------------------------------
@@ -199,8 +198,13 @@ class User(Base):
     User account, including regulatory licence metadata.
 
     Designed to satisfy expectations that maintenance organisations:
-    - keep records of certifying staff, licences and scope :contentReference[oaicite:1]{index=1}
-    - control who can issue maintenance releases / CRS 
+    - keep records of certifying staff, licences and scope
+    - control who can issue maintenance releases / CRS
+
+    NOTE ON AI / SYSTEM ACCOUNTS:
+    - is_system_account = True marks a non-human/service/AI account.
+    - System accounts must NOT be used as certifying staff and must not
+      issue CRS; business logic should enforce this.
     """
 
     __tablename__ = "users"
@@ -236,6 +240,10 @@ class User(Base):
     )
 
     email = Column(String(255), nullable=False, index=True)
+
+    # Split name fields + keep full_name for display/search
+    first_name = Column(String(128), nullable=False)
+    last_name = Column(String(128), nullable=False)
     full_name = Column(String(255), nullable=False)
 
     role = Column(
@@ -245,9 +253,18 @@ class User(Base):
         index=True,
     )
 
+    # Flags and status
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     is_superuser = Column(Boolean, nullable=False, default=False, index=True)
     is_amo_admin = Column(Boolean, nullable=False, default=False, index=True)
+
+    # Marks non-human/system/AI accounts
+    is_system_account = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="True for system/AI/service accounts, never used as certifying staff.",
+    )
 
     position_title = Column(String(255), nullable=True)
     phone = Column(String(64), nullable=True)
@@ -261,6 +278,36 @@ class User(Base):
     licence_state_or_country = Column(String(64), nullable=True)
     licence_expires_on = Column(Date, nullable=True)
 
+    # On-boarding / approval trail
+    approved_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        doc="User who approved this account (e.g. QM / AMO Admin).",
+    )
+    approved_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Date/time when the account was formally approved for use.",
+    )
+    approval_notes = Column(
+        Text,
+        nullable=True,
+        doc="Optional notes on basis for approval (scope, references, etc.).",
+    )
+
+    # Off-boarding / deactivation trail
+    deactivated_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="When this user was deactivated (if applicable).",
+    )
+    deactivated_reason = Column(
+        Text,
+        nullable=True,
+        doc="Reason for deactivation (left company, licence withdrawn, etc.).",
+    )
+
     # Security: password + lockout + login tracking
     hashed_password = Column(String(255), nullable=False)
     login_attempts = Column(Integer, nullable=False, default=0)
@@ -269,7 +316,7 @@ class User(Base):
     last_login_ip = Column(String(64), nullable=True)
     last_login_user_agent = Column(Text, nullable=True)
 
-    # Future: mark if user has registered WebAuthn / passkeys
+    # Future: mark if user has registered WebAuthn / passkeys (MFA hook)
     webauthn_registered = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(
@@ -287,6 +334,14 @@ class User(Base):
     amo = relationship("AMO", back_populates="users")
     department = relationship("Department", back_populates="users")
 
+    # who approved this user (self-referential)
+    approved_by = relationship(
+        "User",
+        remote_side=[id],
+        lazy="joined",
+        doc="Relationship to the user who approved this account.",
+    )
+
     authorisations = relationship(
         "UserAuthorisation",
         back_populates="user",
@@ -300,6 +355,12 @@ class User(Base):
     )
 
     def is_certifying_staff(self) -> bool:
+        """
+        Helper used by business logic to decide if this user can ever act as
+        certifying staff. System/AI accounts must not be certifying staff.
+        """
+        if self.is_system_account:
+            return False
         return self.role in {
             AccountRole.CERTIFYING_ENGINEER,
             AccountRole.CERTIFYING_TECHNICIAN,
@@ -359,6 +420,14 @@ class AuthorisationType(Base):
         doc="e.g. 'EASA Part-145.A.35(e)' or '14 CFR Part 145.157'",
     )
 
+    # Optional default authority for this authorisation type
+    default_reg_authority = Column(
+        Enum(RegulatoryAuthority, name="regulatory_authority_enum"),
+        nullable=True,
+        doc="If set, default regulatory authority for this authorisation type.",
+    )
+
+    # Flags controlling CRS / sign-off behaviour
     can_issue_crs = Column(Boolean, nullable=False, default=False)
     requires_dual_sign = Column(Boolean, nullable=False, default=False)
     requires_valid_licence = Column(Boolean, nullable=False, default=True)
@@ -395,7 +464,7 @@ class UserAuthorisation(Base):
     authorisations are:
     - formally documented,
     - specify the scope and limitations,
-    - and have defined validity periods. :contentReference[oaicite:3]{index=3}
+    - and have defined validity periods.
     """
 
     __tablename__ = "user_authorisations"
@@ -442,6 +511,7 @@ class UserAuthorisation(Base):
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        doc="User who granted/approved this authorisation record.",
     )
 
     created_at = Column(
@@ -475,7 +545,6 @@ class UserAuthorisation(Base):
 
     def __repr__(self) -> str:
         return f"<UserAuthorisation user={self.user_id} type={self.authorisation_type_id}>"
-
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +600,6 @@ class PasswordResetToken(Base):
         if self.used_at is not None:
             return False
         return self.expires_at >= now
-
 
 
 # ---------------------------------------------------------------------------

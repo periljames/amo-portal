@@ -79,9 +79,12 @@ const LoginPage: React.FC = () => {
 
     try {
       setLoading(true);
-      await login(trimmedEmail, password);
 
-      // Remember AMO + department
+      // IMPORTANT: backend now expects amo_slug + email + password.
+      // We treat department as a landing page only, not as part of auth.
+      await login(effectiveAmoCode, trimmedEmail, password);
+
+      // Remember AMO + preferred landing department for routing
       setContext(effectiveAmoCode, department);
 
       navigate(`/maintenance/${effectiveAmoCode}/${department}`, {
@@ -90,7 +93,12 @@ const LoginPage: React.FC = () => {
     } catch (err: unknown) {
       console.error("Login error:", err);
       if (err instanceof Error) {
-        if (err.message.includes("401") || err.message.includes("Incorrect")) {
+        const msg = err.message.toLowerCase();
+        if (msg.includes("locked")) {
+          setErrorMsg(
+            "Your account is locked due to repeated failed attempts. Please contact Quality or IT support."
+          );
+        } else if (msg.includes("401") || msg.includes("unauthorized")) {
           setErrorMsg("Invalid email or password.");
         } else {
           setErrorMsg("Could not sign in. Please try again.");
@@ -113,8 +121,8 @@ const LoginPage: React.FC = () => {
     : "Sign in to AMO Portal";
 
   const subtitle = amoSlugForLabel
-    ? `Use your Safarilink AMO credentials for ${humanAmoLabel}.`
-    : "Use your Safarilink AMO credentials.";
+    ? `Use your personal Safarilink AMO credentials for ${humanAmoLabel}.`
+    : "Use your personal Safarilink AMO credentials.";
 
   const amoUrlHint = amoSlugForLabel
     ? `/maintenance/${amoSlugForLabel}/login`
@@ -126,7 +134,7 @@ const LoginPage: React.FC = () => {
         {errorMsg && <div className="auth-form__error">{errorMsg}</div>}
 
         <TextField
-          label="Email"
+          label="Work email"
           type="email"
           autoComplete="email"
           value={email}
@@ -146,7 +154,9 @@ const LoginPage: React.FC = () => {
         />
 
         <div className="auth-form__field">
-          <label className="auth-form__label">Department</label>
+          <label className="auth-form__label">
+            Landing department (does not affect permissions)
+          </label>
           <select
             className="auth-form__select"
             value={department}
@@ -166,6 +176,11 @@ const LoginPage: React.FC = () => {
             <code>{amoUrlHint}</code>
           </div>
         )}
+
+        <p className="auth-form__smallprint">
+          Use only your personal account. All access and actions are logged in
+          line with AMO and authority requirements.
+        </p>
 
         <div className="auth-form__actions">
           <Button type="submit" loading={loading} disabled={loading}>
