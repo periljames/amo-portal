@@ -342,10 +342,13 @@ class User(Base):
         doc="Relationship to the user who approved this account.",
     )
 
+    # FIXED: specify which FK to use so SQLAlchemy doesn't get confused
     authorisations = relationship(
         "UserAuthorisation",
         back_populates="user",
         lazy="selectin",
+        foreign_keys="UserAuthorisation.user_id",
+        primaryjoin="User.id == UserAuthorisation.user_id",
     )
 
     security_events = relationship(

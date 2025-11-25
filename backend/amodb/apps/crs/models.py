@@ -107,7 +107,12 @@ class CRS(Base):
     crs_issuing_stamp = Column(String(255))
 
     # Audit trail / retention
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # NOTE: users.id is a GUID (String(36)) from the accounts app.
+    created_by_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
