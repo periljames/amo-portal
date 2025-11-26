@@ -8,7 +8,7 @@ import string
 
 from jose import JWTError, jwt  # noqa: F401  (imported for future token use)
 
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, joinedload
 
 from amodb.security import (
@@ -358,18 +358,21 @@ def get_user_for_login(
     email: str,
 ) -> Optional[models.User]:
     email = _normalise_email(email)
+    amo_slug_norm = (amo_slug or "").strip().lower()
 
+    # Look up AMO case-insensitively on login_slug
     amo = (
         db.query(models.AMO)
         .filter(
-            models.AMO.login_slug == amo_slug,
+            func.lower(models.AMO.login_slug) == amo_slug_norm,
             models.AMO.is_active.is_(True),
         )
         .first()
     )
     if not amo:
         return None
-
+    
+    # Now fetch the user in that AMO
     user = (
         db.query(models.User)
         .options(
@@ -449,7 +452,7 @@ def authenticate_user(
             # If AMO exists, log a generic failed login.
             amo = (
                 db.query(models.AMO)
-                .filter(models.AMO.login_slug == amo_slug_raw)
+                .filter(func.lower(models.AMO.login_slug) == amo_slug)
                 .first()
             )
             _log_security_event(

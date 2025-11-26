@@ -4,7 +4,7 @@ import { useNavigate, useLocation, useParams } from "react-router-dom";
 import AuthLayout from "../components/Layout/AuthLayout";
 import TextField from "../components/UI/TextField";
 import Button from "../components/UI/Button";
-import { login, setContext, getToken } from "../services/crs";
+import { login, setContext, getToken } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

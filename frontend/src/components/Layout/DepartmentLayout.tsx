@@ -2,7 +2,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
-import { logout } from "../../services/crs";
+// ⬅️ CHANGE THIS LINE:
+import { logout } from "../../services/auth";  // was ../../services/crs
 
 type Props = {
   amoCode: string;
@@ -33,13 +34,11 @@ const DepartmentLayout: React.FC<Props> = ({
   const [colorScheme, setColorScheme] = useState<ColorScheme>("dark");
   const navigate = useNavigate();
 
-  // Apply time-of-day theme to <body data-theme="...">
   useEffect(() => {
     if (typeof document === "undefined") return;
     document.body.dataset.theme = theme;
   }, [theme]);
 
-  // Initialise color scheme from localStorage
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return;
     const stored = window.localStorage.getItem("amo_color_scheme") as
@@ -53,7 +52,6 @@ const DepartmentLayout: React.FC<Props> = ({
     document.body.dataset.colorScheme = initial;
   }, []);
 
-  // Keep <body data-color-scheme="..."> in sync and persist choice
   useEffect(() => {
     if (typeof document === "undefined" || typeof window === "undefined") return;
     document.body.dataset.colorScheme = colorScheme;
@@ -65,8 +63,8 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const handleNav = (deptId: string) => {
-    // Router path is /maintenance.:amoCode/:department
-    navigate(`/maintenance.${amoCode}/${deptId}`);
+    // ⬅️ FIX PATH: should be /maintenance/<amoCode>/<department>
+    navigate(`/maintenance/${amoCode}/${deptId}`);
   };
 
   const handleLogout = () => {

@@ -2,7 +2,7 @@
 import React from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { getContext } from "../services/crs";
+import { getContext, getCachedUser } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 
 const niceLabel = (dept: string) => {
@@ -40,12 +40,29 @@ const DashboardPage: React.FC = () => {
     amoSlug !== "UNKNOWN" ? decodeAmoCertFromUrl(amoSlug) : "AMO";
 
   const isCRSDept = department === "planning" || department === "production";
+  const isSystemAdminDept = department === "admin";
+
+  const currentUser = getCachedUser();
+  const canManageUsers =
+    !!currentUser &&
+    (currentUser.role === "SUPERUSER" || currentUser.role === "AMO_ADMIN");
 
   const handleNewCrs = () => {
     navigate(`/maintenance/${amoSlug}/${department}/crs/new`);
   };
 
-  console.log("DashboardPage", { amoSlug, amoDisplay, department, params, ctx });
+  const handleCreateUser = () => {
+    navigate(`/maintenance/${amoSlug}/admin/users/new`);
+  };
+
+  console.log("DashboardPage", {
+    amoSlug,
+    amoDisplay,
+    department,
+    params,
+    ctx,
+    currentUser,
+  });
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
@@ -59,6 +76,7 @@ const DashboardPage: React.FC = () => {
         </p>
       </header>
 
+      {/* Planning / Production – CRS widget */}
       {isCRSDept && (
         <section className="page-section">
           <h2 className="page-section__title">
@@ -77,7 +95,49 @@ const DashboardPage: React.FC = () => {
         </section>
       )}
 
-      {!isCRSDept && (
+      {/* System Admin – User Management */}
+      {isSystemAdminDept && (
+        <section className="page-section">
+          <h2 className="page-section__title">System Administration</h2>
+          <p className="page-section__body">
+            User account management for this AMO. Access is restricted to
+            AMO Administrators and platform Superusers in line with AMO and
+            regulatory requirements.
+          </p>
+
+          {canManageUsers ? (
+            <div className="page-section__actions">
+              <button
+                type="button"
+                className="primary-chip-btn"
+                onClick={handleCreateUser}
+              >
+                + Create new user
+              </button>
+
+              {/* Placeholder for future list / search */}
+              {/* <button
+                type="button"
+                className="secondary-chip-btn"
+                onClick={() =>
+                  navigate(`/maintenance/${amoSlug}/admin/users`)
+                }
+              >
+                View all users
+              </button> */}
+            </div>
+          ) : (
+            <p className="page-section__body">
+              You are signed in to the System Admin dashboard but do not have
+              the required system privileges to manage user accounts. Please
+              contact Quality or the AMO System Administrator.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Other departments – placeholder */}
+      {!isCRSDept && !isSystemAdminDept && (
         <section className="page-section">
           <p className="page-section__body">
             Department widgets for {niceLabel(department)} will appear here.

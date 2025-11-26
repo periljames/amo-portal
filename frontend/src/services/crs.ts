@@ -1,13 +1,15 @@
 // src/services/crs.ts
+// - Generic HTTP helpers (apiGet/apiPost) for the AMO backend.
+// - CRS endpoints -> backend/amodb/apps/crs/router.py:
+//     * POST /crs/                      -> createCRS
+//     * GET  /crs/prefill/:wo_no       -> prefillCRS
+//     * GET  /crs/                     -> listCRS
+//     * GET  /crs/:id/pdf              -> getCRSPdfUrl
+// - Uses authHeaders() from auth.ts so requests carry the JWT.
 
 import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
-
-// -----------------------------------------------------------------------------
-// BASE API + GENERIC REQUEST HELPERS
-// -----------------------------------------------------------------------------
-
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+import { authHeaders } from "./auth";
+import { API_BASE_URL } from "./config";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
@@ -32,7 +34,7 @@ async function request<T>(
 
   const contentType = res.headers.get("Content-Type") || "";
   if (!contentType.includes("application/json")) {
-    // @ts-expect-error – caller should know when T is void
+    // @ts-expect-error – caller knows when T is void
     return undefined;
   }
 
@@ -41,10 +43,20 @@ async function request<T>(
 
 export async function apiPost<T>(
   path: string,
-  body?: BodyInit,
+  body?: unknown,
   init: RequestInit = {}
 ): Promise<T> {
-  return request<T>("POST", path, body, init);
+  let bodyInit: BodyInit | undefined;
+
+  if (body === undefined || body === null) {
+    bodyInit = undefined;
+  } else if (typeof body === "string" || body instanceof FormData) {
+    bodyInit = body;
+  } else {
+    bodyInit = JSON.stringify(body);
+  }
+
+  return request<T>("POST", path, bodyInit, init);
 }
 
 export async function apiGet<T>(
@@ -55,199 +67,15 @@ export async function apiGet<T>(
 }
 
 // -----------------------------------------------------------------------------
-// AUTH + CONTEXT HELPERS
-// -----------------------------------------------------------------------------
-
-const TOKEN_KEY = "amo_portal_token";
-const AMO_KEY = "amo_code";
-const DEPT_KEY = "amo_department";
-const USER_KEY = "amo_current_user";
-
-export type PortalUser = {
-  id: number;
-  email: string;
-  full_name: string;
-  role: string;
-};
-
-type TokenResponse = {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  user: PortalUser;
-  amo: {
-    id: string;
-    amo_code: string;
-    name: string;
-    login_slug: string;
-  };
-  department?: {
-    id: string;
-    code: string;
-    name: string;
-    default_route?: string | null;
-  } | null;
-};
-
-// ---- token helpers ----
-export function saveToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
-}
-
-// ---- context (AMO + department) ----
-export function setContext(amoCode: string, department: string) {
-  localStorage.setItem(AMO_KEY, amoCode);
-  localStorage.setItem(DEPT_KEY, department);
-}
-
-export function getContext(): { amoCode: string | null; department: string | null } {
-  return {
-    amoCode: localStorage.getItem(AMO_KEY),
-    department: localStorage.getItem(DEPT_KEY),
-  };
-}
-
-export function clearContext() {
-  localStorage.removeItem(AMO_KEY);
-  localStorage.removeItem(DEPT_KEY);
-}
-
-// ---- current user cache ----
-export function cacheCurrentUser(user: PortalUser) {
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-}
-
-export function getCachedUser(): PortalUser | null {
-  const raw = localStorage.getItem(USER_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as PortalUser;
-  } catch {
-    return null;
-  }
-}
-
-export function clearCachedUser() {
-  localStorage.removeItem(USER_KEY);
-}
-
-// ---- auth helpers ----
-
-export function isAuthenticated(): boolean {
-  return !!getToken();
-}
-
-/**
- * Login using AMO slug + email + password.
- *
- * This matches the backend /auth/login endpoint which expects:
- * { amo_slug, email, password } and returns Token (JWT + user + amo).
- */
-export async function login(
-  amoSlug: string,
-  email: string,
-  password: string
-): Promise<void> {
-  const payload = {
-    amo_slug: amoSlug,
-    email: email.trim(),
-    password,
-  };
-
-  const data = await apiPost<TokenResponse>(
-    "/auth/login",
-    JSON.stringify(payload),
-    {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }
-  );
-
-  saveToken(data.access_token);
-
-  // Cache basic user info for quick access in the UI
-  if (data.user) {
-    cacheCurrentUser(data.user);
-  }
-}
-
-/**
- * Fetch the current logged-in user from the backend.
- * Uses /auth/me (aligned with router_public.py).
- */
-export async function fetchCurrentUser(): Promise<PortalUser> {
-  const token = getToken();
-  if (!token) {
-    throw new Error("No auth token");
-  }
-
-  const res = await fetch(`${API_BASE_URL}/auth/me`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-
-  const user = (await res.json()) as PortalUser;
-  cacheCurrentUser(user);
-  return user;
-}
-
-export function logout() {
-  clearToken();
-  clearContext();
-  clearCachedUser();
-}
-
-// -----------------------------------------------------------------------------
-// INTERNAL: AUTH HEADERS FOR PROTECTED ENDPOINTS
-// -----------------------------------------------------------------------------
-
-function authHeaders(extra?: HeadersInit): HeadersInit {
-  const token = getToken();
-  const base: HeadersInit = {
-    "Content-Type": "application/json",
-  };
-
-  if (token) {
-    base["Authorization"] = `Bearer ${token}`;
-  }
-
-  return {
-    ...base,
-    ...(extra || {}),
-  };
-}
-
-// -----------------------------------------------------------------------------
 // CRS API FUNCTIONS
 // -----------------------------------------------------------------------------
 
-/**
- * Create a new CRS (POST /crs/)
- */
 export async function createCRS(payload: CRSCreate): Promise<CRSRead> {
-  return apiPost<CRSRead>("/crs/", JSON.stringify(payload), {
+  return apiPost<CRSRead>("/crs/", payload, {
     headers: authHeaders(),
   });
 }
 
-/**
- * Prefill CRS from Work Order (GET /crs/prefill/{wo_no})
- */
 export async function prefillCRS(woNo: string): Promise<CRSPrefill> {
   if (!woNo.trim()) {
     throw new Error("Work order number is required for prefill.");
@@ -259,9 +87,6 @@ export async function prefillCRS(woNo: string): Promise<CRSPrefill> {
   });
 }
 
-/**
- * List CRS records (GET /crs/)
- */
 export async function listCRS(
   skip = 0,
   limit = 50,
@@ -277,9 +102,6 @@ export async function listCRS(
   });
 }
 
-/**
- * Build PDF URL for a given CRS id (GET /crs/{id}/pdf)
- */
 export function getCRSPdfUrl(crsId: number): string {
   return `${API_BASE_URL}/crs/${crsId}/pdf`;
 }

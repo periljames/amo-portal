@@ -1,22 +1,69 @@
-// src/services/auth.ts
+/**
+ * Auth service
+ * - Defines API_BASE_URL used by all frontend services.
+ * - Talks to backend auth endpoints (amodb/apps/accounts/router_public.py).
+ * - Manages JWT token, AMO + department context, and cached current user.
+ * - Exposes authHeaders() so other services can call protected routes.
+ */
 
-import { API_BASE_URL } from "./crs";
+import { API_BASE_URL } from "./config";
 
 const TOKEN_KEY = "amo_portal_token";
 const AMO_KEY = "amo_code";
 const DEPT_KEY = "amo_department";
 const USER_KEY = "amo_current_user";
 
-export type PortalUserId = string | number;
+/**
+ * These mirror the backend enums in accounts.models.
+ * Keep them in sync with Python AccountRole / RegulatoryAuthority.
+ */
+export type AccountRole =
+  | "SUPERUSER"
+  | "AMO_ADMIN"
+  | "QUALITY_MANAGER"
+  | "SAFETY_MANAGER"
+  | "PLANNING_ENGINEER"
+  | "PRODUCTION_ENGINEER"
+  | "CERTIFYING_ENGINEER"
+  | "CERTIFYING_TECHNICIAN"
+  | "TECHNICIAN"
+  | "STORES"
+  | "VIEW_ONLY";
 
+export type RegulatoryAuthority = "FAA" | "EASA" | "KCAA" | "CAA_UK" | "OTHER";
+
+/**
+ * This mirrors UserRead in backend accounts.schemas.
+ * If the backend UserRead changes, update this interface to match.
+ */
 export interface PortalUser {
-  id: PortalUserId;
+  id: string;
+  amo_id: string;
+  department_id: string | null;
+  staff_code: string;
+
   email: string;
+  first_name: string;
+  last_name: string;
   full_name: string;
-  role: string;
+
+  role: AccountRole;
+  position_title: string | null;
+  phone: string | null;
+
+  regulatory_authority: RegulatoryAuthority | null;
+  licence_number: string | null;
+  licence_state_or_country: string | null;
+  licence_expires_on: string | null;
+
   is_active: boolean;
   is_superuser: boolean;
   is_amo_admin: boolean;
+
+  last_login_at: string | null;
+  last_login_ip: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AmoContext {
@@ -61,7 +108,10 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-export function setContext(amoCode: string | null, departmentCode: string | null): void {
+export function setContext(
+  amoCode: string | null,
+  departmentCode: string | null
+): void {
   if (amoCode) {
     localStorage.setItem(AMO_KEY, amoCode);
   } else {
@@ -75,7 +125,10 @@ export function setContext(amoCode: string | null, departmentCode: string | null
   }
 }
 
-export function getContext(): { amoCode: string | null; department: string | null } {
+export function getContext(): {
+  amoCode: string | null;
+  department: string | null;
+} {
   return {
     amoCode: localStorage.getItem(AMO_KEY),
     department: localStorage.getItem(DEPT_KEY),
@@ -110,7 +163,7 @@ export function isAuthenticated(): boolean {
 }
 
 // -----------------------------------------------------------------------------
-// Authenticated headers helper (for other services like CRS)
+// Authenticated headers helper (for other services like CRS / adminUsers)
 // -----------------------------------------------------------------------------
 
 export function authHeaders(extra?: HeadersInit): HeadersInit {
@@ -136,7 +189,7 @@ export function authHeaders(extra?: HeadersInit): HeadersInit {
 /**
  * Login with AMO slug + email + password.
  *
- * Backend: POST /auth/login
+ * Backend: POST /auth/login (router_public.py)
  * Body: { amo_slug, email, password }
  *
  * On success:
@@ -150,7 +203,7 @@ export async function login(
   password: string
 ): Promise<void> {
   const payload = {
-    amo_slug: amoSlug.trim(),
+    amo_slug: amoSlug.trim(), // MUST match AMO.login_slug
     email: email.trim(),
     password,
   };
@@ -173,7 +226,7 @@ export async function login(
   // Store JWT
   saveToken(data.access_token);
 
-  // Store context (AMO code + department code)
+  // Store context (AMO code + department code, if provided)
   if (data.amo) {
     setContext(
       data.amo.amo_code,
@@ -192,7 +245,7 @@ export async function login(
 /**
  * Fetch currently logged-in user from backend.
  *
- * Backend: GET /auth/me
+ * Backend: GET /auth/me (router_public.py)
  */
 export async function fetchCurrentUser(): Promise<PortalUser> {
   const token = getToken();
@@ -238,7 +291,6 @@ export async function requestPasswordReset(
     body: JSON.stringify(payload),
   });
 
-  // Always return 200 from backend; still check for non-2xx as a network/error case.
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);
