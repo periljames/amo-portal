@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta
-from typing import Optional, Callable, Union
+from typing import Optional, Callable, Union, Set
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -100,16 +100,25 @@ def create_access_token(
 # ---------------------------------------------------------------------------
 
 
-def get_user_by_id(db: Session, user_id: str) -> Optional[account_models.User]:
+def get_user_by_id(
+    db: Session,
+    user_id: Union[str, int],
+) -> Optional[account_models.User]:
     """
     Minimal helper to load a user by ID.
 
     Services inside the accounts app may use richer helpers with joinedload;
     this is intentionally simple to avoid circular imports.
     """
+    # Normalise id type to int if your PK is integer; adjust if using UUID strings.
+    try:
+        normalised_id = int(user_id)
+    except (TypeError, ValueError):
+        normalised_id = user_id
+
     return (
         db.query(account_models.User)
-        .filter(account_models.User.id == user_id)
+        .filter(account_models.User.id == normalised_id)
         .first()
     )
 
@@ -138,7 +147,7 @@ def get_current_user(
     """
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
-        user_id: Optional[str] = payload.get("sub")
+        user_id: Optional[Union[str, int]] = payload.get("sub")
         if user_id is None:
             raise _credentials_exception()
     except JWTError:
@@ -159,7 +168,7 @@ def get_current_active_user(
 
     Locked / deactivated users are blocked here rather than deeper in the app.
     """
-    if not current_user.is_active:
+    if not getattr(current_user, "is_active", False):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user account",
@@ -179,7 +188,9 @@ def require_admin(
     - QUALITY_MANAGER
     - SAFETY_MANAGER
     """
-    if current_user.is_superuser or current_user.is_amo_admin:
+    if getattr(current_user, "is_superuser", False) or getattr(
+        current_user, "is_amo_admin", False
+    ):
         return current_user
 
     if current_user.role in {
@@ -197,6 +208,7 @@ def require_admin(
 # ---------------------------------------------------------------------------
 # ROLE-BASED ACCESS HELPER
 # ---------------------------------------------------------------------------
+
 
 def require_roles(
     *allowed_roles: Union[AccountRole, str],
@@ -226,13 +238,11 @@ def require_roles(
     - SUPERUSER always passes, even if not explicitly listed in `allowed_roles`.
     - Otherwise, the user's `role` must be in the allowed set.
     """
-    # Normalise inputs to AccountRole enum values
-    normalised_roles: set[AccountRole] = set()
+    normalised_roles: Set[AccountRole] = set()
     for r in allowed_roles:
         if isinstance(r, AccountRole):
             normalised_roles.add(r)
         else:
-            # Try to map string to AccountRole; raises ValueError if invalid
             try:
                 normalised_roles.add(AccountRole(r))
             except ValueError:
@@ -242,7 +252,7 @@ def require_roles(
         current_user: account_models.User = Depends(get_current_active_user),
     ) -> account_models.User:
         # Global override: SUPERUSER can do anything
-        if current_user.is_superuser:
+        if getattr(current_user, "is_superuser", False):
             return current_user
 
         if current_user.role not in normalised_roles:

@@ -9,7 +9,9 @@ Scope:
 - Maintenance programme items and aircraft-level status.
 """
 
-from datetime import date, datetime
+from __future__ import annotations
+
+from datetime import date as DateType, datetime as DateTimeType
 from typing import Optional, List
 
 from pydantic import BaseModel
@@ -31,7 +33,7 @@ class AircraftBase(BaseModel):
     status: Optional[str] = "OPEN"
     is_active: bool = True
 
-    last_log_date: Optional[date] = None
+    last_log_date: Optional[DateType] = None
     total_hours: Optional[float] = None
     total_cycles: Optional[float] = None
 
@@ -59,14 +61,14 @@ class AircraftUpdate(BaseModel):
     status: Optional[str] = None
     is_active: Optional[bool] = None
 
-    last_log_date: Optional[date] = None
+    last_log_date: Optional[DateType] = None
     total_hours: Optional[float] = None
     total_cycles: Optional[float] = None
 
 
 class AircraftRead(AircraftBase):
-    created_at: datetime
-    updated_at: datetime
+    created_at: DateTimeType
+    updated_at: DateTimeType
 
     class Config:
         from_attributes = True
@@ -84,7 +86,7 @@ class AircraftComponentBase(BaseModel):
     serial_number: Optional[str] = None
     description: Optional[str] = None
 
-    installed_date: Optional[date] = None
+    installed_date: Optional[DateType] = None
     installed_hours: Optional[float] = None
     installed_cycles: Optional[float] = None
 
@@ -103,7 +105,7 @@ class AircraftComponentBase(BaseModel):
     hsi_calendar_months: Optional[int] = None
 
     # Overhaul reference
-    last_overhaul_date: Optional[date] = None
+    last_overhaul_date: Optional[DateType] = None
     last_overhaul_hours: Optional[float] = None
     last_overhaul_cycles: Optional[float] = None
 
@@ -127,7 +129,7 @@ class AircraftComponentUpdate(BaseModel):
     serial_number: Optional[str] = None
     description: Optional[str] = None
 
-    installed_date: Optional[date] = None
+    installed_date: Optional[DateType] = None
     installed_hours: Optional[float] = None
     installed_cycles: Optional[float] = None
 
@@ -144,7 +146,7 @@ class AircraftComponentUpdate(BaseModel):
     hsi_cycles: Optional[float] = None
     hsi_calendar_months: Optional[int] = None
 
-    last_overhaul_date: Optional[date] = None
+    last_overhaul_date: Optional[DateType] = None
     last_overhaul_hours: Optional[float] = None
     last_overhaul_cycles: Optional[float] = None
 
@@ -163,7 +165,7 @@ class AircraftComponentRead(AircraftComponentBase):
 
 # For responses that show one aircraft with its components:
 class AircraftWithComponents(AircraftRead):
-    components: List[AircraftComponentRead] = []
+    components: List["AircraftComponentRead"] = []
 
 
 # ---------------- AIRCRAFT USAGE ----------------
@@ -175,7 +177,7 @@ class AircraftUsageBase(BaseModel):
     comes from the path when creating entries.
     """
 
-    date: date
+    date: DateType
     techlog_no: str
     station: Optional[str] = None
 
@@ -208,7 +210,7 @@ class AircraftUsageUpdate(BaseModel):
     does not match the current DB value, the update will be rejected.
     """
 
-    date: Optional[date] = None
+    date: Optional[DateType] = None
     techlog_no: Optional[str] = None
     station: Optional[str] = None
 
@@ -223,15 +225,15 @@ class AircraftUsageUpdate(BaseModel):
 
     remarks: Optional[str] = None
 
-    last_seen_updated_at: datetime
+    last_seen_updated_at: DateTimeType
 
 
 class AircraftUsageRead(AircraftUsageBase):
     id: int
     aircraft_serial_number: str
 
-    created_at: datetime
-    updated_at: datetime
+    created_at: DateTimeType
+    updated_at: DateTimeType
     created_by_user_id: Optional[int] = None
     updated_by_user_id: Optional[int] = None
 
@@ -290,11 +292,11 @@ class MaintenanceStatusRead(BaseModel):
     aircraft_serial_number: str
     program_item_id: int
 
-    last_done_date: Optional[date] = None
+    last_done_date: Optional[DateType] = None
     last_done_hours: Optional[float] = None
     last_done_cycles: Optional[float] = None
 
-    next_due_date: Optional[date] = None
+    next_due_date: Optional[DateType] = None
     next_due_hours: Optional[float] = None
     next_due_cycles: Optional[float] = None
 
