@@ -1,4 +1,6 @@
 # backend/amodb/apps/fleet/router.py
+
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 from typing import List
@@ -14,9 +16,31 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ...security import get_current_active_user, require_roles
+from amodb.apps.accounts import models as account_models
 from . import models, schemas
 
-router = APIRouter(prefix="/aircraft", tags=["aircraft"])
+# Roles allowed to manage aircraft, components, usage
+MANAGEMENT_ROLES = [
+    "SUPERUSER",
+    "AMO_ADMIN",
+    "PLANNING_ENGINEER",
+    "PRODUCTION_ENGINEER",
+]
+
+# Roles allowed to manage maintenance programme template items
+PROGRAM_WRITE_ROLES = [
+    "SUPERUSER",
+    "AMO_ADMIN",
+    "PLANNING_ENGINEER",
+]
+
+router = APIRouter(
+    prefix="/aircraft",
+    tags=["aircraft"],
+    # Require an authenticated, active user for everything in this router
+    dependencies=[Depends(get_current_active_user)],
+)
 
 
 # ---------------- BASIC AIRCRAFT CRUD ----------------
@@ -53,7 +77,13 @@ def get_aircraft(serial_number: str, db: Session = Depends(get_db)):
     response_model=schemas.AircraftRead,
     status_code=status.HTTP_201_CREATED,
 )
-def create_aircraft(payload: schemas.AircraftCreate, db: Session = Depends(get_db)):
+def create_aircraft(
+    payload: schemas.AircraftCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
     existing = db.query(models.Aircraft).get(payload.serial_number)
     if existing:
         raise HTTPException(
@@ -73,6 +103,9 @@ def update_aircraft(
     serial_number: str,
     payload: schemas.AircraftUpdate,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
 ):
     ac = db.query(models.Aircraft).get(serial_number)
     if not ac:
@@ -89,7 +122,13 @@ def update_aircraft(
 
 
 @router.delete("/{serial_number}", status_code=status.HTTP_204_NO_CONTENT)
-def deactivate_aircraft(serial_number: str, db: Session = Depends(get_db)):
+def deactivate_aircraft(
+    serial_number: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
     """
     Soft-delete: mark as inactive instead of dropping the row.
     Keeps history and allows future reactivation.
@@ -130,12 +169,19 @@ def create_component(
     serial_number: str,
     payload: schemas.AircraftComponentCreate,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
 ):
     ac = db.query(models.Aircraft).get(serial_number)
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
-    comp = models.AircraftComponent(**payload.model_dump())
+    data = payload.model_dump(exclude_unset=True)
+    # Ensure the component is always attached to the path aircraft
+    data["aircraft_serial_number"] = serial_number
+
+    comp = models.AircraftComponent(**data)
     db.add(comp)
     db.commit()
     db.refresh(comp)
@@ -150,6 +196,9 @@ def update_component(
     component_id: int,
     payload: schemas.AircraftComponentUpdate,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
 ):
     comp = (
         db.query(models.AircraftComponent)
@@ -170,7 +219,13 @@ def update_component(
 
 
 @router.delete("/components/{component_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_component(component_id: int, db: Session = Depends(get_db)):
+def delete_component(
+    component_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
     comp = (
         db.query(models.AircraftComponent)
         .filter(models.AircraftComponent.id == component_id)
@@ -182,6 +237,268 @@ def delete_component(component_id: int, db: Session = Depends(get_db)):
     db.delete(comp)
     db.commit()
     return
+
+
+# ---------------- AIRCRAFT USAGE ----------------
+
+
+@router.get(
+    "/{serial_number}/usage",
+    response_model=List[schemas.AircraftUsageRead],
+)
+def list_usage_entries(
+    serial_number: str,
+    skip: int = 0,
+    limit: int = 100,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    techlog_no: str | None = None,
+    db: Session = Depends(get_db),
+):
+    # Ensure aircraft exists
+    ac = db.query(models.Aircraft).get(serial_number)
+    if not ac:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    query = db.query(models.AircraftUsage).filter(
+        models.AircraftUsage.aircraft_serial_number == serial_number
+    )
+
+    if start_date is not None:
+        query = query.filter(models.AircraftUsage.date >= start_date)
+    if end_date is not None:
+        query = query.filter(models.AircraftUsage.date <= end_date)
+    if techlog_no is not None:
+        query = query.filter(models.AircraftUsage.techlog_no == techlog_no)
+
+    return (
+        query.order_by(
+            models.AircraftUsage.date.asc(),
+            models.AircraftUsage.techlog_no.asc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+@router.post(
+    "/{serial_number}/usage",
+    response_model=schemas.AircraftUsageRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_usage_entry(
+    serial_number: str,
+    payload: schemas.AircraftUsageCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    # Ensure aircraft exists
+    ac = db.query(models.Aircraft).get(serial_number)
+    if not ac:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    # Uniqueness check: aircraft + date + techlog_no
+    existing = (
+        db.query(models.AircraftUsage)
+        .filter(
+            models.AircraftUsage.aircraft_serial_number == serial_number,
+            models.AircraftUsage.date == payload.date,
+            models.AircraftUsage.techlog_no == payload.techlog_no,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Usage entry for this aircraft, date and techlog already exists.",
+        )
+
+    data = payload.model_dump()
+    usage = models.AircraftUsage(
+        aircraft_serial_number=serial_number,
+        created_by_user_id=current_user.id,
+        updated_by_user_id=current_user.id,
+        **data,
+    )
+
+    db.add(usage)
+    db.commit()
+    db.refresh(usage)
+    return usage
+
+
+@router.put(
+    "/usage/{usage_id}",
+    response_model=schemas.AircraftUsageRead,
+)
+def update_usage_entry(
+    usage_id: int,
+    payload: schemas.AircraftUsageUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    usage = (
+        db.query(models.AircraftUsage)
+        .filter(models.AircraftUsage.id == usage_id)
+        .first()
+    )
+    if not usage:
+        raise HTTPException(status_code=404, detail="Usage entry not found")
+
+    # Optimistic concurrency check
+    if payload.last_seen_updated_at != usage.updated_at:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Usage entry has been modified by another user.",
+        )
+
+    data = payload.model_dump(
+        exclude_unset=True,
+        exclude={"last_seen_updated_at"},
+    )
+    for field, value in data.items():
+        setattr(usage, field, value)
+
+    usage.updated_by_user_id = current_user.id
+
+    db.add(usage)
+    db.commit()
+    db.refresh(usage)
+    return usage
+
+
+@router.delete(
+    "/usage/{usage_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_usage_entry(
+    usage_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    usage = (
+        db.query(models.AircraftUsage)
+        .filter(models.AircraftUsage.id == usage_id)
+        .first()
+    )
+    if not usage:
+        raise HTTPException(status_code=404, detail="Usage entry not found")
+
+    db.delete(usage)
+    db.commit()
+    return
+
+
+# ---------------- MAINTENANCE PROGRAMME ITEMS ----------------
+# Note: paths are under /aircraft/maintenance-program/... because this router
+# has prefix="/aircraft".
+
+
+@router.get(
+    "/maintenance-program/items",
+    response_model=List[schemas.MaintenanceProgramItemRead],
+)
+def list_maintenance_program_items(
+    aircraft_template: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.MaintenanceProgramItem)
+    if aircraft_template is not None:
+        query = query.filter(
+            models.MaintenanceProgramItem.aircraft_template == aircraft_template
+        )
+
+    return (
+        query.order_by(
+            models.MaintenanceProgramItem.aircraft_template.asc(),
+            models.MaintenanceProgramItem.ata_chapter.asc(),
+            models.MaintenanceProgramItem.task_code.asc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+@router.post(
+    "/maintenance-program/items",
+    response_model=schemas.MaintenanceProgramItemRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_maintenance_program_item(
+    payload: schemas.MaintenanceProgramItemCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*PROGRAM_WRITE_ROLES)
+    ),
+):
+    item = models.MaintenanceProgramItem(**payload.model_dump())
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.put(
+    "/maintenance-program/items/{item_id}",
+    response_model=schemas.MaintenanceProgramItemRead,
+)
+def update_maintenance_program_item(
+    item_id: int,
+    payload: schemas.MaintenanceProgramItemUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*PROGRAM_WRITE_ROLES)
+    ),
+):
+    item = (
+        db.query(models.MaintenanceProgramItem)
+        .filter(models.MaintenanceProgramItem.id == item_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Maintenance program item not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(item, field, value)
+
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+# ---------------- MAINTENANCE STATUS (READ-ONLY) ----------------
+
+
+@router.get(
+    "/{serial_number}/maintenance-status",
+    response_model=List[schemas.MaintenanceStatusRead],
+)
+def list_maintenance_status_for_aircraft(
+    serial_number: str,
+    db: Session = Depends(get_db),
+):
+    ac = db.query(models.Aircraft).get(serial_number)
+    if not ac:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    statuses = (
+        db.query(models.MaintenanceStatus)
+        .filter(models.MaintenanceStatus.aircraft_serial_number == serial_number)
+        .all()
+    )
+    return statuses
 
 
 # ---------------- BULK IMPORT (AIRCRAFT) ----------------
@@ -226,6 +543,9 @@ def _map_aircraft_columns(raw_cols: List[str]) -> dict:
 async def import_aircraft_file(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
 ):
     try:
         import pandas as pd  # type: ignore
@@ -332,6 +652,9 @@ async def import_components_file(
     serial_number: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
 ):
     try:
         import pandas as pd  # type: ignore

@@ -7,6 +7,7 @@ Responsibilities:
 - Password hashing and verification
 - JWT access token creation and decoding
 - FastAPI dependencies for current user / admin checks
+- Role-based access helpers for router dependencies
 
 This module is intentionally focused and aligned with the new accounts app:
 `amodb.apps.accounts.models.User` and its AccountRole enum.
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Callable, Union
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -191,3 +192,64 @@ def require_admin(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Insufficient privileges",
     )
+
+
+# ---------------------------------------------------------------------------
+# ROLE-BASED ACCESS HELPER
+# ---------------------------------------------------------------------------
+
+def require_roles(
+    *allowed_roles: Union[AccountRole, str],
+) -> Callable[[account_models.User], account_models.User]:
+    """
+    Dependency factory to enforce that the current user has one of the given roles.
+
+    Usage (with Enum):
+        @router.post(...)
+        def endpoint(
+            current_user: User = Depends(
+                require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)
+            )
+        ):
+            ...
+
+    Usage (with strings, useful in routers to avoid importing AccountRole):
+        @router.post(...)
+        def endpoint(
+            current_user: User = Depends(
+                require_roles("SUPERUSER", "AMO_ADMIN", "PLANNING_ENGINEER")
+            )
+        ):
+            ...
+
+    Behaviour:
+    - SUPERUSER always passes, even if not explicitly listed in `allowed_roles`.
+    - Otherwise, the user's `role` must be in the allowed set.
+    """
+    # Normalise inputs to AccountRole enum values
+    normalised_roles: set[AccountRole] = set()
+    for r in allowed_roles:
+        if isinstance(r, AccountRole):
+            normalised_roles.add(r)
+        else:
+            # Try to map string to AccountRole; raises ValueError if invalid
+            try:
+                normalised_roles.add(AccountRole(r))
+            except ValueError:
+                raise ValueError(f"Unknown role {r!r} passed to require_roles()")
+
+    def dependency(
+        current_user: account_models.User = Depends(get_current_active_user),
+    ) -> account_models.User:
+        # Global override: SUPERUSER can do anything
+        if current_user.is_superuser:
+            return current_user
+
+        if current_user.role not in normalised_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions for this operation",
+            )
+        return current_user
+
+    return dependency
