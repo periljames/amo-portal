@@ -1,4 +1,3 @@
-# backend/amodb/apps/fleet/schemas.py
 """
 Pydantic schemas for the fleet app.
 
@@ -23,16 +22,37 @@ from .models import MaintenanceProgramCategoryEnum
 
 
 class AircraftBase(BaseModel):
+    """
+    Aircraft master record.
+
+    `serial_number` is your AIN-style identifier.
+    `registration` is the aircraft REG.
+    Additional optional fields align with ATA Spec 2000-style codes
+    (model code, operator code, supplier code, etc.).
+    """
+
+    # Core identifiers
     serial_number: str
     registration: str
-    template: Optional[str] = None
-    make: Optional[str] = None
-    model: Optional[str] = None
-    home_base: Optional[str] = None
-    owner: Optional[str] = None
+
+    # Configuration / description
+    template: Optional[str] = None          # e.g. 'DHC8-315', 'C208B'
+    make: Optional[str] = None              # manufacturer
+    model: Optional[str] = None             # subtype / series
+    home_base: Optional[str] = None         # ICAO/IATA/base code
+    owner: Optional[str] = None             # free text owner/operator
+
+    # ATA Spec 2000-style coding (all optional, for standardisation)
+    aircraft_model_code: Optional[str] = None          # model code used in manuals/IPC
+    operator_code: Optional[str] = None                # OPR
+    supplier_code: Optional[str] = None                # SPL / lessor
+    company_name: Optional[str] = None                 # WHO
+    internal_aircraft_identifier: Optional[str] = None # internal fleet ID / hangar ID
+
     status: Optional[str] = "OPEN"
     is_active: bool = True
 
+    # Utilisation snapshot (as of last_log_date)
     last_log_date: Optional[DateType] = None
     total_hours: Optional[float] = None
     total_cycles: Optional[float] = None
@@ -53,11 +73,20 @@ class AircraftUpdate(BaseModel):
     """
 
     registration: Optional[str] = None
+
     template: Optional[str] = None
     make: Optional[str] = None
     model: Optional[str] = None
     home_base: Optional[str] = None
     owner: Optional[str] = None
+
+    # ATA Spec 2000-style coding
+    aircraft_model_code: Optional[str] = None
+    operator_code: Optional[str] = None
+    supplier_code: Optional[str] = None
+    company_name: Optional[str] = None
+    internal_aircraft_identifier: Optional[str] = None
+
     status: Optional[str] = None
     is_active: Optional[bool] = None
 

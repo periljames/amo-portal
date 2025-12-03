@@ -3,7 +3,7 @@
 from datetime import date
 from io import BytesIO
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 
 from fastapi import (
     APIRouter,
@@ -42,8 +42,9 @@ router = APIRouter(
     dependencies=[Depends(get_current_active_user)],
 )
 
-
-# ---------------- BASIC AIRCRAFT CRUD ----------------
+# ---------------------------------------------------------------------------
+# BASIC AIRCRAFT CRUD
+# ---------------------------------------------------------------------------
 
 
 @router.get("/", response_model=List[schemas.AircraftRead])
@@ -84,11 +85,27 @@ def create_aircraft(
         require_roles(*MANAGEMENT_ROLES)
     ),
 ):
+    # Check serial_number (AIN-style)
     existing = db.query(models.Aircraft).get(payload.serial_number)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Aircraft with serial {payload.serial_number} already exists.",
+        )
+
+    # Extra safety: avoid duplicate registration on a different AIN
+    reg_conflict = (
+        db.query(models.Aircraft)
+        .filter(models.Aircraft.registration == payload.registration)
+        .first()
+    )
+    if reg_conflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Registration {payload.registration} is already assigned to "
+                f"aircraft {reg_conflict.serial_number}."
+            ),
         )
 
     ac = models.Aircraft(**payload.model_dump())
@@ -112,6 +129,27 @@ def update_aircraft(
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
     data = payload.model_dump(exclude_unset=True)
+
+    # If registration is changing, ensure no conflicts
+    new_reg = data.get("registration")
+    if new_reg and new_reg != ac.registration:
+        reg_conflict = (
+            db.query(models.Aircraft)
+            .filter(
+                models.Aircraft.registration == new_reg,
+                models.Aircraft.serial_number != serial_number,
+            )
+            .first()
+        )
+        if reg_conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Registration {new_reg} is already assigned to "
+                    f"aircraft {reg_conflict.serial_number}."
+                ),
+            )
+
     for field, value in data.items():
         setattr(ac, field, value)
 
@@ -143,7 +181,9 @@ def deactivate_aircraft(
     return
 
 
-# ---------------- COMPONENTS CRUD ----------------
+# ---------------------------------------------------------------------------
+# COMPONENTS CRUD
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -239,7 +279,9 @@ def delete_component(
     return
 
 
-# ---------------- AIRCRAFT USAGE ----------------
+# ---------------------------------------------------------------------------
+# AIRCRAFT USAGE
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -396,9 +438,10 @@ def delete_usage_entry(
     return
 
 
-# ---------------- MAINTENANCE PROGRAMME ITEMS ----------------
-# Note: paths are under /aircraft/maintenance-program/... because this router
-# has prefix="/aircraft".
+# ---------------------------------------------------------------------------
+# MAINTENANCE PROGRAMME ITEMS
+# (under /aircraft/maintenance-program/...)
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -478,7 +521,9 @@ def update_maintenance_program_item(
     return item
 
 
-# ---------------- MAINTENANCE STATUS (READ-ONLY) ----------------
+# ---------------------------------------------------------------------------
+# MAINTENANCE STATUS (READ-ONLY)
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -501,38 +546,153 @@ def list_maintenance_status_for_aircraft(
     return statuses
 
 
-# ---------------- BULK IMPORT (AIRCRAFT) ----------------
+# ---------------------------------------------------------------------------
+# IMPORT HELPERS (ATA Spec 2000–aware)
+# ---------------------------------------------------------------------------
 
 
 def _normalise_header(name: str) -> str:
-    return name.strip().lower().replace(" ", "_")
+    """
+    Normalise a column header to a forgiving key:
+    - strip spaces
+    - lower-case
+    - remove common punctuation (space, slash, dash, dot)
+    so that 'A/C REG', 'A-C REG.' -> 'ac_reg'.
+    """
+    cleaned = name.strip().lower()
+    for ch in [" ", "-", "/", "."]:
+        cleaned = cleaned.replace(ch, "_")
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    return cleaned
 
 
-def _map_aircraft_columns(raw_cols: List[str]) -> dict:
+def _map_aircraft_columns(raw_cols: List[str]) -> Dict[str, str | None]:
     """
     Map incoming header names onto our canonical field names.
-    Very forgiving about spaces / case.
+
+    Canonical fields (left) vs typical incoming names (right):
+    - serial_number (AIN): serial_number, aircraft, ac_serial, ain, aircraft_id, aircraft_identifier
+    - registration (REG): registration, reg, ac_reg, aircraft_registration
+    - template (aircraft_template/model): template, aircraft_template, aircraft_model, model_code
+    - make: make, manufacturer, mfr
+    - model: model, subtype, series
+    - home_base: home_base, base, home_station, station
+    - owner: owner, operator_name, company_name, who
+    - aircraft_model_code: aircraft_model_code, model_code, model_id
+    - operator_code (OPR): operator_code, opr, operator, airline_code
+    - supplier_code (SPL): supplier_code, spl, supplier
+    - company_name (WHO): who, company_name, operator_name
+    - internal_aircraft_identifier: internal_id, internal_aircraft_id, fleet_id
+    - last_log_date: last_log_date, date
+    - total_hours: total_hours, hours, ttaf, tt_hours, total_time
+    - total_cycles: total_cycles, cycles, ldg, landings
     """
     norm = {_normalise_header(c): c for c in raw_cols}
 
-    def pick(*candidates):
+    def pick(*candidates: str) -> str | None:
         for cand in candidates:
             if cand in norm:
                 return norm[cand]
         return None
 
     return {
-        "serial_number": pick("serial_number", "aircraft", "ac_serial"),
-        "registration": pick("registration", "reg"),
-        "template": pick("template"),
-        "make": pick("make"),
-        "model": pick("model"),
-        "home_base": pick("home_base", "base"),
-        "owner": pick("owner"),
+        # Mandatory
+        "serial_number": pick(
+            "serial_number",
+            "aircraft",
+            "ac_serial",
+            "ac_sn",
+            "aircraft_sn",
+            "ain",
+            "aircraft_identification_number",
+            "aircraft_id",
+            "aircraft_identifier",
+        ),
+        "registration": pick(
+            "registration",
+            "reg",
+            "ac_reg",
+            "aircraft_registration",
+        ),
+        # Core configuration
+        "template": pick(
+            "template",
+            "aircraft_template",
+            "aircraft_model",
+            "model_code",
+        ),
+        "make": pick(
+            "make",
+            "manufacturer",
+            "mfr",
+        ),
+        "model": pick(
+            "model",
+            "subtype",
+            "series",
+        ),
+        "home_base": pick(
+            "home_base",
+            "base",
+            "home_station",
+            "station",
+        ),
+        "owner": pick(
+            "owner",
+            "operator_name",
+            "company_name",
+            "who",
+        ),
+        # Spec 2000–style extra coding
+        "aircraft_model_code": pick(
+            "aircraft_model_code",
+            "model_code",
+            "model_id",
+        ),
+        "operator_code": pick(
+            "operator_code",
+            "opr",
+            "operator",
+            "airline_code",
+        ),
+        "supplier_code": pick(
+            "supplier_code",
+            "spl",
+            "supplier",
+        ),
+        "company_name": pick(
+            "company_name",
+            "who",
+            "operator_name",
+        ),
+        "internal_aircraft_identifier": pick(
+            "internal_aircraft_identifier",
+            "internal_id",
+            "internal_aircraft_id",
+            "fleet_id",
+        ),
+        # Utilisation snapshot
         "last_log_date": pick("last_log_date", "date"),
-        "total_hours": pick("total_hours", "hours"),
-        "total_cycles": pick("total_cycles", "cycles"),
+        "total_hours": pick(
+            "total_hours",
+            "hours",
+            "ttaf",
+            "tt_hours",
+            "total_time",
+        ),
+        "total_cycles": pick(
+            "total_cycles",
+            "cycles",
+            "ldg",
+            "landings",
+        ),
     }
+
+
+# ---------------------------------------------------------------------------
+# BULK IMPORT (AIRCRAFT)
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -547,6 +707,14 @@ async def import_aircraft_file(
         require_roles(*MANAGEMENT_ROLES)
     ),
 ):
+    """
+    Bulk import / update aircraft from CSV/Excel.
+
+    - Uses forgiving header mapping, including ATA Spec 2000-style field names.
+    - Requires at least an aircraft identifier (AIN/serial_number) and REG.
+    - Returns counts plus mapping and skipped-row reasons so users
+      understand *why* a row did not import.
+    """
     try:
         import pandas as pd  # type: ignore
     except ImportError:  # pragma: no cover
@@ -582,25 +750,66 @@ async def import_aircraft_file(
     if not colmap["serial_number"] or not colmap["registration"]:
         raise HTTPException(
             status_code=400,
-            detail="File must include at least aircraft serial number and registration columns.",
+            detail=(
+                "File must include at least aircraft serial/identifier (AIN) and "
+                "registration columns. Accepted examples: "
+                "AIN, serial_number, aircraft_id, registration, REG, AC REG."
+            ),
         )
 
     created = 0
     updated = 0
+    skipped = 0
+    skipped_rows: List[Dict[str, Any]] = []
 
-    for _, row in df.iterrows():
-        serial = str(row[colmap["serial_number"]]).strip()
-        if not serial:
+    for idx, row in df.iterrows():
+        row_idx = int(idx) + 2  # +2 to roughly match Excel row (header + 1)
+
+        # Aircraft serial / AIN
+        serial_raw_col = colmap["serial_number"]
+        reg_raw_col = colmap["registration"]
+
+        serial_value = row.get(serial_raw_col) if serial_raw_col else None
+        registration_value = row.get(reg_raw_col) if reg_raw_col else None
+
+        serial = str(serial_value).strip() if serial_value is not None else ""
+        registration = (
+            str(registration_value).strip() if registration_value is not None else ""
+        )
+
+        if not serial and not registration:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": "Missing both aircraft serial (AIN) and registration.",
+                }
+            )
             continue
 
-        registration = str(row[colmap["registration"]]).strip()
+        if not serial:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": "Missing aircraft serial (AIN).",
+                }
+            )
+            continue
+
         if not registration:
-            # Without registration it's probably junk row
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": f"Missing registration for aircraft serial {serial}.",
+                }
+            )
             continue
 
         ac = db.query(models.Aircraft).get(serial)
 
-        payload = {
+        payload: Dict[str, Any] = {
             "serial_number": serial,
             "registration": registration,
             "template": row.get(colmap["template"]) if colmap["template"] else None,
@@ -608,6 +817,25 @@ async def import_aircraft_file(
             "model": row.get(colmap["model"]) if colmap["model"] else None,
             "home_base": row.get(colmap["home_base"]) if colmap["home_base"] else None,
             "owner": row.get(colmap["owner"]) if colmap["owner"] else None,
+            # Spec 2000–style coding
+            "aircraft_model_code": row.get(colmap["aircraft_model_code"])
+            if colmap["aircraft_model_code"]
+            else None,
+            "operator_code": row.get(colmap["operator_code"])
+            if colmap["operator_code"]
+            else None,
+            "supplier_code": row.get(colmap["supplier_code"])
+            if colmap["supplier_code"]
+            else None,
+            "company_name": row.get(colmap["company_name"])
+            if colmap["company_name"]
+            else None,
+            "internal_aircraft_identifier": row.get(
+                colmap["internal_aircraft_identifier"]
+            )
+            if colmap["internal_aircraft_identifier"]
+            else None,
+            # Status / utilisation
             "status": "OPEN",
             "is_active": True,
             "last_log_date": row.get(colmap["last_log_date"])
@@ -621,12 +849,18 @@ async def import_aircraft_file(
             else None,
         }
 
+        # Basic clean-up: empty strings -> None
+        for key, val in list(payload.items()):
+            if isinstance(val, str) and not val.strip():
+                payload[key] = None
+
         if ac is None:
+            # New aircraft
             ac = models.Aircraft(**payload)
             db.add(ac)
             created += 1
         else:
-            # Update existing
+            # Update existing master record with latest data
             for field, value in payload.items():
                 setattr(ac, field, value)
             updated += 1
@@ -637,10 +871,15 @@ async def import_aircraft_file(
         "status": "ok",
         "created": created,
         "updated": updated,
+        "skipped": skipped,
+        "column_mapping": colmap,
+        "skipped_rows": skipped_rows,
     }
 
 
-# ---------------- BULK IMPORT (COMPONENTS) ----------------
+# ---------------------------------------------------------------------------
+# BULK IMPORT (COMPONENTS)
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -656,6 +895,17 @@ async def import_components_file(
         require_roles(*MANAGEMENT_ROLES)
     ),
 ):
+    """
+    Bulk import components for a single aircraft.
+
+    Accepts Spec 2000-style and conventional column names for:
+    - position
+    - ATA chapter
+    - part number (PN, PNR)
+    - serial number (SN, SNO)
+    - manufacturer/operator codes (MFR, OPR)
+    - installed/current hours/cycles
+    """
     try:
         import pandas as pd  # type: ignore
     except ImportError:  # pragma: no cover
@@ -690,53 +940,62 @@ async def import_components_file(
     if df.empty:
         raise HTTPException(status_code=400, detail="Uploaded file contains no data.")
 
-    # Expected columns (case-insensitive, spaces ignored):
-    # position, ata, part_number, serial_number, description,
-    # installed_date, installed_hours, installed_cycles,
-    # current_hours, current_cycles, notes
     norm_cols = {_normalise_header(c): c for c in df.columns}
 
-    def col(name):
-        return norm_cols.get(name)
+    def col(*names: str) -> str | None:
+        for name in names:
+            if name in norm_cols:
+                return norm_cols[name]
+        return None
+
+    position_col = col("position", "pos")
+    if not position_col:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Component file must have a 'position' column "
+                "(examples: position, pos)."
+            ),
+        )
 
     created = 0
+    skipped = 0
+    skipped_rows: List[Dict[str, Any]] = []
 
-    for _, row in df.iterrows():
-        position_col = col("position")
-        if not position_col:
-            raise HTTPException(
-                status_code=400,
-                detail="Component file must have a 'position' column.",
-            )
+    for idx, row in df.iterrows():
+        row_idx = int(idx) + 2  # approx Excel row number
 
-        position = str(row[position_col]).strip()
+        position_raw = row.get(position_col)
+        position = str(position_raw).strip() if position_raw is not None else ""
+
         if not position:
+            skipped += 1
+            skipped_rows.append(
+                {"row": row_idx, "reason": "Missing component position."}
+            )
             continue
 
         comp = models.AircraftComponent(
             aircraft_serial_number=serial_number,
             position=position,
-            ata=row.get(col("ata")) if col("ata") else None,
-            part_number=row.get(col("part_number")) if col("part_number") else None,
-            serial_number=row.get(col("serial_number")) if col("serial_number") else None,
-            description=row.get(col("description")) if col("description") else None,
-            installed_date=row.get(col("installed_date"))
-            if col("installed_date")
-            else None,
-            installed_hours=row.get(col("installed_hours"))
-            if col("installed_hours")
-            else None,
-            installed_cycles=row.get(col("installed_cycles"))
-            if col("installed_cycles")
-            else None,
-            current_hours=row.get(col("current_hours"))
-            if col("current_hours")
-            else None,
-            current_cycles=row.get(col("current_cycles"))
-            if col("current_cycles")
-            else None,
-            notes=row.get(col("notes")) if col("notes") else None,
+            ata=row.get(col("ata")),
+            part_number=row.get(
+                col("part_number", "pn", "pnr", "part_no", "partnum")
+            ),
+            serial_number=row.get(
+                col("serial_number", "sn", "sno", "serial_no", "serialnum")
+            ),
+            description=row.get(col("description", "desc")),
+            installed_date=row.get(col("installed_date", "inst_date")),
+            installed_hours=row.get(col("installed_hours")),
+            installed_cycles=row.get(col("installed_cycles")),
+            current_hours=row.get(col("current_hours")),
+            current_cycles=row.get(col("current_cycles")),
+            notes=row.get(col("notes", "remark", "remarks")),
+            manufacturer_code=row.get(col("manufacturer_code", "mfr", "mfr_code")),
+            operator_code=row.get(col("operator_code", "opr", "operator")),
         )
+
         db.add(comp)
         created += 1
 
@@ -746,4 +1005,6 @@ async def import_components_file(
         "status": "ok",
         "aircraft_serial_number": serial_number,
         "components_created": created,
+        "components_skipped": skipped,
+        "skipped_rows": skipped_rows,
     }
