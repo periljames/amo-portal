@@ -1,18 +1,11 @@
 # backend/amodb/apps/maintenance_program/__init__.py
 """
-Maintenance program app package.
+Maintenance program module (AMP + per-aircraft program items).
 
-We only expose models/schemas/services here so that:
-- Alembic can see the ORM models via amodb.__init__
-- The main FastAPI app can import router directly from .api
-
-Do NOT import .api here to avoid circular imports when Alembic loads env.py.
+NOTE:
+We intentionally only import models and schemas at package import time.
+Importing services here can cause circular import issues during Alembic's
+metadata loading, and services are not needed for migrations.
 """
 
-from . import models, schemas, services  # noqa: F401
-
-__all__ = [
-    "models",
-    "schemas",
-    "services",
-]
+from . import models, schemas  # noqa: F401

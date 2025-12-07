@@ -13,6 +13,7 @@ from .apps.fleet import models as fleet_models                # aircraft + compo
 from .apps.work import models as work_models                  # work orders + tasks
 from .apps.crs import models as crs_models                    # CRS + signoffs
 from .apps.maintenance_program import models as maintenance_program_models  # AMP + aircraft program items
+from .apps.training import models as training_models  # noqa: F401
 
 __all__ = [
     "accounts_models",

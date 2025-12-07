@@ -65,6 +65,9 @@ class MaintenanceProgramItem(Base):
     """
 
     __tablename__ = "maintenance_program_items"
+    # Guard against duplicate Table() definitions with the same name
+    # in this metadata (e.g. legacy Table(...) plus this ORM class).
+    __table_args__ = {"extend_existing": True}
 
     id: int = Column(Integer, primary_key=True, index=True)
 

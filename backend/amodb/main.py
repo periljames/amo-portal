@@ -10,7 +10,7 @@ Design:
     * Creating the FastAPI app
     * Global middleware (CORS, etc.)
     * Health endpoints
-    * Including feature routers (accounts, fleet, work, CRS)
+    * Including feature routers (accounts, fleet, work, CRS, training)
 - Database schema creation is handled by Alembic migrations.
 """
 
@@ -25,6 +25,7 @@ from .apps.accounts.router_admin import router as accounts_admin_router
 from .apps.fleet.router import router as fleet_router
 from .apps.work.router import router as work_router
 from .apps.crs.router import router as crs_router
+from .apps.training.router import router as training_router  # NEW
 
 # --------------------------------------------------------------------
 # CONFIG
@@ -78,3 +79,6 @@ app.include_router(work_router)
 
 # CRS (tied to aircraft + work orders and authorisations)
 app.include_router(crs_router)
+
+# Training / personnel competence records (Quality edits, others read-only)
+app.include_router(training_router)

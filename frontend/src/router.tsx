@@ -20,6 +20,7 @@ import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
+import TrainingPage from "./pages/MyTrainingPage"; // ✅ NEW
 
 import { isAuthenticated } from "./services/auth";
 
@@ -97,6 +98,16 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <DashboardPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Training status view, e.g. /maintenance/safarilink/planning/training */}
+      <Route
+        path="/maintenance/:amoCode/:department/training"
+        element={
+          <RequireAuth>
+            <TrainingPage />
           </RequireAuth>
         }
       />
