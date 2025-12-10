@@ -17,8 +17,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, and_
 
 from .models import (
-    MaintenanceProgramItem,
-    AircraftProgramItem,
+    AmpProgramItem as MaintenanceProgramItem,
+    AmpAircraftProgramItem as AircraftProgramItem,
     ProgramItemStatusEnum,
     AircraftProgramStatusEnum,
 )

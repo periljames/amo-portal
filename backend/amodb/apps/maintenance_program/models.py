@@ -1,9 +1,9 @@
 # backend/amodb/apps/maintenance_program/models.py
 #
 # ORM models for the maintenance program module:
-# - MaintenanceProgramItem: template-level AMP tasks (generic, by template_code).
-# - AircraftProgramItem   : per-aircraft instance of a program item with utilisation /
-#                           last-done / next-due tracking.
+# - AmpProgramItem        : template-level AMP tasks (generic, by template_code).
+# - AmpAircraftProgramItem: per-aircraft instance of a program item with
+#                           utilisation / last-done / next-due tracking.
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from sqlalchemy import (
     Integer,
     String,
     Float,
-    Boolean,
     Text,
     Date,
     DateTime,
@@ -51,17 +50,17 @@ class AircraftProgramStatusEnum(str, Enum):
 
 
 # ---------------------------------------------------------------------------
-# MaintenanceProgramItem – template AMP task definition
+# AmpProgramItem – template AMP task definition
 # ---------------------------------------------------------------------------
 
 
-class MaintenanceProgramItem(Base):
+class AmpProgramItem(Base):
     """
     Template-level maintenance program item (AMP / MRB task).
 
     This is generic per template / fleet type (e.g. "DHC6-300 AMP v1"),
     not tied to a specific aircraft. Per-aircraft instances live in
-    AircraftProgramItem.
+    AmpAircraftProgramItem.
     """
 
     __tablename__ = "maintenance_program_items"
@@ -119,22 +118,22 @@ class MaintenanceProgramItem(Base):
 
     # Relationships
     aircraft_items = relationship(
-        "AircraftProgramItem",
+        "AmpAircraftProgramItem",
         back_populates="program_item",
         cascade="all, delete-orphan",
     )
 
 
 # ---------------------------------------------------------------------------
-# AircraftProgramItem – per-aircraft instance + scheduling data
+# AmpAircraftProgramItem – per-aircraft instance + scheduling data
 # ---------------------------------------------------------------------------
 
 
-class AircraftProgramItem(Base):
+class AmpAircraftProgramItem(Base):
     """
     Per-aircraft maintenance-program item.
 
-    Links an aircraft to a MaintenanceProgramItem and stores last-done,
+    Links an aircraft to an AmpProgramItem and stores last-done,
     next-due and remaining utilisation / time.
     """
 
@@ -211,11 +210,11 @@ class AircraftProgramItem(Base):
 
     # Relationships
     program_item = relationship(
-        "MaintenanceProgramItem",
+        "AmpProgramItem",
         back_populates="aircraft_items",
     )
 
-    # Simple navigation helpers (no back_populates needed on the other side
-    # unless you want it):
+    # Simple navigation helpers; "Aircraft" and "AircraftComponent"
+    # live in the fleet app models and will be resolved by name.
     aircraft = relationship("Aircraft")
     component = relationship("AircraftComponent")

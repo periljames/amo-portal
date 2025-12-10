@@ -36,7 +36,10 @@ class AirframeLimitUnit(str, enum.Enum):
 class CRSSignoffInput(BaseModel):
     """Single signoff entry supplied by the client when creating/updating a CRS."""
 
-    category: str = Field(..., description="Category of signoff, e.g. ISSUER / VERIFIER")
+    category: str = Field(
+        ...,
+        description="Category of signoff, e.g. ISSUER / VERIFIER",
+    )
     sign_date: date
     full_name_and_signature: Optional[str] = None
     internal_auth_ref: Optional[str] = None
@@ -291,20 +294,76 @@ class CRSPrefill(BaseModel):
     aircraft_reg: str
     msn: str
 
-    lh_engine_type: str
-    rh_engine_type: str
-    lh_engine_sno: str
-    rh_engine_sno: str
+    # Engine details can legitimately be missing if components are not set up
+    lh_engine_type: Optional[str] = None
+    rh_engine_type: Optional[str] = None
+    lh_engine_sno: Optional[str] = None
+    rh_engine_sno: Optional[str] = None
 
-    aircraft_tat: float
-    aircraft_tac: float
-    lh_hrs: float
-    lh_cyc: float
-    rh_hrs: float
-    rh_cyc: float
+    # Hours / cycles may also be missing
+    aircraft_tat: Optional[float] = None
+    aircraft_tac: Optional[float] = None
+    lh_hrs: Optional[float] = None
+    lh_cyc: Optional[float] = None
+    rh_hrs: Optional[float] = None
+    rh_cyc: Optional[float] = None
 
     airframe_limit_unit: AirframeLimitUnit
-    next_maintenance_due: str
+    next_maintenance_due: Optional[str] = None
 
     date_of_completion: date
     crs_issue_date: date
+
+
+# ---------------------------------------------------------------------------
+# PDF TEMPLATE METADATA (for on-screen form filling)
+# ---------------------------------------------------------------------------
+
+
+class PdfPageMeta(BaseModel):
+    """
+    Single page of a PDF template.
+    Coordinates are in PDF units (points).
+    """
+
+    index: int
+    width: float
+    height: float
+
+
+class PdfFormFieldMeta(BaseModel):
+    """
+    One AcroForm field with geometry and a simple type hint.
+    """
+
+    name: str
+    page_index: int
+    x: float
+    y: float
+    width: float
+    height: float
+    field_type: str
+
+
+class PdfFormTemplateMeta(BaseModel):
+    """
+    High-level metadata for a PDF form template.
+
+    The frontend can use this to overlay HTML inputs on top of a rendered
+    PDF page and keep working even if the template revision changes,
+    as long as field names remain stable.
+    """
+
+    template_filename: str
+    page_count: int
+    pages: List[PdfPageMeta]
+    fields: List[PdfFormFieldMeta]
+
+
+class CRSTemplateMeta(PdfFormTemplateMeta):
+    """
+    Alias for PdfFormTemplateMeta used by the CRS template endpoints.
+    Kept separate so CRS-specific routes can refer to a clearly named schema.
+    """
+
+    pass

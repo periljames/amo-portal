@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from typing import List, Optional, Tuple
 
 import secrets
@@ -270,7 +270,7 @@ def update_user(
     if data.is_active is not None:
         # Simple deactivation timestamp to support off-boarding audit
         if user.is_active and not data.is_active and user.deactivated_at is None:
-            user.deactivated_at = datetime.utcnow()
+            user.deactivated_at = datetime.now(timezone.utc)
         user.is_active = data.is_active
 
     if data.is_amo_admin is not None:
@@ -294,9 +294,21 @@ def update_user(
 
 
 def _is_account_locked(user: models.User) -> bool:
-    if user.locked_until and user.locked_until > datetime.utcnow():
-        return True
-    return False
+    """
+    Return True if the account is currently locked.
+
+    Handles both naive and timezone-aware datetimes safely.
+    """
+    locked_until = user.locked_until
+    if not locked_until:
+        return False
+
+    # Normalise to timezone-aware UTC
+    if locked_until.tzinfo is None:
+        locked_until = locked_until.replace(tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    return locked_until > now
 
 
 def _register_failed_login(
@@ -308,7 +320,7 @@ def _register_failed_login(
 ) -> None:
     user.login_attempts = (user.login_attempts or 0) + 1
     if user.login_attempts >= MAX_LOGIN_ATTEMPTS:
-        user.locked_until = datetime.utcnow() + timedelta(
+        user.locked_until = datetime.now(timezone.utc) + timedelta(
             minutes=ACCOUNT_LOCKOUT_MINUTES
         )
     db.add(user)
@@ -334,7 +346,7 @@ def _reset_failed_logins(
 ) -> None:
     user.login_attempts = 0
     user.locked_until = None
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(timezone.utc)
     user.last_login_ip = ip
     user.last_login_user_agent = user_agent
     db.add(user)
@@ -371,7 +383,7 @@ def get_user_for_login(
     )
     if not amo:
         return None
-    
+
     # Now fetch the user in that AMO
     user = (
         db.query(models.User)
@@ -542,6 +554,7 @@ def create_password_reset_token(
     db: Session,
     user: models.User,
     *,
+
     ip: Optional[str] = None,
     user_agent: Optional[str] = None,
 ) -> str:
@@ -552,7 +565,7 @@ def create_password_reset_token(
     """
     raw_token = _generate_reset_token_raw()
     token_hash = get_password_hash(raw_token)
-    expires_at = datetime.utcnow() + timedelta(
+    expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES
     )
 
@@ -584,7 +597,7 @@ def _find_matching_reset_token(
     db: Session,
     raw_token: str,
 ) -> Optional[models.PasswordResetToken]:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     candidate_tokens: List[models.PasswordResetToken] = (
         db.query(models.PasswordResetToken)
         .filter(models.PasswordResetToken.used_at.is_(None))
@@ -616,7 +629,7 @@ def redeem_password_reset_token(
     if not token:
         return None
 
-    token.used_at = datetime.utcnow()
+    token.used_at = datetime.now(timezone.utc)
     db.add(token)
 
     user = token.user

@@ -738,3 +738,60 @@ button,
   border-color: var(--accent-primary);
   color: var(--text-primary);
 }
+/* CRS PDF-on-screen layout */
+.crs-pdf-wrapper {
+  position: relative;
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+  max-width: 900px;
+}
+
+.crs-pdf-document {
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.2);
+}
+
+.crs-pdf-page {
+  width: 100% !important;
+  height: auto !important;
+}
+
+.crs-pdf-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* children re-enable pointer events */
+}
+
+.crs-pdf-input,
+.crs-pdf-textarea {
+  position: absolute;
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  background: rgba(255, 255, 255, 0.01);
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
+.crs-pdf-textarea {
+  resize: none;
+}
+
+.crs-pdf-checkbox-wrapper {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.crs-pdf-checkbox {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+.crs-pdf-status {
+  font-size: 0.9rem;
+  color: var(--text-muted, #666);
+  margin-bottom: 0.75rem;
+}

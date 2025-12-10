@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
@@ -19,6 +20,74 @@ from .utils import generate_crs_serial
 from .pdf_renderer import create_crs_pdf
 
 router = APIRouter(prefix="/crs", tags=["crs"])
+
+# --------------------------------------------------------------------------
+# CRS TEMPLATE FILE LOCATIONS
+# --------------------------------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATE_DIR = BASE_DIR / "assets"
+TEMPLATE_PDF_PATH = TEMPLATE_DIR / "crs_template.pdf"
+TEMPLATE_META_PATH = TEMPLATE_DIR / "crs_template_meta.json"
+
+
+# --------------------------------------------------------------------------
+# CRS TEMPLATE ENDPOINTS (for UI overlay)
+# --------------------------------------------------------------------------
+
+@router.get(
+    "/template/pdf",
+    response_class=FileResponse,
+    summary="Get blank CRS PDF template used for on-screen overlay",
+    include_in_schema=False,
+)
+def get_crs_template_pdf():
+    """
+    Serve the *blank* CRS PDF template which the frontend uses
+    to overlay interactive inputs for new CRS creation.
+    """
+    if not TEMPLATE_PDF_PATH.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="CRS template PDF not found on server.",
+        )
+
+    return FileResponse(
+        path=str(TEMPLATE_PDF_PATH),
+        media_type="application/pdf",
+        filename="crs_template.pdf",
+    )
+
+
+@router.get(
+    "/template/meta",
+    response_model=crs_schemas.CRSTemplateMeta,
+    summary="Get CRS template field geometry metadata",
+    include_in_schema=False,
+)
+def get_crs_template_meta():
+    """
+    Serve JSON metadata that describes the page size and field geometry
+    for the CRS template PDF.
+
+    The frontend uses this to position input overlays on top of the PDF.
+    """
+    if not TEMPLATE_META_PATH.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="CRS template metadata not found on server.",
+        )
+
+    try:
+        with TEMPLATE_META_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="CRS template metadata file is invalid JSON.",
+        )
+
+    return crs_schemas.CRSTemplateMeta(**data)
 
 
 # --------------------------------------------------------------------------

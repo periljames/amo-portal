@@ -1,5 +1,5 @@
 // src/pages/CRSNewPage.tsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import type {
@@ -8,12 +8,94 @@ import type {
   AirframeLimitUnit,
   CRSPrefill,
 } from "../types/crs";
-import { createCRS, prefillCRS } from "../services/crs";
+import {
+  createCRS,
+  prefillCRS,
+  fetchCRSTemplateMeta,
+  fetchCRSTemplatePdf,
+} from "../services/crs";
+import type { CRSTemplateMeta } from "../services/crs";
+import { Document, Page, pdfjs } from "react-pdf";
+
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
 const defaultReleasing: ReleasingAuthority = "KCAA";
 const defaultUnit: AirframeLimitUnit = "HOURS";
 
-type CRSFieldElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+type CRSFieldElement =
+  | HTMLInputElement
+  | HTMLTextAreaElement
+  | HTMLSelectElement;
+
+type PdfFieldMeta = {
+  pdf_name: string;
+  model_key: string | null;
+  page: number;
+  left_pct: number;
+  top_pct: number;
+  width_pct: number;
+  height_pct: number;
+  field_type: "text" | "checkbox";
+  multiline?: boolean;
+};
+
+// Map PDF field names to our local form state keys.
+// This is the only CRS-specific mapping; the geometry comes from the backend.
+const PDF_FIELD_TO_MODEL_KEY: Record<string, string> = {
+  // Header / linkage
+  "WO#": "wo_no",
+  Operator_Contractor: "operator_contractor",
+  Job_No: "job_no",
+  Location: "location",
+
+  // Aircraft identity
+  Aircraft_Type: "aircraft_type",
+  Aircraft_Registration: "aircraft_reg",
+  Msn: "msn",
+
+  // Engines
+  LH_Engine_Type: "lh_engine_type",
+  RH_Engine_Type: "rh_engine_type",
+  LH_Engine_SNo: "lh_engine_sno",
+  RH_Engine_SNo: "rh_engine_sno",
+
+  // Utilisation snapshot
+  Aircraft_TAT: "aircraft_tat",
+  Aircraft_TAC: "aircraft_tac",
+  LH_Hrs: "lh_hrs",
+  LH_Cyc: "lh_cyc",
+  RH_Hrs: "rh_hrs",
+  RH_Cyc: "rh_cyc",
+
+  // Work performed
+  "Maintenance Carried out": "maintenance_carried_out",
+  Deferred_Maintenance: "deferred_maintenance",
+  Date_of_Completion: "date_of_completion",
+
+  // Maintenance data flags
+  AMP: "amp_used",
+  AMM: "amm_used",
+  "Mtx Data": "mtx_data_used",
+
+  // Maintenance data references
+  AMP_Reference: "amp_reference",
+  AMP_Revision: "amp_revision",
+  AMP_Issue_Date: "amp_issue_date",
+  AMM_Reference: "amm_reference",
+  AMM_Revision: "amm_revision",
+  AMM_Issue_Date: "amm_issue_date",
+  Add_Mtx_Data: "add_mtx_data",
+  Work_Order_No: "work_order_no",
+
+  // Expiry
+  "Expiry Date": "expiry_date",
+  "Hrs to Expiry": "hrs_to_expiry",
+  "SUM (Aircraft TAT, Hrs to Expiry)": "sum_airframe_tat_expiry",
+  "Next Maintenance Due": "next_maintenance_due",
+
+  // CRS header
+  "CRS Issue Date": "crs_issue_date",
+};
 
 const CRSNewPage: React.FC = () => {
   const navigate = useNavigate();
@@ -85,6 +167,128 @@ const CRSNewPage: React.FC = () => {
   const [prefillError, setPrefillError] = useState<string | null>(null);
   const [successSerial, setSuccessSerial] = useState<string | null>(null);
 
+  const [templateUrl, setTemplateUrl] = useState<string | null>(null);
+  const [pdfFields, setPdfFields] = useState<PdfFieldMeta[]>([]);
+  const [pdfLoading, setPdfLoading] = useState(true);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  // Clean up the blob URL when it changes / unmounts
+  useEffect(() => {
+    return () => {
+      if (templateUrl) {
+        URL.revokeObjectURL(templateUrl);
+      }
+    };
+  }, [templateUrl]);
+
+  // Load CRS PDF template + metadata from backend once
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadTemplate = async () => {
+      try {
+        setPdfLoading(true);
+        setPdfError(null);
+
+        const [pdfBlob, meta]: [Blob, CRSTemplateMeta] = await Promise.all([
+          fetchCRSTemplatePdf(),
+          fetchCRSTemplateMeta(),
+        ]);
+
+        if (cancelled) return;
+
+        const objectUrl = URL.createObjectURL(pdfBlob);
+        setTemplateUrl(objectUrl);
+
+        const pages = meta.pages || [];
+        const fieldsFromApi = meta.fields || [];
+
+        const firstPage =
+          pages.find((p: any) => p.index === 0) || pages[0] || null;
+
+        if (!firstPage) {
+          throw new Error("CRS template metadata is missing page size info.");
+        }
+
+        const pageWidth = firstPage.width;
+        const pageHeight = firstPage.height;
+
+        const mappedFields: PdfFieldMeta[] = fieldsFromApi
+          .map((f: any): PdfFieldMeta | null => {
+            const pdfName: string = f.name;
+            const modelKey = PDF_FIELD_TO_MODEL_KEY[pdfName] ?? null;
+
+            // Ignore fields we don't map into our CRS model
+            if (!modelKey) {
+              return null;
+            }
+
+            const x: number = f.x;
+            const y: number = f.y;
+            const w: number = f.width;
+            const h: number = f.height;
+
+            // PDF coords are bottom-left origin. Convert to CSS percentages.
+            const leftPct = x / pageWidth;
+            const topPct = 1 - (y + h) / pageHeight;
+            const widthPct = w / pageWidth;
+            const heightPct = h / pageHeight;
+
+            let fieldType: "text" | "checkbox" = "text";
+            if (
+              pdfName === "AMP" ||
+              pdfName === "AMM" ||
+              pdfName === "Mtx Data"
+            ) {
+              fieldType = "checkbox";
+            }
+
+            const multiline =
+              pdfName === "Maintenance Carried out" ||
+              pdfName === "Deferred_Maintenance";
+
+            return {
+              pdf_name: pdfName,
+              model_key: modelKey,
+              page: (f.page_index ?? 0) + 1,
+              left_pct: leftPct,
+              top_pct: topPct,
+              width_pct: widthPct,
+              height_pct: heightPct,
+              field_type: fieldType,
+              multiline,
+            };
+          })
+          // Only overlay for the first page for now
+          .filter(
+            (f: PdfFieldMeta | null): f is PdfFieldMeta =>
+              !!f && f.page === 1
+          );
+
+        setPdfFields(mappedFields);
+      } catch (err) {
+        console.error("Failed to load CRS template/meta", err);
+        if (!cancelled) {
+          setPdfError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load CRS template."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setPdfLoading(false);
+        }
+      }
+    };
+
+    loadTemplate();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleChange = (e: React.ChangeEvent<CRSFieldElement>) => {
     const target = e.target;
 
@@ -130,8 +334,11 @@ const CRSNewPage: React.FC = () => {
         ...prev,
         aircraft_serial_number: data.aircraft_serial_number,
         wo_no: data.wo_no,
-        releasing_authority: data.releasing_authority ?? prev.releasing_authority,
-        operator_contractor: data.operator_contractor ?? prev.operator_contractor,
+        releasing_authority:
+          (data.releasing_authority as ReleasingAuthority) ??
+          prev.releasing_authority,
+        operator_contractor:
+          data.operator_contractor ?? prev.operator_contractor,
         job_no: data.job_no ?? prev.job_no,
         location: data.location ?? prev.location,
 
@@ -170,12 +377,14 @@ const CRSNewPage: React.FC = () => {
             : prev.rh_cyc,
 
         airframe_limit_unit:
-          data.airframe_limit_unit ?? prev.airframe_limit_unit,
+          (data.airframe_limit_unit as AirframeLimitUnit) ??
+          prev.airframe_limit_unit,
         next_maintenance_due:
           data.next_maintenance_due ?? prev.next_maintenance_due,
         date_of_completion:
-          data.date_of_completion ?? prev.date_of_completion,
-        crs_issue_date: data.crs_issue_date ?? prev.crs_issue_date,
+          (data.date_of_completion as string) ?? prev.date_of_completion,
+        crs_issue_date:
+          (data.crs_issue_date as string) ?? prev.crs_issue_date,
       }));
     } catch (err) {
       console.error("CRS prefill failed", err);
@@ -290,8 +499,7 @@ const CRSNewPage: React.FC = () => {
       sum_airframe_tat_expiry: form.sum_airframe_tat_expiry
         ? Number(form.sum_airframe_tat_expiry)
         : undefined,
-      next_maintenance_due:
-        form.next_maintenance_due.trim() || undefined,
+      next_maintenance_due: form.next_maintenance_due.trim() || undefined,
 
       // issuer
       issuer_full_name: form.issuer_full_name.trim(),
@@ -320,7 +528,63 @@ const CRSNewPage: React.FC = () => {
     }
   };
 
-  const formatDate = (value: string | undefined) => (value ? value : "—");
+  const renderPdfField = (field: PdfFieldMeta) => {
+    if (!field.model_key) return null;
+
+    const value = (form as any)[field.model_key] ?? "";
+
+    const style: React.CSSProperties = {
+      position: "absolute",
+      left: `${field.left_pct * 100}%`,
+      top: `${field.top_pct * 100}%`,
+      width: `${field.width_pct * 100}%`,
+      height: `${field.height_pct * 100}%`,
+      boxSizing: "border-box",
+    };
+
+    if (field.field_type === "checkbox") {
+      return (
+        <label
+          key={field.pdf_name}
+          className="crs-pdf-checkbox-wrapper"
+          style={style}
+        >
+          <input
+            type="checkbox"
+            name={field.model_key}
+            checked={!!(form as any)[field.model_key]}
+            onChange={handleChange}
+            className="crs-pdf-checkbox"
+          />
+        </label>
+      );
+    }
+
+    if (field.multiline) {
+      return (
+        <textarea
+          key={field.pdf_name}
+          name={field.model_key}
+          value={value}
+          onChange={handleChange}
+          className="crs-pdf-input crs-pdf-textarea"
+          style={style}
+        />
+      );
+    }
+
+    return (
+      <input
+        key={field.pdf_name}
+        type="text"
+        name={field.model_key}
+        value={value}
+        onChange={handleChange}
+        className="crs-pdf-input"
+        style={style}
+      />
+    );
+  };
 
   return (
     <DepartmentLayout
@@ -331,7 +595,10 @@ const CRSNewPage: React.FC = () => {
         <header className="dept-panel__header">
           <div>
             <h1>New CRS</h1>
-            <p>Create a new Certificate of Release to Service entry.</p>
+            <p>
+              Fill the official CRS form on-screen. The layout matches the
+              current PDF template.
+            </p>
           </div>
           <button
             type="button"
@@ -343,12 +610,12 @@ const CRSNewPage: React.FC = () => {
         </header>
 
         <div className="dept-panel__body crs-panel">
-          {/* LEFT: FORM */}
           <form className="crs-form" onSubmit={handleSubmit}>
             {error && <div className="auth-form__error">{error}</div>}
             {prefillError && (
               <div className="auth-form__error">{prefillError}</div>
             )}
+            {pdfError && <div className="auth-form__error">{pdfError}</div>}
             {successSerial && (
               <div className="auth-form__success">
                 CRS <strong>{successSerial}</strong> created. You can later
@@ -391,491 +658,54 @@ const CRSNewPage: React.FC = () => {
               </label>
             </div>
 
-            <div className="crs-form__grid">
-              {/* Column 1 – header & aircraft */}
-              <div className="crs-form__section">
-                <h2>Header</h2>
+            {/* Keep a simple dropdown for releasing authority at the top.
+                The PDF radio fields will be set when we render the final PDF. */}
+            <div className="crs-form__authority-row">
+              <label className="auth-form__label">
+                Releasing authority
+                <select
+                  name="releasing_authority"
+                  value={form.releasing_authority}
+                  onChange={handleChange}
+                  className="auth-form__input"
+                >
+                  <option value="KCAA">KCAA</option>
+                  <option value="FAA">FAA</option>
+                  <option value="EASA">EASA</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </label>
+            </div>
 
-                <label className="auth-form__label">
-                  Releasing authority
-                  <select
-                    name="releasing_authority"
-                    value={form.releasing_authority}
-                    onChange={handleChange}
-                    className="auth-form__input"
-                  >
-                    <option value="KCAA">KCAA</option>
-                    <option value="ECAA">ECAA</option>
-                    <option value="GCAA">GCAA</option>
-                  </select>
-                </label>
+            <div className="crs-pdf-wrapper">
+              {pdfLoading && (
+                <p className="crs-pdf-status">Loading CRS template…</p>
+              )}
 
-                <label className="auth-form__label">
-                  Operator / contractor
-                  <input
-                    type="text"
-                    name="operator_contractor"
-                    value={form.operator_contractor}
-                    onChange={handleChange}
-                    className="auth-form__input"
+              {templateUrl && (
+                <Document
+                  file={templateUrl}
+                  className="crs-pdf-document"
+                  loading={
+                    <p className="crs-pdf-status">Rendering CRS template…</p>
+                  }
+                  error={
+                    <p className="crs-pdf-status">
+                      Failed to render CRS template.
+                    </p>
+                  }
+                >
+                  <Page
+                    pageNumber={1}
+                    renderAnnotationLayer={false}
+                    renderTextLayer={false}
+                    className="crs-pdf-page"
                   />
-                </label>
+                </Document>
+              )}
 
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    Job no.
-                    <input
-                      type="text"
-                      name="job_no"
-                      value={form.job_no}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    Location
-                    <input
-                      type="text"
-                      name="location"
-                      value={form.location}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <h2>Aircraft</h2>
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    Aircraft type
-                    <input
-                      type="text"
-                      name="aircraft_type"
-                      value={form.aircraft_type}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-
-                  <label className="auth-form__label">
-                    Registration
-                    <input
-                      type="text"
-                      name="aircraft_reg"
-                      value={form.aircraft_reg}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-
-                  <label className="auth-form__label">
-                    MSN
-                    <input
-                      type="text"
-                      name="msn"
-                      value={form.msn}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <h3>Engines</h3>
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    LH engine type
-                    <input
-                      type="text"
-                      name="lh_engine_type"
-                      value={form.lh_engine_type}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    LH engine S/N
-                    <input
-                      type="text"
-                      name="lh_engine_sno"
-                      value={form.lh_engine_sno}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    RH engine type
-                    <input
-                      type="text"
-                      name="rh_engine_type"
-                      value={form.rh_engine_type}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    RH engine S/N
-                    <input
-                      type="text"
-                      name="rh_engine_sno"
-                      value={form.rh_engine_sno}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <h3>Utilisation snapshot</h3>
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    Aircraft TAT (hrs)
-                    <input
-                      type="number"
-                      name="aircraft_tat"
-                      value={form.aircraft_tat}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    Aircraft TAC (cyc)
-                    <input
-                      type="number"
-                      name="aircraft_tac"
-                      value={form.aircraft_tac}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    LH hrs
-                    <input
-                      type="number"
-                      name="lh_hrs"
-                      value={form.lh_hrs}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    LH cyc
-                    <input
-                      type="number"
-                      name="lh_cyc"
-                      value={form.lh_cyc}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    RH hrs
-                    <input
-                      type="number"
-                      name="rh_hrs"
-                      value={form.rh_hrs}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    RH cyc
-                    <input
-                      type="number"
-                      name="rh_cyc"
-                      value={form.rh_cyc}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Column 2 – work & data */}
-              <div className="crs-form__section">
-                <h2>Work performed</h2>
-                <label className="auth-form__label">
-                  Maintenance carried out
-                  <textarea
-                    name="maintenance_carried_out"
-                    value={form.maintenance_carried_out}
-                    onChange={handleChange}
-                    className="auth-form__textarea"
-                    rows={6}
-                  />
-                </label>
-
-                <label className="auth-form__label">
-                  Deferred maintenance
-                  <textarea
-                    name="deferred_maintenance"
-                    value={form.deferred_maintenance}
-                    onChange={handleChange}
-                    className="auth-form__textarea"
-                    rows={3}
-                  />
-                </label>
-
-                <label className="auth-form__label">
-                  Date of completion
-                  <input
-                    type="date"
-                    name="date_of_completion"
-                    value={form.date_of_completion}
-                    onChange={handleChange}
-                    className="auth-form__input"
-                  />
-                </label>
-
-                <h2>Maintenance data</h2>
-                <div className="crs-form__row crs-form__row--checkboxes">
-                  <label className="auth-form__checkbox">
-                    <input
-                      type="checkbox"
-                      name="amp_used"
-                      checked={form.amp_used}
-                      onChange={handleChange}
-                    />
-                    AMP used
-                  </label>
-                  <label className="auth-form__checkbox">
-                    <input
-                      type="checkbox"
-                      name="amm_used"
-                      checked={form.amm_used}
-                      onChange={handleChange}
-                    />
-                    AMM used
-                  </label>
-                  <label className="auth-form__checkbox">
-                    <input
-                      type="checkbox"
-                      name="mtx_data_used"
-                      checked={form.mtx_data_used}
-                      onChange={handleChange}
-                    />
-                    Additional maintenance data
-                  </label>
-                </div>
-
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    AMP reference
-                    <input
-                      type="text"
-                      name="amp_reference"
-                      value={form.amp_reference}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    AMP revision
-                    <input
-                      type="text"
-                      name="amp_revision"
-                      value={form.amp_revision}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    AMP issue date
-                    <input
-                      type="date"
-                      name="amp_issue_date"
-                      value={form.amp_issue_date}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    AMM reference
-                    <input
-                      type="text"
-                      name="amm_reference"
-                      value={form.amm_reference}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    AMM revision
-                    <input
-                      type="text"
-                      name="amm_revision"
-                      value={form.amm_revision}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    AMM issue date
-                    <input
-                      type="date"
-                      name="amm_issue_date"
-                      value={form.amm_issue_date}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <label className="auth-form__label">
-                  Additional maintenance data
-                  <input
-                    type="text"
-                    name="add_mtx_data"
-                    value={form.add_mtx_data}
-                    onChange={handleChange}
-                    className="auth-form__input"
-                  />
-                </label>
-
-                <label className="auth-form__label">
-                  Work order no. (alternate)
-                  <input
-                    type="text"
-                    name="work_order_no"
-                    value={form.work_order_no}
-                    onChange={handleChange}
-                    className="auth-form__input"
-                  />
-                </label>
-              </div>
-
-              {/* Column 3 – expiry & issuing details */}
-              <div className="crs-form__section">
-                <h2>Expiry / next maintenance</h2>
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    Unit
-                    <select
-                      name="airframe_limit_unit"
-                      value={form.airframe_limit_unit}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    >
-                      <option value="HOURS">Hours</option>
-                      <option value="CYCLES">Cycles</option>
-                    </select>
-                  </label>
-
-                  <label className="auth-form__label">
-                    Expiry date
-                    <input
-                      type="date"
-                      name="expiry_date"
-                      value={form.expiry_date}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    Hours / cycles to expiry
-                    <input
-                      type="number"
-                      name="hrs_to_expiry"
-                      value={form.hrs_to_expiry}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    SUM (TAT + to expiry)
-                    <input
-                      type="number"
-                      name="sum_airframe_tat_expiry"
-                      value={form.sum_airframe_tat_expiry}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <label className="auth-form__label">
-                  Next maintenance due
-                  <input
-                    type="text"
-                    name="next_maintenance_due"
-                    value={form.next_maintenance_due}
-                    onChange={handleChange}
-                    className="auth-form__input"
-                  />
-                </label>
-
-                <h2>Certificate issued by</h2>
-                <label className="auth-form__label">
-                  Full name
-                  <input
-                    type="text"
-                    name="issuer_full_name"
-                    value={form.issuer_full_name}
-                    onChange={handleChange}
-                    className="auth-form__input"
-                  />
-                </label>
-
-                <div className="crs-form__row">
-                  <label className="auth-form__label">
-                    Internal authorization ref
-                    <input
-                      type="text"
-                      name="issuer_auth_ref"
-                      value={form.issuer_auth_ref}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                  <label className="auth-form__label">
-                    Category (A&C) licence
-                    <input
-                      type="text"
-                      name="issuer_license"
-                      value={form.issuer_license}
-                      onChange={handleChange}
-                      className="auth-form__input"
-                    />
-                  </label>
-                </div>
-
-                <label className="auth-form__label">
-                  CRS issue date
-                  <input
-                    type="date"
-                    name="crs_issue_date"
-                    value={form.crs_issue_date}
-                    onChange={handleChange}
-                    className="auth-form__input"
-                  />
-                </label>
-
-                <label className="auth-form__label">
-                  CRS issuing stamp / code
-                  <input
-                    type="text"
-                    name="crs_issuing_stamp"
-                    value={form.crs_issuing_stamp}
-                    onChange={handleChange}
-                    className="auth-form__input"
-                  />
-                </label>
+              <div className="crs-pdf-overlay">
+                {pdfFields.map((f) => renderPdfField(f))}
               </div>
             </div>
 
@@ -897,107 +727,6 @@ const CRSNewPage: React.FC = () => {
               </button>
             </div>
           </form>
-
-          {/* RIGHT: LIVE PREVIEW */}
-          <aside className="crs-preview">
-            <h2>CRS Preview (live)</h2>
-            <p className="crs-preview__line">
-              <strong>Authority:</strong> {form.releasing_authority}
-            </p>
-            <p className="crs-preview__line">
-              <strong>Operator:</strong> {form.operator_contractor || "—"}
-            </p>
-            <p className="crs-preview__line">
-              <strong>WO:</strong> {form.wo_no || "—"}{" "}
-              <strong>Job:</strong> {form.job_no || "—"}
-            </p>
-            <p className="crs-preview__line">
-              <strong>Location:</strong> {form.location || "—"}
-            </p>
-
-            <hr />
-
-            <p className="crs-preview__line">
-              <strong>Aircraft:</strong>{" "}
-              {form.aircraft_reg || "—"} ({form.aircraft_type || "—"})
-            </p>
-            <p className="crs-preview__line">
-              <strong>MSN:</strong> {form.msn || "—"} |{" "}
-              <strong>Serial:</strong> {form.aircraft_serial_number || "—"}
-            </p>
-
-            <p className="crs-preview__line">
-              <strong>TAT/TAC:</strong>{" "}
-              {form.aircraft_tat || "0"} hrs / {form.aircraft_tac || "0"} cyc
-            </p>
-
-            <p className="crs-preview__line">
-              <strong>LH:</strong> {form.lh_engine_type || "—"} S/N{" "}
-              {form.lh_engine_sno || "—"} ({form.lh_hrs || "0"} hrs /{" "}
-              {form.lh_cyc || "0"} cyc)
-            </p>
-            <p className="crs-preview__line">
-              <strong>RH:</strong> {form.rh_engine_type || "—"} S/N{" "}
-              {form.rh_engine_sno || "—"} ({form.rh_hrs || "0"} hrs /{" "}
-              {form.rh_cyc || "0"} cyc)
-            </p>
-
-            <hr />
-
-            <p className="crs-preview__line">
-              <strong>Maintenance carried out:</strong>
-            </p>
-            <p className="crs-preview__multiline">
-              {form.maintenance_carried_out || "—"}
-            </p>
-
-            {form.deferred_maintenance && (
-              <>
-                <p className="crs-preview__line">
-                  <strong>Deferred maintenance:</strong>
-                </p>
-                <p className="crs-preview__multiline">
-                  {form.deferred_maintenance}
-                </p>
-              </>
-            )}
-
-            <p className="crs-preview__line">
-              <strong>Date of completion:</strong>{" "}
-              {formatDate(form.date_of_completion)}
-            </p>
-
-            <hr />
-
-            <p className="crs-preview__line">
-              <strong>Next due:</strong>{" "}
-              {form.next_maintenance_due || "—"} (
-              {form.airframe_limit_unit === "HOURS" ? "Hrs" : "Cycles"})
-            </p>
-            <p className="crs-preview__line">
-              <strong>To expiry:</strong>{" "}
-              {form.hrs_to_expiry || "0"} / Sum{" "}
-              {form.sum_airframe_tat_expiry || "0"}
-            </p>
-            <p className="crs-preview__line">
-              <strong>Expiry date:</strong>{" "}
-              {formatDate(form.expiry_date)}
-            </p>
-
-            <hr />
-
-            <p className="crs-preview__line">
-              <strong>Issuer:</strong> {form.issuer_full_name || "—"} (
-              {form.issuer_license || "—"})
-            </p>
-            <p className="crs-preview__line">
-              <strong>Auth ref:</strong> {form.issuer_auth_ref || "—"}
-            </p>
-            <p className="crs-preview__line">
-              <strong>CRS issue date:</strong>{" "}
-              {formatDate(form.crs_issue_date)}
-            </p>
-          </aside>
         </div>
       </section>
     </DepartmentLayout>

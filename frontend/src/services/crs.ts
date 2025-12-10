@@ -4,6 +4,8 @@
 //     * POST /crs/                      -> createCRS
 //     * GET  /crs/prefill/:wo_no       -> prefillCRS
 //     * GET  /crs/                     -> listCRS
+//     * GET  /crs/template/pdf         -> fetchCRSTemplatePdf
+//     * GET  /crs/template/meta        -> fetchCRSTemplateMeta
 //     * GET  /crs/:id/pdf              -> getCRSPdfUrl
 // - Uses authHeaders() from auth.ts so requests carry the JWT.
 
@@ -27,18 +29,43 @@ async function request<T>(
     ...init,
   });
 
+  const contentType = res.headers.get("Content-Type") || "";
+  const text = await res.text(); // read once, then decide what to do
+
   if (!res.ok) {
-    const text = await res.text();
+    // Log for easier debugging in the browser console
+    console.error(
+      `API ${method} ${url} failed:`,
+      res.status,
+      contentType,
+      text.slice(0, 300)
+    );
     throw new Error(text || `HTTP ${res.status}`);
   }
 
-  const contentType = res.headers.get("Content-Type") || "";
+  // We expect these helpers to talk to JSON endpoints.
   if (!contentType.includes("application/json")) {
-    // @ts-expect-error – caller knows when T is void
-    return undefined;
+    console.error(
+      `API ${method} ${url} returned non-JSON success response:`,
+      contentType,
+      text.slice(0, 300)
+    );
+    throw new Error(
+      `Expected JSON from ${url}, but got ${contentType || "unknown"}`
+    );
   }
 
-  return (await res.json()) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    console.error(
+      `API ${method} ${url} JSON parse error:`,
+      err,
+      "raw body:",
+      text.slice(0, 300)
+    );
+    throw err;
+  }
 }
 
 export async function apiPost<T>(
@@ -104,4 +131,59 @@ export async function listCRS(
 
 export function getCRSPdfUrl(crsId: number): string {
   return `${API_BASE_URL}/crs/${crsId}/pdf`;
+}
+
+// -----------------------------------------------------------------------------
+// CRS template helpers (PDF + meta)
+// -----------------------------------------------------------------------------
+
+// Shape based on backend /crs/template/meta response.
+// If you later define a stricter type, update this accordingly.
+export type CRSTemplateMeta = {
+  pages: Array<{
+    index: number;
+    width: number;
+    height: number;
+  }>;
+  fields: Array<{
+    name: string;
+    page_index: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
+};
+
+export async function fetchCRSTemplateMeta(): Promise<CRSTemplateMeta> {
+  return apiGet<CRSTemplateMeta>("/crs/template/meta", {
+    headers: authHeaders(),
+  });
+}
+
+export async function fetchCRSTemplatePdf(): Promise<Blob> {
+  const url = `${API_BASE_URL}/crs/template/pdf`;
+
+  const res = await fetch(url, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  const contentType = res.headers.get("Content-Type") || "";
+
+  if (!res.ok || !contentType.includes("application/pdf")) {
+    const text = await res.text().catch(() => "");
+    console.error(
+      `API GET ${url} failed or returned non-PDF:`,
+      res.status,
+      contentType,
+      text.slice(0, 300)
+    );
+    throw new Error(
+      text ||
+        `Expected PDF from ${url}, but got ${contentType || "unknown"}`
+    );
+  }
+
+  return res.blob();
 }

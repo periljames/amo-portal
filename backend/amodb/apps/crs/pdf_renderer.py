@@ -1,7 +1,6 @@
-# backend/amodb/apps/crs/pdf_renderer.py
-
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
+import re
 
 from pdfrw import PdfReader, PdfWriter, PdfDict, PdfName
 
@@ -9,20 +8,77 @@ from ...database import SessionLocal
 from . import models as crs_models
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-TEMPLATE_PATH = BASE_DIR / "templates" / "crs" / "crs_form_rev6.pdf"
-OUTPUT_DIR = BASE_DIR / "generated" / "crs"
 
+# Directories where we look for the current CRS template.
+TEMPLATE_SEARCH_DIRS = [
+    BASE_DIR / "templates" / "crs",
+    BASE_DIR / "templates",
+]
+
+# Pattern for your CRS template files, e.g.
+# "Form Template CRS Form Rev 6.pdf"
+TEMPLATE_GLOB = "Form Template CRS Form Rev *.pdf"
+
+OUTPUT_DIR = BASE_DIR / "generated" / "crs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Keys for checkboxes and radios in the PDF
 CHECKBOX_FIELDS = {"AMP", "AMM", "Mtx Data"}
-AIRFRAME_UNIT_FIELDS = {"Hours", "Cycles"}  # radio buttons under "12. Airframe Hour/Cycles"
+AIRFRAME_UNIT_FIELDS = {"Hours", "Cycles"}  # radio buttons under Airframe unit
 
 RELEASING_AUTH_RADIO = {
     "KCAA": "KCAA",
     "ECAA": "ECAA",
     "GCAA": "GCAA",
 }
+
+
+def _parse_revision_number(path: Path) -> int:
+    """
+    Extracts the numeric revision from filenames like:
+        'Form Template CRS Form Rev 6.pdf' -> 6
+    Falls back to 0 if no match.
+    """
+    m = re.search(r"Rev\s*(\d+)", path.stem, re.IGNORECASE)
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return 0
+
+
+def get_latest_crs_template() -> Path:
+    """
+    Locate the latest CRS PDF template file.
+
+    It searches:
+      - backend/amodb/templates/crs/Form Template CRS Form Rev X.pdf
+      - backend/amodb/templates/Form Template CRS Form Rev X.pdf
+
+    and picks the highest revision number; if no such file exists, it
+    falls back to the legacy fixed path 'templates/crs/crs_form_rev6.pdf'.
+    """
+    candidates: List[Path] = []
+    for d in TEMPLATE_SEARCH_DIRS:
+        if d.exists():
+            candidates.extend(d.glob(TEMPLATE_GLOB))
+
+    if not candidates:
+        fallback = BASE_DIR / "templates" / "crs" / "crs_form_rev6.pdf"
+        if fallback.exists():
+            return fallback
+        raise FileNotFoundError(
+            "No CRS template PDF found. Expected a file matching "
+            f"'{TEMPLATE_GLOB}' in {', '.join(str(d) for d in TEMPLATE_SEARCH_DIRS)} "
+            "or 'templates/crs/crs_form_rev6.pdf'."
+        )
+
+    # Sort by (revision, mtime) and take the last one
+    candidates.sort(
+        key=lambda p: (_parse_revision_number(p), p.stat().st_mtime)
+    )
+    return candidates[-1]
 
 
 def _build_field_values(crs: crs_models.CRS) -> Dict[str, Any]:
@@ -122,7 +178,6 @@ def _build_field_values(crs: crs_models.CRS) -> Dict[str, Any]:
         values[key] = (crs.releasing_authority.upper() == key)
 
     # Category signoffs (A – Aeroplanes etc.)
-    # Expect crs.signoffs categories like: 'AEROPLANES', 'ENGINES', 'RADIO', ...
     suffix_map = {
         "AEROPLANES": "A Aeroplanes",
         "ENGINES": "C Engines",
@@ -229,7 +284,7 @@ def create_crs_pdf(crs_id: int) -> Path:
     """
     Create a filled, read-only CRS PDF for the given CRS id.
 
-    Returns the path to the generated file.
+    Uses the latest available CRS template.
     """
     db = SessionLocal()
     try:
@@ -238,10 +293,106 @@ def create_crs_pdf(crs_id: int) -> Path:
             raise ValueError(f"CRS id {crs_id} not found")
 
         data = _build_field_values(crs)
+        template_path = get_latest_crs_template()
 
         filename = f"{crs.crs_serial or f'CRS-{crs_id:06d}'}.pdf"
         output_path = OUTPUT_DIR / filename
-        _fill_pdf(TEMPLATE_PATH, output_path, data)
+        _fill_pdf(template_path, output_path, data)
         return output_path
     finally:
         db.close()
+
+
+def get_crs_form_template_metadata() -> Dict[str, Any]:
+    """
+    Introspect the current CRS PDF template and return:
+
+      - page sizes
+      - all AcroForm fields with coordinates and inferred type.
+
+    This is generic enough to be reused for other AMOs / forms by just
+    changing the template path/pattern.
+    """
+    template = get_latest_crs_template()
+    pdf = PdfReader(str(template))
+
+    pages: List[Dict[str, Any]] = []
+    fields: List[Dict[str, Any]] = []
+
+    for page_index, page in enumerate(pdf.pages):
+        # Page size from MediaBox
+        width = height = 0.0
+        mb = getattr(page, "MediaBox", None)
+        if mb and len(mb) == 4:
+            try:
+                x0, y0, x1, y1 = [float(v) for v in mb]
+                width = x1 - x0
+                height = y1 - y0
+            except Exception:
+                width = height = 0.0
+
+        pages.append(
+            {
+                "index": page_index,
+                "width": width,
+                "height": height,
+            }
+        )
+
+        annots = getattr(page, "Annots", None)
+        if not annots:
+            continue
+
+        for annot in annots:
+            field_name_obj = annot.get("/T")
+            if not field_name_obj:
+                continue
+
+            name = str(field_name_obj)[1:-1]  # strip parentheses
+
+            # Field rectangle
+            x = y = w = h = 0.0
+            rect = annot.get("/Rect")
+            if rect and len(rect) == 4:
+                try:
+                    x0, y0, x1, y1 = [float(v) for v in rect]
+                    x = x0
+                    y = y0
+                    w = x1 - x0
+                    h = y1 - y0
+                except Exception:
+                    x = y = w = h = 0.0
+
+            # Field type based on /FT
+            ft = annot.get("/FT")
+            if not ft and annot.get("/Parent"):
+                ft = annot["/Parent"].get("/FT")
+            ft_str = str(ft) if ft else ""
+
+            if "/Btn" in ft_str:
+                field_type = "button"      # check/radio
+            elif "/Tx" in ft_str:
+                field_type = "text"
+            elif "/Ch" in ft_str:
+                field_type = "choice"      # dropdown/list
+            else:
+                field_type = "unknown"
+
+            fields.append(
+                {
+                    "name": name,
+                    "page_index": page_index,
+                    "x": x,
+                    "y": y,
+                    "width": w,
+                    "height": h,
+                    "field_type": field_type,
+                }
+            )
+
+    return {
+        "template_filename": template.name,
+        "page_count": len(pages),
+        "pages": pages,
+        "fields": fields,
+    }
