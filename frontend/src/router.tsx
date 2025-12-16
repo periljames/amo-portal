@@ -2,7 +2,7 @@
 // App routing
 // - Public routes: /login and /maintenance/:amoCode/login
 // - Protected routes (JWT required via services/auth): department dashboards,
-//   CRS pages, aircraft import, and admin user management.
+//   CRS pages, aircraft import, QMS dashboard, and admin user management.
 // - Uses RequireAuth wrapper to redirect unauthenticated users back to login.
 
 import React from "react";
@@ -20,7 +20,8 @@ import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
-import TrainingPage from "./pages/MyTrainingPage"; // ✅ NEW
+import TrainingPage from "./pages/MyTrainingPage";
+import QMSHomePage from "./pages/QMSHomePage"; // ✅ NEW
 
 import { isAuthenticated } from "./services/auth";
 
@@ -128,6 +129,16 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <AircraftImportPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* ✅ QMS dashboard, e.g. /maintenance/safarilink/quality/qms */}
+      <Route
+        path="/maintenance/:amoCode/:department/qms"
+        element={
+          <RequireAuth>
+            <QMSHomePage />
           </RequireAuth>
         }
       />
