@@ -1,22 +1,54 @@
 // src/pages/AdminUserNewPage.tsx
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+
 import { createAdminUser } from "../services/adminUsers";
-import type {
-  AdminUserCreatePayload,
-  AccountRole,
-} from "../services/adminUsers";
+import type { AdminUserCreatePayload, AccountRole } from "../services/adminUsers";
+import { getCachedUser, getContext } from "../services/auth";
 
 type UrlParams = {
   amoCode?: string;
-  department?: string;
 };
 
 const DEFAULT_ROLE: AccountRole = "AMO_ADMIN";
 
+const ROLE_OPTIONS: Array<{ value: AccountRole; label: string }> = [
+  { value: "AMO_ADMIN", label: "AMO Admin" },
+  { value: "QUALITY_MANAGER", label: "Quality Manager" },
+  { value: "SAFETY_MANAGER", label: "Safety Manager" },
+  { value: "PLANNING_ENGINEER", label: "Planning Engineer" },
+  { value: "PRODUCTION_ENGINEER", label: "Production Engineer" },
+  { value: "CERTIFYING_ENGINEER", label: "Certifying Engineer" },
+  { value: "CERTIFYING_TECHNICIAN", label: "Certifying Technician" },
+  { value: "TECHNICIAN", label: "Technician" },
+  { value: "STORES", label: "Stores" },
+  { value: "VIEW_ONLY", label: "View Only" },
+  { value: "SUPERUSER", label: "Platform Superuser" },
+];
+
 const AdminUserNewPage: React.FC = () => {
   const navigate = useNavigate();
-  const { amoCode, department } = useParams<UrlParams>();
+  const { amoCode } = useParams<UrlParams>();
+
+  const ctx = getContext();
+  const currentUser = getCachedUser();
+
+  const isAdmin = useMemo(() => {
+    if (!currentUser) return false;
+    return currentUser.role === "SUPERUSER" || currentUser.role === "AMO_ADMIN";
+  }, [currentUser]);
+
+  const isSuperuser = !!currentUser?.is_superuser;
+
+  const backTarget = useMemo(() => {
+    const slug = amoCode ?? ctx.amoCode ?? null;
+    return slug ? `/maintenance/${slug}/admin` : "/login";
+  }, [amoCode, ctx.amoCode]);
+
+  const pageTitle = useMemo(() => {
+    const slug = amoCode ?? ctx.amoCode ?? "UNKNOWN";
+    return `Create User – ${slug.toUpperCase()}`;
+  }, [amoCode, ctx.amoCode]);
 
   const [form, setForm] = useState({
     staffCode: "",
@@ -38,10 +70,33 @@ const AdminUserNewPage: React.FC = () => {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const validate = (): string | null => {
+    const staff = form.staffCode.trim();
+    const email = form.email.trim();
+
+    if (!staff) return "Staff code is required.";
+    if (!email) return "Email is required.";
+    if (!form.firstName.trim() || !form.lastName.trim()) {
+      return "First name and last name are required.";
+    }
+
+    if (!form.password) return "Password is required.";
+    if (form.password !== form.confirmPassword) return "Passwords do not match.";
+
+    // Basic client-side sanity. Real enforcement should be server-side.
+    if (form.password.length < 10) {
+      return "Password must be at least 10 characters.";
+    }
+
+    // Only SUPERUSER can create SUPERUSER
+    if (form.role === "SUPERUSER" && !isSuperuser) {
+      return "Only a platform superuser can create another superuser.";
+    }
+
+    return null;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -49,66 +104,100 @@ const AdminUserNewPage: React.FC = () => {
     setError(null);
     setSuccess(null);
 
-    if (!form.password || form.password !== form.confirmPassword) {
-      setError("Passwords do not match.");
+    if (!currentUser) {
+      setError("No user session found. Please sign in again.");
+      return;
+    }
+    if (!isAdmin) {
+      setError("You do not have permission to create users.");
       return;
     }
 
-    if (!form.email.trim() || !form.staffCode.trim()) {
-      setError("Email and staff code are required.");
+    const v = validate();
+    if (v) {
+      setError(v);
       return;
     }
 
     setSubmitting(true);
     try {
+      const first = form.firstName.trim();
+      const last = form.lastName.trim();
+
       const payload: AdminUserCreatePayload = {
         staff_code: form.staffCode.trim().toUpperCase(),
         email: form.email.trim().toLowerCase(),
-        first_name: form.firstName.trim(),
-        last_name: form.lastName.trim(),
-        full_name: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(),
+        first_name: first,
+        last_name: last,
+        full_name: `${first} ${last}`.trim(),
         role: form.role,
         position_title: form.positionTitle.trim() || undefined,
         phone: form.phone.trim() || undefined,
         password: form.password,
-        // department_id, regulatory fields, licences, etc.
-        // can be added here later if you want.
+        // NOTE:
+        // Do NOT force amo_id here. adminUsers.ts resolves it safely:
+        // - SUPERUSER: can target selected/active AMO
+        // - others: forced to current user's AMO
       };
 
       await createAdminUser(payload);
 
       setSuccess("User created successfully.");
-      const target =
-        amoCode && department
-          ? `/maintenance/${amoCode}/${department}`
-          : "/login";
-      setTimeout(() => {
-        navigate(target);
-      }, 800);
+      setTimeout(() => navigate(backTarget), 600);
     } catch (err: any) {
       console.error("Failed to create user", err);
+
       const msg =
         err?.response?.data?.detail ||
+        err?.detail ||
         err?.message ||
         "Failed to create user. Please try again.";
-      setError(msg);
+      setError(
+        typeof msg === "string" ? msg : "Failed to create user. Please try again."
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const pageTitle =
-    amoCode && department
-      ? `Create User – ${amoCode.toUpperCase()} / ${department}`
-      : "Create User";
+  if (!currentUser) {
+    return (
+      <div className="page-root">
+        <div className="card card--form">
+          <h1>Create User</h1>
+          <p>You are not signed in. Please sign in again.</p>
+          <button className="btn btn-primary" onClick={() => navigate("/login")}>
+            Go to login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="page-root">
+        <div className="card card--form">
+          <h1>Access denied</h1>
+          <p>
+            You do not have permission to create users. Please contact the AMO
+            Administrator or Quality/IT support.
+          </p>
+          <button className="btn btn-primary" onClick={() => navigate(backTarget)}>
+            Back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-root">
       <div className="page-header">
         <h1>{pageTitle}</h1>
         <p className="page-subtitle">
-          Create a new AMO user (AMO admin or other staff). The AMO will be
-          taken from your current login.
+          Create a new AMO user. The target AMO is resolved from your session
+          (and superuser support context if enabled).
         </p>
       </div>
 
@@ -127,6 +216,7 @@ const AdminUserNewPage: React.FC = () => {
               onChange={handleChange}
               autoComplete="off"
               required
+              disabled={submitting}
             />
           </div>
 
@@ -140,6 +230,7 @@ const AdminUserNewPage: React.FC = () => {
               onChange={handleChange}
               autoComplete="off"
               required
+              disabled={submitting}
             />
           </div>
 
@@ -153,6 +244,7 @@ const AdminUserNewPage: React.FC = () => {
               onChange={handleChange}
               autoComplete="off"
               required
+              disabled={submitting}
             />
           </div>
 
@@ -166,6 +258,7 @@ const AdminUserNewPage: React.FC = () => {
               onChange={handleChange}
               autoComplete="off"
               required
+              disabled={submitting}
             />
           </div>
 
@@ -176,18 +269,15 @@ const AdminUserNewPage: React.FC = () => {
               name="role"
               value={form.role}
               onChange={handleChange}
+              disabled={submitting}
             >
-              <option value="AMO_ADMIN">AMO Admin</option>
-              <option value="QUALITY_MANAGER">Quality Manager</option>
-              <option value="SAFETY_MANAGER">Safety Manager</option>
-              <option value="CERTIFYING_ENGINEER">Certifying Engineer</option>
-              <option value="CERTIFYING_TECHNICIAN">
-                Certifying Technician
-              </option>
-              <option value="TECHNICIAN">Technician</option>
-              <option value="STORES">Stores</option>
-              <option value="VIEW_ONLY">View Only</option>
-              <option value="SUPERUSER">Platform Superuser</option>
+              {ROLE_OPTIONS.filter((r) => isSuperuser || r.value !== "SUPERUSER").map(
+                (r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                )
+              )}
             </select>
           </div>
 
@@ -200,6 +290,7 @@ const AdminUserNewPage: React.FC = () => {
               value={form.positionTitle}
               onChange={handleChange}
               placeholder="e.g. Maintenance Manager"
+              disabled={submitting}
             />
           </div>
 
@@ -212,6 +303,7 @@ const AdminUserNewPage: React.FC = () => {
               value={form.phone}
               onChange={handleChange}
               placeholder="+254..."
+              disabled={submitting}
             />
           </div>
 
@@ -224,6 +316,7 @@ const AdminUserNewPage: React.FC = () => {
               value={form.password}
               onChange={handleChange}
               required
+              disabled={submitting}
             />
           </div>
 
@@ -236,6 +329,7 @@ const AdminUserNewPage: React.FC = () => {
               value={form.confirmPassword}
               onChange={handleChange}
               required
+              disabled={submitting}
             />
           </div>
 
@@ -243,17 +337,12 @@ const AdminUserNewPage: React.FC = () => {
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => {
-                const target =
-                  amoCode && department
-                    ? `/maintenance/${amoCode}/${department}`
-                    : "/login";
-                navigate(target);
-              }}
+              onClick={() => navigate(backTarget)}
               disabled={submitting}
             >
               Cancel
             </button>
+
             <button
               type="submit"
               className="btn btn-primary"

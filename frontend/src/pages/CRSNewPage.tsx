@@ -1,5 +1,5 @@
 // src/pages/CRSNewPage.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import type {
@@ -17,7 +17,9 @@ import {
 import type { CRSTemplateMeta } from "../services/crs";
 import { Document, Page, pdfjs } from "react-pdf";
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+// ✅ FIX: Vite-safe worker import for pdfjs-dist v5 (worker is .mjs)
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const defaultReleasing: ReleasingAuthority = "KCAA";
 const defaultUnit: AirframeLimitUnit = "HOURS";
@@ -97,6 +99,21 @@ const PDF_FIELD_TO_MODEL_KEY: Record<string, string> = {
   "CRS Issue Date": "crs_issue_date",
 };
 
+function errMsg(err: unknown, fallback: string) {
+  if (err instanceof Error) return err.message || fallback;
+  if (typeof err === "string") return err || fallback;
+  if (err && typeof err === "object" && "message" in err) {
+    const m = (err as any).message;
+    if (typeof m === "string" && m.trim()) return m.trim();
+  }
+  return fallback;
+}
+
+// ✅ Your current TS types are missing Page props like width/scale.
+// Runtime supports them, so we wrap to unblock TS without breaking behavior.
+const PdfDocument = Document as unknown as React.ComponentType<any>;
+const PdfPage = Page as unknown as React.ComponentType<any>;
+
 const CRSNewPage: React.FC = () => {
   const navigate = useNavigate();
   const { amoCode, department } = useParams<{
@@ -172,12 +189,28 @@ const CRSNewPage: React.FC = () => {
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
+  // ✅ PDF stage sizing so overlay matches the rendered Page
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [pageWidthPx, setPageWidthPx] = useState<number>(900);
+
+  // Keep the stage height aligned to the rendered PDF page height
+  const [pageHeightPx, setPageHeightPx] = useState<number | null>(null);
+
+  useEffect(() => {
+    const measure = () => {
+      const w = stageRef.current?.clientWidth ?? 0;
+      if (w > 0) setPageWidthPx(Math.max(320, w));
+    };
+
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
   // Clean up the blob URL when it changes / unmounts
   useEffect(() => {
     return () => {
-      if (templateUrl) {
-        URL.revokeObjectURL(templateUrl);
-      }
+      if (templateUrl) URL.revokeObjectURL(templateUrl);
     };
   }, [templateUrl]);
 
@@ -218,10 +251,7 @@ const CRSNewPage: React.FC = () => {
             const pdfName: string = f.name;
             const modelKey = PDF_FIELD_TO_MODEL_KEY[pdfName] ?? null;
 
-            // Ignore fields we don't map into our CRS model
-            if (!modelKey) {
-              return null;
-            }
+            if (!modelKey) return null;
 
             const x: number = f.x;
             const y: number = f.y;
@@ -259,31 +289,20 @@ const CRSNewPage: React.FC = () => {
               multiline,
             };
           })
-          // Only overlay for the first page for now
           .filter(
-            (f: PdfFieldMeta | null): f is PdfFieldMeta =>
-              !!f && f.page === 1
+            (f: PdfFieldMeta | null): f is PdfFieldMeta => !!f && f.page === 1
           );
 
         setPdfFields(mappedFields);
       } catch (err) {
         console.error("Failed to load CRS template/meta", err);
-        if (!cancelled) {
-          setPdfError(
-            err instanceof Error
-              ? err.message
-              : "Failed to load CRS template."
-          );
-        }
+        if (!cancelled) setPdfError(errMsg(err, "Failed to load CRS template."));
       } finally {
-        if (!cancelled) {
-          setPdfLoading(false);
-        }
+        if (!cancelled) setPdfLoading(false);
       }
     };
 
     loadTemplate();
-
     return () => {
       cancelled = true;
     };
@@ -337,8 +356,7 @@ const CRSNewPage: React.FC = () => {
         releasing_authority:
           (data.releasing_authority as ReleasingAuthority) ??
           prev.releasing_authority,
-        operator_contractor:
-          data.operator_contractor ?? prev.operator_contractor,
+        operator_contractor: data.operator_contractor ?? prev.operator_contractor,
         job_no: data.job_no ?? prev.job_no,
         location: data.location ?? prev.location,
 
@@ -379,12 +397,10 @@ const CRSNewPage: React.FC = () => {
         airframe_limit_unit:
           (data.airframe_limit_unit as AirframeLimitUnit) ??
           prev.airframe_limit_unit,
-        next_maintenance_due:
-          data.next_maintenance_due ?? prev.next_maintenance_due,
+        next_maintenance_due: data.next_maintenance_due ?? prev.next_maintenance_due,
         date_of_completion:
           (data.date_of_completion as string) ?? prev.date_of_completion,
-        crs_issue_date:
-          (data.crs_issue_date as string) ?? prev.crs_issue_date,
+        crs_issue_date: (data.crs_issue_date as string) ?? prev.crs_issue_date,
       }));
     } catch (err) {
       console.error("CRS prefill failed", err);
@@ -400,59 +416,36 @@ const CRSNewPage: React.FC = () => {
     setPrefillError(null);
     setSuccessSerial(null);
 
-    if (!form.wo_no.trim()) {
-      setError("Work Order number is required.");
-      return;
-    }
-    if (!form.aircraft_serial_number.trim()) {
-      setError("Aircraft serial number is required (prefill from WO).");
-      return;
-    }
-    if (!form.operator_contractor.trim()) {
-      setError("Operator / contractor is required.");
-      return;
-    }
-    if (!form.location.trim()) {
-      setError("Location is required.");
-      return;
-    }
-    if (!form.aircraft_type.trim() || !form.aircraft_reg.trim()) {
-      setError("Aircraft type and registration are required.");
-      return;
-    }
-    if (!form.maintenance_carried_out.trim()) {
-      setError("Maintenance carried out is required.");
-      return;
-    }
-    if (!form.date_of_completion) {
-      setError("Date of completion is required.");
-      return;
-    }
+    if (!form.wo_no.trim()) return setError("Work Order number is required.");
+    if (!form.aircraft_serial_number.trim())
+      return setError("Aircraft serial number is required (prefill from WO).");
+    if (!form.operator_contractor.trim())
+      return setError("Operator / contractor is required.");
+    if (!form.location.trim()) return setError("Location is required.");
+    if (!form.aircraft_type.trim() || !form.aircraft_reg.trim())
+      return setError("Aircraft type and registration are required.");
+    if (!form.maintenance_carried_out.trim())
+      return setError("Maintenance carried out is required.");
+    if (!form.date_of_completion)
+      return setError("Date of completion is required.");
     if (
       !form.issuer_full_name.trim() ||
       !form.issuer_auth_ref.trim() ||
       !form.issuer_license.trim()
     ) {
-      setError("Issuer name, authorization ref, and licence are required.");
-      return;
+      return setError("Issuer name, authorization ref, and licence are required.");
     }
-    if (!form.crs_issue_date) {
-      setError("CRS issue date is required.");
-      return;
-    }
+    if (!form.crs_issue_date) return setError("CRS issue date is required.");
 
     const payload: CRSCreate = {
-      // linkage
       aircraft_serial_number: form.aircraft_serial_number.trim(),
       wo_no: form.wo_no.trim(),
 
-      // header
       releasing_authority: form.releasing_authority,
       operator_contractor: form.operator_contractor.trim(),
       job_no: form.job_no.trim() || undefined,
       location: form.location.trim(),
 
-      // aircraft & engines
       aircraft_type: form.aircraft_type.trim(),
       aircraft_reg: form.aircraft_reg.trim(),
       msn: form.msn.trim() || undefined,
@@ -469,12 +462,10 @@ const CRSNewPage: React.FC = () => {
       rh_hrs: form.rh_hrs ? Number(form.rh_hrs) : undefined,
       rh_cyc: form.rh_cyc ? Number(form.rh_cyc) : undefined,
 
-      // work
       maintenance_carried_out: form.maintenance_carried_out.trim(),
       deferred_maintenance: form.deferred_maintenance.trim() || undefined,
       date_of_completion: form.date_of_completion,
 
-      // maintenance data
       amp_used: form.amp_used,
       amm_used: form.amm_used,
       mtx_data_used: form.mtx_data_used,
@@ -490,25 +481,20 @@ const CRSNewPage: React.FC = () => {
       add_mtx_data: form.add_mtx_data.trim() || undefined,
       work_order_no: form.work_order_no.trim() || form.wo_no.trim(),
 
-      // expiry
       airframe_limit_unit: form.airframe_limit_unit,
       expiry_date: form.expiry_date || undefined,
-      hrs_to_expiry: form.hrs_to_expiry
-        ? Number(form.hrs_to_expiry)
-        : undefined,
+      hrs_to_expiry: form.hrs_to_expiry ? Number(form.hrs_to_expiry) : undefined,
       sum_airframe_tat_expiry: form.sum_airframe_tat_expiry
         ? Number(form.sum_airframe_tat_expiry)
         : undefined,
       next_maintenance_due: form.next_maintenance_due.trim() || undefined,
 
-      // issuer
       issuer_full_name: form.issuer_full_name.trim(),
       issuer_auth_ref: form.issuer_auth_ref.trim(),
       issuer_license: form.issuer_license.trim(),
       crs_issue_date: form.crs_issue_date,
       crs_issuing_stamp: form.crs_issuing_stamp.trim() || undefined,
 
-      // sign-offs (v1)
       signoffs: [],
     };
 
@@ -518,11 +504,7 @@ const CRSNewPage: React.FC = () => {
       setSuccessSerial(created.crs_serial);
     } catch (err) {
       console.error("CRS create failed", err);
-      if (err instanceof Error) {
-        setError(err.message || "Failed to create CRS.");
-      } else {
-        setError("Failed to create CRS.");
-      }
+      setError(errMsg(err, "Failed to create CRS."));
     } finally {
       setSubmitting(false);
     }
@@ -587,10 +569,7 @@ const CRSNewPage: React.FC = () => {
   };
 
   return (
-    <DepartmentLayout
-      amoCode={amoCode ?? ""}
-      activeDepartment={department ?? ""}
-    >
+    <DepartmentLayout amoCode={amoCode ?? ""} activeDepartment={department ?? ""}>
       <section className="dept-panel">
         <header className="dept-panel__header">
           <div>
@@ -612,9 +591,7 @@ const CRSNewPage: React.FC = () => {
         <div className="dept-panel__body crs-panel">
           <form className="crs-form" onSubmit={handleSubmit}>
             {error && <div className="auth-form__error">{error}</div>}
-            {prefillError && (
-              <div className="auth-form__error">{prefillError}</div>
-            )}
+            {prefillError && <div className="auth-form__error">{prefillError}</div>}
             {pdfError && <div className="auth-form__error">{pdfError}</div>}
             {successSerial && (
               <div className="auth-form__success">
@@ -658,8 +635,6 @@ const CRSNewPage: React.FC = () => {
               </label>
             </div>
 
-            {/* Keep a simple dropdown for releasing authority at the top.
-                The PDF radio fields will be set when we render the final PDF. */}
             <div className="crs-form__authority-row">
               <label className="auth-form__label">
                 Releasing authority
@@ -678,34 +653,62 @@ const CRSNewPage: React.FC = () => {
             </div>
 
             <div className="crs-pdf-wrapper">
-              {pdfLoading && (
-                <p className="crs-pdf-status">Loading CRS template…</p>
-              )}
+              {pdfLoading && <p className="crs-pdf-status">Loading CRS template…</p>}
 
-              {templateUrl && (
-                <Document
-                  file={templateUrl}
-                  className="crs-pdf-document"
-                  loading={
-                    <p className="crs-pdf-status">Rendering CRS template…</p>
-                  }
-                  error={
-                    <p className="crs-pdf-status">
-                      Failed to render CRS template.
-                    </p>
-                  }
+              {/* ✅ Stage container: PDF + overlay share the same coordinate space */}
+              <div
+                className="crs-pdf-stage"
+                ref={stageRef}
+                style={{
+                  position: "relative",
+                  width: "100%",
+                  height: pageHeightPx ? `${pageHeightPx}px` : "auto",
+                }}
+              >
+                {templateUrl && (
+                  <PdfDocument
+                    file={templateUrl}
+                    className="crs-pdf-document"
+                    loading={<p className="crs-pdf-status">Rendering CRS template…</p>}
+                    error={<p className="crs-pdf-status">Failed to render CRS template.</p>}
+                    onLoadError={(e: unknown) => {
+                      console.error("PDF load error:", e);
+                      setPdfError(errMsg(e, "Failed to load CRS PDF."));
+                    }}
+                  >
+                    <PdfPage
+                      pageNumber={1}
+                      width={pageWidthPx}
+                      renderAnnotationLayer={false}
+                      renderTextLayer={false}
+                      className="crs-pdf-page"
+                      onLoadSuccess={(page: any) => {
+                        try {
+                          const vp = page.getViewport({ scale: 1 });
+                          const scale = pageWidthPx / vp.width;
+                          setPageHeightPx(vp.height * scale);
+                        } catch (e) {
+                          console.warn("Could not compute PDF viewport:", e);
+                        }
+                      }}
+                      onRenderError={(e: unknown) => {
+                        console.error("PDF render error:", e);
+                        setPdfError(errMsg(e, "Failed to render CRS template."));
+                      }}
+                    />
+                  </PdfDocument>
+                )}
+
+                <div
+                  className="crs-pdf-overlay"
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    pointerEvents: "auto",
+                  }}
                 >
-                  <Page
-                    pageNumber={1}
-                    renderAnnotationLayer={false}
-                    renderTextLayer={false}
-                    className="crs-pdf-page"
-                  />
-                </Document>
-              )}
-
-              <div className="crs-pdf-overlay">
-                {pdfFields.map((f) => renderPdfField(f))}
+                  {pdfFields.map((f) => renderPdfField(f))}
+                </div>
               </div>
             </div>
 
@@ -718,11 +721,7 @@ const CRSNewPage: React.FC = () => {
               >
                 Cancel
               </button>
-              <button
-                type="submit"
-                className="primary-btn"
-                disabled={submitting}
-              >
+              <button type="submit" className="primary-btn" disabled={submitting}>
                 {submitting ? "Saving..." : "Save CRS"}
               </button>
             </div>

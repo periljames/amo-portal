@@ -2,7 +2,8 @@
 // - Handles admin-only user management.
 // - Talks to backend: backend/amodb/apps/accounts/router_admin.py
 //   * POST /accounts/admin/users  -> createAdminUser
-//   * GET  /accounts/admin/users  -> listAdminUsers
+//   * GET  /accounts/admin/users  -> listAdminUsers (supports amo_id, skip, limit, search)
+//   * GET  /accounts/admin/amos   -> listAdminAmos (SUPERUSER only)
 // - Uses authHeaders() from auth.ts so only logged-in SUPERUSER/AMO_ADMIN
 //   can call these endpoints.
 
@@ -15,7 +16,7 @@ export type { AccountRole, RegulatoryAuthority };
 
 export interface AdminUserCreatePayload {
   // BACKEND: schemas.UserCreate
-  amo_id?: string; // will be filled from current user if not provided
+  amo_id?: string; // optional override (superuser only), otherwise resolved from context
 
   staff_code: string;
   email: string;
@@ -68,50 +69,183 @@ export interface AdminUserRead {
 }
 
 /**
- * Create a user via the admin API.
- *
- * Important:
- * - Backend expects amo_id in schemas.UserCreate.
- * - For normal AMO admins, router_admin will still force amo_id to the
- *   current user's AMO, but Pydantic needs the field to exist.
+ * AMO type returned by GET /accounts/admin/amos (SUPERUSER only).
+ * (Matches backend AMORead shape.)
  */
-export async function createAdminUser(
-  payload: AdminUserCreatePayload
-): Promise<AdminUserRead> {
-  const current = getCachedUser();
-
-  if (!current || !current.amo_id) {
-    throw new Error(
-      "Could not determine your AMO. Please sign out and sign in again."
-    );
-  }
-
-  const body = {
-    // ensure amo_id is present; superuser could override by passing amo_id
-    amo_id: payload.amo_id ?? current.amo_id,
-    ...payload,
-    full_name:
-      (payload.full_name || "").trim() ||
-      `${payload.first_name} ${payload.last_name}`.trim(),
-  };
-
-  return apiPost<AdminUserRead>(
-    "/accounts/admin/users",
-    JSON.stringify(body),
-    {
-      headers: authHeaders(),
-    }
-  );
+export interface AdminAmoRead {
+  id: string;
+  amo_code: string;
+  name: string;
+  login_slug: string;
+  icao_code?: string | null;
+  country?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  time_zone?: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /**
- * List users in the current AMO (or all AMOs for SUPERUSER).
- * This hits GET /accounts/admin/users.
+ * Optional support: store the current "admin context" AMO in localStorage.
+ * Useful for SUPERUSER support workflows (switch AMO without re-login).
+ *
+ * Note: stores amo_id, not amoCode/login_slug.
+ */
+export const LS_ACTIVE_AMO_ID = "amodb_active_amo_id";
+
+// Optional backward/alternate key support (in case you already used another one elsewhere)
+const ACTIVE_AMO_ID_KEY_ALT = "amodb_admin_active_amo_id";
+
+export function setActiveAmoId(amoId: string) {
+  const v = (amoId || "").trim();
+  if (!v) return;
+  localStorage.setItem(LS_ACTIVE_AMO_ID, v);
+  // keep alt key in sync if it exists in your app already
+  localStorage.setItem(ACTIVE_AMO_ID_KEY_ALT, v);
+}
+
+export function getActiveAmoId(): string | null {
+  const primary = localStorage.getItem(LS_ACTIVE_AMO_ID);
+  if (primary && primary.trim()) return primary.trim();
+
+  const alt = localStorage.getItem(ACTIVE_AMO_ID_KEY_ALT);
+  return alt && alt.trim() ? alt.trim() : null;
+}
+
+export function clearActiveAmoId() {
+  localStorage.removeItem(LS_ACTIVE_AMO_ID);
+  localStorage.removeItem(ACTIVE_AMO_ID_KEY_ALT);
+}
+
+type CreateOptions = {
+  /**
+   * Target AMO id override (SUPERUSER only).
+   * If omitted, falls back to:
+   *  - payload.amo_id
+   *  - active AMO id from localStorage
+   *  - current logged-in user's amo_id
+   */
+  amoId?: string;
+};
+
+function resolveTargetAmoId(
+  payload: AdminUserCreatePayload,
+  opts?: CreateOptions
+): string {
+  const current = getCachedUser();
+
+  if (!current) {
+    throw new Error("You are not logged in. Please sign in again.");
+  }
+
+  const currentAmoId = (current as any).amo_id as string | undefined;
+  const isSuperuser = !!(current as any).is_superuser;
+
+  const candidate =
+    (payload.amo_id || "").trim() ||
+    (opts?.amoId || "").trim() ||
+    (getActiveAmoId() || "").trim() ||
+    (currentAmoId || "").trim();
+
+  if (!candidate) {
+    throw new Error(
+      "Could not determine the target AMO. Please sign out and sign in again."
+    );
+  }
+
+  // Non-superusers must never target another AMO.
+  if (!isSuperuser) {
+    if (!currentAmoId) {
+      throw new Error(
+        "Could not determine your AMO. Please sign out and sign in again."
+      );
+    }
+    if (candidate !== currentAmoId) {
+      throw new Error("You do not have permission to create users in this AMO.");
+    }
+  }
+
+  return candidate;
+}
+
+/**
+ * Create a user via the admin API.
+ *
+ * Notes:
+ * - Backend expects amo_id in schemas.UserCreate.
+ * - For normal AMO admins, server enforces amo_id == current user's AMO.
+ * - For SUPERUSER, we allow explicit targeting by passing amo_id.
+ */
+export async function createAdminUser(
+  payload: AdminUserCreatePayload,
+  opts?: CreateOptions
+): Promise<AdminUserRead> {
+  const targetAmoId = resolveTargetAmoId(payload, opts);
+
+  const fullName =
+    (payload.full_name || "").trim() ||
+    `${payload.first_name} ${payload.last_name}`.trim();
+
+  const body: AdminUserCreatePayload = {
+    ...payload,
+    amo_id: targetAmoId, // force resolved value into the request
+    full_name: fullName,
+  };
+
+  return apiPost<AdminUserRead>("/accounts/admin/users", JSON.stringify(body), {
+    headers: authHeaders(),
+  });
+}
+
+type ListParams = {
+  /**
+   * For SUPERUSER: you can request users for a specific AMO.
+   * If omitted (and SUPERUSER), we fall back to active AMO id or user's own AMO.
+   * For non-superusers, this is ignored client-side (not sent).
+   */
+  amo_id?: string;
+
+  skip?: number;
+  limit?: number;
+  search?: string;
+};
+
+function resolveListAmoId(params?: ListParams): string | undefined {
+  const current = getCachedUser();
+  if (!current) return undefined;
+
+  const currentAmoId = (current as any).amo_id as string | undefined;
+  const isSuperuser = !!(current as any).is_superuser;
+
+  if (!isSuperuser) {
+    // Never send amo_id for non-superusers (prevents accidental cross-AMO calls)
+    return undefined;
+  }
+
+  const candidate =
+    (params?.amo_id || "").trim() ||
+    (getActiveAmoId() || "").trim() ||
+    (currentAmoId || "").trim();
+
+  return candidate || undefined;
+}
+
+/**
+ * List users in the current AMO (or selected AMO for SUPERUSER).
+ * This hits GET /accounts/admin/users and supports:
+ * - amo_id (superuser only)
+ * - skip / limit / search
  */
 export async function listAdminUsers(
-  params: { skip?: number; limit?: number; search?: string } = {}
+  params: ListParams = {}
 ): Promise<AdminUserRead[]> {
   const sp = new URLSearchParams();
+
+  const amoId = resolveListAmoId(params);
+  if (amoId) sp.set("amo_id", amoId);
+
   if (typeof params.skip === "number") sp.set("skip", String(params.skip));
   if (typeof params.limit === "number") sp.set("limit", String(params.limit));
   if (params.search && params.search.trim()) {
@@ -119,11 +253,19 @@ export async function listAdminUsers(
   }
 
   const qs = sp.toString();
-  const path = qs
-    ? `/accounts/admin/users?${qs}`
-    : "/accounts/admin/users";
+  const path = qs ? `/accounts/admin/users?${qs}` : "/accounts/admin/users";
 
   return apiGet<AdminUserRead[]>(path, {
+    headers: authHeaders(),
+  });
+}
+
+/**
+ * SUPERUSER ONLY: list all AMOs for the AMO picker.
+ * GET /accounts/admin/amos
+ */
+export async function listAdminAmos(): Promise<AdminAmoRead[]> {
+  return apiGet<AdminAmoRead[]>("/accounts/admin/amos", {
     headers: authHeaders(),
   });
 }

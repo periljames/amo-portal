@@ -13,6 +13,9 @@ const AMO_KEY = "amo_code";
 const DEPT_KEY = "amo_department";
 const USER_KEY = "amo_current_user";
 
+// Shared with adminUsers.ts enhancements (kept as a plain key to avoid circular imports)
+const ACTIVE_AMO_ID_KEY = "amodb_active_amo_id";
+
 /**
  * These mirror the backend enums in accounts.models.
  * Keep them in sync with Python AccountRole / RegulatoryAuthority.
@@ -112,17 +115,11 @@ export function setContext(
   amoCode: string | null,
   departmentCode: string | null
 ): void {
-  if (amoCode) {
-    localStorage.setItem(AMO_KEY, amoCode);
-  } else {
-    localStorage.removeItem(AMO_KEY);
-  }
+  if (amoCode) localStorage.setItem(AMO_KEY, amoCode);
+  else localStorage.removeItem(AMO_KEY);
 
-  if (departmentCode) {
-    localStorage.setItem(DEPT_KEY, departmentCode);
-  } else {
-    localStorage.removeItem(DEPT_KEY);
-  }
+  if (departmentCode) localStorage.setItem(DEPT_KEY, departmentCode);
+  else localStorage.removeItem(DEPT_KEY);
 }
 
 export function getContext(): {
@@ -162,6 +159,22 @@ export function isAuthenticated(): boolean {
   return !!getToken();
 }
 
+// Optional: active AMO id support (for SUPERUSER support workflows)
+export function setActiveAmoId(amoId: string | null): void {
+  const v = (amoId || "").trim();
+  if (!v) localStorage.removeItem(ACTIVE_AMO_ID_KEY);
+  else localStorage.setItem(ACTIVE_AMO_ID_KEY, v);
+}
+
+export function getActiveAmoId(): string | null {
+  const v = localStorage.getItem(ACTIVE_AMO_ID_KEY);
+  return v && v.trim() ? v.trim() : null;
+}
+
+export function clearActiveAmoId(): void {
+  localStorage.removeItem(ACTIVE_AMO_ID_KEY);
+}
+
 // -----------------------------------------------------------------------------
 // Authenticated headers helper (for other services like CRS / adminUsers)
 // -----------------------------------------------------------------------------
@@ -183,6 +196,38 @@ export function authHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 // -----------------------------------------------------------------------------
+// helpers
+// -----------------------------------------------------------------------------
+
+async function readErrorMessage(res: Response): Promise<string> {
+  // Try JSON first (FastAPI often returns { detail: ... })
+  try {
+    const data = await res.clone().json();
+    const detail =
+      (data && (data.detail || data.message || data.error)) ?? null;
+    if (detail) return typeof detail === "string" ? detail : JSON.stringify(detail);
+  } catch {
+    // ignore
+  }
+
+  // Fallback to text
+  try {
+    const text = await res.text();
+    if (text && text.trim()) return text.trim();
+  } catch {
+    // ignore
+  }
+
+  return `HTTP ${res.status}`;
+}
+
+function resolveAmoSlug(input: string | null | undefined): string {
+  // Support mode: allow blank slug to mean "root"
+  const v = (input || "").trim();
+  return v ? v : "root";
+}
+
+// -----------------------------------------------------------------------------
 // API calls
 // -----------------------------------------------------------------------------
 
@@ -192,10 +237,14 @@ export function authHeaders(extra?: HeadersInit): HeadersInit {
  * Backend: POST /auth/login (router_public.py)
  * Body: { amo_slug, email, password }
  *
+ * Enhancements:
+ * - If amoSlug is blank, defaults to "root" (platform support login).
+ *
  * On success:
  * - stores JWT in localStorage
  * - stores AMO + department context
  * - caches current user
+ * - stores active AMO id (if amo context is present)
  */
 export async function login(
   amoSlug: string,
@@ -203,40 +252,35 @@ export async function login(
   password: string
 ): Promise<void> {
   const payload = {
-    amo_slug: amoSlug.trim(), // MUST match AMO.login_slug
+    amo_slug: resolveAmoSlug(amoSlug), // MUST match AMO.login_slug; blank => "root"
     email: email.trim(),
     password,
   };
 
   const res = await fetch(`${API_BASE_URL}/auth/login`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new Error(await readErrorMessage(res));
   }
 
   const data: LoginResponse = await res.json();
 
-  // Store JWT
   saveToken(data.access_token);
 
   // Store context (AMO code + department code, if provided)
   if (data.amo) {
-    setContext(
-      data.amo.amo_code,
-      data.department ? data.department.code : null
-    );
+    setContext(data.amo.amo_code, data.department ? data.department.code : null);
+    // Track currently active AMO id (useful later for SUPERUSER support workflows)
+    setActiveAmoId(data.amo.id);
   } else {
     clearContext();
+    clearActiveAmoId();
   }
 
-  // Cache user
   if (data.user) {
     cacheCurrentUser(data.user);
   }
@@ -254,14 +298,13 @@ export async function fetchCurrentUser(): Promise<PortalUser> {
   }
 
   const res = await fetch(`${API_BASE_URL}/auth/me`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    // If token expired/invalid, clear local state to avoid a “ghost session”
+    if (res.status === 401) logout();
+    throw new Error(await readErrorMessage(res));
   }
 
   const user = (await res.json()) as PortalUser;
@@ -279,21 +322,18 @@ export async function requestPasswordReset(
   email: string
 ): Promise<void> {
   const payload = {
-    amo_slug: amoSlug.trim(),
+    amo_slug: resolveAmoSlug(amoSlug),
     email: email.trim(),
   };
 
   const res = await fetch(`${API_BASE_URL}/auth/password-reset/request`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new Error(await readErrorMessage(res));
   }
 }
 
@@ -313,15 +353,12 @@ export async function confirmPasswordReset(
 
   const res = await fetch(`${API_BASE_URL}/auth/password-reset/confirm`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new Error(await readErrorMessage(res));
   }
 }
 
@@ -332,4 +369,5 @@ export function logout(): void {
   clearToken();
   clearContext();
   clearCachedUser();
+  clearActiveAmoId();
 }

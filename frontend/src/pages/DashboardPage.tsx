@@ -1,32 +1,46 @@
 // src/pages/DashboardPage.tsx
-import React from "react";
+import React, { useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext, getCachedUser } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 
-const niceLabel = (dept: string) => {
-  switch (dept) {
-    case "planning":
-      return "Planning";
-    case "production":
-      return "Production";
-    case "quality":
-      return "Quality & Compliance";
-    case "safety":
-      return "Safety Management";
-    case "stores":
-      return "Procurement & Stores";
-    case "engineering":
-      return "Engineering";
-    case "workshops":
-      return "Workshops";
-    case "admin":
-      return "System Admin";
-    default:
-      return dept;
-  }
+type DepartmentId =
+  | "planning"
+  | "production"
+  | "quality"
+  | "safety"
+  | "stores"
+  | "engineering"
+  | "workshops"
+  | "admin";
+
+const DEPT_LABEL: Record<string, string> = {
+  planning: "Planning",
+  production: "Production",
+  quality: "Quality & Compliance",
+  safety: "Safety Management",
+  stores: "Procurement & Stores",
+  engineering: "Engineering",
+  workshops: "Workshops",
+  admin: "System Admin",
 };
+
+const niceLabel = (dept: string) => DEPT_LABEL[dept] || dept;
+
+function isAdminUser(u: any): boolean {
+  if (!u) return false;
+  return (
+    !!u.is_superuser ||
+    !!u.is_amo_admin ||
+    u.role === "SUPERUSER" ||
+    u.role === "AMO_ADMIN"
+  );
+}
+
+function isDepartmentId(v: string): v is DepartmentId {
+  return Object.prototype.hasOwnProperty.call(DEPT_LABEL, v);
+}
 
 const DashboardPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
@@ -34,7 +48,73 @@ const DashboardPage: React.FC = () => {
 
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
-  const department = params.department ?? ctx.department ?? "planning";
+
+  const currentUser = getCachedUser();
+  const isAdmin = isAdminUser(currentUser);
+
+  // For normal users, this MUST be their assigned department (server-driven context).
+  // We also fall back to cached user.department_id if you ever store codes there.
+  const assignedDept = useMemo(() => {
+    const ctxDept = (ctx.department || "").trim();
+    if (ctxDept) return ctxDept;
+
+    const userDept = (currentUser?.department_id || "").trim();
+    if (userDept) return userDept;
+
+    return null;
+  }, [ctx.department, currentUser?.department_id]);
+
+  const requestedDeptRaw = (params.department || "").trim();
+  const requestedDept: string | null = requestedDeptRaw ? requestedDeptRaw : null;
+
+  // ✅ Guard: normal users can ONLY access their assigned department.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (isAdmin) return;
+
+    if (!assignedDept) {
+      // Misconfigured account/session; bounce to AMO login
+      navigate(`/maintenance/${amoSlug}/login`, { replace: true });
+      return;
+    }
+
+    // Non-admins must never land in "admin"
+    if (assignedDept === "admin") {
+      navigate(`/maintenance/${amoSlug}/login`, { replace: true });
+      return;
+    }
+
+    // If URL dept differs, hard-correct it (prevents cross-department browsing)
+    if (requestedDept && requestedDept !== assignedDept) {
+      navigate(`/maintenance/${amoSlug}/${assignedDept}`, { replace: true });
+    }
+
+    // If URL dept is missing, send them to assigned dept
+    if (!requestedDept) {
+      navigate(`/maintenance/${amoSlug}/${assignedDept}`, { replace: true });
+    }
+  }, [currentUser, isAdmin, assignedDept, requestedDept, amoSlug, navigate]);
+
+  // While we are correcting routes for non-admins, render nothing to avoid flicker.
+  if (
+    currentUser &&
+    !isAdmin &&
+    assignedDept &&
+    (requestedDept !== assignedDept || !requestedDept)
+  ) {
+    return null;
+  }
+
+  // Effective department for rendering
+  const department: DepartmentId = useMemo(() => {
+    if (isAdmin) {
+      const d = requestedDept || ctx.department || "planning";
+      return (isDepartmentId(d) ? d : "planning") as DepartmentId;
+    }
+
+    const d = assignedDept || "planning";
+    return (isDepartmentId(d) ? d : "planning") as DepartmentId;
+  }, [isAdmin, requestedDept, ctx.department, assignedDept]);
 
   const amoDisplay =
     amoSlug !== "UNKNOWN" ? decodeAmoCertFromUrl(amoSlug) : "AMO";
@@ -42,10 +122,12 @@ const DashboardPage: React.FC = () => {
   const isCRSDept = department === "planning" || department === "production";
   const isSystemAdminDept = department === "admin";
 
-  const currentUser = getCachedUser();
   const canManageUsers =
     !!currentUser &&
-    (currentUser.role === "SUPERUSER" || currentUser.role === "AMO_ADMIN");
+    (currentUser.is_superuser ||
+      currentUser.is_amo_admin ||
+      currentUser.role === "SUPERUSER" ||
+      currentUser.role === "AMO_ADMIN");
 
   const handleNewCrs = () => {
     navigate(`/maintenance/${amoSlug}/${department}/crs/new`);
@@ -54,15 +136,6 @@ const DashboardPage: React.FC = () => {
   const handleCreateUser = () => {
     navigate(`/maintenance/${amoSlug}/admin/users/new`);
   };
-
-  console.log("DashboardPage", {
-    amoSlug,
-    amoDisplay,
-    department,
-    params,
-    ctx,
-    currentUser,
-  });
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
@@ -76,12 +149,9 @@ const DashboardPage: React.FC = () => {
         </p>
       </header>
 
-      {/* Planning / Production – CRS widget */}
       {isCRSDept && (
         <section className="page-section">
-          <h2 className="page-section__title">
-            Certificates of Release to Service
-          </h2>
+          <h2 className="page-section__title">Certificates of Release to Service</h2>
           <p className="page-section__body">
             Create, track, and download CRS forms for completed maintenance.
           </p>
@@ -95,13 +165,12 @@ const DashboardPage: React.FC = () => {
         </section>
       )}
 
-      {/* System Admin – User Management */}
       {isSystemAdminDept && (
         <section className="page-section">
           <h2 className="page-section__title">System Administration</h2>
           <p className="page-section__body">
-            User account management for this AMO. Access is restricted to
-            AMO Administrators and platform Superusers in line with AMO and
+            User account management for this AMO. Access is restricted to AMO
+            Administrators and platform Superusers in line with AMO and
             regulatory requirements.
           </p>
 
@@ -114,17 +183,6 @@ const DashboardPage: React.FC = () => {
               >
                 + Create new user
               </button>
-
-              {/* Placeholder for future list / search */}
-              {/* <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={() =>
-                  navigate(`/maintenance/${amoSlug}/admin/users`)
-                }
-              >
-                View all users
-              </button> */}
             </div>
           ) : (
             <p className="page-section__body">
@@ -136,7 +194,6 @@ const DashboardPage: React.FC = () => {
         </section>
       )}
 
-      {/* Other departments – placeholder */}
       {!isCRSDept && !isSystemAdminDept && (
         <section className="page-section">
           <p className="page-section__body">

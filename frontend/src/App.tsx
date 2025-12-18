@@ -11,15 +11,13 @@ import "./styles/auth.css";
 
 const App: React.FC = () => {
   const theme = useTimeOfDayTheme();
-  const { scheme } = useColorScheme(); // used for its side-effect on <body>
+  const { scheme } = useColorScheme();
 
   useEffect(() => {
-    // morning / day / evening / night
     document.body.dataset.theme = theme;
   }, [theme]);
 
-  // `scheme` is already applied to body via the hook side-effect
-  void scheme; // just to silence “unused” warnings if TS complains
+  void scheme;
 
   return <AppRouter />;
 };

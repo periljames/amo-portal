@@ -6,13 +6,7 @@
 // - Uses RequireAuth wrapper to redirect unauthenticated users back to login.
 
 import React from "react";
-import {
-  Routes,
-  Route,
-  Navigate,
-  useLocation,
-  useParams,
-} from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -21,13 +15,25 @@ import AircraftImportPage from "./pages/AircraftImportPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import TrainingPage from "./pages/MyTrainingPage";
-import QMSHomePage from "./pages/QMSHomePage"; // ✅ NEW
+import QMSHomePage from "./pages/QMSHomePage";
 
 import { isAuthenticated } from "./services/auth";
 
 type RequireAuthProps = {
   children: React.ReactElement;
 };
+
+function inferAmoCodeFromPath(pathname: string): string | null {
+  // supports:
+  // /maintenance/:amoCode/login
+  // /maintenance/:amoCode/admin
+  // /maintenance/:amoCode/:department/...
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts.length >= 2 && parts[0] === "maintenance") {
+    return parts[1] || null;
+  }
+  return null;
+}
 
 /**
  * RequireAuth
@@ -39,9 +45,9 @@ type RequireAuthProps = {
  */
 const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
   const location = useLocation();
-  const { amoCode } = useParams<{ amoCode?: string }>();
 
   if (!isAuthenticated()) {
+    const amoCode = inferAmoCodeFromPath(location.pathname);
     const target = amoCode ? `/maintenance/${amoCode}/login` : "/login";
 
     return (
@@ -72,6 +78,12 @@ export const AppRouter: React.FC = () => {
 
       {/* AMO-specific login, e.g. /maintenance/safarilink/login */}
       <Route path="/maintenance/:amoCode/login" element={<LoginPage />} />
+
+      {/* If someone visits /maintenance/:amoCode directly, send them somewhere safe */}
+      <Route
+        path="/maintenance/:amoCode"
+        element={<Navigate to="planning" replace />}
+      />
 
       {/* Admin dashboard (System Admin area) */}
       <Route
@@ -133,7 +145,7 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      {/* ✅ QMS dashboard, e.g. /maintenance/safarilink/quality/qms */}
+      {/* QMS dashboard, e.g. /maintenance/safarilink/quality/qms */}
       <Route
         path="/maintenance/:amoCode/:department/qms"
         element={
