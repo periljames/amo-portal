@@ -370,12 +370,12 @@ class AircraftUsage(Base):
         onupdate=datetime.utcnow,
     )
     created_by_user_id = Column(
-        Integer,
+        String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
     updated_by_user_id = Column(
-        Integer,
+        String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )

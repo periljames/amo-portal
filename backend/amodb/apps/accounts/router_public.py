@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -10,6 +10,29 @@ from amodb.security import get_current_active_user
 from . import models, schemas, services
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+RESERVED_PLATFORM_SLUGS = {"", "system", "root"}
+
+
+def _client_ip(request: Request) -> str | None:
+    try:
+        return request.client.host if request.client else None
+    except Exception:
+        return None
+
+
+def _user_agent(request: Request) -> str | None:
+    try:
+        return request.headers.get("user-agent")
+    except Exception:
+        return None
+
+
+def _normalise_amo_slug(amo_slug: str | None) -> str:
+    v = (amo_slug or "").strip()
+    if v.lower() in RESERVED_PLATFORM_SLUGS:
+        return "system"
+    return v
 
 
 # ---------------------------------------------------------------------------
@@ -24,6 +47,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 )
 def login(
     payload: schemas.LoginRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -37,11 +61,13 @@ def login(
     - If `amo_slug` is empty / `system` / `root`, the platform owner
       (SUPERUSER) can log in even if their AMO is the ROOT AMO.
     """
+    payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
+
     user = services.authenticate_user(
         db=db,
         login_req=payload,
-        ip=None,
-        user_agent="swagger-ui",
+        ip=_client_ip(request),
+        user_agent=_user_agent(request),
     )
 
     if not user:
@@ -73,6 +99,7 @@ def login(
 )
 def request_password_reset(
     payload: schemas.PasswordResetRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -82,6 +109,8 @@ def request_password_reset(
     - For now, the raw token is returned in the response for testing.
     - In production you would email the token or a reset link.
     """
+    payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
+
     amo = (
         db.query(models.AMO)
         .filter(
@@ -91,7 +120,6 @@ def request_password_reset(
         .first()
     )
 
-    # If AMO or user not found, always return generic 202.
     if not amo:
         return {"message": "If the account exists, a reset email will be sent."}
 
@@ -106,14 +134,13 @@ def request_password_reset(
     raw_token = services.create_password_reset_token(
         db=db,
         user=user,
-        ip=None,
-        user_agent="swagger-ui",
+        ip=_client_ip(request),
+        user_agent=_user_agent(request),
     )
 
-    # WARNING: token in response is for development only.
     return {
         "message": "If the account exists, a reset email will be sent.",
-        "token_demo_only": raw_token,
+        "token_demo_only": raw_token,  # dev only
     }
 
 
@@ -182,7 +209,6 @@ def create_first_superuser(
     payload: schemas.FirstSuperuserCreate,
     db: Session = Depends(get_db),
 ):
-    # 1) Ensure there are no users yet
     existing_user = db.query(models.User).first()
     if existing_user:
         raise HTTPException(
@@ -190,19 +216,23 @@ def create_first_superuser(
             detail="Users already exist; bootstrap endpoint is disabled.",
         )
 
-    # 2) Find (or create) a ROOT AMO for the platform owner
+    # Prefer an explicit ROOT/system AMO if it exists; otherwise create it.
     root_amo = (
         db.query(models.AMO)
+        .filter(
+            (models.AMO.login_slug == "system") | (models.AMO.amo_code == "ROOT")
+        )
         .order_by(models.AMO.created_at.asc())
         .first()
     )
+
     if root_amo is None:
         root_amo = models.AMO(
             amo_code="ROOT",
             name="Platform Root AMO",
             icao_code=None,
             country=None,
-            login_slug="system",  # reserved slug for global superuser login
+            login_slug="system",
             contact_email=payload.email,
             contact_phone=payload.phone,
             time_zone="UTC",
@@ -212,9 +242,8 @@ def create_first_superuser(
         db.commit()
         db.refresh(root_amo)
 
-    # 3) Build a normal UserCreate with forced SUPERUSER role and ROOT AMO
     first_name = payload.first_name.strip()
-    last_name = payload.last_name.strip()  # <- fixed: call strip(), not .strip
+    last_name = payload.last_name.strip()
     full_name = (payload.full_name or f"{first_name} {last_name}").strip()
 
     user_create = schemas.UserCreate(
@@ -235,17 +264,14 @@ def create_first_superuser(
         password=payload.password,
     )
 
-    # 4) Use the normal user-creation path (enforces uniqueness, hashing, etc.)
     try:
         user = services.create_user(db, user_create)
     except ValueError as exc:
-        # e.g. invalid AMO id (should not normally happen here)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
 
-    # 5) Elevate flags and save
     user.is_superuser = True
     user.is_amo_admin = True
     db.add(user)

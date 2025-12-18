@@ -3,7 +3,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
-import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
@@ -17,23 +16,18 @@ from ..accounts import services as accounts_services, models as accounts_models
 from . import models as crs_models
 from . import schemas as crs_schemas
 from .utils import generate_crs_serial
-from .pdf_renderer import create_crs_pdf
+from .pdf_renderer import (
+    create_crs_pdf,
+    get_latest_crs_template,
+    get_crs_form_template_metadata,
+)
 
 router = APIRouter(prefix="/crs", tags=["crs"])
 
 # --------------------------------------------------------------------------
-# CRS TEMPLATE FILE LOCATIONS
-# --------------------------------------------------------------------------
-
-BASE_DIR = Path(__file__).resolve().parent
-TEMPLATE_DIR = BASE_DIR / "assets"
-TEMPLATE_PDF_PATH = TEMPLATE_DIR / "crs_template.pdf"
-TEMPLATE_META_PATH = TEMPLATE_DIR / "crs_template_meta.json"
-
-
-# --------------------------------------------------------------------------
 # CRS TEMPLATE ENDPOINTS (for UI overlay)
 # --------------------------------------------------------------------------
+
 
 @router.get(
     "/template/pdf",
@@ -46,22 +40,24 @@ def get_crs_template_pdf():
     Serve the *blank* CRS PDF template which the frontend uses
     to overlay interactive inputs for new CRS creation.
     """
-    if not TEMPLATE_PDF_PATH.exists():
+    try:
+        template_path: Path = get_latest_crs_template()
+    except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="CRS template PDF not found on server.",
+            detail=str(exc),
         )
 
     return FileResponse(
-        path=str(TEMPLATE_PDF_PATH),
+        path=str(template_path),
         media_type="application/pdf",
-        filename="crs_template.pdf",
+        filename=template_path.name,
     )
 
 
 @router.get(
     "/template/meta",
-    response_model=crs_schemas.CRSTemplateMeta,
+    response_model=crs_schemas.PdfFormTemplateMeta,
     summary="Get CRS template field geometry metadata",
     include_in_schema=False,
 )
@@ -72,27 +68,21 @@ def get_crs_template_meta():
 
     The frontend uses this to position input overlays on top of the PDF.
     """
-    if not TEMPLATE_META_PATH.exists():
+    try:
+        meta_dict = get_crs_form_template_metadata()
+    except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="CRS template metadata not found on server.",
+            detail=str(exc),
         )
 
-    try:
-        with TEMPLATE_META_PATH.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="CRS template metadata file is invalid JSON.",
-        )
-
-    return crs_schemas.CRSTemplateMeta(**data)
+    return crs_schemas.PdfFormTemplateMeta(**meta_dict)
 
 
 # --------------------------------------------------------------------------
 # PREFILL ENDPOINT
 # --------------------------------------------------------------------------
+
 
 @router.get(
     "/prefill/{wo_no}",
@@ -126,7 +116,10 @@ def prefill_crs_for_work_order(
 
     ac = (
         db.query(fleet_models.Aircraft)
-        .filter(fleet_models.Aircraft.serial_number == work_order.aircraft_serial_number)
+        .filter(
+            fleet_models.Aircraft.serial_number
+            == work_order.aircraft_serial_number
+        )
         .first()
     )
     if not ac:
@@ -145,7 +138,9 @@ def prefill_crs_for_work_order(
         .all()
     )
 
-    def find_engine(side_keywords: List[str]) -> Optional[fleet_models.AircraftComponent]:
+    def find_engine(
+        side_keywords: List[str],
+    ) -> Optional[fleet_models.AircraftComponent]:
         side_keywords_upper = [k.upper() for k in side_keywords]
         for c in components:
             pos = (c.position or "").upper()
@@ -202,6 +197,7 @@ def prefill_crs_for_work_order(
 # CREATE
 # --------------------------------------------------------------------------
 
+
 @router.post(
     "/",
     response_model=crs_schemas.CRSRead,
@@ -233,7 +229,10 @@ def create_crs(
     if not current_user.licence_number:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Certifying staff must have a licence_number configured before issuing a CRS.",
+            detail=(
+                "Certifying staff must have a licence_number configured "
+                "before issuing a CRS."
+            ),
         )
 
     # ----------------------------------------------------------
@@ -261,7 +260,10 @@ def create_crs(
     # Confirm aircraft exists and matches
     ac = (
         db.query(fleet_models.Aircraft)
-        .filter(fleet_models.Aircraft.serial_number == work_order.aircraft_serial_number)
+        .filter(
+            fleet_models.Aircraft.serial_number
+            == work_order.aircraft_serial_number
+        )
         .first()
     )
     if not ac:
@@ -271,7 +273,10 @@ def create_crs(
         )
 
     # Cross-check payload.aircraft_serial_number (from UI) with WO's aircraft
-    if payload.aircraft_serial_number and payload.aircraft_serial_number != ac.serial_number:
+    if (
+        payload.aircraft_serial_number
+        and payload.aircraft_serial_number != ac.serial_number
+    ):
         raise HTTPException(
             status_code=400,
             detail=(
@@ -374,7 +379,9 @@ def create_crs(
             crs=crs,
             category=s.category,
             sign_date=s.sign_date,
-            full_name_and_signature=s.full_name_and_signature or current_user.full_name,
+            full_name_and_signature=(
+                s.full_name_and_signature or current_user.full_name
+            ),
             internal_auth_ref=s.internal_auth_ref or str(auth.id),
             stamp=s.stamp or payload.crs_issuing_stamp,
         )
@@ -388,6 +395,7 @@ def create_crs(
 # --------------------------------------------------------------------------
 # LIST / GET / UPDATE / ARCHIVE
 # --------------------------------------------------------------------------
+
 
 @router.get("/", response_model=List[crs_schemas.CRSRead])
 def list_crs(
@@ -409,7 +417,11 @@ def list_crs(
 
 @router.get("/{crs_id}", response_model=crs_schemas.CRSRead)
 def get_crs(crs_id: int, db: Session = Depends(get_db)):
-    crs = db.query(crs_models.CRS).filter(crs_models.CRS.id == crs_id).first()
+    crs = (
+        db.query(crs_models.CRS)
+        .filter(crs_models.CRS.id == crs_id)
+        .first()
+    )
     if not crs:
         raise HTTPException(status_code=404, detail="CRS not found")
     return crs
@@ -421,16 +433,26 @@ def update_crs(
     payload: crs_schemas.CRSUpdate,
     db: Session = Depends(get_db),
 ):
-    crs = db.query(crs_models.CRS).filter(crs_models.CRS.id == crs_id).first()
+    crs = (
+        db.query(crs_models.CRS)
+        .filter(crs_models.CRS.id == crs_id)
+        .first()
+    )
     if not crs:
         raise HTTPException(status_code=404, detail="CRS not found")
 
     data = payload.model_dump(exclude_unset=True)
 
     # Convert enums to their string values for DB
-    if "releasing_authority" in data and data["releasing_authority"] is not None:
+    if (
+        "releasing_authority" in data
+        and data["releasing_authority"] is not None
+    ):
         data["releasing_authority"] = data["releasing_authority"].value
-    if "airframe_limit_unit" in data and data["airframe_limit_unit"] is not None:
+    if (
+        "airframe_limit_unit" in data
+        and data["airframe_limit_unit"] is not None
+    ):
         data["airframe_limit_unit"] = data["airframe_limit_unit"].value
 
     for field, value in data.items():
@@ -449,7 +471,11 @@ def archive_crs(crs_id: int, db: Session = Depends(get_db)):
     Records stay available (read-only) until an external cleanup job
     purges rows where `expires_at < now()` (36-month retention).
     """
-    crs = db.query(crs_models.CRS).filter(crs_models.CRS.id == crs_id).first()
+    crs = (
+        db.query(crs_models.CRS)
+        .filter(crs_models.CRS.id == crs_id)
+        .first()
+    )
     if not crs:
         raise HTTPException(status_code=404, detail="CRS not found")
 
@@ -469,6 +495,7 @@ def archive_crs(crs_id: int, db: Session = Depends(get_db)):
 # --------------------------------------------------------------------------
 # CRS PDF DOWNLOAD ENDPOINT
 # --------------------------------------------------------------------------
+
 
 @router.get(
     "/{crs_id}/pdf",

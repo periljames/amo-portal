@@ -1,12 +1,15 @@
+# backend/amodb/apps/accounts/router_admin.py
+
 from __future__ import annotations
 
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
-from amodb.security import get_current_active_user, require_admin
+from amodb.security import get_current_active_user, require_admin, require_roles
 from . import models, schemas, services
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
@@ -21,10 +24,9 @@ def _require_superuser(current_user: models.User) -> models.User:
     """
     Internal helper: platform superuser gate.
 
-    - Blocks system/AI accounts even if they somehow had is_superuser=True.
-    - Requires is_superuser=True (GOD mode).
+    - Blocks system/service accounts even if they somehow had is_superuser=True.
+    - Requires is_superuser=True (platform owner).
     """
-    # System / AI / service accounts must never act as platform superuser.
     if getattr(current_user, "is_system_account", False):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -129,7 +131,6 @@ def create_department(
     - Normal AMO admins: can only create departments in their own AMO.
     - SUPERUSER: can create departments in any AMO.
     """
-    # Only admins of this AMO can create departments unless superuser
     if payload.amo_id != current_user.amo_id and not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -213,24 +214,31 @@ def create_user_admin(
 
     - Normal AMO admins: payload.amo_id is forced to their AMO.
     - SUPERUSER: can set any amo_id in payload.
+    - Only SUPERUSER can create SUPERUSER role.
+    - Enforces uniqueness for email OR staff_code within the AMO.
     """
-    # Force user to current AMO unless superuser explicitly sets another
     if not current_user.is_superuser:
         payload = payload.copy(update={"amo_id": current_user.amo_id})
 
-    # Check duplicates within the chosen AMO
+    if (not current_user.is_superuser) and (payload.role == models.AccountRole.SUPERUSER):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only platform superuser can create superuser accounts.",
+        )
+
     existing = (
         db.query(models.User)
         .filter(
             models.User.amo_id == payload.amo_id,
-            models.User.email == payload.email,
+            (models.User.email == payload.email)
+            | (models.User.staff_code == payload.staff_code),
         )
         .first()
     )
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="User with this email already exists in the AMO.",
+            detail="User with this email or staff code already exists in the AMO.",
         )
 
     user = services.create_user(db, payload)
@@ -244,6 +252,9 @@ def create_user_admin(
 )
 def list_users_admin(
     amo_id: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 200,
+    search: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
@@ -253,6 +264,7 @@ def list_users_admin(
     - Normal AMO admins: see only users in their own AMO.
     - SUPERUSER: can optionally pass `amo_id` to list users for that AMO;
       if omitted, sees users for their own (ROOT/system) AMO.
+    - Supports skip/limit/search for frontend paging and filtering.
     """
     q = db.query(models.User)
 
@@ -262,7 +274,18 @@ def list_users_admin(
     else:
         q = q.filter(models.User.amo_id == current_user.amo_id)
 
-    return q.order_by(models.User.full_name.asc()).all()
+    if search and search.strip():
+        s = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.User.full_name.ilike(s),
+                models.User.email.ilike(s),
+                models.User.staff_code.ilike(s),
+            )
+        )
+
+    q = q.order_by(models.User.full_name.asc()).offset(skip).limit(limit)
+    return q.all()
 
 
 @router.put(
@@ -274,15 +297,19 @@ def update_user_admin(
     user_id: str,
     payload: schemas.UserUpdate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
+    current_user: models.User = Depends(
+        require_roles(models.AccountRole.SUPERUSER, models.AccountRole.AMO_ADMIN)
+    ),
 ):
     """
     Update a user.
 
-    - Normal AMO admins: can only update users in their AMO.
-    - SUPERUSER: can update any user by id (no AMO restriction).
+    - AMO_ADMIN: can only update users in their AMO.
+    - SUPERUSER: can update any user by id.
+    - Blocks non-superusers from role escalation to SUPERUSER and from changing amo_id.
     """
     q = db.query(models.User).filter(models.User.id == user_id)
+
     if not current_user.is_superuser:
         q = q.filter(models.User.amo_id == current_user.amo_id)
 
@@ -293,18 +320,21 @@ def update_user_admin(
             detail="User not found or not in your AMO.",
         )
 
-    # Only superuser can toggle is_superuser; AMO admin can toggle is_amo_admin
     update_data = payload.model_dump(exclude_unset=True)
-    if (
-        "is_amo_admin" in update_data
-        and not current_user.is_amo_admin
-        and not current_user.is_superuser
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You cannot modify is_amo_admin flag.",
-        )
 
+    if not current_user.is_superuser:
+        if "amo_id" in update_data or "is_superuser" in update_data:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot modify amo_id or superuser status.",
+            )
+        if "role" in update_data and update_data["role"] == models.AccountRole.SUPERUSER:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot assign SUPERUSER role.",
+            )
+
+    # NOTE: services.update_user() should also enforce what fields are allowed.
     user = services.update_user(db, user, payload)
     return user
 
@@ -320,9 +350,8 @@ def _require_quality_or_admin(user: models.User) -> models.User:
 
     - SUPERUSER or AMO admin always allowed.
     - QUALITY_MANAGER allowed for their AMO.
-    - System/AI accounts are blocked even if flags are set.
+    - System/service accounts are blocked even if flags are set.
     """
-    # Again, system/AI accounts must not manage authorisations.
     if getattr(user, "is_system_account", False):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -440,6 +469,10 @@ def grant_user_authorisation(
 
     - SUPERUSER: can grant for any AMO as long as user and type share the same AMO.
     - AMO Admin / QM: can only grant within their AMO.
+
+    Security hardening:
+    - granted_by_user_id is ALWAYS set to the authenticated current_user.id
+      (client is not allowed to spoof this).
     """
     _require_quality_or_admin(current_user)
 
@@ -456,14 +489,12 @@ def grant_user_authorisation(
             detail="User or authorisation type not found.",
         )
 
-    # Ensure user and authorisation type belong to the same AMO
     if user.amo_id != atype.amo_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User and authorisation type must belong to the same AMO.",
         )
 
-    # Non-superusers must be in the same AMO as the target user/type
     if not current_user.is_superuser and user.amo_id != current_user.amo_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -476,7 +507,7 @@ def grant_user_authorisation(
         scope_text=payload.scope_text,
         effective_from=payload.effective_from,
         expires_at=payload.expires_at,
-        granted_by_user_id=payload.granted_by_user_id or current_user.id,
+        granted_by_user_id=current_user.id,
     )
     db.add(ua)
     db.commit()

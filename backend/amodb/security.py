@@ -22,8 +22,11 @@ from typing import Optional, Callable, Union, Set
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
+
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHash
+import bcrypt
 
 from .database import get_db  # write DB for auth flows
 from amodb.apps.accounts import models as account_models
@@ -53,17 +56,54 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 # PASSWORD HASHING
 # ---------------------------------------------------------------------------
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Argon2id (argon2-cffi) password hasher.
+# You can tune these via env vars if needed.
+_pwd_hasher = PasswordHasher(
+    time_cost=int(os.getenv("ARGON2_TIME_COST", "3")),
+    memory_cost=int(os.getenv("ARGON2_MEMORY_COST", "65536")),  # KiB (64MB)
+    parallelism=int(os.getenv("ARGON2_PARALLELISM", "2")),
+    hash_len=int(os.getenv("ARGON2_HASH_LEN", "32")),
+    salt_len=int(os.getenv("ARGON2_SALT_LEN", "16")),
+)
+
+
+def _is_argon2_hash(hashed_password: str) -> bool:
+    return isinstance(hashed_password, str) and hashed_password.startswith("$argon2")
+
+
+def _is_bcrypt_hash(hashed_password: str) -> bool:
+    return isinstance(hashed_password, str) and hashed_password.startswith(("$2a$", "$2b$", "$2y$"))
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Return True if the plain password matches the hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    if not plain_password or not hashed_password:
+        return False
+
+    # Prefer Argon2 for new hashes
+    if _is_argon2_hash(hashed_password):
+        try:
+            return _pwd_hasher.verify(hashed_password, plain_password)
+        except (VerifyMismatchError, VerificationError, InvalidHash):
+            return False
+
+    # Backward compatibility: support existing bcrypt hashes (if any)
+    if _is_bcrypt_hash(hashed_password):
+        try:
+            return bcrypt.checkpw(
+                plain_password.encode("utf-8"),
+                hashed_password.encode("utf-8"),
+            )
+        except Exception:
+            return False
+
+    # Unknown hash format
+    return False
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password for storing in the database."""
-    return pwd_context.hash(password)
+    """Hash a password for storing in the database (Argon2id)."""
+    return _pwd_hasher.hash(password)
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +150,11 @@ def get_user_by_id(
     Services inside the accounts app may use richer helpers with joinedload;
     this is intentionally simple to avoid circular imports.
     """
-    # Normalise id type to int if your PK is integer; adjust if using UUID strings.
-    try:
-        normalised_id = int(user_id)
-    except (TypeError, ValueError):
-        normalised_id = user_id
+    # Your User.id is String(36); do not coerce to int.
+    if user_id is None:
+        return None
+
+    normalised_id = str(user_id).strip()
 
     return (
         db.query(account_models.User)

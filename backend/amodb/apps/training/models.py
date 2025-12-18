@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from datetime import date, datetime
+from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -59,11 +60,14 @@ class TrainingDeliveryMethod(str, enum.Enum):
 
 class TrainingEventStatus(str, enum.Enum):
     PLANNED = "PLANNED"
+    IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
 
 
 class TrainingParticipantStatus(str, enum.Enum):
+    # Keep legacy values for compatibility; add SCHEDULED for clearer UI wording.
+    SCHEDULED = "SCHEDULED"
     INVITED = "INVITED"
     CONFIRMED = "CONFIRMED"
     ATTENDED = "ATTENDED"
@@ -88,6 +92,54 @@ class DeferralReasonCategory(str, enum.Enum):
     OTHER = "OTHER"
 
 
+class TrainingRequirementScope(str, enum.Enum):
+    """
+    How a requirement is applied.
+    - ALL: everyone in the AMO
+    - DEPARTMENT: by department code
+    - JOB_ROLE: by job role string
+    - USER: a specific user
+    """
+
+    ALL = "ALL"
+    DEPARTMENT = "DEPARTMENT"
+    JOB_ROLE = "JOB_ROLE"
+    USER = "USER"
+
+
+class TrainingNotificationSeverity(str, enum.Enum):
+    INFO = "INFO"
+    ACTION_REQUIRED = "ACTION_REQUIRED"
+    WARNING = "WARNING"
+
+
+class TrainingFileKind(str, enum.Enum):
+    CERTIFICATE = "CERTIFICATE"
+    AMEL = "AMEL"
+    LICENSE = "LICENSE"
+    EVIDENCE = "EVIDENCE"
+    OTHER = "OTHER"
+
+
+class TrainingFileReviewStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class TrainingRecordVerificationStatus(str, enum.Enum):
+    """
+    Optional second-layer control for IOSA-style evidence governance:
+    - PENDING: uploaded/created but not verified by Quality
+    - VERIFIED: verified by Quality (or authorized role)
+    - REJECTED: evidence/record rejected (needs correction)
+    """
+
+    PENDING = "PENDING"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+
+
 # ---------------------------------------------------------------------------
 # TRAINING COURSE MASTER
 # ---------------------------------------------------------------------------
@@ -97,15 +149,16 @@ class TrainingCourse(Base):
     """
     Master list of training courses for an AMO.
 
-    - `course_id`  = your legacy CourseID (e.g. SMS-REF, HF-INIT, DGR-REF)
-    - `course_name` = your CourseName string
-    - `frequency_months` = FrequencyMonths from your sheet
+    - course_id  = your legacy CourseID (e.g. SMS-REF, HF-INIT, DGR-REF)
+    - course_name = your CourseName string
+    - frequency_months = FrequencyMonths from your sheet
     """
 
     __tablename__ = "training_courses"
     __table_args__ = (
         UniqueConstraint("amo_id", "course_id", name="uq_training_courses_amo_courseid"),
         Index("idx_training_courses_amo_active", "amo_id", "is_active"),
+        Index("idx_training_courses_amo_category", "amo_id", "category"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -117,7 +170,6 @@ class TrainingCourse(Base):
         index=True,
     )
 
-    # DIRECTLY mapped from your Excel list
     course_id = Column(
         String(64),
         nullable=False,
@@ -129,14 +181,12 @@ class TrainingCourse(Base):
         doc="Full course name / description as used in manuals.",
     )
 
-    # FrequencyMonths from your sheet; used for due/overdue logic
     frequency_months = Column(
         Integer,
         nullable=True,
         doc="Recurrent interval in months; NULL for one-off or manually-controlled courses.",
     )
 
-    # Extra classification to help grouping / dashboards
     category = Column(
         Enum(TrainingCourseCategory, name="training_course_category_enum"),
         nullable=False,
@@ -161,11 +211,9 @@ class TrainingCourse(Base):
     default_provider = Column(String(255), nullable=True)
     default_duration_days = Column(Integer, nullable=True, default=1)
 
-    # Mandatory flags
     is_mandatory = Column(Boolean, nullable=False, default=True)
     mandatory_for_all = Column(Boolean, nullable=False, default=False)
 
-    # Simple prerequisite hook, e.g. "SMS-INIT" before "SMS-REF"
     prerequisite_course_id = Column(
         String(64),
         nullable=True,
@@ -193,15 +241,103 @@ class TrainingCourse(Base):
         onupdate=datetime.utcnow,
     )
 
-    # Relationships
     events = relationship("TrainingEvent", back_populates="course", lazy="selectin")
     records = relationship("TrainingRecord", back_populates="course", lazy="selectin")
     deferral_requests = relationship(
         "TrainingDeferralRequest", back_populates="course", lazy="selectin"
     )
 
+    # New (scalable compliance + evidence)
+    requirements = relationship("TrainingRequirement", back_populates="course", lazy="selectin")
+    files = relationship("TrainingFile", back_populates="course", lazy="selectin")
+
     def __repr__(self) -> str:
         return f"<TrainingCourse {self.course_id} ({self.amo_id})>"
+
+
+# ---------------------------------------------------------------------------
+# TRAINING REQUIREMENTS (WHO MUST HAVE WHAT)
+# ---------------------------------------------------------------------------
+
+
+class TrainingRequirement(Base):
+    """
+    IOSA-style requirements matrix to define who must complete which courses.
+    This supports global scaling + dashboards.
+
+    scope rules:
+    - ALL: required for everyone in the AMO
+    - DEPARTMENT: required for a department_code
+    - JOB_ROLE: required for a job_role
+    - USER: required for a specific user_id
+    """
+
+    __tablename__ = "training_requirements"
+    __table_args__ = (
+        Index("idx_training_requirements_amo_active", "amo_id", "is_active"),
+        Index("idx_training_requirements_amo_scope", "amo_id", "scope"),
+        Index("idx_training_requirements_user", "amo_id", "user_id"),
+        Index("idx_training_requirements_dept", "amo_id", "department_code"),
+        Index("idx_training_requirements_role", "amo_id", "job_role"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    course_id = Column(
+        String(36),
+        ForeignKey("training_courses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    scope = Column(
+        Enum(TrainingRequirementScope, name="training_requirement_scope_enum"),
+        nullable=False,
+        default=TrainingRequirementScope.ALL,
+        index=True,
+    )
+
+    department_code = Column(String(64), nullable=True, index=True)
+    job_role = Column(String(128), nullable=True, index=True)
+
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        doc="Only required when scope=USER",
+    )
+
+    is_mandatory = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+
+    created_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    course = relationship("TrainingCourse", back_populates="requirements", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<TrainingRequirement {self.id} course={self.course_id} scope={self.scope}>"
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +349,7 @@ class TrainingEvent(Base):
     __tablename__ = "training_events"
     __table_args__ = (
         Index("idx_training_events_amo_course_date", "amo_id", "course_id", "starts_on"),
+        Index("idx_training_events_amo_status", "amo_id", "status"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -266,7 +403,6 @@ class TrainingEvent(Base):
         onupdate=datetime.utcnow,
     )
 
-    # Relationships
     course = relationship("TrainingCourse", back_populates="events", lazy="joined")
     participants = relationship(
         "TrainingEventParticipant",
@@ -275,6 +411,9 @@ class TrainingEvent(Base):
         cascade="all, delete-orphan",
     )
     records = relationship("TrainingRecord", back_populates="event", lazy="selectin")
+
+    # New (evidence tied to a session)
+    files = relationship("TrainingFile", back_populates="event", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<TrainingEvent {self.id} course={self.course_id} status={self.status}>"
@@ -289,9 +428,19 @@ class TrainingEventParticipant(Base):
             name="uq_training_event_participants_event_user",
         ),
         Index("idx_training_participants_user", "user_id"),
+        Index("idx_training_participants_event", "event_id"),
+        Index("idx_training_participants_amo_user", "amo_id", "user_id"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
+
+    # Multi-tenant guard (helps filtering and avoids expensive joins in some queries)
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     event_id = Column(
         String(36),
@@ -315,9 +464,19 @@ class TrainingEventParticipant(Base):
     )
 
     attendance_note = Column(Text, nullable=True)
-    attended_at = Column(DateTime(timezone=True), nullable=True)
 
-    # Link to deferral request if this attendance was deferred
+    # Governance for attendance marking (who marked + when)
+    attendance_marked_at = Column(DateTime(timezone=True), nullable=True)
+    attendance_marked_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    attended_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+
     deferral_request_id = Column(
         String(36),
         ForeignKey("training_deferral_requests.id", ondelete="SET NULL"),
@@ -350,6 +509,7 @@ class TrainingRecord(Base):
     __table_args__ = (
         Index("idx_training_records_user_course", "user_id", "course_id"),
         Index("idx_training_records_validity", "valid_until"),
+        Index("idx_training_records_amo_user", "amo_id", "user_id"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -375,7 +535,6 @@ class TrainingRecord(Base):
         index=True,
     )
 
-    # Optional link back to the training session
     event_id = Column(
         String(36),
         ForeignKey("training_events.id", ondelete="SET NULL"),
@@ -396,6 +555,25 @@ class TrainingRecord(Base):
     certificate_reference = Column(String(255), nullable=True)
     remarks = Column(Text, nullable=True)
 
+    # Verification governance (recommended)
+    verification_status = Column(
+        Enum(
+            TrainingRecordVerificationStatus,
+            name="training_record_verification_status_enum",
+        ),
+        nullable=False,
+        default=TrainingRecordVerificationStatus.PENDING,
+        index=True,
+    )
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    verified_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    verification_comment = Column(Text, nullable=True)
+
     is_manual_entry = Column(
         Boolean,
         nullable=False,
@@ -413,6 +591,9 @@ class TrainingRecord(Base):
 
     course = relationship("TrainingCourse", back_populates="records", lazy="joined")
     event = relationship("TrainingEvent", back_populates="records", lazy="joined")
+
+    # New (evidence tied to the record)
+    files = relationship("TrainingFile", back_populates="record", lazy="selectin")
 
     def __repr__(self) -> str:
         return (
@@ -435,6 +616,7 @@ class TrainingDeferralRequest(Base):
             "course_id",
             "status",
         ),
+        Index("idx_training_deferrals_amo_status", "amo_id", "status"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -450,6 +632,14 @@ class TrainingDeferralRequest(Base):
         String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+
+    # NEW: who raised the deferral (user, manager, Quality, etc.)
+    requested_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
 
@@ -504,10 +694,241 @@ class TrainingDeferralRequest(Base):
         default=datetime.utcnow,
     )
 
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
     course = relationship("TrainingCourse", back_populates="deferral_requests", lazy="joined")
+
+    # New (deferral evidence like letters, medical notes, etc.)
+    files = relationship("TrainingFile", back_populates="deferral_request", lazy="selectin")
 
     def __repr__(self) -> str:
         return (
             f"<TrainingDeferralRequest user={self.user_id} "
             f"course={self.course_id} status={self.status}>"
         )
+
+
+# ---------------------------------------------------------------------------
+# TRAINING FILES (CERTIFICATES / AMEL / EVIDENCE UPLOADS)
+# ---------------------------------------------------------------------------
+
+
+class TrainingFile(Base):
+    """
+    Stores uploaded training evidence, certificates, licenses (e.g. AMEL) and supporting documents.
+
+    Design notes:
+    - storage_path is a server-side relative path (never the raw client path)
+    - sha256 supports integrity checks and de-dup
+    - review fields support Quality governance
+    """
+
+    __tablename__ = "training_files"
+    __table_args__ = (
+        Index("idx_training_files_amo_owner", "amo_id", "owner_user_id"),
+        Index("idx_training_files_course", "amo_id", "course_id"),
+        Index("idx_training_files_event", "amo_id", "event_id"),
+        Index("idx_training_files_record", "amo_id", "record_id"),
+        Index("idx_training_files_deferral", "amo_id", "deferral_request_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    owner_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="The user this file belongs to (usually the trainee).",
+    )
+
+    kind = Column(
+        Enum(TrainingFileKind, name="training_file_kind_enum"),
+        nullable=False,
+        default=TrainingFileKind.OTHER,
+        index=True,
+    )
+
+    course_id = Column(
+        String(36),
+        ForeignKey("training_courses.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    event_id = Column(
+        String(36),
+        ForeignKey("training_events.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    record_id = Column(
+        String(36),
+        ForeignKey("training_records.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    deferral_request_id = Column(
+        String(36),
+        ForeignKey("training_deferral_requests.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    original_filename = Column(String(255), nullable=False)
+    storage_path = Column(String(512), nullable=False)
+    content_type = Column(String(128), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    sha256 = Column(String(64), nullable=True, index=True)
+
+    review_status = Column(
+        Enum(TrainingFileReviewStatus, name="training_file_review_status_enum"),
+        nullable=False,
+        default=TrainingFileReviewStatus.PENDING,
+        index=True,
+    )
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    review_comment = Column(Text, nullable=True)
+
+    uploaded_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    uploaded_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    course = relationship("TrainingCourse", back_populates="files", lazy="joined")
+    event = relationship("TrainingEvent", back_populates="files", lazy="joined")
+    record = relationship("TrainingRecord", back_populates="files", lazy="joined")
+    deferral_request = relationship("TrainingDeferralRequest", back_populates="files", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<TrainingFile {self.id} kind={self.kind} owner={self.owner_user_id}>"
+
+
+# ---------------------------------------------------------------------------
+# TRAINING NOTIFICATIONS (IN-APP POPUPS + TRACKING)
+# ---------------------------------------------------------------------------
+
+
+class TrainingNotification(Base):
+    """
+    In-app notifications for trainees and staff.
+    Used for login popups, scheduled/rescheduled/cancelled training, deferral decisions, file reviews, etc.
+    """
+
+    __tablename__ = "training_notifications"
+    __table_args__ = (
+        Index("idx_training_notifications_amo_user_created", "amo_id", "user_id", "created_at"),
+        Index("idx_training_notifications_amo_user_unread", "amo_id", "user_id", "read_at"),
+        UniqueConstraint("amo_id", "user_id", "dedupe_key", name="uq_training_notifications_dedupe"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    title = Column(String(255), nullable=False)
+    body = Column(Text, nullable=True)
+
+    severity = Column(
+        Enum(TrainingNotificationSeverity, name="training_notification_severity_enum"),
+        nullable=False,
+        default=TrainingNotificationSeverity.INFO,
+        index=True,
+    )
+
+    link_path = Column(String(255), nullable=True, doc="Frontend route for deep-linking (optional).")
+
+    # Optional dedupe key to avoid spamming (e.g., event:123:scheduled)
+    dedupe_key = Column(String(255), nullable=True)
+
+    created_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<TrainingNotification {self.id} user={self.user_id} severity={self.severity}>"
+
+
+# ---------------------------------------------------------------------------
+# TRAINING AUDIT LOG (TRACEABILITY)
+# ---------------------------------------------------------------------------
+
+
+class TrainingAuditLog(Base):
+    """
+    Audit trail for training actions. Keeps the who-did-what trail.
+    Store details as JSON (Postgres will map to JSONB where supported).
+    """
+
+    __tablename__ = "training_audit_logs"
+    __table_args__ = (
+        Index("idx_training_audit_amo_created", "amo_id", "created_at"),
+        Index("idx_training_audit_entity", "amo_id", "entity_type", "entity_id"),
+        Index("idx_training_audit_actor", "amo_id", "actor_user_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    actor_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        doc="User who performed the action (if known).",
+    )
+
+    action = Column(String(64), nullable=False, index=True)
+
+    entity_type = Column(String(64), nullable=False, index=True)
+    entity_id = Column(String(36), nullable=True, index=True)
+
+    details = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<TrainingAuditLog {self.id} action={self.action} entity={self.entity_type}:{self.entity_id}>"

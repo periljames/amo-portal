@@ -207,12 +207,12 @@ class WorkOrder(Base):
         onupdate=datetime.utcnow,
     )
     created_by_user_id: int | None = Column(
-        Integer,
+        String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
     updated_by_user_id: int | None = Column(
-        Integer,
+        String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
@@ -388,12 +388,12 @@ class TaskCard(Base):
         onupdate=datetime.utcnow,
     )
     created_by_user_id: int | None = Column(
-        Integer,
+        String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
     updated_by_user_id: int | None = Column(
-        Integer,
+        String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
@@ -451,7 +451,7 @@ class TaskAssignment(Base):
     )
 
     user_id: int = Column(
-        Integer,
+        String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -513,7 +513,7 @@ class WorkLogEntry(Base):
     )
 
     user_id: int | None = Column(
-        Integer,
+        String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
