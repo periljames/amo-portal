@@ -1,19 +1,22 @@
+from __future__ import annotations
+
 from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import re
 
 import importlib.util
 from pdfrw import PdfReader, PdfWriter, PdfDict, PdfName
 from pdfrw.objects.pdfstring import PdfString
 from pdfrw.pagemerge import PageMerge
-from reportlab.lib.utils import ImageReader  # type: ignore[import-not-found]
-from reportlab.pdfgen import canvas  # type: ignore[import-not-found]
 
 from ...database import SessionLocal
 from . import models as crs_models
+
+if TYPE_CHECKING:
+    from reportlab.lib.utils import ImageReader
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -339,9 +342,15 @@ def _generate_barcode_reader(barcode_value: str) -> ImageReader:
             "Missing dependency 'python-barcode'. Install it with "
             "'pip install -r backend/requirements.txt'."
         )
+    if importlib.util.find_spec("reportlab") is None:
+        raise RuntimeError(
+            "Missing dependency 'reportlab'. Install it with "
+            "'pip install -r backend/requirements.txt'."
+        )
     from barcode import Code128  # type: ignore[import-not-found]
     from barcode.writer import ImageWriter  # type: ignore[import-not-found]
-    
+    from reportlab.lib.utils import ImageReader  # type: ignore[import-not-found]
+
     barcode = Code128(barcode_value, writer=ImageWriter())
     buffer = BytesIO()
     barcode.write(
@@ -365,6 +374,13 @@ def _build_overlay_pdf(
     barcode_reader: Optional[ImageReader],
     barcode_placement: Optional[BarcodePlacement],
 ) -> PdfDict:
+    if importlib.util.find_spec("reportlab") is None:
+        raise RuntimeError(
+            "Missing dependency 'reportlab'. Install it with "
+            "'pip install -r backend/requirements.txt'."
+        )
+    from reportlab.pdfgen import canvas  # type: ignore[import-not-found]
+    
     buffer = BytesIO()
     overlay = canvas.Canvas(buffer, pagesize=page_size)
     overlay.setFont("Helvetica", footer_placement.font_size)
