@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import models as account_models
-from . import models, schemas
+from . import models, schemas, services
 
 # Roles allowed to manage aircraft, components, usage
 MANAGEMENT_ROLES = [
@@ -359,6 +359,9 @@ def create_usage_entry(
         )
 
     data = payload.model_dump()
+    previous_usage = services.get_previous_usage(db, serial_number, payload.date)
+    services.apply_usage_calculations(data, previous_usage)
+    services.update_maintenance_remaining(db, serial_number, payload.date, data)
     usage = models.AircraftUsage(
         aircraft_serial_number=serial_number,
         created_by_user_id=current_user.id,
@@ -403,7 +406,40 @@ def update_usage_entry(
         exclude_unset=True,
         exclude={"last_seen_updated_at"},
     )
-    for field, value in data.items():
+    
+    effective_date = data.get("date", usage.date)
+    merged_data = {
+        "date": effective_date,
+        "techlog_no": data.get("techlog_no", usage.techlog_no),
+        "station": data.get("station", usage.station),
+        "block_hours": data.get("block_hours", usage.block_hours),
+        "cycles": data.get("cycles", usage.cycles),
+        "ttaf_after": data.get("ttaf_after", usage.ttaf_after),
+        "tca_after": data.get("tca_after", usage.tca_after),
+        "ttesn_after": data.get("ttesn_after", usage.ttesn_after),
+        "tcesn_after": data.get("tcesn_after", usage.tcesn_after),
+        "ttsoh_after": data.get("ttsoh_after", usage.ttsoh_after),
+        "ttshsi_after": data.get("ttshsi_after", usage.ttshsi_after),
+        "tcsoh_after": data.get("tcsoh_after", usage.tcsoh_after),
+        "pttsn_after": data.get("pttsn_after", usage.pttsn_after),
+        "pttso_after": data.get("pttso_after", usage.pttso_after),
+        "tscoa_after": data.get("tscoa_after", usage.tscoa_after),
+        "hours_to_mx": data.get("hours_to_mx", usage.hours_to_mx),
+        "days_to_mx": data.get("days_to_mx", usage.days_to_mx),
+        "remarks": data.get("remarks", usage.remarks),
+        "note": data.get("note", usage.note),
+    }
+
+    previous_usage = services.get_previous_usage(db, usage.aircraft_serial_number, effective_date)
+    services.apply_usage_calculations(merged_data, previous_usage)
+    services.update_maintenance_remaining(
+        db,
+        usage.aircraft_serial_number,
+        effective_date,
+        merged_data,
+    )
+
+    for field, value in merged_data.items():
         setattr(usage, field, value)
 
     usage.updated_by_user_id = current_user.id
@@ -436,6 +472,21 @@ def delete_usage_entry(
     db.delete(usage)
     db.commit()
     return
+
+
+@router.get(
+    "/{serial_number}/usage/summary",
+    response_model=schemas.AircraftUsageSummary,
+)
+def get_usage_summary(
+    serial_number: str,
+    db: Session = Depends(get_db),
+):
+    ac = db.query(models.Aircraft).get(serial_number)
+    if not ac:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+    summary = services.build_usage_summary(db, serial_number)
+    return summary
 
 
 # ---------------------------------------------------------------------------
