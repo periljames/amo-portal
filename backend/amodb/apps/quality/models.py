@@ -199,7 +199,7 @@ class QMSDocumentDistribution(Base):
 
     copy_number = Column(String(64), nullable=True)
     holder_label = Column(String(255), nullable=False)
-    holder_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    holder_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
 
     dist_format = Column(
         SAEnum(QMSDistributionFormat, name="qms_dist_format", native_enum=False),
@@ -210,7 +210,7 @@ class QMSDocumentDistribution(Base):
     requires_ack = Column(Boolean, nullable=False, default=False)
 
     acked_at = Column(DateTime(timezone=True), nullable=True)
-    acked_by_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    acked_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
 
     distributed_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
@@ -273,7 +273,7 @@ class QMSManualChangeRequest(Base):
     librarian_decision = Column(String(64), nullable=True)
     review_feedback = Column(Text, nullable=True)
 
-    created_by_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     submitted_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     __table_args__ = (
@@ -315,7 +315,7 @@ class QMSAudit(Base):
     criteria = Column(Text, nullable=True)
 
     auditee = Column(String(255), nullable=True)
-    lead_auditor_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    lead_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
 
     planned_start = Column(Date, nullable=True)
     planned_end = Column(Date, nullable=True)
@@ -325,7 +325,7 @@ class QMSAudit(Base):
     report_file_ref = Column(String(512), nullable=True)
     retention_until = Column(Date, nullable=True)
 
-    created_by_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     findings = relationship(
@@ -396,7 +396,7 @@ class QMSAuditFinding(Base):
     target_close_date = Column(Date, nullable=True, index=True)
     closed_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
-    created_by_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     audit = relationship("QMSAudit", back_populates="findings", lazy="joined")
@@ -445,7 +445,7 @@ class QMSCorrectiveAction(Base):
     corrective_action = Column(Text, nullable=True)
     preventive_action = Column(Text, nullable=True)
 
-    responsible_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    responsible_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     due_date = Column(Date, nullable=True, index=True)
     evidence_ref = Column(String(512), nullable=True)
 
@@ -456,8 +456,8 @@ class QMSCorrectiveAction(Base):
         index=True,
     )
 
-    created_by_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
-    updated_by_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    updated_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
