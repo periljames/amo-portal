@@ -10,7 +10,7 @@ Key goals:
 
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import MetaData, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # -------------------------------------------------------------------
@@ -81,8 +81,16 @@ ReadSessionLocal = sessionmaker(
     future=True,
 )
 
-# Declarative base for all models
-Base = declarative_base()
+# Declarative base for all models with stable naming conventions for Alembic.
+NAMING_CONVENTION = {
+    "ix": "ix_%(table_name)s_%(column_0_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+metadata = MetaData(naming_convention=NAMING_CONVENTION)
+Base = declarative_base(metadata=metadata)
 
 # -------------------------------------------------------------------
 # DEPENDENCIES (for FastAPI)
