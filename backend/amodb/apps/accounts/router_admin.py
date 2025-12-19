@@ -194,6 +194,151 @@ def list_departments(
 
 
 # ---------------------------------------------------------------------------
+# AMO ASSETS (AMO ADMIN / SUPERUSER)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/assets",
+    response_model=schemas.AMOAssetRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create an AMO asset (AMO admin or superuser)",
+)
+def create_amo_asset(
+    payload: schemas.AMOAssetCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    """
+    Create an AMO asset.
+
+    - Normal AMO admins: can only create assets for their own AMO.
+    - SUPERUSER: can create assets for any AMO.
+    """
+    if payload.amo_id != current_user.amo_id and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot create assets for another AMO.",
+        )
+
+    asset = models.AMOAsset(
+        **payload.model_dump(exclude={"is_active"}),
+        is_active=payload.is_active if payload.is_active is not None else True,
+        uploaded_by_user_id=current_user.id,
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return asset
+
+
+@router.get(
+    "/assets",
+    response_model=List[schemas.AMOAssetRead],
+    summary="List AMO assets (current AMO by default; any AMO for superuser)",
+)
+def list_amo_assets(
+    amo_id: Optional[str] = None,
+    kind: Optional[models.AMOAssetKind] = None,
+    only_active: bool = True,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    """
+    List assets.
+
+    - Normal users / AMO admins: always scoped to their own AMO.
+    - SUPERUSER: can optionally pass `amo_id` to inspect another AMO;
+      if omitted, sees assets for their own (ROOT/system) AMO.
+    """
+    q = db.query(models.AMOAsset)
+
+    if current_user.is_superuser:
+        if amo_id:
+            q = q.filter(models.AMOAsset.amo_id == amo_id)
+    else:
+        q = q.filter(models.AMOAsset.amo_id == current_user.amo_id)
+
+    if kind:
+        q = q.filter(models.AMOAsset.kind == kind)
+    if only_active:
+        q = q.filter(models.AMOAsset.is_active.is_(True))
+
+    return q.order_by(models.AMOAsset.created_at.desc()).all()
+
+
+@router.get(
+    "/assets/{asset_id}",
+    response_model=schemas.AMOAssetRead,
+    summary="Get an AMO asset by id",
+)
+def get_amo_asset(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    asset = db.query(models.AMOAsset).filter(models.AMOAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
+
+    if not current_user.is_superuser and asset.amo_id != current_user.amo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to access this asset.")
+
+    return asset
+
+
+@router.put(
+    "/assets/{asset_id}",
+    response_model=schemas.AMOAssetRead,
+    summary="Update an AMO asset (AMO admin or superuser)",
+)
+def update_amo_asset(
+    asset_id: str,
+    payload: schemas.AMOAssetUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    asset = db.query(models.AMOAsset).filter(models.AMOAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
+
+    if not current_user.is_superuser and asset.amo_id != current_user.amo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this asset.")
+
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(asset, field, value)
+
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return asset
+
+
+@router.delete(
+    "/assets/{asset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Deactivate an AMO asset (AMO admin or superuser)",
+)
+def deactivate_amo_asset(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    asset = db.query(models.AMOAsset).filter(models.AMOAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
+
+    if not current_user.is_superuser and asset.amo_id != current_user.amo_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this asset.")
+
+    asset.is_active = False
+    db.add(asset)
+    db.commit()
+    return
+
+
+# ---------------------------------------------------------------------------
 # USER MANAGEMENT (AMO ADMIN / SUPERUSER)
 # ---------------------------------------------------------------------------
 

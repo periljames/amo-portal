@@ -7,8 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
-from .models import RegulatoryAuthority, AccountRole, MaintenanceScope
-
+from .models import RegulatoryAuthority, AccountRole, MaintenanceScope, AMOAssetKind
 
 # ---------------------------------------------------------------------------
 # BASE SHARED OBJECTS
@@ -72,6 +71,52 @@ class DepartmentRead(DepartmentBase):
     id: str
     amo_id: str
     is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+
+# ---------------------------------------------------------------------------
+# AMO ASSETS
+# ---------------------------------------------------------------------------
+
+
+class AMOAssetBase(BaseModel):
+    kind: AMOAssetKind
+    name: Optional[str] = None
+    description: Optional[str] = None
+    original_filename: str
+    storage_path: str
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    sha256: Optional[str] = None
+
+
+class AMOAssetCreate(AMOAssetBase):
+    amo_id: str
+    is_active: Optional[bool] = True
+
+
+class AMOAssetUpdate(BaseModel):
+    kind: Optional[AMOAssetKind] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    original_filename: Optional[str] = None
+    storage_path: Optional[str] = None
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    sha256: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class AMOAssetRead(AMOAssetBase):
+    id: str
+    amo_id: str
+    is_active: bool
+    uploaded_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
