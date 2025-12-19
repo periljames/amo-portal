@@ -57,7 +57,8 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-USER_ID_FK = ForeignKey("users.id", ondelete="SET NULL")
+def _user_id_fk() -> ForeignKey:
+    return ForeignKey("users.id", ondelete="SET NULL")
 
 
 class QMSDocument(Base):
@@ -94,8 +95,8 @@ class QMSDocument(Base):
     restricted_access = Column(Boolean, nullable=False, default=False)
     current_file_ref = Column(String(512), nullable=True)
 
-    created_by_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
-    updated_by_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    updated_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
@@ -157,7 +158,7 @@ class QMSDocumentRevision(Base):
     approved_by_authority = Column(Boolean, nullable=False, default=False)
     authority_ref = Column(String(255), nullable=True)
 
-    created_by_user_id = Column(String(36), USER_ID_FK, nullable=True, index=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     document = relationship("QMSDocument", back_populates="revisions", lazy="joined")
