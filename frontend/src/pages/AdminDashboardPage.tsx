@@ -184,6 +184,11 @@ const AdminDashboardPage: React.FC = () => {
     navigate(target);
   };
 
+  const handleManageAssets = () => {
+    const target = amoCode ? `/maintenance/${amoCode}/admin/amo-assets` : "/login";
+    navigate(target);
+  };
+
   const handleAmoChange = (nextAmoId: string) => {
     const v = (nextAmoId || "").trim();
     if (!v) return;
@@ -343,6 +348,21 @@ const AdminDashboardPage: React.FC = () => {
             </table>
           </div>
         )}
+      </section>
+
+      <section className="page-section">
+        <h2 className="page-section__title">CRS Asset Setup</h2>
+        <p className="page-section__body">
+          Upload AMO-specific CRS templates and branding assets used in PDF
+          generation.
+        </p>
+        <button
+          type="button"
+          className="primary-chip-btn"
+          onClick={handleManageAssets}
+        >
+          Manage CRS assets
+        </button>
       </section>
     </DepartmentLayout>
   );

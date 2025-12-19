@@ -14,6 +14,7 @@ import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
+import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 
@@ -101,6 +102,16 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <AdminUserNewPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Admin - AMO asset setup */}
+      <Route
+        path="/maintenance/:amoCode/admin/amo-assets"
+        element={
+          <RequireAuth>
+            <AdminAmoAssetsPage />
           </RequireAuth>
         }
       />

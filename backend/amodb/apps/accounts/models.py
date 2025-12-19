@@ -130,9 +130,59 @@ class AMO(Base):
         back_populates="amo",
         lazy="selectin",
     )
+    assets = relationship(
+        "AMOAsset",
+        back_populates="amo",
+        uselist=False,
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     def __repr__(self) -> str:
         return f"<AMO {self.amo_code} {self.name}>"
+
+
+class AMOAsset(Base):
+    """
+    Files associated with an AMO (branding + CRS assets).
+
+    Stored as a 1:1 table keyed by amo_id for easier expansion.
+    """
+
+    __tablename__ = "amo_assets"
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    crs_logo_path = Column(Text, nullable=True)
+    crs_logo_filename = Column(String(255), nullable=True)
+    crs_logo_content_type = Column(String(100), nullable=True)
+    crs_logo_uploaded_at = Column(DateTime(timezone=True), nullable=True)
+
+    crs_template_path = Column(Text, nullable=True)
+    crs_template_filename = Column(String(255), nullable=True)
+    crs_template_content_type = Column(String(100), nullable=True)
+    crs_template_uploaded_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    amo = relationship("AMO", back_populates="assets")
+
+    def __repr__(self) -> str:
+        return f"<AMOAsset amo_id={self.amo_id}>"
 
 
 class Department(Base):
