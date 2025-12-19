@@ -5,13 +5,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import re
 
-from barcode import Code128
-from barcode.writer import ImageWriter
+from barcode import Code128  # type: ignore[import-not-found]
+from barcode.writer import ImageWriter  # type: ignore[import-not-found]
 from pdfrw import PdfReader, PdfWriter, PdfDict, PdfName
 from pdfrw.objects.pdfstring import PdfString
 from pdfrw.pagemerge import PageMerge
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader  # type: ignore[import-not-found]
+from reportlab.pdfgen import canvas  # type: ignore[import-not-found]
 
 from ...database import SessionLocal
 from . import models as crs_models
