@@ -42,6 +42,9 @@ from amodb.apps.maintenance_program import models as maintenance_program_models 
 # ADD: Training models so Alembic can create/update training tables
 from amodb.apps.training import models as training_models  # noqa: F401, E402
 
+# ADD: Quality models so Alembic can create/update QMS tables
+from amodb.apps.quality import models as quality_models  # noqa: F401, E402
+
 # Target metadata for 'autogenerate'
 target_metadata = Base.metadata
 
