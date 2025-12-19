@@ -5,8 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import re
 
-from barcode import Code128  # type: ignore[import-not-found]
-from barcode.writer import ImageWriter  # type: ignore[import-not-found]
+import importlib.util
 from pdfrw import PdfReader, PdfWriter, PdfDict, PdfName
 from pdfrw.objects.pdfstring import PdfString
 from pdfrw.pagemerge import PageMerge
@@ -335,6 +334,14 @@ def _get_copy_footer_placement(template: Path) -> CopyFooterPlacement:
 
 
 def _generate_barcode_reader(barcode_value: str) -> ImageReader:
+    if importlib.util.find_spec("barcode") is None:
+        raise RuntimeError(
+            "Missing dependency 'python-barcode'. Install it with "
+            "'pip install -r backend/requirements.txt'."
+        )
+    from barcode import Code128  # type: ignore[import-not-found]
+    from barcode.writer import ImageWriter  # type: ignore[import-not-found]
+    
     barcode = Code128(barcode_value, writer=ImageWriter())
     buffer = BytesIO()
     barcode.write(
