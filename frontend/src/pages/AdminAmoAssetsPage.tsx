@@ -11,9 +11,9 @@ import {
   getAmoAssets,
   uploadAmoLogo,
   uploadAmoTemplate,
-} from "../services/amoAssets";
+} from "../services/amoAssets.ts";
 
-import type { AmoAssetRead } from "../services/amoAssets";
+import type { AmoAssetRead } from "../services/amoAssets.ts";
 
 type UrlParams = {
   amoCode?: string;
