@@ -70,6 +70,12 @@ class MaintenanceScope(str, enum.Enum):
     OTHER = "OTHER"
 
 
+class AMOAssetKind(str, enum.Enum):
+    CRS_LOGO = "CRS_LOGO"
+    CRS_TEMPLATE = "CRS_TEMPLATE"
+    OTHER = "OTHER"
+
+
 # ---------------------------------------------------------------------------
 # AMO + DEPARTMENT
 # ---------------------------------------------------------------------------
@@ -133,7 +139,6 @@ class AMO(Base):
     assets = relationship(
         "AMOAsset",
         back_populates="amo",
-        uselist=False,
         cascade="all, delete-orphan",
         lazy="selectin",
     )
@@ -145,27 +150,42 @@ class AMO(Base):
 class AMOAsset(Base):
     """
     Files associated with an AMO (branding + CRS assets).
-
-    Stored as a 1:1 table keyed by amo_id for easier expansion.
     """
 
     __tablename__ = "amo_assets"
 
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
     amo_id = Column(
         String(36),
         ForeignKey("amos.id", ondelete="CASCADE"),
-        primary_key=True,
+        nullable=False,
+        index=True,
     )
 
-    crs_logo_path = Column(Text, nullable=True)
-    crs_logo_filename = Column(String(255), nullable=True)
-    crs_logo_content_type = Column(String(100), nullable=True)
-    crs_logo_uploaded_at = Column(DateTime(timezone=True), nullable=True)
+    kind = Column(
+        Enum(AMOAssetKind, name="amo_asset_kind_enum"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
 
-    crs_template_path = Column(Text, nullable=True)
-    crs_template_filename = Column(String(255), nullable=True)
-    crs_template_content_type = Column(String(100), nullable=True)
-    crs_template_uploaded_at = Column(DateTime(timezone=True), nullable=True)
+    original_filename = Column(String(255), nullable=False)
+    storage_path = Column(Text, nullable=False)
+    content_type = Column(String(100), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    sha256 = Column(String(64), nullable=True)
+
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    uploaded_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     created_at = Column(
         DateTime(timezone=True),
@@ -182,7 +202,7 @@ class AMOAsset(Base):
     amo = relationship("AMO", back_populates="assets")
 
     def __repr__(self) -> str:
-        return f"<AMOAsset amo_id={self.amo_id}>"
+        return f"<AMOAsset id={self.id} amo_id={self.amo_id} kind={self.kind}>"
 
 
 class Department(Base):

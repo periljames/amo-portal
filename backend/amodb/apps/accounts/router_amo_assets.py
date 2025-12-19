@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -59,13 +58,21 @@ def _resolve_target_amo_id(current_user: models.User, amo_id: Optional[str]) -> 
     return amo_id if amo_id and current_user.is_superuser else current_user.amo_id
 
 
-def _load_or_create_asset(db: Session, amo_id: str) -> models.AMOAsset:
-    asset = db.query(models.AMOAsset).filter(models.AMOAsset.amo_id == amo_id).first()
-    if asset:
-        return asset
-    asset = models.AMOAsset(amo_id=amo_id)
-    db.add(asset)
-    return asset
+def _get_latest_asset(
+    db: Session,
+    amo_id: str,
+    kind: models.AMOAssetKind,
+) -> Optional[models.AMOAsset]:
+    return (
+        db.query(models.AMOAsset)
+        .filter(
+            models.AMOAsset.amo_id == amo_id,
+            models.AMOAsset.kind == kind,
+            models.AMOAsset.is_active.is_(True),
+        )
+        .order_by(models.AMOAsset.created_at.desc())
+        .first()
+    )
 
 
 def _ensure_safe_path(path: Path) -> Path:
@@ -111,7 +118,7 @@ def _delete_if_exists(path: Optional[str]) -> None:
 
 @router.get(
     "/me",
-    response_model=schemas.AMOAssetRead,
+    response_model=List[schemas.AMOAssetRead],
     summary="Get AMO asset configuration for the current AMO",
 )
 def get_amo_assets(
@@ -120,10 +127,12 @@ def get_amo_assets(
     current_user: models.User = Depends(get_current_active_user),
 ):
     target_amo_id = _resolve_target_amo_id(current_user, amo_id)
-    asset = db.query(models.AMOAsset).filter(models.AMOAsset.amo_id == target_amo_id).first()
-    if not asset:
-        asset = models.AMOAsset(amo_id=target_amo_id)
-    return asset
+    return (
+        db.query(models.AMOAsset)
+        .filter(models.AMOAsset.amo_id == target_amo_id)
+        .order_by(models.AMOAsset.created_at.desc())
+        .all()
+    )
 
 
 @router.post(
@@ -157,13 +166,21 @@ def upload_crs_logo(
 
     _save_upload(file=file, dest_path=dest_path)
 
-    asset = _load_or_create_asset(db, target_amo_id)
-    _delete_if_exists(asset.crs_logo_path)
+    asset = _get_latest_asset(db, target_amo_id, models.AMOAssetKind.CRS_LOGO)
+    if asset:
+        _delete_if_exists(asset.storage_path)
+    else:
+        asset = models.AMOAsset(
+            amo_id=target_amo_id,
+            kind=models.AMOAssetKind.CRS_LOGO,
+        )
 
-    asset.crs_logo_path = str(dest_path)
-    asset.crs_logo_filename = filename
-    asset.crs_logo_content_type = file.content_type
-    asset.crs_logo_uploaded_at = datetime.utcnow()
+    asset.original_filename = filename
+    asset.storage_path = str(dest_path)
+    asset.content_type = file.content_type
+    asset.size_bytes = dest_path.stat().st_size
+    asset.uploaded_by_user_id = current_user.id
+    asset.is_active = True
 
     db.add(asset)
     db.commit()
@@ -202,13 +219,21 @@ def upload_crs_template(
 
     _save_upload(file=file, dest_path=dest_path)
 
-    asset = _load_or_create_asset(db, target_amo_id)
-    _delete_if_exists(asset.crs_template_path)
+    asset = _get_latest_asset(db, target_amo_id, models.AMOAssetKind.CRS_TEMPLATE)
+    if asset:
+        _delete_if_exists(asset.storage_path)
+    else:
+        asset = models.AMOAsset(
+            amo_id=target_amo_id,
+            kind=models.AMOAssetKind.CRS_TEMPLATE,
+        )
 
-    asset.crs_template_path = str(dest_path)
-    asset.crs_template_filename = filename
-    asset.crs_template_content_type = file.content_type
-    asset.crs_template_uploaded_at = datetime.utcnow()
+    asset.original_filename = filename
+    asset.storage_path = str(dest_path)
+    asset.content_type = file.content_type
+    asset.size_bytes = dest_path.stat().st_size
+    asset.uploaded_by_user_id = current_user.id
+    asset.is_active = True
 
     db.add(asset)
     db.commit()
@@ -227,18 +252,18 @@ def download_crs_logo(
     current_user: models.User = Depends(get_current_active_user),
 ):
     target_amo_id = _resolve_target_amo_id(current_user, amo_id)
-    asset = db.query(models.AMOAsset).filter(models.AMOAsset.amo_id == target_amo_id).first()
-    if not asset or not asset.crs_logo_path:
+    asset = _get_latest_asset(db, target_amo_id, models.AMOAssetKind.CRS_LOGO)
+    if not asset or not asset.storage_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No logo uploaded for this AMO.")
 
-    path = _ensure_safe_path(Path(asset.crs_logo_path))
+    path = _ensure_safe_path(Path(asset.storage_path))
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Logo asset not found.")
 
     return FileResponse(
         path=str(path),
-        media_type=asset.crs_logo_content_type or "application/octet-stream",
-        filename=asset.crs_logo_filename or path.name,
+        media_type=asset.content_type or "application/octet-stream",
+        filename=asset.original_filename or path.name,
     )
 
 
@@ -253,16 +278,16 @@ def download_crs_template(
     current_user: models.User = Depends(get_current_active_user),
 ):
     target_amo_id = _resolve_target_amo_id(current_user, amo_id)
-    asset = db.query(models.AMOAsset).filter(models.AMOAsset.amo_id == target_amo_id).first()
-    if not asset or not asset.crs_template_path:
+    asset = _get_latest_asset(db, target_amo_id, models.AMOAssetKind.CRS_TEMPLATE)
+    if not asset or not asset.storage_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No template uploaded for this AMO.")
 
-    path = _ensure_safe_path(Path(asset.crs_template_path))
+    path = _ensure_safe_path(Path(asset.storage_path))
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template asset not found.")
 
     return FileResponse(
         path=str(path),
-        media_type=asset.crs_template_content_type or "application/pdf",
-        filename=asset.crs_template_filename or path.name,
+        media_type=asset.content_type or "application/pdf",
+        filename=asset.original_filename or path.name,
     )
