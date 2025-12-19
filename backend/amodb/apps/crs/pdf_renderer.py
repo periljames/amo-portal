@@ -1,9 +1,17 @@
+from copy import deepcopy
+from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import re
 
+from barcode import Code128
+from barcode.writer import ImageWriter
 from pdfrw import PdfReader, PdfWriter, PdfDict, PdfName
 from pdfrw.objects.pdfstring import PdfString
+from pdfrw.pagemerge import PageMerge
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
 
 from ...database import SessionLocal
 from . import models as crs_models
@@ -37,6 +45,37 @@ RELEASING_AUTH_RADIO = {
 
 FIELD_NAME_ALIASES = {
     "7b RH Engine SNo": "RH_Engine_SNo",
+}
+
+
+@dataclass(frozen=True)
+class BarcodePlacement:
+    page_index: int
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
+class CopyFooterPlacement:
+    x: float
+    y: float
+    font_size: int
+
+
+BARCODE_PLACEMENT_BY_REV = {
+    6: BarcodePlacement(
+        page_index=0,
+        x=17.0183,
+        y=748.574,
+        width=150.6547,
+        height=22.0,
+    ),
+}
+
+COPY_FOOTER_PLACEMENT_BY_REV = {
+    6: CopyFooterPlacement(x=36.0, y=18.0, font_size=8),
 }
 
 
@@ -120,7 +159,7 @@ def _build_field_values(crs: crs_models.CRS) -> Dict[str, Any]:
     values: Dict[str, Any] = {
         # Identity / barcode
         "CRS Serial Number": crs.crs_serial,
-        "Barcode": crs.barcode_value,
+        "Barcode": "",
 
         # Releasing Authority (radio handled separately)
         "Operator_Contractor": crs.operator_contractor,
@@ -232,6 +271,152 @@ def _build_field_values(crs: crs_models.CRS) -> Dict[str, Any]:
         values[f"Stamp{suf}"] = s.stamp or ""
 
     return values
+
+
+def _get_page_size(page: PdfDict) -> tuple[float, float]:
+    mb = getattr(page, "MediaBox", None)
+    if mb and len(mb) == 4:
+        x0, y0, x1, y1 = [float(v) for v in mb]
+        return x1 - x0, y1 - y0
+    return 0.0, 0.0
+
+
+def _find_field_rect(
+    template: Path,
+    field_name: str,
+) -> Optional[BarcodePlacement]:
+    pdf = PdfReader(str(template))
+    for page_index, page in enumerate(pdf.pages):
+        annots = getattr(page, "Annots", None)
+        if not annots:
+            continue
+        for annot in annots:
+            field_name_obj = annot.get("/T")
+            if not field_name_obj:
+                continue
+            raw_name = _decode_pdf_field_name(field_name_obj)
+            normalized_name = _normalize_field_name(raw_name)
+            if normalized_name != field_name:
+                continue
+            rect = annot.get("/Rect")
+            if not rect or len(rect) != 4:
+                continue
+            x0, y0, x1, y1 = [float(v) for v in rect]
+            return BarcodePlacement(
+                page_index=page_index,
+                x=x0,
+                y=y0,
+                width=x1 - x0,
+                height=y1 - y0,
+            )
+    return None
+
+
+def _get_barcode_placement(template: Path) -> BarcodePlacement:
+    placement = _find_field_rect(template, "Barcode")
+    if placement:
+        return placement
+
+    revision = _parse_revision_number(template)
+    if revision in BARCODE_PLACEMENT_BY_REV:
+        return BARCODE_PLACEMENT_BY_REV[revision]
+    raise ValueError(
+        "Barcode placement not configured for CRS template revision "
+        f"{revision}. Update BARCODE_PLACEMENT_BY_REV or add a 'Barcode' "
+        "field to the template."
+    )
+
+
+def _get_copy_footer_placement(template: Path) -> CopyFooterPlacement:
+    revision = _parse_revision_number(template)
+    if revision in COPY_FOOTER_PLACEMENT_BY_REV:
+        return COPY_FOOTER_PLACEMENT_BY_REV[revision]
+    return CopyFooterPlacement(x=36.0, y=18.0, font_size=8)
+
+
+def _generate_barcode_reader(barcode_value: str) -> ImageReader:
+    barcode = Code128(barcode_value, writer=ImageWriter())
+    buffer = BytesIO()
+    barcode.write(
+        buffer,
+        options={
+            "module_width": 0.2,
+            "module_height": 10.0,
+            "quiet_zone": 1.0,
+            "font_size": 0,
+            "text_distance": 1.0,
+        },
+    )
+    buffer.seek(0)
+    return ImageReader(buffer)
+
+
+def _build_overlay_pdf(
+    page_size: tuple[float, float],
+    footer_text: str,
+    footer_placement: CopyFooterPlacement,
+    barcode_reader: Optional[ImageReader],
+    barcode_placement: Optional[BarcodePlacement],
+) -> PdfDict:
+    buffer = BytesIO()
+    overlay = canvas.Canvas(buffer, pagesize=page_size)
+    overlay.setFont("Helvetica", footer_placement.font_size)
+    overlay.drawString(footer_placement.x, footer_placement.y, footer_text)
+
+    if barcode_reader and barcode_placement:
+        overlay.drawImage(
+            barcode_reader,
+            barcode_placement.x,
+            barcode_placement.y,
+            width=barcode_placement.width,
+            height=barcode_placement.height,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+
+    overlay.save()
+    buffer.seek(0)
+    return PdfReader(fdata=buffer.read()).pages[0]
+
+
+def _render_multi_copy_pdf(
+    filled_template: Path,
+    output: Path,
+    barcode_value: str,
+    template_path: Path,
+    copy_labels: List[str],
+) -> None:
+    pdf = PdfReader(str(filled_template))
+    barcode_placement = _get_barcode_placement(template_path)
+    footer_placement = _get_copy_footer_placement(template_path)
+    barcode_reader = _generate_barcode_reader(barcode_value)
+
+    output_writer = PdfWriter()
+
+    for copy_index, copy_label in enumerate(copy_labels, start=1):
+        footer_text = f"Copy {copy_index}: {copy_label}"
+        for page_index, page in enumerate(pdf.pages):
+            stamped_page = deepcopy(page)
+            page_size = _get_page_size(stamped_page)
+            overlay_page = _build_overlay_pdf(
+                page_size=page_size,
+                footer_text=footer_text,
+                footer_placement=footer_placement,
+                barcode_reader=(
+                    barcode_reader
+                    if page_index == barcode_placement.page_index
+                    else None
+                ),
+                barcode_placement=(
+                    barcode_placement
+                    if page_index == barcode_placement.page_index
+                    else None
+                ),
+            )
+            PageMerge(stamped_page).add(overlay_page).render()
+            output_writer.addpage(stamped_page)
+
+    output_writer.write(str(output))
 
 
 def _set_field_readonly(annot: PdfDict):
@@ -355,7 +540,17 @@ def create_crs_pdf(crs_id: int) -> Path:
 
         filename = f"{crs.crs_serial or f'CRS-{crs_id:06d}'}.pdf"
         output_path = OUTPUT_DIR / filename
-        _fill_pdf(template_path, output_path, data)
+        filled_output_path = OUTPUT_DIR / f"{output_path.stem}-filled.pdf"
+        _fill_pdf(template_path, filled_output_path, data)
+
+        copy_labels = ["Original", "Duplicate", "Triplicate"]
+        _render_multi_copy_pdf(
+            filled_template=filled_output_path,
+            output=output_path,
+            barcode_value=crs.barcode_value,
+            template_path=template_path,
+            copy_labels=copy_labels,
+        )
         return output_path
     finally:
         db.close()

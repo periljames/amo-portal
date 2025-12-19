@@ -505,7 +505,7 @@ def archive_crs(crs_id: int, db: Session = Depends(get_db)):
 )
 def download_crs_pdf(crs_id: int):
     """
-    Generate a filled, read-only CRS PDF for this record and return it.
+    Generate a filled, multi-copy CRS PDF for this record and return it.
     """
     try:
         pdf_path: Path = create_crs_pdf(crs_id)

@@ -17,8 +17,8 @@ import {
 import type { CRSTemplateMeta } from "../services/crs";
 import { Document, Page, pdfjs } from "react-pdf";
 
-// ✅ FIX: Vite-safe worker import for pdfjs-dist v5 (worker is .mjs)
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+// ✅ FIX: Ensure worker version matches react-pdf's bundled pdfjs-dist
+import pdfWorkerUrl from "react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const defaultReleasing: ReleasingAuthority = "KCAA";
