@@ -1,16 +1,28 @@
 # backend/amodb/apps/training/models.py
+#
+# Training module ORM models (hardened for long-run safety):
+# - Uses timezone-aware UTC timestamps.
+# - Uses non-native enums to avoid Postgres enum lifecycle headaches in Alembic.
+# - Adds check constraints for date ordering and non-negative numeric fields.
+# - Adds uniqueness constraints / indexes to prevent silent duplicates and speed planning queries.
+# - Aligns audit/user FKs with accounts users.id GUID (String(36)).
+#
+# NOTE:
+# - This file intentionally keeps your existing table and column names to avoid breaking routers/schemas.
+# - course_id in TrainingCourse is the legacy short code (e.g. "SMS-REF"); the PK is TrainingCourse.id.
 
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
-    Enum,
+    Enum as SAEnum,
     ForeignKey,
     Index,
     Integer,
@@ -23,6 +35,10 @@ from sqlalchemy.orm import relationship
 
 from ...database import Base
 from ...user_id import generate_user_id
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +165,10 @@ class TrainingCourse(Base):
     """
     Master list of training courses for an AMO.
 
-    - course_id  = your legacy CourseID (e.g. SMS-REF, HF-INIT, DGR-REF)
-    - course_name = your CourseName string
-    - frequency_months = FrequencyMonths from your sheet
+    - id        = internal GUID (String(36))
+    - course_id = legacy short code (e.g. SMS-REF, HF-INIT, DGR-REF)
+    - course_name = human readable title/name
+    - frequency_months = recurrence frequency in months (NULL for one-off)
     """
 
     __tablename__ = "training_courses"
@@ -159,6 +176,12 @@ class TrainingCourse(Base):
         UniqueConstraint("amo_id", "course_id", name="uq_training_courses_amo_courseid"),
         Index("idx_training_courses_amo_active", "amo_id", "is_active"),
         Index("idx_training_courses_amo_category", "amo_id", "category"),
+        Index("idx_training_courses_amo_kind", "amo_id", "kind"),
+        CheckConstraint("frequency_months IS NULL OR frequency_months >= 0", name="ck_training_course_freq_nonneg"),
+        CheckConstraint(
+            "default_duration_days IS NULL OR default_duration_days >= 0",
+            name="ck_training_course_default_duration_nonneg",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -188,21 +211,21 @@ class TrainingCourse(Base):
     )
 
     category = Column(
-        Enum(TrainingCourseCategory, name="training_course_category_enum"),
+        SAEnum(TrainingCourseCategory, name="training_course_category_enum", native_enum=False),
         nullable=False,
         default=TrainingCourseCategory.OTHER,
         index=True,
     )
 
     kind = Column(
-        Enum(TrainingKind, name="training_kind_enum"),
+        SAEnum(TrainingKind, name="training_kind_enum", native_enum=False),
         nullable=False,
         default=TrainingKind.OTHER,
         index=True,
     )
 
     delivery_method = Column(
-        Enum(TrainingDeliveryMethod, name="training_delivery_method_enum"),
+        SAEnum(TrainingDeliveryMethod, name="training_delivery_method_enum", native_enum=False),
         nullable=False,
         default=TrainingDeliveryMethod.CLASSROOM,
     )
@@ -226,28 +249,23 @@ class TrainingCourse(Base):
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     updated_by_user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
 
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
+    # Relationships
     events = relationship("TrainingEvent", back_populates="course", lazy="selectin")
     records = relationship("TrainingRecord", back_populates="course", lazy="selectin")
-    deferral_requests = relationship(
-        "TrainingDeferralRequest", back_populates="course", lazy="selectin"
-    )
+    deferral_requests = relationship("TrainingDeferralRequest", back_populates="course", lazy="selectin")
 
-    # New (scalable compliance + evidence)
     requirements = relationship("TrainingRequirement", back_populates="course", lazy="selectin")
     files = relationship("TrainingFile", back_populates="course", lazy="selectin")
 
@@ -263,7 +281,6 @@ class TrainingCourse(Base):
 class TrainingRequirement(Base):
     """
     IOSA-style requirements matrix to define who must complete which courses.
-    This supports global scaling + dashboards.
 
     scope rules:
     - ALL: required for everyone in the AMO
@@ -279,6 +296,21 @@ class TrainingRequirement(Base):
         Index("idx_training_requirements_user", "amo_id", "user_id"),
         Index("idx_training_requirements_dept", "amo_id", "department_code"),
         Index("idx_training_requirements_role", "amo_id", "job_role"),
+        Index("idx_training_requirements_course", "amo_id", "course_id"),
+        # Soft guard against duplication (NULLs are allowed; still helpful)
+        UniqueConstraint(
+            "amo_id",
+            "course_id",
+            "scope",
+            "department_code",
+            "job_role",
+            "user_id",
+            name="uq_training_requirements_identity",
+        ),
+        CheckConstraint(
+            "effective_from IS NULL OR effective_to IS NULL OR effective_to >= effective_from",
+            name="ck_training_req_effective_dates_order",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -298,7 +330,7 @@ class TrainingRequirement(Base):
     )
 
     scope = Column(
-        Enum(TrainingRequirementScope, name="training_requirement_scope_enum"),
+        SAEnum(TrainingRequirementScope, name="training_requirement_scope_enum", native_enum=False),
         nullable=False,
         default=TrainingRequirementScope.ALL,
         index=True,
@@ -325,14 +357,10 @@ class TrainingRequirement(Base):
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     course = relationship("TrainingCourse", back_populates="requirements", lazy="joined")
 
@@ -350,6 +378,8 @@ class TrainingEvent(Base):
     __table_args__ = (
         Index("idx_training_events_amo_course_date", "amo_id", "course_id", "starts_on"),
         Index("idx_training_events_amo_status", "amo_id", "status"),
+        Index("idx_training_events_amo_date", "amo_id", "starts_on"),
+        CheckConstraint("ends_on IS NULL OR ends_on >= starts_on", name="ck_training_event_dates_order"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -381,7 +411,7 @@ class TrainingEvent(Base):
     ends_on = Column(Date, nullable=True)
 
     status = Column(
-        Enum(TrainingEventStatus, name="training_event_status_enum"),
+        SAEnum(TrainingEventStatus, name="training_event_status_enum", native_enum=False),
         nullable=False,
         default=TrainingEventStatus.PLANNED,
         index=True,
@@ -393,15 +423,11 @@ class TrainingEvent(Base):
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
 
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     course = relationship("TrainingCourse", back_populates="events", lazy="joined")
     participants = relationship(
@@ -409,10 +435,10 @@ class TrainingEvent(Base):
         back_populates="event",
         lazy="selectin",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     records = relationship("TrainingRecord", back_populates="event", lazy="selectin")
 
-    # New (evidence tied to a session)
     files = relationship("TrainingFile", back_populates="event", lazy="selectin")
 
     def __repr__(self) -> str:
@@ -422,19 +448,19 @@ class TrainingEvent(Base):
 class TrainingEventParticipant(Base):
     __tablename__ = "training_event_participants"
     __table_args__ = (
-        UniqueConstraint(
-            "event_id",
-            "user_id",
-            name="uq_training_event_participants_event_user",
-        ),
+        UniqueConstraint("event_id", "user_id", name="uq_training_event_participants_event_user"),
         Index("idx_training_participants_user", "user_id"),
         Index("idx_training_participants_event", "event_id"),
         Index("idx_training_participants_amo_user", "amo_id", "user_id"),
+        Index("idx_training_participants_amo_status", "amo_id", "status"),
+        CheckConstraint(
+            "attendance_marked_by_user_id IS NULL OR attendance_marked_at IS NOT NULL",
+            name="ck_training_participant_marked_requires_timestamp",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
 
-    # Multi-tenant guard (helps filtering and avoids expensive joins in some queries)
     amo_id = Column(
         String(36),
         ForeignKey("amos.id", ondelete="CASCADE"),
@@ -457,7 +483,7 @@ class TrainingEventParticipant(Base):
     )
 
     status = Column(
-        Enum(TrainingParticipantStatus, name="training_participant_status_enum"),
+        SAEnum(TrainingParticipantStatus, name="training_participant_status_enum", native_enum=False),
         nullable=False,
         default=TrainingParticipantStatus.INVITED,
         index=True,
@@ -465,7 +491,6 @@ class TrainingEventParticipant(Base):
 
     attendance_note = Column(Text, nullable=True)
 
-    # Governance for attendance marking (who marked + when)
     attendance_marked_at = Column(DateTime(timezone=True), nullable=True)
     attendance_marked_by_user_id = Column(
         String(36),
@@ -484,13 +509,8 @@ class TrainingEventParticipant(Base):
         index=True,
     )
 
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     event = relationship("TrainingEvent", back_populates="participants", lazy="joined")
     deferral_request = relationship("TrainingDeferralRequest", lazy="joined")
@@ -510,6 +530,20 @@ class TrainingRecord(Base):
         Index("idx_training_records_user_course", "user_id", "course_id"),
         Index("idx_training_records_validity", "valid_until"),
         Index("idx_training_records_amo_user", "amo_id", "user_id"),
+        Index("idx_training_records_amo_course", "amo_id", "course_id"),
+        Index("idx_training_records_amo_verification", "amo_id", "verification_status"),
+        CheckConstraint(
+            "valid_until IS NULL OR valid_until >= completion_date",
+            name="ck_training_record_validity_after_completion",
+        ),
+        CheckConstraint(
+            "hours_completed IS NULL OR hours_completed >= 0",
+            name="ck_training_record_hours_nonneg",
+        ),
+        CheckConstraint(
+            "exam_score IS NULL OR (exam_score >= 0 AND exam_score <= 100)",
+            name="ck_training_record_exam_score_range",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -555,11 +589,11 @@ class TrainingRecord(Base):
     certificate_reference = Column(String(255), nullable=True)
     remarks = Column(Text, nullable=True)
 
-    # Verification governance (recommended)
     verification_status = Column(
-        Enum(
+        SAEnum(
             TrainingRecordVerificationStatus,
             name="training_record_verification_status_enum",
+            native_enum=False,
         ),
         nullable=False,
         default=TrainingRecordVerificationStatus.PENDING,
@@ -585,21 +619,18 @@ class TrainingRecord(Base):
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
 
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     course = relationship("TrainingCourse", back_populates="records", lazy="joined")
     event = relationship("TrainingEvent", back_populates="records", lazy="joined")
 
-    # New (evidence tied to the record)
     files = relationship("TrainingFile", back_populates="record", lazy="selectin")
 
     def __repr__(self) -> str:
-        return (
-            f"<TrainingRecord user={self.user_id} course={self.course_id} "
-            f"completion={self.completion_date}>"
-        )
+        return f"<TrainingRecord user={self.user_id} course={self.course_id} completion={self.completion_date}>"
 
 
 # ---------------------------------------------------------------------------
@@ -610,13 +641,14 @@ class TrainingRecord(Base):
 class TrainingDeferralRequest(Base):
     __tablename__ = "training_deferral_requests"
     __table_args__ = (
-        Index(
-            "idx_training_deferrals_user_course_status",
-            "user_id",
-            "course_id",
-            "status",
-        ),
+        Index("idx_training_deferrals_user_course_status", "user_id", "course_id", "status"),
         Index("idx_training_deferrals_amo_status", "amo_id", "status"),
+        Index("idx_training_deferrals_amo_course", "amo_id", "course_id"),
+        Index("idx_training_deferrals_due_dates", "amo_id", "original_due_date", "requested_new_due_date"),
+        CheckConstraint(
+            "requested_new_due_date >= original_due_date",
+            name="ck_training_deferral_new_due_after_original",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -635,7 +667,6 @@ class TrainingDeferralRequest(Base):
         index=True,
     )
 
-    # NEW: who raised the deferral (user, manager, Quality, etc.)
     requested_by_user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -662,7 +693,7 @@ class TrainingDeferralRequest(Base):
     )
 
     reason_category = Column(
-        Enum(DeferralReasonCategory, name="training_deferral_reason_enum"),
+        SAEnum(DeferralReasonCategory, name="training_deferral_reason_enum", native_enum=False),
         nullable=False,
         default=DeferralReasonCategory.OTHER,
     )
@@ -670,7 +701,7 @@ class TrainingDeferralRequest(Base):
     reason_text = Column(Text, nullable=True)
 
     status = Column(
-        Enum(DeferralStatus, name="training_deferral_status_enum"),
+        SAEnum(DeferralStatus, name="training_deferral_status_enum", native_enum=False),
         nullable=False,
         default=DeferralStatus.PENDING,
         index=True,
@@ -688,29 +719,15 @@ class TrainingDeferralRequest(Base):
 
     decision_comment = Column(Text, nullable=True)
 
-    requested_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-    )
-
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    requested_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     course = relationship("TrainingCourse", back_populates="deferral_requests", lazy="joined")
 
-    # New (deferral evidence like letters, medical notes, etc.)
     files = relationship("TrainingFile", back_populates="deferral_request", lazy="selectin")
 
     def __repr__(self) -> str:
-        return (
-            f"<TrainingDeferralRequest user={self.user_id} "
-            f"course={self.course_id} status={self.status}>"
-        )
+        return f"<TrainingDeferralRequest user={self.user_id} course={self.course_id} status={self.status}>"
 
 
 # ---------------------------------------------------------------------------
@@ -735,6 +752,12 @@ class TrainingFile(Base):
         Index("idx_training_files_event", "amo_id", "event_id"),
         Index("idx_training_files_record", "amo_id", "record_id"),
         Index("idx_training_files_deferral", "amo_id", "deferral_request_id"),
+        Index("idx_training_files_kind", "amo_id", "kind"),
+        CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="ck_training_file_size_nonneg"),
+        CheckConstraint(
+            "reviewed_by_user_id IS NULL OR reviewed_at IS NOT NULL",
+            name="ck_training_file_reviewed_requires_timestamp",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -755,7 +778,7 @@ class TrainingFile(Base):
     )
 
     kind = Column(
-        Enum(TrainingFileKind, name="training_file_kind_enum"),
+        SAEnum(TrainingFileKind, name="training_file_kind_enum", native_enum=False),
         nullable=False,
         default=TrainingFileKind.OTHER,
         index=True,
@@ -793,7 +816,7 @@ class TrainingFile(Base):
     sha256 = Column(String(64), nullable=True, index=True)
 
     review_status = Column(
-        Enum(TrainingFileReviewStatus, name="training_file_review_status_enum"),
+        SAEnum(TrainingFileReviewStatus, name="training_file_review_status_enum", native_enum=False),
         nullable=False,
         default=TrainingFileReviewStatus.PENDING,
         index=True,
@@ -813,7 +836,7 @@ class TrainingFile(Base):
         nullable=True,
         index=True,
     )
-    uploaded_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    uploaded_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     course = relationship("TrainingCourse", back_populates="files", lazy="joined")
     event = relationship("TrainingEvent", back_populates="files", lazy="joined")
@@ -839,6 +862,7 @@ class TrainingNotification(Base):
     __table_args__ = (
         Index("idx_training_notifications_amo_user_created", "amo_id", "user_id", "created_at"),
         Index("idx_training_notifications_amo_user_unread", "amo_id", "user_id", "read_at"),
+        # Dedupe: Postgres allows multiple NULLs under a unique constraint, so this stays safe.
         UniqueConstraint("amo_id", "user_id", "dedupe_key", name="uq_training_notifications_dedupe"),
     )
 
@@ -862,7 +886,7 @@ class TrainingNotification(Base):
     body = Column(Text, nullable=True)
 
     severity = Column(
-        Enum(TrainingNotificationSeverity, name="training_notification_severity_enum"),
+        SAEnum(TrainingNotificationSeverity, name="training_notification_severity_enum", native_enum=False),
         nullable=False,
         default=TrainingNotificationSeverity.INFO,
         index=True,
@@ -877,9 +901,10 @@ class TrainingNotification(Base):
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
 
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     read_at = Column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
@@ -894,7 +919,7 @@ class TrainingNotification(Base):
 class TrainingAuditLog(Base):
     """
     Audit trail for training actions. Keeps the who-did-what trail.
-    Store details as JSON (Postgres will map to JSONB where supported).
+    Store details as JSON (Postgres will map to JSONB where supported by the dialect).
     """
 
     __tablename__ = "training_audit_logs"
@@ -902,6 +927,7 @@ class TrainingAuditLog(Base):
         Index("idx_training_audit_amo_created", "amo_id", "created_at"),
         Index("idx_training_audit_entity", "amo_id", "entity_type", "entity_id"),
         Index("idx_training_audit_actor", "amo_id", "actor_user_id", "created_at"),
+        Index("idx_training_audit_action", "amo_id", "action"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
@@ -928,7 +954,7 @@ class TrainingAuditLog(Base):
 
     details = Column(JSON, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     def __repr__(self) -> str:
         return f"<TrainingAuditLog {self.id} action={self.action} entity={self.entity_type}:{self.entity_id}>"

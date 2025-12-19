@@ -1,5 +1,4 @@
 # backend/amodb/apps/work/models.py
-
 """
 Work module ORM models.
 
@@ -9,29 +8,44 @@ Work module ORM models.
   non-routine), with HF-aware fields and status tracking.
 - TaskAssignment: allocation of a task card to certifying staff / technicians.
 - WorkLogEntry: actual man-hours booked against a task card.
+
+This revision hardens the schema for long-run safety:
+- Uses timezone-aware UTC timestamps (consistent across apps).
+- Uses non-native enums to avoid Postgres enum lifecycle headaches in Alembic.
+- Adds indexes for common planning queries (aircraft/status/due dates).
+- Adds non-negative and date/time ordering check constraints.
+- Adds uniqueness constraints to prevent silent duplication where it matters.
+- Aligns program item FK to maintenance_program module hardened table name
+  (`amp_program_items`) to avoid table-name collisions.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import date, datetime, timezone
 from enum import Enum
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
-    Enum as SQLEnum,
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import relationship
 
 from ...database import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +55,6 @@ from ...database import Base
 
 class WorkOrderTypeEnum(str, Enum):
     """High-level type of maintenance event."""
-
     LINE = "LINE"              # line maintenance visit
     BASE = "BASE"              # base / heavy check
     PERIODIC = "PERIODIC"      # scheduled check (A/B/C/etc.)
@@ -53,7 +66,6 @@ class WorkOrderTypeEnum(str, Enum):
 
 class WorkOrderStatusEnum(str, Enum):
     """Lifecycle state of the work order."""
-
     OPEN = "OPEN"
     IN_PROGRESS = "IN_PROGRESS"
     ON_HOLD = "ON_HOLD"
@@ -63,7 +75,6 @@ class WorkOrderStatusEnum(str, Enum):
 
 class TaskCategoryEnum(str, Enum):
     """Category of task as used in planning / reporting."""
-
     SCHEDULED = "SCHEDULED"
     UNSCHEDULED = "UNSCHEDULED"
     DEFECT = "DEFECT"
@@ -77,14 +88,12 @@ class TaskOriginTypeEnum(str, Enum):
     - SCHEDULED: created from an approved maintenance program / package.
     - NON_ROUTINE: raised as a finding or additional work during execution.
     """
-
     SCHEDULED = "SCHEDULED"
     NON_ROUTINE = "NON_ROUTINE"
 
 
 class TaskPriorityEnum(str, Enum):
     """Planning priority indicator."""
-
     CRITICAL = "CRITICAL"
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
@@ -93,7 +102,6 @@ class TaskPriorityEnum(str, Enum):
 
 class TaskStatusEnum(str, Enum):
     """Execution status of a task card."""
-
     PLANNED = "PLANNED"
     IN_PROGRESS = "IN_PROGRESS"
     PAUSED = "PAUSED"
@@ -104,7 +112,6 @@ class TaskStatusEnum(str, Enum):
 
 class TaskRoleOnTaskEnum(str, Enum):
     """Role of an assignee on a task card."""
-
     LEAD = "LEAD"
     SUPPORT = "SUPPORT"
     INSPECTOR = "INSPECTOR"
@@ -112,7 +119,6 @@ class TaskRoleOnTaskEnum(str, Enum):
 
 class TaskAssignmentStatusEnum(str, Enum):
     """Status of an assignment to a user."""
-
     ASSIGNED = "ASSIGNED"
     ACCEPTED = "ACCEPTED"
     REJECTED = "REJECTED"
@@ -126,7 +132,6 @@ class ErrorCapturingMethodEnum(str, Enum):
     This allows us to distinguish independent inspections, functional checks,
     duplicate inspections, etc.
     """
-
     INDEPENDENT_INSPECTION = "INDEPENDENT_INSPECTION"
     FUNCTIONAL_TEST = "FUNCTIONAL_TEST"
     OPERATIONAL_CHECK = "OPERATIONAL_CHECK"
@@ -149,14 +154,23 @@ class WorkOrder(Base):
     """
 
     __tablename__ = "work_orders"
+    __table_args__ = (
+        Index("ix_work_orders_aircraft_status", "aircraft_serial_number", "status"),
+        Index("ix_work_orders_status_due", "status", "due_date"),
+        Index("ix_work_orders_type_status", "wo_type", "status"),
+        CheckConstraint(
+            "open_date IS NULL OR closed_date IS NULL OR closed_date >= open_date",
+            name="ck_work_orders_closed_after_open",
+        ),
+    )
 
-    id: int = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
 
     # Organisation-specific work order number (e.g. YYNNNN or similar)
-    wo_number: str = Column(String(32), nullable=False, unique=True, index=True)
+    wo_number = Column(String(32), nullable=False, unique=True, index=True)
 
     # Link to aircraft
-    aircraft_serial_number: str = Column(
+    aircraft_serial_number = Column(
         String(50),
         ForeignKey("aircraft.serial_number", ondelete="RESTRICT"),
         nullable=False,
@@ -164,72 +178,72 @@ class WorkOrder(Base):
     )
 
     # Optional references for multi-AMO / CAMO integration or Spec 2000 payloads
-    amo_code: str | None = Column(String(20), nullable=True)
-    originating_org: str | None = Column(String(64), nullable=True)
-    work_package_ref: str | None = Column(
-        String(64), nullable=True
-    )  # identifier of the work package in planning system
+    amo_code = Column(String(20), nullable=True)
+    originating_org = Column(String(64), nullable=True)
+    work_package_ref = Column(String(64), nullable=True)  # planning system pack reference
 
-    description: str | None = Column(String(255), nullable=True)
+    description = Column(String(255), nullable=True)
 
     # Optional short check code (e.g. "A", "C", "200FH", "L")
-    check_type: str | None = Column(String(32), nullable=True)
+    check_type = Column(String(32), nullable=True)
 
-    wo_type: WorkOrderTypeEnum = Column(
-        SQLEnum(WorkOrderTypeEnum, name="work_order_type"),
+    wo_type = Column(
+        SAEnum(WorkOrderTypeEnum, name="work_order_type_enum", native_enum=False),
         nullable=False,
         default=WorkOrderTypeEnum.PERIODIC,
+        index=True,
     )
 
-    status: WorkOrderStatusEnum = Column(
-        SQLEnum(WorkOrderStatusEnum, name="work_order_status"),
+    status = Column(
+        SAEnum(WorkOrderStatusEnum, name="work_order_status_enum", native_enum=False),
         nullable=False,
         default=WorkOrderStatusEnum.OPEN,
+        index=True,
     )
 
-    is_scheduled: bool = Column(Boolean, nullable=False, default=True)
+    is_scheduled = Column(Boolean, nullable=False, default=True, index=True)
 
     # Dates (planning and execution)
-    due_date: date | None = Column(Date, nullable=True)
-    open_date: date | None = Column(Date, nullable=True)
-    closed_date: date | None = Column(Date, nullable=True)
+    due_date = Column(Date, nullable=True, index=True)
+    open_date = Column(Date, nullable=True, index=True)
+    closed_date = Column(Date, nullable=True, index=True)
 
-    # Audit
-    created_at: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-    )
-    updated_at: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
-    created_by_user_id: int | None = Column(
+    # Audit (accounts.users.id is GUID string)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    created_by_user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
-    updated_by_user_id: int | None = Column(
+    updated_by_user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
 
     # Relationships
-    aircraft = relationship("Aircraft", back_populates="work_orders")
+    aircraft = relationship("Aircraft", back_populates="work_orders", lazy="joined")
 
     tasks = relationship(
         "TaskCard",
         back_populates="work_order",
         cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
     )
 
     crs_list = relationship(
         "CRS",
         back_populates="work_order",
+        lazy="selectin",
     )
+
+    def __repr__(self) -> str:
+        return f"<WorkOrder id={self.id} wo_number={self.wo_number} status={self.status}>"
 
 
 # ---------------------------------------------------------------------------
@@ -242,10 +256,9 @@ class TaskCard(Base):
     Maintenance task card (job card / work card) under a WorkOrder.
 
     - For scheduled work, cards are created from the maintenance program.
-    - For non-routine work, cards are raised by engineering / certifying staff
-      as findings during execution.
+    - For non-routine work, cards are raised by engineering / certifying staff.
 
-    This model supports:
+    Supports:
     - link to maintenance program item and component;
     - staging and status tracking;
     - HF-aware fields like error-capturing method and HF notes.
@@ -253,16 +266,32 @@ class TaskCard(Base):
 
     __tablename__ = "task_cards"
     __table_args__ = (
-        UniqueConstraint(
-            "work_order_id",
-            "task_code",
-            name="uq_taskcard_workorder_taskcode",
+        # Note: Postgres allows multiple NULLs for a UNIQUE constraint.
+        # That is acceptable for non-coded ad-hoc cards.
+        UniqueConstraint("work_order_id", "task_code", name="uq_taskcard_workorder_taskcode"),
+        Index("ix_task_cards_workorder_status", "work_order_id", "status"),
+        Index("ix_task_cards_aircraft_status", "aircraft_serial_number", "status"),
+        Index("ix_task_cards_status_priority", "status", "priority"),
+        Index("ix_task_cards_program_item", "program_item_id"),
+        Index("ix_task_cards_component", "aircraft_component_id"),
+        Index("ix_task_cards_ata", "ata_chapter"),
+        CheckConstraint(
+            "planned_start IS NULL OR planned_end IS NULL OR planned_end >= planned_start",
+            name="ck_task_cards_planned_end_after_start",
+        ),
+        CheckConstraint(
+            "actual_start IS NULL OR actual_end IS NULL OR actual_end >= actual_start",
+            name="ck_task_cards_actual_end_after_start",
+        ),
+        CheckConstraint(
+            "estimated_manhours IS NULL OR estimated_manhours >= 0",
+            name="ck_task_cards_estimated_manhours_nonneg",
         ),
     )
 
-    id: int = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
 
-    work_order_id: int = Column(
+    work_order_id = Column(
         Integer,
         ForeignKey("work_orders.id", ondelete="CASCADE"),
         nullable=False,
@@ -270,7 +299,7 @@ class TaskCard(Base):
     )
 
     # Redundant aircraft link for easier querying / reporting
-    aircraft_serial_number: str = Column(
+    aircraft_serial_number = Column(
         String(50),
         ForeignKey("aircraft.serial_number", ondelete="RESTRICT"),
         nullable=False,
@@ -278,7 +307,7 @@ class TaskCard(Base):
     )
 
     # Optional link to a specific component position
-    aircraft_component_id: int | None = Column(
+    aircraft_component_id = Column(
         Integer,
         ForeignKey("aircraft_components.id", ondelete="SET NULL"),
         nullable=True,
@@ -286,15 +315,16 @@ class TaskCard(Base):
     )
 
     # Optional link to the maintenance program template item
-    program_item_id: int | None = Column(
+    # (Aligned with maintenance_program hardened table name)
+    program_item_id = Column(
         Integer,
-        ForeignKey("maintenance_program_items.id", ondelete="SET NULL"),
+        ForeignKey("amp_program_items.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
 
     # For non-routine tasks raised from a scheduled task
-    parent_task_id: int | None = Column(
+    parent_task_id = Column(
         Integer,
         ForeignKey("task_cards.id", ondelete="SET NULL"),
         nullable=True,
@@ -302,108 +332,84 @@ class TaskCard(Base):
     )
 
     # Technical classification
-    ata_chapter: str | None = Column(String(20), nullable=True, index=True)
-    task_code: str | None = Column(
-        String(64),
-        nullable=True,
-        index=True,
-    )  # internal card number or OEM task number
+    ata_chapter = Column(String(20), nullable=True, index=True)
+    task_code = Column(String(64), nullable=True, index=True)  # internal card number or OEM task number
 
-    title: str = Column(String(255), nullable=False)
-    description: str | None = Column(Text, nullable=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
 
-    category: TaskCategoryEnum = Column(
-        SQLEnum(TaskCategoryEnum, name="task_category"),
+    category = Column(
+        SAEnum(TaskCategoryEnum, name="task_category_enum", native_enum=False),
         nullable=False,
         default=TaskCategoryEnum.SCHEDULED,
+        index=True,
     )
 
-    origin_type: TaskOriginTypeEnum = Column(
-        SQLEnum(TaskOriginTypeEnum, name="task_origin_type"),
+    origin_type = Column(
+        SAEnum(TaskOriginTypeEnum, name="task_origin_type_enum", native_enum=False),
         nullable=False,
         default=TaskOriginTypeEnum.SCHEDULED,
+        index=True,
     )
 
-    priority: TaskPriorityEnum = Column(
-        SQLEnum(TaskPriorityEnum, name="task_priority"),
+    priority = Column(
+        SAEnum(TaskPriorityEnum, name="task_priority_enum", native_enum=False),
         nullable=False,
         default=TaskPriorityEnum.MEDIUM,
+        index=True,
     )
 
     # Location / access metadata (ATA style)
-    zone: str | None = Column(String(32), nullable=True)
-    access_panel: str | None = Column(String(64), nullable=True)
+    zone = Column(String(32), nullable=True)
+    access_panel = Column(String(64), nullable=True)
 
     # Planning
-    planned_start: datetime | None = Column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    planned_end: datetime | None = Column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    estimated_manhours: float | None = Column(Float, nullable=True)
+    planned_start = Column(DateTime(timezone=True), nullable=True)
+    planned_end = Column(DateTime(timezone=True), nullable=True)
+    estimated_manhours = Column(Float, nullable=True)
 
     # Execution
-    status: TaskStatusEnum = Column(
-        SQLEnum(TaskStatusEnum, name="task_status"),
+    status = Column(
+        SAEnum(TaskStatusEnum, name="task_status_enum", native_enum=False),
         nullable=False,
         default=TaskStatusEnum.PLANNED,
+        index=True,
     )
-    actual_start: datetime | None = Column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    actual_end: datetime | None = Column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
+    actual_start = Column(DateTime(timezone=True), nullable=True)
+    actual_end = Column(DateTime(timezone=True), nullable=True)
 
     # Human factors / error-capturing
-    error_capturing_method: ErrorCapturingMethodEnum | None = Column(
-        SQLEnum(ErrorCapturingMethodEnum, name="task_error_capturing_method"),
+    error_capturing_method = Column(
+        SAEnum(ErrorCapturingMethodEnum, name="task_error_capturing_method_enum", native_enum=False),
         nullable=True,
     )
-    requires_duplicate_inspection: bool = Column(
-        Boolean,
-        nullable=False,
-        default=False,
-    )
-    hf_notes: str | None = Column(
-        Text,
-        nullable=True,
-    )  # free-text HF remarks / cautions / special instructions
+    requires_duplicate_inspection = Column(Boolean, nullable=False, default=False)
+
+    hf_notes = Column(Text, nullable=True)  # free-text HF remarks / cautions / instructions
 
     # Audit
-    created_at: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-    )
-    updated_at: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
-    created_by_user_id: int | None = Column(
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    created_by_user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
-    updated_by_user_id: int | None = Column(
+    updated_by_user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
 
     # Relationships
-    work_order = relationship("WorkOrder", back_populates="tasks")
-    aircraft = relationship("Aircraft")  # simple navigation, no back_populates
+    work_order = relationship("WorkOrder", back_populates="tasks", lazy="joined")
+    aircraft = relationship("Aircraft", lazy="joined")  # navigation helper
 
-    component = relationship("AircraftComponent")
-    program_item = relationship("MaintenanceProgramItem")
+    component = relationship("AircraftComponent", lazy="joined")
+    program_item = relationship("AmpProgramItem", lazy="joined")
 
     parent_task = relationship(
         "TaskCard",
@@ -415,13 +421,20 @@ class TaskCard(Base):
         "TaskAssignment",
         back_populates="task",
         cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
     )
 
     work_logs = relationship(
         "WorkLogEntry",
         back_populates="task",
         cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
     )
+
+    def __repr__(self) -> str:
+        return f"<TaskCard id={self.id} wo={self.work_order_id} status={self.status} title={self.title!r}>"
 
 
 # ---------------------------------------------------------------------------
@@ -433,59 +446,64 @@ class TaskAssignment(Base):
     """
     Assignment of a TaskCard to a user (engineer / technician / inspector).
 
-    Allows tracking of:
-    - who is responsible for the task (LEAD / SUPPORT / INSPECTOR);
-    - agreed man-hour allocation;
+    Tracks:
+    - role on task (LEAD / SUPPORT / INSPECTOR);
+    - allocated man-hours;
     - assignment lifecycle (ASSIGNED / ACCEPTED / REJECTED / COMPLETED).
     """
 
     __tablename__ = "task_assignments"
+    __table_args__ = (
+        UniqueConstraint("task_id", "user_id", "role_on_task", name="uq_task_assignments_task_user_role"),
+        Index("ix_task_assignments_task_status", "task_id", "status"),
+        Index("ix_task_assignments_user_status", "user_id", "status"),
+        CheckConstraint(
+            "allocated_hours IS NULL OR allocated_hours >= 0",
+            name="ck_task_assignments_allocated_hours_nonneg",
+        ),
+    )
 
-    id: int = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
 
-    task_id: int = Column(
+    task_id = Column(
         Integer,
         ForeignKey("task_cards.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
-    user_id: int = Column(
+    user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
-    role_on_task: TaskRoleOnTaskEnum = Column(
-        SQLEnum(TaskRoleOnTaskEnum, name="task_assignment_role"),
+    role_on_task = Column(
+        SAEnum(TaskRoleOnTaskEnum, name="task_assignment_role_enum", native_enum=False),
         nullable=False,
         default=TaskRoleOnTaskEnum.SUPPORT,
+        index=True,
     )
 
-    allocated_hours: float | None = Column(Float, nullable=True)
+    allocated_hours = Column(Float, nullable=True)
 
-    status: TaskAssignmentStatusEnum = Column(
-        SQLEnum(TaskAssignmentStatusEnum, name="task_assignment_status"),
+    status = Column(
+        SAEnum(TaskAssignmentStatusEnum, name="task_assignment_status_enum", native_enum=False),
         nullable=False,
         default=TaskAssignmentStatusEnum.ASSIGNED,
+        index=True,
     )
 
-    created_at: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-    )
-    updated_at: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     # Relationships
-    task = relationship("TaskCard", back_populates="assignments")
-    user = relationship("User")  # from apps.accounts.models via table "users"
+    task = relationship("TaskCard", back_populates="assignments", lazy="joined")
+    user = relationship("User", lazy="joined")  # apps.accounts.models via "users"
+
+    def __repr__(self) -> str:
+        return f"<TaskAssignment id={self.id} task={self.task_id} user={self.user_id} role={self.role_on_task}>"
 
 
 # ---------------------------------------------------------------------------
@@ -502,50 +520,44 @@ class WorkLogEntry(Base):
     """
 
     __tablename__ = "work_log_entries"
+    __table_args__ = (
+        Index("ix_work_log_task_time", "task_id", "start_time"),
+        Index("ix_work_log_user_time", "user_id", "start_time"),
+        CheckConstraint("end_time >= start_time", name="ck_work_log_end_after_start"),
+        CheckConstraint("actual_hours >= 0", name="ck_work_log_actual_hours_nonneg"),
+    )
 
-    id: int = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
 
-    task_id: int = Column(
+    task_id = Column(
         Integer,
         ForeignKey("task_cards.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
-    user_id: int | None = Column(
+    user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
 
-    start_time: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-    end_time: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
+    start_time = Column(DateTime(timezone=True), nullable=False)
+    end_time = Column(DateTime(timezone=True), nullable=False)
 
     # Stored explicitly to make reporting easier and robust to timezone changes
-    actual_hours: float = Column(Float, nullable=False)
+    actual_hours = Column(Float, nullable=False)
 
-    description: str | None = Column(Text, nullable=True)
-    station: str | None = Column(String(16), nullable=True)  # ICAO / IATA / base
+    description = Column(Text, nullable=True)
+    station = Column(String(16), nullable=True)  # ICAO / IATA / base
 
-    created_at: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-    )
-    updated_at: datetime = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     # Relationships
-    task = relationship("TaskCard", back_populates="work_logs")
-    user = relationship("User")
+    task = relationship("TaskCard", back_populates="work_logs", lazy="joined")
+    user = relationship("User", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<WorkLogEntry id={self.id} task={self.task_id} hours={self.actual_hours}>"

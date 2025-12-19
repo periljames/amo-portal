@@ -23,21 +23,33 @@ Key ATA Spec 2000 alignments:
 This file is intentionally conservative: we add the Spec 2000-aligned
 fields without breaking existing API field names so that routers and
 schemas can be migrated incrementally.
+
+Long-run safeguards added in this revision:
+- Indexes for common query paths (fleet dashboards, planning, reporting).
+- Uniqueness constraints to prevent silent duplication (component positions,
+  programme item identity).
+- Removed dangerous delete-orphan cascade on WorkOrders (editing the list
+  should never delete work orders).
+- Relationship loading defaults to avoid join row-explosion in large datasets.
 """
 
-from datetime import datetime, date
+from __future__ import annotations
+
+from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
     Float,
+    ForeignKey,
+    Index,
     Integer,
     String,
     Text,
-    ForeignKey,
     UniqueConstraint,
     Enum as SQLEnum,
 )
@@ -89,6 +101,17 @@ class Aircraft(Base):
 
     __tablename__ = "aircraft"
 
+    __table_args__ = (
+        # Typical filters in ops/planning UIs
+        Index("ix_aircraft_model_code", "aircraft_model_code"),
+        Index("ix_aircraft_operator_code", "operator_code"),
+        Index("ix_aircraft_status_active", "status", "is_active"),
+        Index("ix_aircraft_last_log_date", "last_log_date"),
+        # Prevent negative totals creeping in
+        CheckConstraint("total_hours IS NULL OR total_hours >= 0", name="ck_aircraft_total_hours_nonneg"),
+        CheckConstraint("total_cycles IS NULL OR total_cycles >= 0", name="ck_aircraft_total_cycles_nonneg"),
+    )
+
     # Primary key = aircraft identification (AIN-style internal ID)
     # Spec 2000: Aircraft Identification Number (AIN)
     serial_number = Column(String(50), primary_key=True, index=True)
@@ -115,8 +138,6 @@ class Aircraft(Base):
 
     # --- Local convenience fields (kept for app usage, mapped to Spec 2000) ---
 
-    # These correspond to model/type structure but are not strict Spec 2000 TEIs.
-    # They are retained for UI clarity and internal reporting.
     template = Column(String(50), nullable=True)   # e.g. 'DHC8-315', 'C208B'
     make = Column(String(50), nullable=True)       # e.g. manufacturer name
     model = Column(String(50), nullable=True)      # e.g. '315', '208B'
@@ -128,28 +149,24 @@ class Aircraft(Base):
     owner = Column(String(255), nullable=True)
 
     # Operational status – OPEN / CLOSED / STORED, etc.
-    status = Column(String(20), nullable=False, default="OPEN")
-    is_active = Column(Boolean, nullable=False, default=True)
+    status = Column(String(20), nullable=False, default="OPEN", index=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
 
     # Utilisation snapshot (high-level cumulative hours / cycles)
-    # These reflect total aircraft time and cycles as of `last_log_date`.
-    # Spec 2000 alignment:
-    #   - total_hours  -> Aircraft Cumulative Total Flight Hours
-    #   - total_cycles -> Aircraft Cumulative Total Cycles
-    last_log_date = Column(Date, nullable=True)
+    last_log_date = Column(Date, nullable=True, index=True)
     total_hours = Column(Float, nullable=True)   # cumulative flight hours
     total_cycles = Column(Float, nullable=True)  # cumulative cycles / landings
 
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # ------------------------------------------------------------------
@@ -157,38 +174,55 @@ class Aircraft(Base):
     # ------------------------------------------------------------------
 
     # All work orders raised against this aircraft (defined in apps.work)
+    #
+    # IMPORTANT:
+    # Do NOT use delete-orphan here. Removing a WorkOrder from the relationship
+    # list should never delete it. That is a long-run "silent data loss" risk.
     work_orders = relationship(
         "WorkOrder",
         back_populates="aircraft",
-        cascade="all, delete-orphan",
+        lazy="selectin",
+        passive_deletes=True,
+        cascade="save-update, merge",
     )
 
     # All CRS records that reference this aircraft (defined in apps.crs)
     crs_list = relationship(
         "CRS",
         back_populates="aircraft",
+        lazy="selectin",
+        passive_deletes=True,
     )
 
     # Component master records (engines, props, APU, etc.)
     components = relationship(
         "AircraftComponent",
         back_populates="aircraft",
+        lazy="selectin",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     # Detailed utilisation entries (per techlog / date)
     usage_entries = relationship(
         "AircraftUsage",
         back_populates="aircraft",
+        lazy="selectin",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     # Maintenance programme status records for this aircraft
     maintenance_statuses = relationship(
         "MaintenanceStatus",
         back_populates="aircraft",
+        lazy="selectin",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
+
+    def __repr__(self) -> str:
+        return f"<Aircraft serial_number={self.serial_number} registration={self.registration}>"
 
 
 # ---------------------------------------------------------------------------
@@ -218,16 +252,21 @@ class AircraftComponent(Base):
     - unit_of_measure_hours / unit_of_measure_cycles:
         Units of measure (UNT) consistent with Spec 2000 usage:
         typically 'H' for hours, 'C' for cycles.
-
-    Time accumulation fields (installed/current hours/cycles and overhaul
-    references) are designed to map cleanly onto Spec 2000 Total Time Text
-    (TTM_x_y) when exporting component reliability data:
-      - Time Since New (TSN)
-      - Time Since Overhaul (TSO)
-      - etc.
     """
 
     __tablename__ = "aircraft_components"
+
+    __table_args__ = (
+        # One component position per aircraft (prevents duplicate "L ENGINE" entries)
+        UniqueConstraint("aircraft_serial_number", "position", name="uq_aircraft_component_aircraft_position"),
+        Index("ix_aircraft_components_aircraft_position", "aircraft_serial_number", "position"),
+        Index("ix_aircraft_components_pn_sn", "part_number", "serial_number"),
+        Index("ix_aircraft_components_ata", "ata"),
+        CheckConstraint("installed_hours IS NULL OR installed_hours >= 0", name="ck_aircraft_comp_installed_hours_nonneg"),
+        CheckConstraint("installed_cycles IS NULL OR installed_cycles >= 0", name="ck_aircraft_comp_installed_cycles_nonneg"),
+        CheckConstraint("current_hours IS NULL OR current_hours >= 0", name="ck_aircraft_comp_current_hours_nonneg"),
+        CheckConstraint("current_cycles IS NULL OR current_cycles >= 0", name="ck_aircraft_comp_current_cycles_nonneg"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 
@@ -235,29 +274,30 @@ class AircraftComponent(Base):
         String(50),
         ForeignKey("aircraft.serial_number", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
 
     # e.g. 'L ENGINE', 'R ENGINE', 'APU', 'PROP LH', 'PROP RH'
-    position = Column(String(50), nullable=False)
+    position = Column(String(50), nullable=False, index=True)
 
     # Optional ATA chapter / system reference (e.g. '72', '79', etc.)
-    ata = Column(String(20))
+    ata = Column(String(20), nullable=True, index=True)
 
     # Core identification
-    part_number = Column(String(50))       # PNR
-    serial_number = Column(String(50))     # component serial
-    description = Column(String(255))
+    part_number = Column(String(50), nullable=True, index=True)       # PNR
+    serial_number = Column(String(50), nullable=True, index=True)     # component serial
+    description = Column(String(255), nullable=True)
 
     # Installation reference
-    installed_date = Column(Date)
-    installed_hours = Column(Float)
-    installed_cycles = Column(Float)
+    installed_date = Column(Date, nullable=True)
+    installed_hours = Column(Float, nullable=True)
+    installed_cycles = Column(Float, nullable=True)
 
     # Current cumulative utilisation
-    current_hours = Column(Float)
-    current_cycles = Column(Float)
+    current_hours = Column(Float, nullable=True)
+    current_cycles = Column(Float, nullable=True)
 
-    notes = Column(Text)
+    notes = Column(Text, nullable=True)
 
     # ------------------------------------------------------------------
     # Life limits and reliability standardisation
@@ -280,14 +320,17 @@ class AircraftComponent(Base):
 
     # Standardisation for reliability coding
     manufacturer_code = Column(String(32), nullable=True)  # MFR
-    operator_code = Column(String(32), nullable=True)       # OPR / reporting operator
+    operator_code = Column(String(32), nullable=True)      # OPR / reporting operator
 
     # Units of measure for hours and cycles – normally 'H' and 'C' in Spec 2000
     unit_of_measure_hours = Column(String(8), nullable=False, default="H")
     unit_of_measure_cycles = Column(String(8), nullable=False, default="C")
 
     # Relationships
-    aircraft = relationship("Aircraft", back_populates="components")
+    aircraft = relationship("Aircraft", back_populates="components", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<AircraftComponent id={self.id} aircraft={self.aircraft_serial_number} position={self.position}>"
 
 
 # ---------------------------------------------------------------------------
@@ -298,29 +341,10 @@ class AircraftComponent(Base):
 class AircraftUsage(Base):
     """
     Represents an individual utilisation entry from a techlog / flight.
-
-    For each aircraft, this captures:
-    - date
-    - techlog number
-    - block hours (time flown)
-    - cycles (takeoff/landing)
-
-    plus an optional snapshot of totals after the flight.
-
-    Spec 2000 alignment:
-
-    These records are the raw per-flight utilisation that can be aggregated
-    to:
-      - Aircraft Monthly Total Flight Hours
-      - Aircraft Monthly Total Cycles
-      - Aircraft Cumulative Total Flight Hours
-      - Aircraft Cumulative Total Cycles
-
-    as required to build Aircraft Hours and Landings Records (Record Type 36)
-    for external exchange.
     """
 
     __tablename__ = "aircraft_usage"
+
     __table_args__ = (
         UniqueConstraint(
             "aircraft_serial_number",
@@ -328,6 +352,10 @@ class AircraftUsage(Base):
             "techlog_no",
             name="uq_aircraft_usage_aircraft_date_techlog",
         ),
+        Index("ix_aircraft_usage_aircraft_date", "aircraft_serial_number", "date"),
+        Index("ix_aircraft_usage_techlog_no", "techlog_no"),
+        CheckConstraint("block_hours >= 0", name="ck_aircraft_usage_block_hours_nonneg"),
+        CheckConstraint("cycles >= 0", name="ck_aircraft_usage_cycles_nonneg"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -340,15 +368,13 @@ class AircraftUsage(Base):
     )
 
     date = Column(Date, nullable=False, index=True)
-    techlog_no = Column(String(64), nullable=False)
+    techlog_no = Column(String(64), nullable=False, index=True)
     station = Column(String(16), nullable=True)  # ICAO/IATA/base code
 
     block_hours = Column(Float, nullable=False)
     cycles = Column(Float, nullable=False)
 
     # Snapshot / denormalised totals AFTER this entry
-    # These can be used directly when calculating Spec 2000 cumulative
-    # hours/cycles for the aircraft at the reporting date.
     ttaf_after = Column(Float, nullable=True)    # Total Time Airframe
     tca_after = Column(Float, nullable=True)     # Total Cycles Airframe
     ttesn_after = Column(Float, nullable=True)   # Total Time Engine Since New
@@ -361,26 +387,31 @@ class AircraftUsage(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
     created_by_user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     updated_by_user_id = Column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
 
-    aircraft = relationship("Aircraft", back_populates="usage_entries")
+    aircraft = relationship("Aircraft", back_populates="usage_entries", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<AircraftUsage id={self.id} aircraft={self.aircraft_serial_number} date={self.date} techlog={self.techlog_no}>"
 
 
 # ---------------------------------------------------------------------------
@@ -393,15 +424,7 @@ class MaintenanceProgramCategoryEnum(str, Enum):
     High-level category for maintenance programme items.
 
     Not directly defined in Spec 2000, but aligned with common airline
-    maintenance planning practice and ATA chapters:
-
-    - AIRFRAME: airframe and systems (ATA 21–57).
-    - ENGINE: engine-related tasks.
-    - PROP: propeller.
-    - AD: Airworthiness Directive.
-    - SB: Service Bulletin.
-    - HT: Hard Time / life-limited items.
-    - OTHER: anything not fitting the above buckets.
+    maintenance planning practice and ATA chapters.
     """
 
     AIRFRAME = "AIRFRAME"
@@ -416,18 +439,25 @@ class MaintenanceProgramCategoryEnum(str, Enum):
 class MaintenanceProgramItem(Base):
     """
     Template-level definition of a maintenance task for a given aircraft type.
-
-    Example:
-      - aircraft_template: aircraft model / type (e.g. 'C208B')
-      - ata_chapter: '05-21'
-      - task_code: manufacturer or internal task identifier
-      - category: AIRFRAME / ENGINE / PROP / AD / SB / HT / OTHER
-
-    The ATA chapter links naturally to ATA iSpec 2200 / IPC structures
-    and to Spec 2000 provisioning data by ATA/system code.
     """
 
     __tablename__ = "maintenance_program_items"
+
+    __table_args__ = (
+        # Prevent accidental duplicates of the same task identity
+        UniqueConstraint(
+            "aircraft_template",
+            "ata_chapter",
+            "task_code",
+            name="uq_maintenance_program_item_template_ata_task",
+        ),
+        Index("ix_mpi_template_ata", "aircraft_template", "ata_chapter"),
+        Index("ix_mpi_task_code", "task_code"),
+        Index("ix_mpi_category", "category"),
+        CheckConstraint("interval_hours IS NULL OR interval_hours >= 0", name="ck_mpi_interval_hours_nonneg"),
+        CheckConstraint("interval_cycles IS NULL OR interval_cycles >= 0", name="ck_mpi_interval_cycles_nonneg"),
+        CheckConstraint("interval_days IS NULL OR interval_days >= 0", name="ck_mpi_interval_days_nonneg"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 
@@ -435,8 +465,15 @@ class MaintenanceProgramItem(Base):
     ata_chapter = Column(String(20), nullable=False, index=True)
     task_code = Column(String(64), nullable=False, index=True)
 
+    # NOTE:
+    # native_enum=False prevents Postgres enum-type lifecycle issues (Alembic).
+    # It stores values as VARCHAR + CHECK constraint instead.
     category = Column(
-        SQLEnum(MaintenanceProgramCategoryEnum, name="maintenance_program_category"),
+        SQLEnum(
+            MaintenanceProgramCategoryEnum,
+            name="maintenance_program_category",
+            native_enum=False,
+        ),
         nullable=False,
         default=MaintenanceProgramCategoryEnum.AIRFRAME,
     )
@@ -448,37 +485,38 @@ class MaintenanceProgramItem(Base):
     interval_cycles = Column(Float, nullable=True)
     interval_days = Column(Integer, nullable=True)
 
-    is_mandatory = Column(Boolean, nullable=False, default=True)
+    is_mandatory = Column(Boolean, nullable=False, default=True, index=True)
 
     statuses = relationship(
         "MaintenanceStatus",
         back_populates="program_item",
         cascade="all, delete-orphan",
+        lazy="selectin",
+        passive_deletes=True,
     )
+
+    def __repr__(self) -> str:
+        return f"<MaintenanceProgramItem id={self.id} template={self.aircraft_template} task_code={self.task_code}>"
 
 
 class MaintenanceStatus(Base):
     """
     Aircraft-level status for each maintenance programme item.
-
-    Tracks:
-    - last done (date / hours / cycles)
-    - next due (date / hours / cycles)
-    - remaining (days / hours / cycles)
-
-    These fields can be used to drive both internal planning (check packs,
-    work orders) and external reporting if you ever decide to encode
-    maintenance status into Spec 2000-compatible exchange messages
-    or reliability data.
     """
 
     __tablename__ = "maintenance_statuses"
+
     __table_args__ = (
         UniqueConstraint(
             "aircraft_serial_number",
             "program_item_id",
             name="uq_maintenance_status_aircraft_program_item",
         ),
+        Index("ix_maintenance_status_aircraft_due_date", "aircraft_serial_number", "next_due_date"),
+        Index("ix_maintenance_status_program_item", "program_item_id"),
+        CheckConstraint("remaining_days IS NULL OR remaining_days >= 0", name="ck_mstatus_remaining_days_nonneg"),
+        CheckConstraint("remaining_hours IS NULL OR remaining_hours >= 0", name="ck_mstatus_remaining_hours_nonneg"),
+        CheckConstraint("remaining_cycles IS NULL OR remaining_cycles >= 0", name="ck_mstatus_remaining_cycles_nonneg"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -503,7 +541,7 @@ class MaintenanceStatus(Base):
     last_done_cycles = Column(Float, nullable=True)
 
     # Next due
-    next_due_date = Column(Date, nullable=True)
+    next_due_date = Column(Date, nullable=True, index=True)
     next_due_hours = Column(Float, nullable=True)
     next_due_cycles = Column(Float, nullable=True)
 
@@ -512,5 +550,8 @@ class MaintenanceStatus(Base):
     remaining_hours = Column(Float, nullable=True)
     remaining_cycles = Column(Float, nullable=True)
 
-    program_item = relationship("MaintenanceProgramItem", back_populates="statuses")
-    aircraft = relationship("Aircraft", back_populates="maintenance_statuses")
+    program_item = relationship("MaintenanceProgramItem", back_populates="statuses", lazy="joined")
+    aircraft = relationship("Aircraft", back_populates="maintenance_statuses", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<MaintenanceStatus id={self.id} aircraft={self.aircraft_serial_number} program_item_id={self.program_item_id}>"
