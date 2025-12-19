@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 import re
 
 from pdfrw import PdfReader, PdfWriter, PdfDict, PdfName
+from pdfrw.objects.pdfstring import PdfString
 
 from ...database import SessionLocal
 from . import models as crs_models
@@ -21,6 +22,8 @@ TEMPLATE_GLOB = "Form Template CRS Form Rev *.pdf"
 
 OUTPUT_DIR = BASE_DIR / "generated" / "crs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+TEMPLATE_OUTPUT_DIR = OUTPUT_DIR / "templates"
+TEMPLATE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Keys for checkboxes and radios in the PDF
 CHECKBOX_FIELDS = {"AMP", "AMM", "Mtx Data"}
@@ -30,6 +33,10 @@ RELEASING_AUTH_RADIO = {
     "KCAA": "KCAA",
     "ECAA": "ECAA",
     "GCAA": "GCAA",
+}
+
+FIELD_NAME_ALIASES = {
+    "7b RH Engine SNo": "RH_Engine_SNo",
 }
 
 
@@ -79,6 +86,26 @@ def get_latest_crs_template() -> Path:
         key=lambda p: (_parse_revision_number(p), p.stat().st_mtime)
     )
     return candidates[-1]
+
+
+def _decode_pdf_field_name(field_name_obj: Any) -> str:
+    if isinstance(field_name_obj, PdfString):
+        return field_name_obj.to_unicode()
+
+    field_name = str(field_name_obj)
+    if field_name.startswith("(") and field_name.endswith(")"):
+        return field_name[1:-1]
+    return field_name
+
+
+def _normalize_field_name(field_name: str) -> str:
+    cleaned = (
+        field_name.replace("\ufeff", "")
+        .replace("\u00ad", "")
+        .replace("\x00", "")
+        .strip()
+    )
+    return FIELD_NAME_ALIASES.get(cleaned, cleaned)
 
 
 def _build_field_values(crs: crs_models.CRS) -> Dict[str, Any]:
@@ -225,14 +252,15 @@ def _fill_pdf(template: Path, output: Path, data: Dict[str, Any]) -> None:
             if not field_name_obj:
                 continue
 
-            raw_name = str(field_name_obj)[1:-1]  # strip parentheses
-            if raw_name not in data:
+            raw_name = _decode_pdf_field_name(field_name_obj)
+            normalized_name = _normalize_field_name(raw_name)
+            if normalized_name not in data:
                 continue
 
-            value = data[raw_name]
+            value = data[normalized_name]
 
             # Checkboxes
-            if raw_name in CHECKBOX_FIELDS:
+            if normalized_name in CHECKBOX_FIELDS:
                 on = bool(value)
                 annot.update(
                     PdfDict(
@@ -244,7 +272,7 @@ def _fill_pdf(template: Path, output: Path, data: Dict[str, Any]) -> None:
                 continue
 
             # Airframe unit radios
-            if raw_name in AIRFRAME_UNIT_FIELDS:
+            if normalized_name in AIRFRAME_UNIT_FIELDS:
                 selected = bool(value)
                 annot.update(
                     PdfDict(
@@ -256,7 +284,7 @@ def _fill_pdf(template: Path, output: Path, data: Dict[str, Any]) -> None:
                 continue
 
             # Releasing Authority radios (KCAA/ECAA/GCAA)
-            if raw_name in RELEASING_AUTH_RADIO.values():
+            if normalized_name in RELEASING_AUTH_RADIO.values():
                 selected = bool(value)
                 annot.update(
                     PdfDict(
@@ -268,7 +296,7 @@ def _fill_pdf(template: Path, output: Path, data: Dict[str, Any]) -> None:
                 continue
 
             # Normal text / numeric fields
-            annot.update(PdfDict(V=str(value)))
+            annot.update(PdfDict(V=PdfString.encode(str(value))))
             _set_field_readonly(annot)
 
     writer = PdfWriter()
@@ -278,6 +306,36 @@ def _fill_pdf(template: Path, output: Path, data: Dict[str, Any]) -> None:
         writer.trailer.Root.NeedAppearances = PdfName("true")
 
     writer.write(str(output))
+
+
+def get_fillable_crs_template() -> Path:
+    """
+    Return a CRS template path that has form appearance metadata enabled.
+
+    Some viewers (Adobe/Google) need NeedAppearances set to render empty
+    AcroForm fields correctly. We generate a cached copy to avoid mutating
+    the original template.
+    """
+    template_path = get_latest_crs_template()
+    cache_name = (
+        f"{template_path.stem}-fillable-"
+        f"{int(template_path.stat().st_mtime)}{template_path.suffix}"
+    )
+    output_path = TEMPLATE_OUTPUT_DIR / cache_name
+    if output_path.exists():
+        return output_path
+
+    pdf = PdfReader(str(template_path))
+    if not pdf.Root:
+        pdf.Root = PdfDict()
+    if not pdf.Root.AcroForm:
+        pdf.Root.AcroForm = PdfDict()
+    pdf.Root.AcroForm.NeedAppearances = PdfName("true")
+
+    writer = PdfWriter()
+    writer.trailer = pdf
+    writer.write(str(output_path))
+    return output_path
 
 
 def create_crs_pdf(crs_id: int) -> Path:
@@ -348,7 +406,7 @@ def get_crs_form_template_metadata() -> Dict[str, Any]:
             if not field_name_obj:
                 continue
 
-            name = str(field_name_obj)[1:-1]  # strip parentheses
+            name = _normalize_field_name(_decode_pdf_field_name(field_name_obj))
 
             # Field rectangle
             x = y = w = h = 0.0

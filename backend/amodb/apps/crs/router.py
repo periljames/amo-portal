@@ -18,7 +18,7 @@ from . import schemas as crs_schemas
 from .utils import generate_crs_serial
 from .pdf_renderer import (
     create_crs_pdf,
-    get_latest_crs_template,
+    get_fillable_crs_template,
     get_crs_form_template_metadata,
 )
 
@@ -41,7 +41,7 @@ def get_crs_template_pdf():
     to overlay interactive inputs for new CRS creation.
     """
     try:
-        template_path: Path = get_latest_crs_template()
+         template_path: Path = get_fillable_crs_template()
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
