@@ -128,8 +128,21 @@ class AircraftImportRow(BaseModel):
     total_cycles: Optional[float] = None
 
 
+class AircraftImportConfirmedCell(BaseModel):
+    original: Any = None
+    proposed: Any = None
+    final: Any = None
+
+
+class AircraftImportConfirmedRow(BaseModel):
+    row_number: int
+    cells: Dict[str, AircraftImportConfirmedCell]
+
+
 class AircraftImportRequest(BaseModel):
     rows: List[AircraftImportRow]
+    confirmed_rows: Optional[List[AircraftImportConfirmedRow]] = None
+    batch_id: Optional[str] = None
 
 
 class AircraftImportTemplateBase(BaseModel):
@@ -160,6 +173,18 @@ class AircraftImportTemplateRead(AircraftImportTemplateBase):
     id: int
     created_at: DateTimeType
     updated_at: DateTimeType
+
+    class Config:
+        from_attributes = True
+
+
+class ImportSnapshotRead(BaseModel):
+    id: int
+    batch_id: str
+    import_type: str
+    diff_map: Dict[str, Any]
+    created_at: DateTimeType
+    created_by_user_id: Optional[str] = None
 
     class Config:
         from_attributes = True

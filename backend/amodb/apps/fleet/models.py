@@ -615,3 +615,84 @@ class AircraftImportTemplate(Base):
 
     def __repr__(self) -> str:
         return f"<AircraftImportTemplate id={self.id} name={self.name}>"
+
+
+# ---------------------------------------------------------------------------
+# Aircraft Import Reconciliation
+# ---------------------------------------------------------------------------
+
+
+class ImportSnapshot(Base):
+    """
+    Captures the full diff map for an import batch, enabling undo/redo.
+    """
+
+    __tablename__ = "aircraft_import_snapshots"
+    __table_args__ = (
+        Index("ix_import_snapshot_batch", "batch_id", "created_at"),
+        Index("ix_import_snapshot_type", "import_type", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(String(36), nullable=False, index=True)
+    import_type = Column(String(32), nullable=False, index=True, default="aircraft")
+    diff_map = Column(JSON, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    created_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<ImportSnapshot id={self.id} batch_id={self.batch_id}>"
+
+
+class ImportReconciliationLog(Base):
+    """
+    Audit trail of per-cell reconciliation for import confirms.
+    """
+
+    __tablename__ = "aircraft_import_reconciliation_logs"
+    __table_args__ = (
+        Index("ix_import_recon_batch", "batch_id", "created_at"),
+        Index("ix_import_recon_snapshot", "snapshot_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_id = Column(
+        Integer,
+        ForeignKey("aircraft_import_snapshots.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    batch_id = Column(String(36), nullable=False, index=True)
+    import_type = Column(String(32), nullable=False, index=True, default="aircraft")
+    row_number = Column(Integer, nullable=True)
+    field_name = Column(String(64), nullable=False, index=True)
+    aircraft_serial_number = Column(String(50), nullable=True, index=True)
+    original_value = Column(JSON, nullable=True)
+    proposed_value = Column(JSON, nullable=True)
+    final_value = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    created_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ImportReconciliationLog id={self.id} batch_id={self.batch_id} "
+            f"field={self.field_name}>"
+        )
