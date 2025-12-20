@@ -3,6 +3,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext, getCachedUser } from "../services/auth";
+import { getMyTrainingStatus } from "../services/training";
+import type { TrainingStatusItem, TrainingStatusLabel } from "../types/training";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 
 type DepartmentId =
@@ -15,7 +17,7 @@ type DepartmentId =
   | "workshops"
   | "admin";
 
-  type SheetId =
+type SheetId =
   | "hours"
   | "airframe-typical"
   | "hard-time"
@@ -129,6 +131,8 @@ const DashboardPage: React.FC = () => {
 
   const isCRSDept = department === "planning" || department === "production";
   const isSystemAdminDept = department === "admin";
+  const isQualityDept = department === "quality";
+  const isEngineeringDept = department === "engineering";
 
   const canManageUsers =
     !!currentUser &&
@@ -144,6 +148,60 @@ const DashboardPage: React.FC = () => {
   const handleCreateUser = () => {
     navigate(`/maintenance/${amoSlug}/admin/users/new`);
   };
+
+  const handleTraining = () => {
+    navigate(`/maintenance/${amoSlug}/${department}/training`);
+  };
+
+  const handleQms = () => {
+    navigate(`/maintenance/${amoSlug}/${department}/qms`);
+  };
+
+  const handleAircraftImport = () => {
+    navigate(`/maintenance/${amoSlug}/${department}/aircraft-import`);
+  };
+
+  const [trainingState, setTrainingState] = useState<"idle" | "loading" | "ready" | "error">(
+    "idle",
+  );
+  const [trainingError, setTrainingError] = useState<string | null>(null);
+  const [trainingItems, setTrainingItems] = useState<TrainingStatusItem[]>([]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setTrainingState("loading");
+    setTrainingError(null);
+
+    getMyTrainingStatus()
+      .then((items) => {
+        setTrainingItems(items);
+        setTrainingState("ready");
+      })
+      .catch((err: any) => {
+        setTrainingError(err?.message || "Unable to load training snapshot.");
+        setTrainingState("error");
+      });
+  }, [currentUser]);
+
+  const trainingCounts = useMemo(() => {
+    const counts: Record<TrainingStatusLabel, number> = {
+      OK: 0,
+      DUE_SOON: 0,
+      OVERDUE: 0,
+      DEFERRED: 0,
+      SCHEDULED_ONLY: 0,
+      NOT_DONE: 0,
+    };
+
+    for (const item of trainingItems) {
+      counts[item.status] += 1;
+    }
+
+    return {
+      total: trainingItems.length,
+      ...counts,
+    };
+  }, [trainingItems]);
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
@@ -202,12 +260,77 @@ const DashboardPage: React.FC = () => {
         </section>
       )}
 
-      {!isCRSDept && !isSystemAdminDept && (
-        <section className="page-section">
-          <p className="page-section__body">
-            Department widgets for {niceLabel(department)} will appear here.
-          </p>
-        </section>
+      {!isSystemAdminDept && (
+        <>
+          <section className="page-section">
+            <h2 className="page-section__title">Daily overview</h2>
+            <p className="page-section__body">
+              Stay on top of training compliance, ongoing work, and department priorities.
+            </p>
+            <div className="page-section__actions">
+              <button type="button" className="primary-chip-btn" onClick={handleTraining}>
+                Open My Training
+              </button>
+              {isCRSDept && (
+                <button type="button" className="secondary-chip-btn" onClick={handleNewCrs}>
+                  Create CRS
+                </button>
+              )}
+              {isQualityDept && (
+                <button type="button" className="secondary-chip-btn" onClick={handleQms}>
+                  Open QMS dashboard
+                </button>
+              )}
+              {isEngineeringDept && (
+                <button
+                  type="button"
+                  className="secondary-chip-btn"
+                  onClick={handleAircraftImport}
+                >
+                  Aircraft import
+                </button>
+              )}
+              {canManageUsers && (
+                <button type="button" className="secondary-chip-btn" onClick={handleCreateUser}>
+                  Manage users
+                </button>
+              )}
+            </div>
+          </section>
+
+          <section className="page-section">
+            <div className="card">
+              <div className="card-header">
+                <h2>My training snapshot</h2>
+                <p className="text-muted">Live status from the training service.</p>
+              </div>
+
+              {trainingState === "loading" && (
+                <p className="text-muted">Loading training status…</p>
+              )}
+              {trainingState === "error" && (
+                <div className="alert alert-error">{trainingError}</div>
+              )}
+              {trainingState === "ready" && (
+                <>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <span className="badge badge--neutral">Total: {trainingCounts.total}</span>
+                    <span className="badge badge--success">OK: {trainingCounts.OK}</span>
+                    <span className="badge badge--warning">Due soon: {trainingCounts.DUE_SOON}</span>
+                    <span className="badge badge--danger">Overdue: {trainingCounts.OVERDUE}</span>
+                    <span className="badge badge--neutral">Deferred: {trainingCounts.DEFERRED}</span>
+                  </div>
+
+                  <div style={{ marginTop: 12 }}>
+                    <button type="button" className="secondary-chip-btn" onClick={handleTraining}>
+                      View full training status
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </>
       )}
     </DepartmentLayout>
   );

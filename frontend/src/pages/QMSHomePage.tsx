@@ -1,6 +1,6 @@
 // src/pages/quality/QMSHomePage.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
@@ -49,8 +49,6 @@ function niceDomain(domain?: string): string {
 
 const QMSHomePage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
-  const navigate = useNavigate();
-
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
@@ -196,41 +194,9 @@ const QMSHomePage: React.FC = () => {
               <button
                 type="button"
                 className="primary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms`)}
+                onClick={load}
               >
-                Refresh
-              </button>
-
-              <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms/documents`)}
-              >
-                Documents
-              </button>
-
-              <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms/audits`)}
-              >
-                Audits
-              </button>
-
-              <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms/change-requests`)}
-              >
-                Change Requests
-              </button>
-
-              <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms/distributions`)}
-              >
-                Distributions
+                Refresh snapshot
               </button>
             </div>
           </section>

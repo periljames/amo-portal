@@ -234,6 +234,8 @@ const DepartmentLayout: React.FC<Props> = ({
   const userName = getUserDisplayName(currentUser);
   const userInitials = getUserInitials(currentUser);
 
+  const currentYear = new Date().getFullYear();
+
   return (
     <div className={shellClassName}>
       <aside className="app-shell__sidebar">
@@ -270,12 +272,7 @@ const DepartmentLayout: React.FC<Props> = ({
             );
           })}
 
-          <div
-            style={{
-              margin: "10px 0",
-              borderTop: "1px solid rgba(255,255,255,0.08)",
-            }}
-          />
+          <div className="sidebar__divider" />
 
           <button
             type="button"
@@ -310,102 +307,40 @@ const DepartmentLayout: React.FC<Props> = ({
       </aside>
 
       <main className="app-shell__main">
-        {/* Top bar */}
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "10px 12px",
-            borderBottom: "1px solid rgba(255,255,255,0.08)",
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontWeight: 700, letterSpacing: 0.2 }}>{deptLabel}</div>
-            <div style={{ opacity: 0.75, fontSize: 12 }}>
-              {amoLabel} · Department workspace
+        <header className="app-shell__topbar">
+          <div className="app-shell__topbar-title">
+            <div className="app-shell__topbar-heading">{deptLabel}</div>
+            <div className="app-shell__topbar-subtitle">
+              {amoLabel} · Daily operations workspace
             </div>
           </div>
 
-          <div
-            ref={profileRef}
-            style={{ position: "relative", display: "flex", alignItems: "center" }}
-          >
+          <div ref={profileRef} className="profile-menu">
             <button
               type="button"
               onClick={() => setProfileOpen((v) => !v)}
               aria-haspopup="menu"
               aria-expanded={profileOpen}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "6px 10px",
-                borderRadius: 999,
-                border: "1px solid rgba(255,255,255,0.10)",
-                background: "transparent",
-                cursor: "pointer",
-              }}
+              className="profile-menu__trigger"
               title={userName}
             >
-              <span
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 999,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontWeight: 800,
-                  border: "1px solid rgba(255,255,255,0.12)",
-                }}
-              >
-                {userInitials}
+              <span className="profile-menu__avatar">{userInitials}</span>
+              <span className="profile-menu__meta">
+                <span className="profile-menu__name">{userName}</span>
+                <span className="profile-menu__role">Profile</span>
               </span>
-              <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-                <span style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.1 }}>
-                  {userName}
-                </span>
-                <span style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.1 }}>
-                  Profile
-                </span>
-              </span>
-              <span style={{ opacity: 0.7, fontSize: 12 }}>{profileOpen ? "▲" : "▼"}</span>
+              <span className="profile-menu__caret">{profileOpen ? "▲" : "▼"}</span>
             </button>
 
             {profileOpen && (
-              <div
-                role="menu"
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 8px)",
-                  right: 0,
-                  minWidth: 220,
-                  borderRadius: 12,
-                  padding: 8,
-                  border: "1px solid rgba(255,255,255,0.10)",
-                  background: "rgba(20,20,22,0.98)",
-                  boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
-                  zIndex: 50,
-                }}
-              >
+              <div role="menu" className="profile-menu__panel">
                 <button
                   type="button"
                   role="menuitem"
+                  className="profile-menu__item"
                   onClick={() => {
                     setProfileOpen(false);
                     gotoMyTraining();
-                  }}
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "10px 10px",
-                    borderRadius: 10,
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "inherit",
                   }}
                 >
                   My Training
@@ -414,47 +349,26 @@ const DepartmentLayout: React.FC<Props> = ({
                 <button
                   type="button"
                   role="menuitem"
+                  className="profile-menu__item"
                   onClick={() => {
                     setProfileOpen(false);
                     toggleColorScheme();
                   }}
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "10px 10px",
-                    borderRadius: 10,
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "inherit",
-                  }}
                 >
-                  {colorScheme === "dark" ? "Switch to Light mode" : "Switch to Dark mode"}
+                  {colorScheme === "dark"
+                    ? "Switch to Light mode"
+                    : "Switch to Dark mode"}
                 </button>
 
-                <div
-                  style={{
-                    margin: "8px 0",
-                    borderTop: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                />
+                <div className="profile-menu__divider" />
 
                 <button
                   type="button"
                   role="menuitem"
+                  className="profile-menu__item"
                   onClick={() => {
                     setProfileOpen(false);
                     handleLogout();
-                  }}
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "10px 10px",
-                    borderRadius: 10,
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "inherit",
                   }}
                 >
                   Sign out
@@ -465,6 +379,11 @@ const DepartmentLayout: React.FC<Props> = ({
         </header>
 
         <div className="app-shell__main-inner">{children}</div>
+
+        <footer className="app-shell__footer">
+          <span>© {currentYear} AMO Portal.</span>
+          <span>All rights reserved.</span>
+        </footer>
       </main>
     </div>
   );
