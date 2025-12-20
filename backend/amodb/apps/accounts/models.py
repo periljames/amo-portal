@@ -382,6 +382,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     login_attempts = Column(Integer, nullable=False, default=0)
     locked_until = Column(DateTime(timezone=True), nullable=True)
+    lockout_count = Column(Integer, nullable=False, default=0)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     last_login_ip = Column(String(64), nullable=True)
     last_login_user_agent = Column(Text, nullable=True)

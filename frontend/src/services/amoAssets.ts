@@ -1,7 +1,7 @@
 // src/services/amoAssets.ts
 
 import { API_BASE_URL } from "./config";
-import { authHeaders, getToken } from "./auth";
+import { authHeaders, getToken, handleAuthFailure } from "./auth";
 
 export type AmoAssetRead = {
   amo_id: string;
@@ -30,6 +30,11 @@ export async function getAmoAssets(amoId?: string | null): Promise<AmoAssetRead>
     headers: authHeaders(),
   });
 
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);
@@ -47,6 +52,11 @@ export async function uploadAmoLogo(file: File, amoId?: string | null): Promise<
     headers: buildAuthHeader(),
     body: form,
   });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   if (!res.ok) {
     const text = await res.text();
@@ -66,6 +76,11 @@ export async function uploadAmoTemplate(file: File, amoId?: string | null): Prom
     body: form,
   });
 
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);
@@ -82,6 +97,11 @@ export async function downloadAmoAsset(
     method: "GET",
     headers: buildAuthHeader(),
   });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   if (!res.ok) {
     const text = await res.text();

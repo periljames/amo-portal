@@ -10,7 +10,7 @@
 // - Uses authHeaders() from auth.ts so requests carry the JWT.
 
 import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
-import { authHeaders } from "./auth";
+import { authHeaders, handleAuthFailure } from "./auth";
 import { API_BASE_URL } from "./config";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
@@ -28,6 +28,11 @@ async function request<T>(
     body,
     ...init,
   });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   if (!res.ok) {
     const contentType = res.headers.get("Content-Type") || "";
@@ -179,6 +184,11 @@ export async function fetchCRSTemplatePdf(): Promise<Blob> {
     method: "GET",
     headers: authHeaders(),
   });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   const contentType = res.headers.get("Content-Type") || "";
 
