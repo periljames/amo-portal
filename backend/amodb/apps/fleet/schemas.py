@@ -103,6 +103,35 @@ class AircraftRead(AircraftBase):
         from_attributes = True
 
 
+class AircraftImportRow(BaseModel):
+    row_number: Optional[int] = None
+    serial_number: str
+    registration: str
+
+    template: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    home_base: Optional[str] = None
+    owner: Optional[str] = None
+
+    aircraft_model_code: Optional[str] = None
+    operator_code: Optional[str] = None
+    supplier_code: Optional[str] = None
+    company_name: Optional[str] = None
+    internal_aircraft_identifier: Optional[str] = None
+
+    status: Optional[str] = "OPEN"
+    is_active: Optional[bool] = True
+
+    last_log_date: Optional[DateType] = None
+    total_hours: Optional[float] = None
+    total_cycles: Optional[float] = None
+
+
+class AircraftImportRequest(BaseModel):
+    rows: List[AircraftImportRow]
+
+
 # ---------------- COMPONENTS ----------------
 
 
