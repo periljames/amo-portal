@@ -5,6 +5,7 @@ from io import BytesIO
 import importlib
 import math
 import numbers
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -19,7 +20,7 @@ from fastapi import (
     UploadFile,
     File,
 )
-from sqlalchemy import or_
+from sqlalchemy import or_, tuple_
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -48,6 +49,64 @@ router = APIRouter(
     # Require an authenticated, active user for everything in this router
     dependencies=[Depends(get_current_active_user)],
 )
+
+MAX_HOURS = 1_000_000.0
+MAX_CYCLES = 1_000_000.0
+MAX_CALENDAR_MONTHS = 1_200
+MIN_VALID_DATE = date(1950, 1, 1)
+
+AIRCRAFT_SERIAL_PATTERN = re.compile(r"^[A-Z0-9-]{1,50}$")
+REGISTRATION_PATTERN = re.compile(r"^[A-Z0-9-]{1,20}$")
+PART_NUMBER_PATTERN = re.compile(r"^[A-Z0-9./-]{1,50}$")
+COMPONENT_SERIAL_PATTERN = re.compile(r"^[A-Z0-9./-]{1,50}$")
+
+AIRCRAFT_SAFETY_FIELDS = {
+    "registration",
+    "total_hours",
+    "total_cycles",
+    "last_log_date",
+}
+
+COMPONENT_SAFETY_FIELDS = {
+    "position",
+    "part_number",
+    "serial_number",
+    "installed_date",
+    "installed_hours",
+    "installed_cycles",
+    "current_hours",
+    "current_cycles",
+    "tbo_hours",
+    "tbo_cycles",
+    "tbo_calendar_months",
+    "hsi_hours",
+    "hsi_cycles",
+    "hsi_calendar_months",
+    "last_overhaul_date",
+    "last_overhaul_hours",
+    "last_overhaul_cycles",
+    "unit_of_measure_hours",
+    "unit_of_measure_cycles",
+}
+
+USAGE_SAFETY_FIELDS = {
+    "date",
+    "techlog_no",
+    "block_hours",
+    "cycles",
+    "ttaf_after",
+    "tca_after",
+    "ttesn_after",
+    "tcesn_after",
+    "ttsoh_after",
+    "ttshsi_after",
+    "tcsoh_after",
+    "pttsn_after",
+    "pttso_after",
+    "tscoa_after",
+    "hours_to_mx",
+    "days_to_mx",
+}
 
 # ---------------------------------------------------------------------------
 # BASIC AIRCRAFT CRUD
@@ -92,6 +151,13 @@ def create_aircraft(
         require_roles(*MANAGEMENT_ROLES)
     ),
 ):
+    safety_confirmed = bool(payload.safety_confirmed)
+    data = payload.model_dump(exclude={"safety_confirmed"})
+    safety_fields = [
+        field for field in AIRCRAFT_SAFETY_FIELDS if data.get(field) is not None
+    ]
+    _require_safety_confirmation("aircraft", safety_confirmed, safety_fields)
+
     # Check serial_number (AIN-style)
     existing = db.query(models.Aircraft).get(payload.serial_number)
     if existing:
@@ -115,7 +181,8 @@ def create_aircraft(
             ),
         )
 
-    ac = models.Aircraft(**payload.model_dump())
+    ac = models.Aircraft(**data)
+    _set_verification_status(ac, safety_confirmed)
     db.add(ac)
     db.commit()
     db.refresh(ac)
@@ -135,7 +202,29 @@ def update_aircraft(
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True, exclude={"safety_confirmed"})
+    safety_fields = [
+        field
+        for field in AIRCRAFT_SAFETY_FIELDS
+        if field in data and _values_differ(getattr(ac, field), data[field])
+    ]
+    _require_safety_confirmation(
+        "aircraft", payload.safety_confirmed, safety_fields
+    )
+
+    merged_data = {
+        "serial_number": ac.serial_number,
+        "registration": data.get("registration", ac.registration),
+        "last_log_date": data.get("last_log_date", ac.last_log_date),
+        "total_hours": data.get("total_hours", ac.total_hours),
+        "total_cycles": data.get("total_cycles", ac.total_cycles),
+    }
+    validation = _validate_aircraft_payload(merged_data)
+    if validation["errors"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(validation["errors"]),
+        )
 
     # If registration is changing, ensure no conflicts
     new_reg = data.get("registration")
@@ -159,6 +248,9 @@ def update_aircraft(
 
     for field, value in data.items():
         setattr(ac, field, value)
+
+    if safety_fields:
+        _set_verification_status(ac, True)
 
     db.add(ac)
     db.commit()
@@ -224,11 +316,39 @@ def create_component(
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
-    data = payload.model_dump(exclude_unset=True)
+    safety_confirmed = bool(payload.safety_confirmed)
+    data = payload.model_dump(exclude_unset=True, exclude={"safety_confirmed"})
+    safety_fields = [
+        field for field in COMPONENT_SAFETY_FIELDS if data.get(field) is not None
+    ]
+    _require_safety_confirmation("component", safety_confirmed, safety_fields)
     # Ensure the component is always attached to the path aircraft
     data["aircraft_serial_number"] = serial_number
 
+    validation = _validate_component_payload(data)
+    if validation["errors"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(validation["errors"]),
+        )
+
+    collision = _find_component_collision(
+        db,
+        data.get("part_number"),
+        data.get("serial_number"),
+        exclude_aircraft_serial=serial_number,
+    )
+    if collision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Part/serial pair already assigned to aircraft "
+                f"{collision.aircraft_serial_number}."
+            ),
+        )
+
     comp = models.AircraftComponent(**data)
+    _set_verification_status(comp, safety_confirmed)
     db.add(comp)
     db.commit()
     db.refresh(comp)
@@ -255,9 +375,74 @@ def update_component(
     if not comp:
         raise HTTPException(status_code=404, detail="Component not found")
 
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True, exclude={"safety_confirmed"})
+    safety_fields = [
+        field
+        for field in COMPONENT_SAFETY_FIELDS
+        if field in data and _values_differ(getattr(comp, field), data[field])
+    ]
+    _require_safety_confirmation(
+        "component", payload.safety_confirmed, safety_fields
+    )
+
+    merged_data = {
+        "position": data.get("position", comp.position),
+        "part_number": data.get("part_number", comp.part_number),
+        "serial_number": data.get("serial_number", comp.serial_number),
+        "installed_date": data.get("installed_date", comp.installed_date),
+        "installed_hours": data.get("installed_hours", comp.installed_hours),
+        "installed_cycles": data.get("installed_cycles", comp.installed_cycles),
+        "current_hours": data.get("current_hours", comp.current_hours),
+        "current_cycles": data.get("current_cycles", comp.current_cycles),
+        "tbo_hours": data.get("tbo_hours", comp.tbo_hours),
+        "tbo_cycles": data.get("tbo_cycles", comp.tbo_cycles),
+        "tbo_calendar_months": data.get(
+            "tbo_calendar_months", comp.tbo_calendar_months
+        ),
+        "hsi_hours": data.get("hsi_hours", comp.hsi_hours),
+        "hsi_cycles": data.get("hsi_cycles", comp.hsi_cycles),
+        "hsi_calendar_months": data.get(
+            "hsi_calendar_months", comp.hsi_calendar_months
+        ),
+        "last_overhaul_date": data.get(
+            "last_overhaul_date", comp.last_overhaul_date
+        ),
+        "last_overhaul_hours": data.get(
+            "last_overhaul_hours", comp.last_overhaul_hours
+        ),
+        "last_overhaul_cycles": data.get(
+            "last_overhaul_cycles", comp.last_overhaul_cycles
+        ),
+    }
+    validation = _validate_component_payload(merged_data)
+    if validation["errors"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(validation["errors"]),
+        )
+
+    part_number = data.get("part_number", comp.part_number)
+    serial_number = data.get("serial_number", comp.serial_number)
+    collision = _find_component_collision(
+        db,
+        part_number,
+        serial_number,
+        exclude_component_id=comp.id,
+        exclude_aircraft_serial=comp.aircraft_serial_number,
+    )
+    if collision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Part/serial pair already assigned to aircraft "
+                f"{collision.aircraft_serial_number}."
+            ),
+        )
     for field, value in data.items():
         setattr(comp, field, value)
+
+    if safety_fields:
+        _set_verification_status(comp, True)
 
     db.add(comp)
     db.commit()
@@ -349,6 +534,13 @@ def create_usage_entry(
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
+    safety_confirmed = bool(payload.safety_confirmed)
+    data = payload.model_dump(exclude={"safety_confirmed"})
+    safety_fields = [
+        field for field in USAGE_SAFETY_FIELDS if data.get(field) is not None
+    ]
+    _require_safety_confirmation("usage", safety_confirmed, safety_fields)
+
     # Uniqueness check: aircraft + date + techlog_no
     existing = (
         db.query(models.AircraftUsage)
@@ -365,7 +557,6 @@ def create_usage_entry(
             detail="Usage entry for this aircraft, date and techlog already exists.",
         )
 
-    data = payload.model_dump()
     previous_usage = services.get_previous_usage(db, serial_number, payload.date)
     services.apply_usage_calculations(data, previous_usage)
     services.update_maintenance_remaining(db, serial_number, payload.date, data)
@@ -375,6 +566,7 @@ def create_usage_entry(
         updated_by_user_id=current_user.id,
         **data,
     )
+    _set_verification_status(usage, safety_confirmed)
 
     db.add(usage)
     db.commit()
@@ -411,7 +603,15 @@ def update_usage_entry(
 
     data = payload.model_dump(
         exclude_unset=True,
-        exclude={"last_seen_updated_at"},
+        exclude={"last_seen_updated_at", "safety_confirmed"},
+    )
+    safety_fields = [
+        field
+        for field in USAGE_SAFETY_FIELDS
+        if field in data and _values_differ(getattr(usage, field), data[field])
+    ]
+    _require_safety_confirmation(
+        "usage", payload.safety_confirmed, safety_fields
     )
     
     effective_date = data.get("date", usage.date)
@@ -450,6 +650,8 @@ def update_usage_entry(
         setattr(usage, field, value)
 
     usage.updated_by_user_id = current_user.id
+    if safety_fields:
+        _set_verification_status(usage, True)
 
     db.add(usage)
     db.commit()
@@ -811,12 +1013,12 @@ def _build_aircraft_payload(
     registration_value = row.get(reg_raw_col) if reg_raw_col else None
 
     serial = (
-        str(_coerce_import_value(serial_value)).strip()
+        str(_coerce_import_value(serial_value)).strip().upper()
         if serial_value is not None
         else ""
     )
     registration = (
-        str(_coerce_import_value(registration_value)).strip()
+        str(_coerce_import_value(registration_value)).strip().upper()
         if registration_value is not None
         else ""
     )
@@ -941,11 +1143,14 @@ def _build_component_payload(
             return None
         return _coerce_import_value(row.get(raw_col))
 
+    part_number = to_str(pick_value("part_number"))
+    serial_number = to_str(pick_value("serial_number"))
+
     return {
         "position": to_str(pick_value("position")) or "",
         "ata": to_str(pick_value("ata")),
-        "part_number": to_str(pick_value("part_number")),
-        "serial_number": to_str(pick_value("serial_number")),
+        "part_number": part_number.upper() if part_number else None,
+        "serial_number": serial_number.upper() if serial_number else None,
         "description": to_str(pick_value("description")),
         "installed_date": pick_value("installed_date"),
         "installed_hours": pick_value("installed_hours"),
@@ -962,8 +1167,8 @@ def _validate_aircraft_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]:
     errors: List[str] = []
     warnings: List[str] = []
 
-    serial = payload.get("serial_number") or ""
-    registration = payload.get("registration") or ""
+    serial = str(payload.get("serial_number") or "").strip().upper()
+    registration = str(payload.get("registration") or "").strip().upper()
 
     if not serial and not registration:
         errors.append("Missing both aircraft serial (AIN) and registration.")
@@ -971,6 +1176,28 @@ def _validate_aircraft_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]:
         errors.append("Missing aircraft serial (AIN).")
     elif not registration:
         errors.append(f"Missing registration for aircraft serial {serial}.")
+
+    if serial and not AIRCRAFT_SERIAL_PATTERN.match(serial):
+        errors.append("Aircraft serial (AIN) must be A-Z/0-9 with hyphens only.")
+    if registration and not REGISTRATION_PATTERN.match(registration):
+        errors.append("Registration must be A-Z/0-9 with hyphens only.")
+
+    last_log_date = payload.get("last_log_date")
+    if isinstance(last_log_date, date):
+        if last_log_date < MIN_VALID_DATE:
+            errors.append("Last log date is earlier than allowed.")
+        if last_log_date > date.today():
+            errors.append("Last log date cannot be in the future.")
+
+    total_hours = payload.get("total_hours")
+    if isinstance(total_hours, numbers.Number):
+        if total_hours < 0 or total_hours > MAX_HOURS:
+            errors.append("Total hours are out of allowed range.")
+
+    total_cycles = payload.get("total_cycles")
+    if isinstance(total_cycles, numbers.Number):
+        if total_cycles < 0 or total_cycles > MAX_CYCLES:
+            errors.append("Total cycles are out of allowed range.")
 
     return {"errors": errors, "warnings": warnings}
 
@@ -980,16 +1207,106 @@ def _validate_component_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]
     warnings: List[str] = []
 
     position = (payload.get("position") or "").strip()
-    part_number = (payload.get("part_number") or "").strip()
-    serial_number = (payload.get("serial_number") or "").strip()
+    part_number = (payload.get("part_number") or "").strip().upper()
+    serial_number = (payload.get("serial_number") or "").strip().upper()
 
     if not position:
         errors.append("Missing component position.")
 
     if (part_number and not serial_number) or (serial_number and not part_number):
-        warnings.append("Part/serial number pair is incomplete.")
+        errors.append("Part/serial number pair is incomplete.")
+
+    if part_number and not PART_NUMBER_PATTERN.match(part_number):
+        errors.append("Part number contains invalid characters.")
+
+    if serial_number and not COMPONENT_SERIAL_PATTERN.match(serial_number):
+        errors.append("Serial number contains invalid characters.")
+
+    hours_fields = [
+        "installed_hours",
+        "current_hours",
+        "tbo_hours",
+        "hsi_hours",
+        "last_overhaul_hours",
+    ]
+    cycles_fields = [
+        "installed_cycles",
+        "current_cycles",
+        "tbo_cycles",
+        "hsi_cycles",
+        "last_overhaul_cycles",
+    ]
+    for field in hours_fields:
+        value = payload.get(field)
+        if isinstance(value, numbers.Number) and (value < 0 or value > MAX_HOURS):
+            errors.append(f"{field.replace('_', ' ').title()} is out of range.")
+    for field in cycles_fields:
+        value = payload.get(field)
+        if isinstance(value, numbers.Number) and (value < 0 or value > MAX_CYCLES):
+            errors.append(f"{field.replace('_', ' ').title()} is out of range.")
+
+    for field in ["tbo_calendar_months", "hsi_calendar_months"]:
+        value = payload.get(field)
+        if isinstance(value, numbers.Number) and (
+            value < 0 or value > MAX_CALENDAR_MONTHS
+        ):
+            errors.append(f"{field.replace('_', ' ').title()} is out of range.")
+
+    for field in ["installed_date", "last_overhaul_date"]:
+        value = payload.get(field)
+        if isinstance(value, date):
+            if value < MIN_VALID_DATE:
+                errors.append(f"{field.replace('_', ' ').title()} is too early.")
+            if value > date.today():
+                errors.append(f"{field.replace('_', ' ').title()} cannot be future.")
 
     return {"errors": errors, "warnings": warnings}
+
+
+def _require_safety_confirmation(
+    entity_label: str,
+    safety_confirmed: Optional[bool],
+    fields_changed: List[str],
+) -> None:
+    if fields_changed and not safety_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Safety-critical {entity_label} fields changed "
+                f"({', '.join(sorted(fields_changed))}). "
+                "Confirmation is required."
+            ),
+        )
+
+
+def _set_verification_status(
+    record: Any,
+    safety_confirmed: bool,
+) -> None:
+    if safety_confirmed:
+        record.verification_status = "CONFIRMED"
+
+
+def _find_component_collision(
+    db: Session,
+    part_number: Optional[str],
+    serial_number: Optional[str],
+    exclude_component_id: Optional[int] = None,
+    exclude_aircraft_serial: Optional[str] = None,
+) -> Optional[models.AircraftComponent]:
+    if not part_number or not serial_number:
+        return None
+    query = db.query(models.AircraftComponent).filter(
+        models.AircraftComponent.part_number == part_number,
+        models.AircraftComponent.serial_number == serial_number,
+    )
+    if exclude_component_id is not None:
+        query = query.filter(models.AircraftComponent.id != exclude_component_id)
+    if exclude_aircraft_serial is not None:
+        query = query.filter(
+            models.AircraftComponent.aircraft_serial_number != exclude_aircraft_serial
+        )
+    return query.first()
 
 
 def _normalize_reconciliation_value(value: Any) -> Any:
@@ -1681,6 +1998,32 @@ async def import_aircraft_file(
             for field in row_data.keys():
                 original_values[field] = getattr(ac, field, None)
 
+        safety_fields = []
+        if action == "new":
+            safety_fields = [
+                field
+                for field in AIRCRAFT_SAFETY_FIELDS
+                if row_data.get(field) is not None
+            ]
+        else:
+            safety_fields = [
+                field
+                for field in AIRCRAFT_SAFETY_FIELDS
+                if _values_differ(original_values.get(field), row_data.get(field))
+            ]
+        if safety_fields and not confirmed_row:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": (
+                        "Safety-critical fields require confirmation: "
+                        f"{', '.join(sorted(safety_fields))}."
+                    ),
+                }
+            )
+            continue
+
         if ac is None:
             # New aircraft
             ac = models.Aircraft(**row_data)
@@ -1691,6 +2034,9 @@ async def import_aircraft_file(
             for field, value in row_data.items():
                 setattr(ac, field, value)
             updated += 1
+
+        if safety_fields:
+            _set_verification_status(ac, True)
 
         snapshot_cells: Dict[str, Dict[str, Any]] = {}
         if confirmed_row:
@@ -1930,9 +2276,41 @@ async def preview_components_import(
     update_count = 0
     invalid_count = 0
 
+    raw_rows: List[Dict[str, Any]] = []
+    pn_sn_pairs: set[tuple[str, str]] = set()
     for idx, row in df.iterrows():
         row_idx = int(idx) + 2  # approx Excel row number
         payload = _build_component_payload(row.to_dict(), colmap)
+        part_number = (payload.get("part_number") or "").strip().upper()
+        serial = (payload.get("serial_number") or "").strip().upper()
+        if part_number and serial:
+            pn_sn_pairs.add((part_number, serial))
+        raw_rows.append({"row_number": row_idx, "payload": payload})
+
+    collisions_by_pn_sn: Dict[tuple[str, str], List[models.AircraftComponent]] = {}
+    if pn_sn_pairs:
+        collisions = (
+            db.query(models.AircraftComponent)
+            .filter(
+                models.AircraftComponent.aircraft_serial_number != serial_number,
+                tuple_(
+                    models.AircraftComponent.part_number,
+                    models.AircraftComponent.serial_number,
+                ).in_(pn_sn_pairs),
+            )
+            .all()
+        )
+        for comp in collisions:
+            key = (
+                (comp.part_number or "").strip().upper(),
+                (comp.serial_number or "").strip().upper(),
+            )
+            if all(key):
+                collisions_by_pn_sn.setdefault(key, []).append(comp)
+
+    for row in raw_rows:
+        row_idx = row["row_number"]
+        payload = row["payload"]
         validation = _validate_component_payload(payload)
         errors = validation["errors"]
         warnings = validation["warnings"]
@@ -1969,6 +2347,23 @@ async def preview_components_import(
                     }
                 )
             seen_in_file.setdefault(key, []).append(position or f"row {row_idx}")
+
+            normalized_key = (part_number.upper(), serial.upper())
+            if normalized_key in collisions_by_pn_sn:
+                warnings.append(
+                    "Part/serial pair already exists on another aircraft."
+                )
+                dedupe_suggestions.append(
+                    {
+                        "source": "fleet",
+                        "part_number": part_number,
+                        "serial_number": serial,
+                        "aircraft_serial_numbers": [
+                            comp.aircraft_serial_number
+                            for comp in collisions_by_pn_sn[normalized_key]
+                        ],
+                    }
+                )
 
         if errors:
             action = "invalid"
@@ -2048,6 +2443,10 @@ async def confirm_components_import(
         for key, value in list(row_data.items()):
             if isinstance(value, str) and not value.strip():
                 row_data[key] = None
+        if row_data.get("part_number"):
+            row_data["part_number"] = row_data["part_number"].strip().upper()
+        if row_data.get("serial_number"):
+            row_data["serial_number"] = row_data["serial_number"].strip().upper()
 
         validation = _validate_component_payload(row_data)
         if validation["errors"]:
@@ -2078,8 +2477,29 @@ async def confirm_components_import(
         else:
             updated += 1
 
+        collision = _find_component_collision(
+            db,
+            row_data.get("part_number"),
+            row_data.get("serial_number"),
+            exclude_component_id=comp.id if comp.id else None,
+            exclude_aircraft_serial=serial_number,
+        )
+        if collision:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": (
+                        "Part/serial pair already assigned to aircraft "
+                        f"{collision.aircraft_serial_number}."
+                    ),
+                }
+            )
+            continue
+
         for field, value in row_data.items():
             setattr(comp, field, value)
+        _set_verification_status(comp, True)
 
         db.add(comp)
         existing_by_position[position.lower()] = comp
@@ -2173,11 +2593,45 @@ async def import_components_file(
 
         payload = _build_component_payload(row.to_dict(), colmap)
         position = payload.get("position") or ""
+        if payload.get("part_number"):
+            payload["part_number"] = payload["part_number"].strip().upper()
+        if payload.get("serial_number"):
+            payload["serial_number"] = payload["serial_number"].strip().upper()
 
         if not position:
             skipped += 1
             skipped_rows.append(
                 {"row": row_idx, "reason": "Missing component position."}
+            )
+            continue
+
+        validation = _validate_component_payload(payload)
+        if validation["errors"]:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": "; ".join(validation["errors"]),
+                }
+            )
+            continue
+
+        collision = _find_component_collision(
+            db,
+            payload.get("part_number"),
+            payload.get("serial_number"),
+            exclude_aircraft_serial=serial_number,
+        )
+        if collision:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": (
+                        "Part/serial pair already assigned to aircraft "
+                        f"{collision.aircraft_serial_number}."
+                    ),
+                }
             )
             continue
 
@@ -2197,6 +2651,7 @@ async def import_components_file(
             manufacturer_code=payload.get("manufacturer_code"),
             operator_code=payload.get("operator_code"),
         )
+        _set_verification_status(comp, True)
 
         db.add(comp)
         created += 1

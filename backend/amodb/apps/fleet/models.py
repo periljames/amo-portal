@@ -157,6 +157,12 @@ class Aircraft(Base):
     last_log_date = Column(Date, nullable=True, index=True)
     total_hours = Column(Float, nullable=True)   # cumulative flight hours
     total_cycles = Column(Float, nullable=True)  # cumulative cycles / landings
+    verification_status = Column(
+        String(32),
+        nullable=False,
+        default="UNVERIFIED",
+        index=True,
+    )
 
     created_at = Column(
         DateTime(timezone=True),
@@ -299,6 +305,12 @@ class AircraftComponent(Base):
     current_cycles = Column(Float, nullable=True)
 
     notes = Column(Text, nullable=True)
+    verification_status = Column(
+        String(32),
+        nullable=False,
+        default="UNVERIFIED",
+        index=True,
+    )
 
     # ------------------------------------------------------------------
     # Life limits and reliability standardisation
@@ -392,6 +404,12 @@ class AircraftUsage(Base):
 
     remarks = Column(Text, nullable=True)
     note = Column(Text, nullable=True)
+    verification_status = Column(
+        String(32),
+        nullable=False,
+        default="UNVERIFIED",
+        index=True,
+    )
 
     # Audit
     created_at = Column(
