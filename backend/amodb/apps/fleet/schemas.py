@@ -11,7 +11,7 @@ Scope:
 from __future__ import annotations
 
 from datetime import date as DateType, datetime as DateTimeType
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field
 
@@ -130,6 +130,37 @@ class AircraftImportRow(BaseModel):
 
 class AircraftImportRequest(BaseModel):
     rows: List[AircraftImportRow]
+
+
+class AircraftImportTemplateBase(BaseModel):
+    name: str
+    aircraft_template: Optional[str] = None
+    model_code: Optional[str] = None
+    operator_code: Optional[str] = None
+    column_mapping: Optional[Dict[str, Optional[str]]] = None
+    default_values: Optional[Dict[str, Any]] = None
+
+
+class AircraftImportTemplateCreate(AircraftImportTemplateBase):
+    pass
+
+
+class AircraftImportTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    aircraft_template: Optional[str] = None
+    model_code: Optional[str] = None
+    operator_code: Optional[str] = None
+    column_mapping: Optional[Dict[str, Optional[str]]] = None
+    default_values: Optional[Dict[str, Any]] = None
+
+
+class AircraftImportTemplateRead(AircraftImportTemplateBase):
+    id: int
+    created_at: DateTimeType
+    updated_at: DateTimeType
+
+    class Config:
+        from_attributes = True
 
 
 # ---------------- COMPONENTS ----------------
