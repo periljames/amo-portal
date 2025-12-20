@@ -1,6 +1,6 @@
 # backend/amodb/apps/fleet/router.py
 
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import List, Dict, Any
@@ -741,17 +741,136 @@ def _map_aircraft_columns(raw_cols: List[str]) -> Dict[str, str | None]:
     }
 
 
+def _coerce_import_value(value: Any) -> Any:
+    if value is None:
+        return None
+    try:
+        import pandas as pd  # type: ignore
+
+        if pd.isna(value):
+            return None
+    except ImportError:  # pragma: no cover
+        pass
+    if hasattr(value, "item") and callable(value.item):
+        try:
+            value = value.item()
+        except Exception:  # pragma: no cover - defensive
+            pass
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
+
+
+def _build_aircraft_payload(
+    row: Dict[str, Any], colmap: Dict[str, str | None]
+) -> Dict[str, Any]:
+    serial_raw_col = colmap["serial_number"]
+    reg_raw_col = colmap["registration"]
+
+    serial_value = row.get(serial_raw_col) if serial_raw_col else None
+    registration_value = row.get(reg_raw_col) if reg_raw_col else None
+
+    serial = (
+        str(_coerce_import_value(serial_value)).strip()
+        if serial_value is not None
+        else ""
+    )
+    registration = (
+        str(_coerce_import_value(registration_value)).strip()
+        if registration_value is not None
+        else ""
+    )
+
+    payload: Dict[str, Any] = {
+        "serial_number": serial,
+        "registration": registration,
+        "template": _coerce_import_value(row.get(colmap["template"]))
+        if colmap["template"]
+        else None,
+        "make": _coerce_import_value(row.get(colmap["make"]))
+        if colmap["make"]
+        else None,
+        "model": _coerce_import_value(row.get(colmap["model"]))
+        if colmap["model"]
+        else None,
+        "home_base": _coerce_import_value(row.get(colmap["home_base"]))
+        if colmap["home_base"]
+        else None,
+        "owner": _coerce_import_value(row.get(colmap["owner"]))
+        if colmap["owner"]
+        else None,
+        # Spec 2000–style coding
+        "aircraft_model_code": _coerce_import_value(
+            row.get(colmap["aircraft_model_code"])
+        )
+        if colmap["aircraft_model_code"]
+        else None,
+        "operator_code": _coerce_import_value(row.get(colmap["operator_code"]))
+        if colmap["operator_code"]
+        else None,
+        "supplier_code": _coerce_import_value(row.get(colmap["supplier_code"]))
+        if colmap["supplier_code"]
+        else None,
+        "company_name": _coerce_import_value(row.get(colmap["company_name"]))
+        if colmap["company_name"]
+        else None,
+        "internal_aircraft_identifier": _coerce_import_value(
+            row.get(colmap["internal_aircraft_identifier"])
+        )
+        if colmap["internal_aircraft_identifier"]
+        else None,
+        # Status / utilisation
+        "status": "OPEN",
+        "is_active": True,
+        "last_log_date": _coerce_import_value(row.get(colmap["last_log_date"]))
+        if colmap["last_log_date"]
+        else None,
+        "total_hours": _coerce_import_value(row.get(colmap["total_hours"]))
+        if colmap["total_hours"]
+        else None,
+        "total_cycles": _coerce_import_value(row.get(colmap["total_cycles"]))
+        if colmap["total_cycles"]
+        else None,
+    }
+
+    for key, val in list(payload.items()):
+        if isinstance(val, str) and not val.strip():
+            payload[key] = None
+
+    payload["serial_number"] = payload.get("serial_number") or ""
+    payload["registration"] = payload.get("registration") or ""
+
+    return payload
+
+
+def _validate_aircraft_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]:
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    serial = payload.get("serial_number") or ""
+    registration = payload.get("registration") or ""
+
+    if not serial and not registration:
+        errors.append("Missing both aircraft serial (AIN) and registration.")
+    elif not serial:
+        errors.append("Missing aircraft serial (AIN).")
+    elif not registration:
+        errors.append(f"Missing registration for aircraft serial {serial}.")
+
+    return {"errors": errors, "warnings": warnings}
+
+
 # ---------------------------------------------------------------------------
 # BULK IMPORT (AIRCRAFT)
 # ---------------------------------------------------------------------------
 
 
 @router.post(
-    "/import",
+    "/import/preview",
     tags=["aircraft"],
-    summary="Bulk import / update aircraft from CSV or Excel",
+    summary="Preview aircraft import with mapping and validation",
 )
-async def import_aircraft_file(
+async def preview_aircraft_import(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(
@@ -759,12 +878,10 @@ async def import_aircraft_file(
     ),
 ):
     """
-    Bulk import / update aircraft from CSV/Excel.
+    Preview bulk import / update aircraft from CSV/Excel.
 
-    - Uses forgiving header mapping, including ATA Spec 2000-style field names.
-    - Requires at least an aircraft identifier (AIN/serial_number) and REG.
-    - Returns counts plus mapping and skipped-row reasons so users
-      understand *why* a row did not import.
+    Returns normalised rows, column mapping, validation issues and summary counts
+    for new/update/invalid rows.
     """
     try:
         import pandas as pd  # type: ignore
@@ -783,7 +900,6 @@ async def import_aircraft_file(
     elif ext in [".xlsx", ".xlsm", ".xls"]:
         df = pd.read_excel(buffer)
     elif ext == ".pdf":
-        # Placeholder – PDF parsing is messy; we'll support later.
         raise HTTPException(
             status_code=501,
             detail="PDF ingestion not yet implemented. Please upload CSV or Excel export for now.",
@@ -808,111 +924,132 @@ async def import_aircraft_file(
             ),
         )
 
+    rows: List[Dict[str, Any]] = []
+    serials: List[str] = []
+    seen_serials: Dict[str, int] = {}
+
+    for idx, row in df.iterrows():
+        row_idx = int(idx) + 2
+        payload = _build_aircraft_payload(row.to_dict(), colmap)
+        serial = payload.get("serial_number") or ""
+        if serial:
+            serials.append(serial)
+            seen_serials[serial] = seen_serials.get(serial, 0) + 1
+        rows.append(
+            {
+                "row_number": row_idx,
+                "data": payload,
+            }
+        )
+
+    existing_serials: set[str] = set()
+    if serials:
+        existing_serials = {
+            serial
+            for (serial,) in db.query(models.Aircraft.serial_number)
+            .filter(models.Aircraft.serial_number.in_(serials))
+            .all()
+        }
+
+    new_count = 0
+    update_count = 0
+    invalid_count = 0
+
+    for row in rows:
+        payload = row["data"]
+        validation = _validate_aircraft_payload(payload)
+        errors = validation["errors"]
+        warnings = validation["warnings"]
+        serial = payload.get("serial_number") or ""
+
+        if serial and seen_serials.get(serial, 0) > 1:
+            warnings.append("Duplicate serial number in uploaded file.")
+
+        if errors:
+            action = "invalid"
+            invalid_count += 1
+        else:
+            if serial in existing_serials:
+                action = "update"
+                update_count += 1
+            else:
+                action = "new"
+                new_count += 1
+
+        row["errors"] = errors
+        row["warnings"] = warnings
+        row["action"] = action
+
+    return {
+        "rows": rows,
+        "column_mapping": colmap,
+        "summary": {
+            "new": new_count,
+            "update": update_count,
+            "invalid": invalid_count,
+        },
+    }
+
+
+@router.post(
+    "/import",
+    tags=["aircraft"],
+    summary="Bulk import / update aircraft from CSV or Excel",
+)
+async def import_aircraft_file(
+    payload: schemas.AircraftImportRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    """
+    Bulk import / update aircraft from approved rows.
+
+    - Requires at least an aircraft identifier (AIN/serial_number) and REG.
+    - Returns counts plus skipped-row reasons so users understand
+      why a row did not import.
+    """
     created = 0
     updated = 0
     skipped = 0
     skipped_rows: List[Dict[str, Any]] = []
 
-    for idx, row in df.iterrows():
-        row_idx = int(idx) + 2  # +2 to roughly match Excel row (header + 1)
+    for row in payload.rows:
+        row_idx = row.row_number
+        row_data = row.model_dump(exclude={"row_number"})
 
-        # Aircraft serial / AIN
-        serial_raw_col = colmap["serial_number"]
-        reg_raw_col = colmap["registration"]
-
-        serial_value = row.get(serial_raw_col) if serial_raw_col else None
-        registration_value = row.get(reg_raw_col) if reg_raw_col else None
-
-        serial = str(serial_value).strip() if serial_value is not None else ""
-        registration = (
-            str(registration_value).strip() if registration_value is not None else ""
-        )
-
-        if not serial and not registration:
+        validation = _validate_aircraft_payload(row_data)
+        if validation["errors"]:
             skipped += 1
             skipped_rows.append(
                 {
                     "row": row_idx,
-                    "reason": "Missing both aircraft serial (AIN) and registration.",
+                    "reason": "; ".join(validation["errors"]),
                 }
             )
             continue
 
-        if not serial:
-            skipped += 1
-            skipped_rows.append(
-                {
-                    "row": row_idx,
-                    "reason": "Missing aircraft serial (AIN).",
-                }
-            )
-            continue
+        serial = str(row_data.get("serial_number") or "").strip()
+        registration = str(row_data.get("registration") or "").strip()
 
-        if not registration:
-            skipped += 1
-            skipped_rows.append(
-                {
-                    "row": row_idx,
-                    "reason": f"Missing registration for aircraft serial {serial}.",
-                }
-            )
-            continue
+        row_data["serial_number"] = serial
+        row_data["registration"] = registration
+
+        for key, val in list(row_data.items()):
+            if isinstance(val, str) and not val.strip():
+                row_data[key] = None
 
         ac = db.query(models.Aircraft).get(serial)
 
-        payload: Dict[str, Any] = {
-            "serial_number": serial,
-            "registration": registration,
-            "template": row.get(colmap["template"]) if colmap["template"] else None,
-            "make": row.get(colmap["make"]) if colmap["make"] else None,
-            "model": row.get(colmap["model"]) if colmap["model"] else None,
-            "home_base": row.get(colmap["home_base"]) if colmap["home_base"] else None,
-            "owner": row.get(colmap["owner"]) if colmap["owner"] else None,
-            # Spec 2000–style coding
-            "aircraft_model_code": row.get(colmap["aircraft_model_code"])
-            if colmap["aircraft_model_code"]
-            else None,
-            "operator_code": row.get(colmap["operator_code"])
-            if colmap["operator_code"]
-            else None,
-            "supplier_code": row.get(colmap["supplier_code"])
-            if colmap["supplier_code"]
-            else None,
-            "company_name": row.get(colmap["company_name"])
-            if colmap["company_name"]
-            else None,
-            "internal_aircraft_identifier": row.get(
-                colmap["internal_aircraft_identifier"]
-            )
-            if colmap["internal_aircraft_identifier"]
-            else None,
-            # Status / utilisation
-            "status": "OPEN",
-            "is_active": True,
-            "last_log_date": row.get(colmap["last_log_date"])
-            if colmap["last_log_date"]
-            else None,
-            "total_hours": row.get(colmap["total_hours"])
-            if colmap["total_hours"]
-            else None,
-            "total_cycles": row.get(colmap["total_cycles"])
-            if colmap["total_cycles"]
-            else None,
-        }
-
-        # Basic clean-up: empty strings -> None
-        for key, val in list(payload.items()):
-            if isinstance(val, str) and not val.strip():
-                payload[key] = None
-
         if ac is None:
             # New aircraft
-            ac = models.Aircraft(**payload)
+            ac = models.Aircraft(**row_data)
             db.add(ac)
             created += 1
         else:
             # Update existing master record with latest data
-            for field, value in payload.items():
+            for field, value in row_data.items():
                 setattr(ac, field, value)
             updated += 1
 
@@ -923,7 +1060,6 @@ async def import_aircraft_file(
         "created": created,
         "updated": updated,
         "skipped": skipped,
-        "column_mapping": colmap,
         "skipped_rows": skipped_rows,
     }
 
