@@ -134,6 +134,7 @@ class AircraftImportRequest(BaseModel):
 
 class AircraftImportTemplateBase(BaseModel):
     name: str
+    template_type: str = "aircraft"
     aircraft_template: Optional[str] = None
     model_code: Optional[str] = None
     operator_code: Optional[str] = None
@@ -147,6 +148,7 @@ class AircraftImportTemplateCreate(AircraftImportTemplateBase):
 
 class AircraftImportTemplateUpdate(BaseModel):
     name: Optional[str] = None
+    template_type: Optional[str] = None
     aircraft_template: Optional[str] = None
     model_code: Optional[str] = None
     operator_code: Optional[str] = None
@@ -250,6 +252,31 @@ class AircraftComponentRead(AircraftComponentBase):
 
     class Config:
         from_attributes = True
+
+
+class AircraftComponentImportRow(BaseModel):
+    row_number: Optional[int] = None
+    position: str
+
+    ata: Optional[str] = None
+    part_number: Optional[str] = None
+    serial_number: Optional[str] = None
+    description: Optional[str] = None
+
+    installed_date: Optional[DateType] = None
+    installed_hours: Optional[float] = None
+    installed_cycles: Optional[float] = None
+
+    current_hours: Optional[float] = None
+    current_cycles: Optional[float] = None
+
+    notes: Optional[str] = None
+    manufacturer_code: Optional[str] = None
+    operator_code: Optional[str] = None
+
+
+class AircraftComponentImportRequest(BaseModel):
+    rows: List[AircraftComponentImportRow]
 
 
 # For responses that show one aircraft with its components:

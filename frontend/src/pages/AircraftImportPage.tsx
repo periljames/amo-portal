@@ -44,6 +44,7 @@ type SuggestedTemplate = {
 type AircraftImportTemplate = {
   id: number;
   name: string;
+  template_type?: string | null;
   aircraft_template?: string | null;
   model_code?: string | null;
   operator_code?: string | null;
@@ -58,12 +59,47 @@ type OcrPreview = {
   file_type?: string | null;
 };
 
+type ComponentRowData = {
+  position: string;
+  ata?: string | null;
+  part_number?: string | null;
+  serial_number?: string | null;
+  description?: string | null;
+  installed_date?: string | null;
+  installed_hours?: number | string | null;
+  installed_cycles?: number | string | null;
+  current_hours?: number | string | null;
+  current_cycles?: number | string | null;
+  notes?: string | null;
+  manufacturer_code?: string | null;
+  operator_code?: string | null;
+};
+
+type ComponentPreviewRow = {
+  row_number: number;
+  data: ComponentRowData;
+  errors: string[];
+  warnings: string[];
+  action: "new" | "update" | "invalid";
+  approved: boolean;
+  existing_component?: {
+    position?: string | null;
+    part_number?: string | null;
+    serial_number?: string | null;
+  } | null;
+  dedupe_suggestions?: {
+    source: "file" | "existing";
+    part_number: string;
+    serial_number: string;
+    positions: string[];
+  }[];
+};
+
 const AircraftImportPage: React.FC = () => {
   const [aircraftFile, setAircraftFile] = useState<File | null>(null);
   const [componentsFile, setComponentsFile] = useState<File | null>(null);
   const [componentAircraftSerial, setComponentAircraftSerial] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
@@ -85,6 +121,35 @@ const AircraftImportPage: React.FC = () => {
   const [templateOperatorCode, setTemplateOperatorCode] = useState("");
   const [templateDefaultsJson, setTemplateDefaultsJson] = useState("{}");
   const [templateLoading, setTemplateLoading] = useState(false);
+  const [componentPreviewLoading, setComponentPreviewLoading] = useState(false);
+  const [componentConfirmLoading, setComponentConfirmLoading] = useState(false);
+  const [componentPreviewRows, setComponentPreviewRows] = useState<
+    ComponentPreviewRow[]
+  >([]);
+  const [componentColumnMapping, setComponentColumnMapping] = useState<
+    Record<string, string | null> | null
+  >(null);
+  const [componentSummary, setComponentSummary] = useState<{
+    new: number;
+    update: number;
+    invalid: number;
+  } | null>(null);
+  const [componentTemplates, setComponentTemplates] = useState<
+    AircraftImportTemplate[]
+  >([]);
+  const [componentSelectedTemplateId, setComponentSelectedTemplateId] =
+    useState<number | "">("");
+  const [componentTemplateName, setComponentTemplateName] = useState("");
+  const [componentTemplateAircraftTemplate, setComponentTemplateAircraftTemplate] =
+    useState("");
+  const [componentTemplateModelCode, setComponentTemplateModelCode] =
+    useState("");
+  const [componentTemplateOperatorCode, setComponentTemplateOperatorCode] =
+    useState("");
+  const [componentTemplateDefaultsJson, setComponentTemplateDefaultsJson] =
+    useState("{}");
+  const [componentTemplateLoading, setComponentTemplateLoading] =
+    useState(false);
 
   const handleAircraftFileChange = (
     e: React.ChangeEvent<HTMLInputElement>
@@ -112,9 +177,22 @@ const AircraftImportPage: React.FC = () => {
 
   const hasErrors = (row: PreviewRow) => row.errors.length > 0;
 
+  const validateComponentRow = (data: ComponentRowData) => {
+    const errors: string[] = [];
+    if (!data.position?.trim()) {
+      errors.push("Missing component position.");
+    }
+    return errors;
+  };
+
+  const hasComponentErrors = (row: ComponentPreviewRow) =>
+    row.errors.length > 0;
+
   const loadTemplates = async () => {
     try {
-      const res = await fetch(`${API_BASE}/aircraft/import/templates`);
+      const res = await fetch(
+        `${API_BASE}/aircraft/import/templates?template_type=aircraft`
+      );
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.detail ?? "Failed to load templates.");
@@ -125,8 +203,24 @@ const AircraftImportPage: React.FC = () => {
     }
   };
 
+  const loadComponentTemplates = async () => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/aircraft/import/templates?template_type=components`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail ?? "Failed to load component templates.");
+      }
+      setComponentTemplates(data ?? []);
+    } catch (err: any) {
+      setMessage(err.message ?? "Error loading component templates.");
+    }
+  };
+
   useEffect(() => {
     void loadTemplates();
+    void loadComponentTemplates();
   }, []);
 
   useEffect(() => {
@@ -153,6 +247,30 @@ const AircraftImportPage: React.FC = () => {
     );
   }, [selectedTemplateId, templates]);
 
+  useEffect(() => {
+    if (componentSelectedTemplateId === "") {
+      setComponentTemplateName("");
+      setComponentTemplateAircraftTemplate("");
+      setComponentTemplateModelCode("");
+      setComponentTemplateOperatorCode("");
+      setComponentTemplateDefaultsJson("{}");
+      return;
+    }
+    const selected = componentTemplates.find(
+      (template) => template.id === componentSelectedTemplateId
+    );
+    if (!selected) {
+      return;
+    }
+    setComponentTemplateName(selected.name ?? "");
+    setComponentTemplateAircraftTemplate(selected.aircraft_template ?? "");
+    setComponentTemplateModelCode(selected.model_code ?? "");
+    setComponentTemplateOperatorCode(selected.operator_code ?? "");
+    setComponentTemplateDefaultsJson(
+      JSON.stringify(selected.default_values ?? {}, null, 2)
+    );
+  }, [componentSelectedTemplateId, componentTemplates]);
+
   const handlePreviewRowChange = (
     index: number,
     field: keyof AircraftRowData,
@@ -178,6 +296,31 @@ const AircraftImportPage: React.FC = () => {
     );
   };
 
+  const handleComponentPreviewRowChange = (
+    index: number,
+    field: keyof ComponentRowData,
+    value: string
+  ) => {
+    setComponentPreviewRows((prev) =>
+      prev.map((row, rowIndex) => {
+        if (rowIndex !== index) {
+          return row;
+        }
+        const nextData = {
+          ...row.data,
+          [field]: value,
+        };
+        const errors = validateComponentRow(nextData);
+        return {
+          ...row,
+          data: nextData,
+          errors,
+          approved: errors.length === 0 && row.approved,
+        };
+      })
+    );
+  };
+
   const toggleApproval = (index: number) => {
     setPreviewRows((prev) =>
       prev.map((row, rowIndex) => {
@@ -185,6 +328,23 @@ const AircraftImportPage: React.FC = () => {
           return row;
         }
         if (hasErrors(row)) {
+          return row;
+        }
+        return {
+          ...row,
+          approved: !row.approved,
+        };
+      })
+    );
+  };
+
+  const toggleComponentApproval = (index: number) => {
+    setComponentPreviewRows((prev) =>
+      prev.map((row, rowIndex) => {
+        if (rowIndex !== index) {
+          return row;
+        }
+        if (hasComponentErrors(row)) {
           return row;
         }
         return {
@@ -229,12 +389,63 @@ const AircraftImportPage: React.FC = () => {
     }
   };
 
+  const submitComponentPreviewFile = async (file: File) => {
+    if (!componentAircraftSerial.trim()) {
+      setMessage("Enter the aircraft serial number for components.");
+      return;
+    }
+    setComponentPreviewLoading(true);
+    setMessage(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/aircraft/${encodeURIComponent(
+          componentAircraftSerial.trim()
+        )}/components/import/preview`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail ?? "Component preview failed");
+      }
+      const rows: ComponentPreviewRow[] = (data.rows ?? []).map(
+        (row: ComponentPreviewRow) => ({
+          ...row,
+          approved: row.errors.length === 0,
+        })
+      );
+      setComponentPreviewRows(rows);
+      setComponentColumnMapping(data.column_mapping ?? null);
+      setComponentSummary(data.summary ?? null);
+      setMessage("Component preview ready. Review and confirm import.");
+    } catch (err: any) {
+      setMessage(err.message ?? "Error previewing components.");
+    } finally {
+      setComponentPreviewLoading(false);
+    }
+  };
+
   const parseAircraftFile = async () => {
     if (!aircraftFile) {
       setMessage("Select an aircraft file first.");
       return;
     }
     await submitPreviewFile(aircraftFile);
+  };
+
+  const parseComponentsFile = async () => {
+    if (!componentsFile) {
+      setMessage("Select a component file first.");
+      return;
+    }
+    await submitComponentPreviewFile(componentsFile);
   };
 
   const reparseOcrText = async () => {
@@ -260,6 +471,18 @@ const AircraftImportPage: React.FC = () => {
     }
   };
 
+  const parseComponentTemplateDefaults = () => {
+    const raw = componentTemplateDefaultsJson.trim();
+    if (!raw) {
+      return null;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      throw new Error("Component default values JSON is invalid.");
+    }
+  };
+
   const saveMappingTemplate = async () => {
     if (!columnMapping) {
       setMessage("Parse a file to generate a column mapping before saving.");
@@ -280,6 +503,7 @@ const AircraftImportPage: React.FC = () => {
       const defaultValues = parseTemplateDefaults();
       const payload = {
         name,
+        template_type: "aircraft",
         aircraft_template: templateAircraftTemplate.trim() || null,
         model_code: templateModelCode.trim() || null,
         operator_code: templateOperatorCode.trim() || null,
@@ -306,6 +530,60 @@ const AircraftImportPage: React.FC = () => {
       setMessage(err.message ?? "Error saving template.");
     } finally {
       setTemplateLoading(false);
+    }
+  };
+
+  const saveComponentTemplate = async () => {
+    if (!componentColumnMapping) {
+      setMessage(
+        "Parse a file to generate a component column mapping before saving."
+      );
+      return;
+    }
+    const name =
+      componentTemplateName.trim() ||
+      componentTemplates.find(
+        (template) => template.id === componentSelectedTemplateId
+      )?.name ||
+      "";
+    if (!name) {
+      setMessage("Enter a template name for components.");
+      return;
+    }
+
+    setComponentTemplateLoading(true);
+    setMessage(null);
+    try {
+      const defaultValues = parseComponentTemplateDefaults();
+      const payload = {
+        name,
+        template_type: "components",
+        aircraft_template: componentTemplateAircraftTemplate.trim() || null,
+        model_code: componentTemplateModelCode.trim() || null,
+        operator_code: componentTemplateOperatorCode.trim() || null,
+        column_mapping: componentColumnMapping,
+        default_values: defaultValues,
+      };
+      const method = componentSelectedTemplateId ? "PUT" : "POST";
+      const url = componentSelectedTemplateId
+        ? `${API_BASE}/aircraft/import/templates/${componentSelectedTemplateId}`
+        : `${API_BASE}/aircraft/import/templates`;
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail ?? "Failed to save component template.");
+      }
+      await loadComponentTemplates();
+      setComponentSelectedTemplateId(data.id ?? componentSelectedTemplateId);
+      setMessage("Component template saved.");
+    } catch (err: any) {
+      setMessage(err.message ?? "Error saving component template.");
+    } finally {
+      setComponentTemplateLoading(false);
     }
   };
 
@@ -360,6 +638,47 @@ const AircraftImportPage: React.FC = () => {
     setMessage("Template defaults applied to preview rows.");
   };
 
+  const applyComponentTemplateToPreview = () => {
+    const selected = componentTemplates.find(
+      (template) => template.id === componentSelectedTemplateId
+    );
+    if (!selected) {
+      setMessage("Select a component template to apply.");
+      return;
+    }
+    setComponentPreviewRows((prev) =>
+      prev.map((row) => {
+        const nextData = { ...row.data };
+        const defaults = selected.default_values ?? {};
+
+        (Object.entries(defaults) as [keyof ComponentRowData, any][]).forEach(
+          ([key, value]) => {
+            if (value === null || value === undefined) {
+              return;
+            }
+            const currentValue = nextData[key];
+            if (
+              currentValue === null ||
+              currentValue === undefined ||
+              `${currentValue}`.trim() === ""
+            ) {
+              nextData[key] = value;
+            }
+          }
+        );
+
+        const errors = validateComponentRow(nextData);
+        return {
+          ...row,
+          data: nextData,
+          errors,
+          approved: errors.length === 0 && row.approved,
+        };
+      })
+    );
+    setMessage("Component template defaults applied.");
+  };
+
   const confirmImport = async () => {
     const approvedRows = previewRows.filter(
       (row) => row.approved && row.errors.length === 0
@@ -397,29 +716,35 @@ const AircraftImportPage: React.FC = () => {
     }
   };
 
-  const uploadComponents = async () => {
+  const confirmComponentImport = async () => {
     if (!componentAircraftSerial.trim()) {
       setMessage("Enter the aircraft serial number for components.");
       return;
     }
-    if (!componentsFile) {
-      setMessage("Select a component file first.");
+    const approvedRows = componentPreviewRows.filter(
+      (row) => row.approved && row.errors.length === 0
+    );
+    if (approvedRows.length === 0) {
+      setMessage("Select at least one valid component row to import.");
       return;
     }
-    setLoading(true);
+    setComponentConfirmLoading(true);
     setMessage(null);
-
-    const formData = new FormData();
-    formData.append("file", componentsFile);
 
     try {
       const res = await fetch(
         `${API_BASE}/aircraft/${encodeURIComponent(
           componentAircraftSerial.trim()
-        )}/components/import`,
+        )}/components/import/confirm`,
         {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rows: approvedRows.map((row) => ({
+              row_number: row.row_number,
+              ...row.data,
+            })),
+          }),
         }
       );
 
@@ -429,18 +754,26 @@ const AircraftImportPage: React.FC = () => {
       }
       setMessage(
         `Components import OK for aircraft ${data.aircraft_serial_number}. ` +
-          `New components: ${data.components_created}`
+          `Created: ${data.components_created}, Updated: ${data.components_updated}`
       );
     } catch (err: any) {
       setMessage(err.message ?? "Error importing components.");
     } finally {
-      setLoading(false);
+      setComponentConfirmLoading(false);
     }
   };
 
   const approvedCount = useMemo(
     () => previewRows.filter((row) => row.approved && !hasErrors(row)).length,
     [previewRows]
+  );
+
+  const componentApprovedCount = useMemo(
+    () =>
+      componentPreviewRows.filter(
+        (row) => row.approved && !hasComponentErrors(row)
+      ).length,
+    [componentPreviewRows]
   );
 
   return (
@@ -959,13 +1292,349 @@ const AircraftImportPage: React.FC = () => {
             className="block mb-3"
           />
 
-          <button
-            onClick={uploadComponents}
-            disabled={loading}
-            className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50"
-          >
-            {loading ? "Uploading..." : "Upload Components File"}
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={parseComponentsFile}
+              disabled={componentPreviewLoading}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {componentPreviewLoading ? "Parsing..." : "Parse & Preview"}
+            </button>
+            <button
+              onClick={confirmComponentImport}
+              disabled={componentConfirmLoading || componentApprovedCount === 0}
+              className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50"
+            >
+              {componentConfirmLoading
+                ? "Importing..."
+                : `Confirm Import (${componentApprovedCount})`}
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs uppercase text-slate-400">
+                  Component Template
+                </label>
+                <select
+                  value={componentSelectedTemplateId}
+                  onChange={(e) =>
+                    setComponentSelectedTemplateId(
+                      e.target.value ? Number(e.target.value) : ""
+                    )
+                  }
+                  className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                >
+                  <option value="">Select template</option>
+                  {componentTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={applyComponentTemplateToPreview}
+                  disabled={!componentPreviewRows.length || !componentSelectedTemplateId}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  Apply Template to Preview
+                </button>
+                <button
+                  onClick={saveComponentTemplate}
+                  disabled={componentTemplateLoading || !componentColumnMapping}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50"
+                >
+                  {componentTemplateLoading
+                    ? "Saving..."
+                    : "Save Mapping as Template"}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-4">
+              <div>
+                <label className="block text-xs uppercase text-slate-400">
+                  Template Name
+                </label>
+                <input
+                  type="text"
+                  value={componentTemplateName}
+                  onChange={(e) => setComponentTemplateName(e.target.value)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs uppercase text-slate-400">
+                  Aircraft Template
+                </label>
+                <input
+                  type="text"
+                  value={componentTemplateAircraftTemplate}
+                  onChange={(e) =>
+                    setComponentTemplateAircraftTemplate(e.target.value)
+                  }
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs uppercase text-slate-400">
+                  Model Code
+                </label>
+                <input
+                  type="text"
+                  value={componentTemplateModelCode}
+                  onChange={(e) => setComponentTemplateModelCode(e.target.value)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs uppercase text-slate-400">
+                  Operator Code
+                </label>
+                <input
+                  type="text"
+                  value={componentTemplateOperatorCode}
+                  onChange={(e) =>
+                    setComponentTemplateOperatorCode(e.target.value)
+                  }
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase text-slate-400">
+                Default Values (JSON)
+              </label>
+              <textarea
+                value={componentTemplateDefaultsJson}
+                onChange={(e) =>
+                  setComponentTemplateDefaultsJson(e.target.value)
+                }
+                rows={4}
+                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs"
+              />
+            </div>
+          </div>
+
+          {componentSummary && (
+            <div className="mt-4 grid gap-2 text-sm text-slate-200 md:grid-cols-3">
+              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+                <div className="text-xs uppercase text-slate-400">New</div>
+                <div className="text-lg font-semibold">
+                  {componentSummary.new}
+                </div>
+              </div>
+              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+                <div className="text-xs uppercase text-slate-400">Update</div>
+                <div className="text-lg font-semibold">
+                  {componentSummary.update}
+                </div>
+              </div>
+              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+                <div className="text-xs uppercase text-slate-400">Invalid</div>
+                <div className="text-lg font-semibold">
+                  {componentSummary.invalid}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {componentPreviewRows.length > 0 && (
+            <div className="mt-6 overflow-x-auto border border-slate-800 rounded-2xl">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-950 text-slate-200">
+                  <tr>
+                    <th className="p-3 text-left">Approve</th>
+                    <th className="p-3 text-left">Row</th>
+                    <th className="p-3 text-left">Action</th>
+                    <th className="p-3 text-left">Position</th>
+                    <th className="p-3 text-left">Part Number</th>
+                    <th className="p-3 text-left">Serial Number</th>
+                    <th className="p-3 text-left">Existing PN/SN</th>
+                    <th className="p-3 text-left">ATA</th>
+                    <th className="p-3 text-left">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {componentPreviewRows.map((row, index) => {
+                    const action =
+                      row.errors.length > 0 ? "invalid" : row.action;
+                    const positionMissing = !row.data.position?.trim();
+                    const existingPart = row.existing_component?.part_number;
+                    const existingSerial = row.existing_component?.serial_number;
+                    const partDiff =
+                      existingPart &&
+                      row.data.part_number &&
+                      existingPart !== row.data.part_number;
+                    const serialDiff =
+                      existingSerial &&
+                      row.data.serial_number &&
+                      existingSerial !== row.data.serial_number;
+                    return (
+                      <tr
+                        key={`${row.row_number}-${index}`}
+                        className="border-t border-slate-800"
+                      >
+                        <td className="p-3">
+                          <input
+                            type="checkbox"
+                            checked={row.approved}
+                            disabled={hasComponentErrors(row)}
+                            onChange={() => toggleComponentApproval(index)}
+                          />
+                        </td>
+                        <td className="p-3 text-slate-300">{row.row_number}</td>
+                        <td className="p-3">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${
+                              action === "new"
+                                ? "bg-emerald-500/20 text-emerald-200"
+                                : action === "update"
+                                ? "bg-sky-500/20 text-sky-200"
+                                : "bg-rose-500/20 text-rose-200"
+                            }`}
+                          >
+                            {action}
+                          </span>
+                          {row.errors.length > 0 && (
+                            <div className="mt-1 text-xs text-rose-300">
+                              {row.errors.join(" ")}
+                            </div>
+                          )}
+                          {row.warnings.length > 0 && (
+                            <div className="mt-1 text-xs text-amber-200">
+                              {row.warnings.join(" ")}
+                            </div>
+                          )}
+                          {row.dedupe_suggestions &&
+                            row.dedupe_suggestions.length > 0 && (
+                              <div className="mt-1 text-xs text-amber-200">
+                                {row.dedupe_suggestions.map((suggestion, idx) => (
+                                  <div key={`${row.row_number}-dedupe-${idx}`}>
+                                    {suggestion.source === "existing"
+                                      ? "Existing"
+                                      : "File"}{" "}
+                                    match for {suggestion.part_number}/
+                                    {suggestion.serial_number}:{" "}
+                                    {suggestion.positions.join(", ")}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={row.data.position ?? ""}
+                            onChange={(e) =>
+                              handleComponentPreviewRowChange(
+                                index,
+                                "position",
+                                e.target.value
+                              )
+                            }
+                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
+                              positionMissing
+                                ? "border-rose-400"
+                                : "border-slate-700"
+                            }`}
+                          />
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={row.data.part_number ?? ""}
+                            onChange={(e) =>
+                              handleComponentPreviewRowChange(
+                                index,
+                                "part_number",
+                                e.target.value
+                              )
+                            }
+                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
+                              partDiff ? "border-amber-400" : "border-slate-700"
+                            }`}
+                          />
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={row.data.serial_number ?? ""}
+                            onChange={(e) =>
+                              handleComponentPreviewRowChange(
+                                index,
+                                "serial_number",
+                                e.target.value
+                              )
+                            }
+                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
+                              serialDiff
+                                ? "border-amber-400"
+                                : "border-slate-700"
+                            }`}
+                          />
+                        </td>
+                        <td className="p-3 text-xs text-slate-300">
+                          {existingPart || existingSerial ? (
+                            <div>
+                              <div>{existingPart ?? "—"}</div>
+                              <div className="text-slate-400">
+                                {existingSerial ?? "—"}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">—</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={row.data.ata ?? ""}
+                            onChange={(e) =>
+                              handleComponentPreviewRowChange(
+                                index,
+                                "ata",
+                                e.target.value
+                              )
+                            }
+                            className="w-20 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
+                          />
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={row.data.notes ?? ""}
+                            onChange={(e) =>
+                              handleComponentPreviewRowChange(
+                                index,
+                                "notes",
+                                e.target.value
+                              )
+                            }
+                            className="w-40 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {componentColumnMapping && (
+            <div className="mt-4 text-xs text-slate-400">
+              Detected mapping:{" "}
+              {Object.entries(componentColumnMapping)
+                .filter(([, value]) => value)
+                .map(([key, value]) => `${key} → ${value}`)
+                .join(", ")}
+            </div>
+          )}
         </section>
 
         {message && (
