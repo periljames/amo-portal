@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import models as account_models
-from . import models, schemas, services
+from . import models, ocr as ocr_service, schemas, services
 
 # Roles allowed to manage aircraft, components, usage
 MANAGEMENT_ROLES = [
@@ -1052,23 +1052,34 @@ async def preview_aircraft_import(
             detail="pandas is required for import. Install with 'pip install pandas openpyxl'.",
         )
 
-    ext = Path(file.filename).suffix.lower()
     content = await file.read()
     buffer = BytesIO(content)
+    file_type = ocr_service.detect_file_type(content, file.filename)
+    ocr_info: Dict[str, Any] | None = None
 
-    if ext in [".csv", ".txt"]:
+    ext = Path(file.filename).suffix.lower()
+    if file_type == "csv":
         df = pd.read_csv(buffer)
-    elif ext in [".xlsx", ".xlsm", ".xls"]:
+    elif file_type == "excel" and ext in [".xlsx", ".xlsm", ".xls"]:
         df = pd.read_excel(buffer)
-    elif ext == ".pdf":
-        raise HTTPException(
-            status_code=501,
-            detail="PDF ingestion not yet implemented. Please upload CSV or Excel export for now.",
-        )
+    elif file_type in ["pdf", "image"]:
+        try:
+            ocr_table = ocr_service.extract_table_from_bytes(content, file_type)
+        except ocr_service.OCRDependencyError as exc:  # pragma: no cover
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        df = pd.DataFrame(ocr_table.rows, columns=ocr_table.headers)
+        ocr_info = {
+            "confidence": ocr_table.confidence,
+            "samples": ocr_table.samples,
+            "text": ocr_table.text,
+            "file_type": file_type,
+        }
     else:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{ext}'. Upload CSV, XLSX, XLSM or XLS.",
+            detail=(
+                "Unsupported file type. Upload CSV, XLSX, XLSM, XLS, PDF, or an image."
+            ),
         )
 
     if df.empty:
@@ -1154,6 +1165,7 @@ async def preview_aircraft_import(
             "update": update_count,
             "invalid": invalid_count,
         },
+        "ocr": ocr_info,
     }
 
 
