@@ -803,6 +803,78 @@ function MyTrainingPage() {
     URL.revokeObjectURL(url);
   };
 
+  const exportPdf = () => {
+    if (typeof window === "undefined") return;
+    const rows = sortedItems.map((it) => ({
+      course_id: it.course_id,
+      course_name: it.course_name,
+      status: it.status,
+      frequency_months: it.frequency_months ?? "",
+      last_completion_date: it.last_completion_date ?? "",
+      due_date: getDueDate(it) ?? "",
+      days_until_due: it.days_until_due ?? "",
+      upcoming_event_date: it.upcoming_event_date ?? "",
+    }));
+
+    const win = window.open("", "_blank", "width=980,height=720");
+    if (!win) return;
+
+    const tableRows = rows
+      .map(
+        (row) => `
+          <tr>
+            <td>${row.course_id}</td>
+            <td>${row.course_name}</td>
+            <td>${row.status}</td>
+            <td>${row.frequency_months}</td>
+            <td>${row.last_completion_date}</td>
+            <td>${row.due_date}</td>
+            <td>${row.days_until_due}</td>
+            <td>${row.upcoming_event_date}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    win.document.write(`
+      <html>
+        <head>
+          <title>AMO Training Status</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; }
+            h1 { font-size: 18px; margin-bottom: 12px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; }
+            th { background: #f3f4f6; text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; }
+          </style>
+        </head>
+        <body>
+          <h1>AMO Training Status</h1>
+          <table>
+            <thead>
+              <tr>
+                <th>Course ID</th>
+                <th>Course</th>
+                <th>Status</th>
+                <th>Frequency (Months)</th>
+                <th>Last Completion</th>
+                <th>Due Date</th>
+                <th>Days Until Due</th>
+                <th>Next Event</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows || `<tr><td colspan="8">No rows available.</td></tr>`}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
   const shiftMonth = (delta: number) => {
     setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1));
   };
@@ -1117,6 +1189,9 @@ function MyTrainingPage() {
                       </button>
                       <button type="button" className="secondary-chip-btn" onClick={exportCsv}>
                         Export CSV
+                      </button>
+                      <button type="button" className="secondary-chip-btn" onClick={exportPdf}>
+                        Export PDF
                       </button>
                       <button type="button" className="primary-chip-btn" onClick={reload}>
                         Refresh
