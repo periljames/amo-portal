@@ -1,5 +1,14 @@
 // frontend/src/pages/AircraftImportPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
+import type {
+  CellValueChangedEvent,
+  ColDef,
+  ICellRendererParams,
+} from "ag-grid-community";
+import { AgGridReact } from "ag-grid-react";
+import "ag-grid-community/styles/ag-grid.css";
+import "ag-grid-community/styles/ag-theme-alpine.css";
+import "ag-grid-community/styles/ag-theme-alpine-dark.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -23,6 +32,8 @@ type AircraftRowData = {
   total_cycles?: number | string | null;
 };
 
+type AircraftRowField = keyof AircraftRowData;
+
 type PreviewRow = {
   row_number: number;
   data: AircraftRowData;
@@ -31,6 +42,9 @@ type PreviewRow = {
   action: "new" | "update" | "invalid";
   approved: boolean;
   suggested_template?: SuggestedTemplate | null;
+  original_data?: AircraftRowData;
+  proposed_fields?: AircraftRowField[];
+  user_overrides?: AircraftRowField[];
 };
 
 type SuggestedTemplate = {
@@ -94,6 +108,42 @@ type ComponentPreviewRow = {
     positions: string[];
   }[];
 };
+
+const AIRCRAFT_DIFF_FIELDS: AircraftRowField[] = [
+  "serial_number",
+  "registration",
+  "template",
+  "make",
+  "model",
+  "home_base",
+  "owner",
+  "total_hours",
+  "total_cycles",
+  "last_log_date",
+];
+
+const AIRCRAFT_FIELD_LABELS: Record<AircraftRowField, string> = {
+  serial_number: "Serial",
+  registration: "Registration",
+  template: "Template",
+  make: "Make",
+  model: "Model",
+  home_base: "Base",
+  owner: "Owner",
+  aircraft_model_code: "Model Code",
+  operator_code: "Operator Code",
+  supplier_code: "Supplier Code",
+  company_name: "Company Name",
+  internal_aircraft_identifier: "Internal ID",
+  status: "Status",
+  is_active: "Active",
+  last_log_date: "Last Log Date",
+  total_hours: "Hours",
+  total_cycles: "Cycles",
+};
+
+const normalizeValue = (value: unknown) =>
+  value === null || value === undefined ? "" : `${value}`.trim();
 
 const AircraftImportPage: React.FC = () => {
   const [aircraftFile, setAircraftFile] = useState<File | null>(null);
@@ -271,14 +321,15 @@ const AircraftImportPage: React.FC = () => {
     );
   }, [componentSelectedTemplateId, componentTemplates]);
 
-  const handlePreviewRowChange = (
-    index: number,
-    field: keyof AircraftRowData,
-    value: string
+  const updatePreviewRowValue = (
+    rowNumber: number,
+    field: AircraftRowField,
+    value: string,
+    source: "user" | "system" = "user"
   ) => {
     setPreviewRows((prev) =>
-      prev.map((row, rowIndex) => {
-        if (rowIndex !== index) {
+      prev.map((row) => {
+        if (row.row_number !== rowNumber) {
           return row;
         }
         const nextData = {
@@ -286,11 +337,21 @@ const AircraftImportPage: React.FC = () => {
           [field]: value,
         };
         const errors = validateRow(nextData);
+        const originalValue = normalizeValue(row.original_data?.[field]);
+        const userOverrides = new Set(row.user_overrides ?? []);
+        if (source === "user") {
+          if (normalizeValue(value) === originalValue) {
+            userOverrides.delete(field);
+          } else {
+            userOverrides.add(field);
+          }
+        }
         return {
           ...row,
           data: nextData,
           errors,
           approved: errors.length === 0 && row.approved,
+          user_overrides: Array.from(userOverrides),
         };
       })
     );
@@ -321,10 +382,10 @@ const AircraftImportPage: React.FC = () => {
     );
   };
 
-  const toggleApproval = (index: number) => {
+  const toggleApproval = (rowNumber: number) => {
     setPreviewRows((prev) =>
-      prev.map((row, rowIndex) => {
-        if (rowIndex !== index) {
+      prev.map((row) => {
+        if (row.row_number !== rowNumber) {
           return row;
         }
         if (hasErrors(row)) {
@@ -375,6 +436,9 @@ const AircraftImportPage: React.FC = () => {
       const rows: PreviewRow[] = (data.rows ?? []).map((row: PreviewRow) => ({
         ...row,
         approved: row.errors.length === 0,
+        original_data: { ...row.data },
+        proposed_fields: [],
+        user_overrides: [],
       }));
       setPreviewRows(rows);
       setColumnMapping(data.column_mapping ?? null);
@@ -599,6 +663,7 @@ const AircraftImportPage: React.FC = () => {
       prev.map((row) => {
         const nextData = { ...row.data };
         const defaults = selected.default_values ?? {};
+        const proposedFields = new Set(row.proposed_fields ?? []);
 
         if (selected.aircraft_template && !nextData.template?.trim()) {
           nextData.template = selected.aircraft_template;
@@ -626,12 +691,22 @@ const AircraftImportPage: React.FC = () => {
           }
         );
 
+        AIRCRAFT_DIFF_FIELDS.forEach((field) => {
+          if (
+            normalizeValue(row.data[field]) === "" &&
+            normalizeValue(nextData[field]) !== ""
+          ) {
+            proposedFields.add(field);
+          }
+        });
+
         const errors = validateRow(nextData);
         return {
           ...row,
           data: nextData,
           errors,
           approved: errors.length === 0 && row.approved,
+          proposed_fields: Array.from(proposedFields),
         };
       })
     );
@@ -677,6 +752,341 @@ const AircraftImportPage: React.FC = () => {
       })
     );
     setMessage("Component template defaults applied.");
+  };
+
+  const aircraftGridColumns = useMemo<ColDef<PreviewRow>[]>(
+    () => [
+      {
+        headerName: "Approve",
+        colId: "approved",
+        width: 110,
+        pinned: "left",
+        suppressMovable: true,
+        cellRenderer: (params: ICellRendererParams<PreviewRow>) => {
+          if (!params.data) {
+            return null;
+          }
+          return (
+            <input
+              type="checkbox"
+              checked={params.data.approved}
+              disabled={hasErrors(params.data)}
+              onChange={() => toggleApproval(params.data!.row_number)}
+            />
+          );
+        },
+      },
+      {
+        headerName: "Row",
+        field: "row_number",
+        width: 80,
+        pinned: "left",
+      },
+      {
+        headerName: "Action",
+        colId: "action",
+        minWidth: 200,
+        cellRenderer: (params: ICellRendererParams<PreviewRow>) => {
+          const row = params.data;
+          if (!row) {
+            return null;
+          }
+          const action = row.errors.length > 0 ? "invalid" : row.action;
+          return (
+            <div className="flex flex-col gap-1 text-xs">
+              <span
+                className={`inline-flex w-fit items-center rounded-full px-2 py-1 text-xs font-semibold ${
+                  action === "new"
+                    ? "bg-emerald-500/20 text-emerald-200"
+                    : action === "update"
+                    ? "bg-sky-500/20 text-sky-200"
+                    : "bg-rose-500/20 text-rose-200"
+                }`}
+              >
+                {action}
+              </span>
+              {row.errors.length > 0 && (
+                <div className="text-rose-300">{row.errors.join(" ")}</div>
+              )}
+              {row.warnings.length > 0 && (
+                <div className="text-amber-200">{row.warnings.join(" ")}</div>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "Diff",
+        colId: "diff",
+        minWidth: 220,
+        cellRenderer: (params: ICellRendererParams<PreviewRow>) => {
+          const row = params.data;
+          if (!row) {
+            return null;
+          }
+          const overrides = row.user_overrides ?? [];
+          const proposed = (row.proposed_fields ?? []).filter(
+            (field) =>
+              !overrides.includes(field) &&
+              normalizeValue(row.data[field]) !==
+                normalizeValue(row.original_data?.[field])
+          );
+          const formatLabels = (fields: AircraftRowField[]) =>
+            fields
+              .map((field) => AIRCRAFT_FIELD_LABELS[field] ?? field)
+              .join(", ");
+          return (
+            <div className="flex flex-col gap-1 text-xs">
+              {proposed.length > 0 && (
+                <div className="text-sky-300">
+                  Proposed: {formatLabels(proposed)}
+                </div>
+              )}
+              {overrides.length > 0 && (
+                <div className="text-fuchsia-300">
+                  Overrides: {formatLabels(overrides)}
+                </div>
+              )}
+              {proposed.length === 0 && overrides.length === 0 && (
+                <span className="text-slate-500">—</span>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "Serial",
+        colId: "serial_number",
+        editable: true,
+        width: 150,
+        valueGetter: (params) => params.data?.data.serial_number ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            serial_number: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Registration",
+        colId: "registration",
+        editable: true,
+        width: 150,
+        valueGetter: (params) => params.data?.data.registration ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            registration: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Template",
+        colId: "template",
+        editable: true,
+        width: 160,
+        valueGetter: (params) => params.data?.data.template ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            template: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Suggested Template",
+        colId: "suggested_template",
+        minWidth: 220,
+        valueGetter: (params) => params.data?.suggested_template?.name ?? "—",
+        cellRenderer: (params: ICellRendererParams<PreviewRow>) => {
+          const suggested = params.data?.suggested_template;
+          if (!suggested) {
+            return <span className="text-slate-500">—</span>;
+          }
+          return (
+            <div className="text-xs">
+              <div className="font-semibold text-slate-100">
+                {suggested.name}
+              </div>
+              {(suggested.aircraft_template ||
+                suggested.model_code ||
+                suggested.operator_code) && (
+                <div className="text-slate-400">
+                  {[
+                    suggested.aircraft_template,
+                    suggested.model_code,
+                    suggested.operator_code,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "Make",
+        colId: "make",
+        editable: true,
+        width: 140,
+        valueGetter: (params) => params.data?.data.make ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            make: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Model",
+        colId: "model",
+        editable: true,
+        width: 140,
+        valueGetter: (params) => params.data?.data.model ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            model: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Base",
+        colId: "home_base",
+        editable: true,
+        width: 140,
+        valueGetter: (params) => params.data?.data.home_base ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            home_base: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Owner",
+        colId: "owner",
+        editable: true,
+        width: 160,
+        valueGetter: (params) => params.data?.data.owner ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            owner: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Hours",
+        colId: "total_hours",
+        editable: true,
+        width: 120,
+        valueGetter: (params) => params.data?.data.total_hours ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            total_hours: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Cycles",
+        colId: "total_cycles",
+        editable: true,
+        width: 120,
+        valueGetter: (params) => params.data?.data.total_cycles ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            total_cycles: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Last Log Date",
+        colId: "last_log_date",
+        editable: true,
+        width: 160,
+        valueGetter: (params) => params.data?.data.last_log_date ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            last_log_date: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+    ],
+    []
+  );
+
+  const aircraftGridDefaultColDef = useMemo<ColDef<PreviewRow>>(
+    () => ({
+      editable: false,
+      resizable: true,
+      sortable: true,
+      suppressMovable: false,
+      filter: true,
+    }),
+    []
+  );
+
+  const handleAircraftCellValueChanged = (
+    event: CellValueChangedEvent<PreviewRow>
+  ) => {
+    if (!event.data) {
+      return;
+    }
+    const field = event.colDef.colId as AircraftRowField | undefined;
+    if (!field || !AIRCRAFT_DIFF_FIELDS.includes(field)) {
+      return;
+    }
+    updatePreviewRowValue(
+      event.data.row_number,
+      field,
+      event.newValue ?? "",
+      "user"
+    );
   };
 
   const confirmImport = async () => {
@@ -1007,248 +1417,27 @@ const AircraftImportPage: React.FC = () => {
           )}
 
           {previewRows.length > 0 && (
-            <div className="mt-6 overflow-x-auto border border-slate-800 rounded-2xl">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-950 text-slate-200">
-                  <tr>
-                    <th className="p-3 text-left">Approve</th>
-                    <th className="p-3 text-left">Row</th>
-                    <th className="p-3 text-left">Action</th>
-                    <th className="p-3 text-left">Serial</th>
-                    <th className="p-3 text-left">Registration</th>
-                    <th className="p-3 text-left">Template</th>
-                    <th className="p-3 text-left">Suggested Template</th>
-                    <th className="p-3 text-left">Make</th>
-                    <th className="p-3 text-left">Model</th>
-                    <th className="p-3 text-left">Base</th>
-                    <th className="p-3 text-left">Owner</th>
-                    <th className="p-3 text-left">Hours</th>
-                    <th className="p-3 text-left">Cycles</th>
-                    <th className="p-3 text-left">Last Log Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewRows.map((row, index) => {
-                    const action =
-                      row.errors.length > 0 ? "invalid" : row.action;
-                    const serialMissing = !row.data.serial_number?.trim();
-                    const regMissing = !row.data.registration?.trim();
-                    return (
-                      <tr
-                        key={`${row.row_number}-${index}`}
-                        className="border-t border-slate-800"
-                      >
-                        <td className="p-3">
-                          <input
-                            type="checkbox"
-                            checked={row.approved}
-                            disabled={hasErrors(row)}
-                            onChange={() => toggleApproval(index)}
-                          />
-                        </td>
-                        <td className="p-3 text-slate-300">{row.row_number}</td>
-                        <td className="p-3">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${
-                              action === "new"
-                                ? "bg-emerald-500/20 text-emerald-200"
-                                : action === "update"
-                                ? "bg-sky-500/20 text-sky-200"
-                                : "bg-rose-500/20 text-rose-200"
-                            }`}
-                          >
-                            {action}
-                          </span>
-                          {row.errors.length > 0 && (
-                            <div className="mt-1 text-xs text-rose-300">
-                              {row.errors.join(" ")}
-                            </div>
-                          )}
-                          {row.warnings.length > 0 && (
-                            <div className="mt-1 text-xs text-amber-200">
-                              {row.warnings.join(" ")}
-                            </div>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.serial_number ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "serial_number",
-                                e.target.value
-                              )
-                            }
-                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
-                              serialMissing
-                                ? "border-rose-400"
-                                : "border-slate-700"
-                            }`}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.registration ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "registration",
-                                e.target.value
-                              )
-                            }
-                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
-                              regMissing
-                                ? "border-rose-400"
-                                : "border-slate-700"
-                            }`}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.template ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "template",
-                                e.target.value
-                              )
-                            }
-                            className="w-32 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                        <td className="p-3 text-xs text-slate-300">
-                          {row.suggested_template ? (
-                            <div>
-                              <div className="font-semibold text-slate-100">
-                                {row.suggested_template.name}
-                              </div>
-                              <div>
-                                {(row.suggested_template.aircraft_template ||
-                                  row.suggested_template.model_code ||
-                                  row.suggested_template.operator_code) && (
-                                  <span className="text-slate-400">
-                                    {[
-                                      row.suggested_template.aircraft_template,
-                                      row.suggested_template.model_code,
-                                      row.suggested_template.operator_code,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(" · ")}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-slate-500">—</span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.make ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "make",
-                                e.target.value
-                              )
-                            }
-                            className="w-32 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.model ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "model",
-                                e.target.value
-                              )
-                            }
-                            className="w-32 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.home_base ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "home_base",
-                                e.target.value
-                              )
-                            }
-                            className="w-32 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.owner ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "owner",
-                                e.target.value
-                              )
-                            }
-                            className="w-32 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="number"
-                            value={row.data.total_hours ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "total_hours",
-                                e.target.value
-                              )
-                            }
-                            className="w-28 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="number"
-                            value={row.data.total_cycles ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "total_cycles",
-                                e.target.value
-                              )
-                            }
-                            className="w-24 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="date"
-                            value={row.data.last_log_date ?? ""}
-                            onChange={(e) =>
-                              handlePreviewRowChange(
-                                index,
-                                "last_log_date",
-                                e.target.value
-                              )
-                            }
-                            className="w-36 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="mt-6">
+              <div
+                className="ag-theme-alpine-dark border border-slate-800 rounded-2xl overflow-hidden"
+                style={{ height: 560 }}
+              >
+                <AgGridReact<PreviewRow>
+                  rowData={previewRows}
+                  columnDefs={aircraftGridColumns}
+                  defaultColDef={aircraftGridDefaultColDef}
+                  rowSelection="multiple"
+                  suppressRowClickSelection
+                  rowBuffer={12}
+                  rowModelType="clientSide"
+                  suppressColumnVirtualisation={false}
+                  suppressRowVirtualisation={false}
+                  enableCellTextSelection
+                  enableRangeSelection
+                  getRowId={(params) => `${params.data.row_number}`}
+                  onCellValueChanged={handleAircraftCellValueChanged}
+                />
+              </div>
             </div>
           )}
 
