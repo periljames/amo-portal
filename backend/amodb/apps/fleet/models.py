@@ -380,8 +380,17 @@ class AircraftUsage(Base):
     ttesn_after = Column(Float, nullable=True)   # Total Time Engine Since New
     tcesn_after = Column(Float, nullable=True)   # Total Cycles Engine Since New
     ttsoh_after = Column(Float, nullable=True)   # Time Since Overhaul (relevant comp)
+    ttshsi_after = Column(Float, nullable=True)  # Time Since HSI
+    tcsoh_after = Column(Float, nullable=True)   # Cycles Since Overhaul
+    pttsn_after = Column(Float, nullable=True)   # Prop Total Time Since New
+    pttso_after = Column(Float, nullable=True)   # Prop Time Since Overhaul
+    tscoa_after = Column(Float, nullable=True)   # Time Since Change of Angle (prop)
+
+    hours_to_mx = Column(Float, nullable=True)
+    days_to_mx = Column(Integer, nullable=True)
 
     remarks = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
 
     # Audit
     created_at = Column(

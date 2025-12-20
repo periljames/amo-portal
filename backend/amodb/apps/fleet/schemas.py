@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import date as DateType, datetime as DateTimeType
 from typing import Optional, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .models import MaintenanceProgramCategoryEnum
 
@@ -207,19 +207,28 @@ class AircraftUsageBase(BaseModel):
     """
 
     date: DateType
-    techlog_no: str
+    techlog_no: str = Field(..., min_length=1)
     station: Optional[str] = None
 
-    block_hours: float
-    cycles: float
+    block_hours: float = Field(..., ge=0)
+    cycles: float = Field(..., ge=0)
 
     ttaf_after: Optional[float] = None
     tca_after: Optional[float] = None
     ttesn_after: Optional[float] = None
     tcesn_after: Optional[float] = None
     ttsoh_after: Optional[float] = None
+    ttshsi_after: Optional[float] = None
+    tcsoh_after: Optional[float] = None
+    pttsn_after: Optional[float] = None
+    pttso_after: Optional[float] = None
+    tscoa_after: Optional[float] = None
+
+    hours_to_mx: Optional[float] = None
+    days_to_mx: Optional[int] = None
 
     remarks: Optional[str] = None
+    note: Optional[str] = None
 
 
 class AircraftUsageCreate(AircraftUsageBase):
@@ -243,16 +252,25 @@ class AircraftUsageUpdate(BaseModel):
     techlog_no: Optional[str] = None
     station: Optional[str] = None
 
-    block_hours: Optional[float] = None
-    cycles: Optional[float] = None
+    block_hours: Optional[float] = Field(default=None, ge=0)
+    cycles: Optional[float] = Field(default=None, ge=0)
 
     ttaf_after: Optional[float] = None
     tca_after: Optional[float] = None
     ttesn_after: Optional[float] = None
     tcesn_after: Optional[float] = None
     ttsoh_after: Optional[float] = None
+    ttshsi_after: Optional[float] = None
+    tcsoh_after: Optional[float] = None
+    pttsn_after: Optional[float] = None
+    pttso_after: Optional[float] = None
+    tscoa_after: Optional[float] = None
+
+    hours_to_mx: Optional[float] = None
+    days_to_mx: Optional[int] = None
 
     remarks: Optional[str] = None
+    note: Optional[str] = None
 
     last_seen_updated_at: DateTimeType
 
@@ -268,6 +286,19 @@ class AircraftUsageRead(AircraftUsageBase):
 
     class Config:
         from_attributes = True
+
+
+class AircraftUsageSummary(BaseModel):
+    aircraft_serial_number: str
+    total_hours: Optional[float] = None
+    total_cycles: Optional[float] = None
+    seven_day_daily_average_hours: Optional[float] = None
+
+    next_due_program_item_id: Optional[int] = None
+    next_due_task_code: Optional[str] = None
+    next_due_date: Optional[DateType] = None
+    next_due_hours: Optional[float] = None
+    next_due_cycles: Optional[float] = None
 
 
 # ---------------- MAINTENANCE PROGRAMME ----------------
