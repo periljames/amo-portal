@@ -51,6 +51,13 @@ type AircraftImportTemplate = {
   default_values?: Record<string, any> | null;
 };
 
+type OcrPreview = {
+  confidence?: number | null;
+  samples?: string[];
+  text?: string | null;
+  file_type?: string | null;
+};
+
 const AircraftImportPage: React.FC = () => {
   const [aircraftFile, setAircraftFile] = useState<File | null>(null);
   const [componentsFile, setComponentsFile] = useState<File | null>(null);
@@ -63,6 +70,8 @@ const AircraftImportPage: React.FC = () => {
   const [columnMapping, setColumnMapping] = useState<
     Record<string, string | null> | null
   >(null);
+  const [ocrPreview, setOcrPreview] = useState<OcrPreview | null>(null);
+  const [ocrTextDraft, setOcrTextDraft] = useState("");
   const [previewSummary, setPreviewSummary] = useState<{
     new: number;
     update: number;
@@ -186,16 +195,12 @@ const AircraftImportPage: React.FC = () => {
     );
   };
 
-  const parseAircraftFile = async () => {
-    if (!aircraftFile) {
-      setMessage("Select an aircraft file first.");
-      return;
-    }
+  const submitPreviewFile = async (file: File) => {
     setPreviewLoading(true);
     setMessage(null);
 
     const formData = new FormData();
-    formData.append("file", aircraftFile);
+    formData.append("file", file);
 
     try {
       const res = await fetch(`${API_BASE}/aircraft/import/preview`, {
@@ -214,12 +219,33 @@ const AircraftImportPage: React.FC = () => {
       setPreviewRows(rows);
       setColumnMapping(data.column_mapping ?? null);
       setPreviewSummary(data.summary ?? null);
+      setOcrPreview(data.ocr ?? null);
+      setOcrTextDraft(data.ocr?.text ?? "");
       setMessage("Preview ready. Review and confirm import.");
     } catch (err: any) {
       setMessage(err.message ?? "Error previewing aircraft.");
     } finally {
       setPreviewLoading(false);
     }
+  };
+
+  const parseAircraftFile = async () => {
+    if (!aircraftFile) {
+      setMessage("Select an aircraft file first.");
+      return;
+    }
+    await submitPreviewFile(aircraftFile);
+  };
+
+  const reparseOcrText = async () => {
+    if (!ocrTextDraft.trim()) {
+      setMessage("Add corrected OCR text before re-parsing.");
+      return;
+    }
+    const ocrFile = new File([ocrTextDraft], "ocr-corrected.csv", {
+      type: "text/csv",
+    });
+    await submitPreviewFile(ocrFile);
   };
 
   const parseTemplateDefaults = () => {
@@ -435,7 +461,7 @@ const AircraftImportPage: React.FC = () => {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <input
               type="file"
-              accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf"
+              accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
               onChange={handleAircraftFileChange}
               className="block"
             />
@@ -459,6 +485,69 @@ const AircraftImportPage: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {ocrPreview && (
+            <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase text-slate-400">
+                    OCR Preview
+                  </div>
+                  <div className="text-sm text-slate-200">
+                    {ocrPreview.file_type
+                      ? `Detected ${ocrPreview.file_type.toUpperCase()}`
+                      : "Detected OCR content"}
+                  </div>
+                </div>
+                <div className="text-sm text-slate-200">
+                  Confidence:{" "}
+                  <span className="font-semibold">
+                    {ocrPreview.confidence !== null &&
+                    ocrPreview.confidence !== undefined
+                      ? `${ocrPreview.confidence.toFixed(1)}%`
+                      : "n/a"}
+                  </span>
+                </div>
+              </div>
+
+              {ocrPreview.samples && ocrPreview.samples.length > 0 && (
+                <div className="mt-3 text-sm text-slate-300">
+                  <div className="text-xs uppercase text-slate-400">
+                    Extracted Samples
+                  </div>
+                  <ul className="mt-1 list-disc space-y-1 pl-5">
+                    {ocrPreview.samples.map((sample, index) => (
+                      <li key={`${sample}-${index}`}>{sample}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="mt-4">
+                <label className="block text-xs uppercase text-slate-400">
+                  OCR Text (edit to correct before re-parsing)
+                </label>
+                <textarea
+                  value={ocrTextDraft}
+                  onChange={(e) => setOcrTextDraft(e.target.value)}
+                  rows={6}
+                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs"
+                />
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
+                  <span>
+                    Re-parsing expects CSV/TSV-style rows with a header line.
+                  </span>
+                </div>
+                <button
+                  onClick={reparseOcrText}
+                  disabled={previewLoading}
+                  className="mt-3 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50"
+                >
+                  {previewLoading ? "Re-parsing..." : "Rebuild Preview from OCR"}
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 grid gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
