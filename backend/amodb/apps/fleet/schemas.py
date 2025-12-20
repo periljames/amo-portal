@@ -132,6 +132,7 @@ class AircraftImportConfirmedCell(BaseModel):
     original: Any = None
     proposed: Any = None
     final: Any = None
+    decision: Optional[str] = None
 
 
 class AircraftImportConfirmedRow(BaseModel):

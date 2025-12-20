@@ -679,6 +679,7 @@ class ImportReconciliationLog(Base):
     original_value = Column(JSON, nullable=True)
     proposed_value = Column(JSON, nullable=True)
     final_value = Column(JSON, nullable=True)
+    decision = Column(String(32), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

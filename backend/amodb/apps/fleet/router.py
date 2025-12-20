@@ -1576,6 +1576,7 @@ async def import_aircraft_file(
                     "original": cell.original,
                     "proposed": cell.proposed,
                     "final": cell.final,
+                    "decision": cell.decision,
                 }
         else:
             for field, value in row_data.items():
@@ -1598,7 +1599,8 @@ async def import_aircraft_file(
         )
 
         for field, cell in snapshot_cells.items():
-            if _values_differ(cell.get("original"), cell.get("final")):
+            decision = cell.get("decision") if confirmed_row else None
+            if _values_differ(cell.get("original"), cell.get("final")) or decision:
                 reconciliation_logs.append(
                     models.ImportReconciliationLog(
                         batch_id=batch_id,
@@ -1609,6 +1611,7 @@ async def import_aircraft_file(
                         original_value=cell.get("original"),
                         proposed_value=cell.get("proposed"),
                         final_value=cell.get("final"),
+                        decision=decision,
                         created_by_user_id=current_user.id,
                     )
                 )
