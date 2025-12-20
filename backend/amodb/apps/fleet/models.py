@@ -618,6 +618,69 @@ class AircraftImportTemplate(Base):
 
 
 # ---------------------------------------------------------------------------
+# Aircraft Import Preview Staging
+# ---------------------------------------------------------------------------
+
+
+class AircraftImportPreviewSession(Base):
+    """
+    Preview session metadata for bulk import staging.
+    """
+
+    __tablename__ = "aircraft_import_preview_sessions"
+    __table_args__ = (
+        Index("ix_aircraft_import_preview_session_created", "created_at"),
+        Index("ix_aircraft_import_preview_session_type", "import_type"),
+    )
+
+    preview_id = Column(String(36), primary_key=True, index=True)
+    import_type = Column(String(32), nullable=False, index=True, default="aircraft")
+    total_rows = Column(Integer, nullable=False, default=0)
+    column_mapping = Column(JSON, nullable=True)
+    summary = Column(JSON, nullable=True)
+    ocr_info = Column(JSON, nullable=True)
+    formula_discrepancies = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    created_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+
+class AircraftImportPreviewRow(Base):
+    """
+    Staged rows for bulk import preview.
+    """
+
+    __tablename__ = "aircraft_import_preview_rows"
+    __table_args__ = (
+        Index("ix_aircraft_import_preview_row_preview", "preview_id", "row_number"),
+        Index("ix_aircraft_import_preview_row_preview_action", "preview_id", "action"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    preview_id = Column(
+        String(36),
+        ForeignKey("aircraft_import_preview_sessions.preview_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    row_number = Column(Integer, nullable=False, index=True)
+    data = Column(JSON, nullable=False)
+    errors = Column(JSON, nullable=False, default=list)
+    warnings = Column(JSON, nullable=False, default=list)
+    action = Column(String(16), nullable=False)
+    suggested_template = Column(JSON, nullable=True)
+    formula_proposals = Column(JSON, nullable=True)
+
+
+# ---------------------------------------------------------------------------
 # Aircraft Import Reconciliation
 # ---------------------------------------------------------------------------
 
