@@ -189,6 +189,101 @@ const AdminDashboardPage: React.FC = () => {
     navigate(target);
   };
 
+  const exportUsersCsv = () => {
+    const rows = users.map((u) => ({
+      staff_code: u.staff_code ?? "",
+      name: u.full_name ?? "",
+      email: u.email ?? "",
+      role: u.role ?? "",
+      department: u.department_id ?? "",
+      status: u.is_active ? "Active" : "Inactive",
+    }));
+
+    const header = rows.length
+      ? Object.keys(rows[0]).join(",")
+      : "staff_code,name,email,role,department,status";
+    const body = rows
+      .map((r) =>
+        Object.values(r)
+          .map((v) => {
+            const s = String(v ?? "");
+            const escaped =
+              s.includes(",") || s.includes('"') || s.includes("\n")
+                ? `"${s.replace(/"/g, '""')}"`
+                : s;
+            return escaped;
+          })
+          .join(","),
+      )
+      .join("\n");
+
+    const csv = rows.length ? `${header}\n${body}\n` : `${header}\n`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "amo_users.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportUsersPdf = () => {
+    if (typeof window === "undefined") return;
+    const win = window.open("", "_blank", "width=980,height=720");
+    if (!win) return;
+
+    const rows = users
+      .map(
+        (u) => `
+          <tr>
+            <td>${u.staff_code ?? ""}</td>
+            <td>${u.full_name ?? ""}</td>
+            <td>${u.email ?? ""}</td>
+            <td>${u.role ?? ""}</td>
+            <td>${u.department_id ?? "—"}</td>
+            <td>${u.is_active ? "Active" : "Inactive"}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    win.document.write(`
+      <html>
+        <head>
+          <title>AMO Users</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; }
+            h1 { font-size: 18px; margin-bottom: 12px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; }
+            th { background: #f3f4f6; text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; }
+          </style>
+        </head>
+        <body>
+          <h1>AMO Users</h1>
+          <table>
+            <thead>
+              <tr>
+                <th>Staff Code</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Department</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || `<tr><td colspan="6">No users found.</td></tr>`}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
   const handleAmoChange = (nextAmoId: string) => {
     const v = (nextAmoId || "").trim();
     if (!v) return;
@@ -271,6 +366,22 @@ const AdminDashboardPage: React.FC = () => {
           >
             + Create user
           </button>
+          <button
+            type="button"
+            className="secondary-chip-btn"
+            onClick={exportUsersCsv}
+            disabled={users.length === 0}
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            className="secondary-chip-btn"
+            onClick={exportUsersPdf}
+            disabled={users.length === 0}
+          >
+            Export PDF
+          </button>
 
           <div
             style={{
@@ -288,6 +399,7 @@ const AdminDashboardPage: React.FC = () => {
                 setSkip(0);
               }}
               placeholder="Search name, email, staff code…"
+              className="input"
               style={{ minWidth: 280 }}
             />
             {skip > 0 && (
