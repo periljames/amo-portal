@@ -71,6 +71,7 @@ WriteSessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=write_engine,
+    expire_on_commit=False,
     future=True,
 )
 
@@ -78,6 +79,7 @@ ReadSessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=read_engine,
+    expire_on_commit=False,
     future=True,
 )
 

@@ -181,18 +181,18 @@ export function clearActiveAmoId(): void {
 
 export function authHeaders(extra?: HeadersInit): HeadersInit {
   const token = getToken();
-  const base: HeadersInit = {
-    "Content-Type": "application/json",
-  };
+  const headers = new Headers();
 
   if (token) {
-    (base as any).Authorization = `Bearer ${token}`;
+    headers.set("Authorization", `Bearer ${token}`);
   }
 
-  return {
-    ...base,
-    ...(extra || {}),
-  };
+  if (extra) {
+    const extras = new Headers(extra);
+    extras.forEach((value, key) => headers.set(key, value));
+  }
+
+  return headers;
 }
 
 // -----------------------------------------------------------------------------
