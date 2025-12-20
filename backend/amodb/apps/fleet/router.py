@@ -843,6 +843,81 @@ def _build_aircraft_payload(
     return payload
 
 
+def _map_component_columns(raw_cols: List[str]) -> Dict[str, str | None]:
+    """
+    Map incoming header names onto canonical component fields.
+    """
+    norm = {_normalise_header(c): c for c in raw_cols}
+
+    def pick(*candidates: str) -> str | None:
+        for cand in candidates:
+            if cand in norm:
+                return norm[cand]
+        return None
+
+    return {
+        "position": pick("position", "pos", "component_position", "location"),
+        "ata": pick("ata", "ata_chapter", "ata_system"),
+        "part_number": pick(
+            "part_number",
+            "part_no",
+            "partnum",
+            "pn",
+            "pnr",
+        ),
+        "serial_number": pick(
+            "serial_number",
+            "serial_no",
+            "serialnum",
+            "sn",
+            "sno",
+        ),
+        "description": pick("description", "desc"),
+        "installed_date": pick("installed_date", "inst_date"),
+        "installed_hours": pick("installed_hours"),
+        "installed_cycles": pick("installed_cycles"),
+        "current_hours": pick("current_hours"),
+        "current_cycles": pick("current_cycles"),
+        "notes": pick("notes", "remark", "remarks"),
+        "manufacturer_code": pick("manufacturer_code", "mfr", "mfr_code"),
+        "operator_code": pick("operator_code", "opr", "operator"),
+    }
+
+
+def _build_component_payload(
+    row: Dict[str, Any], colmap: Dict[str, str | None]
+) -> Dict[str, Any]:
+    def to_str(value: Any) -> str | None:
+        if value is None:
+            return None
+        coerced = _coerce_import_value(value)
+        if coerced is None:
+            return None
+        return str(coerced).strip()
+
+    def pick_value(key: str) -> Any:
+        raw_col = colmap.get(key)
+        if not raw_col:
+            return None
+        return _coerce_import_value(row.get(raw_col))
+
+    return {
+        "position": to_str(pick_value("position")) or "",
+        "ata": to_str(pick_value("ata")),
+        "part_number": to_str(pick_value("part_number")),
+        "serial_number": to_str(pick_value("serial_number")),
+        "description": to_str(pick_value("description")),
+        "installed_date": pick_value("installed_date"),
+        "installed_hours": pick_value("installed_hours"),
+        "installed_cycles": pick_value("installed_cycles"),
+        "current_hours": pick_value("current_hours"),
+        "current_cycles": pick_value("current_cycles"),
+        "notes": to_str(pick_value("notes")),
+        "manufacturer_code": to_str(pick_value("manufacturer_code")),
+        "operator_code": to_str(pick_value("operator_code")),
+    }
+
+
 def _validate_aircraft_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]:
     errors: List[str] = []
     warnings: List[str] = []
@@ -860,12 +935,30 @@ def _validate_aircraft_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]:
     return {"errors": errors, "warnings": warnings}
 
 
+def _validate_component_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]:
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    position = (payload.get("position") or "").strip()
+    part_number = (payload.get("part_number") or "").strip()
+    serial_number = (payload.get("serial_number") or "").strip()
+
+    if not position:
+        errors.append("Missing component position.")
+
+    if (part_number and not serial_number) or (serial_number and not part_number):
+        warnings.append("Part/serial number pair is incomplete.")
+
+    return {"errors": errors, "warnings": warnings}
+
+
 def _serialize_import_template(
     template: models.AircraftImportTemplate,
 ) -> Dict[str, Any]:
     return {
         "id": template.id,
         "name": template.name,
+        "template_type": template.template_type,
         "aircraft_template": template.aircraft_template,
         "model_code": template.model_code,
         "operator_code": template.operator_code,
@@ -915,9 +1008,14 @@ def list_import_templates(
     aircraft_template: Optional[str] = None,
     model_code: Optional[str] = None,
     operator_code: Optional[str] = None,
+    template_type: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(models.AircraftImportTemplate)
+    if template_type is not None:
+        query = query.filter(
+            models.AircraftImportTemplate.template_type == template_type
+        )
     if aircraft_template is not None:
         query = query.filter(
             models.AircraftImportTemplate.aircraft_template == aircraft_template
@@ -947,12 +1045,19 @@ def create_import_template(
     existing = (
         db.query(models.AircraftImportTemplate)
         .filter(models.AircraftImportTemplate.name == payload.name)
+        .filter(
+            models.AircraftImportTemplate.template_type
+            == payload.template_type
+        )
         .first()
     )
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Template with name {payload.name} already exists.",
+            detail=(
+                f"Template with name {payload.name} already exists "
+                f"for type {payload.template_type}."
+            ),
         )
     template = models.AircraftImportTemplate(**payload.model_dump())
     db.add(template)
@@ -980,16 +1085,25 @@ def update_import_template(
 
     data = payload.model_dump(exclude_unset=True)
     new_name = data.get("name")
-    if new_name and new_name != template.name:
+    target_type = data.get("template_type", template.template_type)
+    if new_name and (
+        new_name != template.name or target_type != template.template_type
+    ):
         name_conflict = (
             db.query(models.AircraftImportTemplate)
             .filter(models.AircraftImportTemplate.name == new_name)
+            .filter(
+                models.AircraftImportTemplate.template_type == target_type
+            )
             .first()
         )
         if name_conflict:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Template with name {new_name} already exists.",
+                detail=(
+                    f"Template with name {new_name} already exists "
+                    f"for type {target_type}."
+                ),
             )
 
     for field, value in data.items():
@@ -1099,7 +1213,11 @@ async def preview_aircraft_import(
     rows: List[Dict[str, Any]] = []
     serials: List[str] = []
     seen_serials: Dict[str, int] = {}
-    templates = db.query(models.AircraftImportTemplate).all()
+    templates = (
+        db.query(models.AircraftImportTemplate)
+        .filter(models.AircraftImportTemplate.template_type == "aircraft")
+        .all()
+    )
 
     for idx, row in df.iterrows():
         row_idx = int(idx) + 2
@@ -1248,6 +1366,256 @@ async def import_aircraft_file(
 
 
 @router.post(
+    "/{serial_number}/components/import/preview",
+    tags=["aircraft"],
+    summary="Preview component import with normalization and dedupe hints",
+)
+async def preview_components_import(
+    serial_number: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    """
+    Preview components for an aircraft before importing.
+
+    Returns normalized rows, validation errors/warnings, and dedupe hints
+    based on part/serial number pairs.
+    """
+    try:
+        import pandas as pd  # type: ignore
+    except ImportError:  # pragma: no cover
+        raise HTTPException(
+            status_code=500,
+            detail="pandas is required for import. Install with 'pip install pandas openpyxl'.",
+        )
+
+    ac = db.query(models.Aircraft).get(serial_number)
+    if not ac:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    ext = Path(file.filename).suffix.lower()
+    content = await file.read()
+    buffer = BytesIO(content)
+
+    if ext in [".csv", ".txt"]:
+        df = pd.read_csv(buffer)
+    elif ext in [".xlsx", ".xlsm", ".xls"]:
+        df = pd.read_excel(buffer)
+    elif ext == ".pdf":
+        raise HTTPException(
+            status_code=501,
+            detail="PDF ingestion for components not yet implemented. Use CSV/Excel for now.",
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Upload CSV, XLSX, XLSM or XLS.",
+        )
+
+    if df.empty:
+        raise HTTPException(status_code=400, detail="Uploaded file contains no data.")
+
+    colmap = _map_component_columns(list(df.columns))
+    if not colmap["position"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Component file must have a 'position' column "
+                "(examples: position, pos)."
+            ),
+        )
+
+    existing_components = (
+        db.query(models.AircraftComponent)
+        .filter(models.AircraftComponent.aircraft_serial_number == serial_number)
+        .all()
+    )
+    existing_by_position = {
+        (comp.position or "").strip().lower(): comp for comp in existing_components
+    }
+    existing_by_pn_sn: Dict[tuple[str, str], List[models.AircraftComponent]] = {}
+    for comp in existing_components:
+        pn = (comp.part_number or "").strip().lower()
+        sn = (comp.serial_number or "").strip().lower()
+        if pn and sn:
+            existing_by_pn_sn.setdefault((pn, sn), []).append(comp)
+
+    seen_in_file: Dict[tuple[str, str], List[str]] = {}
+    rows: List[Dict[str, Any]] = []
+    new_count = 0
+    update_count = 0
+    invalid_count = 0
+
+    for idx, row in df.iterrows():
+        row_idx = int(idx) + 2  # approx Excel row number
+        payload = _build_component_payload(row.to_dict(), colmap)
+        validation = _validate_component_payload(payload)
+        errors = validation["errors"]
+        warnings = validation["warnings"]
+        position = payload.get("position") or ""
+        existing_component = (
+            existing_by_position.get(position.lower()) if position else None
+        )
+        dedupe_suggestions: List[Dict[str, Any]] = []
+
+        part_number = (payload.get("part_number") or "").strip()
+        serial = (payload.get("serial_number") or "").strip()
+        if part_number and serial:
+            key = (part_number.lower(), serial.lower())
+            if key in seen_in_file:
+                warnings.append("Duplicate part/serial pair found in upload.")
+                dedupe_suggestions.append(
+                    {
+                        "source": "file",
+                        "part_number": part_number,
+                        "serial_number": serial,
+                        "positions": seen_in_file[key],
+                    }
+                )
+            if key in existing_by_pn_sn:
+                warnings.append("Part/serial pair already exists on this aircraft.")
+                dedupe_suggestions.append(
+                    {
+                        "source": "existing",
+                        "part_number": part_number,
+                        "serial_number": serial,
+                        "positions": [
+                            comp.position for comp in existing_by_pn_sn[key]
+                        ],
+                    }
+                )
+            seen_in_file.setdefault(key, []).append(position or f"row {row_idx}")
+
+        if errors:
+            action = "invalid"
+            invalid_count += 1
+        else:
+            if existing_component:
+                action = "update"
+                update_count += 1
+            else:
+                action = "new"
+                new_count += 1
+
+        rows.append(
+            {
+                "row_number": row_idx,
+                "data": payload,
+                "errors": errors,
+                "warnings": warnings,
+                "action": action,
+                "existing_component": {
+                    "position": existing_component.position,
+                    "part_number": existing_component.part_number,
+                    "serial_number": existing_component.serial_number,
+                }
+                if existing_component
+                else None,
+                "dedupe_suggestions": dedupe_suggestions,
+            }
+        )
+
+    return {
+        "rows": rows,
+        "column_mapping": colmap,
+        "summary": {
+            "new": new_count,
+            "update": update_count,
+            "invalid": invalid_count,
+        },
+    }
+
+
+@router.post(
+    "/{serial_number}/components/import/confirm",
+    tags=["aircraft"],
+    summary="Confirm component import for approved rows",
+)
+async def confirm_components_import(
+    serial_number: str,
+    payload: schemas.AircraftComponentImportRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    ac = db.query(models.Aircraft).get(serial_number)
+    if not ac:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    existing_components = (
+        db.query(models.AircraftComponent)
+        .filter(models.AircraftComponent.aircraft_serial_number == serial_number)
+        .all()
+    )
+    existing_by_position = {
+        (comp.position or "").strip().lower(): comp for comp in existing_components
+    }
+
+    created = 0
+    updated = 0
+    skipped = 0
+    skipped_rows: List[Dict[str, Any]] = []
+
+    for row in payload.rows:
+        row_idx = row.row_number
+        row_data = row.model_dump(exclude={"row_number"})
+
+        for key, value in list(row_data.items()):
+            if isinstance(value, str) and not value.strip():
+                row_data[key] = None
+
+        validation = _validate_component_payload(row_data)
+        if validation["errors"]:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": "; ".join(validation["errors"]),
+                }
+            )
+            continue
+
+        position = (row_data.get("position") or "").strip()
+        if not position:
+            skipped += 1
+            skipped_rows.append(
+                {"row": row_idx, "reason": "Missing component position."}
+            )
+            continue
+
+        comp = existing_by_position.get(position.lower())
+        if comp is None:
+            comp = models.AircraftComponent(
+                aircraft_serial_number=serial_number,
+                position=position,
+            )
+            created += 1
+        else:
+            updated += 1
+
+        for field, value in row_data.items():
+            setattr(comp, field, value)
+
+        db.add(comp)
+        existing_by_position[position.lower()] = comp
+
+    db.commit()
+
+    return {
+        "status": "ok",
+        "aircraft_serial_number": serial_number,
+        "components_created": created,
+        "components_updated": updated,
+        "components_skipped": skipped,
+        "skipped_rows": skipped_rows,
+    }
+
+
+@router.post(
     "/{serial_number}/components/import",
     tags=["aircraft"],
     summary="Bulk import components for a single aircraft from CSV/Excel",
@@ -1305,16 +1673,8 @@ async def import_components_file(
     if df.empty:
         raise HTTPException(status_code=400, detail="Uploaded file contains no data.")
 
-    norm_cols = {_normalise_header(c): c for c in df.columns}
-
-    def col(*names: str) -> str | None:
-        for name in names:
-            if name in norm_cols:
-                return norm_cols[name]
-        return None
-
-    position_col = col("position", "pos")
-    if not position_col:
+    colmap = _map_component_columns(list(df.columns))
+    if not colmap["position"]:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -1330,8 +1690,8 @@ async def import_components_file(
     for idx, row in df.iterrows():
         row_idx = int(idx) + 2  # approx Excel row number
 
-        position_raw = row.get(position_col)
-        position = str(position_raw).strip() if position_raw is not None else ""
+        payload = _build_component_payload(row.to_dict(), colmap)
+        position = payload.get("position") or ""
 
         if not position:
             skipped += 1
@@ -1343,22 +1703,18 @@ async def import_components_file(
         comp = models.AircraftComponent(
             aircraft_serial_number=serial_number,
             position=position,
-            ata=row.get(col("ata")),
-            part_number=row.get(
-                col("part_number", "pn", "pnr", "part_no", "partnum")
-            ),
-            serial_number=row.get(
-                col("serial_number", "sn", "sno", "serial_no", "serialnum")
-            ),
-            description=row.get(col("description", "desc")),
-            installed_date=row.get(col("installed_date", "inst_date")),
-            installed_hours=row.get(col("installed_hours")),
-            installed_cycles=row.get(col("installed_cycles")),
-            current_hours=row.get(col("current_hours")),
-            current_cycles=row.get(col("current_cycles")),
-            notes=row.get(col("notes", "remark", "remarks")),
-            manufacturer_code=row.get(col("manufacturer_code", "mfr", "mfr_code")),
-            operator_code=row.get(col("operator_code", "opr", "operator")),
+            ata=payload.get("ata"),
+            part_number=payload.get("part_number"),
+            serial_number=payload.get("serial_number"),
+            description=payload.get("description"),
+            installed_date=payload.get("installed_date"),
+            installed_hours=payload.get("installed_hours"),
+            installed_cycles=payload.get("installed_cycles"),
+            current_hours=payload.get("current_hours"),
+            current_cycles=payload.get("current_cycles"),
+            notes=payload.get("notes"),
+            manufacturer_code=payload.get("manufacturer_code"),
+            operator_code=payload.get("operator_code"),
         )
 
         db.add(comp)

@@ -579,15 +579,21 @@ class AircraftImportTemplate(Base):
 
     __tablename__ = "aircraft_import_templates"
     __table_args__ = (
-        UniqueConstraint("name", name="uq_aircraft_import_template_name"),
+        UniqueConstraint(
+            "template_type",
+            "name",
+            name="uq_aircraft_import_template_type_name",
+        ),
         Index("ix_aircraft_import_template_aircraft_template", "aircraft_template"),
         Index("ix_aircraft_import_template_model_code", "model_code"),
         Index("ix_aircraft_import_template_operator_code", "operator_code"),
+        Index("ix_aircraft_import_template_type", "template_type"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
 
     name = Column(String(120), nullable=False, index=True)
+    template_type = Column(String(32), nullable=False, index=True, default="aircraft")
     aircraft_template = Column(String(50), nullable=True)
     model_code = Column(String(32), nullable=True)
     operator_code = Column(String(5), nullable=True)
