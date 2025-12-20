@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from typing import List, Dict, Any, Optional
+from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -990,6 +991,67 @@ def _validate_component_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]
     return {"errors": errors, "warnings": warnings}
 
 
+def _normalize_reconciliation_value(value: Any) -> Any:
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def _values_differ(original: Any, final: Any) -> bool:
+    return _normalize_reconciliation_value(original) != _normalize_reconciliation_value(
+        final
+    )
+
+
+def _apply_snapshot_rows(
+    db: Session, snapshot_rows: List[Dict[str, Any]], mode: str
+) -> int:
+    applied = 0
+    use_original = mode == "restore"
+
+    for row in snapshot_rows:
+        action = row.get("action")
+        cells = row.get("cells") or {}
+        original_serial = row.get("original_serial_number")
+        final_serial = row.get("final_serial_number")
+        target_serial = original_serial if use_original else final_serial
+
+        if action == "new" and use_original:
+            if final_serial:
+                ac = db.query(models.Aircraft).get(final_serial)
+                if ac:
+                    db.delete(ac)
+                    applied += 1
+            continue
+
+        ac = None
+        if final_serial:
+            ac = db.query(models.Aircraft).get(final_serial)
+        if ac is None and original_serial:
+            ac = db.query(models.Aircraft).get(original_serial)
+
+        if ac is None:
+            ac = models.Aircraft(
+                serial_number=target_serial or "",
+                registration="",
+            )
+            db.add(ac)
+
+        if use_original and original_serial:
+            ac.serial_number = original_serial
+        elif not use_original and final_serial:
+            ac.serial_number = final_serial
+
+        for field, cell in cells.items():
+            value = cell.get("original") if use_original else cell.get("final")
+            value = _normalize_reconciliation_value(value)
+            setattr(ac, field, value)
+
+        applied += 1
+
+    return applied
+
+
 def _serialize_import_template(
     template: models.AircraftImportTemplate,
 ) -> Dict[str, Any]:
@@ -1449,10 +1511,23 @@ async def import_aircraft_file(
     updated = 0
     skipped = 0
     skipped_rows: List[Dict[str, Any]] = []
+    batch_id = payload.batch_id or str(uuid4())
+    confirmed_rows = payload.confirmed_rows or []
+    confirmed_by_row = {
+        row.row_number: row for row in confirmed_rows if row.row_number is not None
+    }
+    snapshot_rows: List[Dict[str, Any]] = []
+    reconciliation_logs: List[models.ImportReconciliationLog] = []
 
     for row in payload.rows:
         row_idx = row.row_number
         row_data = row.model_dump(exclude={"row_number"})
+        confirmed_row = confirmed_by_row.get(row_idx)
+        if confirmed_row:
+            row_data = {
+                field: cell.final
+                for field, cell in confirmed_row.cells.items()
+            }
 
         validation = _validate_aircraft_payload(row_data)
         if validation["errors"]:
@@ -1476,6 +1551,12 @@ async def import_aircraft_file(
                 row_data[key] = None
 
         ac = db.query(models.Aircraft).get(serial)
+        action = "new" if ac is None else "update"
+        original_serial = ac.serial_number if ac is not None else None
+        original_values: Dict[str, Any] = {}
+        if ac is not None:
+            for field in row_data.keys():
+                original_values[field] = getattr(ac, field, None)
 
         if ac is None:
             # New aircraft
@@ -1488,6 +1569,62 @@ async def import_aircraft_file(
                 setattr(ac, field, value)
             updated += 1
 
+        snapshot_cells: Dict[str, Dict[str, Any]] = {}
+        if confirmed_row:
+            for field, cell in confirmed_row.cells.items():
+                snapshot_cells[field] = {
+                    "original": cell.original,
+                    "proposed": cell.proposed,
+                    "final": cell.final,
+                }
+        else:
+            for field, value in row_data.items():
+                snapshot_cells[field] = {
+                    "original": original_values.get(field)
+                    if action == "update"
+                    else None,
+                    "proposed": value,
+                    "final": value,
+                }
+
+        snapshot_rows.append(
+            {
+                "row_number": row_idx,
+                "action": action,
+                "original_serial_number": original_serial,
+                "final_serial_number": serial,
+                "cells": snapshot_cells,
+            }
+        )
+
+        for field, cell in snapshot_cells.items():
+            if _values_differ(cell.get("original"), cell.get("final")):
+                reconciliation_logs.append(
+                    models.ImportReconciliationLog(
+                        batch_id=batch_id,
+                        import_type="aircraft",
+                        row_number=row_idx,
+                        field_name=field,
+                        aircraft_serial_number=serial,
+                        original_value=cell.get("original"),
+                        proposed_value=cell.get("proposed"),
+                        final_value=cell.get("final"),
+                        created_by_user_id=current_user.id,
+                    )
+                )
+
+    snapshot = models.ImportSnapshot(
+        batch_id=batch_id,
+        import_type="aircraft",
+        diff_map={"rows": snapshot_rows},
+        created_by_user_id=current_user.id,
+    )
+    db.add(snapshot)
+    db.flush()
+    for log in reconciliation_logs:
+        log.snapshot_id = snapshot.id
+        db.add(log)
+
     db.commit()
 
     return {
@@ -1496,6 +1633,85 @@ async def import_aircraft_file(
         "updated": updated,
         "skipped": skipped,
         "skipped_rows": skipped_rows,
+        "snapshot_id": snapshot.id,
+        "batch_id": batch_id,
+    }
+
+
+@router.get(
+    "/import/snapshots",
+    tags=["aircraft"],
+    response_model=List[schemas.ImportSnapshotRead],
+    summary="List import snapshots for aircraft imports",
+)
+def list_import_snapshots(
+    batch_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    query = db.query(models.ImportSnapshot).filter(
+        models.ImportSnapshot.import_type == "aircraft"
+    )
+    if batch_id:
+        query = query.filter(models.ImportSnapshot.batch_id == batch_id)
+    return query.order_by(models.ImportSnapshot.created_at.desc()).all()
+
+
+@router.post(
+    "/import/snapshots/{snapshot_id}/restore",
+    tags=["aircraft"],
+    summary="Restore an aircraft import snapshot (undo)",
+)
+def restore_import_snapshot(
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    snapshot = db.query(models.ImportSnapshot).get(snapshot_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    rows = snapshot.diff_map.get("rows", [])
+    restored = _apply_snapshot_rows(db, rows, mode="restore")
+    db.commit()
+
+    return {
+        "status": "ok",
+        "snapshot_id": snapshot.id,
+        "batch_id": snapshot.batch_id,
+        "restored": restored,
+    }
+
+
+@router.post(
+    "/import/snapshots/{snapshot_id}/reapply",
+    tags=["aircraft"],
+    summary="Reapply an aircraft import snapshot (redo)",
+)
+def reapply_import_snapshot(
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    snapshot = db.query(models.ImportSnapshot).get(snapshot_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    rows = snapshot.diff_map.get("rows", [])
+    reapplied = _apply_snapshot_rows(db, rows, mode="reapply")
+    db.commit()
+
+    return {
+        "status": "ok",
+        "snapshot_id": snapshot.id,
+        "batch_id": snapshot.batch_id,
+        "reapplied": reapplied,
     }
 
 

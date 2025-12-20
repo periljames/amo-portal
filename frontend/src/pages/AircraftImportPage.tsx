@@ -47,6 +47,17 @@ type PreviewRow = {
   user_overrides?: AircraftRowField[];
 };
 
+type ConfirmedCell = {
+  original: any;
+  proposed: any;
+  final: any;
+};
+
+type ConfirmedRow = {
+  row_number: number;
+  cells: Record<string, ConfirmedCell>;
+};
+
 type SuggestedTemplate = {
   id: number;
   name: string;
@@ -107,6 +118,15 @@ type ComponentPreviewRow = {
     serial_number: string;
     positions: string[];
   }[];
+};
+
+type ImportSnapshot = {
+  id: number;
+  batch_id: string;
+  import_type: string;
+  diff_map: Record<string, any>;
+  created_at: string;
+  created_by_user_id?: string | null;
 };
 
 const AIRCRAFT_DIFF_FIELDS: AircraftRowField[] = [
@@ -200,6 +220,13 @@ const AircraftImportPage: React.FC = () => {
     useState("{}");
   const [componentTemplateLoading, setComponentTemplateLoading] =
     useState(false);
+  const [importBatchId, setImportBatchId] = useState<string | null>(null);
+  const [snapshots, setSnapshots] = useState<ImportSnapshot[]>([]);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(
+    null
+  );
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [snapshotActionLoading, setSnapshotActionLoading] = useState(false);
 
   const handleAircraftFileChange = (
     e: React.ChangeEvent<HTMLInputElement>
@@ -441,6 +468,10 @@ const AircraftImportPage: React.FC = () => {
         user_overrides: [],
       }));
       setPreviewRows(rows);
+      const nextBatchId = generateBatchId();
+      setImportBatchId(nextBatchId);
+      setSnapshots([]);
+      setSelectedSnapshotId(null);
       setColumnMapping(data.column_mapping ?? null);
       setPreviewSummary(data.summary ?? null);
       setOcrPreview(data.ocr ?? null);
@@ -504,6 +535,36 @@ const AircraftImportPage: React.FC = () => {
     await submitPreviewFile(aircraftFile);
   };
 
+  const loadSnapshotHistory = async (batchId: string | null) => {
+    if (!batchId) {
+      return;
+    }
+    setSnapshotLoading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/aircraft/import/snapshots?batch_id=${encodeURIComponent(
+          batchId
+        )}`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail ?? "Failed to load snapshots.");
+      }
+      setSnapshots(data ?? []);
+      setSelectedSnapshotId((data?.[0]?.id as number | undefined) ?? null);
+    } catch (err: any) {
+      setMessage(err.message ?? "Error loading snapshots.");
+    } finally {
+      setSnapshotLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (importBatchId) {
+      loadSnapshotHistory(importBatchId);
+    }
+  }, [importBatchId]);
+
   const parseComponentsFile = async () => {
     if (!componentsFile) {
       setMessage("Select a component file first.");
@@ -545,6 +606,13 @@ const AircraftImportPage: React.FC = () => {
     } catch (err) {
       throw new Error("Component default values JSON is invalid.");
     }
+  };
+
+  const generateBatchId = () => {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   };
 
   const saveMappingTemplate = async () => {
@@ -1089,6 +1157,23 @@ const AircraftImportPage: React.FC = () => {
     );
   };
 
+  const buildConfirmedRows = (rows: PreviewRow[]): ConfirmedRow[] => {
+    return rows.map((row) => {
+      const cells: Record<string, ConfirmedCell> = {};
+      (Object.keys(row.data) as AircraftRowField[]).forEach((field) => {
+        const original = row.original_data?.[field] ?? null;
+        const proposed =
+          row.proposed_fields?.includes(field) ? row.data[field] : original;
+        cells[field] = {
+          original,
+          proposed,
+          final: row.data[field],
+        };
+      });
+      return { row_number: row.row_number, cells };
+    });
+  };
+
   const confirmImport = async () => {
     const approvedRows = previewRows.filter(
       (row) => row.approved && row.errors.length === 0
@@ -1109,6 +1194,8 @@ const AircraftImportPage: React.FC = () => {
             row_number: row.row_number,
             ...row.data,
           })),
+          confirmed_rows: buildConfirmedRows(approvedRows),
+          batch_id: importBatchId,
         }),
       });
 
@@ -1116,6 +1203,8 @@ const AircraftImportPage: React.FC = () => {
       if (!res.ok) {
         throw new Error(data.detail ?? "Import failed");
       }
+      setImportBatchId(data.batch_id ?? importBatchId);
+      await loadSnapshotHistory(data.batch_id ?? importBatchId);
       setMessage(
         `Aircraft import OK. Created: ${data.created}, Updated: ${data.updated}`
       );
@@ -1186,6 +1275,56 @@ const AircraftImportPage: React.FC = () => {
     [componentPreviewRows]
   );
 
+  const handleUndoSnapshot = async () => {
+    if (!selectedSnapshotId) {
+      setMessage("Select a snapshot to undo.");
+      return;
+    }
+    setSnapshotActionLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/aircraft/import/snapshots/${selectedSnapshotId}/restore`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail ?? "Failed to restore snapshot.");
+      }
+      await loadSnapshotHistory(data.batch_id ?? importBatchId);
+      setMessage(`Snapshot restored. Rows updated: ${data.restored ?? 0}.`);
+    } catch (err: any) {
+      setMessage(err.message ?? "Error restoring snapshot.");
+    } finally {
+      setSnapshotActionLoading(false);
+    }
+  };
+
+  const handleRedoSnapshot = async () => {
+    if (!selectedSnapshotId) {
+      setMessage("Select a snapshot to reapply.");
+      return;
+    }
+    setSnapshotActionLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/aircraft/import/snapshots/${selectedSnapshotId}/reapply`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail ?? "Failed to reapply snapshot.");
+      }
+      await loadSnapshotHistory(data.batch_id ?? importBatchId);
+      setMessage(`Snapshot reapplied. Rows updated: ${data.reapplied ?? 0}.`);
+    } catch (err: any) {
+      setMessage(err.message ?? "Error reapplying snapshot.");
+    } finally {
+      setSnapshotActionLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center py-10">
       <div className="w-full max-w-6xl space-y-8">
@@ -1227,6 +1366,76 @@ const AircraftImportPage: React.FC = () => {
                   : `Confirm Import (${approvedCount})`}
               </button>
             </div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200">
+                  Undo / Redo
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Snapshot history for this import batch.
+                </p>
+              </div>
+              <button
+                onClick={() => loadSnapshotHistory(importBatchId)}
+                disabled={!importBatchId || snapshotLoading}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-sm"
+              >
+                {snapshotLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+
+            <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center">
+              <select
+                value={selectedSnapshotId ?? ""}
+                onChange={(event) =>
+                  setSelectedSnapshotId(
+                    event.target.value ? Number(event.target.value) : null
+                  )
+                }
+                disabled={!snapshots.length}
+                className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              >
+                <option value="">Select snapshot...</option>
+                {snapshots.map((snapshot) => (
+                  <option key={snapshot.id} value={snapshot.id}>
+                    {new Date(snapshot.created_at).toLocaleString()} (#
+                    {snapshot.id})
+                  </option>
+                ))}
+              </select>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleUndoSnapshot}
+                  disabled={
+                    snapshotActionLoading ||
+                    !selectedSnapshotId ||
+                    !snapshots.length
+                  }
+                  className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-sm"
+                >
+                  Undo
+                </button>
+                <button
+                  onClick={handleRedoSnapshot}
+                  disabled={
+                    snapshotActionLoading ||
+                    !selectedSnapshotId ||
+                    !snapshots.length
+                  }
+                  className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-sm"
+                >
+                  Redo
+                </button>
+              </div>
+            </div>
+            {importBatchId && (
+              <p className="mt-2 text-xs text-slate-500">
+                Batch ID: {importBatchId}
+              </p>
+            )}
           </div>
 
           {ocrPreview && (
