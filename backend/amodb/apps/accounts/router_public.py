@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
@@ -12,6 +15,11 @@ from . import models, schemas, services
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 RESERVED_PLATFORM_SLUGS = {"", "system", "root"}
+RESET_LINK_BASE_URL = (
+    os.getenv("PORTAL_BASE_URL")
+    or os.getenv("FRONTEND_BASE_URL")
+    or ""
+).strip()
 
 
 def _client_ip(request: Request) -> str | None:
@@ -33,6 +41,14 @@ def _normalise_amo_slug(amo_slug: str | None) -> str:
     if v.lower() in RESERVED_PLATFORM_SLUGS:
         return "system"
     return v
+
+
+def _build_reset_link(*, amo_slug: str, token: str) -> str | None:
+    if not RESET_LINK_BASE_URL:
+        return None
+    base = RESET_LINK_BASE_URL.rstrip("/")
+    query = urlencode({"token": token, "amo": amo_slug})
+    return f"{base}/reset-password?{query}"
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +79,19 @@ def login(
     """
     payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
 
-    user = services.authenticate_user(
-        db=db,
-        login_req=payload,
-        ip=_client_ip(request),
-        user_agent=_user_agent(request),
-    )
+    try:
+        user = services.authenticate_user(
+            db=db,
+            login_req=payload,
+            ip=_client_ip(request),
+            user_agent=_user_agent(request),
+        )
+    except services.AuthenticationError as exc:
+        detail = str(exc) or "Incorrect email, password or AMO slug."
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+        )
 
     if not user:
         raise HTTPException(
@@ -138,9 +161,10 @@ def request_password_reset(
         user_agent=_user_agent(request),
     )
 
+    reset_link = _build_reset_link(amo_slug=payload.amo_slug, token=raw_token)
     return {
         "message": "If the account exists, a reset email will be sent.",
-        "token_demo_only": raw_token,  # dev only
+        "reset_link": reset_link,
     }
 
 
@@ -153,11 +177,17 @@ def confirm_password_reset(
     payload: schemas.PasswordResetConfirm,
     db: Session = Depends(get_db),
 ):
-    user = services.redeem_password_reset_token(
-        db=db,
-        raw_token=payload.token,
-        new_password=payload.new_password,
-    )
+    try:
+        user = services.redeem_password_reset_token(
+            db=db,
+            raw_token=payload.token,
+            new_password=payload.new_password,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

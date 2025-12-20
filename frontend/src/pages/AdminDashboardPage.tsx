@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { authHeaders, getCachedUser, getContext } from "../services/auth";
-import { API_BASE_URL } from "../services/config";
+import { apiGet } from "../services/crs";
 import { listAdminUsers } from "../services/adminUsers";
 import type { AdminUserRead } from "../services/adminUsers";
 import { LS_ACTIVE_AMO_ID } from "../services/adminUsers";
@@ -25,17 +25,9 @@ type AmoRead = {
 };
 
 async function fetchAdminAmos(): Promise<AmoRead[]> {
-  const res = await fetch(`${API_BASE_URL}/accounts/admin/amos`, {
-    method: "GET",
+  return apiGet<AmoRead[]>("/accounts/admin/amos", {
     headers: authHeaders(),
   });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-
-  return (await res.json()) as AmoRead[];
 }
 
 const AdminDashboardPage: React.FC = () => {

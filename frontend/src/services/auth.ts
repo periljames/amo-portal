@@ -12,6 +12,7 @@ const TOKEN_KEY = "amo_portal_token";
 const AMO_KEY = "amo_code";
 const DEPT_KEY = "amo_department";
 const USER_KEY = "amo_current_user";
+const SESSION_EVENT_KEY = "amo_session_event";
 
 // Shared with adminUsers.ts enhancements (kept as a plain key to avoid circular imports)
 const ACTIVE_AMO_ID_KEY = "amodb_active_amo_id";
@@ -94,6 +95,16 @@ export interface LoginResponse {
   amo: AmoContext | null;
   department: DepartmentContext | null;
 }
+
+export type SessionEventDetail = {
+  type: "expired" | "idle-warning" | "idle-logout";
+  reason?: string;
+};
+
+export type PasswordResetResponse = {
+  message: string;
+  reset_link?: string | null;
+};
 
 // -----------------------------------------------------------------------------
 // localStorage helpers
@@ -303,7 +314,7 @@ export async function fetchCurrentUser(): Promise<PortalUser> {
 
   if (!res.ok) {
     // If token expired/invalid, clear local state to avoid a “ghost session”
-    if (res.status === 401) logout();
+    if (res.status === 401) handleAuthFailure("expired");
     throw new Error(await readErrorMessage(res));
   }
 
@@ -320,7 +331,7 @@ export async function fetchCurrentUser(): Promise<PortalUser> {
 export async function requestPasswordReset(
   amoSlug: string,
   email: string
-): Promise<void> {
+): Promise<PasswordResetResponse> {
   const payload = {
     amo_slug: resolveAmoSlug(amoSlug),
     email: email.trim(),
@@ -335,6 +346,8 @@ export async function requestPasswordReset(
   if (!res.ok) {
     throw new Error(await readErrorMessage(res));
   }
+
+  return (await res.json()) as PasswordResetResponse;
 }
 
 /**
@@ -370,4 +383,28 @@ export function logout(): void {
   clearContext();
   clearCachedUser();
   clearActiveAmoId();
+}
+
+export function emitSessionEvent(detail: SessionEventDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(SESSION_EVENT_KEY, { detail }));
+}
+
+export function onSessionEvent(
+  handler: (detail: SessionEventDetail) => void
+): () => void {
+  if (typeof window === "undefined") return () => undefined;
+
+  const listener = (event: Event) => {
+    if (!(event instanceof CustomEvent)) return;
+    handler(event.detail as SessionEventDetail);
+  };
+
+  window.addEventListener(SESSION_EVENT_KEY, listener);
+  return () => window.removeEventListener(SESSION_EVENT_KEY, listener);
+}
+
+export function handleAuthFailure(reason = "expired"): void {
+  logout();
+  emitSessionEvent({ type: "expired", reason });
 }

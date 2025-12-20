@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
-import { getCachedUser, logout } from "../../services/auth";
+import { getCachedUser, logout, onSessionEvent } from "../../services/auth";
 
 type Props = {
   amoCode: string;
@@ -32,6 +32,9 @@ const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
 ];
 
 type ColorScheme = "dark" | "light";
+
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+const IDLE_WARNING_MS = 3 * 60 * 1000;
 
 function isDepartmentId(v: string): v is DepartmentId {
   return DEPARTMENTS.some((d) => d.id === v);
@@ -85,6 +88,11 @@ const DepartmentLayout: React.FC<Props> = ({
   const [collapsed, setCollapsed] = useState(false);
   const [colorScheme, setColorScheme] = useState<ColorScheme>("dark");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [idleWarningOpen, setIdleWarningOpen] = useState(false);
+  const [idleCountdown, setIdleCountdown] = useState(IDLE_WARNING_MS / 1000);
+  const [logoutReason, setLogoutReason] = useState<"idle" | "expired" | null>(
+    null
+  );
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -203,6 +211,9 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [location.pathname]);
 
   const profileRef = useRef<HTMLDivElement | null>(null);
+  const idleWarningTimeoutRef = useRef<number | null>(null);
+  const idleLogoutTimeoutRef = useRef<number | null>(null);
+  const idleCountdownIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -227,6 +238,115 @@ const DepartmentLayout: React.FC<Props> = ({
     };
   }, [profileOpen]);
 
+  const clearIdleTimers = () => {
+    if (idleWarningTimeoutRef.current) {
+      window.clearTimeout(idleWarningTimeoutRef.current);
+      idleWarningTimeoutRef.current = null;
+    }
+    if (idleLogoutTimeoutRef.current) {
+      window.clearTimeout(idleLogoutTimeoutRef.current);
+      idleLogoutTimeoutRef.current = null;
+    }
+    if (idleCountdownIntervalRef.current) {
+      window.clearInterval(idleCountdownIntervalRef.current);
+      idleCountdownIntervalRef.current = null;
+    }
+  };
+
+  const scheduleIdleTimers = () => {
+    clearIdleTimers();
+    if (!currentUser || logoutReason) return;
+
+    const warningDelay = Math.max(IDLE_TIMEOUT_MS - IDLE_WARNING_MS, 0);
+
+    idleWarningTimeoutRef.current = window.setTimeout(() => {
+      setIdleWarningOpen(true);
+      setIdleCountdown(IDLE_WARNING_MS / 1000);
+    }, warningDelay);
+
+    idleLogoutTimeoutRef.current = window.setTimeout(() => {
+      logout();
+      setIdleWarningOpen(false);
+      setLogoutReason("idle");
+    }, IDLE_TIMEOUT_MS);
+  };
+
+  const resetIdleTimers = () => {
+    if (!currentUser || logoutReason) return;
+    setIdleWarningOpen(false);
+    setIdleCountdown(IDLE_WARNING_MS / 1000);
+    scheduleIdleTimers();
+  };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    scheduleIdleTimers();
+
+    const activityEvents = [
+      "mousemove",
+      "keydown",
+      "click",
+      "scroll",
+      "touchstart",
+    ];
+    const handleActivity = () => {
+      if (logoutReason) return;
+      resetIdleTimers();
+    };
+
+    activityEvents.forEach((evt) =>
+      window.addEventListener(evt, handleActivity, { passive: true })
+    );
+
+    return () => {
+      activityEvents.forEach((evt) =>
+        window.removeEventListener(evt, handleActivity)
+      );
+      clearIdleTimers();
+    };
+  }, [currentUser, logoutReason]);
+
+  useEffect(() => {
+    if (!idleWarningOpen) return;
+
+    idleCountdownIntervalRef.current = window.setInterval(() => {
+      setIdleCountdown((prev) => {
+        if (prev <= 1) {
+          const intervalId = idleCountdownIntervalRef.current;
+          if (intervalId) {
+            window.clearInterval(intervalId);
+            idleCountdownIntervalRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (idleCountdownIntervalRef.current) {
+        window.clearInterval(idleCountdownIntervalRef.current);
+        idleCountdownIntervalRef.current = null;
+      }
+    };
+  }, [idleWarningOpen]);
+
+  useEffect(() => {
+    const unsubscribe = onSessionEvent((detail) => {
+      if (detail.type !== "expired") return;
+      clearIdleTimers();
+      setIdleWarningOpen(false);
+      setLogoutReason("expired");
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const shouldBlur = idleWarningOpen || !!logoutReason;
+    document.body.classList.toggle("session-timeout-active", shouldBlur);
+  }, [idleWarningOpen, logoutReason]);
+
   const deptLabel =
     DEPARTMENTS.find((d) => d.id === (activeDepartment as any))?.label ||
     (activeDepartment || "Department");
@@ -235,6 +355,27 @@ const DepartmentLayout: React.FC<Props> = ({
   const userInitials = getUserInitials(currentUser);
 
   const currentYear = new Date().getFullYear();
+  const returnPath = location.pathname + location.search;
+  const formattedCountdown = new Date(idleCountdown * 1000)
+    .toISOString()
+    .substring(14, 19);
+
+  const handleStaySignedIn = () => {
+    resetIdleTimers();
+  };
+
+  const handleIdleLogout = () => {
+    logout();
+    clearIdleTimers();
+    setIdleWarningOpen(false);
+    setLogoutReason("idle");
+  };
+
+  const handleResumeLogin = () => {
+    const code = (amoCode || "").trim();
+    const target = code ? `/maintenance/${code}/login` : "/login";
+    navigate(target, { replace: true, state: { from: returnPath } });
+  };
 
   return (
     <div className={shellClassName}>
@@ -385,6 +526,47 @@ const DepartmentLayout: React.FC<Props> = ({
           <span>All rights reserved.</span>
         </footer>
       </main>
+
+      {(idleWarningOpen || logoutReason) && (
+        <div className="session-timeout-overlay" role="dialog" aria-live="polite">
+          <div className="session-timeout-card">
+            {idleWarningOpen && !logoutReason && (
+              <>
+                <h2>Inactivity warning</h2>
+                <p>
+                  You will be logged out in{" "}
+                  <strong>{formattedCountdown}</strong> due to inactivity.
+                </p>
+                <p>Please click below to stay signed in.</p>
+                <div className="session-timeout-actions">
+                  <button className="btn btn-secondary" onClick={handleIdleLogout}>
+                    Log out now
+                  </button>
+                  <button className="btn btn-primary" onClick={handleStaySignedIn}>
+                    Stay signed in
+                  </button>
+                </div>
+              </>
+            )}
+
+            {logoutReason && (
+              <>
+                <h2>Session ended</h2>
+                <p>
+                  {logoutReason === "idle"
+                    ? "You have been logged out due to inactivity."
+                    : "Your session has expired. Please log in again."}
+                </p>
+                <div className="session-timeout-actions">
+                  <button className="btn btn-primary" onClick={handleResumeLogin}>
+                    Log in
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

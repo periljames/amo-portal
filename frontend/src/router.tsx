@@ -9,6 +9,7 @@ import React from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import LoginPage from "./pages/LoginPage";
+import PasswordResetPage from "./pages/PasswordResetPage";
 import DashboardPage from "./pages/DashboardPage";
 import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
@@ -79,6 +80,9 @@ export const AppRouter: React.FC = () => {
 
       {/* AMO-specific login, e.g. /maintenance/safarilink/login */}
       <Route path="/maintenance/:amoCode/login" element={<LoginPage />} />
+
+      {/* Password reset */}
+      <Route path="/reset-password" element={<PasswordResetPage />} />
 
       {/* If someone visits /maintenance/:amoCode directly, send them somewhere safe */}
       <Route

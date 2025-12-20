@@ -170,7 +170,12 @@ const LoginPage: React.FC = () => {
           setErrorMsg(
             "Your account is locked due to repeated failed attempts. Please contact Quality or IT support."
           );
-        } else if (msg.includes("401") || msg.includes("unauthorized")) {
+        } else if (
+          msg.includes("401") ||
+          msg.includes("unauthorized") ||
+          msg.includes("invalid credentials") ||
+          msg.includes("incorrect")
+        ) {
           setErrorMsg("Invalid email or password.");
         } else if (msg.includes("not found") || msg.includes("amo")) {
           setErrorMsg(
@@ -254,6 +259,19 @@ const LoginPage: React.FC = () => {
           name="password"
           required
         />
+
+        <div className="auth-form__field">
+          <button
+            type="button"
+            className="auth-form__link"
+            onClick={() => {
+              const query = amoSlugForLabel ? `?amo=${amoSlugForLabel}` : "";
+              navigate(`/reset-password${query}`);
+            }}
+          >
+            Forgot password?
+          </button>
+        </div>
 
         <div className="auth-form__field">
           <label className="auth-form__label">

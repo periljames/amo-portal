@@ -61,6 +61,7 @@ const AdminUserNewPage: React.FC = () => {
     password: "",
     confirmPassword: "",
   });
+  const [showPassword, setShowPassword] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,9 +87,15 @@ const AdminUserNewPage: React.FC = () => {
     if (!form.password) return "Password is required.";
     if (form.password !== form.confirmPassword) return "Passwords do not match.";
 
-    // Basic client-side sanity. Real enforcement should be server-side.
-    if (form.password.length < 10) {
-      return "Password must be at least 10 characters.";
+    if (form.password.length < 12) {
+      return "Password must be at least 12 characters.";
+    }
+    const hasUpper = /[A-Z]/.test(form.password);
+    const hasLower = /[a-z]/.test(form.password);
+    const hasDigit = /\d/.test(form.password);
+    const hasSymbol = /[^A-Za-z0-9]/.test(form.password);
+    if (!(hasUpper && hasLower && hasDigit && hasSymbol)) {
+      return "Password must include upper/lower case, a number, and a symbol.";
     }
 
     // Only SUPERUSER can create SUPERUSER
@@ -97,6 +104,49 @@ const AdminUserNewPage: React.FC = () => {
     }
 
     return null;
+  };
+
+  const generateSecurePassword = () => {
+    const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const lower = "abcdefghijklmnopqrstuvwxyz";
+    const digits = "0123456789";
+    const symbols = "!@#$%^&*()-_=+[]{}<>?";
+    const all = upper + lower + digits + symbols;
+
+    const pick = (chars: string) =>
+      chars[Math.floor(Math.random() * chars.length)];
+
+    const base = [
+      pick(upper),
+      pick(lower),
+      pick(digits),
+      pick(symbols),
+    ];
+
+    for (let i = base.length; i < 14; i += 1) {
+      base.push(pick(all));
+    }
+
+    const shuffled = base.sort(() => Math.random() - 0.5).join("");
+    setForm((prev) => ({
+      ...prev,
+      password: shuffled,
+      confirmPassword: shuffled,
+    }));
+  };
+
+  const copyPassword = async () => {
+    if (!form.password) return;
+    try {
+      if (!navigator.clipboard) {
+        throw new Error("Clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(form.password);
+      setSuccess("Temporary password copied to clipboard.");
+    } catch (err) {
+      console.error("Failed to copy password", err);
+      setError("Could not copy password. Please copy it manually.");
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -312,7 +362,7 @@ const AdminUserNewPage: React.FC = () => {
             <input
               id="password"
               name="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               value={form.password}
               onChange={handleChange}
               required
@@ -325,12 +375,45 @@ const AdminUserNewPage: React.FC = () => {
             <input
               id="confirmPassword"
               name="confirmPassword"
-              type="password"
+              type={showPassword ? "text" : "password"}
               value={form.confirmPassword}
               onChange={handleChange}
               required
               disabled={submitting}
             />
+          </div>
+
+          <div className="form-row">
+            <div className="form-actions form-actions--inline">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={generateSecurePassword}
+                disabled={submitting}
+              >
+                Generate secure password
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowPassword((prev) => !prev)}
+                disabled={submitting}
+              >
+                {showPassword ? "Hide password" : "Show password"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={copyPassword}
+                disabled={submitting || !form.password}
+              >
+                Copy password
+              </button>
+            </div>
+            <p className="form-hint">
+              Passwords must be at least 12 characters and include upper/lower
+              case letters, a number, and a symbol.
+            </p>
           </div>
 
           <div className="form-actions">

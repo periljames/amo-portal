@@ -8,7 +8,7 @@
 //   - GET /quality/qms/change-requests
 //   - GET /quality/audits
 
-import { getToken } from "./auth";
+import { getToken, handleAuthFailure } from "./auth";
 
 const API_BASE =
   (import.meta as any).env?.VITE_API_BASE_URL || "http://127.0.0.1:8000";
@@ -92,6 +92,11 @@ async function fetchJson<T>(path: string): Promise<T> {
     },
     credentials: "include",
   });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");

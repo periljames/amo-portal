@@ -26,8 +26,9 @@ from .models import MaintenanceScope, RegulatoryAuthority
 # ---------------------------------------------------------------------------
 
 PASSWORD_RESET_TOKEN_TTL_MINUTES = 60 * 24  # 24 hours
-MAX_LOGIN_ATTEMPTS = 5
-ACCOUNT_LOCKOUT_MINUTES = 15
+MAX_LOGIN_ATTEMPTS = 3
+LOCKOUT_SCHEDULE_SECONDS = (30, 90, 900)
+MIN_PASSWORD_LENGTH = 12
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +38,15 @@ ACCOUNT_LOCKOUT_MINUTES = 15
 
 class AuthenticationError(Exception):
     """Raised when login credentials are invalid or account is locked."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after_seconds: Optional[int] = None,
+    ) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 class AuthorisationError(Exception):
@@ -55,6 +65,28 @@ def _normalise_email(value: str) -> str:
 def _normalise_staff_code(value: str) -> str:
     # Staff codes are often formatted, but it's safer to force uppercase and strip.
     return value.strip().upper()
+
+
+# ---------------------------------------------------------------------------
+# Password policy
+# ---------------------------------------------------------------------------
+
+
+def _validate_password_strength(password: str) -> None:
+    if not password or len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(
+            f"Password must be at least {MIN_PASSWORD_LENGTH} characters long."
+        )
+
+    has_upper = any(ch.isupper() for ch in password)
+    has_lower = any(ch.islower() for ch in password)
+    has_digit = any(ch.isdigit() for ch in password)
+    has_symbol = any(not ch.isalnum() for ch in password)
+
+    if not (has_upper and has_lower and has_digit and has_symbol):
+        raise ValueError(
+            "Password must include upper and lower case letters, a number, and a symbol."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +230,7 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         or f"{first_name} {last_name}".strip()
     )
 
+    _validate_password_strength(data.password)
     hashed = get_password_hash(data.password)
 
     user = models.User(
@@ -311,6 +344,71 @@ def _is_account_locked(user: models.User) -> bool:
     return locked_until > now
 
 
+def _seconds_until_unlock(user: models.User) -> Optional[int]:
+    locked_until = user.locked_until
+    if not locked_until:
+        return None
+    if locked_until.tzinfo is None:
+        locked_until = locked_until.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    remaining = locked_until - now
+    return max(0, int(remaining.total_seconds()))
+
+
+def _notify_amo_admins_of_lockout(
+    db: Session,
+    *,
+    user: models.User,
+    amo: Optional[models.AMO],
+    ip: Optional[str],
+    user_agent: Optional[str],
+) -> None:
+    if not amo:
+        return
+
+    try:
+        from amodb.apps.training import models as training_models
+        from amodb.apps.training.models import TrainingNotificationSeverity
+    except Exception:
+        return
+
+    admins = (
+        db.query(models.User)
+        .filter(
+            models.User.amo_id == amo.id,
+            models.User.is_active.is_(True),
+            or_(
+                models.User.is_amo_admin.is_(True),
+                models.User.is_superuser.is_(True),
+            ),
+        )
+        .all()
+    )
+
+    if not admins:
+        return
+
+    title = "Security alert: account lockout"
+    body = (
+        f"User {user.email} was locked out after repeated failed login attempts."
+        f"\nIP: {ip or 'unknown'}"
+        f"\nUser agent: {user_agent or 'unknown'}"
+    )
+
+    for admin in admins:
+        note = training_models.TrainingNotification(
+            amo_id=amo.id,
+            user_id=admin.id,
+            title=title,
+            body=body,
+            severity=TrainingNotificationSeverity.WARNING,
+            dedupe_key=f"account-lockout:{user.id}:{user.lockout_count}",
+        )
+        db.add(note)
+
+    db.commit()
+
+
 def _register_failed_login(
     db: Session,
     user: models.User,
@@ -319,12 +417,6 @@ def _register_failed_login(
     user_agent: Optional[str],
 ) -> None:
     user.login_attempts = (user.login_attempts or 0) + 1
-    if user.login_attempts >= MAX_LOGIN_ATTEMPTS:
-        user.locked_until = datetime.now(timezone.utc) + timedelta(
-            minutes=ACCOUNT_LOCKOUT_MINUTES
-        )
-    db.add(user)
-    db.commit()
 
     _log_security_event(
         db,
@@ -336,6 +428,45 @@ def _register_failed_login(
         user_agent=user_agent,
     )
 
+    if user.login_attempts < MAX_LOGIN_ATTEMPTS:
+        db.add(user)
+        db.commit()
+        return
+
+    user.login_attempts = 0
+    user.lockout_count = (user.lockout_count or 0) + 1
+    lockout_index = min(user.lockout_count - 1, len(LOCKOUT_SCHEDULE_SECONDS) - 1)
+    lockout_seconds = LOCKOUT_SCHEDULE_SECONDS[lockout_index]
+    user.locked_until = datetime.now(timezone.utc) + timedelta(
+        seconds=lockout_seconds
+    )
+    db.add(user)
+    db.commit()
+
+    _log_security_event(
+        db,
+        user=user,
+        amo=amo,
+        event_type="LOCKOUT",
+        description=(
+            f"Account locked for {lockout_seconds} seconds after repeated failures."
+        ),
+        ip=ip,
+        user_agent=user_agent,
+    )
+
+    if user.lockout_count >= 3:
+        _log_security_event(
+            db,
+            user=user,
+            amo=amo,
+            event_type="LOCKOUT_ESCALATED",
+            description="Lockout escalation threshold reached; notify AMO admin.",
+            ip=ip,
+            user_agent=user_agent,
+        )
+        _notify_amo_admins_of_lockout(db, user=user, amo=amo, ip=ip, user_agent=user_agent)
+
 
 def _reset_failed_logins(
     db: Session,
@@ -346,6 +477,7 @@ def _reset_failed_logins(
 ) -> None:
     user.login_attempts = 0
     user.locked_until = None
+    user.lockout_count = 0
     user.last_login_at = datetime.now(timezone.utc)
     user.last_login_ip = ip
     user.last_login_user_agent = user_agent
@@ -492,6 +624,7 @@ def authenticate_user(
         return None
 
     if _is_account_locked(user):
+        retry_after = _seconds_until_unlock(user)
         _log_security_event(
             db,
             user=user,
@@ -501,11 +634,14 @@ def authenticate_user(
             ip=ip,
             user_agent=user_agent,
         )
-        return None
+        raise AuthenticationError(
+            "Account locked due to repeated failed attempts.",
+            retry_after_seconds=retry_after,
+        )
 
     if not verify_password(login_req.password, user.hashed_password):
         _register_failed_login(db, user, amo, ip, user_agent)
-        return None
+        raise AuthenticationError("Invalid credentials.")
 
     _reset_failed_logins(db, user, amo, ip, user_agent)
     return user
@@ -637,6 +773,7 @@ def redeem_password_reset_token(
         db.commit()
         return None
 
+    _validate_password_strength(new_password)
     user.hashed_password = get_password_hash(new_password)
     db.add(user)
     db.commit()
