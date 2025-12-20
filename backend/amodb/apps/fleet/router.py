@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import models as account_models
-from . import models, schemas, services
+from . import models, schemas, usage_services
 
 # Roles allowed to manage aircraft, components, usage
 MANAGEMENT_ROLES = [
@@ -359,9 +359,9 @@ def create_usage_entry(
         )
 
     data = payload.model_dump()
-    previous_usage = services.get_previous_usage(db, serial_number, payload.date)
-    services.apply_usage_calculations(data, previous_usage)
-    services.update_maintenance_remaining(db, serial_number, payload.date, data)
+    previous_usage = usage_services.get_previous_usage(db, serial_number, payload.date)
+    usage_services.apply_usage_calculations(data, previous_usage)
+    usage_services.update_maintenance_remaining(db, serial_number, payload.date, data)
     usage = models.AircraftUsage(
         aircraft_serial_number=serial_number,
         created_by_user_id=current_user.id,
@@ -430,9 +430,13 @@ def update_usage_entry(
         "note": data.get("note", usage.note),
     }
 
-    previous_usage = services.get_previous_usage(db, usage.aircraft_serial_number, effective_date)
-    services.apply_usage_calculations(merged_data, previous_usage)
-    services.update_maintenance_remaining(
+    previous_usage = usage_services.get_previous_usage(
+        db,
+        usage.aircraft_serial_number,
+        effective_date,
+    )
+    usage_services.apply_usage_calculations(merged_data, previous_usage)
+    usage_services.update_maintenance_remaining(
         db,
         usage.aircraft_serial_number,
         effective_date,
@@ -485,7 +489,7 @@ def get_usage_summary(
     ac = db.query(models.Aircraft).get(serial_number)
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
-    summary = services.build_usage_summary(db, serial_number)
+    summary = usage_services.build_usage_summary(db, serial_number)
     return summary
 
 
@@ -594,11 +598,11 @@ def list_maintenance_status_for_aircraft(
         .filter(models.MaintenanceStatus.aircraft_serial_number == serial_number)
         .all()
     )
-    usage_snapshot = services.get_usage_snapshot(db, serial_number, date.today())
+    usage_snapshot = usage_services.get_usage_snapshot(db, serial_number, date.today())
 
     response: list[schemas.MaintenanceStatusRead] = []
     for status in statuses:
-        remaining = services.compute_remaining_fields(status, usage_snapshot)
+        remaining = usage_services.compute_remaining_fields(status, usage_snapshot)
         response.append(
             schemas.MaintenanceStatusRead(
                 id=status.id,

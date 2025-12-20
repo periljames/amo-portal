@@ -129,7 +129,6 @@ def compute_remaining_fields(
         remaining_days = (status.next_due_date - usage_snapshot.as_of_date).days
 
     if remaining_hours is None and status.next_due_hours is not None:
-        current_hours = None
         if category == models.MaintenanceProgramCategoryEnum.ENGINE:
             current_hours = usage_snapshot.engine_hours
         elif category == models.MaintenanceProgramCategoryEnum.PROP:
@@ -140,7 +139,6 @@ def compute_remaining_fields(
             remaining_hours = status.next_due_hours - current_hours
 
     if remaining_cycles is None and status.next_due_cycles is not None:
-        current_cycles = None
         if category == models.MaintenanceProgramCategoryEnum.ENGINE:
             current_cycles = usage_snapshot.engine_cycles
         else:
