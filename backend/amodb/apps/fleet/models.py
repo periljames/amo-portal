@@ -52,6 +52,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Enum as SQLEnum,
+    JSON,
 )
 from sqlalchemy.orm import relationship
 
@@ -564,3 +565,47 @@ class MaintenanceStatus(Base):
 
     def __repr__(self) -> str:
         return f"<MaintenanceStatus id={self.id} aircraft={self.aircraft_serial_number} program_item_id={self.program_item_id}>"
+
+
+# ---------------------------------------------------------------------------
+# Aircraft Import Templates
+# ---------------------------------------------------------------------------
+
+
+class AircraftImportTemplate(Base):
+    """
+    Saved templates for aircraft import column mappings and defaults.
+    """
+
+    __tablename__ = "aircraft_import_templates"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_aircraft_import_template_name"),
+        Index("ix_aircraft_import_template_aircraft_template", "aircraft_template"),
+        Index("ix_aircraft_import_template_model_code", "model_code"),
+        Index("ix_aircraft_import_template_operator_code", "operator_code"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    name = Column(String(120), nullable=False, index=True)
+    aircraft_template = Column(String(50), nullable=True)
+    model_code = Column(String(32), nullable=True)
+    operator_code = Column(String(5), nullable=True)
+
+    column_mapping = Column(JSON, nullable=True)
+    default_values = Column(JSON, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AircraftImportTemplate id={self.id} name={self.name}>"

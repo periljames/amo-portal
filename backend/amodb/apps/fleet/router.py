@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from fastapi import (
     APIRouter,
@@ -860,6 +860,167 @@ def _validate_aircraft_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]:
     return {"errors": errors, "warnings": warnings}
 
 
+def _serialize_import_template(
+    template: models.AircraftImportTemplate,
+) -> Dict[str, Any]:
+    return {
+        "id": template.id,
+        "name": template.name,
+        "aircraft_template": template.aircraft_template,
+        "model_code": template.model_code,
+        "operator_code": template.operator_code,
+    }
+
+
+def _pick_import_template(
+    payload: Dict[str, Any],
+    templates: List[models.AircraftImportTemplate],
+) -> Optional[models.AircraftImportTemplate]:
+    template_value = (payload.get("template") or "").strip()
+    model_code = (payload.get("aircraft_model_code") or "").strip()
+    operator_code = (payload.get("operator_code") or "").strip()
+
+    best_template: Optional[models.AircraftImportTemplate] = None
+    best_score = 0
+
+    for template in templates:
+        score = 0
+        if template.aircraft_template and template_value:
+            if template.aircraft_template.lower() == template_value.lower():
+                score += 3
+        if template.model_code and model_code:
+            if template.model_code.lower() == model_code.lower():
+                score += 2
+        if template.operator_code and operator_code:
+            if template.operator_code.lower() == operator_code.lower():
+                score += 1
+        if score > best_score:
+            best_score = score
+            best_template = template
+
+    return best_template
+
+
+# ---------------------------------------------------------------------------
+# IMPORT TEMPLATES (AIRCRAFT)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/import/templates",
+    response_model=List[schemas.AircraftImportTemplateRead],
+    tags=["aircraft"],
+)
+def list_import_templates(
+    aircraft_template: Optional[str] = None,
+    model_code: Optional[str] = None,
+    operator_code: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.AircraftImportTemplate)
+    if aircraft_template is not None:
+        query = query.filter(
+            models.AircraftImportTemplate.aircraft_template == aircraft_template
+        )
+    if model_code is not None:
+        query = query.filter(models.AircraftImportTemplate.model_code == model_code)
+    if operator_code is not None:
+        query = query.filter(
+            models.AircraftImportTemplate.operator_code == operator_code
+        )
+    return query.order_by(models.AircraftImportTemplate.name.asc()).all()
+
+
+@router.post(
+    "/import/templates",
+    response_model=schemas.AircraftImportTemplateRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["aircraft"],
+)
+def create_import_template(
+    payload: schemas.AircraftImportTemplateCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    existing = (
+        db.query(models.AircraftImportTemplate)
+        .filter(models.AircraftImportTemplate.name == payload.name)
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Template with name {payload.name} already exists.",
+        )
+    template = models.AircraftImportTemplate(**payload.model_dump())
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+@router.put(
+    "/import/templates/{template_id}",
+    response_model=schemas.AircraftImportTemplateRead,
+    tags=["aircraft"],
+)
+def update_import_template(
+    template_id: int,
+    payload: schemas.AircraftImportTemplateUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    template = db.query(models.AircraftImportTemplate).get(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    new_name = data.get("name")
+    if new_name and new_name != template.name:
+        name_conflict = (
+            db.query(models.AircraftImportTemplate)
+            .filter(models.AircraftImportTemplate.name == new_name)
+            .first()
+        )
+        if name_conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Template with name {new_name} already exists.",
+            )
+
+    for field, value in data.items():
+        setattr(template, field, value)
+
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+@router.delete(
+    "/import/templates/{template_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["aircraft"],
+)
+def delete_import_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    template = db.query(models.AircraftImportTemplate).get(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    db.delete(template)
+    db.commit()
+    return
+
+
 # ---------------------------------------------------------------------------
 # BULK IMPORT (AIRCRAFT)
 # ---------------------------------------------------------------------------
@@ -927,6 +1088,7 @@ async def preview_aircraft_import(
     rows: List[Dict[str, Any]] = []
     serials: List[str] = []
     seen_serials: Dict[str, int] = {}
+    templates = db.query(models.AircraftImportTemplate).all()
 
     for idx, row in df.iterrows():
         row_idx = int(idx) + 2
@@ -935,10 +1097,14 @@ async def preview_aircraft_import(
         if serial:
             serials.append(serial)
             seen_serials[serial] = seen_serials.get(serial, 0) + 1
+        suggested = _pick_import_template(payload, templates) if templates else None
         rows.append(
             {
                 "row_number": row_idx,
                 "data": payload,
+                "suggested_template": _serialize_import_template(suggested)
+                if suggested
+                else None,
             }
         )
 

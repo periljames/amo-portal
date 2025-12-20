@@ -1,5 +1,5 @@
 // frontend/src/pages/AircraftImportPage.tsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -30,6 +30,25 @@ type PreviewRow = {
   warnings: string[];
   action: "new" | "update" | "invalid";
   approved: boolean;
+  suggested_template?: SuggestedTemplate | null;
+};
+
+type SuggestedTemplate = {
+  id: number;
+  name: string;
+  aircraft_template?: string | null;
+  model_code?: string | null;
+  operator_code?: string | null;
+};
+
+type AircraftImportTemplate = {
+  id: number;
+  name: string;
+  aircraft_template?: string | null;
+  model_code?: string | null;
+  operator_code?: string | null;
+  column_mapping?: Record<string, string | null> | null;
+  default_values?: Record<string, any> | null;
 };
 
 const AircraftImportPage: React.FC = () => {
@@ -49,6 +68,14 @@ const AircraftImportPage: React.FC = () => {
     update: number;
     invalid: number;
   } | null>(null);
+  const [templates, setTemplates] = useState<AircraftImportTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | "">("");
+  const [templateName, setTemplateName] = useState("");
+  const [templateAircraftTemplate, setTemplateAircraftTemplate] = useState("");
+  const [templateModelCode, setTemplateModelCode] = useState("");
+  const [templateOperatorCode, setTemplateOperatorCode] = useState("");
+  const [templateDefaultsJson, setTemplateDefaultsJson] = useState("{}");
+  const [templateLoading, setTemplateLoading] = useState(false);
 
   const handleAircraftFileChange = (
     e: React.ChangeEvent<HTMLInputElement>
@@ -75,6 +102,47 @@ const AircraftImportPage: React.FC = () => {
   };
 
   const hasErrors = (row: PreviewRow) => row.errors.length > 0;
+
+  const loadTemplates = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/aircraft/import/templates`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail ?? "Failed to load templates.");
+      }
+      setTemplates(data ?? []);
+    } catch (err: any) {
+      setMessage(err.message ?? "Error loading templates.");
+    }
+  };
+
+  useEffect(() => {
+    void loadTemplates();
+  }, []);
+
+  useEffect(() => {
+    if (selectedTemplateId === "") {
+      setTemplateName("");
+      setTemplateAircraftTemplate("");
+      setTemplateModelCode("");
+      setTemplateOperatorCode("");
+      setTemplateDefaultsJson("{}");
+      return;
+    }
+    const selected = templates.find(
+      (template) => template.id === selectedTemplateId
+    );
+    if (!selected) {
+      return;
+    }
+    setTemplateName(selected.name ?? "");
+    setTemplateAircraftTemplate(selected.aircraft_template ?? "");
+    setTemplateModelCode(selected.model_code ?? "");
+    setTemplateOperatorCode(selected.operator_code ?? "");
+    setTemplateDefaultsJson(
+      JSON.stringify(selected.default_values ?? {}, null, 2)
+    );
+  }, [selectedTemplateId, templates]);
 
   const handlePreviewRowChange = (
     index: number,
@@ -152,6 +220,118 @@ const AircraftImportPage: React.FC = () => {
     } finally {
       setPreviewLoading(false);
     }
+  };
+
+  const parseTemplateDefaults = () => {
+    const raw = templateDefaultsJson.trim();
+    if (!raw) {
+      return null;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      throw new Error("Default values JSON is invalid.");
+    }
+  };
+
+  const saveMappingTemplate = async () => {
+    if (!columnMapping) {
+      setMessage("Parse a file to generate a column mapping before saving.");
+      return;
+    }
+    const name =
+      templateName.trim() ||
+      templates.find((template) => template.id === selectedTemplateId)?.name ||
+      "";
+    if (!name) {
+      setMessage("Enter a template name.");
+      return;
+    }
+
+    setTemplateLoading(true);
+    setMessage(null);
+    try {
+      const defaultValues = parseTemplateDefaults();
+      const payload = {
+        name,
+        aircraft_template: templateAircraftTemplate.trim() || null,
+        model_code: templateModelCode.trim() || null,
+        operator_code: templateOperatorCode.trim() || null,
+        column_mapping: columnMapping,
+        default_values: defaultValues,
+      };
+      const method = selectedTemplateId ? "PUT" : "POST";
+      const url = selectedTemplateId
+        ? `${API_BASE}/aircraft/import/templates/${selectedTemplateId}`
+        : `${API_BASE}/aircraft/import/templates`;
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail ?? "Failed to save template.");
+      }
+      await loadTemplates();
+      setSelectedTemplateId(data.id ?? selectedTemplateId);
+      setMessage("Template saved.");
+    } catch (err: any) {
+      setMessage(err.message ?? "Error saving template.");
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+
+  const applyTemplateToPreview = () => {
+    const selected = templates.find(
+      (template) => template.id === selectedTemplateId
+    );
+    if (!selected) {
+      setMessage("Select a template to apply.");
+      return;
+    }
+    setPreviewRows((prev) =>
+      prev.map((row) => {
+        const nextData = { ...row.data };
+        const defaults = selected.default_values ?? {};
+
+        if (selected.aircraft_template && !nextData.template?.trim()) {
+          nextData.template = selected.aircraft_template;
+        }
+        if (selected.model_code && !nextData.aircraft_model_code?.trim()) {
+          nextData.aircraft_model_code = selected.model_code;
+        }
+        if (selected.operator_code && !nextData.operator_code?.trim()) {
+          nextData.operator_code = selected.operator_code;
+        }
+
+        (Object.entries(defaults) as [keyof AircraftRowData, any][]).forEach(
+          ([key, value]) => {
+            if (value === null || value === undefined) {
+              return;
+            }
+            const currentValue = nextData[key];
+            if (
+              currentValue === null ||
+              currentValue === undefined ||
+              `${currentValue}`.trim() === ""
+            ) {
+              nextData[key] = value;
+            }
+          }
+        );
+
+        const errors = validateRow(nextData);
+        return {
+          ...row,
+          data: nextData,
+          errors,
+          approved: errors.length === 0 && row.approved,
+        };
+      })
+    );
+    setMessage("Template defaults applied to preview rows.");
   };
 
   const confirmImport = async () => {
@@ -280,6 +460,107 @@ const AircraftImportPage: React.FC = () => {
             </div>
           </div>
 
+          <div className="mt-4 grid gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs uppercase text-slate-400">
+                  Template
+                </label>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) =>
+                    setSelectedTemplateId(
+                      e.target.value ? Number(e.target.value) : ""
+                    )
+                  }
+                  className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                >
+                  <option value="">Select template</option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={applyTemplateToPreview}
+                  disabled={!previewRows.length || !selectedTemplateId}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  Apply Template to Preview
+                </button>
+                <button
+                  onClick={saveMappingTemplate}
+                  disabled={templateLoading || !columnMapping}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50"
+                >
+                  {templateLoading ? "Saving..." : "Save Mapping as Template"}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-4">
+              <div>
+                <label className="block text-xs uppercase text-slate-400">
+                  Template Name
+                </label>
+                <input
+                  type="text"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs uppercase text-slate-400">
+                  Aircraft Template
+                </label>
+                <input
+                  type="text"
+                  value={templateAircraftTemplate}
+                  onChange={(e) => setTemplateAircraftTemplate(e.target.value)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs uppercase text-slate-400">
+                  Model Code
+                </label>
+                <input
+                  type="text"
+                  value={templateModelCode}
+                  onChange={(e) => setTemplateModelCode(e.target.value)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs uppercase text-slate-400">
+                  Operator Code
+                </label>
+                <input
+                  type="text"
+                  value={templateOperatorCode}
+                  onChange={(e) => setTemplateOperatorCode(e.target.value)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase text-slate-400">
+                Default Values (JSON)
+              </label>
+              <textarea
+                value={templateDefaultsJson}
+                onChange={(e) => setTemplateDefaultsJson(e.target.value)}
+                rows={4}
+                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs"
+              />
+            </div>
+          </div>
+
           {previewSummary && (
             <div className="mt-4 grid gap-2 text-sm text-slate-200 md:grid-cols-3">
               <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
@@ -314,6 +595,7 @@ const AircraftImportPage: React.FC = () => {
                     <th className="p-3 text-left">Serial</th>
                     <th className="p-3 text-left">Registration</th>
                     <th className="p-3 text-left">Template</th>
+                    <th className="p-3 text-left">Suggested Template</th>
                     <th className="p-3 text-left">Make</th>
                     <th className="p-3 text-left">Model</th>
                     <th className="p-3 text-left">Base</th>
@@ -415,6 +697,32 @@ const AircraftImportPage: React.FC = () => {
                             }
                             className="w-32 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
                           />
+                        </td>
+                        <td className="p-3 text-xs text-slate-300">
+                          {row.suggested_template ? (
+                            <div>
+                              <div className="font-semibold text-slate-100">
+                                {row.suggested_template.name}
+                              </div>
+                              <div>
+                                {(row.suggested_template.aircraft_template ||
+                                  row.suggested_template.model_code ||
+                                  row.suggested_template.operator_code) && (
+                                  <span className="text-slate-400">
+                                    {[
+                                      row.suggested_template.aircraft_template,
+                                      row.suggested_template.model_code,
+                                      row.suggested_template.operator_code,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">—</span>
+                          )}
                         </td>
                         <td className="p-3">
                           <input
