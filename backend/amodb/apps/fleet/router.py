@@ -2,7 +2,12 @@
 
 from datetime import date, datetime
 from io import BytesIO
+import importlib
+import math
+import numbers
 from pathlib import Path
+import subprocess
+import tempfile
 from typing import List, Dict, Any, Optional
 
 from fastapi import (
@@ -761,6 +766,39 @@ def _coerce_import_value(value: Any) -> Any:
     return value
 
 
+def _recalculate_excel_with_libreoffice(
+    content: bytes, suffix: str
+) -> bytes:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = Path(tmpdir) / f"input{suffix}"
+        input_path.write_bytes(content)
+        command = [
+            "soffice",
+            "--headless",
+            "--convert-to",
+            "xlsx",
+            "--outdir",
+            tmpdir,
+            str(input_path),
+        ]
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=False
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            stdout = result.stdout.strip()
+            message = stderr or stdout or "Unknown LibreOffice error."
+            raise RuntimeError(
+                f"LibreOffice recalculation failed: {message}"
+            )
+        output_path = Path(tmpdir) / f"{input_path.stem}.xlsx"
+        if not output_path.exists():
+            raise RuntimeError(
+                "LibreOffice did not produce a recalculated workbook."
+            )
+        return output_path.read_bytes()
+
+
 def _build_aircraft_payload(
     row: Dict[str, Any], colmap: Dict[str, str | None]
 ) -> Dict[str, Any]:
@@ -1210,6 +1248,105 @@ async def preview_aircraft_import(
             ),
         )
 
+    formula_discrepancies: List[Dict[str, Any]] = []
+    row_formula_proposals: Dict[int, List[Dict[str, Any]]] = {}
+
+    if file_type == "excel" and ext in [".xlsx", ".xlsm", ".xls"]:
+        openpyxl_spec = importlib.util.find_spec("openpyxl")
+        if not openpyxl_spec:
+            raise HTTPException(
+                status_code=500,
+                detail="openpyxl is required for Excel formula checks.",
+            )
+        openpyxl = importlib.import_module("openpyxl")
+        workbook = openpyxl.load_workbook(BytesIO(content), data_only=False)
+        sheet = workbook.active
+        recalc_df = None
+        evaluator = None
+
+        try:
+            recalc_content = _recalculate_excel_with_libreoffice(content, ext)
+            recalc_df = pd.read_excel(BytesIO(recalc_content))
+        except Exception:
+            xlcalculator_spec = importlib.util.find_spec("xlcalculator")
+            if xlcalculator_spec:
+                xlcalculator = importlib.import_module("xlcalculator")
+                compiler = xlcalculator.ModelCompiler()
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    input_path = Path(tmpdir) / f"input{ext}"
+                    input_path.write_bytes(content)
+                    model = compiler.read_and_parse_archive(str(input_path))
+                evaluator = xlcalculator.Evaluator(model)
+
+        def is_formula(cell: Any) -> bool:
+            if cell.data_type == "f":
+                return True
+            return isinstance(cell.value, str) and cell.value.startswith("=")
+
+        def get_recalculated_value(cell: Any) -> tuple[Any, str]:
+            if recalc_df is not None:
+                row_idx = cell.row - 2
+                col_idx = cell.column - 1
+                if row_idx < 0 or col_idx < 0:
+                    return None, "high"
+                if row_idx >= len(recalc_df.index):
+                    return None, "high"
+                if col_idx >= len(recalc_df.columns):
+                    return None, "high"
+                return recalc_df.iat[row_idx, col_idx], "high"
+            if evaluator:
+                sheet_name = sheet.title.replace("'", "''")
+                reference = f"'{sheet_name}'!{cell.coordinate}"
+                try:
+                    return evaluator.evaluate(reference), "medium"
+                except Exception:
+                    return None, "low"
+            return None, "low"
+
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                if not is_formula(cell):
+                    continue
+                row_number = cell.row
+                col_index = cell.column - 1
+                if col_index < 0 or col_index >= len(df.columns):
+                    continue
+                if row_number - 2 >= len(df.index):
+                    continue
+                column_name = str(df.columns[col_index])
+                a_value = df.iat[row_number - 2, col_index]
+                b_value, confidence = get_recalculated_value(cell)
+                if pd.isna(a_value) and pd.isna(b_value):
+                    continue
+                if a_value == b_value:
+                    continue
+                delta = None
+                if (
+                    isinstance(a_value, numbers.Number)
+                    and isinstance(b_value, numbers.Number)
+                    and not (pd.isna(a_value) or pd.isna(b_value))
+                ):
+                    delta = b_value - a_value
+                discrepancy = {
+                    "cell_address": cell.coordinate,
+                    "row_number": row_number,
+                    "column_name": column_name,
+                    "value_a": a_value,
+                    "value_b": b_value,
+                    "delta": delta,
+                    "confidence": confidence,
+                }
+                formula_discrepancies.append(discrepancy)
+                row_formula_proposals.setdefault(row_number, []).append(
+                    {
+                        "cell_address": cell.coordinate,
+                        "column_name": column_name,
+                        "current_value": a_value,
+                        "proposed_value": b_value,
+                        "confidence": confidence,
+                    }
+                )
+
     rows: List[Dict[str, Any]] = []
     serials: List[str] = []
     seen_serials: Dict[str, int] = {}
@@ -1234,6 +1371,7 @@ async def preview_aircraft_import(
                 "suggested_template": _serialize_import_template(suggested)
                 if suggested
                 else None,
+                "formula_proposals": row_formula_proposals.get(row_idx, []),
             }
         )
 
@@ -1284,6 +1422,7 @@ async def preview_aircraft_import(
             "invalid": invalid_count,
         },
         "ocr": ocr_info,
+        "formula_discrepancies": formula_discrepancies,
     }
 
 
