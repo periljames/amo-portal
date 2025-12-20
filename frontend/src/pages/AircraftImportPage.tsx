@@ -45,12 +45,15 @@ type PreviewRow = {
   original_data?: AircraftRowData;
   proposed_fields?: AircraftRowField[];
   user_overrides?: AircraftRowField[];
+  formula_proposals?: FormulaProposal[];
+  formula_decisions?: Partial<Record<AircraftRowField, FormulaDecision>>;
 };
 
 type ConfirmedCell = {
   original: any;
   proposed: any;
   final: any;
+  decision?: FormulaDecision;
 };
 
 type ConfirmedRow = {
@@ -65,6 +68,16 @@ type SuggestedTemplate = {
   model_code?: string | null;
   operator_code?: string | null;
 };
+
+type FormulaProposal = {
+  cell_address?: string | null;
+  column_name: string;
+  current_value: any;
+  proposed_value: any;
+  confidence?: string | null;
+};
+
+type FormulaDecision = "accept" | "keep" | "override";
 
 type AircraftImportTemplate = {
   id: number;
@@ -162,8 +175,17 @@ const AIRCRAFT_FIELD_LABELS: Record<AircraftRowField, string> = {
   total_cycles: "Cycles",
 };
 
+const FORMULA_TOLERANCE = 0.01;
+
 const normalizeValue = (value: unknown) =>
   value === null || value === undefined ? "" : `${value}`.trim();
+
+const normalizeHeader = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[.\-/\s]+/g, "_")
+    .replace(/_+/g, "_");
 
 const AircraftImportPage: React.FC = () => {
   const [aircraftFile, setAircraftFile] = useState<File | null>(null);
@@ -351,8 +373,9 @@ const AircraftImportPage: React.FC = () => {
   const updatePreviewRowValue = (
     rowNumber: number,
     field: AircraftRowField,
-    value: string,
-    source: "user" | "system" = "user"
+    value: any,
+    source: "user" | "system" = "user",
+    decision?: FormulaDecision
   ) => {
     setPreviewRows((prev) =>
       prev.map((row) => {
@@ -373,12 +396,17 @@ const AircraftImportPage: React.FC = () => {
             userOverrides.add(field);
           }
         }
+        const formulaDecisions = { ...(row.formula_decisions ?? {}) };
+        if (decision) {
+          formulaDecisions[field] = decision;
+        }
         return {
           ...row,
           data: nextData,
           errors,
           approved: errors.length === 0 && row.approved,
           user_overrides: Array.from(userOverrides),
+          formula_decisions: formulaDecisions,
         };
       })
     );
@@ -466,6 +494,8 @@ const AircraftImportPage: React.FC = () => {
         original_data: { ...row.data },
         proposed_fields: [],
         user_overrides: [],
+        formula_proposals: row.formula_proposals ?? [],
+        formula_decisions: {},
       }));
       setPreviewRows(rows);
       const nextBatchId = generateBatchId();
@@ -719,6 +749,181 @@ const AircraftImportPage: React.FC = () => {
     }
   };
 
+  const formulaFieldMapping = useMemo(() => {
+    const mapping = new Map<string, AircraftRowField>();
+    if (!columnMapping) {
+      return mapping;
+    }
+    (Object.entries(columnMapping) as [AircraftRowField, string | null][]).forEach(
+      ([field, columnName]) => {
+        if (!columnName) {
+          return;
+        }
+        mapping.set(normalizeHeader(columnName), field);
+      }
+    );
+    return mapping;
+  }, [columnMapping]);
+
+  const getFormulaProposalForField = (
+    row: PreviewRow,
+    field: AircraftRowField
+  ) => {
+    const proposals = row.formula_proposals ?? [];
+    return proposals.find(
+      (proposal) => {
+        const normalized = normalizeHeader(proposal.column_name);
+        const mappedField = formulaFieldMapping.get(normalized);
+        if (mappedField) {
+          return mappedField === field;
+        }
+        return normalized === normalizeHeader(field);
+      }
+    );
+  };
+
+  const applyFormulaDecision = (
+    rowNumber: number,
+    field: AircraftRowField,
+    decision: FormulaDecision,
+    value: any
+  ) => {
+    updatePreviewRowValue(rowNumber, field, value ?? "", "user", decision);
+  };
+
+  const buildFormulaDecision = (
+    row: PreviewRow,
+    field: AircraftRowField
+  ): FormulaDecision | undefined => {
+    const proposal = getFormulaProposalForField(row, field);
+    if (!proposal) {
+      return undefined;
+    }
+    const existing = row.formula_decisions?.[field];
+    if (existing) {
+      return existing;
+    }
+    const original = normalizeValue(row.original_data?.[field]);
+    const proposed = normalizeValue(proposal.proposed_value);
+    const finalValue = normalizeValue(row.data[field]);
+    if (finalValue === proposed) {
+      return "accept";
+    }
+    if (finalValue === original) {
+      return "keep";
+    }
+    return "override";
+  };
+
+  const renderFormulaCell =
+    (field: AircraftRowField) =>
+    (params: ICellRendererParams<PreviewRow>) => {
+      const row = params.data;
+      if (!row) {
+        return null;
+      }
+      const proposal = getFormulaProposalForField(row, field);
+      if (!proposal) {
+        return <span>{normalizeValue(row.data[field])}</span>;
+      }
+      const uploadedValue = row.original_data?.[field];
+      const currentValue = row.data[field];
+      const proposedValue = proposal.proposed_value;
+      const delta =
+        typeof uploadedValue === "number" && typeof proposedValue === "number"
+          ? proposedValue - uploadedValue
+          : Number.isFinite(Number(proposedValue)) &&
+            Number.isFinite(Number(uploadedValue))
+          ? Number(proposedValue) - Number(uploadedValue)
+          : null;
+      const decision = buildFormulaDecision(row, field);
+      const withinTolerance =
+        delta !== null && Math.abs(delta) <= FORMULA_TOLERANCE;
+      return (
+        <div className="flex flex-col gap-1 text-xs">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-200">
+              Formula mismatch
+            </span>
+            {decision && (
+              <span className="rounded-full bg-slate-700 px-2 py-0.5 text-slate-200">
+                Decision: {decision}
+              </span>
+            )}
+          </div>
+          <div className="text-slate-100">
+            Uploaded: {normalizeValue(uploadedValue) || "—"}
+          </div>
+          <div className="text-sky-300">
+            Recalc: {normalizeValue(proposedValue) || "—"}
+          </div>
+          {normalizeValue(currentValue) !== normalizeValue(uploadedValue) &&
+            normalizeValue(currentValue) !== normalizeValue(proposedValue) && (
+              <div className="text-fuchsia-200">
+                Final: {normalizeValue(currentValue) || "—"}
+              </div>
+            )}
+          <div
+            className={`text-xs ${
+              withinTolerance ? "text-amber-200" : "text-rose-200"
+            }`}
+          >
+            Δ{" "}
+            {delta === null
+              ? "n/a"
+              : `${delta > 0 ? "+" : ""}${delta.toFixed(2)}`}{" "}
+            <span className="text-slate-400">(tol ±{FORMULA_TOLERANCE})</span>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <button
+              type="button"
+              className="rounded-full bg-sky-500/20 px-2 py-0.5 text-sky-200"
+              onClick={() =>
+                applyFormulaDecision(
+                  row.row_number,
+                  field,
+                  "accept",
+                  proposedValue
+                )
+              }
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              className="rounded-full bg-slate-700 px-2 py-0.5 text-slate-200"
+              onClick={() =>
+                applyFormulaDecision(
+                  row.row_number,
+                  field,
+                  "keep",
+                  row.original_data?.[field] ?? ""
+                )
+              }
+            >
+              Keep
+            </button>
+            <button
+              type="button"
+              className="rounded-full bg-fuchsia-500/20 px-2 py-0.5 text-fuchsia-200"
+              onClick={() => {
+                const colId = params.column?.getColId();
+                if (!colId) {
+                  return;
+                }
+                params.api.startEditingCell({
+                  rowIndex: params.rowIndex ?? 0,
+                  colKey: colId,
+                });
+              }}
+            >
+              Override
+            </button>
+          </div>
+        </div>
+      );
+    };
+
   const applyTemplateToPreview = () => {
     const selected = templates.find(
       (template) => template.id === selectedTemplateId
@@ -927,6 +1132,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "serial_number",
         editable: true,
         width: 150,
+        cellRenderer: renderFormulaCell("serial_number"),
         valueGetter: (params) => params.data?.data.serial_number ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -944,6 +1150,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "registration",
         editable: true,
         width: 150,
+        cellRenderer: renderFormulaCell("registration"),
         valueGetter: (params) => params.data?.data.registration ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -961,6 +1168,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "template",
         editable: true,
         width: 160,
+        cellRenderer: renderFormulaCell("template"),
         valueGetter: (params) => params.data?.data.template ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -1010,6 +1218,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "make",
         editable: true,
         width: 140,
+        cellRenderer: renderFormulaCell("make"),
         valueGetter: (params) => params.data?.data.make ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -1027,6 +1236,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "model",
         editable: true,
         width: 140,
+        cellRenderer: renderFormulaCell("model"),
         valueGetter: (params) => params.data?.data.model ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -1044,6 +1254,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "home_base",
         editable: true,
         width: 140,
+        cellRenderer: renderFormulaCell("home_base"),
         valueGetter: (params) => params.data?.data.home_base ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -1061,6 +1272,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "owner",
         editable: true,
         width: 160,
+        cellRenderer: renderFormulaCell("owner"),
         valueGetter: (params) => params.data?.data.owner ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -1078,6 +1290,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "total_hours",
         editable: true,
         width: 120,
+        cellRenderer: renderFormulaCell("total_hours"),
         valueGetter: (params) => params.data?.data.total_hours ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -1095,6 +1308,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "total_cycles",
         editable: true,
         width: 120,
+        cellRenderer: renderFormulaCell("total_cycles"),
         valueGetter: (params) => params.data?.data.total_cycles ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -1112,6 +1326,7 @@ const AircraftImportPage: React.FC = () => {
         colId: "last_log_date",
         editable: true,
         width: 160,
+        cellRenderer: renderFormulaCell("last_log_date"),
         valueGetter: (params) => params.data?.data.last_log_date ?? "",
         valueSetter: (params) => {
           if (!params.data) {
@@ -1149,11 +1364,15 @@ const AircraftImportPage: React.FC = () => {
     if (!field || !AIRCRAFT_DIFF_FIELDS.includes(field)) {
       return;
     }
+    const decision = getFormulaProposalForField(event.data, field)
+      ? "override"
+      : undefined;
     updatePreviewRowValue(
       event.data.row_number,
       field,
       event.newValue ?? "",
-      "user"
+      "user",
+      decision
     );
   };
 
@@ -1162,12 +1381,17 @@ const AircraftImportPage: React.FC = () => {
       const cells: Record<string, ConfirmedCell> = {};
       (Object.keys(row.data) as AircraftRowField[]).forEach((field) => {
         const original = row.original_data?.[field] ?? null;
-        const proposed =
-          row.proposed_fields?.includes(field) ? row.data[field] : original;
+        const proposal = getFormulaProposalForField(row, field);
+        const proposed = proposal
+          ? proposal.proposed_value
+          : row.proposed_fields?.includes(field)
+          ? row.data[field]
+          : original;
         cells[field] = {
           original,
           proposed,
           final: row.data[field],
+          decision: buildFormulaDecision(row, field),
         };
       });
       return { row_number: row.row_number, cells };
