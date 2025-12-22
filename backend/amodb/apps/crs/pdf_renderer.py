@@ -16,7 +16,7 @@ from ...database import SessionLocal
 from . import models as crs_models
 
 if TYPE_CHECKING:
-    from reportlab.lib.utils import ImageReader
+    from reportlab.lib.utils import ImageReader  # type: ignore[reportMissingModuleSource]
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 

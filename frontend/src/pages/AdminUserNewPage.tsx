@@ -2,8 +2,17 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { createAdminUser } from "../services/adminUsers";
-import type { AdminUserCreatePayload, AccountRole } from "../services/adminUsers";
+import {
+  createAdminUser,
+  listAdminAmos,
+  setActiveAmoId,
+  LS_ACTIVE_AMO_ID,
+} from "../services/adminUsers";
+import type {
+  AdminAmoRead,
+  AdminUserCreatePayload,
+  AccountRole,
+} from "../services/adminUsers";
 import { getCachedUser, getContext } from "../services/auth";
 
 type UrlParams = {
@@ -62,6 +71,13 @@ const AdminUserNewPage: React.FC = () => {
     confirmPassword: "",
   });
   const [showPassword, setShowPassword] = useState(false);
+  const [amos, setAmos] = useState<AdminAmoRead[]>([]);
+  const [amoLoading, setAmoLoading] = useState(false);
+  const [amoError, setAmoError] = useState<string | null>(null);
+  const [selectedAmoId, setSelectedAmoId] = useState<string>(() => {
+    const stored = localStorage.getItem(LS_ACTIVE_AMO_ID);
+    return stored && stored.trim() ? stored.trim() : "";
+  });
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +117,10 @@ const AdminUserNewPage: React.FC = () => {
     // Only SUPERUSER can create SUPERUSER
     if (form.role === "SUPERUSER" && !isSuperuser) {
       return "Only a platform superuser can create another superuser.";
+    }
+
+    if (isSuperuser && !selectedAmoId) {
+      return "Select an AMO for this user.";
     }
 
     return null;
@@ -149,6 +169,29 @@ const AdminUserNewPage: React.FC = () => {
     }
   };
 
+  React.useEffect(() => {
+    if (!isSuperuser) return;
+
+    const loadAmos = async () => {
+      setAmoError(null);
+      setAmoLoading(true);
+      try {
+        const data = await listAdminAmos();
+        setAmos(data);
+        if (!selectedAmoId && data.length > 0) {
+          setSelectedAmoId(data[0].id);
+        }
+      } catch (err: any) {
+        console.error("Failed to load AMOs", err);
+        setAmoError(err?.message || "Failed to load AMOs.");
+      } finally {
+        setAmoLoading(false);
+      }
+    };
+
+    loadAmos();
+  }, [isSuperuser, selectedAmoId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -184,6 +227,7 @@ const AdminUserNewPage: React.FC = () => {
         position_title: form.positionTitle.trim() || undefined,
         phone: form.phone.trim() || undefined,
         password: form.password,
+        amo_id: isSuperuser ? selectedAmoId || undefined : undefined,
         // NOTE:
         // Do NOT force amo_id here. adminUsers.ts resolves it safely:
         // - SUPERUSER: can target selected/active AMO
@@ -255,6 +299,34 @@ const AdminUserNewPage: React.FC = () => {
         <form onSubmit={handleSubmit} className="form-grid">
           {error && <div className="alert alert-error">{error}</div>}
           {success && <div className="alert alert-success">{success}</div>}
+          {amoError && <div className="alert alert-error">{amoError}</div>}
+
+          {isSuperuser && (
+            <div className="form-row">
+              <label htmlFor="amoId">Target AMO</label>
+              <select
+                id="amoId"
+                name="amoId"
+                value={selectedAmoId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setSelectedAmoId(nextId);
+                  setActiveAmoId(nextId);
+                }}
+                disabled={submitting || amoLoading}
+                required
+              >
+                <option value="" disabled>
+                  {amoLoading ? "Loading AMOs..." : "Select an AMO"}
+                </option>
+                {amos.map((amo) => (
+                  <option key={amo.id} value={amo.id}>
+                    {amo.name} ({amo.amo_code})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="form-row">
             <label htmlFor="staffCode">Staff Code</label>
