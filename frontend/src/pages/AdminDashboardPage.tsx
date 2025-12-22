@@ -31,6 +31,10 @@ const AdminDashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastUsersRequestKey = useRef<string | null>(null);
+  const usersRequestRef = useRef<{
+    key: string;
+    controller: AbortController;
+  } | null>(null);
 
   // SUPERUSER AMO picker
   const [amos, setAmos] = useState<AdminAmoRead[]>([]);
@@ -171,17 +175,36 @@ const AdminDashboardPage: React.FC = () => {
       lastUsersRequestKey.current = requestKey;
 
       try {
+        if (usersRequestRef.current?.key === requestKey) {
+          return;
+        }
+
+        if (usersRequestRef.current) {
+          usersRequestRef.current.controller.abort();
+          usersRequestRef.current = null;
+        }
+
+        const controller = new AbortController();
+        usersRequestRef.current = { key: requestKey, controller };
         setLoading(true);
 
-        const data = await listAdminUsers({
-          amo_id: isSuperuser ? effectiveAmoId : undefined,
-          skip,
-          limit,
-          search: search.trim() || undefined,
-        });
+        const data = await listAdminUsers(
+          {
+            amo_id: isSuperuser ? effectiveAmoId : undefined,
+            skip,
+            limit,
+            search: search.trim() || undefined,
+          },
+          {
+            signal: controller.signal,
+          }
+        );
 
         setUsers(data);
       } catch (err: any) {
+        if (err?.name === "AbortError") {
+          return;
+        }
         console.error("Failed to load users", err);
         lastUsersRequestKey.current = null;
         setError(
@@ -189,11 +212,21 @@ const AdminDashboardPage: React.FC = () => {
             "Could not load users. Please try again or contact Quality/IT."
         );
       } finally {
+        if (usersRequestRef.current?.key === requestKey) {
+          usersRequestRef.current = null;
+        }
         setLoading(false);
       }
     };
 
     loadUsers();
+
+    return () => {
+      if (usersRequestRef.current) {
+        usersRequestRef.current.controller.abort();
+        usersRequestRef.current = null;
+      }
+    };
   }, [currentUser, canAccessAdmin, effectiveAmoId, isSuperuser, skip, limit, search]);
 
   const handleNewUser = () => {
