@@ -251,6 +251,7 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         licence_expires_on=data.licence_expires_on,
         hashed_password=hashed,
         is_active=True,
+        is_amo_admin=data.role == models.AccountRole.AMO_ADMIN,
         # is_system_account defaults to False in the model – human by default.
     )
     db.add(user)
@@ -280,6 +281,8 @@ def update_user(
     # Role / org placement
     if data.role is not None:
         user.role = data.role
+        if data.is_amo_admin is None:
+            user.is_amo_admin = data.role == models.AccountRole.AMO_ADMIN
     if data.position_title is not None:
         user.position_title = data.position_title
     if data.phone is not None:

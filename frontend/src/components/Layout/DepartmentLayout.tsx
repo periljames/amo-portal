@@ -140,7 +140,11 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const visibleAdminNav = useMemo(() => {
     if (!isAdminArea) return [];
-    if (!isSuperuser) return ADMIN_NAV_ITEMS.filter((i) => i.id !== "admin-billing");
+    if (!isSuperuser) {
+      return ADMIN_NAV_ITEMS.filter(
+        (i) => i.id !== "admin-billing" && i.id !== "admin-amos"
+      );
+    }
     return ADMIN_NAV_ITEMS;
   }, [isAdminArea, isSuperuser]);
 
