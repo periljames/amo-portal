@@ -31,6 +31,7 @@ const AdminDashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastUsersRequestKey = useRef<string | null>(null);
+  const lastUsersFetchAt = useRef<number>(0);
   const usersRequestRef = useRef<{
     key: string;
     controller: AbortController;
@@ -175,7 +176,10 @@ const AdminDashboardPage: React.FC = () => {
       }
 
       if (lastUsersRequestKey.current === usersRequestKey) {
-        return;
+        const now = Date.now();
+        if (now - lastUsersFetchAt.current < 1000) {
+          return;
+        }
       }
 
       if (usersRequestRef.current?.key === usersRequestKey) {
@@ -190,6 +194,8 @@ const AdminDashboardPage: React.FC = () => {
       try {
         const controller = new AbortController();
         usersRequestRef.current = { key: usersRequestKey, controller };
+        lastUsersRequestKey.current = usersRequestKey;
+        lastUsersFetchAt.current = Date.now();
         setLoading(true);
 
         const data = await listAdminUsers(
