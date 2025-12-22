@@ -1191,6 +1191,14 @@ const AircraftImportPage: React.FC = () => {
           ) {
             nextData[key] = value;
           }
+        };
+
+        (
+          Object.entries(defaults) as Array<
+            [AircraftRowField, AircraftRowData[AircraftRowField]]
+          >
+        ).forEach(([key, value]) => {
+          applyDefault(key, value);
         });
 
         AIRCRAFT_DIFF_FIELDS.forEach((field) => {
