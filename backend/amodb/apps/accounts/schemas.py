@@ -343,7 +343,7 @@ class LoginRequest(BaseModel):
 class PasswordResetRequest(BaseModel):
     amo_slug: str
     email: EmailStr
-    delivery_method: Literal["email", "sms", "both"] = "email"
+    delivery_method: Literal["email", "whatsapp", "both"] = "email"
 
 
 class PasswordResetConfirm(BaseModel):

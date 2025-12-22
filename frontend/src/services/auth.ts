@@ -106,7 +106,7 @@ export type PasswordResetResponse = {
   reset_link?: string | null;
 };
 
-export type PasswordResetDeliveryMethod = "email" | "sms" | "both";
+export type PasswordResetDeliveryMethod = "email" | "whatsapp" | "both";
 
 // -----------------------------------------------------------------------------
 // localStorage helpers

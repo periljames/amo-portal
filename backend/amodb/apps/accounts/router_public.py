@@ -103,21 +103,21 @@ def _maybe_send_sms(
     message: str,
 ) -> None:
     """
-    Optional SMS hook (safe-by-default).
-    If SMS_WEBHOOK_URL is not set, this does nothing.
+    Optional WhatsApp hook (safe-by-default).
+    If WHATSAPP_WEBHOOK_URL is not set, this does nothing.
 
     Env expected:
-      SMS_WEBHOOK_URL
-      SMS_WEBHOOK_BEARER (optional)
+      WHATSAPP_WEBHOOK_URL
+      WHATSAPP_WEBHOOK_BEARER (optional)
     """
     if not to_phone or not isinstance(to_phone, str):
         return
 
-    url = os.getenv("SMS_WEBHOOK_URL")
+    url = os.getenv("WHATSAPP_WEBHOOK_URL")
     if not url:
         return
 
-    token = os.getenv("SMS_WEBHOOK_BEARER")
+    token = os.getenv("WHATSAPP_WEBHOOK_BEARER")
 
     def _send() -> None:
         payload = json.dumps({"to": to_phone, "message": message}).encode("utf-8")
@@ -257,8 +257,10 @@ def request_password_reset(
     if delivery in {"email", "both"}:
         _maybe_send_email(background_tasks, getattr(user, "email", None), subject, message)
 
-    if delivery in {"sms", "both"}:
-        _maybe_send_sms(background_tasks, getattr(user, "phone", None), message)
+    if delivery in {"whatsapp", "both"}:
+        _maybe_send_whatsapp(
+            background_tasks, getattr(user, "phone", None), message
+        )
     return {
         "message": "If the account exists, a reset link will be sent.",
         "reset_link": reset_link,

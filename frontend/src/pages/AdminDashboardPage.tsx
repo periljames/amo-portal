@@ -1,5 +1,5 @@
 // src/pages/AdminDashboardPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
@@ -30,6 +30,7 @@ const AdminDashboardPage: React.FC = () => {
   const [users, setUsers] = useState<AdminUserRead[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lastUsersRequestKey = useRef<string | null>(null);
 
   // SUPERUSER AMO picker
   const [amos, setAmos] = useState<AdminAmoRead[]>([]);
@@ -157,6 +158,18 @@ const AdminDashboardPage: React.FC = () => {
         return;
       }
 
+      const requestKey = JSON.stringify({
+        amo_id: effectiveAmoId,
+        skip,
+        limit,
+        search: search.trim(),
+      });
+
+      if (lastUsersRequestKey.current === requestKey) {
+        return;
+      }
+      lastUsersRequestKey.current = requestKey;
+
       try {
         setLoading(true);
 
@@ -170,6 +183,7 @@ const AdminDashboardPage: React.FC = () => {
         setUsers(data);
       } catch (err: any) {
         console.error("Failed to load users", err);
+        lastUsersRequestKey.current = null;
         setError(
           err?.message ||
             "Could not load users. Please try again or contact Quality/IT."
