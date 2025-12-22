@@ -1163,7 +1163,9 @@ const AircraftImportPage: React.FC = () => {
 
     setPreviewRows((prev) =>
       prev.map((row) => {
-        const nextData: AircraftRowData = { ...row.data };
+        const nextData = { ...row.data };
+        const defaults =
+          (selected.default_values ?? {}) as Partial<AircraftRowData>;
         const proposedFields = new Set(row.proposed_fields ?? []);
 
         if (selected.aircraft_template && !nextData.template?.trim()) {
@@ -1176,10 +1178,27 @@ const AircraftImportPage: React.FC = () => {
           nextData.operator_code = selected.operator_code;
         }
 
-        for (const key of Object.keys(templateDefaults) as AircraftRowField[]) {
-          const value = templateDefaults[key];
-          if (value === null || value === undefined) {
-            continue;
+        (
+          Object.entries(defaults) as Array<
+            [AircraftRowField, AircraftRowData[AircraftRowField]]
+          >
+        ).forEach(
+          ([key, value]) => {
+            if (value === null || value === undefined) {
+              return;
+            }
+            const currentValue = nextData[key];
+            if (
+              currentValue === null ||
+              currentValue === undefined ||
+              `${currentValue}`.trim() === ""
+            ) {
+              nextData[key] = value;
+            }
+          }
+          const key = rawKey as AircraftRowField;
+          if (!(key in nextData)) {
+            return;
           }
           const currentValue = nextData[key];
           if (
@@ -1187,9 +1206,9 @@ const AircraftImportPage: React.FC = () => {
             currentValue === undefined ||
             `${currentValue}`.trim() === ""
           ) {
-            nextData[key] = value;
+            nextData[key] = value as AircraftRowData[typeof key];
           }
-        }
+        });
 
         AIRCRAFT_DIFF_FIELDS.forEach((field) => {
           if (
