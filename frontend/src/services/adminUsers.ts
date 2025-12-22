@@ -87,6 +87,17 @@ export interface AdminAmoRead {
   updated_at?: string;
 }
 
+export interface AdminAmoCreatePayload {
+  amo_code: string;
+  name: string;
+  login_slug: string;
+  icao_code?: string | null;
+  country?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  time_zone?: string | null;
+}
+
 /**
  * Optional support: store the current "admin context" AMO in localStorage.
  * Useful for SUPERUSER support workflows (switch AMO without re-login).
@@ -266,6 +277,18 @@ export async function listAdminUsers(
  */
 export async function listAdminAmos(): Promise<AdminAmoRead[]> {
   return apiGet<AdminAmoRead[]>("/accounts/admin/amos", {
+    headers: authHeaders(),
+  });
+}
+
+/**
+ * SUPERUSER ONLY: create an AMO.
+ * POST /accounts/admin/amos
+ */
+export async function createAdminAmo(
+  payload: AdminAmoCreatePayload
+): Promise<AdminAmoRead> {
+  return apiPost<AdminAmoRead>("/accounts/admin/amos", JSON.stringify(payload), {
     headers: authHeaders(),
   });
 }
