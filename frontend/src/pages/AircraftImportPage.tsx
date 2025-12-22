@@ -10,7 +10,7 @@ import type {
 import { AgGridReact } from "ag-grid-react";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
-import { getCachedUser } from "../services/auth";
+import { authHeaders, getCachedUser } from "../services/auth";
 import {
   getActiveAmoId as getAdminActiveAmoId,
   listAdminAmos,
@@ -373,7 +373,8 @@ const AircraftImportPage: React.FC = () => {
   const loadTemplates = async () => {
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/templates?template_type=aircraft`
+        `${API_BASE}/aircraft/import/templates?template_type=aircraft`,
+        { headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -388,7 +389,8 @@ const AircraftImportPage: React.FC = () => {
   const loadComponentTemplates = async () => {
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/templates?template_type=components`
+        `${API_BASE}/aircraft/import/templates?template_type=components`,
+        { headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -628,6 +630,7 @@ const AircraftImportPage: React.FC = () => {
     try {
       const res = await fetch(`${API_BASE}/aircraft/import/preview`, {
         method: "POST",
+        headers: authHeaders(),
         body: formData,
       });
 
@@ -686,7 +689,8 @@ const AircraftImportPage: React.FC = () => {
           const res = await fetch(
             `${API_BASE}/aircraft/import/preview/${encodeURIComponent(
               previewId
-            )}/rows?offset=${startRow}&limit=${limit}`
+            )}/rows?offset=${startRow}&limit=${limit}`,
+            { headers: authHeaders() }
           );
           const data = await res.json();
           if (!res.ok) {
@@ -739,6 +743,7 @@ const AircraftImportPage: React.FC = () => {
         )}/components/import/preview`,
         {
           method: "POST",
+          headers: authHeaders(),
           body: formData,
         }
       );
@@ -782,7 +787,8 @@ const AircraftImportPage: React.FC = () => {
       const res = await fetch(
         `${API_BASE}/aircraft/import/snapshots?batch_id=${encodeURIComponent(
           batchId
-        )}`
+        )}`,
+        { headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -888,7 +894,7 @@ const AircraftImportPage: React.FC = () => {
         : `${API_BASE}/aircraft/import/templates`;
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -942,7 +948,7 @@ const AircraftImportPage: React.FC = () => {
         : `${API_BASE}/aircraft/import/templates`;
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1691,7 +1697,7 @@ const AircraftImportPage: React.FC = () => {
           : [];
       const res = await fetch(`${API_BASE}/aircraft/import`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           rows:
             previewMode === "client"
@@ -1752,7 +1758,7 @@ const AircraftImportPage: React.FC = () => {
         )}/components/import/confirm`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             rows: approvedRows.map((row) => ({
               row_number: row.row_number,
@@ -1835,7 +1841,7 @@ const AircraftImportPage: React.FC = () => {
     try {
       const res = await fetch(
         `${API_BASE}/aircraft/import/snapshots/${selectedSnapshotId}/restore`,
-        { method: "POST" }
+        { method: "POST", headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -1860,7 +1866,7 @@ const AircraftImportPage: React.FC = () => {
     try {
       const res = await fetch(
         `${API_BASE}/aircraft/import/snapshots/${selectedSnapshotId}/reapply`,
-        { method: "POST" }
+        { method: "POST", headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {

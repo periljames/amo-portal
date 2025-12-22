@@ -3,7 +3,7 @@ import React, { useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { getCachedUser, getContext } from "../services/auth";
+import { getCachedUser } from "../services/auth";
 
 type UrlParams = {
   amoCode?: string;
@@ -14,31 +14,20 @@ const AdminBillingPage: React.FC = () => {
   const navigate = useNavigate();
 
   const currentUser = useMemo(() => getCachedUser(), []);
-  const ctx = getContext();
-
   const isSuperuser = !!currentUser?.is_superuser;
-  const isAmoAdmin = !!currentUser?.is_amo_admin;
-  const canAccessAdmin = isSuperuser || isAmoAdmin;
 
   useEffect(() => {
     if (!currentUser) return;
-    if (canAccessAdmin) return;
-
-    const dept = ctx.department;
-    if (amoCode && dept) {
-      navigate(`/maintenance/${amoCode}/${dept}`, { replace: true });
-      return;
-    }
+    if (isSuperuser) return;
 
     if (amoCode) {
-      navigate(`/maintenance/${amoCode}/login`, { replace: true });
+      navigate(`/maintenance/${amoCode}/admin/overview`, { replace: true });
       return;
     }
-
     navigate("/login", { replace: true });
-  }, [currentUser, canAccessAdmin, amoCode, ctx.department, navigate]);
+  }, [currentUser, isSuperuser, amoCode, navigate]);
 
-  if (currentUser && !canAccessAdmin) {
+  if (currentUser && !isSuperuser) {
     return null;
   }
 

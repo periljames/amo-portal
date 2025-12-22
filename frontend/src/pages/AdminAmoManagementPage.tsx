@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { getCachedUser, getContext } from "../services/auth";
+import { getCachedUser } from "../services/auth";
 import {
   createAdminAmo,
   listAdminAmos,
@@ -31,11 +31,7 @@ const AdminAmoManagementPage: React.FC = () => {
   const navigate = useNavigate();
 
   const currentUser = useMemo(() => getCachedUser(), []);
-  const ctx = getContext();
-
   const isSuperuser = !!currentUser?.is_superuser;
-  const isAmoAdmin = !!currentUser?.is_amo_admin;
-  const canAccessAdmin = isSuperuser || isAmoAdmin;
 
   const [amos, setAmos] = useState<AdminAmoRead[]>([]);
   const [amoLoading, setAmoLoading] = useState(false);
@@ -62,21 +58,14 @@ const AdminAmoManagementPage: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    if (canAccessAdmin) return;
-
-    const dept = ctx.department;
-    if (amoCode && dept) {
-      navigate(`/maintenance/${amoCode}/${dept}`, { replace: true });
-      return;
-    }
+    if (isSuperuser) return;
 
     if (amoCode) {
-      navigate(`/maintenance/${amoCode}/login`, { replace: true });
+      navigate(`/maintenance/${amoCode}/admin/overview`, { replace: true });
       return;
     }
-
     navigate("/login", { replace: true });
-  }, [currentUser, canAccessAdmin, amoCode, ctx.department, navigate]);
+  }, [currentUser, isSuperuser, amoCode, navigate]);
 
   useEffect(() => {
     if (!isSuperuser) return;
@@ -121,6 +110,10 @@ const AdminAmoManagementPage: React.FC = () => {
     () => amos.find((a) => a.id === activeAmoId) || null,
     [amos, activeAmoId]
   );
+
+  if (currentUser && !isSuperuser) {
+    return null;
+  }
 
   const handleAmoChange = (nextAmoId: string) => {
     const v = (nextAmoId || "").trim();
