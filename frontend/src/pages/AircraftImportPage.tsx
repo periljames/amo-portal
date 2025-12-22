@@ -208,8 +208,8 @@ const AircraftImportPage: React.FC = () => {
     amoCode?: string;
     department?: string;
   }>();
-  const [aircraftFile, setAircraftFile] = useState<File | null>(null);
-  const [componentsFile, setComponentsFile] = useState<File | null>(null);
+  const [aircraftFiles, setAircraftFiles] = useState<File[]>([]);
+  const [componentsFiles, setComponentsFiles] = useState<File[]>([]);
   const [componentAircraftSerial, setComponentAircraftSerial] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [amoOptions, setAmoOptions] = useState<AdminAmoRead[]>([]);
@@ -290,14 +290,26 @@ const AircraftImportPage: React.FC = () => {
   const handleAircraftFileChange = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    setAircraftFile(e.target.files?.[0] ?? null);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 10) {
+      setMessage("Upload up to 10 aircraft files at a time.");
+      setAircraftFiles(files.slice(0, 10));
+    } else {
+      setAircraftFiles(files);
+    }
     setAircraftImportComplete(false);
   };
 
   const handleComponentsFileChange = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    setComponentsFile(e.target.files?.[0] ?? null);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 10) {
+      setMessage("Upload up to 10 component files at a time.");
+      setComponentsFiles(files.slice(0, 10));
+    } else {
+      setComponentsFiles(files);
+    }
     setComponentImportComplete(false);
   };
 
@@ -620,12 +632,14 @@ const AircraftImportPage: React.FC = () => {
     );
   };
 
-  const submitPreviewFile = async (file: File) => {
+  const submitPreviewFiles = async (files: File[]) => {
     setPreviewLoading(true);
     setMessage(null);
 
     const formData = new FormData();
-    formData.append("file", file);
+    files.forEach((upload) => {
+      formData.append("files", upload);
+    });
 
     try {
       const res = await fetch(`${API_BASE}/aircraft/import/preview`, {
@@ -725,7 +739,7 @@ const AircraftImportPage: React.FC = () => {
     [previewMode, createPreviewDatasource]
   );
 
-  const submitComponentPreviewFile = async (file: File) => {
+  const submitComponentPreviewFile = async (files: File[]) => {
     if (!componentAircraftSerial.trim()) {
       setMessage("Enter the aircraft serial number for components.");
       return;
@@ -734,7 +748,9 @@ const AircraftImportPage: React.FC = () => {
     setMessage(null);
 
     const formData = new FormData();
-    formData.append("file", file);
+    files.forEach((upload) => {
+      formData.append("files", upload);
+    });
 
     try {
       const res = await fetch(
@@ -770,12 +786,12 @@ const AircraftImportPage: React.FC = () => {
   };
 
   const parseAircraftFile = async () => {
-    if (!aircraftFile) {
-      setMessage("Select an aircraft file first.");
+    if (aircraftFiles.length === 0) {
+      setMessage("Select up to 10 aircraft files first.");
       return;
     }
     setAircraftImportComplete(false);
-    await submitPreviewFile(aircraftFile);
+    await submitPreviewFiles(aircraftFiles);
   };
 
   const loadSnapshotHistory = async (batchId: string | null) => {
@@ -810,12 +826,12 @@ const AircraftImportPage: React.FC = () => {
   }, [importBatchId]);
 
   const parseComponentsFile = async () => {
-    if (!componentsFile) {
-      setMessage("Select a component file first.");
+    if (componentsFiles.length === 0) {
+      setMessage("Select up to 10 component files first.");
       return;
     }
     setComponentImportComplete(false);
-    await submitComponentPreviewFile(componentsFile);
+    await submitComponentPreviewFile(componentsFiles);
   };
 
   const reparseOcrText = async () => {
@@ -827,7 +843,7 @@ const AircraftImportPage: React.FC = () => {
     const ocrFile = new File([ocrTextDraft], "ocr-corrected.csv", {
       type: "text/csv",
     });
-    await submitPreviewFile(ocrFile);
+    await submitPreviewFiles([ocrFile]);
   };
 
   const parseTemplateDefaults = () => {
@@ -1817,14 +1833,14 @@ const AircraftImportPage: React.FC = () => {
     ? 3
     : aircraftHasPreview
     ? 2
-    : aircraftFile
+    : aircraftFiles.length > 0
     ? 1
     : 0;
   const componentStep = componentImportComplete
     ? 3
     : componentHasPreview
     ? 2
-    : componentsFile
+    : componentsFiles.length > 0
     ? 1
     : 0;
 
@@ -1971,17 +1987,26 @@ const AircraftImportPage: React.FC = () => {
             </div>
 
             <div className="form-row">
-              <label htmlFor="aircraft-file">Aircraft master file</label>
+              <label htmlFor="aircraft-file">Aircraft master files</label>
               <input
                 id="aircraft-file"
                 type="file"
+                multiple
                 accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
                 onChange={handleAircraftFileChange}
                 className="input"
               />
               <p className="form-hint">
                 Accepted formats: CSV, XLSX, PDF, or image scans (OCR supported).
+                Upload up to 10 files with identical column headers.
               </p>
+              {aircraftFiles.length > 0 && (
+                <p className="form-hint">
+                  Selected {aircraftFiles.length} file
+                  {aircraftFiles.length === 1 ? "" : "s"}:{" "}
+                  {aircraftFiles.map((file) => file.name).join(", ")}
+                </p>
+              )}
             </div>
 
             <div className="form-actions form-actions--inline">
@@ -2384,17 +2409,25 @@ const AircraftImportPage: React.FC = () => {
                 />
               </div>
               <div className="form-row">
-                <label>Components file</label>
+                <label>Components files</label>
                 <input
                   type="file"
-                  accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf"
+                  multiple
+                  accept=".csv,.txt,.xlsx,.xlsm,.xls"
                   onChange={handleComponentsFileChange}
                   className="input"
                 />
                 <p className="form-hint">
                   Use component positions (L ENGINE, R ENGINE, APU) and PN/SN
-                  columns.
+                  columns. Upload up to 10 files with identical headers.
                 </p>
+                {componentsFiles.length > 0 && (
+                  <p className="form-hint">
+                    Selected {componentsFiles.length} file
+                    {componentsFiles.length === 1 ? "" : "s"}:{" "}
+                    {componentsFiles.map((file) => file.name).join(", ")}
+                  </p>
+                )}
               </div>
             </div>
 
