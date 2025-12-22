@@ -1175,10 +1175,11 @@ const AircraftImportPage: React.FC = () => {
           nextData.operator_code = selected.operator_code;
         }
 
-        const applyDefault = <K extends AircraftRowField>(
-          key: K,
-          value: AircraftRowData[K]
-        ) => {
+        (
+          Object.entries(defaults) as Array<
+            [AircraftRowField, AircraftRowData[AircraftRowField]]
+          >
+        ).forEach(([key, value]) => {
           if (value === null || value === undefined) {
             return;
           }
