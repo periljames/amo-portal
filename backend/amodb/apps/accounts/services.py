@@ -495,16 +495,11 @@ def _reset_failed_logins(
     )
 
 
-def get_user_for_login(
-    db: Session,
-    *,
-    amo_slug: str,
-    email: str,
-) -> Optional[models.User]:
-    email = _normalise_email(email)
+def _find_amo_by_slug_or_code(db: Session, amo_slug: str) -> Optional[models.AMO]:
     amo_slug_norm = (amo_slug or "").strip().lower()
+    if not amo_slug_norm:
+        return None
 
-    # Look up AMO case-insensitively on login_slug
     amo = (
         db.query(models.AMO)
         .filter(
@@ -513,6 +508,29 @@ def get_user_for_login(
         )
         .first()
     )
+    if amo:
+        return amo
+
+    return (
+        db.query(models.AMO)
+        .filter(
+            func.lower(models.AMO.amo_code) == amo_slug_norm,
+            models.AMO.is_active.is_(True),
+        )
+        .first()
+    )
+
+
+def get_user_for_login(
+    db: Session,
+    *,
+    amo_slug: str,
+    email: str,
+) -> Optional[models.User]:
+    email = _normalise_email(email)
+
+    # Look up AMO case-insensitively on login_slug or amo_code
+    amo = _find_amo_by_slug_or_code(db, amo_slug)
     if not amo:
         return None
 
@@ -594,11 +612,7 @@ def authenticate_user(
             amo = user.amo
         else:
             # If AMO exists, log a generic failed login.
-            amo = (
-                db.query(models.AMO)
-                .filter(func.lower(models.AMO.login_slug) == amo_slug)
-                .first()
-            )
+            amo = _find_amo_by_slug_or_code(db, amo_slug_raw)
             _log_security_event(
                 db,
                 user=None,
