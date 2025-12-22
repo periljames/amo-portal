@@ -106,6 +106,8 @@ export type PasswordResetResponse = {
   reset_link?: string | null;
 };
 
+export type PasswordResetDeliveryMethod = "email" | "sms" | "both";
+
 // -----------------------------------------------------------------------------
 // localStorage helpers
 // -----------------------------------------------------------------------------
@@ -330,11 +332,13 @@ export async function fetchCurrentUser(): Promise<PortalUser> {
  */
 export async function requestPasswordReset(
   amoSlug: string,
-  email: string
+  email: string,
+  deliveryMethod: PasswordResetDeliveryMethod = "email"
 ): Promise<PasswordResetResponse> {
   const payload = {
     amo_slug: resolveAmoSlug(amoSlug),
     email: email.trim(),
+    delivery_method: deliveryMethod,
   };
 
   const res = await fetch(`${API_BASE_URL}/auth/password-reset/request`, {

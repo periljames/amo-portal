@@ -42,7 +42,7 @@ const AdminUserNewPage: React.FC = () => {
 
   const backTarget = useMemo(() => {
     const slug = amoCode ?? ctx.amoCode ?? null;
-    return slug ? `/maintenance/${slug}/admin` : "/login";
+    return slug ? `/maintenance/${slug}/admin/users` : "/login";
   }, [amoCode, ctx.amoCode]);
 
   const pageTitle = useMemo(() => {

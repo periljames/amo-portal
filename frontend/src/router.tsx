@@ -15,6 +15,9 @@ import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
+import AdminOverviewPage from "./pages/AdminOverviewPage";
+import AdminAmoManagementPage from "./pages/AdminAmoManagementPage";
+import AdminBillingPage from "./pages/AdminBillingPage";
 import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
@@ -93,6 +96,32 @@ export const AppRouter: React.FC = () => {
       {/* Admin dashboard (System Admin area) */}
       <Route
         path="/maintenance/:amoCode/admin"
+        element={<Navigate to="overview" replace />}
+      />
+
+      {/* Admin - overview */}
+      <Route
+        path="/maintenance/:amoCode/admin/overview"
+        element={
+          <RequireAuth>
+            <AdminOverviewPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Admin - AMO management */}
+      <Route
+        path="/maintenance/:amoCode/admin/amos"
+        element={
+          <RequireAuth>
+            <AdminAmoManagementPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Admin - users */}
+      <Route
+        path="/maintenance/:amoCode/admin/users"
         element={
           <RequireAuth>
             <AdminDashboardPage />
@@ -116,6 +145,16 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <AdminAmoAssetsPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Admin - billing */}
+      <Route
+        path="/maintenance/:amoCode/admin/billing"
+        element={
+          <RequireAuth>
+            <AdminBillingPage />
           </RequireAuth>
         }
       />

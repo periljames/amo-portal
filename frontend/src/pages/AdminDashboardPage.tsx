@@ -20,7 +20,7 @@ const AdminDashboardPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
 
-  const currentUser = getCachedUser();
+  const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
 
   const isSuperuser = !!currentUser?.is_superuser;
@@ -371,9 +371,12 @@ const AdminDashboardPage: React.FC = () => {
   }
 
   return (
-    <DepartmentLayout amoCode={amoCode ?? "UNKNOWN"} activeDepartment="admin">
+    <DepartmentLayout
+      amoCode={amoCode ?? "UNKNOWN"}
+      activeDepartment="admin-users"
+    >
       <header className="page-header">
-        <h1 className="page-header__title">User Administration</h1>
+        <h1 className="page-header__title">User Management</h1>
         <p className="page-header__subtitle">
           Manage AMO users, roles and access.
           {currentUser && (
@@ -388,9 +391,11 @@ const AdminDashboardPage: React.FC = () => {
       {isSuperuser && (
         <section className="page-section">
           <div className="card card--form" style={{ padding: 16 }}>
-            <h3 style={{ marginTop: 0, marginBottom: 8 }}>
-              Support mode (SUPERUSER)
-            </h3>
+            <h3 style={{ marginTop: 0, marginBottom: 8 }}>AMO Context</h3>
+            <p style={{ marginTop: 0, opacity: 0.85 }}>
+              Select which AMO you are managing. Need to create a new AMO? Use
+              the AMO Management page.
+            </p>
 
             {amoLoading && <p>Loading AMOs…</p>}
             {amoError && <div className="alert alert-error">{amoError}</div>}
@@ -559,6 +564,15 @@ const AdminDashboardPage: React.FC = () => {
           >
             + Create user
           </button>
+          {isSuperuser && (
+            <button
+              type="button"
+              className="secondary-chip-btn"
+              onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}
+            >
+              Manage AMOs
+            </button>
+          )}
           <button
             type="button"
             className="secondary-chip-btn"
