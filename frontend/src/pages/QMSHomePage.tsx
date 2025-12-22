@@ -192,11 +192,14 @@ const QMSHomePage: React.FC = () => {
       {state === "ready" && (
         <>
           <section className="page-section">
-            <div className="page-section__actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div
+              className="page-section__actions"
+              style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+            >
               <button
                 type="button"
                 className="primary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms`)}
+                onClick={load}
               >
                 Refresh
               </button>
@@ -204,33 +207,11 @@ const QMSHomePage: React.FC = () => {
               <button
                 type="button"
                 className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms/documents`)}
+                onClick={() =>
+                  navigate(`/maintenance/${amoSlug}/${department}`)
+                }
               >
-                Documents
-              </button>
-
-              <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms/audits`)}
-              >
-                Audits
-              </button>
-
-              <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms/change-requests`)}
-              >
-                Change Requests
-              </button>
-
-              <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/quality/qms/distributions`)}
-              >
-                Distributions
+                Back to dashboard
               </button>
             </div>
           </section>

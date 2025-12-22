@@ -142,6 +142,18 @@ const AdminDashboardPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuperuser]);
 
+  const trimmedSearch = search.trim();
+  const usersRequestKey = useMemo(
+    () =>
+      JSON.stringify({
+        amo_id: effectiveAmoId,
+        skip,
+        limit,
+        search: trimmedSearch,
+      }),
+    [effectiveAmoId, skip, limit, trimmedSearch]
+  );
+
   // Load users
   useEffect(() => {
     const loadUsers = async () => {
@@ -162,30 +174,22 @@ const AdminDashboardPage: React.FC = () => {
         return;
       }
 
-      const requestKey = JSON.stringify({
-        amo_id: effectiveAmoId,
-        skip,
-        limit,
-        search: search.trim(),
-      });
-
-      if (lastUsersRequestKey.current === requestKey) {
+      if (lastUsersRequestKey.current === usersRequestKey) {
         return;
       }
-      lastUsersRequestKey.current = requestKey;
+
+      if (usersRequestRef.current?.key === usersRequestKey) {
+        return;
+      }
+
+      if (usersRequestRef.current) {
+        usersRequestRef.current.controller.abort();
+        usersRequestRef.current = null;
+      }
 
       try {
-        if (usersRequestRef.current?.key === requestKey) {
-          return;
-        }
-
-        if (usersRequestRef.current) {
-          usersRequestRef.current.controller.abort();
-          usersRequestRef.current = null;
-        }
-
         const controller = new AbortController();
-        usersRequestRef.current = { key: requestKey, controller };
+        usersRequestRef.current = { key: usersRequestKey, controller };
         setLoading(true);
 
         const data = await listAdminUsers(
@@ -193,7 +197,7 @@ const AdminDashboardPage: React.FC = () => {
             amo_id: isSuperuser ? effectiveAmoId : undefined,
             skip,
             limit,
-            search: search.trim() || undefined,
+            search: trimmedSearch || undefined,
           },
           {
             signal: controller.signal,
@@ -201,18 +205,18 @@ const AdminDashboardPage: React.FC = () => {
         );
 
         setUsers(data);
+        lastUsersRequestKey.current = usersRequestKey;
       } catch (err: any) {
         if (err?.name === "AbortError") {
           return;
         }
         console.error("Failed to load users", err);
-        lastUsersRequestKey.current = null;
         setError(
           err?.message ||
             "Could not load users. Please try again or contact Quality/IT."
         );
       } finally {
-        if (usersRequestRef.current?.key === requestKey) {
+        if (usersRequestRef.current?.key === usersRequestKey) {
           usersRequestRef.current = null;
         }
         setLoading(false);
@@ -227,7 +231,16 @@ const AdminDashboardPage: React.FC = () => {
         usersRequestRef.current = null;
       }
     };
-  }, [currentUser, canAccessAdmin, effectiveAmoId, isSuperuser, skip, limit, search]);
+  }, [
+    currentUser,
+    canAccessAdmin,
+    effectiveAmoId,
+    isSuperuser,
+    skip,
+    limit,
+    trimmedSearch,
+    usersRequestKey,
+  ]);
 
   const handleNewUser = () => {
     const target = amoCode ? `/maintenance/${amoCode}/admin/users/new` : "/login";
