@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext, getCachedUser } from "../services/auth";
@@ -14,14 +14,6 @@ type DepartmentId =
   | "engineering"
   | "workshops"
   | "admin";
-
-  type SheetId =
-  | "hours"
-  | "airframe-typical"
-  | "hard-time"
-  | "engine-periodic"
-  | "ops-kcaa"
-  | "airframe-ads";
 
 const DEPT_LABEL: Record<string, string> = {
   planning: "Planning",
