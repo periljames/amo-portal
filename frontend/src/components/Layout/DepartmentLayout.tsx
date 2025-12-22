@@ -20,6 +20,13 @@ type DepartmentId =
   | "workshops"
   | "admin";
 
+type AdminNavId =
+  | "admin-overview"
+  | "admin-amos"
+  | "admin-users"
+  | "admin-assets"
+  | "admin-billing";
+
 const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
   { id: "planning", label: "Planning" },
   { id: "production", label: "Production" },
@@ -31,6 +38,14 @@ const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
   { id: "admin", label: "System Admin" },
 ];
 
+const ADMIN_NAV_ITEMS: Array<{ id: AdminNavId; label: string }> = [
+  { id: "admin-overview", label: "Overview" },
+  { id: "admin-amos", label: "AMO Management" },
+  { id: "admin-users", label: "User Management" },
+  { id: "admin-assets", label: "AMO Assets" },
+  { id: "admin-billing", label: "Billing & Usage" },
+];
+
 type ColorScheme = "dark" | "light";
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -38,6 +53,10 @@ const IDLE_WARNING_MS = 3 * 60 * 1000;
 
 function isDepartmentId(v: string): v is DepartmentId {
   return DEPARTMENTS.some((d) => d.id === v);
+}
+
+function isAdminNavId(v: string): v is AdminNavId {
+  return ADMIN_NAV_ITEMS.some((d) => d.id === v);
 }
 
 function isAdminUser(u: any): boolean {
@@ -98,11 +117,14 @@ const DepartmentLayout: React.FC<Props> = ({
   const location = useLocation();
 
   const currentUser = getCachedUser();
+  const isSuperuser = !!currentUser?.is_superuser;
+  const isAdminArea = isAdminNavId(activeDepartment);
 
   // Admins/SUPERUSER can see all departments and the System Admin area.
   const canAccessAdmin = isAdminUser(currentUser);
 
   const visibleDepartments = useMemo(() => {
+    if (isAdminArea) return [];
     if (canAccessAdmin) return DEPARTMENTS;
 
     // Non-admin users: show ONLY their current department in the ribbon.
@@ -114,7 +136,13 @@ const DepartmentLayout: React.FC<Props> = ({
 
     const match = DEPARTMENTS.find((d) => d.id === deptId);
     return match ? [match] : [];
-  }, [canAccessAdmin, activeDepartment]);
+  }, [canAccessAdmin, activeDepartment, isAdminArea]);
+
+  const visibleAdminNav = useMemo(() => {
+    if (!isAdminArea) return [];
+    if (!isSuperuser) return ADMIN_NAV_ITEMS.filter((i) => i.id !== "admin-billing");
+    return ADMIN_NAV_ITEMS;
+  }, [isAdminArea, isSuperuser]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -157,11 +185,33 @@ const DepartmentLayout: React.FC<Props> = ({
 
     // System Admin is NOT a normal department dashboard; route is explicit.
     if (deptId === "admin") {
-      navigate(`/maintenance/${amoCode}/admin`);
+      navigate(`/maintenance/${amoCode}/admin/overview`);
       return;
     }
 
     navigate(`/maintenance/${amoCode}/${deptId}`);
+  };
+
+  const handleAdminNav = (navId: AdminNavId) => {
+    switch (navId) {
+      case "admin-overview":
+        navigate(`/maintenance/${amoCode}/admin/overview`);
+        break;
+      case "admin-amos":
+        navigate(`/maintenance/${amoCode}/admin/amos`);
+        break;
+      case "admin-users":
+        navigate(`/maintenance/${amoCode}/admin/users`);
+        break;
+      case "admin-assets":
+        navigate(`/maintenance/${amoCode}/admin/amo-assets`);
+        break;
+      case "admin-billing":
+        navigate(`/maintenance/${amoCode}/admin/billing`);
+        break;
+      default:
+        break;
+    }
   };
 
   const resolveDeptForTraining = (): string => {
@@ -352,6 +402,8 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [idleWarningOpen, logoutReason]);
 
   const deptLabel =
+    ADMIN_NAV_ITEMS.find((d) => d.id === (activeDepartment as AdminNavId))
+      ?.label ||
     DEPARTMENTS.find((d) => d.id === (activeDepartment as any))?.label ||
     (activeDepartment || "Department");
 
@@ -401,6 +453,22 @@ const DepartmentLayout: React.FC<Props> = ({
         </div>
 
         <nav className="sidebar__nav">
+          {visibleAdminNav.map((nav) => {
+            const isActive = nav.id === activeDepartment;
+            return (
+              <button
+                key={nav.id}
+                type="button"
+                onClick={() => handleAdminNav(nav.id)}
+                className={
+                  "sidebar__item" + (isActive ? " sidebar__item--active" : "")
+                }
+              >
+                <span className="sidebar__item-label">{nav.label}</span>
+              </button>
+            );
+          })}
+
           {visibleDepartments.map((dept) => {
             const isActive = dept.id === activeDepartment;
             return (
@@ -417,9 +485,9 @@ const DepartmentLayout: React.FC<Props> = ({
             );
           })}
 
-          <div className="sidebar__divider" />
+          {!isAdminArea && <div className="sidebar__divider" />}
 
-          {activeDepartment === "planning" && (
+          {!isAdminArea && activeDepartment === "planning" && (
             <button
               type="button"
               onClick={() =>
@@ -436,17 +504,20 @@ const DepartmentLayout: React.FC<Props> = ({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={gotoMyTraining}
-            className={
-              "sidebar__item" + (isTrainingRoute ? " sidebar__item--active" : "")
-            }
-            aria-label="My Training"
-            title="My Training"
-          >
-            <span className="sidebar__item-label">My Training</span>
-          </button>
+          {!isAdminArea && (
+            <button
+              type="button"
+              onClick={gotoMyTraining}
+              className={
+                "sidebar__item" +
+                (isTrainingRoute ? " sidebar__item--active" : "")
+              }
+              aria-label="My Training"
+              title="My Training"
+            >
+              <span className="sidebar__item-label">My Training</span>
+            </button>
+          )}
         </nav>
 
         <div className="sidebar__footer">

@@ -1,40 +1,22 @@
 // src/pages/AdminDashboardPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { authHeaders, getCachedUser, getContext } from "../services/auth";
-import { apiGet } from "../services/crs";
-import { listAdminUsers } from "../services/adminUsers";
-import type { AdminUserRead } from "../services/adminUsers";
+import { getCachedUser, getContext } from "../services/auth";
+import { listAdminAmos, listAdminUsers } from "../services/adminUsers";
+import type { AdminAmoRead, AdminUserRead } from "../services/adminUsers";
 import { LS_ACTIVE_AMO_ID } from "../services/adminUsers";
 
 type UrlParams = {
   amoCode?: string;
 };
 
-type AmoRead = {
-  id: string;
-  amo_code: string;
-  name: string;
-  login_slug: string;
-  contact_email?: string | null;
-  contact_phone?: string | null;
-  time_zone?: string | null;
-  is_active: boolean;
-};
-
-async function fetchAdminAmos(): Promise<AmoRead[]> {
-  return apiGet<AmoRead[]>("/accounts/admin/amos", {
-    headers: authHeaders(),
-  });
-}
-
 const AdminDashboardPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
 
-  const currentUser = getCachedUser();
+  const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
 
   const isSuperuser = !!currentUser?.is_superuser;
@@ -44,9 +26,10 @@ const AdminDashboardPage: React.FC = () => {
   const [users, setUsers] = useState<AdminUserRead[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lastUsersRequestKey = useRef<string | null>(null);
 
   // SUPERUSER AMO picker
-  const [amos, setAmos] = useState<AmoRead[]>([]);
+  const [amos, setAmos] = useState<AdminAmoRead[]>([]);
   const [amoLoading, setAmoLoading] = useState(false);
   const [amoError, setAmoError] = useState<string | null>(null);
 
@@ -93,7 +76,7 @@ const AdminDashboardPage: React.FC = () => {
       setAmoError(null);
       setAmoLoading(true);
       try {
-        const data = await fetchAdminAmos();
+        const data = await listAdminAmos();
         setAmos(data);
 
         const stored = localStorage.getItem(LS_ACTIVE_AMO_ID);
@@ -146,6 +129,18 @@ const AdminDashboardPage: React.FC = () => {
         return;
       }
 
+      const requestKey = JSON.stringify({
+        amo_id: effectiveAmoId,
+        skip,
+        limit,
+        search: search.trim(),
+      });
+
+      if (lastUsersRequestKey.current === requestKey) {
+        return;
+      }
+      lastUsersRequestKey.current = requestKey;
+
       try {
         setLoading(true);
 
@@ -159,6 +154,7 @@ const AdminDashboardPage: React.FC = () => {
         setUsers(data);
       } catch (err: any) {
         console.error("Failed to load users", err);
+        lastUsersRequestKey.current = null;
         setError(
           err?.message ||
             "Could not load users. Please try again or contact Quality/IT."
@@ -295,9 +291,12 @@ const AdminDashboardPage: React.FC = () => {
   }
 
   return (
-    <DepartmentLayout amoCode={amoCode ?? "UNKNOWN"} activeDepartment="admin">
+    <DepartmentLayout
+      amoCode={amoCode ?? "UNKNOWN"}
+      activeDepartment="admin-users"
+    >
       <header className="page-header">
-        <h1 className="page-header__title">User Administration</h1>
+        <h1 className="page-header__title">User Management</h1>
         <p className="page-header__subtitle">
           Manage AMO users, roles and access.
           {currentUser && (
@@ -312,9 +311,11 @@ const AdminDashboardPage: React.FC = () => {
       {isSuperuser && (
         <section className="page-section">
           <div className="card card--form" style={{ padding: 16 }}>
-            <h3 style={{ marginTop: 0, marginBottom: 8 }}>
-              Support mode (SUPERUSER)
-            </h3>
+            <h3 style={{ marginTop: 0, marginBottom: 8 }}>AMO Context</h3>
+            <p style={{ marginTop: 0, opacity: 0.85 }}>
+              Select which AMO you are managing. Need to create a new AMO? Use
+              the AMO Management page.
+            </p>
 
             {amoLoading && <p>Loading AMOs…</p>}
             {amoError && <div className="alert alert-error">{amoError}</div>}
@@ -358,6 +359,15 @@ const AdminDashboardPage: React.FC = () => {
           >
             + Create user
           </button>
+          {isSuperuser && (
+            <button
+              type="button"
+              className="secondary-chip-btn"
+              onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}
+            >
+              Manage AMOs
+            </button>
+          )}
           <button
             type="button"
             className="secondary-chip-btn"
