@@ -211,6 +211,7 @@ const AdminDashboardPage: React.FC = () => {
         );
 
         setUsers(data);
+        lastUsersRequestKey.current = usersRequestKey;
       } catch (err: any) {
         if (err?.name === "AbortError") {
           return;
