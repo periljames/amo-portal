@@ -9,7 +9,6 @@ import type {
 import { AgGridReact } from "ag-grid-react";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
-import "ag-grid-community/styles/ag-theme-alpine-dark.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -2064,7 +2063,7 @@ const AircraftImportPage: React.FC = () => {
           {(previewRows.length > 0 || previewTotalRows > 0) && (
             <div className="mt-6">
               <div
-                className="ag-theme-alpine-dark border border-slate-800 rounded-2xl overflow-hidden"
+                className="ag-theme-alpine border border-slate-800 rounded-2xl overflow-hidden"
                 style={{ height: 560 }}
               >
                 <AgGridReact<PreviewRow>
