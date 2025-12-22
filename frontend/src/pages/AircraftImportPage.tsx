@@ -707,7 +707,7 @@ const AircraftImportPage: React.FC = () => {
 
   useEffect(() => {
     if (previewMode === "server" && previewGridApi) {
-      previewGridApi.setDatasource(createPreviewDatasource());
+      previewGridApi.setGridOption("datasource", createPreviewDatasource());
     }
   }, [previewMode, previewGridApi, createPreviewDatasource]);
 
@@ -715,7 +715,7 @@ const AircraftImportPage: React.FC = () => {
     (params: GridReadyEvent) => {
       setPreviewGridApi(params.api);
       if (previewMode === "server") {
-        params.api.setDatasource(createPreviewDatasource());
+        params.api.setGridOption("datasource", createPreviewDatasource());
       }
     },
     [previewMode, createPreviewDatasource]
@@ -1132,7 +1132,7 @@ const AircraftImportPage: React.FC = () => {
                   return;
                 }
                 params.api.startEditingCell({
-                  rowIndex: params.rowIndex ?? 0,
+                  rowIndex: params.node?.rowIndex ?? 0,
                   colKey: colId,
                 });
               }}
@@ -1158,10 +1158,12 @@ const AircraftImportPage: React.FC = () => {
       setMessage("Select a template to apply.");
       return;
     }
+    const templateDefaults =
+      (selected.default_values ?? {}) as Partial<AircraftRowData>;
+
     setPreviewRows((prev) =>
       prev.map((row) => {
-        const nextData = { ...row.data };
-        const defaults = selected.default_values ?? {};
+        const nextData: AircraftRowData = { ...row.data };
         const proposedFields = new Set(row.proposed_fields ?? []);
 
         if (selected.aircraft_template && !nextData.template?.trim()) {
@@ -1174,21 +1176,20 @@ const AircraftImportPage: React.FC = () => {
           nextData.operator_code = selected.operator_code;
         }
 
-        (Object.entries(defaults) as [keyof AircraftRowData, any][]).forEach(
-          ([key, value]) => {
-            if (value === null || value === undefined) {
-              return;
-            }
-            const currentValue = nextData[key];
-            if (
-              currentValue === null ||
-              currentValue === undefined ||
-              `${currentValue}`.trim() === ""
-            ) {
-              nextData[key] = value;
-            }
+        for (const key of Object.keys(templateDefaults) as AircraftRowField[]) {
+          const value = templateDefaults[key];
+          if (value === null || value === undefined) {
+            continue;
           }
-        );
+          const currentValue = nextData[key];
+          if (
+            currentValue === null ||
+            currentValue === undefined ||
+            `${currentValue}`.trim() === ""
+          ) {
+            nextData[key] = value;
+          }
+        }
 
         AIRCRAFT_DIFF_FIELDS.forEach((field) => {
           if (
