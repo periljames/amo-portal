@@ -4,7 +4,11 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser, getContext } from "../services/auth";
-import { listAdminAmos, listAdminUsers } from "../services/adminUsers";
+import {
+  createAdminAmo,
+  listAdminAmos,
+  listAdminUsers,
+} from "../services/adminUsers";
 import type { AdminAmoRead, AdminUserRead } from "../services/adminUsers";
 import { LS_ACTIVE_AMO_ID } from "../services/adminUsers";
 
@@ -31,6 +35,31 @@ const AdminDashboardPage: React.FC = () => {
   const [amos, setAmos] = useState<AdminAmoRead[]>([]);
   const [amoLoading, setAmoLoading] = useState(false);
   const [amoError, setAmoError] = useState<string | null>(null);
+  const [amoCreateError, setAmoCreateError] = useState<string | null>(null);
+  const [amoCreateSuccess, setAmoCreateSuccess] = useState<string | null>(null);
+  const [lastCreatedAmoId, setLastCreatedAmoId] = useState<string | null>(null);
+
+  type AmoFormState = {
+    amoCode: string;
+    name: string;
+    loginSlug: string;
+    icaoCode: string;
+    country: string;
+    contactEmail: string;
+    contactPhone: string;
+    timeZone: string;
+  };
+
+  const [amoForm, setAmoForm] = useState<AmoFormState>({
+    amoCode: "",
+    name: "",
+    loginSlug: "",
+    icaoCode: "",
+    country: "",
+    contactEmail: "",
+    contactPhone: "",
+    timeZone: "",
+  });
 
   const [activeAmoId, setActiveAmoId] = useState<string | null>(() => {
     const v = localStorage.getItem(LS_ACTIVE_AMO_ID);
@@ -266,6 +295,71 @@ const AdminDashboardPage: React.FC = () => {
     setSkip(0);
   };
 
+  const handleAmoFormChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ): void => {
+    const { name, value } = e.target;
+    const key = name as keyof AmoFormState;
+    setAmoForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleCreateAmo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAmoCreateError(null);
+    setAmoCreateSuccess(null);
+
+    if (!amoForm.amoCode.trim() || !amoForm.name.trim() || !amoForm.loginSlug.trim()) {
+      setAmoCreateError("AMO code, name, and login slug are required.");
+      return;
+    }
+
+    try {
+      const created = await createAdminAmo({
+        amo_code: amoForm.amoCode.trim().toUpperCase(),
+        name: amoForm.name.trim(),
+        login_slug: amoForm.loginSlug.trim().toLowerCase(),
+        icao_code: amoForm.icaoCode.trim() || undefined,
+        country: amoForm.country.trim() || undefined,
+        contact_email: amoForm.contactEmail.trim() || undefined,
+        contact_phone: amoForm.contactPhone.trim() || undefined,
+        time_zone: amoForm.timeZone.trim() || undefined,
+      });
+
+      setAmoForm({
+        amoCode: "",
+        name: "",
+        loginSlug: "",
+        icaoCode: "",
+        country: "",
+        contactEmail: "",
+        contactPhone: "",
+        timeZone: "",
+      });
+
+      setAmoCreateSuccess(
+        `AMO ${created.amo_code} created. You can now add its first user.`
+      );
+      setLastCreatedAmoId(created.id);
+      setActiveAmoId(created.id);
+      localStorage.setItem(LS_ACTIVE_AMO_ID, created.id);
+
+      const data = await listAdminAmos();
+      setAmos(data);
+    } catch (err: any) {
+      console.error("Failed to create AMO", err);
+      const msg =
+        err?.response?.data?.detail ||
+        err?.detail ||
+        err?.message ||
+        "Could not create AMO. Please try again.";
+      setAmoCreateError(
+        typeof msg === "string"
+          ? msg
+          : "Could not create AMO. Please try again."
+      );
+    }
+  };
+
   const activeAmoLabel = useMemo(() => {
     if (!isSuperuser) return null;
     const a = amos.find((x) => x.id === effectiveAmoId);
@@ -329,6 +423,131 @@ const AdminDashboardPage: React.FC = () => {
                 )}
               </div>
             )}
+
+            <hr style={{ margin: "16px 0" }} />
+
+            <h4 style={{ marginTop: 0 }}>Create a new AMO</h4>
+            <p style={{ marginTop: 0, opacity: 0.85 }}>
+              Use this form to register a new AMO and then create its first user.
+            </p>
+
+            {amoCreateError && (
+              <div className="alert alert-error">{amoCreateError}</div>
+            )}
+            {amoCreateSuccess && (
+              <div className="alert alert-success">{amoCreateSuccess}</div>
+            )}
+
+            <form onSubmit={handleCreateAmo} className="form-grid">
+              <div className="form-row">
+                <label htmlFor="amoCode">AMO Code</label>
+                <input
+                  id="amoCode"
+                  name="amoCode"
+                  type="text"
+                  value={amoForm.amoCode}
+                  onChange={handleAmoFormChange}
+                  placeholder="e.g. SKYJET"
+                  required
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="amoName">AMO Name</label>
+                <input
+                  id="amoName"
+                  name="name"
+                  type="text"
+                  value={amoForm.name}
+                  onChange={handleAmoFormChange}
+                  placeholder="SkyJet Maintenance"
+                  required
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="loginSlug">Login Slug</label>
+                <input
+                  id="loginSlug"
+                  name="loginSlug"
+                  type="text"
+                  value={amoForm.loginSlug}
+                  onChange={handleAmoFormChange}
+                  placeholder="skyjet"
+                  required
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="icaoCode">ICAO Code</label>
+                <input
+                  id="icaoCode"
+                  name="icaoCode"
+                  type="text"
+                  value={amoForm.icaoCode}
+                  onChange={handleAmoFormChange}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="country">Country</label>
+                <input
+                  id="country"
+                  name="country"
+                  type="text"
+                  value={amoForm.country}
+                  onChange={handleAmoFormChange}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="contactEmail">Contact Email</label>
+                <input
+                  id="contactEmail"
+                  name="contactEmail"
+                  type="email"
+                  value={amoForm.contactEmail}
+                  onChange={handleAmoFormChange}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="contactPhone">Contact Phone</label>
+                <input
+                  id="contactPhone"
+                  name="contactPhone"
+                  type="tel"
+                  value={amoForm.contactPhone}
+                  onChange={handleAmoFormChange}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="timeZone">Time Zone</label>
+                <input
+                  id="timeZone"
+                  name="timeZone"
+                  type="text"
+                  value={amoForm.timeZone}
+                  onChange={handleAmoFormChange}
+                  placeholder="Africa/Nairobi"
+                />
+              </div>
+
+              <div className="form-actions">
+                <button type="submit" className="btn btn-primary">
+                  Create AMO
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleNewUser}
+                  disabled={!lastCreatedAmoId}
+                >
+                  Create first user
+                </button>
+              </div>
+            </form>
           </div>
         </section>
       )}
