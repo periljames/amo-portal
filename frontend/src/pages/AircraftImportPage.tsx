@@ -1193,7 +1193,19 @@ const AircraftImportPage: React.FC = () => {
               nextData[key] = value;
             }
           }
-        );
+          const key = rawKey as AircraftRowField;
+          if (!(key in nextData)) {
+            return;
+          }
+          const currentValue = nextData[key];
+          if (
+            currentValue === null ||
+            currentValue === undefined ||
+            `${currentValue}`.trim() === ""
+          ) {
+            nextData[key] = value as AircraftRowData[typeof key];
+          }
+        });
 
         AIRCRAFT_DIFF_FIELDS.forEach((field) => {
           if (
