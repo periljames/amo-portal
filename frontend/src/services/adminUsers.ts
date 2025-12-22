@@ -223,6 +223,10 @@ type ListParams = {
   search?: string;
 };
 
+type ListOptions = {
+  signal?: AbortSignal;
+};
+
 function resolveListAmoId(params?: ListParams): string | undefined {
   const current = getCachedUser();
   if (!current) return undefined;
@@ -250,7 +254,8 @@ function resolveListAmoId(params?: ListParams): string | undefined {
  * - skip / limit / search
  */
 export async function listAdminUsers(
-  params: ListParams = {}
+  params: ListParams = {},
+  options: ListOptions = {}
 ): Promise<AdminUserRead[]> {
   const sp = new URLSearchParams();
 
@@ -268,6 +273,7 @@ export async function listAdminUsers(
 
   return apiGet<AdminUserRead[]>(path, {
     headers: authHeaders(),
+    signal: options.signal,
   });
 }
 
