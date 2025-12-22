@@ -1,5 +1,6 @@
 // frontend/src/pages/AircraftImportPage.tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import type {
   CellValueChangedEvent,
   ColDef,
@@ -9,6 +10,13 @@ import type {
 import { AgGridReact } from "ag-grid-react";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
+import { getCachedUser } from "../services/auth";
+import {
+  getActiveAmoId as getAdminActiveAmoId,
+  listAdminAmos,
+  setActiveAmoId as setAdminActiveAmoId,
+  type AdminAmoRead,
+} from "../services/adminUsers";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -189,13 +197,28 @@ const normalizeHeader = (value: string) =>
     .replace(/[.\-/\s]+/g, "_")
     .replace(/_+/g, "_");
 
+const isSuperuser = (user: any): boolean => {
+  if (!user) return false;
+  return !!user.is_superuser || user.role === "SUPERUSER";
+};
+
 const AircraftImportPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { amoCode, department } = useParams<{
+    amoCode?: string;
+    department?: string;
+  }>();
   const [aircraftFile, setAircraftFile] = useState<File | null>(null);
   const [componentsFile, setComponentsFile] = useState<File | null>(null);
   const [componentAircraftSerial, setComponentAircraftSerial] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [amoOptions, setAmoOptions] = useState<AdminAmoRead[]>([]);
+  const [amoLoading, setAmoLoading] = useState(false);
+  const [amoError, setAmoError] = useState<string | null>(null);
+  const [selectedAmoId, setSelectedAmoId] = useState<string>("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [aircraftImportComplete, setAircraftImportComplete] = useState(false);
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [previewRowOverrides, setPreviewRowOverrides] = useState<
     Record<number, PreviewRow>
@@ -251,6 +274,7 @@ const AircraftImportPage: React.FC = () => {
     useState("{}");
   const [componentTemplateLoading, setComponentTemplateLoading] =
     useState(false);
+  const [componentImportComplete, setComponentImportComplete] = useState(false);
   const [importBatchId, setImportBatchId] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<ImportSnapshot[]>([]);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(
@@ -259,16 +283,36 @@ const AircraftImportPage: React.FC = () => {
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshotActionLoading, setSnapshotActionLoading] = useState(false);
 
+  const currentUser = getCachedUser();
+  const userIsSuperuser = isSuperuser(currentUser);
+  const currentDepartment = department || "planning";
+
   const handleAircraftFileChange = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     setAircraftFile(e.target.files?.[0] ?? null);
+    setAircraftImportComplete(false);
   };
 
   const handleComponentsFileChange = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     setComponentsFile(e.target.files?.[0] ?? null);
+    setComponentImportComplete(false);
+  };
+
+  const handleAmoChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const nextId = event.target.value;
+    setSelectedAmoId(nextId);
+    if (nextId) {
+      setAdminActiveAmoId(nextId);
+    }
+    const amo = amoOptions.find((entry) => entry.id === nextId);
+    if (amo?.login_slug) {
+      navigate(
+        `/maintenance/${amo.login_slug}/${currentDepartment}/aircraft-import`
+      );
+    }
   };
 
   const validateRow = (data: AircraftRowData) => {
@@ -360,6 +404,44 @@ const AircraftImportPage: React.FC = () => {
     void loadTemplates();
     void loadComponentTemplates();
   }, []);
+
+  useEffect(() => {
+    if (!userIsSuperuser) return;
+    let active = true;
+
+    const loadAmos = async () => {
+      setAmoLoading(true);
+      setAmoError(null);
+      try {
+        const data = await listAdminAmos();
+        if (!active) return;
+        setAmoOptions(data ?? []);
+      } catch (err: any) {
+        if (!active) return;
+        setAmoError(err?.message ?? "Could not load AMO list.");
+      } finally {
+        if (active) setAmoLoading(false);
+      }
+    };
+
+    void loadAmos();
+    return () => {
+      active = false;
+    };
+  }, [userIsSuperuser]);
+
+  useEffect(() => {
+    if (!userIsSuperuser || amoOptions.length === 0) return;
+    const storedAmoId = getAdminActiveAmoId();
+    const matchBySlug = amoCode
+      ? amoOptions.find((amo) => amo.login_slug === amoCode)
+      : undefined;
+    const nextId = storedAmoId || matchBySlug?.id || amoOptions[0]?.id || "";
+    if (nextId && nextId !== selectedAmoId) {
+      setSelectedAmoId(nextId);
+      setAdminActiveAmoId(nextId);
+    }
+  }, [userIsSuperuser, amoOptions, amoCode, selectedAmoId]);
 
   useEffect(() => {
     if (selectedTemplateId === "") {
@@ -687,6 +769,7 @@ const AircraftImportPage: React.FC = () => {
       setMessage("Select an aircraft file first.");
       return;
     }
+    setAircraftImportComplete(false);
     await submitPreviewFile(aircraftFile);
   };
 
@@ -725,6 +808,7 @@ const AircraftImportPage: React.FC = () => {
       setMessage("Select a component file first.");
       return;
     }
+    setComponentImportComplete(false);
     await submitComponentPreviewFile(componentsFile);
   };
 
@@ -733,6 +817,7 @@ const AircraftImportPage: React.FC = () => {
       setMessage("Add corrected OCR text before re-parsing.");
       return;
     }
+    setAircraftImportComplete(false);
     const ocrFile = new File([ocrTextDraft], "ocr-corrected.csv", {
       type: "text/csv",
     });
@@ -1627,6 +1712,7 @@ const AircraftImportPage: React.FC = () => {
       setMessage(
         `Aircraft import OK. Created: ${data.created}, Updated: ${data.updated}`
       );
+      setAircraftImportComplete(true);
     } catch (err: any) {
       setMessage(err.message ?? "Error importing aircraft.");
     } finally {
@@ -1674,6 +1760,7 @@ const AircraftImportPage: React.FC = () => {
         `Components import OK for aircraft ${data.aircraft_serial_number}. ` +
           `Created: ${data.components_created}, Updated: ${data.components_updated}`
       );
+      setComponentImportComplete(true);
     } catch (err: any) {
       setMessage(err.message ?? "Error importing components.");
     } finally {
@@ -1705,6 +1792,28 @@ const AircraftImportPage: React.FC = () => {
       ).length,
     [componentPreviewRows]
   );
+
+  const aircraftHasPreview =
+    previewRows.length > 0 || previewTotalRows > 0 || !!previewId;
+  const componentHasPreview = componentPreviewRows.length > 0;
+
+  const aircraftStep = aircraftImportComplete
+    ? 3
+    : aircraftHasPreview
+    ? 2
+    : aircraftFile
+    ? 1
+    : 0;
+  const componentStep = componentImportComplete
+    ? 3
+    : componentHasPreview
+    ? 2
+    : componentsFile
+    ? 1
+    : 0;
+
+  const aircraftProgress = Math.round((aircraftStep / 3) * 100);
+  const componentProgress = Math.round((componentStep / 3) * 100);
 
   const handleUndoSnapshot = async () => {
     if (!selectedSnapshotId) {
@@ -1757,731 +1866,885 @@ const AircraftImportPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center py-10">
-      <div className="w-full max-w-6xl space-y-8">
-        <h1 className="text-2xl font-semibold">Aircraft Loader / Setup</h1>
+    <div className="page-layout">
+      <div className="page-header">
+        <h1 className="page-header__title">Aircraft Loader / Setup</h1>
+        <p className="page-header__subtitle">
+          Follow the guided steps to upload aircraft masters, review the preview,
+          and confirm updates. The progress bar shows where you are in the
+          process.
+        </p>
+      </div>
 
-        {/* AIRCRAFT MASTER IMPORT */}
-        <section className="bg-slate-900 rounded-2xl p-6 shadow">
-          <h2 className="text-lg font-semibold mb-2">
-            1. Import Aircraft Master List
-          </h2>
-          <p className="text-sm text-slate-300 mb-4">
-            Upload a CSV or Excel file containing all aircraft
-            (serial, registration, type, model, base, hours, cycles).
+      {userIsSuperuser && (
+        <section className="page-section">
+          <h2 className="page-section__title">Target AMO</h2>
+          <p className="page-section__body">
+            Select the AMO you are configuring. This is only available to
+            platform superusers.
           </p>
+          <div className="page-section__grid">
+            <div className="form-row">
+              <label htmlFor="amo-target">AMO</label>
+              <select
+                id="amo-target"
+                className="input"
+                value={selectedAmoId}
+                onChange={handleAmoChange}
+                disabled={amoLoading || amoOptions.length === 0}
+              >
+                <option value="">
+                  {amoLoading ? "Loading AMOs..." : "Select AMO"}
+                </option>
+                {amoOptions.map((amo) => (
+                  <option key={amo.id} value={amo.id}>
+                    {amo.amo_code} · {amo.name}
+                  </option>
+                ))}
+              </select>
+              {amoError && <div className="alert alert-error">{amoError}</div>}
+            </div>
+          </div>
+        </section>
+      )}
 
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <input
-              type="file"
-              accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
-              onChange={handleAircraftFileChange}
-              className="block"
-            />
+      {/* AIRCRAFT MASTER IMPORT */}
+      <section className="page-section">
+        <h2 className="page-section__title">1. Import Aircraft Master List</h2>
+        <p className="page-section__body">
+          Upload a CSV/Excel file containing aircraft serials, registration,
+          type, base, hours, and cycles. You can preview and approve rows before
+          final import.
+        </p>
 
-            <div className="flex flex-wrap gap-3">
+        <div className="import-progress">
+          <div className="import-progress__summary">
+            <span>Aircraft master progress</span>
+            <span>{aircraftProgress}%</span>
+          </div>
+          <div
+            className={`import-progress__bar ${
+              previewLoading || confirmLoading ? "is-loading" : ""
+            }`}
+          >
+            <span style={{ width: `${aircraftProgress}%` }} />
+          </div>
+          <ol className="import-stepper">
+            <li className={aircraftStep >= 1 ? "is-complete" : ""}>
+              Upload file
+            </li>
+            <li className={aircraftStep >= 2 ? "is-complete" : ""}>
+              Review preview
+            </li>
+            <li className={aircraftStep >= 3 ? "is-complete" : ""}>
+              Confirm import
+            </li>
+          </ol>
+        </div>
+
+        <div className="page-section__grid">
+          <div className="card card--form">
+            <div className="card-header">
+              <div>
+                <div className="import-step__eyebrow">Step 1</div>
+                <h3 className="import-step__title">Upload aircraft file</h3>
+              </div>
+              <span className="import-step__status">
+                {aircraftStep >= 1 ? "Ready" : "Waiting"}
+              </span>
+            </div>
+
+            <div className="form-row">
+              <label htmlFor="aircraft-file">Aircraft master file</label>
+              <input
+                id="aircraft-file"
+                type="file"
+                accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
+                onChange={handleAircraftFileChange}
+                className="input"
+              />
+              <p className="form-hint">
+                Accepted formats: CSV, XLSX, PDF, or image scans (OCR supported).
+              </p>
+            </div>
+
+            <div className="form-actions form-actions--inline">
               <button
                 onClick={parseAircraftFile}
                 disabled={previewLoading}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
+                className="btn"
               >
                 {previewLoading ? "Parsing..." : "Parse & Preview"}
               </button>
+            </div>
+          </div>
+
+          <div className="card card--form">
+            <div className="card-header">
+              <div>
+                <div className="import-step__eyebrow">Step 2</div>
+                <h3 className="import-step__title">Review & map data</h3>
+              </div>
+              <span className="import-step__status">
+                {aircraftStep >= 2 ? "Ready" : "Waiting"}
+              </span>
+            </div>
+
+            {previewSummary && (
+              <div className="import-summary-grid">
+                <div className="card card--success">
+                  <div className="import-summary__label">New</div>
+                  <div className="import-summary__value">
+                    {previewSummary.new}
+                  </div>
+                </div>
+                <div className="card card--info">
+                  <div className="import-summary__label">Update</div>
+                  <div className="import-summary__value">
+                    {previewSummary.update}
+                  </div>
+                </div>
+                <div className="card card--warning">
+                  <div className="import-summary__label">Invalid</div>
+                  <div className="import-summary__value">
+                    {previewSummary.invalid}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(previewRows.length > 0 || previewTotalRows > 0) && (
+              <div className="table-wrapper import-grid">
+                <div
+                  className="ag-theme-alpine"
+                  style={{ height: 520, minWidth: 720 }}
+                >
+                  <AgGridReact<PreviewRow>
+                    key={previewMode}
+                    rowData={previewMode === "client" ? previewRows : undefined}
+                    columnDefs={aircraftGridColumns}
+                    defaultColDef={aircraftGridDefaultColDef}
+                    rowSelection="multiple"
+                    suppressRowClickSelection
+                    rowBuffer={12}
+                    rowModelType={
+                      previewMode === "server" ? "infinite" : "clientSide"
+                    }
+                    cacheBlockSize={200}
+                    maxBlocksInCache={5}
+                    suppressColumnVirtualisation={false}
+                    suppressRowVirtualisation={false}
+                    enableCellTextSelection
+                    enableRangeSelection
+                    getRowId={(params) => `${params.data.row_number}`}
+                    onGridReady={handlePreviewGridReady}
+                    onCellValueChanged={handleAircraftCellValueChanged}
+                  />
+                </div>
+              </div>
+            )}
+
+            {columnMapping && (
+              <div className="form-hint">
+                Detected mapping:{" "}
+                {Object.entries(columnMapping)
+                  .filter(([, value]) => value)
+                  .map(([key, value]) => `${key} → ${value}`)
+                  .join(", ")}
+              </div>
+            )}
+
+            <details className="import-advanced" open={false}>
+              <summary>Templates & defaults</summary>
+              <div className="import-advanced__body">
+                <div className="form-row">
+                  <label>Template</label>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(e) =>
+                      setSelectedTemplateId(
+                        e.target.value ? Number(e.target.value) : ""
+                      )
+                    }
+                    className="input"
+                  >
+                    <option value="">Select template</option>
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-actions form-actions--inline">
+                  <button
+                    onClick={applyTemplateToPreview}
+                    disabled={
+                      previewMode === "server" ||
+                      !previewRows.length ||
+                      !selectedTemplateId
+                    }
+                    className="btn"
+                  >
+                    Apply template to preview
+                  </button>
+                  <button
+                    onClick={saveMappingTemplate}
+                    disabled={templateLoading || !columnMapping}
+                    className="btn-secondary"
+                  >
+                    {templateLoading ? "Saving..." : "Save mapping template"}
+                  </button>
+                </div>
+
+                <div className="import-template-grid">
+                  <div className="form-row">
+                    <label>Template name</label>
+                    <input
+                      type="text"
+                      value={templateName}
+                      onChange={(e) => setTemplateName(e.target.value)}
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Aircraft template</label>
+                    <input
+                      type="text"
+                      value={templateAircraftTemplate}
+                      onChange={(e) =>
+                        setTemplateAircraftTemplate(e.target.value)
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Model code</label>
+                    <input
+                      type="text"
+                      value={templateModelCode}
+                      onChange={(e) => setTemplateModelCode(e.target.value)}
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Operator code</label>
+                    <input
+                      type="text"
+                      value={templateOperatorCode}
+                      onChange={(e) => setTemplateOperatorCode(e.target.value)}
+                      className="input"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <label>Default values (JSON)</label>
+                  <textarea
+                    value={templateDefaultsJson}
+                    onChange={(e) => setTemplateDefaultsJson(e.target.value)}
+                    rows={4}
+                    className="input"
+                  />
+                </div>
+              </div>
+            </details>
+
+            {ocrPreview && (
+              <details className="import-advanced" open={false}>
+                <summary>OCR preview details</summary>
+                <div className="import-advanced__body">
+                  <div className="import-ocr__header">
+                    <div>
+                      <div className="import-ocr__title">OCR Preview</div>
+                      <div className="form-hint">
+                        {ocrPreview.file_type
+                          ? `Detected ${ocrPreview.file_type.toUpperCase()}`
+                          : "Detected OCR content"}
+                      </div>
+                    </div>
+                    <div className="import-ocr__confidence">
+                      Confidence:{" "}
+                      <strong>
+                        {ocrPreview.confidence !== null &&
+                        ocrPreview.confidence !== undefined
+                          ? `${ocrPreview.confidence.toFixed(1)}%`
+                          : "n/a"}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {ocrPreview.samples && ocrPreview.samples.length > 0 && (
+                    <div className="import-ocr__samples">
+                      <div className="import-ocr__label">Extracted samples</div>
+                      <ul>
+                        {ocrPreview.samples.map((sample, index) => (
+                          <li key={`${sample}-${index}`}>{sample}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="form-row">
+                    <label>OCR text (edit before re-parsing)</label>
+                    <textarea
+                      value={ocrTextDraft}
+                      onChange={(e) => setOcrTextDraft(e.target.value)}
+                      rows={6}
+                      className="input import-ocr__textarea"
+                    />
+                    <p className="form-hint">
+                      Re-parsing expects CSV/TSV-style rows with a header line.
+                    </p>
+                  </div>
+
+                  <div className="form-actions form-actions--inline">
+                    <button
+                      onClick={reparseOcrText}
+                      disabled={previewLoading}
+                      className="btn"
+                    >
+                      {previewLoading
+                        ? "Re-parsing..."
+                        : "Rebuild Preview from OCR"}
+                    </button>
+                  </div>
+                </div>
+              </details>
+            )}
+          </div>
+
+          <div className="card card--form">
+            <div className="card-header">
+              <div>
+                <div className="import-step__eyebrow">Step 3</div>
+                <h3 className="import-step__title">Confirm & finalize</h3>
+              </div>
+              <span className="import-step__status">
+                {aircraftStep >= 3 ? "Complete" : "Waiting"}
+              </span>
+            </div>
+
+            <div className="form-actions form-actions--inline">
               <button
                 onClick={confirmImport}
                 disabled={confirmLoading || approvedCount === 0}
-                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50"
+                className="btn"
               >
                 {confirmLoading
                   ? "Importing..."
                   : `Confirm Import (${approvedCount})`}
               </button>
             </div>
-          </div>
 
-          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="import-snapshot">
+              <div className="import-snapshot__header">
+                <div>
+                  <h4>Undo / Redo</h4>
+                  <p>Snapshot history for this import batch.</p>
+                </div>
+                <button
+                  onClick={() => loadSnapshotHistory(importBatchId)}
+                  disabled={!importBatchId || snapshotLoading}
+                  className="btn-secondary"
+                >
+                  {snapshotLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+
+              <div className="import-snapshot__controls">
+                <select
+                  value={selectedSnapshotId ?? ""}
+                  onChange={(event) =>
+                    setSelectedSnapshotId(
+                      event.target.value ? Number(event.target.value) : null
+                    )
+                  }
+                  disabled={!snapshots.length}
+                  className="input"
+                >
+                  <option value="">Select snapshot...</option>
+                  {snapshots.map((snapshot) => (
+                    <option key={snapshot.id} value={snapshot.id}>
+                      {new Date(snapshot.created_at).toLocaleString()} (#
+                      {snapshot.id})
+                    </option>
+                  ))}
+                </select>
+                <div className="import-snapshot__actions">
+                  <button
+                    onClick={handleUndoSnapshot}
+                    disabled={
+                      snapshotActionLoading ||
+                      !selectedSnapshotId ||
+                      !snapshots.length
+                    }
+                    className="btn-secondary"
+                  >
+                    Undo
+                  </button>
+                  <button
+                    onClick={handleRedoSnapshot}
+                    disabled={
+                      snapshotActionLoading ||
+                      !selectedSnapshotId ||
+                      !snapshots.length
+                    }
+                    className="btn-secondary"
+                  >
+                    Redo
+                  </button>
+                </div>
+              </div>
+              {importBatchId && (
+                <p className="form-hint">Batch ID: {importBatchId}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* COMPONENT IMPORT */}
+      <section className="page-section">
+        <h2 className="page-section__title">
+          2. Import Components for One Aircraft
+        </h2>
+        <p className="page-section__body">
+          Upload components for one aircraft at a time, then review and confirm
+          before committing.
+        </p>
+
+        <div className="import-progress">
+          <div className="import-progress__summary">
+            <span>Component import progress</span>
+            <span>{componentProgress}%</span>
+          </div>
+          <div
+            className={`import-progress__bar ${
+              componentPreviewLoading || componentConfirmLoading
+                ? "is-loading"
+                : ""
+            }`}
+          >
+            <span style={{ width: `${componentProgress}%` }} />
+          </div>
+          <ol className="import-stepper">
+            <li className={componentStep >= 1 ? "is-complete" : ""}>
+              Upload file
+            </li>
+            <li className={componentStep >= 2 ? "is-complete" : ""}>
+              Review preview
+            </li>
+            <li className={componentStep >= 3 ? "is-complete" : ""}>
+              Confirm import
+            </li>
+          </ol>
+        </div>
+
+        <div className="page-section__grid">
+          <div className="card card--form">
+            <div className="card-header">
               <div>
-                <h3 className="text-sm font-semibold text-slate-200">
-                  Undo / Redo
+                <div className="import-step__eyebrow">Step 1</div>
+                <h3 className="import-step__title">
+                  Identify the aircraft & upload
                 </h3>
-                <p className="text-xs text-slate-400">
-                  Snapshot history for this import batch.
+              </div>
+              <span className="import-step__status">
+                {componentStep >= 1 ? "Ready" : "Waiting"}
+              </span>
+            </div>
+
+            <div className="import-template-grid">
+              <div className="form-row">
+                <label>Aircraft serial number</label>
+                <input
+                  type="text"
+                  value={componentAircraftSerial}
+                  onChange={(e) => setComponentAircraftSerial(e.target.value)}
+                  className="input"
+                  placeholder="e.g. 574, 510, 331"
+                />
+              </div>
+              <div className="form-row">
+                <label>Components file</label>
+                <input
+                  type="file"
+                  accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf"
+                  onChange={handleComponentsFileChange}
+                  className="input"
+                />
+                <p className="form-hint">
+                  Use component positions (L ENGINE, R ENGINE, APU) and PN/SN
+                  columns.
                 </p>
               </div>
-              <button
-                onClick={() => loadSnapshotHistory(importBatchId)}
-                disabled={!importBatchId || snapshotLoading}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-sm"
-              >
-                {snapshotLoading ? "Refreshing..." : "Refresh"}
-              </button>
             </div>
 
-            <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center">
-              <select
-                value={selectedSnapshotId ?? ""}
-                onChange={(event) =>
-                  setSelectedSnapshotId(
-                    event.target.value ? Number(event.target.value) : null
-                  )
-                }
-                disabled={!snapshots.length}
-                className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-100"
+            <div className="form-actions form-actions--inline">
+              <button
+                onClick={parseComponentsFile}
+                disabled={componentPreviewLoading}
+                className="btn"
               >
-                <option value="">Select snapshot...</option>
-                {snapshots.map((snapshot) => (
-                  <option key={snapshot.id} value={snapshot.id}>
-                    {new Date(snapshot.created_at).toLocaleString()} (#
-                    {snapshot.id})
-                  </option>
-                ))}
-              </select>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleUndoSnapshot}
-                  disabled={
-                    snapshotActionLoading ||
-                    !selectedSnapshotId ||
-                    !snapshots.length
-                  }
-                  className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-sm"
-                >
-                  Undo
-                </button>
-                <button
-                  onClick={handleRedoSnapshot}
-                  disabled={
-                    snapshotActionLoading ||
-                    !selectedSnapshotId ||
-                    !snapshots.length
-                  }
-                  className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-sm"
-                >
-                  Redo
-                </button>
-              </div>
+                {componentPreviewLoading ? "Parsing..." : "Parse & Preview"}
+              </button>
             </div>
-            {importBatchId && (
-              <p className="mt-2 text-xs text-slate-500">
-                Batch ID: {importBatchId}
-              </p>
+          </div>
+
+          <div className="card card--form">
+            <div className="card-header">
+              <div>
+                <div className="import-step__eyebrow">Step 2</div>
+                <h3 className="import-step__title">Review & map components</h3>
+              </div>
+              <span className="import-step__status">
+                {componentStep >= 2 ? "Ready" : "Waiting"}
+              </span>
+            </div>
+
+            {componentSummary && (
+              <div className="import-summary-grid">
+                <div className="card card--success">
+                  <div className="import-summary__label">New</div>
+                  <div className="import-summary__value">
+                    {componentSummary.new}
+                  </div>
+                </div>
+                <div className="card card--info">
+                  <div className="import-summary__label">Update</div>
+                  <div className="import-summary__value">
+                    {componentSummary.update}
+                  </div>
+                </div>
+                <div className="card card--warning">
+                  <div className="import-summary__label">Invalid</div>
+                  <div className="import-summary__value">
+                    {componentSummary.invalid}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <details className="import-advanced" open={false}>
+              <summary>Templates & defaults</summary>
+              <div className="import-advanced__body">
+                <div className="form-row">
+                  <label>Component template</label>
+                  <select
+                    value={componentSelectedTemplateId}
+                    onChange={(e) =>
+                      setComponentSelectedTemplateId(
+                        e.target.value ? Number(e.target.value) : ""
+                      )
+                    }
+                    className="input"
+                  >
+                    <option value="">Select template</option>
+                    {componentTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-actions form-actions--inline">
+                  <button
+                    onClick={applyComponentTemplateToPreview}
+                    disabled={
+                      !componentPreviewRows.length ||
+                      !componentSelectedTemplateId
+                    }
+                    className="btn"
+                  >
+                    Apply template to preview
+                  </button>
+                  <button
+                    onClick={saveComponentTemplate}
+                    disabled={componentTemplateLoading || !componentColumnMapping}
+                    className="btn-secondary"
+                  >
+                    {componentTemplateLoading
+                      ? "Saving..."
+                      : "Save mapping template"}
+                  </button>
+                </div>
+
+                <div className="import-template-grid">
+                  <div className="form-row">
+                    <label>Template name</label>
+                    <input
+                      type="text"
+                      value={componentTemplateName}
+                      onChange={(e) => setComponentTemplateName(e.target.value)}
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Aircraft template</label>
+                    <input
+                      type="text"
+                      value={componentTemplateAircraftTemplate}
+                      onChange={(e) =>
+                        setComponentTemplateAircraftTemplate(e.target.value)
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Model code</label>
+                    <input
+                      type="text"
+                      value={componentTemplateModelCode}
+                      onChange={(e) => setComponentTemplateModelCode(e.target.value)}
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Operator code</label>
+                    <input
+                      type="text"
+                      value={componentTemplateOperatorCode}
+                      onChange={(e) =>
+                        setComponentTemplateOperatorCode(e.target.value)
+                      }
+                      className="input"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <label>Default values (JSON)</label>
+                  <textarea
+                    value={componentTemplateDefaultsJson}
+                    onChange={(e) =>
+                      setComponentTemplateDefaultsJson(e.target.value)
+                    }
+                    rows={4}
+                    className="input"
+                  />
+                </div>
+              </div>
+            </details>
+
+            {componentPreviewRows.length > 0 && (
+              <div className="table-wrapper import-grid">
+                <table className="table table-compact table-striped">
+                  <thead>
+                    <tr>
+                      <th>Approve</th>
+                      <th>Row</th>
+                      <th>Action</th>
+                      <th>Position</th>
+                      <th>Part Number</th>
+                      <th>Serial Number</th>
+                      <th>Existing PN/SN</th>
+                      <th>ATA</th>
+                      <th>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {componentPreviewRows.map((row, index) => {
+                      const action =
+                        row.errors.length > 0 ? "invalid" : row.action;
+                      const positionMissing = !row.data.position?.trim();
+                      const existingPart = row.existing_component?.part_number;
+                      const existingSerial =
+                        row.existing_component?.serial_number;
+                      const partDiff =
+                        existingPart &&
+                        row.data.part_number &&
+                        existingPart !== row.data.part_number;
+                      const serialDiff =
+                        existingSerial &&
+                        row.data.serial_number &&
+                        existingSerial !== row.data.serial_number;
+                      return (
+                        <tr key={`${row.row_number}-${index}`}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={row.approved}
+                              disabled={hasComponentErrors(row)}
+                              onChange={() => toggleComponentApproval(index)}
+                            />
+                          </td>
+                          <td className="table-secondary-text">
+                            {row.row_number}
+                          </td>
+                          <td>
+                            <span
+                              className={`import-badge import-badge--${action}`}
+                            >
+                              {action}
+                            </span>
+                            {row.errors.length > 0 && (
+                              <div className="import-row-warning">
+                                {row.errors.join(" ")}
+                              </div>
+                            )}
+                            {row.warnings.length > 0 && (
+                              <div className="import-row-warning import-row-warning--warn">
+                                {row.warnings.join(" ")}
+                              </div>
+                            )}
+                            {row.dedupe_suggestions &&
+                              row.dedupe_suggestions.length > 0 && (
+                                <div className="import-row-warning import-row-warning--warn">
+                                  {row.dedupe_suggestions.map(
+                                    (suggestion, idx) => (
+                                      <div
+                                        key={`${row.row_number}-dedupe-${idx}`}
+                                      >
+                                        {suggestion.source === "existing"
+                                          ? "Existing"
+                                          : "File"}{" "}
+                                        match for {suggestion.part_number}/
+                                        {suggestion.serial_number}:{" "}
+                                        {suggestion.positions.join(", ")}
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              )}
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={row.data.position ?? ""}
+                              onChange={(e) =>
+                                handleComponentPreviewRowChange(
+                                  index,
+                                  "position",
+                                  e.target.value
+                                )
+                              }
+                              className={`input input--compact ${
+                                positionMissing ? "input--error" : ""
+                              }`}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={row.data.part_number ?? ""}
+                              onChange={(e) =>
+                                handleComponentPreviewRowChange(
+                                  index,
+                                  "part_number",
+                                  e.target.value
+                                )
+                              }
+                              className={`input input--compact ${
+                                partDiff ? "input--warn" : ""
+                              }`}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={row.data.serial_number ?? ""}
+                              onChange={(e) =>
+                                handleComponentPreviewRowChange(
+                                  index,
+                                  "serial_number",
+                                  e.target.value
+                                )
+                              }
+                              className={`input input--compact ${
+                                serialDiff ? "input--warn" : ""
+                              }`}
+                            />
+                          </td>
+                          <td className="table-secondary-text">
+                            {existingPart || existingSerial ? (
+                              <div>
+                                <div>{existingPart ?? "—"}</div>
+                                <div className="table-secondary-text">
+                                  {existingSerial ?? "—"}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="table-secondary-text">—</span>
+                            )}
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={row.data.ata ?? ""}
+                              onChange={(e) =>
+                                handleComponentPreviewRowChange(
+                                  index,
+                                  "ata",
+                                  e.target.value
+                                )
+                              }
+                              className="input input--compact"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={row.data.notes ?? ""}
+                              onChange={(e) =>
+                                handleComponentPreviewRowChange(
+                                  index,
+                                  "notes",
+                                  e.target.value
+                                )
+                              }
+                              className="input input--compact"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {componentColumnMapping && (
+              <div className="form-hint">
+                Detected mapping:{" "}
+                {Object.entries(componentColumnMapping)
+                  .filter(([, value]) => value)
+                  .map(([key, value]) => `${key} → ${value}`)
+                  .join(", ")}
+              </div>
             )}
           </div>
 
-          {ocrPreview && (
-            <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs uppercase text-slate-400">
-                    OCR Preview
-                  </div>
-                  <div className="text-sm text-slate-200">
-                    {ocrPreview.file_type
-                      ? `Detected ${ocrPreview.file_type.toUpperCase()}`
-                      : "Detected OCR content"}
-                  </div>
-                </div>
-                <div className="text-sm text-slate-200">
-                  Confidence:{" "}
-                  <span className="font-semibold">
-                    {ocrPreview.confidence !== null &&
-                    ocrPreview.confidence !== undefined
-                      ? `${ocrPreview.confidence.toFixed(1)}%`
-                      : "n/a"}
-                  </span>
-                </div>
-              </div>
-
-              {ocrPreview.samples && ocrPreview.samples.length > 0 && (
-                <div className="mt-3 text-sm text-slate-300">
-                  <div className="text-xs uppercase text-slate-400">
-                    Extracted Samples
-                  </div>
-                  <ul className="mt-1 list-disc space-y-1 pl-5">
-                    {ocrPreview.samples.map((sample, index) => (
-                      <li key={`${sample}-${index}`}>{sample}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="mt-4">
-                <label className="block text-xs uppercase text-slate-400">
-                  OCR Text (edit to correct before re-parsing)
-                </label>
-                <textarea
-                  value={ocrTextDraft}
-                  onChange={(e) => setOcrTextDraft(e.target.value)}
-                  rows={6}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs"
-                />
-                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
-                  <span>
-                    Re-parsing expects CSV/TSV-style rows with a header line.
-                  </span>
-                </div>
-                <button
-                  onClick={reparseOcrText}
-                  disabled={previewLoading}
-                  className="mt-3 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50"
-                >
-                  {previewLoading ? "Re-parsing..." : "Rebuild Preview from OCR"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-4 grid gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs uppercase text-slate-400">
-                  Template
-                </label>
-                <select
-                  value={selectedTemplateId}
-                  onChange={(e) =>
-                    setSelectedTemplateId(
-                      e.target.value ? Number(e.target.value) : ""
-                    )
-                  }
-                  className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                >
-                  <option value="">Select template</option>
-                  {templates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={applyTemplateToPreview}
-                  disabled={
-                    previewMode === "server" ||
-                    !previewRows.length ||
-                    !selectedTemplateId
-                  }
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  Apply Template to Preview
-                </button>
-                <button
-                  onClick={saveMappingTemplate}
-                  disabled={templateLoading || !columnMapping}
-                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50"
-                >
-                  {templateLoading ? "Saving..." : "Save Mapping as Template"}
-                </button>
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-4">
+          <div className="card card--form">
+            <div className="card-header">
               <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Template Name
-                </label>
-                <input
-                  type="text"
-                  value={templateName}
-                  onChange={(e) => setTemplateName(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
+                <div className="import-step__eyebrow">Step 3</div>
+                <h3 className="import-step__title">Confirm component import</h3>
               </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Aircraft Template
-                </label>
-                <input
-                  type="text"
-                  value={templateAircraftTemplate}
-                  onChange={(e) => setTemplateAircraftTemplate(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Model Code
-                </label>
-                <input
-                  type="text"
-                  value={templateModelCode}
-                  onChange={(e) => setTemplateModelCode(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Operator Code
-                </label>
-                <input
-                  type="text"
-                  value={templateOperatorCode}
-                  onChange={(e) => setTemplateOperatorCode(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
+              <span className="import-step__status">
+                {componentStep >= 3 ? "Complete" : "Waiting"}
+              </span>
             </div>
-
-            <div>
-              <label className="block text-xs uppercase text-slate-400">
-                Default Values (JSON)
-              </label>
-              <textarea
-                value={templateDefaultsJson}
-                onChange={(e) => setTemplateDefaultsJson(e.target.value)}
-                rows={4}
-                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs"
-              />
-            </div>
-          </div>
-
-          {previewSummary && (
-            <div className="mt-4 grid gap-2 text-sm text-slate-200 md:grid-cols-3">
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">New</div>
-                <div className="text-lg font-semibold">
-                  {previewSummary.new}
-                </div>
-              </div>
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">Update</div>
-                <div className="text-lg font-semibold">
-                  {previewSummary.update}
-                </div>
-              </div>
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">Invalid</div>
-                <div className="text-lg font-semibold">
-                  {previewSummary.invalid}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {(previewRows.length > 0 || previewTotalRows > 0) && (
-            <div className="mt-6">
-              <div
-                className="ag-theme-alpine border border-slate-800 rounded-2xl overflow-hidden"
-                style={{ height: 560 }}
-              >
-                <AgGridReact<PreviewRow>
-                  key={previewMode}
-                  rowData={previewMode === "client" ? previewRows : undefined}
-                  columnDefs={aircraftGridColumns}
-                  defaultColDef={aircraftGridDefaultColDef}
-                  rowSelection="multiple"
-                  suppressRowClickSelection
-                  rowBuffer={12}
-                  rowModelType={
-                    previewMode === "server" ? "infinite" : "clientSide"
-                  }
-                  cacheBlockSize={200}
-                  maxBlocksInCache={5}
-                  suppressColumnVirtualisation={false}
-                  suppressRowVirtualisation={false}
-                  enableCellTextSelection
-                  enableRangeSelection
-                  getRowId={(params) => `${params.data.row_number}`}
-                  onGridReady={handlePreviewGridReady}
-                  onCellValueChanged={handleAircraftCellValueChanged}
-                />
-              </div>
-            </div>
-          )}
-
-          {columnMapping && (
-            <div className="mt-4 text-xs text-slate-400">
-              Detected mapping:{" "}
-              {Object.entries(columnMapping)
-                .filter(([, value]) => value)
-                .map(([key, value]) => `${key} → ${value}`)
-                .join(", ")}
-            </div>
-          )}
-        </section>
-
-        {/* COMPONENT IMPORT */}
-        <section className="bg-slate-900 rounded-2xl p-6 shadow">
-          <h2 className="text-lg font-semibold mb-2">
-            2. Import Components for One Aircraft
-          </h2>
-          <p className="text-sm text-slate-300 mb-4">
-            Upload CSV/Excel with component positions (e.g. L ENGINE, R ENGINE,
-            APU), part and serial numbers, installed values, etc.
-          </p>
-
-          <div className="mb-3">
-            <label className="block text-sm mb-1">
-              Aircraft Serial Number (e.g. 574, 510, 331)
-            </label>
-            <input
-              type="text"
-              value={componentAircraftSerial}
-              onChange={(e) => setComponentAircraftSerial(e.target.value)}
-              className="w-full rounded-xl px-3 py-2 bg-slate-950 border border-slate-700"
-            />
-          </div>
-
-          <input
-            type="file"
-            accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf"
-            onChange={handleComponentsFileChange}
-            className="block mb-3"
-          />
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={parseComponentsFile}
-              disabled={componentPreviewLoading}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
-            >
-              {componentPreviewLoading ? "Parsing..." : "Parse & Preview"}
-            </button>
-            <button
-              onClick={confirmComponentImport}
-              disabled={componentConfirmLoading || componentApprovedCount === 0}
-              className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50"
-            >
-              {componentConfirmLoading
-                ? "Importing..."
-                : `Confirm Import (${componentApprovedCount})`}
-            </button>
-          </div>
-
-          <div className="mt-4 grid gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs uppercase text-slate-400">
-                  Component Template
-                </label>
-                <select
-                  value={componentSelectedTemplateId}
-                  onChange={(e) =>
-                    setComponentSelectedTemplateId(
-                      e.target.value ? Number(e.target.value) : ""
-                    )
-                  }
-                  className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                >
-                  <option value="">Select template</option>
-                  {componentTemplates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={applyComponentTemplateToPreview}
-                  disabled={!componentPreviewRows.length || !componentSelectedTemplateId}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  Apply Template to Preview
-                </button>
-                <button
-                  onClick={saveComponentTemplate}
-                  disabled={componentTemplateLoading || !componentColumnMapping}
-                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50"
-                >
-                  {componentTemplateLoading
-                    ? "Saving..."
-                    : "Save Mapping as Template"}
-                </button>
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-4">
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Template Name
-                </label>
-                <input
-                  type="text"
-                  value={componentTemplateName}
-                  onChange={(e) => setComponentTemplateName(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Aircraft Template
-                </label>
-                <input
-                  type="text"
-                  value={componentTemplateAircraftTemplate}
-                  onChange={(e) =>
-                    setComponentTemplateAircraftTemplate(e.target.value)
-                  }
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Model Code
-                </label>
-                <input
-                  type="text"
-                  value={componentTemplateModelCode}
-                  onChange={(e) => setComponentTemplateModelCode(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Operator Code
-                </label>
-                <input
-                  type="text"
-                  value={componentTemplateOperatorCode}
-                  onChange={(e) =>
-                    setComponentTemplateOperatorCode(e.target.value)
-                  }
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase text-slate-400">
-                Default Values (JSON)
-              </label>
-              <textarea
-                value={componentTemplateDefaultsJson}
-                onChange={(e) =>
-                  setComponentTemplateDefaultsJson(e.target.value)
+            <div className="form-actions form-actions--inline">
+              <button
+                onClick={confirmComponentImport}
+                disabled={
+                  componentConfirmLoading || componentApprovedCount === 0
                 }
-                rows={4}
-                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs"
-              />
+                className="btn"
+              >
+                {componentConfirmLoading
+                  ? "Importing..."
+                  : `Confirm Import (${componentApprovedCount})`}
+              </button>
             </div>
           </div>
+        </div>
+      </section>
 
-          {componentSummary && (
-            <div className="mt-4 grid gap-2 text-sm text-slate-200 md:grid-cols-3">
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">New</div>
-                <div className="text-lg font-semibold">
-                  {componentSummary.new}
-                </div>
-              </div>
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">Update</div>
-                <div className="text-lg font-semibold">
-                  {componentSummary.update}
-                </div>
-              </div>
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">Invalid</div>
-                <div className="text-lg font-semibold">
-                  {componentSummary.invalid}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {componentPreviewRows.length > 0 && (
-            <div className="mt-6 overflow-x-auto border border-slate-800 rounded-2xl">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-950 text-slate-200">
-                  <tr>
-                    <th className="p-3 text-left">Approve</th>
-                    <th className="p-3 text-left">Row</th>
-                    <th className="p-3 text-left">Action</th>
-                    <th className="p-3 text-left">Position</th>
-                    <th className="p-3 text-left">Part Number</th>
-                    <th className="p-3 text-left">Serial Number</th>
-                    <th className="p-3 text-left">Existing PN/SN</th>
-                    <th className="p-3 text-left">ATA</th>
-                    <th className="p-3 text-left">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {componentPreviewRows.map((row, index) => {
-                    const action =
-                      row.errors.length > 0 ? "invalid" : row.action;
-                    const positionMissing = !row.data.position?.trim();
-                    const existingPart = row.existing_component?.part_number;
-                    const existingSerial = row.existing_component?.serial_number;
-                    const partDiff =
-                      existingPart &&
-                      row.data.part_number &&
-                      existingPart !== row.data.part_number;
-                    const serialDiff =
-                      existingSerial &&
-                      row.data.serial_number &&
-                      existingSerial !== row.data.serial_number;
-                    return (
-                      <tr
-                        key={`${row.row_number}-${index}`}
-                        className="border-t border-slate-800"
-                      >
-                        <td className="p-3">
-                          <input
-                            type="checkbox"
-                            checked={row.approved}
-                            disabled={hasComponentErrors(row)}
-                            onChange={() => toggleComponentApproval(index)}
-                          />
-                        </td>
-                        <td className="p-3 text-slate-300">{row.row_number}</td>
-                        <td className="p-3">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${
-                              action === "new"
-                                ? "bg-emerald-500/20 text-emerald-200"
-                                : action === "update"
-                                ? "bg-sky-500/20 text-sky-200"
-                                : "bg-rose-500/20 text-rose-200"
-                            }`}
-                          >
-                            {action}
-                          </span>
-                          {row.errors.length > 0 && (
-                            <div className="mt-1 text-xs text-rose-300">
-                              {row.errors.join(" ")}
-                            </div>
-                          )}
-                          {row.warnings.length > 0 && (
-                            <div className="mt-1 text-xs text-amber-200">
-                              {row.warnings.join(" ")}
-                            </div>
-                          )}
-                          {row.dedupe_suggestions &&
-                            row.dedupe_suggestions.length > 0 && (
-                              <div className="mt-1 text-xs text-amber-200">
-                                {row.dedupe_suggestions.map((suggestion, idx) => (
-                                  <div key={`${row.row_number}-dedupe-${idx}`}>
-                                    {suggestion.source === "existing"
-                                      ? "Existing"
-                                      : "File"}{" "}
-                                    match for {suggestion.part_number}/
-                                    {suggestion.serial_number}:{" "}
-                                    {suggestion.positions.join(", ")}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.position ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "position",
-                                e.target.value
-                              )
-                            }
-                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
-                              positionMissing
-                                ? "border-rose-400"
-                                : "border-slate-700"
-                            }`}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.part_number ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "part_number",
-                                e.target.value
-                              )
-                            }
-                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
-                              partDiff ? "border-amber-400" : "border-slate-700"
-                            }`}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.serial_number ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "serial_number",
-                                e.target.value
-                              )
-                            }
-                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
-                              serialDiff
-                                ? "border-amber-400"
-                                : "border-slate-700"
-                            }`}
-                          />
-                        </td>
-                        <td className="p-3 text-xs text-slate-300">
-                          {existingPart || existingSerial ? (
-                            <div>
-                              <div>{existingPart ?? "—"}</div>
-                              <div className="text-slate-400">
-                                {existingSerial ?? "—"}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-slate-500">—</span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.ata ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "ata",
-                                e.target.value
-                              )
-                            }
-                            className="w-20 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.notes ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "notes",
-                                e.target.value
-                              )
-                            }
-                            className="w-40 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {componentColumnMapping && (
-            <div className="mt-4 text-xs text-slate-400">
-              Detected mapping:{" "}
-              {Object.entries(componentColumnMapping)
-                .filter(([, value]) => value)
-                .map(([key, value]) => `${key} → ${value}`)
-                .join(", ")}
-            </div>
-          )}
-        </section>
-
-        {message && (
-          <div className="mt-4 text-sm bg-slate-900 border border-slate-700 rounded-2xl p-3">
-            {message}
-          </div>
-        )}
-      </div>
+      {message && <div className="alert">{message}</div>}
     </div>
   );
 };
