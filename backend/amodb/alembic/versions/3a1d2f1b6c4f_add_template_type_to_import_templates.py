@@ -1,7 +1,7 @@
 """Add template_type to aircraft import templates.
 
 Revision ID: 3a1d2f1b6c4f
-Revises: 70a4e360dd80
+Revises: ab12cd34ef56
 Create Date: 2025-01-12 00:00:00.000000
 """
 
@@ -12,7 +12,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "3a1d2f1b6c4f"
-down_revision: Union[str, Sequence[str], None] = "70a4e360dd80"
+down_revision: Union[str, Sequence[str], None] = "ab12cd34ef56"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
