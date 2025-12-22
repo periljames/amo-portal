@@ -139,11 +139,11 @@ const PasswordResetPage: React.FC = () => {
                 }
               >
                 <option value="email">Email</option>
-                <option value="whatsapp">WhatsApp (phone on file)</option>
-                <option value="both">Email + WhatsApp</option>
+                <option value="sms">SMS (phone on file)</option>
+                <option value="both">Email + SMS</option>
               </select>
               <div className="auth-form__hint">
-                WhatsApp is sent to the phone number stored on your profile.
+                SMS is sent to the phone number stored on your profile.
               </div>
             </div>
 

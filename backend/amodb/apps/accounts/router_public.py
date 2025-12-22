@@ -97,7 +97,7 @@ def _maybe_send_email(
     background_tasks.add_task(_send)
 
 
-def _maybe_send_whatsapp(
+def _maybe_send_sms(
     background_tasks: BackgroundTasks,
     to_phone: str | None,
     message: str,
