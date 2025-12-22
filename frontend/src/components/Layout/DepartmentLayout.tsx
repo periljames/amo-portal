@@ -210,6 +210,10 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/training");
   }, [location.pathname]);
 
+  const isAircraftImportRoute = useMemo(() => {
+    return location.pathname.includes("/aircraft-import");
+  }, [location.pathname]);
+
   const profileRef = useRef<HTMLDivElement | null>(null);
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
@@ -414,6 +418,23 @@ const DepartmentLayout: React.FC<Props> = ({
           })}
 
           <div className="sidebar__divider" />
+
+          {activeDepartment === "planning" && (
+            <button
+              type="button"
+              onClick={() =>
+                navigate(`/maintenance/${amoCode}/planning/aircraft-import`)
+              }
+              className={
+                "sidebar__item" +
+                (isAircraftImportRoute ? " sidebar__item--active" : "")
+              }
+              aria-label="Setup Aircraft"
+              title="Setup Aircraft"
+            >
+              <span className="sidebar__item-label">Setup Aircraft</span>
+            </button>
+          )}
 
           <button
             type="button"
