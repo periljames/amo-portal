@@ -1158,9 +1158,6 @@ const AircraftImportPage: React.FC = () => {
       setMessage("Select a template to apply.");
       return;
     }
-    const templateDefaults =
-      (selected.default_values ?? {}) as Partial<AircraftRowData>;
-
     setPreviewRows((prev) =>
       prev.map((row) => {
         const nextData = { ...row.data };
@@ -1178,26 +1175,9 @@ const AircraftImportPage: React.FC = () => {
           nextData.operator_code = selected.operator_code;
         }
 
-        (
-          Object.entries(defaults) as Array<
-            [AircraftRowField, AircraftRowData[AircraftRowField]]
-          >
-        ).forEach(
-          ([key, value]) => {
-            if (value === null || value === undefined) {
-              return;
-            }
-            const currentValue = nextData[key];
-            if (
-              currentValue === null ||
-              currentValue === undefined ||
-              `${currentValue}`.trim() === ""
-            ) {
-              nextData[key] = value;
-            }
-          }
-          const key = rawKey as AircraftRowField;
-          if (!(key in nextData)) {
+        (Object.keys(defaults) as AircraftRowField[]).forEach((key) => {
+          const value = defaults[key];
+          if (value === null || value === undefined) {
             return;
           }
           const currentValue = nextData[key];
@@ -1206,7 +1186,12 @@ const AircraftImportPage: React.FC = () => {
             currentValue === undefined ||
             `${currentValue}`.trim() === ""
           ) {
-            nextData[key] = value as AircraftRowData[typeof key];
+            (
+              nextData as Record<
+                AircraftRowField,
+                AircraftRowData[AircraftRowField]
+              >
+            )[key] = value;
           }
         });
 
