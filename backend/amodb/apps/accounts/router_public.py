@@ -97,7 +97,7 @@ def _maybe_send_email(
     background_tasks.add_task(_send)
 
 
-def _maybe_send_sms(
+def _maybe_send_whatsapp(
     background_tasks: BackgroundTasks,
     to_phone: str | None,
     message: str,
@@ -258,9 +258,7 @@ def request_password_reset(
         _maybe_send_email(background_tasks, getattr(user, "email", None), subject, message)
 
     if delivery in {"whatsapp", "both"}:
-        _maybe_send_whatsapp(
-            background_tasks, getattr(user, "phone", None), message
-        )
+        _maybe_send_whatsapp(background_tasks, getattr(user, "phone", None), message)
     return {
         "message": "If the account exists, a reset link will be sent.",
         "reset_link": reset_link,
