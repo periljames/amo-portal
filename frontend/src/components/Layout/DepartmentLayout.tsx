@@ -264,6 +264,10 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/aircraft-import");
   }, [location.pathname]);
 
+  const isQmsRoute = useMemo(() => {
+    return location.pathname.includes("/qms");
+  }, [location.pathname]);
+
   const profileRef = useRef<HTMLDivElement | null>(null);
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
@@ -516,6 +520,20 @@ const DepartmentLayout: React.FC<Props> = ({
               title="My Training"
             >
               <span className="sidebar__item-label">My Training</span>
+            </button>
+          )}
+
+          {!isAdminArea && activeDepartment === "quality" && (
+            <button
+              type="button"
+              onClick={() => navigate(`/maintenance/${amoCode}/quality/qms`)}
+              className={
+                "sidebar__item" + (isQmsRoute ? " sidebar__item--active" : "")
+              }
+              aria-label="Quality Management System"
+              title="Quality Management System"
+            >
+              <span className="sidebar__item-label">QMS Overview</span>
             </button>
           )}
         </nav>

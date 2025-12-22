@@ -121,6 +121,7 @@ const DashboardPage: React.FC = () => {
 
   const isCRSDept = department === "planning" || department === "production";
   const isSystemAdminDept = department === "admin";
+  const isQualityDept = department === "quality";
 
   const canManageUsers =
     !!currentUser &&
@@ -135,6 +136,10 @@ const DashboardPage: React.FC = () => {
 
   const handleCreateUser = () => {
     navigate(`/maintenance/${amoSlug}/admin/users/new`);
+  };
+
+  const handleOpenQms = () => {
+    navigate(`/maintenance/${amoSlug}/${department}/qms`);
   };
 
   return (
@@ -191,6 +196,23 @@ const DashboardPage: React.FC = () => {
               contact Quality or the AMO System Administrator.
             </p>
           )}
+        </section>
+      )}
+
+      {isQualityDept && (
+        <section className="page-section">
+          <h2 className="page-section__title">Quality Management System</h2>
+          <p className="page-section__body">
+            Review QMS documents, audits, change requests, and distribution
+            activity for {niceLabel(department)}.
+          </p>
+          <button
+            type="button"
+            className="primary-chip-btn"
+            onClick={handleOpenQms}
+          >
+            Open QMS overview
+          </button>
         </section>
       )}
 
