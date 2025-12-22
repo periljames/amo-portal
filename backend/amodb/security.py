@@ -233,6 +233,9 @@ def require_admin(
     ):
         return current_user
 
+    if current_user.role == AccountRole.AMO_ADMIN:
+        return current_user
+
     if current_user.role in {
         AccountRole.QUALITY_MANAGER,
         AccountRole.SAFETY_MANAGER,

@@ -19,6 +19,8 @@ const AdminOverviewPage: React.FC = () => {
   const isSuperuser = !!currentUser?.is_superuser;
   const isAmoAdmin = !!currentUser?.is_amo_admin;
   const canAccessAdmin = isSuperuser || isAmoAdmin;
+  const canManageAmos = isSuperuser;
+  const canAccessBilling = isSuperuser;
 
   useEffect(() => {
     if (!currentUser) return;
@@ -57,24 +59,26 @@ const AdminOverviewPage: React.FC = () => {
 
       <section className="page-section page-layout">
         <div className="page-section__grid">
-          <div className="card card--info">
-            <div className="card-header">
-              <strong>AMO Management</strong>
+          {canManageAmos && (
+            <div className="card card--info">
+              <div className="card-header">
+                <strong>AMO Management</strong>
+              </div>
+              <p className="page-section__body">
+                Register new AMOs, set active AMO context, and jump into an AMO
+                dashboard.
+              </p>
+              <div className="page-section__actions" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}
+                >
+                  Manage AMOs
+                </button>
+              </div>
             </div>
-            <p className="page-section__body">
-              Register new AMOs, set active AMO context, and jump into an AMO
-              dashboard.
-            </p>
-            <div className="page-section__actions" style={{ marginTop: 12 }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}
-              >
-                Manage AMOs
-              </button>
-            </div>
-          </div>
+          )}
 
           <div className="card card--success">
             <div className="card-header">
@@ -125,25 +129,27 @@ const AdminOverviewPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="card">
-            <div className="card-header">
-              <strong>Billing & Usage</strong>
+          {canAccessBilling && (
+            <div className="card">
+              <div className="card-header">
+                <strong>Billing & Usage</strong>
+              </div>
+              <p className="page-section__body">
+                Track usage, subscriptions, and billing activity across all AMOs.
+              </p>
+              <div className="page-section__actions" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() =>
+                    navigate(`/maintenance/${amoCode}/admin/billing`)
+                  }
+                >
+                  View Billing
+                </button>
+              </div>
             </div>
-            <p className="page-section__body">
-              Track usage, subscriptions, and billing activity across all AMOs.
-            </p>
-            <div className="page-section__actions" style={{ marginTop: 12 }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/admin/billing`)
-                }
-              >
-                View Billing
-              </button>
-            </div>
-          </div>
+          )}
         </div>
       </section>
     </DepartmentLayout>

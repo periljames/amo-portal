@@ -1565,7 +1565,8 @@ def delete_import_template(
     response_model=schemas.AircraftImportPreviewResponse,
 )
 async def preview_aircraft_import(
-    file: UploadFile = File(...),
+    files: List[UploadFile] | None = File(None),
+    file: UploadFile | None = File(None),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(
         require_roles(*MANAGEMENT_ROLES)
@@ -1585,40 +1586,87 @@ async def preview_aircraft_import(
             detail="pandas is required for import. Install with 'pip install pandas openpyxl'.",
         )
 
-    content = await file.read()
-    buffer = BytesIO(content)
-    file_type = ocr_service.detect_file_type(content, file.filename)
-    ocr_info: Dict[str, Any] | None = None
-
-    ext = Path(file.filename).suffix.lower()
-    if file_type == "csv":
-        df = pd.read_csv(buffer)
-    elif file_type == "excel" and ext in [".xlsx", ".xlsm", ".xls"]:
-        df = pd.read_excel(buffer)
-    elif file_type in ["pdf", "image"]:
-        try:
-            ocr_table = ocr_service.extract_table_from_bytes(content, file_type)
-        except ocr_service.OCRDependencyError as exc:  # pragma: no cover
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        df = pd.DataFrame(ocr_table.rows, columns=ocr_table.headers)
-        ocr_info = {
-            "confidence": ocr_table.confidence,
-            "samples": ocr_table.samples,
-            "text": ocr_table.text,
-            "file_type": file_type,
-        }
-    else:
+    uploads = files or ([file] if file else [])
+    if not uploads:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Unsupported file type. Upload CSV, XLSX, XLSM, XLS, PDF, or an image."
-            ),
+            detail="No files uploaded. Upload up to 10 CSV/Excel/PDF/image files.",
+        )
+    if len(uploads) > 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload up to 10 files at a time.",
         )
 
-    if df.empty:
-        raise HTTPException(status_code=400, detail="Uploaded file contains no data.")
+    ocr_infos: List[Dict[str, Any]] = []
+    dataframes: List[Any] = []
+    base_columns: List[str] | None = None
+    single_file_type: str | None = None
+    single_ext: str | None = None
+    single_content: bytes | None = None
 
-    colmap = _map_aircraft_columns(list(df.columns))
+    for upload in uploads:
+        content = await upload.read()
+        buffer = BytesIO(content)
+        file_type = ocr_service.detect_file_type(content, upload.filename)
+        ext = Path(upload.filename or "").suffix.lower()
+        ocr_info: Dict[str, Any] | None = None
+
+        if file_type == "csv":
+            df = pd.read_csv(buffer)
+        elif file_type == "excel" and ext in [".xlsx", ".xlsm", ".xls"]:
+            df = pd.read_excel(buffer)
+        elif file_type in ["pdf", "image"]:
+            try:
+                ocr_table = ocr_service.extract_table_from_bytes(content, file_type)
+            except ocr_service.OCRDependencyError as exc:  # pragma: no cover
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            df = pd.DataFrame(ocr_table.rows, columns=ocr_table.headers)
+            ocr_info = {
+                "confidence": ocr_table.confidence,
+                "samples": ocr_table.samples,
+                "text": ocr_table.text,
+                "file_type": file_type,
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Unsupported file type. Upload CSV, XLSX, XLSM, XLS, PDF, or an image."
+                ),
+            )
+
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Uploaded file '{upload.filename}' contains no data.",
+            )
+
+        columns = list(df.columns)
+        if base_columns is None:
+            base_columns = columns
+        elif columns != base_columns:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "All uploaded files must use identical column headers. "
+                    f"File '{upload.filename}' does not match the first file."
+                ),
+            )
+
+        dataframes.append(df)
+        if ocr_info:
+            ocr_infos.append(ocr_info)
+
+        if len(uploads) == 1:
+            single_file_type = file_type
+            single_ext = ext
+            single_content = content
+
+    df = pd.concat(dataframes, ignore_index=True)
+    colmap = _map_aircraft_columns(base_columns or list(df.columns))
     if not colmap["serial_number"] or not colmap["registration"]:
         raise HTTPException(
             status_code=400,
@@ -1632,7 +1680,12 @@ async def preview_aircraft_import(
     formula_discrepancies: List[Dict[str, Any]] = []
     row_formula_proposals: Dict[int, List[Dict[str, Any]]] = {}
 
-    if file_type == "excel" and ext in [".xlsx", ".xlsm", ".xls"]:
+    if (
+        len(uploads) == 1
+        and single_file_type == "excel"
+        and single_ext in [".xlsx", ".xlsm", ".xls"]
+        and single_content
+    ):
         openpyxl_spec = importlib.util.find_spec("openpyxl")
         if not openpyxl_spec:
             raise HTTPException(
@@ -1640,13 +1693,17 @@ async def preview_aircraft_import(
                 detail="openpyxl is required for Excel formula checks.",
             )
         openpyxl = importlib.import_module("openpyxl")
-        workbook = openpyxl.load_workbook(BytesIO(content), data_only=False)
+        workbook = openpyxl.load_workbook(
+            BytesIO(single_content), data_only=False
+        )
         sheet = workbook.active
         recalc_df = None
         evaluator = None
 
         try:
-            recalc_content = _recalculate_excel_with_libreoffice(content, ext)
+            recalc_content = _recalculate_excel_with_libreoffice(
+                single_content, single_ext
+            )
             recalc_df = pd.read_excel(BytesIO(recalc_content))
         except Exception:
             xlcalculator_spec = importlib.util.find_spec("xlcalculator")
@@ -1654,8 +1711,8 @@ async def preview_aircraft_import(
                 xlcalculator = importlib.import_module("xlcalculator")
                 compiler = xlcalculator.ModelCompiler()
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    input_path = Path(tmpdir) / f"input{ext}"
-                    input_path.write_bytes(content)
+                    input_path = Path(tmpdir) / f"input{single_ext}"
+                    input_path.write_bytes(single_content)
                     model = compiler.read_and_parse_archive(str(input_path))
                 evaluator = xlcalculator.Evaluator(model)
 
@@ -1795,6 +1852,7 @@ async def preview_aircraft_import(
         row["action"] = action
 
     preview_id = str(uuid4())
+    ocr_info = ocr_infos[0] if len(uploads) == 1 and ocr_infos else None
     session = models.AircraftImportPreviewSession(
         preview_id=preview_id,
         import_type="aircraft",
@@ -2199,7 +2257,8 @@ def reapply_import_snapshot(
 )
 async def preview_components_import(
     serial_number: str,
-    file: UploadFile = File(...),
+    files: List[UploadFile] | None = File(None),
+    file: UploadFile | None = File(None),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(
         require_roles(*MANAGEMENT_ROLES)
@@ -2223,29 +2282,69 @@ async def preview_components_import(
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
-    ext = Path(file.filename).suffix.lower()
-    content = await file.read()
-    buffer = BytesIO(content)
-
-    if ext in [".csv", ".txt"]:
-        df = pd.read_csv(buffer)
-    elif ext in [".xlsx", ".xlsm", ".xls"]:
-        df = pd.read_excel(buffer)
-    elif ext == ".pdf":
-        raise HTTPException(
-            status_code=501,
-            detail="PDF ingestion for components not yet implemented. Use CSV/Excel for now.",
-        )
-    else:
+    uploads = files or ([file] if file else [])
+    if not uploads:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{ext}'. Upload CSV, XLSX, XLSM or XLS.",
+            detail="No files uploaded. Upload up to 10 CSV/Excel files.",
+        )
+    if len(uploads) > 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload up to 10 files at a time.",
         )
 
-    if df.empty:
-        raise HTTPException(status_code=400, detail="Uploaded file contains no data.")
+    dataframes: List[Any] = []
+    base_columns: List[str] | None = None
 
-    colmap = _map_component_columns(list(df.columns))
+    for upload in uploads:
+        ext = Path(upload.filename or "").suffix.lower()
+        content = await upload.read()
+        buffer = BytesIO(content)
+
+        if ext in [".csv", ".txt"]:
+            df = pd.read_csv(buffer)
+        elif ext in [".xlsx", ".xlsm", ".xls"]:
+            df = pd.read_excel(buffer)
+        elif ext == ".pdf":
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "PDF ingestion for components not yet implemented. "
+                    "Use CSV/Excel for now."
+                ),
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported file type '{ext}'. Upload CSV, XLSX, XLSM or XLS."
+                ),
+            )
+
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Uploaded file '{upload.filename}' contains no data.",
+            )
+
+        columns = list(df.columns)
+        if base_columns is None:
+            base_columns = columns
+        elif columns != base_columns:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "All uploaded files must use identical column headers. "
+                    f"File '{upload.filename}' does not match the first file."
+                ),
+            )
+
+        dataframes.append(df)
+
+    df = pd.concat(dataframes, ignore_index=True)
+
+    colmap = _map_component_columns(base_columns or list(df.columns))
     if not colmap["position"]:
         raise HTTPException(
             status_code=400,
