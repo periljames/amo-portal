@@ -1158,6 +1158,9 @@ const AircraftImportPage: React.FC = () => {
       setMessage("Select a template to apply.");
       return;
     }
+    const templateDefaults =
+      (selected.default_values ?? {}) as Partial<AircraftRowData>;
+
     setPreviewRows((prev) =>
       prev.map((row) => {
         const nextData = { ...row.data };
