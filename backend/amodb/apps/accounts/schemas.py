@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, date
-from typing import Optional
+from typing import Optional, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -343,6 +343,7 @@ class LoginRequest(BaseModel):
 class PasswordResetRequest(BaseModel):
     amo_slug: str
     email: EmailStr
+    delivery_method: Literal["email", "sms", "both"] = "email"
 
 
 class PasswordResetConfirm(BaseModel):

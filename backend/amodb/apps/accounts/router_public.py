@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
+import urllib.request
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -49,6 +51,87 @@ def _build_reset_link(*, amo_slug: str, token: str) -> str | None:
     base = RESET_LINK_BASE_URL.rstrip("/")
     query = urlencode({"token": token, "amo": amo_slug})
     return f"{base}/reset-password?{query}"
+
+
+def _maybe_send_email(
+    background_tasks: BackgroundTasks,
+    to_email: str | None,
+    subject: str,
+    body: str,
+) -> None:
+    """
+    Optional email hook (safe-by-default).
+    If SMTP env vars are not set, this does nothing.
+
+    Env expected:
+      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+    """
+    if not to_email or not isinstance(to_email, str) or "@" not in to_email:
+        return
+
+    host = os.getenv("SMTP_HOST")
+    port = os.getenv("SMTP_PORT")
+    user = os.getenv("SMTP_USER")
+    pwd = os.getenv("SMTP_PASS")
+    sender = os.getenv("SMTP_FROM")
+
+    if not (host and port and sender):
+        return
+
+    def _send() -> None:
+        import smtplib
+        from email.message import EmailMessage
+
+        msg = EmailMessage()
+        msg["From"] = sender
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.set_content(body)
+
+        with smtplib.SMTP(host, int(port)) as s:
+            s.starttls()
+            if user and pwd:
+                s.login(user, pwd)
+            s.send_message(msg)
+
+    background_tasks.add_task(_send)
+
+
+def _maybe_send_sms(
+    background_tasks: BackgroundTasks,
+    to_phone: str | None,
+    message: str,
+) -> None:
+    """
+    Optional SMS hook (safe-by-default).
+    If SMS_WEBHOOK_URL is not set, this does nothing.
+
+    Env expected:
+      SMS_WEBHOOK_URL
+      SMS_WEBHOOK_BEARER (optional)
+    """
+    if not to_phone or not isinstance(to_phone, str):
+        return
+
+    url = os.getenv("SMS_WEBHOOK_URL")
+    if not url:
+        return
+
+    token = os.getenv("SMS_WEBHOOK_BEARER")
+
+    def _send() -> None:
+        payload = json.dumps({"to": to_phone, "message": message}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+
+    background_tasks.add_task(_send)
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +206,7 @@ def login(
 def request_password_reset(
     payload: schemas.PasswordResetRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
@@ -144,7 +228,7 @@ def request_password_reset(
     )
 
     if not amo:
-        return {"message": "If the account exists, a reset email will be sent."}
+        return {"message": "If the account exists, a reset link will be sent."}
 
     user = services.get_active_user_by_email(
         db=db,
@@ -152,7 +236,7 @@ def request_password_reset(
         email=payload.email,
     )
     if not user:
-        return {"message": "If the account exists, a reset email will be sent."}
+        return {"message": "If the account exists, a reset link will be sent."}
 
     raw_token = services.create_password_reset_token(
         db=db,
@@ -162,8 +246,21 @@ def request_password_reset(
     )
 
     reset_link = _build_reset_link(amo_slug=payload.amo_slug, token=raw_token)
+    delivery = payload.delivery_method
+    subject = "Reset your AMO Portal password"
+    message = (
+        f"Use this link to reset your password: {reset_link}"
+        if reset_link
+        else f"Use this reset token to set a new password: {raw_token}"
+    )
+
+    if delivery in {"email", "both"}:
+        _maybe_send_email(background_tasks, getattr(user, "email", None), subject, message)
+
+    if delivery in {"sms", "both"}:
+        _maybe_send_sms(background_tasks, getattr(user, "phone", None), message)
     return {
-        "message": "If the account exists, a reset email will be sent.",
+        "message": "If the account exists, a reset link will be sent.",
         "reset_link": reset_link,
     }
 

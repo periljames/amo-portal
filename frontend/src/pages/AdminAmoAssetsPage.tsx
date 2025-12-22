@@ -23,7 +23,7 @@ const AdminAmoAssetsPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
 
-  const currentUser = getCachedUser();
+  const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
 
   const isSuperuser = !!currentUser?.is_superuser;
@@ -209,7 +209,10 @@ const AdminAmoAssetsPage: React.FC = () => {
     : "No template uploaded";
 
   return (
-    <DepartmentLayout amoCode={amoCode ?? "UNKNOWN"} activeDepartment="admin">
+    <DepartmentLayout
+      amoCode={amoCode ?? "UNKNOWN"}
+      activeDepartment="admin-assets"
+    >
       <header className="page-header">
         <h1 className="page-header__title">CRS Assets Setup</h1>
         <p className="page-header__subtitle">

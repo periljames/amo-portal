@@ -8,6 +8,7 @@ import Button from "../components/UI/Button";
 import {
   confirmPasswordReset,
   requestPasswordReset,
+  type PasswordResetDeliveryMethod,
   type PasswordResetResponse,
 } from "../services/auth";
 
@@ -19,6 +20,8 @@ const PasswordResetPage: React.FC = () => {
   const amoSlug = (params.get("amo") || "").trim();
 
   const [email, setEmail] = useState("");
+  const [deliveryMethod, setDeliveryMethod] =
+    useState<PasswordResetDeliveryMethod>("email");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,11 +44,13 @@ const PasswordResetPage: React.FC = () => {
 
     try {
       setLoading(true);
-      const response = await requestPasswordReset(amoSlug || "root", email);
-      setResetInfo(response);
-      setSuccessMsg(
-        "If the account exists, a password reset link has been prepared."
+      const response = await requestPasswordReset(
+        amoSlug || "root",
+        email,
+        deliveryMethod
       );
+      setResetInfo(response);
+      setSuccessMsg(response.message);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not request reset.";
       setErrorMsg(msg);
@@ -122,6 +127,25 @@ const PasswordResetPage: React.FC = () => {
               name="email"
               required
             />
+
+            <div className="auth-form__field">
+              <label htmlFor="deliveryMethod">Send reset link via</label>
+              <select
+                id="deliveryMethod"
+                name="deliveryMethod"
+                value={deliveryMethod}
+                onChange={(e) =>
+                  setDeliveryMethod(e.target.value as PasswordResetDeliveryMethod)
+                }
+              >
+                <option value="email">Email</option>
+                <option value="sms">SMS (phone on file)</option>
+                <option value="both">Email + SMS</option>
+              </select>
+              <div className="auth-form__hint">
+                SMS is sent to the phone number stored on your profile.
+              </div>
+            </div>
 
             {resetInfo?.reset_link && (
               <div className="auth-form__hint" style={{ marginBottom: 12 }}>
