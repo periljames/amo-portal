@@ -13,6 +13,11 @@ from amodb.database import get_db
 
 from . import models
 from .schemas import (
+    CARActionCreate,
+    CARActionOut,
+    CARCreate,
+    CAROut,
+    CARUpdate,
     QMSDashboardOut,
     QMSDocumentCreate, QMSDocumentUpdate, QMSDocumentOut,
     QMSDocumentRevisionCreate, QMSDocumentRevisionOut, QMSPublishRevision,
@@ -22,8 +27,14 @@ from .schemas import (
     QMSFindingCreate, QMSFindingOut,
     QMSCAPUpsert, QMSCAPOut,
 )
-from .enums import QMSDomain, QMSAuditStatus
-from .service import get_dashboard, normalize_finding_level, compute_target_close_date
+from .enums import CARStatus, QMSDomain, QMSAuditStatus
+from .service import (
+    add_car_action,
+    compute_target_close_date,
+    create_car,
+    get_dashboard,
+    normalize_finding_level,
+)
 
 router = APIRouter(prefix="/quality", tags=["Quality / QMS"])
 
@@ -425,3 +436,132 @@ def upsert_cap(finding_id: UUID, payload: QMSCAPUpsert, db: Session = Depends(ge
     db.commit()
     db.refresh(cap)
     return cap
+
+
+# -----------------------------
+# Corrective Action Requests (CAR)
+# -----------------------------
+
+
+@router.post("/cars", response_model=CAROut, status_code=status.HTTP_201_CREATED)
+def create_car_request(payload: CARCreate, db: Session = Depends(get_db)):
+    car = create_car(
+        db=db,
+        program=payload.program,
+        title=payload.title.strip(),
+        summary=payload.summary.strip(),
+        priority=payload.priority,
+        requested_by_user_id=get_actor(),
+        assigned_to_user_id=payload.assigned_to_user_id,
+        due_date=payload.due_date,
+        target_closure_date=payload.target_closure_date,
+        finding_id=payload.finding_id,
+    )
+    db.commit()
+    db.refresh(car)
+    return car
+
+
+@router.get("/cars", response_model=List[CAROut])
+def list_cars(
+    db: Session = Depends(get_db),
+    program: Optional[models.CARProgram] = None,
+    status_: Optional[models.CARStatus] = None,
+    assigned_to_user_id: Optional[str] = None,
+):
+    qs = db.query(models.CorrectiveActionRequest)
+    if program:
+        qs = qs.filter(models.CorrectiveActionRequest.program == program)
+    if status_:
+        qs = qs.filter(models.CorrectiveActionRequest.status == status_)
+    if assigned_to_user_id:
+        qs = qs.filter(models.CorrectiveActionRequest.assigned_to_user_id == assigned_to_user_id)
+    return qs.order_by(models.CorrectiveActionRequest.created_at.desc()).all()
+
+
+@router.patch("/cars/{car_id}", response_model=CAROut)
+def update_car(car_id: UUID, payload: CARUpdate, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+
+    changed_status = False
+    for field in (
+        "title",
+        "summary",
+        "priority",
+        "status",
+        "due_date",
+        "target_closure_date",
+        "assigned_to_user_id",
+        "closed_at",
+    ):
+        val = getattr(payload, field)
+        if val is not None:
+            setattr(car, field, val)
+            if field == "status":
+                changed_status = True
+
+    if changed_status:
+        add_car_action(
+            db=db,
+            car=car,
+            action_type=models.CARActionType.STATUS_CHANGE,
+            message=f"Status changed to {car.status}",
+            actor_user_id=get_actor(),
+        )
+
+    db.commit()
+    db.refresh(car)
+    return car
+
+
+@router.post("/cars/{car_id}/escalate", response_model=CAROut)
+def escalate_car(car_id: UUID, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+
+    car.status = models.CARStatus.ESCALATED
+    car.escalated_at = func.now()
+    add_car_action(
+        db=db,
+        car=car,
+        action_type=models.CARActionType.ESCALATION,
+        message="Escalated due to inactivity or overdue status",
+        actor_user_id=get_actor(),
+    )
+    db.commit()
+    db.refresh(car)
+    return car
+
+
+@router.post("/cars/{car_id}/actions", response_model=CARActionOut, status_code=status.HTTP_201_CREATED)
+def add_car_action_log(car_id: UUID, payload: CARActionCreate, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+
+    log = add_car_action(
+        db=db,
+        car=car,
+        action_type=payload.action_type,
+        message=payload.message.strip(),
+        actor_user_id=get_actor(),
+    )
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+@router.get("/cars/{car_id}/actions", response_model=List[CARActionOut])
+def list_car_actions(car_id: UUID, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    return (
+        db.query(models.CARActionLog)
+        .filter(models.CARActionLog.car_id == car_id)
+        .order_by(models.CARActionLog.created_at.desc())
+        .all()
+    )

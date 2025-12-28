@@ -8,6 +8,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import (
+    CARActionType,
+    CARPriority,
+    CARProgram,
+    CARStatus,
     QMSDomain,
     QMSDocType,
     QMSDocStatus,
@@ -360,3 +364,67 @@ class QMSDashboardOut(BaseModel):
     findings_open_level_3: int
 
     findings_overdue_total: int
+
+
+# -----------------------------
+# Corrective Action Requests (CAR)
+# -----------------------------
+
+
+class CARCreate(BaseModel):
+    program: CARProgram = CARProgram.QUALITY
+    title: str = Field(min_length=1, max_length=255)
+    summary: str = Field(min_length=1)
+    priority: CARPriority = CARPriority.MEDIUM
+    due_date: Optional[date] = None
+    target_closure_date: Optional[date] = None
+    assigned_to_user_id: Optional[str] = None
+    finding_id: Optional[UUID] = None
+
+
+class CARUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=255)
+    summary: Optional[str] = None
+    priority: Optional[CARPriority] = None
+    status: Optional[CARStatus] = None
+    due_date: Optional[date] = None
+    target_closure_date: Optional[date] = None
+    assigned_to_user_id: Optional[str] = None
+    closed_at: Optional[datetime] = None
+
+
+class CAROut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    program: CARProgram
+    car_number: str
+    title: str
+    summary: str
+    priority: CARPriority
+    status: CARStatus
+    due_date: Optional[date]
+    target_closure_date: Optional[date]
+    closed_at: Optional[datetime]
+    escalated_at: Optional[datetime]
+    finding_id: Optional[UUID]
+    requested_by_user_id: Optional[str]
+    assigned_to_user_id: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class CARActionCreate(BaseModel):
+    action_type: CARActionType = CARActionType.COMMENT
+    message: str = Field(min_length=1)
+
+
+class CARActionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    car_id: UUID
+    action_type: CARActionType
+    message: str
+    actor_user_id: Optional[str]
+    created_at: datetime
