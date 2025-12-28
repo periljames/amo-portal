@@ -27,6 +27,7 @@ from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts.models import AccountRole, User  # type: ignore
 
 from . import models, schemas
+from amodb.apps.fleet import services as fleet_services
 
 # ---------------------------------------------------------------------------
 # Router
@@ -51,6 +52,36 @@ ENGINEERING_ROLES = {
     AccountRole.CERTIFYING_TECHNICIAN,
     AccountRole.TECHNICIAN,
 }
+
+
+def _ensure_aircraft_documents_clear(db: Session, aircraft_serial_number: str) -> None:
+    """
+    Block work when mandatory aircraft documents (e.g., C of A) are due or missing evidence,
+    unless Quality has an active override.
+    """
+    blockers = fleet_services.get_blocking_documents(db, aircraft_serial_number)
+    if not blockers:
+        return
+
+    details = []
+    for doc, evaluation in blockers:
+        msg_parts = [
+            doc.document_type.value.replace("_", " ").title(),
+            evaluation.status.value,
+        ]
+        if evaluation.days_to_expiry is not None:
+            msg_parts.append(f"{evaluation.days_to_expiry} days to expiry")
+        if evaluation.missing_evidence:
+            msg_parts.append("evidence missing")
+        details.append(" - ".join(msg_parts))
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "Work is blocked until required aircraft documents are renewed and uploaded. "
+            f"Outstanding: {', '.join(details)}. Quality may override with a recorded reason."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +181,8 @@ def create_work_order(
             detail=f"Work order {payload.wo_number} already exists.",
         )
 
+    _ensure_aircraft_documents_clear(db, payload.aircraft_serial_number)
+
     wo = models.WorkOrder(
         wo_number=payload.wo_number,
         aircraft_serial_number=payload.aircraft_serial_number,
@@ -235,6 +268,12 @@ def update_work_order(
         raise HTTPException(status_code=404, detail="Work order not found")
 
     data = payload.model_dump(exclude_unset=True)
+    new_status = data.get("status")
+    if new_status in {
+        models.WorkOrderStatusEnum.OPEN,
+        models.WorkOrderStatusEnum.IN_PROGRESS,
+    }:
+        _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number)
     # updated_at optimistic concurrency could be added here later if needed
     for field, value in data.items():
         setattr(wo, field, value)
@@ -343,6 +382,8 @@ def create_task(
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
 
+    _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number)
+
     is_planning = (
         current_user.is_superuser
         or current_user.role in PLANNING_ROLES
@@ -447,6 +488,10 @@ def update_task(
             status_code=status.HTTP_409_CONFLICT,
             detail="Task card has been modified by another user.",
         )
+
+    incoming_status = data.get("status")
+    if incoming_status == models.TaskStatusEnum.IN_PROGRESS:
+        _ensure_aircraft_documents_clear(db, task.aircraft_serial_number)
 
     if is_planning:
         # Full update allowed

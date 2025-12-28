@@ -1,9 +1,10 @@
 // src/pages/DashboardPage.tsx
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext, getCachedUser } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
+import { AircraftDocument, listDocumentAlerts } from "../services/fleet";
 
 type DepartmentId =
   | "planning"
@@ -51,6 +52,9 @@ const DashboardPage: React.FC = () => {
 
   const currentUser = getCachedUser();
   const isAdmin = isAdminUser(currentUser);
+  const [docAlerts, setDocAlerts] = useState<AircraftDocument[] | null>(null);
+  const [docAlertsError, setDocAlertsError] = useState<string | null>(null);
+  const [docAlertsLoading, setDocAlertsLoading] = useState(false);
 
   // For normal users, this MUST be their assigned department (server-driven context).
   // We also fall back to cached user.department_id if you ever store codes there.
@@ -122,6 +126,10 @@ const DashboardPage: React.FC = () => {
   const isCRSDept = department === "planning" || department === "production";
   const isSystemAdminDept = department === "admin";
   const isQualityDept = department === "quality";
+  const shouldShowComplianceAlerts =
+    department === "planning" ||
+    department === "production" ||
+    department === "quality";
 
   const canManageUsers =
     !!currentUser &&
@@ -141,6 +149,22 @@ const DashboardPage: React.FC = () => {
   const handleOpenQms = () => {
     navigate(`/maintenance/${amoSlug}/${department}/qms`);
   };
+
+  useEffect(() => {
+    if (!shouldShowComplianceAlerts) {
+      setDocAlerts(null);
+      return;
+    }
+
+    setDocAlertsLoading(true);
+    setDocAlertsError(null);
+    listDocumentAlerts({ due_within_days: 45 })
+      .then((alerts) => setDocAlerts(alerts))
+      .catch((err) => {
+        setDocAlertsError(err?.message || "Could not load document alerts.");
+      })
+      .finally(() => setDocAlertsLoading(false));
+  }, [department, shouldShowComplianceAlerts]);
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
@@ -195,6 +219,58 @@ const DashboardPage: React.FC = () => {
               the required system privileges to manage user accounts. Please
               contact Quality or the AMO System Administrator.
             </p>
+          )}
+        </section>
+      )}
+
+      {shouldShowComplianceAlerts && (
+        <section className="page-section">
+          <h2 className="page-section__title">Airworthiness document alerts</h2>
+          <p className="page-section__body">
+            Planning, Production, and Quality are notified when documents like C
+            of A, ARC, or radio licenses are due or missing. Work on an affected
+            aircraft is blocked until updated evidence is uploaded (Quality can
+            override with a recorded reason).
+          </p>
+
+          {docAlertsLoading && (
+            <p className="page-section__body">Loading document alerts…</p>
+          )}
+          {docAlertsError && (
+            <p className="page-section__body error-text">{docAlertsError}</p>
+          )}
+          {!docAlertsLoading && !docAlertsError && (
+            <>
+              {(docAlerts?.length || 0) === 0 ? (
+                <p className="page-section__body">
+                  No document alerts found in the next 45 days.
+                </p>
+              ) : (
+                <ul className="card-list">
+                  {docAlerts?.map((alert) => (
+                    <li className="card card--border" key={alert.id}>
+                      <h3 className="card__title">
+                        {alert.document_type.replace(/_/g, " ")} ·{" "}
+                        {alert.aircraft_serial_number}
+                      </h3>
+                      <p className="card__subtitle">
+                        Authority: {alert.authority} · Status: {alert.status}
+                      </p>
+                      <p className="card__body">
+                        {alert.expires_on
+                          ? `Expires on ${alert.expires_on}${
+                              alert.days_to_expiry !== null
+                                ? ` (${alert.days_to_expiry} days)`
+                                : ""
+                            }`
+                          : "Expiry not recorded"}
+                        {alert.missing_evidence && " · Evidence missing"}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
         </section>
       )}

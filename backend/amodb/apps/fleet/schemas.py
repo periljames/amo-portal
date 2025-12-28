@@ -16,7 +16,12 @@ from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from .models import MaintenanceProgramCategoryEnum
+from amodb.apps.accounts.models import RegulatoryAuthority
+from .models import (
+    MaintenanceProgramCategoryEnum,
+    AircraftDocumentStatus,
+    AircraftDocumentType,
+)
 
 MIN_VALID_DATE = DateType(1950, 1, 1)
 MAX_HOURS = 1_000_000.0
@@ -145,6 +150,102 @@ class AircraftRead(AircraftBase):
 
     class Config:
         from_attributes = True
+
+
+# ---------------- AIRCRAFT DOCUMENTS ----------------
+
+
+class AircraftDocumentBase(BaseModel):
+    document_type: AircraftDocumentType
+    authority: RegulatoryAuthority = RegulatoryAuthority.KCAA
+    title: Optional[str] = None
+    reference_number: Optional[str] = None
+    compliance_basis: Optional[str] = None
+    issued_on: Optional[DateType] = None
+    expires_on: Optional[DateType] = None
+    alert_window_days: int = Field(default=30, ge=0, le=365)
+
+    @field_validator("issued_on", "expires_on")
+    @classmethod
+    def validate_dates(cls, value: Optional[DateType]) -> Optional[DateType]:
+        if value is None:
+            return value
+        if value < MIN_VALID_DATE:
+            raise ValueError("Date is earlier than allowed.")
+        return value
+
+    @field_validator("expires_on")
+    @classmethod
+    def validate_expiry_after_issue(
+        cls, value: Optional[DateType], values: Dict[str, Any]
+    ) -> Optional[DateType]:
+        issued_on = values.get("issued_on")
+        if value and issued_on and value < issued_on:
+            raise ValueError("expires_on cannot be earlier than issued_on.")
+        return value
+
+
+class AircraftDocumentCreate(AircraftDocumentBase):
+    pass
+
+
+class AircraftDocumentUpdate(BaseModel):
+    title: Optional[str] = None
+    reference_number: Optional[str] = None
+    compliance_basis: Optional[str] = None
+    issued_on: Optional[DateType] = None
+    expires_on: Optional[DateType] = None
+    alert_window_days: Optional[int] = Field(default=None, ge=0, le=365)
+    status: Optional[AircraftDocumentStatus] = None
+
+    @field_validator("expires_on")
+    @classmethod
+    def validate_expiry_after_issue(
+        cls, value: Optional[DateType], values: Dict[str, Any]
+    ) -> Optional[DateType]:
+        issued_on = values.get("issued_on")
+        if value and issued_on and value < issued_on:
+            raise ValueError("expires_on cannot be earlier than issued_on.")
+        return value
+
+
+class AircraftDocumentRead(AircraftDocumentBase):
+    id: int
+    aircraft_serial_number: str
+    status: AircraftDocumentStatus
+    is_blocking: bool
+    days_to_expiry: Optional[int] = None
+    missing_evidence: bool = False
+    file_original_name: Optional[str] = None
+    file_storage_path: Optional[str] = None
+    file_content_type: Optional[str] = None
+    last_uploaded_at: Optional[DateTimeType] = None
+    last_uploaded_by_user_id: Optional[str] = None
+    override_reason: Optional[str] = None
+    override_expires_on: Optional[DateType] = None
+    override_by_user_id: Optional[str] = None
+    override_recorded_at: Optional[DateTimeType] = None
+    created_at: DateTimeType
+    updated_at: DateTimeType
+
+    class Config:
+        from_attributes = True
+
+
+class AircraftDocumentOverride(BaseModel):
+    reason: str
+    override_expires_on: Optional[DateType] = None
+
+
+class AircraftComplianceSummary(BaseModel):
+    aircraft_serial_number: str
+    documents_total: int
+    is_blocking: bool
+    blocking_documents: List[AircraftDocumentRead]
+    due_soon_documents: List[AircraftDocumentRead]
+    overdue_documents: List[AircraftDocumentRead]
+    overrides: List[AircraftDocumentRead]
+    documents: List[AircraftDocumentRead]
 
 
 class AircraftImportRow(BaseModel):
