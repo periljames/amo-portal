@@ -1,5 +1,6 @@
 # backend/amodb/apps/fleet/router.py
 
+import os
 from datetime import date, datetime
 from io import BytesIO
 import importlib
@@ -36,12 +37,106 @@ MANAGEMENT_ROLES = [
     "PRODUCTION_ENGINEER",
 ]
 
+# Include Quality for document management
+DOCUMENT_WRITE_ROLES = MANAGEMENT_ROLES + ["QUALITY_MANAGER"]
+QUALITY_OVERRIDE_ROLES = [
+    "SUPERUSER",
+    "AMO_ADMIN",
+    "QUALITY_MANAGER",
+]
+
 # Roles allowed to manage maintenance programme template items
 PROGRAM_WRITE_ROLES = [
     "SUPERUSER",
     "AMO_ADMIN",
     "PLANNING_ENGINEER",
 ]
+
+DOC_UPLOAD_DIR = Path(
+    os.getenv("AIRCRAFT_DOC_UPLOAD_DIR", "/tmp/amo_aircraft_documents")
+).resolve()
+DOC_MAX_UPLOAD_BYTES = int(os.getenv("AIRCRAFT_DOC_MAX_UPLOAD_BYTES", "20971520"))
+ALLOWED_DOC_EXTS = {".pdf", ".png", ".jpg", ".jpeg"}
+
+
+def _get_aircraft_or_404(db: Session, serial_number: str) -> models.Aircraft:
+    ac = db.query(models.Aircraft).get(serial_number)
+    if not ac:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+    return ac
+
+
+def _get_document_or_404(db: Session, document_id: int) -> models.AircraftDocument:
+    doc = (
+        db.query(models.AircraftDocument)
+        .filter(models.AircraftDocument.id == document_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+def _document_to_schema(
+    doc: models.AircraftDocument,
+    evaluation: services.DocumentEvaluation | None = None,
+) -> schemas.AircraftDocumentRead:
+    evaluation = evaluation or services.evaluate_document(doc)
+    base = schemas.AircraftDocumentRead.model_validate(doc, from_attributes=True)
+    return base.model_copy(
+        update={
+            "status": evaluation.status,
+            "is_blocking": evaluation.is_blocking,
+            "days_to_expiry": evaluation.days_to_expiry,
+            "missing_evidence": evaluation.missing_evidence,
+        }
+    )
+
+
+def _ensure_doc_upload_path(dest: Path) -> Path:
+    resolved = dest.resolve()
+    if not str(resolved).startswith(str(DOC_UPLOAD_DIR)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid document upload path.",
+        )
+    return resolved
+
+
+def _save_document_file(
+    *,
+    file: UploadFile,
+    doc: models.AircraftDocument,
+) -> Path:
+    filename = file.filename or "document"
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_DOC_EXTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Upload must be a PDF or image file (.pdf, .png, .jpg, .jpeg).",
+        )
+
+    DOC_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    doc_folder = _ensure_doc_upload_path(DOC_UPLOAD_DIR / doc.aircraft_serial_number)
+    doc_folder.mkdir(parents=True, exist_ok=True)
+
+    dest_path = _ensure_doc_upload_path(
+        doc_folder / f"{doc.document_type.lower()}_{uuid4().hex}{ext}"
+    )
+    total = 0
+    with dest_path.open("wb") as out:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if DOC_MAX_UPLOAD_BYTES and total > DOC_MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Upload exceeds maximum file size.",
+                )
+            out.write(chunk)
+    return dest_path
 
 router = APIRouter(
     prefix="/aircraft",
@@ -278,6 +373,281 @@ def deactivate_aircraft(
     db.add(ac)
     db.commit()
     return
+
+
+# ---------------------------------------------------------------------------
+# AIRCRAFT DOCUMENTS (C of A / regulatory evidence)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{serial_number}/documents",
+    response_model=List[schemas.AircraftDocumentRead],
+)
+def list_aircraft_documents(
+    serial_number: str,
+    db: Session = Depends(get_db),
+):
+    _get_aircraft_or_404(db, serial_number)
+    docs = (
+        db.query(models.AircraftDocument)
+        .filter(models.AircraftDocument.aircraft_serial_number == serial_number)
+        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
+        .all()
+    )
+    return [_document_to_schema(doc) for doc in docs]
+
+
+@router.post(
+    "/{serial_number}/documents",
+    response_model=schemas.AircraftDocumentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_aircraft_document(
+    serial_number: str,
+    payload: schemas.AircraftDocumentCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    _get_aircraft_or_404(db, serial_number)
+    existing = (
+        db.query(models.AircraftDocument)
+        .filter(
+            models.AircraftDocument.aircraft_serial_number == serial_number,
+            models.AircraftDocument.document_type == payload.document_type,
+            models.AircraftDocument.authority == payload.authority,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document for this authority and type already exists for this aircraft.",
+        )
+
+    doc = models.AircraftDocument(
+        aircraft_serial_number=serial_number,
+        document_type=payload.document_type,
+        authority=payload.authority,
+        title=payload.title,
+        reference_number=payload.reference_number,
+        compliance_basis=payload.compliance_basis,
+        issued_on=payload.issued_on,
+        expires_on=payload.expires_on,
+        alert_window_days=payload.alert_window_days,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    evaluation = services.refresh_document_status(doc)
+
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_schema(doc, evaluation)
+
+
+@router.put(
+    "/documents/{document_id}",
+    response_model=schemas.AircraftDocumentRead,
+)
+def update_aircraft_document(
+    document_id: int,
+    payload: schemas.AircraftDocumentUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(doc, field, value)
+
+    evaluation = services.refresh_document_status(doc)
+    doc.updated_at = datetime.utcnow()
+
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_schema(doc, evaluation)
+
+
+@router.post(
+    "/documents/{document_id}/upload",
+    response_model=schemas.AircraftDocumentRead,
+)
+def upload_document_evidence(
+    document_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+
+    # Replace any previous evidence to avoid stale copies floating around.
+    if doc.file_storage_path:
+        try:
+            Path(doc.file_storage_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    dest_path = _save_document_file(file=file, doc=doc)
+
+    doc.file_storage_path = str(dest_path)
+    doc.file_original_name = file.filename or Path(dest_path).name
+    doc.file_content_type = file.content_type
+    doc.last_uploaded_at = datetime.utcnow()
+    doc.last_uploaded_by_user_id = current_user.id
+    doc.updated_at = datetime.utcnow()
+
+    evaluation = services.refresh_document_status(doc)
+
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_schema(doc, evaluation)
+
+
+@router.post(
+    "/documents/{document_id}/override",
+    response_model=schemas.AircraftDocumentRead,
+)
+def quality_override_document(
+    document_id: int,
+    payload: schemas.AircraftDocumentOverride,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*QUALITY_OVERRIDE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Override reason is required.",
+        )
+
+    doc.override_reason = reason
+    doc.override_expires_on = payload.override_expires_on
+    doc.override_by_user_id = current_user.id
+    doc.override_recorded_at = datetime.utcnow()
+    doc.updated_at = datetime.utcnow()
+
+    evaluation = services.refresh_document_status(doc)
+
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_schema(doc, evaluation)
+
+
+@router.delete(
+    "/documents/{document_id}/override",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def clear_document_override(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*QUALITY_OVERRIDE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+
+    doc.override_reason = None
+    doc.override_expires_on = None
+    doc.override_by_user_id = None
+    doc.override_recorded_at = None
+    doc.updated_at = datetime.utcnow()
+
+    services.refresh_document_status(doc)
+    db.add(doc)
+    db.commit()
+    return
+
+
+@router.get(
+    "/{serial_number}/compliance",
+    response_model=schemas.AircraftComplianceSummary,
+)
+def get_aircraft_compliance_summary(
+    serial_number: str,
+    db: Session = Depends(get_db),
+):
+    _get_aircraft_or_404(db, serial_number)
+    docs = (
+        db.query(models.AircraftDocument)
+        .filter(models.AircraftDocument.aircraft_serial_number == serial_number)
+        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
+        .all()
+    )
+
+    blocking: List[schemas.AircraftDocumentRead] = []
+    due_soon: List[schemas.AircraftDocumentRead] = []
+    overdue: List[schemas.AircraftDocumentRead] = []
+    overrides: List[schemas.AircraftDocumentRead] = []
+    all_docs: List[schemas.AircraftDocumentRead] = []
+
+    for doc in docs:
+        evaluation = services.evaluate_document(doc)
+        schema_doc = _document_to_schema(doc, evaluation)
+        all_docs.append(schema_doc)
+        if evaluation.is_blocking:
+            blocking.append(schema_doc)
+        if evaluation.status == models.AircraftDocumentStatus.DUE_SOON:
+            due_soon.append(schema_doc)
+        if evaluation.status == models.AircraftDocumentStatus.OVERDUE:
+            overdue.append(schema_doc)
+        if evaluation.override_active:
+            overrides.append(schema_doc)
+
+    return schemas.AircraftComplianceSummary(
+        aircraft_serial_number=serial_number,
+        documents_total=len(all_docs),
+        is_blocking=len(blocking) > 0,
+        blocking_documents=blocking,
+        due_soon_documents=due_soon,
+        overdue_documents=overdue,
+        overrides=overrides,
+        documents=all_docs,
+    )
+
+
+@router.get(
+    "/document-alerts",
+    response_model=List[schemas.AircraftDocumentRead],
+)
+def list_document_alerts(
+    due_within_days: int = 45,
+    db: Session = Depends(get_db),
+):
+    alerts: List[schemas.AircraftDocumentRead] = []
+    docs = (
+        db.query(models.AircraftDocument)
+        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
+        .all()
+    )
+    today = date.today()
+    for doc in docs:
+        evaluation = services.evaluate_document(doc, today=today)
+        days_to_expiry = evaluation.days_to_expiry
+        if evaluation.status in {
+            models.AircraftDocumentStatus.OVERDUE,
+            models.AircraftDocumentStatus.DUE_SOON,
+        } or (
+            evaluation.status == models.AircraftDocumentStatus.CURRENT
+            and days_to_expiry is not None
+            and days_to_expiry <= due_within_days
+        ):
+            schema_doc = _document_to_schema(doc, evaluation)
+            alerts.append(schema_doc)
+    return alerts
 
 
 # ---------------------------------------------------------------------------
