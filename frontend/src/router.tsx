@@ -21,6 +21,7 @@ import AdminBillingPage from "./pages/AdminBillingPage";
 import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
+import QualityCarsPage from "./pages/QualityCarsPage";
 
 import { isAuthenticated } from "./services/auth";
 
@@ -205,6 +206,15 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <QMSHomePage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/cars"
+        element={
+          <RequireAuth>
+            <QualityCarsPage />
           </RequireAuth>
         }
       />

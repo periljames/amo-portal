@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 
 from . import models
 from .enums import (
+    CARActionType,
+    CARPriority,
+    CARProgram,
+    CARStatus,
     FindingLevel,
     FINDING_LEVEL_DUE_DAYS,
     QMSChangeRequestStatus,
@@ -111,3 +115,87 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
         "findings_open_level_3": findings_open_level_3,
         "findings_overdue_total": findings_overdue_total,
     }
+
+
+# -----------------------------
+# CAR helpers
+# -----------------------------
+
+
+def _next_car_number(db: Session, program: CARProgram) -> str:
+    year = date.today().year
+    prefix = "Q" if program == CARProgram.QUALITY else "R"
+
+    pattern = f"{prefix}-{year}-"
+    last = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(
+            models.CorrectiveActionRequest.program == program,
+            models.CorrectiveActionRequest.car_number.like(f"{pattern}%"),
+        )
+        .order_by(models.CorrectiveActionRequest.car_number.desc())
+        .first()
+    )
+    if last and last.car_number.startswith(pattern):
+        try:
+            seq = int(last.car_number.split("-")[-1]) + 1
+        except ValueError:
+            seq = 1
+    else:
+        seq = 1
+    return f"{prefix}-{year}-{seq:04d}"
+
+
+def create_car(
+    db: Session,
+    program: CARProgram,
+    title: str,
+    summary: str,
+    priority: CARPriority,
+    requested_by_user_id: Optional[str],
+    assigned_to_user_id: Optional[str],
+    due_date: Optional[date],
+    target_closure_date: Optional[date],
+    finding_id: Optional[str],
+) -> models.CorrectiveActionRequest:
+    car = models.CorrectiveActionRequest(
+        program=program,
+        car_number=_next_car_number(db, program),
+        title=title,
+        summary=summary,
+        priority=priority,
+        status=CARStatus.OPEN,
+        requested_by_user_id=requested_by_user_id,
+        assigned_to_user_id=assigned_to_user_id,
+        due_date=due_date,
+        target_closure_date=target_closure_date,
+        finding_id=finding_id,
+    )
+    db.add(car)
+    db.flush()
+
+    log = models.CARActionLog(
+        car=car,
+        action_type=CARActionType.COMMENT,
+        message="CAR created",
+        actor_user_id=requested_by_user_id,
+    )
+    db.add(log)
+    return car
+
+
+def add_car_action(
+    db: Session,
+    car: models.CorrectiveActionRequest,
+    action_type: CARActionType,
+    message: str,
+    actor_user_id: Optional[str],
+) -> models.CARActionLog:
+    log = models.CARActionLog(
+        car=car,
+        action_type=action_type,
+        message=message,
+        actor_user_id=actor_user_id,
+    )
+    db.add(log)
+    return log
