@@ -39,6 +39,10 @@ from sqlalchemy.orm import relationship
 from ...database import Base
 
 from .enums import (
+    CARActionType,
+    CARPriority,
+    CARProgram,
+    CARStatus,
     QMSDomain,
     QMSDocType,
     QMSDocStatus,
@@ -470,3 +474,112 @@ class QMSCorrectiveAction(Base):
 
     def __repr__(self) -> str:
         return f"<QMSCorrectiveAction id={self.id} finding_id={self.finding_id} status={self.status}>"
+
+
+class CorrectiveActionRequest(Base):
+    """
+    CAR register entry.
+    - program: QUALITY or RELIABILITY
+    - car_number: unique per program + year (e.g., Q-2024-0001)
+    - source: optional linkage to a QMS audit finding
+    """
+
+    __tablename__ = "quality_cars"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    program = Column(
+        SAEnum(CARProgram, name="quality_car_program", native_enum=False),
+        nullable=False,
+        index=True,
+    )
+    car_number = Column(String(32), nullable=False)
+
+    title = Column(String(255), nullable=False)
+    summary = Column(Text, nullable=False)
+    requested_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    assigned_to_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+
+    priority = Column(
+        SAEnum(CARPriority, name="quality_car_priority", native_enum=False),
+        nullable=False,
+        default=CARPriority.MEDIUM,
+        index=True,
+    )
+    status = Column(
+        SAEnum(CARStatus, name="quality_car_status", native_enum=False),
+        nullable=False,
+        default=CARStatus.DRAFT,
+        index=True,
+    )
+
+    invite_token = Column(String(64), nullable=False, unique=True, index=True)
+    reminder_interval_days = Column(Integer, nullable=False, default=7)
+    next_reminder_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    due_date = Column(Date, nullable=True, index=True)
+    target_closure_date = Column(Date, nullable=True, index=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    escalated_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    finding_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("qms_audit_findings.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    finding = relationship("QMSAuditFinding", lazy="selectin")
+    actions = relationship(
+        "CARActionLog",
+        back_populates="car",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("program", "car_number", name="uq_quality_car_number"),
+        Index("ix_quality_cars_program_status", "program", "status"),
+        Index("ix_quality_cars_program_due", "program", "due_date"),
+        Index("ix_quality_cars_reminders", "next_reminder_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CAR id={self.id} program={self.program} number={self.car_number} status={self.status}>"
+
+
+class CARActionLog(Base):
+    __tablename__ = "quality_car_actions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    car_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("quality_cars.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    action_type = Column(
+        SAEnum(CARActionType, name="quality_car_action_type", native_enum=False),
+        nullable=False,
+        default=CARActionType.COMMENT,
+        index=True,
+    )
+    message = Column(Text, nullable=False)
+    actor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    car = relationship("CorrectiveActionRequest", back_populates="actions", lazy="joined")
+
+    __table_args__ = (
+        Index("ix_quality_car_actions_car_type", "car_id", "action_type"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CARAction car={self.car_id} type={self.action_type}>"
