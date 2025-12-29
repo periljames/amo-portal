@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, date, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
+import math
 
 import hashlib
 import hmac
@@ -43,6 +44,16 @@ PASSWORD_RESET_TOKEN_TTL_MINUTES = 60 * 24  # 24 hours
 MAX_LOGIN_ATTEMPTS = 3
 LOCKOUT_SCHEDULE_SECONDS = (30, 90, 900)
 MIN_PASSWORD_LENGTH = 12
+DEFAULT_USAGE_WARN_THRESHOLD = float(os.getenv("USAGE_WARN_THRESHOLD", "0.8"))
+METER_KEY_STORAGE_MB = "storage_mb"
+METER_KEY_AUTOMATION_RUNS = "automation_runs"
+METER_KEY_SCHEDULED_JOBS = "scheduled_jobs"
+METER_KEY_NOTIFICATIONS = "notifications_sent"
+METER_KEY_API_CALLS = "api_calls"
+# Map meter keys to entitlement keys when limits are defined in different units
+METER_LIMIT_KEY_MAP = {
+    METER_KEY_STORAGE_MB: ("storage_gb", 1024),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +116,44 @@ def _validate_password_strength(password: str) -> None:
         raise ValueError(
             "Password must include upper and lower case letters, a number, and a symbol."
         )
+
+
+# ---------------------------------------------------------------------------
+# Usage metering helpers
+# ---------------------------------------------------------------------------
+
+
+def megabytes_from_bytes(size_bytes: int) -> int:
+    """
+    Convert a byte count to whole megabytes (rounded up, minimum 1).
+    """
+    if size_bytes <= 0:
+        return 0
+    return max(1, math.ceil(size_bytes / (1024 * 1024)))
+
+
+def _resolve_meter_limit_for_key(
+    meter_key: str, entitlements: Dict[str, schemas.ResolvedEntitlement]
+) -> tuple[Optional[int], bool]:
+    """
+    Resolve a numeric limit and unlimited flag for a given meter key.
+
+    Supports explicit matches, plus any cross-unit mappings in METER_LIMIT_KEY_MAP
+    (e.g., usage tracked in MB while entitlement is expressed in GB).
+    """
+    ent = entitlements.get(meter_key)
+    if ent:
+        return ent.limit, ent.is_unlimited
+
+    mapped = METER_LIMIT_KEY_MAP.get(meter_key)
+    if mapped:
+        ent_key, multiplier = mapped
+        mapped_ent = entitlements.get(ent_key)
+        if mapped_ent:
+            limit = None if mapped_ent.limit is None else mapped_ent.limit * multiplier
+            return limit, mapped_ent.is_unlimited
+
+    return None, False
 
 
 # ---------------------------------------------------------------------------
@@ -1096,9 +1145,19 @@ def record_usage(
     quantity: int,
     license_id: Optional[str] = None,
     at: Optional[datetime] = None,
+    attach_license: bool = True,
+    commit: bool = True,
 ) -> models.UsageMeter:
     """
     Increment usage for a meter, creating it if needed.
+
+    attach_license:
+        When True, link the meter to the current active/trialing subscription if no
+        license_id is supplied.
+
+    commit:
+        When False, the caller is responsible for committing the session (useful when
+        recording usage inside a broader transaction).
     """
     if quantity < 0:
         raise ValueError("Quantity must be non-negative.")
@@ -1124,12 +1183,20 @@ def record_usage(
     # Preserve any existing license link but allow initial association
     if license_id and meter.license_id is None:
         meter.license_id = license_id
+    elif attach_license and meter.license_id is None:
+        current_license = get_current_subscription(db, amo_id=amo_id)
+        if current_license:
+            meter.license_id = current_license.id
 
     meter.used_units += quantity
     meter.last_recorded_at = at
 
     db.add(meter)
-    db.commit()
+    if commit:
+        db.commit()
+        db.refresh(meter)
+    else:
+        db.flush()
     return meter
 
 
@@ -1581,6 +1648,104 @@ def list_usage_meters(db: Session, *, amo_id: str) -> List[models.UsageMeter]:
         .order_by(models.UsageMeter.meter_key)
         .all()
     )
+
+
+def roll_billing_periods_and_alert(
+    db: Session,
+    *,
+    as_of: Optional[datetime] = None,
+    warn_threshold: float = DEFAULT_USAGE_WARN_THRESHOLD,
+) -> dict:
+    """
+    Rolls subscription periods that have ended and logs alerts for meters nearing limits.
+
+    Returns a summary dict for logging/cron visibility.
+    """
+    now = as_of or datetime.now(timezone.utc)
+    rolled: List[str] = []
+    expired: List[str] = []
+    warned: List[str] = []
+
+    # 1) Roll or expire licenses where needed
+    delta_by_term = {
+        BillingTerm.MONTHLY: timedelta(days=30),
+        BillingTerm.BI_ANNUAL: timedelta(days=182),
+        BillingTerm.ANNUAL: timedelta(days=365),
+    }
+    licenses = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.status.in_([LicenseStatus.ACTIVE, LicenseStatus.TRIALING])
+        )
+        .all()
+    )
+    for license in licenses:
+        if (
+            license.status == LicenseStatus.TRIALING
+            and license.trial_ends_at
+            and license.trial_ends_at <= now
+        ):
+            license.status = LicenseStatus.EXPIRED
+            license.current_period_end = license.trial_ends_at
+            db.add(license)
+            _log_billing_audit(
+                db,
+                amo_id=license.amo_id,
+                event="TRIAL_EXPIRED",
+                details=f"license={license.id} trial ended={license.trial_ends_at.isoformat()}",
+            )
+            expired.append(license.id)
+            continue
+
+        if license.current_period_end and license.current_period_end <= now:
+            delta = delta_by_term.get(license.term, timedelta(days=30))
+            prev_end = license.current_period_end
+            license.current_period_start = prev_end
+            license.current_period_end = prev_end + delta
+            if license.status != LicenseStatus.ACTIVE:
+                license.status = LicenseStatus.ACTIVE
+            db.add(license)
+            _log_billing_audit(
+                db,
+                amo_id=license.amo_id,
+                event="PERIOD_ROLLED",
+                details=f"license={license.id} next_end={license.current_period_end.isoformat()}",
+            )
+            rolled.append(license.id)
+
+    db.commit()
+
+    # 2) Emit alerts for usage meters approaching limits
+    warn_pct = int(warn_threshold * 100)
+    amo_ids: Set[str] = {
+        row[0]
+        for row in db.query(models.UsageMeter.amo_id).distinct().all()
+        if row[0]
+    }
+    for amo_id in amo_ids:
+        entitlements = resolve_entitlements(db, amo_id=amo_id, as_of=now)
+        for meter in list_usage_meters(db, amo_id=amo_id):
+            limit, is_unlimited = _resolve_meter_limit_for_key(meter.meter_key, entitlements)
+            if is_unlimited or limit in (None, 0):
+                continue
+            percent = int(min(100, round((meter.used_units / limit) * 100)))
+            if percent >= warn_pct:
+                _log_billing_audit(
+                    db,
+                    amo_id=amo_id,
+                    event="USAGE_THRESHOLD",
+                    details=(
+                        f"meter={meter.meter_key} used={meter.used_units} "
+                        f"limit={limit} percent={percent}"
+                    ),
+                )
+                warned.append(f"{amo_id}:{meter.meter_key}")
+
+    return {
+        "rolled_licenses": rolled,
+        "expired_licenses": expired,
+        "warned_meters": warned,
+    }
 
 
 def _compute_backoff_seconds(attempt_count: int, *, base: int = 5, cap: int = 3600) -> int:

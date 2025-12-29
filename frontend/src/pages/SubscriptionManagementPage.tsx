@@ -38,6 +38,20 @@ type PaymentFormState = {
   isDefault: boolean;
 };
 
+const USAGE_WARNING_THRESHOLD = 80;
+const OVERAGE_RULES: Record<string, string> = {
+  storage_mb:
+    "Additional storage is billed on renewal; archive or delete large files to stay within plan.",
+  automation_runs:
+    "Automation runs beyond your plan are billed per run and may throttle when grossly exceeded.",
+  scheduled_jobs:
+    "Scheduled maintenance jobs above plan are invoiced at renewal; keep only active schedules.",
+  notifications_sent:
+    "High notification volume may trigger messaging surcharges; prefer digesting when possible.",
+  api_calls:
+    "API calls above the included quota are billed pay-as-you-go. Consider caching to reduce volume.",
+};
+
 const formatMoney = (amountCents: number, currency = "USD"): string => {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -392,9 +406,19 @@ const SubscriptionManagementPage: React.FC = () => {
         limit !== null && limit > 0
           ? Math.min(100, Math.round((meter.used_units / limit) * 100))
           : null;
-      return { meter, limit, remaining, percent };
+      const overLimit = percent !== null && percent >= 100;
+      const nearLimit = percent !== null && percent >= USAGE_WARNING_THRESHOLD;
+      const overageRule =
+        OVERAGE_RULES[meter.meter_key] ||
+        "Overages are billed on the next renewal if limits are exceeded.";
+      return { meter, limit, remaining, percent, overLimit, nearLimit, overageRule };
     });
   }, [usageMeters, usageLimits]);
+
+  const usageAlerts = useMemo(
+    () => usageMeterRows.filter((row) => row.nearLimit || row.overLimit),
+    [usageMeterRows]
+  );
 
   if (currentUser && !isTenantAdmin) {
     return null;
@@ -556,6 +580,31 @@ const SubscriptionManagementPage: React.FC = () => {
             </div>
           </div>
 
+          {usageAlerts.length > 0 && (
+            <div className="card card--warning">
+              <div className="card-header">
+                <h3 style={{ margin: 0 }}>Usage alerts</h3>
+                <span className="badge">{usageAlerts.length} at risk</span>
+              </div>
+              <ul style={{ margin: "8px 0 0 16px" }}>
+                {usageAlerts.map((alert) => (
+                  <li key={alert.meter.id}>
+                    <strong>{alert.meter.meter_key}</strong>:{" "}
+                    {alert.overLimit
+                      ? "Over the included limit."
+                      : "Approaching the included limit."}{" "}
+                    {alert.limit !== null
+                      ? `(${alert.meter.used_units}/${alert.limit})`
+                      : `${alert.meter.used_units} used`}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-muted" style={{ margin: "8px 0 0 16px" }}>
+                We bill overages per plan rules; see each meter below for handling.
+              </p>
+            </div>
+          )}
+
           <div className="card">
             <div className="card-header">
               <h3 style={{ margin: 0 }}>Usage meters</h3>
@@ -567,7 +616,8 @@ const SubscriptionManagementPage: React.FC = () => {
               {usageMeters.length === 0 && (
                 <p className="text-muted">No usage has been recorded yet.</p>
               )}
-              {usageMeterRows.map(({ meter, limit, remaining, percent }) => (
+              {usageMeterRows.map(
+                ({ meter, limit, remaining, percent, overLimit, nearLimit, overageRule }) => (
                 <div key={meter.id} className="usage-meter">
                   <div className="usage-meter__row">
                     <div>
@@ -578,14 +628,25 @@ const SubscriptionManagementPage: React.FC = () => {
                           : `${meter.used_units} used`}
                       </p>
                     </div>
-                    <span className="badge">
-                      {percent !== null ? `${percent}%` : "Uncapped"}
-                    </span>
+                    <div className="page-section__actions">
+                      {overLimit && <span className="badge badge--error">Over limit</span>}
+                      {!overLimit && nearLimit && (
+                        <span className="badge badge--warning">Approaching</span>
+                      )}
+                      <span className="badge">
+                        {percent !== null ? `${percent}%` : "Uncapped"}
+                      </span>
+                    </div>
                   </div>
                   <div className="usage-meter__bar">
                     <span
                       style={{
                         width: `${percent ?? 100}%`,
+                        backgroundColor: overLimit
+                          ? "#e55353"
+                          : nearLimit
+                          ? "#f59e0b"
+                          : undefined,
                       }}
                     />
                   </div>
@@ -594,8 +655,12 @@ const SubscriptionManagementPage: React.FC = () => {
                       {remaining} units remaining before renewal
                     </p>
                   )}
+                  <p className="text-muted" style={{ margin: "4px 0 0" }}>
+                    {overageRule}
+                  </p>
                 </div>
-              ))}
+              ))
+              }
             </div>
           </div>
 
