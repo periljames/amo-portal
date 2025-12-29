@@ -22,6 +22,7 @@ import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
+import UpsellPage from "./pages/UpsellPage";
 
 import { isAuthenticated } from "./services/auth";
 
@@ -166,6 +167,16 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <DashboardPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Upsell + pricing page */}
+      <Route
+        path="/maintenance/:amoCode/upsell"
+        element={
+          <RequireAuth>
+            <UpsellPage />
           </RequireAuth>
         }
       />

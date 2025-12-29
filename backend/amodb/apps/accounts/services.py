@@ -1346,6 +1346,17 @@ def remove_payment_method(
         )
 
 
+def list_catalog_skus(
+    db: Session,
+    *,
+    include_inactive: bool = False,
+) -> List[models.CatalogSKU]:
+    query = db.query(models.CatalogSKU)
+    if not include_inactive:
+        query = query.filter(models.CatalogSKU.is_active.is_(True))
+    return query.order_by(models.CatalogSKU.amount_cents.asc()).all()
+
+
 def _price_for_sku(db: Session, sku_code: str) -> models.CatalogSKU:
     sku = (
         db.query(models.CatalogSKU)
