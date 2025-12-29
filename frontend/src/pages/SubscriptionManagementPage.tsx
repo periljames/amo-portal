@@ -61,6 +61,20 @@ const formatMoney = (amountCents: number, currency = "USD"): string => {
   }).format(amountCents / 100);
 };
 
+const formatCountdown = (iso?: string | null): string | null => {
+  if (!iso) return null;
+  const target = new Date(iso).getTime();
+  const now = Date.now();
+  const diff = target - now;
+  if (diff <= 0) return "0d";
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  if (days > 0) return `${days}d ${hours}h`;
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+};
+
 const formatDate = (value?: string | null): string => {
   if (!value) return "—";
   const d = new Date(value);
@@ -226,6 +240,18 @@ const SubscriptionManagementPage: React.FC = () => {
     return limits;
   }, [entitlements]);
 
+  const isReadOnly = subscription?.is_read_only ?? false;
+  const isExpired = subscription?.status === "EXPIRED";
+  const isTrialing = subscription?.status === "TRIALING";
+  const trialCountdownLabel = useMemo(
+    () => formatCountdown(subscription?.trial_ends_at),
+    [subscription?.trial_ends_at]
+  );
+  const graceCountdownLabel = useMemo(
+    () => formatCountdown(subscription?.trial_grace_expires_at),
+    [subscription?.trial_grace_expires_at]
+  );
+
   const trialDaysRemaining = useMemo(() => {
     if (!subscription?.trial_ends_at) return null;
     const end = new Date(subscription.trial_ends_at).getTime();
@@ -347,6 +373,31 @@ const SubscriptionManagementPage: React.FC = () => {
     }
   };
 
+  const handleConvertTrial = async () => {
+    if (!currentSku) {
+      setError("Current plan not found. Please refresh and try again.");
+      return;
+    }
+    setProcessingPayment(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await purchaseSubscription(
+        currentSku.code,
+        currentSku.amount_cents,
+        currentSku.currency,
+        "TRIAL_CONVERT"
+      );
+      setSubscription(updated);
+      setNotice("Trial converted to paid successfully.");
+      await loadBillingData();
+    } catch (err: any) {
+      setError(err?.message || "Unable to convert the trial right now.");
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
+
   const handleAddPaymentMethod = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser?.amo_id) {
@@ -425,9 +476,10 @@ const SubscriptionManagementPage: React.FC = () => {
   }
 
   const showTrialCta =
-    !subscription ||
-    subscription.status === "CANCELLED" ||
-    subscription.status === "EXPIRED";
+    (!subscription ||
+      subscription.status === "CANCELLED" ||
+      subscription.status === "EXPIRED") &&
+    !isReadOnly;
 
   return (
     <DepartmentLayout amoCode={amoCode ?? "UNKNOWN"} activeDepartment="admin-billing">
@@ -455,6 +507,71 @@ const SubscriptionManagementPage: React.FC = () => {
             <strong>Security check:</strong> {scaCue}
           </div>
         )}
+        {isTrialing && (
+          <div className="card card--info">
+            <div className="card-header">
+              <div>
+                <h3 style={{ margin: "4px 0" }}>Trial countdown</h3>
+                <p className="text-muted" style={{ margin: 0 }}>
+                  {trialCountdownLabel
+                    ? `Trial ends in ${trialCountdownLabel}.`
+                    : "Trial ending soon."}{" "}
+                  Convert to paid to avoid read-only mode.
+                </p>
+              </div>
+              <div className="page-section__actions">
+                <button
+                  className="btn btn-primary"
+                  onClick={handleConvertTrial}
+                  disabled={processingPayment || !currentSku}
+                >
+                  Convert to paid
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setChangePlanOpen(true)}
+                  disabled={processingPayment}
+                >
+                  View plans
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {isExpired && (
+          <div className={`card ${isReadOnly ? "card--error" : "card--warning"}`}>
+            <div className="card-header">
+              <div>
+                <h3 style={{ margin: "4px 0" }}>
+                  {isReadOnly ? "Trial locked" : "Trial expired"}
+                </h3>
+                <p className="text-muted" style={{ margin: 0 }}>
+                  {isReadOnly
+                    ? "Grace has ended; workspace is read-only until billing resumes."
+                    : graceCountdownLabel
+                    ? `Grace ends in ${graceCountdownLabel}.`
+                    : "Grace period is active. Add a payment method to keep access."}
+                </p>
+              </div>
+              <div className="page-section__actions">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => setChangePlanOpen(true)}
+                  disabled={processingPayment}
+                >
+                  Choose a paid plan
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/upsell`)}
+                  disabled={processingPayment}
+                >
+                  View pricing
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <section className="page-section subscription-grid">
           <div className="card card--form">
@@ -476,14 +593,14 @@ const SubscriptionManagementPage: React.FC = () => {
                 <button
                   className="btn btn-primary"
                   onClick={() => setChangePlanOpen(true)}
-                  disabled={loading || processingPayment}
+                  disabled={loading || processingPayment || isReadOnly}
                 >
                   Upgrade / Downgrade
                 </button>
                 <button
                   className="btn btn-secondary"
                   onClick={() => setCancelModalOpen(true)}
-                  disabled={!subscription || processingPayment}
+                  disabled={!subscription || processingPayment || isReadOnly}
                 >
                   Cancel plan
                 </button>
@@ -498,9 +615,11 @@ const SubscriptionManagementPage: React.FC = () => {
                 <p className="text-muted">Trial status</p>
                 <strong>
                   {subscription?.status === "TRIALING"
-                    ? `${trialDaysRemaining ?? 0} days left`
+                    ? trialCountdownLabel || `${trialDaysRemaining ?? 0} days left`
                     : showTrialCta
                     ? "No trial in progress"
+                    : isExpired
+                    ? "Expired"
                     : "Active"}
                 </strong>
               </div>

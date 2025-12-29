@@ -2,6 +2,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
+import { fetchSubscription } from "../../services/billing";
+import type { Subscription } from "../../types/billing";
 import { getCachedUser, logout, onSessionEvent } from "../../services/auth";
 
 type Props = {
@@ -112,6 +114,8 @@ const DepartmentLayout: React.FC<Props> = ({
   const [logoutReason, setLogoutReason] = useState<"idle" | "expired" | null>(
     null
   );
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -178,11 +182,24 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const handleNav = (deptId: DepartmentId) => {
+    const targetPath = `/maintenance/${amoCode}/${deptId}`;
+    if (
+      subscription?.is_read_only &&
+      !targetPath.includes("/billing") &&
+      !targetPath.includes("/upsell")
+    ) {
+      navigate(`/maintenance/${amoCode}/admin/billing?lockout=1`, {
+        replace: true,
+        state: { from: targetPath },
+      });
+      return;
+    }
+
     // Non-admins should not navigate across departments.
     if (!canAccessAdmin) {
       const active = isDepartmentId(activeDepartment) ? activeDepartment : null;
       if (active && deptId === active) {
-        navigate(`/maintenance/${amoCode}/${deptId}`);
+        navigate(targetPath);
       }
       return;
     }
@@ -193,10 +210,18 @@ const DepartmentLayout: React.FC<Props> = ({
       return;
     }
 
-    navigate(`/maintenance/${amoCode}/${deptId}`);
+    navigate(targetPath);
   };
 
   const handleAdminNav = (navId: AdminNavId) => {
+    if (subscription?.is_read_only && navId !== "admin-billing") {
+      navigate(`/maintenance/${amoCode}/admin/billing?lockout=1`, {
+        replace: true,
+        state: { from: location.pathname + location.search },
+      });
+      return;
+    }
+
     switch (navId) {
       case "admin-overview":
         navigate(`/maintenance/${amoCode}/admin/overview`);
@@ -260,6 +285,14 @@ const DepartmentLayout: React.FC<Props> = ({
     ? "app-shell app-shell--collapsed"
     : "app-shell";
 
+  const isBillingRoute = useMemo(() => {
+    return location.pathname.includes("/billing");
+  }, [location.pathname]);
+
+  const isUpsellRoute = useMemo(() => {
+    return location.pathname.includes("/upsell");
+  }, [location.pathname]);
+
   const isTrainingRoute = useMemo(() => {
     return location.pathname.includes("/training");
   }, [location.pathname]);
@@ -276,6 +309,25 @@ const DepartmentLayout: React.FC<Props> = ({
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
   const idleCountdownIntervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchSubscription()
+      .then((sub) => {
+        if (!active) return;
+        setSubscription(sub);
+        setSubscriptionError(null);
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        setSubscription(null);
+        setSubscriptionError(err?.message || "Unable to load subscription status.");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -409,6 +461,23 @@ const DepartmentLayout: React.FC<Props> = ({
     document.body.classList.toggle("session-timeout-active", shouldBlur);
   }, [idleWarningOpen, logoutReason]);
 
+  useEffect(() => {
+    if (!subscription?.is_read_only) return;
+    if (isBillingRoute || isUpsellRoute) return;
+    navigate(`/maintenance/${amoCode}/admin/billing?lockout=1`, {
+      replace: true,
+      state: { from: location.pathname + location.search },
+    });
+  }, [
+    subscription?.is_read_only,
+    isBillingRoute,
+    isUpsellRoute,
+    amoCode,
+    location.pathname,
+    location.search,
+    navigate,
+  ]);
+
   const deptLabel =
     ADMIN_NAV_ITEMS.find((d) => d.id === (activeDepartment as AdminNavId))
       ?.label ||
@@ -423,6 +492,24 @@ const DepartmentLayout: React.FC<Props> = ({
   const formattedCountdown = new Date(idleCountdown * 1000)
     .toISOString()
     .substring(14, 19);
+  const formatCountdown = (iso?: string | null): string | null => {
+    if (!iso) return null;
+    const target = new Date(iso).getTime();
+    const now = Date.now();
+    const diff = target - now;
+    if (diff <= 0) return "0d";
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    if (days > 0) return `${days}d ${hours}h`;
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
+  const trialCountdown = formatCountdown(subscription?.trial_ends_at || null);
+  const graceCountdown = formatCountdown(subscription?.trial_grace_expires_at || null);
+  const isTrialing = subscription?.status === "TRIALING";
+  const isExpired = subscription?.status === "EXPIRED";
+  const isReadOnly = !!subscription?.is_read_only;
 
   const handleStaySignedIn = () => {
     resetIdleTimers();
@@ -632,6 +719,75 @@ const DepartmentLayout: React.FC<Props> = ({
             )}
           </div>
         </header>
+
+        {isTrialing && subscription?.trial_ends_at && (
+          <div className="info-banner info-banner--soft" style={{ margin: "12px 16px 0" }}>
+            <div>
+              <strong>Trial in progress</strong>
+              <p className="text-muted" style={{ margin: 0 }}>
+                {trialCountdown
+                  ? `Ends in ${trialCountdown}.`
+                  : "Trial ending soon."}{" "}
+                Convert to paid to avoid any grace or lockout.
+              </p>
+            </div>
+            <div className="page-section__actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`)}
+              >
+                Convert to paid
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => navigate(`/maintenance/${amoCode}/upsell`)}
+              >
+                View plans
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isExpired && (
+          <div
+            className={`card ${isReadOnly ? "card--error" : "card--warning"}`}
+            style={{ margin: "12px 16px 0" }}
+          >
+            <div className="card-header">
+              <div>
+                <h3 style={{ margin: "4px 0" }}>
+                  {isReadOnly ? "Trial locked" : "Trial expired"}
+                </h3>
+                <p className="text-muted" style={{ margin: 0 }}>
+                  {isReadOnly
+                    ? "Grace ended; workspace is read-only until a paid plan starts."
+                    : graceCountdown
+                    ? `Grace expires in ${graceCountdown}.`
+                    : "Grace period is in effect. Add a payment method to keep access."}
+                </p>
+                {subscriptionError && (
+                  <p className="text-muted" style={{ margin: 0 }}>
+                    {subscriptionError}
+                  </p>
+                )}
+              </div>
+              <div className="page-section__actions">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`)}
+                >
+                  Go to billing
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => navigate(`/maintenance/${amoCode}/upsell`)}
+                >
+                  See plans
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="app-shell__main-inner">{children}</div>
 

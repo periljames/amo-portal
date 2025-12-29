@@ -1063,7 +1063,15 @@ def get_current_certifying_staff_for_wo(
 
 
 def _license_is_active(license: models.TenantLicense, at: datetime) -> bool:
-    if license.status in {LicenseStatus.CANCELLED, LicenseStatus.EXPIRED}:
+    if license.status == LicenseStatus.EXPIRED:
+        if (
+            license.trial_grace_expires_at
+            and at <= license.trial_grace_expires_at
+            and not license.is_read_only
+        ):
+            return True
+        return False
+    if license.status == LicenseStatus.CANCELLED:
         return False
     if license.current_period_start and license.current_period_start > at:
         return False
@@ -1472,6 +1480,19 @@ def start_trial(
         payload={"sku": sku_code},
     )
 
+    # Enforce a single trial per tenant per SKU (evergreen)
+    prior_trial = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.sku_id == sku.id,
+            models.TenantLicense.trial_started_at.isnot(None),
+        )
+        .first()
+    )
+    if prior_trial:
+        raise ValueError("Trial for this SKU already consumed for this tenant.")
+
     now = datetime.now(timezone.utc)
     trial_end = now + timedelta(days=sku.trial_days or 0)
     license = models.TenantLicense(
@@ -1479,7 +1500,10 @@ def start_trial(
         sku_id=sku.id,
         term=sku.term,
         status=LicenseStatus.TRIALING,
+        trial_started_at=now,
         trial_ends_at=trial_end,
+        trial_grace_expires_at=None,
+        is_read_only=False,
         current_period_start=now,
         current_period_end=trial_end,
     )
@@ -1537,6 +1561,7 @@ def purchase_sku(
         sku_id=sku.id,
         term=sku.term,
         status=LicenseStatus.ACTIVE,
+        is_read_only=False,
         current_period_start=now,
         current_period_end=now + timedelta(days=30 if sku.term == BillingTerm.MONTHLY else 365),
     )
@@ -1628,7 +1653,7 @@ def list_invoices(db: Session, *, amo_id: str) -> List[models.BillingInvoice]:
 
 
 def get_current_subscription(db: Session, *, amo_id: str) -> Optional[models.TenantLicense]:
-    return (
+    active_or_trialing = (
         db.query(models.TenantLicense)
         .filter(
             models.TenantLicense.amo_id == amo_id,
@@ -1637,6 +1662,21 @@ def get_current_subscription(db: Session, *, amo_id: str) -> Optional[models.Ten
             ),
         )
         .order_by(models.TenantLicense.current_period_end.desc())
+        .first()
+    )
+    if active_or_trialing:
+        return active_or_trialing
+
+    now = datetime.now(timezone.utc)
+    return (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.status == LicenseStatus.EXPIRED,
+            models.TenantLicense.trial_grace_expires_at.isnot(None),
+            models.TenantLicense.trial_grace_expires_at >= now,
+        )
+        .order_by(models.TenantLicense.trial_grace_expires_at.desc())
         .first()
     )
 
@@ -1672,6 +1712,12 @@ def roll_billing_periods_and_alert(
         BillingTerm.BI_ANNUAL: timedelta(days=182),
         BillingTerm.ANNUAL: timedelta(days=365),
     }
+    grace_period = timedelta(days=7)
+    has_payment_method = {
+        row[0]: True
+        for row in db.query(models.PaymentMethod.amo_id).distinct().all()
+        if row[0]
+    }
     licenses = (
         db.query(models.TenantLicense)
         .filter(
@@ -1685,16 +1731,45 @@ def roll_billing_periods_and_alert(
             and license.trial_ends_at
             and license.trial_ends_at <= now
         ):
-            license.status = LicenseStatus.EXPIRED
-            license.current_period_end = license.trial_ends_at
-            db.add(license)
-            _log_billing_audit(
-                db,
-                amo_id=license.amo_id,
-                event="TRIAL_EXPIRED",
-                details=f"license={license.id} trial ended={license.trial_ends_at.isoformat()}",
-            )
-            expired.append(license.id)
+            # Auto-convert to paid if a payment method is available
+            if has_payment_method.get(license.amo_id):
+                delta = delta_by_term.get(license.term, timedelta(days=30))
+                license.status = LicenseStatus.ACTIVE
+                license.current_period_start = license.trial_ends_at
+                license.current_period_end = license.trial_ends_at + delta
+                license.trial_grace_expires_at = None
+                license.is_read_only = False
+                db.add(license)
+                _log_billing_audit(
+                    db,
+                    amo_id=license.amo_id,
+                    event="TRIAL_CONVERTED",
+                    details=(
+                        f"license={license.id} converted_at={now.isoformat()} next_end={license.current_period_end.isoformat()}"
+                    ),
+                )
+            else:
+                license.status = LicenseStatus.EXPIRED
+                license.current_period_end = license.trial_ends_at
+                if not license.trial_grace_expires_at:
+                    license.trial_grace_expires_at = license.trial_ends_at + grace_period
+                    _log_billing_audit(
+                        db,
+                        amo_id=license.amo_id,
+                        event="TRIAL_GRACE_STARTED",
+                        details=(
+                            f"license={license.id} grace_until={license.trial_grace_expires_at.isoformat()}"
+                        ),
+                    )
+                license.is_read_only = now >= (license.trial_grace_expires_at or now)
+                db.add(license)
+                _log_billing_audit(
+                    db,
+                    amo_id=license.amo_id,
+                    event="TRIAL_EXPIRED",
+                    details=f"license={license.id} trial ended={license.trial_ends_at.isoformat()}",
+                )
+                expired.append(license.id)
             continue
 
         if license.current_period_end and license.current_period_end <= now:
@@ -1712,6 +1787,29 @@ def roll_billing_periods_and_alert(
                 details=f"license={license.id} next_end={license.current_period_end.isoformat()}",
             )
             rolled.append(license.id)
+
+    # 1b) Flip read-only after grace for expired trials
+    expired_grace = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.status == LicenseStatus.EXPIRED,
+            models.TenantLicense.trial_grace_expires_at.isnot(None),
+        )
+        .all()
+    )
+    for license in expired_grace:
+        if license.trial_grace_expires_at and license.trial_grace_expires_at <= now:
+            if not license.is_read_only:
+                license.is_read_only = True
+                db.add(license)
+                _log_billing_audit(
+                    db,
+                    amo_id=license.amo_id,
+                    event="TRIAL_LOCKED",
+                    details=(
+                        f"license={license.id} locked_at={now.isoformat()} grace_until={license.trial_grace_expires_at.isoformat()}"
+                    ),
+                )
 
     db.commit()
 

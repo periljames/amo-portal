@@ -28,7 +28,10 @@ export type Subscription = {
   sku_id: string;
   term: BillingTerm;
   status: LicenseStatus;
+  trial_started_at?: string | null;
   trial_ends_at?: string | null;
+  trial_grace_expires_at?: string | null;
+  is_read_only: boolean;
   current_period_start: string;
   current_period_end?: string | null;
   canceled_at?: string | null;
