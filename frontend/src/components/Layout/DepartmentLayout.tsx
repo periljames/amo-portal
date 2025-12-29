@@ -1,6 +1,7 @@
 // src/components/Layout/DepartmentLayout.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
 import { fetchSubscription } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
@@ -119,6 +120,7 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const navigate = useNavigate();
   const location = useLocation();
+  const { trackEvent } = useAnalytics();
 
   const currentUser = getCachedUser();
   const isSuperuser = !!currentUser?.is_superuser;
@@ -305,6 +307,7 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/qms");
   }, [location.pathname]);
 
+  const lockedEventRef = useRef<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
@@ -464,6 +467,18 @@ const DepartmentLayout: React.FC<Props> = ({
   useEffect(() => {
     if (!subscription?.is_read_only) return;
     if (isBillingRoute || isUpsellRoute) return;
+
+    const key = `${location.pathname}${location.search}`;
+    if (lockedEventRef.current !== key) {
+      lockedEventRef.current = key;
+      trackEvent("ACCESS_BLOCKED", {
+        path: location.pathname,
+        query: location.search || undefined,
+        amo_code: amoCode,
+        reason: "read_only_subscription",
+      });
+    }
+
     navigate(`/maintenance/${amoCode}/admin/billing?lockout=1`, {
       replace: true,
       state: { from: location.pathname + location.search },
@@ -476,6 +491,7 @@ const DepartmentLayout: React.FC<Props> = ({
     location.pathname,
     location.search,
     navigate,
+    trackEvent,
   ]);
 
   const deptLabel =
