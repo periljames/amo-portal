@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
-from . import models, schemas
+from . import models, schemas, services
 
 router = APIRouter(prefix="/accounts/amo-assets", tags=["accounts_amo_assets"])
 
@@ -182,6 +182,14 @@ def upload_crs_logo(
     asset.uploaded_by_user_id = current_user.id
     asset.is_active = True
 
+    services.record_usage(
+        db,
+        amo_id=target_amo_id,
+        meter_key=services.METER_KEY_STORAGE_MB,
+        quantity=services.megabytes_from_bytes(asset.size_bytes or 0),
+        commit=False,
+    )
+
     db.add(asset)
     db.commit()
     db.refresh(asset)
@@ -234,6 +242,14 @@ def upload_crs_template(
     asset.size_bytes = dest_path.stat().st_size
     asset.uploaded_by_user_id = current_user.id
     asset.is_active = True
+
+    services.record_usage(
+        db,
+        amo_id=target_amo_id,
+        meter_key=services.METER_KEY_STORAGE_MB,
+        quantity=services.megabytes_from_bytes(asset.size_bytes or 0),
+        commit=False,
+    )
 
     db.add(asset)
     db.commit()

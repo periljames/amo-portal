@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
+from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts.models import AccountRole, User  # type: ignore
 
 from . import models, schemas
@@ -236,6 +237,15 @@ def create_work_order(
                 created_by_user_id=current_user.id,
             )
             db.add(task)
+
+    if payload.is_scheduled:
+        account_services.record_usage(
+            db,
+            amo_id=current_user.amo_id,
+            meter_key=account_services.METER_KEY_SCHEDULED_JOBS,
+            quantity=1,
+            commit=False,
+        )
 
     db.commit()
     db.refresh(wo)

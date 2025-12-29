@@ -25,6 +25,7 @@ from ...database import get_db
 from ...entitlements import require_module
 from ...security import get_current_active_user
 from ..accounts import models as accounts_models
+from ..accounts import services as account_services
 from . import models as training_models
 from . import schemas as training_schemas
 
@@ -215,6 +216,13 @@ def _create_notification(
         created_by_user_id=created_by_user_id,
     )
     db.add(n)
+    account_services.record_usage(
+        db,
+        amo_id=amo_id,
+        meter_key=account_services.METER_KEY_NOTIFICATIONS,
+        quantity=1,
+        commit=False,
+    )
 
 
 def _maybe_send_email(background_tasks: BackgroundTasks, to_email: Optional[str], subject: str, body: str) -> None:
@@ -1734,6 +1742,14 @@ def upload_training_file(
     )
 
     db.add(f)
+
+    account_services.record_usage(
+        db,
+        amo_id=current_user.amo_id,
+        meter_key=account_services.METER_KEY_STORAGE_MB,
+        quantity=account_services.megabytes_from_bytes(total),
+        commit=False,
+    )
 
     # Notify Quality (and optionally the owner)
     _create_notification(

@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
+from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts import models as account_models
 from . import models, ocr as ocr_service, schemas, services
 
@@ -506,6 +507,19 @@ def upload_document_evidence(
     doc.updated_at = datetime.utcnow()
 
     evaluation = services.refresh_document_status(doc)
+
+    try:
+        size_bytes = Path(dest_path).stat().st_size
+    except FileNotFoundError:
+        size_bytes = 0
+
+    account_services.record_usage(
+        db,
+        amo_id=current_user.amo_id,
+        meter_key=account_services.METER_KEY_STORAGE_MB,
+        quantity=account_services.megabytes_from_bytes(size_bytes),
+        commit=False,
+    )
 
     db.add(doc)
     db.commit()
