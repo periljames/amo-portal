@@ -7,7 +7,16 @@ from typing import Optional, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
-from .models import RegulatoryAuthority, AccountRole, MaintenanceScope, AMOAssetKind
+from .models import (
+    RegulatoryAuthority,
+    AccountRole,
+    MaintenanceScope,
+    AMOAssetKind,
+    BillingTerm,
+    LicenseStatus,
+    LedgerEntryType,
+    PaymentProvider,
+)
 
 # ---------------------------------------------------------------------------
 # BASE SHARED OBJECTS
@@ -349,6 +358,134 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirm(BaseModel):
     token: str
     new_password: str
+
+
+# ---------------------------------------------------------------------------
+# BILLING / LICENSING
+# ---------------------------------------------------------------------------
+
+
+class CatalogSKUBase(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    term: BillingTerm
+    trial_days: int = Field(0, ge=0)
+    amount_cents: int = Field(..., ge=0, description="Price in the smallest currency unit.")
+    currency: str = "USD"
+    is_active: bool = True
+
+
+class CatalogSKUCreate(CatalogSKUBase):
+    pass
+
+
+class CatalogSKURead(CatalogSKUBase):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TenantLicenseCreate(BaseModel):
+    amo_id: str
+    sku_id: str
+    term: BillingTerm
+    status: LicenseStatus = LicenseStatus.TRIALING
+    trial_ends_at: Optional[datetime] = None
+    current_period_start: datetime
+    current_period_end: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class TenantLicenseRead(TenantLicenseCreate):
+    id: str
+    canceled_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LicenseEntitlementCreate(BaseModel):
+    license_id: str
+    key: str
+    limit: Optional[int] = Field(None, ge=0)
+    is_unlimited: bool = False
+    description: Optional[str] = None
+
+
+class LicenseEntitlementRead(LicenseEntitlementCreate):
+    id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UsageMeterRead(BaseModel):
+    id: str
+    amo_id: str
+    license_id: Optional[str] = None
+    meter_key: str
+    used_units: int
+    last_recorded_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LedgerEntryCreate(BaseModel):
+    amo_id: str
+    license_id: Optional[str] = None
+    amount_cents: int
+    currency: str = "USD"
+    entry_type: LedgerEntryType
+    description: Optional[str] = None
+    idempotency_key: str
+    recorded_at: datetime
+
+
+class LedgerEntryRead(LedgerEntryCreate):
+    id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PaymentMethodCreate(BaseModel):
+    amo_id: str
+    provider: PaymentProvider
+    external_ref: str
+    display_name: Optional[str] = None
+    card_last4: Optional[str] = None
+    card_exp_month: Optional[int] = None
+    card_exp_year: Optional[int] = None
+    is_default: bool = False
+
+
+class PaymentMethodRead(PaymentMethodCreate):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ResolvedEntitlement(BaseModel):
+    key: str
+    is_unlimited: bool
+    limit: Optional[int] = None
+    source_license_id: str
+    license_term: BillingTerm
+    license_status: LicenseStatus
 
 
 # ---------------------------------------------------------------------------
