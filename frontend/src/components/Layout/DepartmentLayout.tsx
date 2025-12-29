@@ -118,6 +118,7 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const currentUser = getCachedUser();
   const isSuperuser = !!currentUser?.is_superuser;
+  const isTenantAdmin = isSuperuser || !!currentUser?.is_amo_admin;
   const isAdminArea = isAdminNavId(activeDepartment);
 
   // Admins/SUPERUSER can see all departments and the System Admin area.
@@ -140,13 +141,12 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const visibleAdminNav = useMemo(() => {
     if (!isAdminArea) return [];
-    if (!isSuperuser) {
-      return ADMIN_NAV_ITEMS.filter(
-        (i) => i.id !== "admin-billing" && i.id !== "admin-amos"
-      );
-    }
-    return ADMIN_NAV_ITEMS;
-  }, [isAdminArea, isSuperuser]);
+    return ADMIN_NAV_ITEMS.filter((i) => {
+      if (i.id === "admin-amos" && !isSuperuser) return false;
+      if (i.id === "admin-billing" && !isTenantAdmin) return false;
+      return true;
+    });
+  }, [isAdminArea, isSuperuser, isTenantAdmin]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;

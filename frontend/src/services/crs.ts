@@ -109,6 +109,31 @@ export async function apiGet<T>(
   return request<T>("GET", path, undefined, init);
 }
 
+export async function apiDelete<T>(
+  path: string,
+  body?: unknown,
+  init: RequestInit = {}
+): Promise<T> {
+  let bodyInit: BodyInit | undefined;
+
+  if (body === undefined || body === null) {
+    bodyInit = undefined;
+  } else if (typeof body === "string" || body instanceof FormData) {
+    bodyInit = body;
+  } else {
+    bodyInit = JSON.stringify(body);
+  }
+
+  const headers = new Headers(init.headers);
+  if (bodyInit !== undefined && !(bodyInit instanceof FormData)) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+  }
+
+  return request<T>("DELETE", path, bodyInit, { ...init, headers });
+}
+
 // -----------------------------------------------------------------------------
 // CRS API FUNCTIONS
 // -----------------------------------------------------------------------------
