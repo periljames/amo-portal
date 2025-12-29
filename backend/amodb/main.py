@@ -15,6 +15,7 @@ from .apps.crs.router import router as crs_router
 from .apps.training.router import router as training_router
 from .apps.quality import router as quality_router  
 from .apps.reliability.router import router as reliability_router
+from .apps.accounts.router_billing import router as billing_router
 
 
 def _allowed_origins() -> List[str]:
@@ -63,3 +64,4 @@ app.include_router(crs_router)
 app.include_router(training_router)
 app.include_router(quality_router) 
 app.include_router(reliability_router)
+app.include_router(billing_router)

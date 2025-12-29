@@ -16,6 +16,7 @@ from .models import (
     LicenseStatus,
     LedgerEntryType,
     PaymentProvider,
+    InvoiceStatus,
 )
 
 # ---------------------------------------------------------------------------
@@ -479,6 +480,10 @@ class PaymentMethodRead(PaymentMethodCreate):
         from_attributes = True
 
 
+class PaymentMethodUpsertRequest(PaymentMethodCreate):
+    idempotency_key: str
+
+
 class ResolvedEntitlement(BaseModel):
     key: str
     is_unlimited: bool
@@ -486,6 +491,62 @@ class ResolvedEntitlement(BaseModel):
     source_license_id: str
     license_term: BillingTerm
     license_status: LicenseStatus
+
+
+class SubscriptionRead(BaseModel):
+    id: str
+    amo_id: str
+    sku_id: str
+    term: BillingTerm
+    status: LicenseStatus
+    trial_ends_at: Optional[datetime]
+    current_period_start: datetime
+    current_period_end: Optional[datetime]
+    canceled_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class InvoiceRead(BaseModel):
+    id: str
+    amo_id: str
+    license_id: Optional[str]
+    ledger_entry_id: Optional[str]
+    amount_cents: int
+    currency: str
+    status: InvoiceStatus
+    description: Optional[str]
+    issued_at: datetime
+    due_at: Optional[datetime]
+    paid_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TrialStartRequest(BaseModel):
+    sku_code: str
+    idempotency_key: str
+
+
+class PurchaseRequest(BaseModel):
+    sku_code: str
+    idempotency_key: str
+    purchase_kind: str = "PURCHASE"
+    expected_amount_cents: Optional[int] = None
+    currency: Optional[str] = None
+
+
+class CancelSubscriptionRequest(BaseModel):
+    effective_date: datetime
+    idempotency_key: str
+
+
+class PaymentMethodMutationRequest(BaseModel):
+    idempotency_key: str
 
 
 # ---------------------------------------------------------------------------

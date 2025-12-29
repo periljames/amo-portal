@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
+import json
 
 import pytest
+from fastapi import HTTPException
 
-from amodb.apps.accounts import models, services
+from amodb.apps.accounts import models, services, schemas
 
 
 def _create_amo(session, *, code: str = "AMO1") -> models.AMO:
@@ -18,13 +22,15 @@ def _create_amo(session, *, code: str = "AMO1") -> models.AMO:
     return amo
 
 
-def _create_sku(session, *, code: str, term: models.BillingTerm) -> models.CatalogSKU:
+def _create_sku(
+    session, *, code: str, term: models.BillingTerm, amount_cents: int = 2500
+) -> models.CatalogSKU:
     sku = models.CatalogSKU(
         code=code,
         name=f"{code} Plan",
         term=term,
         trial_days=14,
-        amount_cents=2500,
+        amount_cents=amount_cents,
         currency="USD",
     )
     session.add(sku)
@@ -141,3 +147,106 @@ def test_append_ledger_entry_enforces_idempotency(db_session):
             description="Conflicting payload",
             idempotency_key="charge-001",
         )
+
+
+def test_add_payment_method_is_idempotent(db_session):
+    amo = _create_amo(db_session, code="AMO3")
+    payload = schemas.PaymentMethodCreate(
+        amo_id=amo.id,
+        provider=models.PaymentProvider.PSP,
+        external_ref="card_123",
+        display_name="Test Card",
+        card_last4="4242",
+        card_exp_month=1,
+        card_exp_year=2030,
+        is_default=True,
+    )
+    first = services.add_payment_method(
+        db_session,
+        amo_id=amo.id,
+        data=payload,
+        idempotency_key="pm-1",
+    )
+    second = services.add_payment_method(
+        db_session,
+        amo_id=amo.id,
+        data=payload,
+        idempotency_key="pm-1",
+    )
+    assert first.id == second.id
+
+    altered = payload.model_copy(update={"external_ref": "card_456"})
+    with pytest.raises(services.IdempotencyError):
+        services.add_payment_method(
+            db_session,
+            amo_id=amo.id,
+            data=altered,
+            idempotency_key="pm-1",
+        )
+
+
+def test_purchase_validates_server_pricing(db_session):
+    amo = _create_amo(db_session, code="AMO4")
+    sku = _create_sku(
+        db_session,
+        code="BASE-PURCHASE",
+        term=models.BillingTerm.MONTHLY,
+        amount_cents=9900,
+    )
+
+    license, ledger, invoice = services.purchase_sku(
+        db_session,
+        amo_id=amo.id,
+        sku_code=sku.code,
+        idempotency_key="purchase-1",
+        expected_amount_cents=9900,
+        expected_currency="USD",
+    )
+
+    assert license.status == models.LicenseStatus.ACTIVE
+    assert ledger.amount_cents == 9900
+    assert invoice.amount_cents == 9900
+
+    with pytest.raises(ValueError):
+        services.purchase_sku(
+            db_session,
+            amo_id=amo.id,
+            sku_code=sku.code,
+            idempotency_key="purchase-2",
+            expected_amount_cents=100,
+            expected_currency="USD",
+        )
+
+
+def test_webhook_signature_verification(db_session, monkeypatch):
+    amo = _create_amo(db_session, code="AMO5")
+    monkeypatch.setenv("PSP_WEBHOOK_SECRET", "super-secret")
+
+    payload = {"id": "evt_123", "type": "payment.succeeded", "amo_id": amo.id}
+    good_signature = hmac.new(
+        b"super-secret",
+        msg=json.dumps(payload, sort_keys=True).encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+
+    with pytest.raises(HTTPException):
+        services.handle_webhook(
+            db_session,
+            provider=models.PaymentProvider.PSP,
+            payload=payload,
+            signature="bad",
+            external_event_id="evt_123",
+            event_type="payment.succeeded",
+        )
+
+    event = services.handle_webhook(
+        db_session,
+        provider=models.PaymentProvider.PSP,
+        payload=payload,
+        signature=good_signature,
+        external_event_id="evt_123",
+        event_type="payment.succeeded",
+    )
+
+    assert event.status == models.WebhookStatus.PROCESSED
+    assert event.attempt_count == 1

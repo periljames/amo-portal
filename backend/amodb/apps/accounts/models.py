@@ -769,6 +769,19 @@ class PaymentProvider(str, enum.Enum):
     STRIPE = "STRIPE"
     OFFLINE = "OFFLINE"
     MANUAL = "MANUAL"
+    PSP = "PSP"
+
+
+class InvoiceStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    PAID = "PAID"
+    VOID = "VOID"
+
+
+class WebhookStatus(str, enum.Enum):
+    RECEIVED = "RECEIVED"
+    PROCESSED = "PROCESSED"
+    FAILED = "FAILED"
 
 
 class CatalogSKU(Base):
@@ -1099,3 +1112,200 @@ class PaymentMethod(Base):
 
     def __repr__(self) -> str:
         return f"<PaymentMethod amo={self.amo_id} provider={self.provider}>"
+
+
+class IdempotencyKey(Base):
+    """
+    Tracks idempotent operations across billing mutations.
+    """
+
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (
+        UniqueConstraint("scope", "key", name="uq_idempotency_scope_key"),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    scope = Column(String(64), nullable=False, index=True)
+    key = Column(String(128), nullable=False)
+    payload_hash = Column(String(128), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    last_used_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    def __repr__(self) -> str:
+        return f"<Idempotency scope={self.scope} key={self.key}>"
+
+
+class BillingInvoice(Base):
+    """
+    Minimal invoice representation backed by ledger entries.
+    """
+
+    __tablename__ = "billing_invoices"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "idempotency_key", name="uq_invoice_idempotency"),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    license_id = Column(
+        String(36),
+        ForeignKey("tenant_licenses.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ledger_entry_id = Column(
+        String(36),
+        ForeignKey("ledger_entries.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    amount_cents = Column(Integer, nullable=False)
+    currency = Column(String(8), nullable=False, default="USD")
+    status = Column(
+        Enum(InvoiceStatus, name="invoice_status_enum"),
+        nullable=False,
+        default=InvoiceStatus.PENDING,
+        index=True,
+    )
+    description = Column(Text, nullable=True)
+    idempotency_key = Column(String(128), nullable=False)
+    issued_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    due_at = Column(DateTime(timezone=True), nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    amo = relationship("AMO", lazy="joined")
+    license = relationship("TenantLicense", lazy="joined")
+    ledger_entry = relationship("LedgerEntry", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<BillingInvoice amo={self.amo_id} amount={self.amount_cents} status={self.status}>"
+
+
+class BillingAuditLog(Base):
+    """
+    Audit log for billing events (webhooks, mutations, retries).
+    """
+
+    __tablename__ = "billing_audit_logs"
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    event_type = Column(String(128), nullable=False)
+    details = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    amo = relationship("AMO", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<BillingAuditLog event={self.event_type}>"
+
+
+class WebhookEvent(Base):
+    """
+    Stores PSP webhook deliveries with retry metadata.
+    """
+
+    __tablename__ = "webhook_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "external_event_id",
+            name="uq_webhook_provider_event",
+        ),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    provider = Column(
+        Enum(PaymentProvider, name="payment_provider_enum"),
+        nullable=False,
+        index=True,
+    )
+    external_event_id = Column(String(128), nullable=False)
+    signature = Column(String(256), nullable=True)
+    event_type = Column(String(128), nullable=True)
+    payload = Column(Text, nullable=False)
+    status = Column(
+        Enum(WebhookStatus, name="webhook_status_enum"),
+        nullable=False,
+        default=WebhookStatus.RECEIVED,
+        index=True,
+    )
+    attempt_count = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    audit_log_id = Column(
+        String(36),
+        ForeignKey("billing_audit_logs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    audit_log = relationship("BillingAuditLog", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<WebhookEvent provider={self.provider} status={self.status} attempts={self.attempt_count}>"
