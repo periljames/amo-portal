@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, date, timezone
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import secrets
 import string
@@ -9,7 +9,7 @@ import string
 from jose import JWTError, jwt  # noqa: F401  (imported for future token use)
 
 from sqlalchemy import or_, func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, noload
 
 from amodb.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -18,7 +18,13 @@ from amodb.security import (
     verify_password,
 )
 from . import models, schemas
-from .models import MaintenanceScope, RegulatoryAuthority
+from .models import (
+    MaintenanceScope,
+    RegulatoryAuthority,
+    BillingTerm,
+    LedgerEntryType,
+    LicenseStatus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +57,10 @@ class AuthenticationError(Exception):
 
 class AuthorisationError(Exception):
     """Raised when a user tries to perform an action they are not authorised for."""
+
+
+class IdempotencyError(Exception):
+    """Raised when an idempotency key is reused with conflicting payload."""
 
 
 # ---------------------------------------------------------------------------
@@ -988,3 +998,202 @@ def get_current_certifying_staff_for_wo(
             results.append((user, ua))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# BILLING / LICENSING
+# ---------------------------------------------------------------------------
+
+
+def _license_is_active(license: models.TenantLicense, at: datetime) -> bool:
+    if license.status in {LicenseStatus.CANCELLED, LicenseStatus.EXPIRED}:
+        return False
+    if license.current_period_start and license.current_period_start > at:
+        return False
+    if license.current_period_end and license.current_period_end < at:
+        return False
+    if license.trial_ends_at and license.status == LicenseStatus.TRIALING:
+        return license.trial_ends_at >= at
+    return True
+
+
+def resolve_entitlements(
+    db: Session,
+    *,
+    amo_id: str,
+    as_of: Optional[datetime] = None,
+) -> Dict[str, schemas.ResolvedEntitlement]:
+    """
+    Return the strongest entitlement per key for the AMO.
+
+    - Only active/trialing licenses with current coverage are considered.
+    - Unlimited entitlements always win over numeric limits.
+    - For numeric entitlements, the highest limit wins.
+    """
+    as_of = as_of or datetime.now(timezone.utc)
+    resolved: Dict[str, schemas.ResolvedEntitlement] = {}
+
+    licenses = (
+        db.query(models.TenantLicense)
+        .options(
+            joinedload(models.TenantLicense.entitlements),
+            noload(models.TenantLicense.amo),
+            noload(models.TenantLicense.catalog_sku),
+            noload(models.TenantLicense.ledger_entries),
+            noload(models.TenantLicense.usage_meters),
+        )
+        .filter(models.TenantLicense.amo_id == amo_id)
+        .all()
+    )
+
+    for license in licenses:
+        if not _license_is_active(license, as_of):
+            continue
+
+        for entitlement in license.entitlements:
+            if entitlement.is_unlimited:
+                resolved[entitlement.key] = schemas.ResolvedEntitlement(
+                    key=entitlement.key,
+                    is_unlimited=True,
+                    limit=None,
+                    source_license_id=license.id,
+                    license_term=license.term,
+                    license_status=license.status,
+                )
+                continue
+
+            candidate_limit = entitlement.limit if entitlement.limit is not None else 0
+            existing = resolved.get(entitlement.key)
+
+            if existing is None or (
+                existing.limit is not None and candidate_limit > existing.limit
+            ):
+                resolved[entitlement.key] = schemas.ResolvedEntitlement(
+                    key=entitlement.key,
+                    is_unlimited=False,
+                    limit=candidate_limit,
+                    source_license_id=license.id,
+                    license_term=license.term,
+                    license_status=license.status,
+                )
+
+    return resolved
+
+
+def record_usage(
+    db: Session,
+    *,
+    amo_id: str,
+    meter_key: str,
+    quantity: int,
+    license_id: Optional[str] = None,
+    at: Optional[datetime] = None,
+) -> models.UsageMeter:
+    """
+    Increment usage for a meter, creating it if needed.
+    """
+    if quantity < 0:
+        raise ValueError("Quantity must be non-negative.")
+
+    at = at or datetime.now(timezone.utc)
+    meter = (
+        db.query(models.UsageMeter)
+        .filter(
+            models.UsageMeter.amo_id == amo_id,
+            models.UsageMeter.meter_key == meter_key,
+        )
+        .first()
+    )
+
+    if meter is None:
+        meter = models.UsageMeter(
+            amo_id=amo_id,
+            meter_key=meter_key,
+            license_id=license_id,
+            used_units=0,
+        )
+
+    # Preserve any existing license link but allow initial association
+    if license_id and meter.license_id is None:
+        meter.license_id = license_id
+
+    meter.used_units += quantity
+    meter.last_recorded_at = at
+
+    db.add(meter)
+    db.commit()
+    return meter
+
+
+def _assert_ledger_idempotency(
+    existing: models.LedgerEntry,
+    *,
+    amount_cents: int,
+    currency: str,
+    entry_type: LedgerEntryType,
+    license_id: Optional[str],
+) -> None:
+    if (
+        existing.amount_cents != amount_cents
+        or existing.currency != currency
+        or existing.entry_type != entry_type
+        or existing.license_id != license_id
+    ):
+        raise IdempotencyError(
+            "Idempotency key reuse with a different ledger payload is not allowed."
+        )
+
+
+def append_ledger_entry(
+    db: Session,
+    *,
+    amo_id: str,
+    amount_cents: int,
+    currency: str,
+    entry_type: LedgerEntryType,
+    description: Optional[str],
+    idempotency_key: str,
+    license_id: Optional[str] = None,
+    recorded_at: Optional[datetime] = None,
+) -> models.LedgerEntry:
+    """
+    Append a ledger entry, enforcing idempotency per AMO + key.
+    """
+    if not idempotency_key:
+        raise ValueError("idempotency_key is required.")
+
+    existing = (
+        db.query(models.LedgerEntry)
+        .options(
+            noload(models.LedgerEntry.amo),
+            noload(models.LedgerEntry.license),
+        )
+        .filter(
+            models.LedgerEntry.amo_id == amo_id,
+            models.LedgerEntry.idempotency_key == idempotency_key,
+        )
+        .first()
+    )
+    if existing:
+        _assert_ledger_idempotency(
+            existing,
+            amount_cents=amount_cents,
+            currency=currency,
+            entry_type=entry_type,
+            license_id=license_id,
+        )
+        return existing
+
+    entry = models.LedgerEntry(
+        amo_id=amo_id,
+        license_id=license_id,
+        amount_cents=amount_cents,
+        currency=currency,
+        entry_type=entry_type,
+        description=description,
+        idempotency_key=idempotency_key,
+        recorded_at=recorded_at or datetime.now(timezone.utc),
+    )
+    db.add(entry)
+    db.commit()
+    return entry
