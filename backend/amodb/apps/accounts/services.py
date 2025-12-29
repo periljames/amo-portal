@@ -3,11 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timedelta, date, timezone
 from typing import Dict, List, Optional, Tuple
 
+import hashlib
+import hmac
+import json
+import os
 import secrets
 import string
 
 from jose import JWTError, jwt  # noqa: F401  (imported for future token use)
 
+from fastapi import HTTPException
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, joinedload, noload
 
@@ -24,6 +29,9 @@ from .models import (
     BillingTerm,
     LedgerEntryType,
     LicenseStatus,
+    PaymentProvider,
+    InvoiceStatus,
+    WebhookStatus,
 )
 
 
@@ -1197,3 +1205,414 @@ def append_ledger_entry(
     db.add(entry)
     db.commit()
     return entry
+
+
+# ---------------------------------------------------------------------------
+# BILLING OPERATIONS / IDEMPOTENCY
+# ---------------------------------------------------------------------------
+
+
+def _hash_payload(payload: dict) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def register_idempotency_key(
+    db: Session,
+    *,
+    scope: str,
+    key: str,
+    payload: dict,
+) -> models.IdempotencyKey:
+    if not key:
+        raise ValueError("idempotency key is required")
+
+    payload_hash = _hash_payload(payload)
+    existing = (
+        db.query(models.IdempotencyKey)
+        .filter(
+            models.IdempotencyKey.scope == scope,
+            models.IdempotencyKey.key == key,
+        )
+        .first()
+    )
+    if existing:
+        if existing.payload_hash != payload_hash:
+            raise IdempotencyError("Idempotency key reuse with different payload.")
+        return existing
+
+    idem = models.IdempotencyKey(
+        scope=scope,
+        key=key,
+        payload_hash=payload_hash,
+    )
+    db.add(idem)
+    db.commit()
+    return idem
+
+
+def _log_billing_audit(db: Session, *, amo_id: Optional[str], event: str, details: str) -> models.BillingAuditLog:
+    log = models.BillingAuditLog(
+        amo_id=amo_id,
+        event_type=event,
+        details=details,
+    )
+    db.add(log)
+    db.commit()
+    return log
+
+
+def add_payment_method(
+    db: Session,
+    *,
+    amo_id: str,
+    data: schemas.PaymentMethodCreate,
+    idempotency_key: str,
+) -> models.PaymentMethod:
+    register_idempotency_key(
+        db,
+        scope=f"payment_method:{amo_id}",
+        key=idempotency_key,
+        payload=data.model_dump(),
+    )
+
+    method = (
+        db.query(models.PaymentMethod)
+        .filter(
+            models.PaymentMethod.amo_id == amo_id,
+            models.PaymentMethod.provider == data.provider,
+            models.PaymentMethod.external_ref == data.external_ref,
+        )
+        .first()
+    )
+    if method:
+        return method
+
+    if data.is_default:
+        db.query(models.PaymentMethod).filter(
+            models.PaymentMethod.amo_id == amo_id,
+            models.PaymentMethod.is_default.is_(True),
+        ).update({"is_default": False})
+
+    method = models.PaymentMethod(
+        amo_id=amo_id,
+        provider=data.provider,
+        external_ref=data.external_ref,
+        display_name=data.display_name,
+        card_last4=data.card_last4,
+        card_exp_month=data.card_exp_month,
+        card_exp_year=data.card_exp_year,
+        is_default=data.is_default,
+    )
+    db.add(method)
+    db.commit()
+    _log_billing_audit(
+        db,
+        amo_id=amo_id,
+        event="PAYMENT_METHOD_ADDED",
+        details=f"Provider={data.provider} ref={data.external_ref}",
+    )
+    return method
+
+
+def remove_payment_method(
+    db: Session,
+    *,
+    amo_id: str,
+    payment_method_id: str,
+    idempotency_key: str,
+) -> None:
+    register_idempotency_key(
+        db,
+        scope=f"payment_method_delete:{amo_id}",
+        key=idempotency_key,
+        payload={"payment_method_id": payment_method_id},
+    )
+    method = (
+        db.query(models.PaymentMethod)
+        .filter(
+            models.PaymentMethod.id == payment_method_id,
+            models.PaymentMethod.amo_id == amo_id,
+        )
+        .first()
+    )
+    if method:
+        db.delete(method)
+        db.commit()
+        _log_billing_audit(
+            db,
+            amo_id=amo_id,
+            event="PAYMENT_METHOD_REMOVED",
+            details=f"id={payment_method_id}",
+        )
+
+
+def _price_for_sku(db: Session, sku_code: str) -> models.CatalogSKU:
+    sku = (
+        db.query(models.CatalogSKU)
+        .filter(
+            models.CatalogSKU.code == sku_code,
+            models.CatalogSKU.is_active.is_(True),
+        )
+        .first()
+    )
+    if not sku:
+        raise ValueError("Unknown or inactive SKU.")
+    return sku
+
+
+def start_trial(
+    db: Session,
+    *,
+    amo_id: str,
+    sku_code: str,
+    idempotency_key: str,
+) -> models.TenantLicense:
+    sku = _price_for_sku(db, sku_code)
+    register_idempotency_key(
+        db,
+        scope=f"trial:{amo_id}",
+        key=idempotency_key,
+        payload={"sku": sku_code},
+    )
+
+    now = datetime.now(timezone.utc)
+    trial_end = now + timedelta(days=sku.trial_days or 0)
+    license = models.TenantLicense(
+        amo_id=amo_id,
+        sku_id=sku.id,
+        term=sku.term,
+        status=LicenseStatus.TRIALING,
+        trial_ends_at=trial_end,
+        current_period_start=now,
+        current_period_end=trial_end,
+    )
+    db.add(license)
+    db.commit()
+
+    _log_billing_audit(
+        db,
+        amo_id=amo_id,
+        event="TRIAL_STARTED",
+        details=f"sku={sku.code} until={trial_end.isoformat()}",
+    )
+    return license
+
+
+def purchase_sku(
+    db: Session,
+    *,
+    amo_id: str,
+    sku_code: str,
+    idempotency_key: str,
+    purchase_kind: str = "PURCHASE",
+    expected_amount_cents: Optional[int] = None,
+    expected_currency: Optional[str] = None,
+) -> Tuple[models.TenantLicense, models.LedgerEntry, models.BillingInvoice]:
+    sku = _price_for_sku(db, sku_code)
+    if expected_amount_cents is not None and expected_amount_cents != sku.amount_cents:
+        raise ValueError("Client price does not match server SKU pricing.")
+    if expected_currency is not None and expected_currency != sku.currency:
+        raise ValueError("Client currency does not match server SKU pricing.")
+    register_idempotency_key(
+        db,
+        scope=f"purchase:{amo_id}",
+        key=idempotency_key,
+        payload={"sku": sku_code, "purchase_kind": purchase_kind},
+    )
+
+    now = datetime.now(timezone.utc)
+    existing = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.status.in_(
+                [LicenseStatus.ACTIVE, LicenseStatus.TRIALING]
+            ),
+        )
+        .all()
+    )
+    for lic in existing:
+        lic.status = LicenseStatus.CANCELLED
+        lic.canceled_at = now
+
+    license = models.TenantLicense(
+        amo_id=amo_id,
+        sku_id=sku.id,
+        term=sku.term,
+        status=LicenseStatus.ACTIVE,
+        current_period_start=now,
+        current_period_end=now + timedelta(days=30 if sku.term == BillingTerm.MONTHLY else 365),
+    )
+    db.add(license)
+    db.commit()
+
+    ledger = append_ledger_entry(
+        db,
+        amo_id=amo_id,
+        amount_cents=sku.amount_cents,
+        currency=sku.currency,
+        entry_type=LedgerEntryType.CHARGE,
+        description=f"{purchase_kind}:{sku.code}",
+        idempotency_key=idempotency_key,
+        license_id=license.id,
+    )
+
+    invoice = models.BillingInvoice(
+        amo_id=amo_id,
+        license_id=license.id,
+        ledger_entry_id=ledger.id,
+        amount_cents=sku.amount_cents,
+        currency=sku.currency,
+        status=InvoiceStatus.PAID if sku.amount_cents == 0 else InvoiceStatus.PENDING,
+        description=f"Invoice for {sku.code}",
+        idempotency_key=idempotency_key,
+        issued_at=now,
+        due_at=now if sku.amount_cents == 0 else now + timedelta(days=7),
+        paid_at=now if sku.amount_cents == 0 else None,
+    )
+    db.add(invoice)
+    db.commit()
+
+    _log_billing_audit(
+        db,
+        amo_id=amo_id,
+        event=purchase_kind,
+        details=f"sku={sku.code} amount={sku.amount_cents}",
+    )
+    return license, ledger, invoice
+
+
+def cancel_subscription(
+    db: Session,
+    *,
+    amo_id: str,
+    effective_date: datetime,
+    idempotency_key: str,
+) -> Optional[models.TenantLicense]:
+    register_idempotency_key(
+        db,
+        scope=f"cancel:{amo_id}",
+        key=idempotency_key,
+        payload={"effective_date": effective_date.isoformat()},
+    )
+    license = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.status.in_(
+                [LicenseStatus.ACTIVE, LicenseStatus.TRIALING]
+            ),
+        )
+        .order_by(models.TenantLicense.created_at.desc())
+        .first()
+    )
+    if license:
+        license.status = LicenseStatus.CANCELLED
+        license.canceled_at = effective_date
+        license.current_period_end = effective_date
+        db.add(license)
+        db.commit()
+        _log_billing_audit(
+            db,
+            amo_id=amo_id,
+            event="CANCELLED",
+            details=f"effective={effective_date.isoformat()}",
+        )
+    return license
+
+
+def list_invoices(db: Session, *, amo_id: str) -> List[models.BillingInvoice]:
+    return (
+        db.query(models.BillingInvoice)
+        .filter(models.BillingInvoice.amo_id == amo_id)
+        .order_by(models.BillingInvoice.issued_at.desc())
+        .all()
+    )
+
+
+def get_current_subscription(db: Session, *, amo_id: str) -> Optional[models.TenantLicense]:
+    return (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.status.in_(
+                [LicenseStatus.ACTIVE, LicenseStatus.TRIALING]
+            ),
+        )
+        .order_by(models.TenantLicense.current_period_end.desc())
+        .first()
+    )
+
+
+def list_usage_meters(db: Session, *, amo_id: str) -> List[models.UsageMeter]:
+    return (
+        db.query(models.UsageMeter)
+        .filter(models.UsageMeter.amo_id == amo_id)
+        .order_by(models.UsageMeter.meter_key)
+        .all()
+    )
+
+
+def _compute_backoff_seconds(attempt_count: int, *, base: int = 5, cap: int = 3600) -> int:
+    delay = base * (2 ** max(attempt_count - 1, 0))
+    return min(delay, cap)
+
+
+def handle_webhook(
+    db: Session,
+    *,
+    provider: PaymentProvider,
+    payload: dict,
+    signature: str,
+    external_event_id: str,
+    event_type: Optional[str] = None,
+    should_fail: bool = False,
+) -> models.WebhookEvent:
+    secret = (
+        os.getenv("PSP_WEBHOOK_SECRET") or ""
+    )
+    if not secret:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured.")
+
+    computed = hmac.new(
+        secret.encode("utf-8"),
+        msg=json.dumps(payload, sort_keys=True).encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(computed, signature or ""):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature.")
+
+    register_idempotency_key(
+        db,
+        scope=f"webhook:{provider.value}",
+        key=external_event_id,
+        payload=payload,
+    )
+
+    log = _log_billing_audit(
+        db,
+        amo_id=None,
+        event="WEBHOOK_RECEIVED",
+        details=f"provider={provider.value} event={external_event_id}",
+    )
+
+    event = models.WebhookEvent(
+        provider=provider,
+        external_event_id=external_event_id,
+        signature=signature,
+        event_type=event_type,
+        payload=json.dumps(payload, sort_keys=True),
+        status=WebhookStatus.PROCESSED if not should_fail else WebhookStatus.FAILED,
+        attempt_count=1,
+        processed_at=datetime.now(timezone.utc) if not should_fail else None,
+        audit_log_id=log.id,
+    )
+    if should_fail:
+        event.status = WebhookStatus.FAILED
+        event.last_error = "Processing failed"
+        event.next_retry_at = datetime.now(timezone.utc) + timedelta(
+            seconds=_compute_backoff_seconds(event.attempt_count)
+        )
+    db.add(event)
+    db.commit()
+    return event
