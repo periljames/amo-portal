@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
-from . import schemas, services, models
+from . import audit, schemas, services, models
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -157,6 +157,24 @@ def cancel(
     if not license:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active subscription to cancel.")
     return license
+
+
+@router.post("/audit-events", status_code=status.HTTP_202_ACCEPTED)
+def record_audit_event(
+    payload: schemas.AuditEventCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_user),
+):
+    log = audit.safe_record_audit_event(
+        db,
+        amo_id=current_user.amo_id,
+        event=payload.event_type.strip(),
+        details=payload.details or {},
+    )
+    return {
+        "id": log.id if log else None,
+        "created_at": log.created_at if log else None,
+    }
 
 
 @router.post("/webhooks/{provider}", status_code=status.HTTP_202_ACCEPTED)

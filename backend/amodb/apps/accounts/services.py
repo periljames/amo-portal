@@ -23,7 +23,7 @@ from amodb.security import (
     get_password_hash,
     verify_password,
 )
-from . import models, schemas
+from . import audit, models, schemas
 from .models import (
     MaintenanceScope,
     RegulatoryAuthority,
@@ -1082,6 +1082,100 @@ def _license_is_active(license: models.TenantLicense, at: datetime) -> bool:
     return True
 
 
+def grant_entitlement(
+    db: Session,
+    *,
+    license_id: str,
+    key: str,
+    limit: Optional[int] = None,
+    is_unlimited: bool = False,
+    description: Optional[str] = None,
+) -> models.LicenseEntitlement:
+    """
+    Create or update a license entitlement and emit an audit entry.
+    """
+    license = (
+        db.query(models.TenantLicense)
+        .filter(models.TenantLicense.id == license_id)
+        .first()
+    )
+    if not license:
+        raise ValueError("License not found.")
+
+    entitlement = (
+        db.query(models.LicenseEntitlement)
+        .filter(
+            models.LicenseEntitlement.license_id == license_id,
+            models.LicenseEntitlement.key == key,
+        )
+        .first()
+    )
+    event = "ENTITLEMENT_GRANTED"
+    if entitlement:
+        entitlement.limit = limit
+        entitlement.is_unlimited = is_unlimited
+        entitlement.description = description
+        event = "ENTITLEMENT_UPDATED"
+    else:
+        entitlement = models.LicenseEntitlement(
+            license_id=license_id,
+            key=key,
+            limit=limit,
+            is_unlimited=is_unlimited,
+            description=description,
+        )
+    db.add(entitlement)
+    db.commit()
+    _log_billing_audit(
+        db,
+        amo_id=license.amo_id,
+        event=event,
+        details={
+            "license_id": license_id,
+            "key": key,
+            "limit": limit,
+            "is_unlimited": is_unlimited,
+        },
+    )
+    return entitlement
+
+
+def revoke_entitlement(
+    db: Session,
+    *,
+    license_id: str,
+    key: str,
+) -> bool:
+    """
+    Remove a license entitlement (no-op if not present) and log the change.
+    """
+    entitlement = (
+        db.query(models.LicenseEntitlement)
+        .filter(
+            models.LicenseEntitlement.license_id == license_id,
+            models.LicenseEntitlement.key == key,
+        )
+        .first()
+    )
+    if not entitlement:
+        return False
+
+    license = (
+        db.query(models.TenantLicense)
+        .filter(models.TenantLicense.id == license_id)
+        .first()
+    )
+    db.delete(entitlement)
+    db.commit()
+    _log_billing_audit(
+        db,
+        amo_id=license.amo_id if license else None,
+        event="ENTITLEMENT_REVOKED",
+        details={"license_id": license_id, "key": key},
+    )
+    return True
+
+
 def resolve_entitlements(
     db: Session,
     *,
@@ -1325,15 +1419,11 @@ def register_idempotency_key(
     return idem
 
 
-def _log_billing_audit(db: Session, *, amo_id: Optional[str], event: str, details: str) -> models.BillingAuditLog:
-    log = models.BillingAuditLog(
-        amo_id=amo_id,
-        event_type=event,
-        details=details,
-    )
-    db.add(log)
-    db.commit()
-    return log
+def _log_billing_audit(db: Session, *, amo_id: Optional[str], event: str, details: object) -> Optional[models.BillingAuditLog]:
+    """
+    Best-effort audit logger shared by billing workflows.
+    """
+    return audit.safe_record_audit_event(db, amo_id=amo_id, event=event, details=details)
 
 
 def add_payment_method(
@@ -1508,13 +1598,17 @@ def start_trial(
         current_period_end=trial_end,
     )
     db.add(license)
-    db.commit()
+        db.commit()
 
     _log_billing_audit(
         db,
         amo_id=amo_id,
         event="TRIAL_STARTED",
-        details=f"sku={sku.code} until={trial_end.isoformat()}",
+        details={
+            "sku": sku.code,
+            "license_id": license.id,
+            "trial_ends_at": trial_end.isoformat(),
+        },
     )
     return license
 
@@ -1539,6 +1633,19 @@ def purchase_sku(
         scope=f"purchase:{amo_id}",
         key=idempotency_key,
         payload={"sku": sku_code, "purchase_kind": purchase_kind},
+    )
+
+    _log_billing_audit(
+        db,
+        amo_id=amo_id,
+        event="PAYMENT_ATTEMPT",
+        details={
+            "sku": sku.code,
+            "purchase_kind": purchase_kind,
+            "amount_cents": sku.amount_cents,
+            "currency": sku.currency,
+            "idempotency_key": idempotency_key,
+        },
     )
 
     now = datetime.now(timezone.utc)
@@ -1599,7 +1706,13 @@ def purchase_sku(
         db,
         amo_id=amo_id,
         event=purchase_kind,
-        details=f"sku={sku.code} amount={sku.amount_cents}",
+        details={
+            "sku": sku.code,
+            "license_id": license.id,
+            "amount_cents": sku.amount_cents,
+            "currency": sku.currency,
+            "invoice_id": invoice.id,
+        },
     )
     return license, ledger, invoice
 
@@ -1638,7 +1751,10 @@ def cancel_subscription(
             db,
             amo_id=amo_id,
             event="CANCELLED",
-            details=f"effective={effective_date.isoformat()}",
+            details={
+                "license_id": license.id,
+                "effective": effective_date.isoformat(),
+            },
         )
     return license
 
@@ -1744,9 +1860,11 @@ def roll_billing_periods_and_alert(
                     db,
                     amo_id=license.amo_id,
                     event="TRIAL_CONVERTED",
-                    details=(
-                        f"license={license.id} converted_at={now.isoformat()} next_end={license.current_period_end.isoformat()}"
-                    ),
+                    details={
+                        "license_id": license.id,
+                        "converted_at": now.isoformat(),
+                        "next_period_end": license.current_period_end.isoformat(),
+                    },
                 )
             else:
                 license.status = LicenseStatus.EXPIRED
@@ -1757,9 +1875,10 @@ def roll_billing_periods_and_alert(
                         db,
                         amo_id=license.amo_id,
                         event="TRIAL_GRACE_STARTED",
-                        details=(
-                            f"license={license.id} grace_until={license.trial_grace_expires_at.isoformat()}"
-                        ),
+                        details={
+                            "license_id": license.id,
+                            "grace_until": license.trial_grace_expires_at.isoformat(),
+                        },
                     )
                 license.is_read_only = now >= (license.trial_grace_expires_at or now)
                 db.add(license)
@@ -1767,7 +1886,10 @@ def roll_billing_periods_and_alert(
                     db,
                     amo_id=license.amo_id,
                     event="TRIAL_EXPIRED",
-                    details=f"license={license.id} trial ended={license.trial_ends_at.isoformat()}",
+                    details={
+                        "license_id": license.id,
+                        "trial_ended": license.trial_ends_at.isoformat(),
+                    },
                 )
                 expired.append(license.id)
             continue
@@ -1784,7 +1906,10 @@ def roll_billing_periods_and_alert(
                 db,
                 amo_id=license.amo_id,
                 event="PERIOD_ROLLED",
-                details=f"license={license.id} next_end={license.current_period_end.isoformat()}",
+                details={
+                    "license_id": license.id,
+                    "next_period_end": license.current_period_end.isoformat(),
+                },
             )
             rolled.append(license.id)
 
@@ -1806,9 +1931,11 @@ def roll_billing_periods_and_alert(
                     db,
                     amo_id=license.amo_id,
                     event="TRIAL_LOCKED",
-                    details=(
-                        f"license={license.id} locked_at={now.isoformat()} grace_until={license.trial_grace_expires_at.isoformat()}"
-                    ),
+                    details={
+                        "license_id": license.id,
+                        "locked_at": now.isoformat(),
+                        "grace_until": license.trial_grace_expires_at.isoformat(),
+                    },
                 )
 
     db.commit()
@@ -1832,10 +1959,12 @@ def roll_billing_periods_and_alert(
                     db,
                     amo_id=amo_id,
                     event="USAGE_THRESHOLD",
-                    details=(
-                        f"meter={meter.meter_key} used={meter.used_units} "
-                        f"limit={limit} percent={percent}"
-                    ),
+                    details={
+                        "meter": meter.meter_key,
+                        "used_units": meter.used_units,
+                        "limit": limit,
+                        "percent": percent,
+                    },
                 )
                 warned.append(f"{amo_id}:{meter.meter_key}")
 
@@ -1886,7 +2015,11 @@ def handle_webhook(
         db,
         amo_id=None,
         event="WEBHOOK_RECEIVED",
-        details=f"provider={provider.value} event={external_event_id}",
+        details={
+            "provider": provider.value,
+            "external_event_id": external_event_id,
+            "event_type": event_type,
+        },
     )
 
     event = models.WebhookEvent(
@@ -1898,7 +2031,7 @@ def handle_webhook(
         status=WebhookStatus.PROCESSED if not should_fail else WebhookStatus.FAILED,
         attempt_count=1,
         processed_at=datetime.now(timezone.utc) if not should_fail else None,
-        audit_log_id=log.id,
+        audit_log_id=log.id if log else None,
     )
     if should_fail:
         event.status = WebhookStatus.FAILED

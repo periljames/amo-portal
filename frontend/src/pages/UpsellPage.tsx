@@ -5,6 +5,7 @@ import PricingCard from "../components/UI/PricingCard";
 import PricingToggle from "../components/UI/PricingToggle";
 import LockedRouteModal from "../components/UI/LockedRouteModal";
 import Button from "../components/UI/Button";
+import { useAnalytics } from "../hooks/useAnalytics";
 import { fetchCatalog, fetchSubscription, startTrial } from "../services/billing";
 import type { BillingTerm, CatalogSKU, Subscription } from "../types/billing";
 
@@ -128,6 +129,8 @@ const UpsellPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const pricingRef = useRef<HTMLDivElement>(null);
+  const viewTrackedRef = useRef<string | null>(null);
+  const { trackEvent } = useAnalytics();
 
   const [term, setTerm] = useState<BillingTerm>("ANNUAL");
   const [catalog, setCatalog] = useState<CatalogSKU[]>([]);
@@ -155,6 +158,17 @@ const UpsellPage: React.FC = () => {
     const params = new URLSearchParams(location.search);
     return params.get("locked");
   }, [location.search]);
+
+  useEffect(() => {
+    const viewKey = `${amoCode || "UNKNOWN"}:${location.pathname}${location.search}`;
+    if (viewTrackedRef.current === viewKey) return;
+    viewTrackedRef.current = viewKey;
+    trackEvent("UPSELL_VIEWED", {
+      amo_code: amoCode,
+      locked: !!lockedParam,
+      path: location.pathname,
+    });
+  }, [amoCode, lockedParam, location.pathname, location.search, trackEvent]);
 
   useEffect(() => {
     let isMounted = true;
@@ -185,8 +199,13 @@ const UpsellPage: React.FC = () => {
     if (lockedParam) {
       setLockedFeature(lockedParam.replace(/-/g, " "));
       setLockedModalOpen(true);
+      trackEvent("LOCKED_ROUTE_MODAL", {
+        amo_code: amoCode,
+        feature: lockedParam,
+        path: location.pathname,
+      });
     }
-  }, [lockedParam]);
+  }, [amoCode, lockedParam, location.pathname, trackEvent]);
 
   const productViews: ProductView[] = useMemo(() => {
     return PRODUCTS.map((product) => {
@@ -253,6 +272,11 @@ const UpsellPage: React.FC = () => {
       return;
     }
 
+    trackEvent("UPSELL_TRIAL_ATTEMPT", {
+      sku: skuCode,
+      amo_code: amoCode,
+      source: lockedParam ? "locked_route" : "upsell",
+    });
     setTrialLoading(true);
     setError(null);
     setNotice(null);
@@ -261,15 +285,46 @@ const UpsellPage: React.FC = () => {
       setSubscription(lic);
       setNotice("Trial started successfully. Enjoy your 30 days on us!");
       setLockedModalOpen(false);
+      trackEvent("UPSELL_TRIAL_STARTED", {
+        sku: skuCode,
+        amo_code: amoCode,
+        status: lic.status,
+      });
     } catch (err: any) {
       setError(err?.message || "Could not start trial. Please try again.");
+      trackEvent("UPSELL_TRIAL_FAILED", {
+        sku: skuCode,
+        amo_code: amoCode,
+        message: err?.message || "unknown_error",
+      });
     } finally {
       setTrialLoading(false);
     }
   };
 
+  const handleTermChange = (nextTerm: BillingTerm) => {
+    setTerm(nextTerm);
+    trackEvent("UPSELL_TERM_SELECTED", {
+      amo_code: amoCode,
+      term: nextTerm,
+    });
+  };
+
   const scrollToPricing = () => {
     pricingRef.current?.scrollIntoView({ behavior: "smooth" });
+    trackEvent("UPSELL_SCROLL_TO_PRICING", {
+      amo_code: amoCode,
+      term,
+    });
+  };
+
+  const goToBilling = (source: string) => {
+    trackEvent("UPSELL_CONVERT_CLICK", {
+      amo_code: amoCode,
+      source,
+      term,
+    });
+    navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin/billing`);
   };
 
   return (
@@ -299,9 +354,7 @@ const UpsellPage: React.FC = () => {
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin/billing`)
-                }
+                onClick={() => goToBilling("hero-trialing")}
               >
                 Convert to paid
               </button>
@@ -345,7 +398,7 @@ const UpsellPage: React.FC = () => {
       <section className="pricing-toggle__section">
         <PricingToggle
           value={term}
-          onChange={setTerm}
+          onChange={handleTermChange}
           subtitle="See how pricing shifts by term – we will highlight savings versus monthly."
         />
       </section>
@@ -397,6 +450,11 @@ const UpsellPage: React.FC = () => {
               onClick={() => {
                 setLockedFeature("Previewed feature");
                 setLockedModalOpen(true);
+                trackEvent("LOCKED_ROUTE_MODAL", {
+                  amo_code: amoCode,
+                  feature: "preview",
+                  path: location.pathname,
+                });
               }}
             >
               Preview locked-route modal

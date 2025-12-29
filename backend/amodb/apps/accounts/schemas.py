@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, date
-from typing import Optional, Literal
+from typing import Any, Optional, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -549,6 +549,11 @@ class PurchaseRequest(BaseModel):
 class CancelSubscriptionRequest(BaseModel):
     effective_date: datetime
     idempotency_key: str
+
+
+class AuditEventCreate(BaseModel):
+    event_type: str = Field(min_length=1, max_length=128)
+    details: Optional[dict[str, Any]] = None
 
 
 class PaymentMethodMutationRequest(BaseModel):
