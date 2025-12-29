@@ -25,6 +25,7 @@ from sqlalchemy import or_, tuple_
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import models as account_models
 from . import models, ocr as ocr_service, schemas, services
@@ -141,8 +142,8 @@ def _save_document_file(
 router = APIRouter(
     prefix="/aircraft",
     tags=["aircraft"],
-    # Require an authenticated, active user for everything in this router
-    dependencies=[Depends(get_current_active_user)],
+    # Require an entitled, authenticated user for everything in this router
+    dependencies=[Depends(require_module("fleet"))],
 )
 
 MAX_HOURS = 1_000_000.0

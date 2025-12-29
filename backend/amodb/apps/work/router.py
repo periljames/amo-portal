@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts.models import AccountRole, User  # type: ignore
 
@@ -38,7 +39,7 @@ router = APIRouter(
     tags=["work_orders"],
     # All endpoints require an authenticated user; role-specific checks are
     # added per-endpoint for write operations.
-    dependencies=[Depends(get_current_active_user)],
+    dependencies=[Depends(require_module("work"))],
 )
 
 PLANNING_ROLES = {

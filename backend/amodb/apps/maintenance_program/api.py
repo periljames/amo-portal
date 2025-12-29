@@ -9,11 +9,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import models as account_models
 from amodb.apps.work.schemas import WorkOrderRead
 
-from . import services
+from . import service as services
 from .models import ProgramItemStatusEnum, AircraftProgramStatusEnum
 from .schemas import (
     MaintenanceProgramItemCreate,
@@ -35,6 +36,7 @@ PROGRAM_WRITE_ROLES = [
 router = APIRouter(
     prefix="/maintenance-program",
     tags=["maintenance_program"],
+    dependencies=[Depends(require_module("maintenance_program"))],
 )
 
 
