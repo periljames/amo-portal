@@ -395,7 +395,10 @@ class TenantLicenseCreate(BaseModel):
     sku_id: str
     term: BillingTerm
     status: LicenseStatus = LicenseStatus.TRIALING
+    trial_started_at: Optional[datetime] = None
     trial_ends_at: Optional[datetime] = None
+    trial_grace_expires_at: Optional[datetime] = None
+    is_read_only: bool = False
     current_period_start: datetime
     current_period_end: Optional[datetime] = None
     notes: Optional[str] = None
@@ -499,7 +502,10 @@ class SubscriptionRead(BaseModel):
     sku_id: str
     term: BillingTerm
     status: LicenseStatus
+    trial_started_at: Optional[datetime]
     trial_ends_at: Optional[datetime]
+    trial_grace_expires_at: Optional[datetime]
+    is_read_only: bool
     current_period_start: datetime
     current_period_end: Optional[datetime]
     canceled_at: Optional[datetime]

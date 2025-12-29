@@ -1,6 +1,6 @@
 // src/pages/UpsellPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import PricingCard from "../components/UI/PricingCard";
 import PricingToggle from "../components/UI/PricingToggle";
 import LockedRouteModal from "../components/UI/LockedRouteModal";
@@ -109,9 +109,24 @@ function findSkuForTerm(
   );
 }
 
+function formatCountdown(iso?: string | null): string | null {
+  if (!iso) return null;
+  const target = new Date(iso).getTime();
+  const now = Date.now();
+  const diff = target - now;
+  if (diff <= 0) return "0d";
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  if (days > 0) return `${days}d ${hours}h`;
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
 const UpsellPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const location = useLocation();
+  const navigate = useNavigate();
   const pricingRef = useRef<HTMLDivElement>(null);
 
   const [term, setTerm] = useState<BillingTerm>("ANNUAL");
@@ -123,6 +138,18 @@ const UpsellPage: React.FC = () => {
   const [notice, setNotice] = useState<string | null>(null);
   const [lockedModalOpen, setLockedModalOpen] = useState(false);
   const [lockedFeature, setLockedFeature] = useState<string | undefined>();
+
+  const trialCountdown = useMemo(
+    () => formatCountdown(subscription?.trial_ends_at),
+    [subscription?.trial_ends_at]
+  );
+  const graceCountdown = useMemo(
+    () => formatCountdown(subscription?.trial_grace_expires_at),
+    [subscription?.trial_grace_expires_at]
+  );
+  const isReadOnly = subscription?.is_read_only ?? false;
+  const isTrialing = subscription?.status === "TRIALING";
+  const isExpired = subscription?.status === "EXPIRED";
 
   const lockedParam = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -198,7 +225,8 @@ const UpsellPage: React.FC = () => {
         activeSku.trial_days >= 30 &&
         (!subscription ||
           subscription.status === "CANCELLED" ||
-          subscription.status === "EXPIRED");
+          subscription.status === "EXPIRED") &&
+        !isReadOnly;
 
       const trialLabel = trialEligible
         ? `Eligible for ${activeSku?.trial_days || 30}-day trial`
@@ -258,15 +286,45 @@ const UpsellPage: React.FC = () => {
             without losing context.
           </p>
           <div className="upsell-hero__actions">
-            <Button onClick={() => handleStartTrial(productViews[0]?.selectedSku?.code)}>
+            <Button
+              onClick={() => handleStartTrial(productViews[0]?.selectedSku?.code)}
+              disabled={isReadOnly || trialLoading}
+            >
               Start 30-day trial
             </Button>
             <button type="button" className="btn-secondary" onClick={scrollToPricing}>
               Compare modules
             </button>
+            {isTrialing && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin/billing`)
+                }
+              >
+                Convert to paid
+              </button>
+            )}
           </div>
           {notice && <div className="upsell-alert upsell-alert--success">{notice}</div>}
           {error && <div className="upsell-alert upsell-alert--error">{error}</div>}
+          {isTrialing && trialCountdown && (
+            <div className="upsell-alert upsell-alert--info">
+              Trial ends in <strong>{trialCountdown}</strong>. Add a payment method to
+              keep access.
+            </div>
+          )}
+          {isExpired && (
+            <div
+              className={`upsell-alert ${
+                isReadOnly ? "upsell-alert--error" : "upsell-alert--warning"
+              }`}
+            >
+              Trial expired{graceCountdown ? `; grace ends in ${graceCountdown}` : "."}{" "}
+              {isReadOnly ? "Workspace is read-only until billing resumes." : ""}
+            </div>
+          )}
         </div>
         <div className="upsell-hero__panel">
           <div className="upsell-hero__panel-inner">
@@ -319,7 +377,7 @@ const UpsellPage: React.FC = () => {
               secondaryLabel="View more details"
               onSecondary={scrollToPricing}
               highlight={product.id === "suite"}
-              disabled={trialLoading}
+              disabled={trialLoading || isReadOnly}
             />
           ))}
         </div>

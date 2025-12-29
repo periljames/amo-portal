@@ -872,7 +872,10 @@ class TenantLicense(Base):
         default=LicenseStatus.TRIALING,
         index=True,
     )
+    trial_started_at = Column(DateTime(timezone=True), nullable=True)
     trial_ends_at = Column(DateTime(timezone=True), nullable=True)
+    trial_grace_expires_at = Column(DateTime(timezone=True), nullable=True)
+    is_read_only = Column(Boolean, nullable=False, default=False)
     current_period_start = Column(DateTime(timezone=True), nullable=False)
     current_period_end = Column(DateTime(timezone=True), nullable=True)
     canceled_at = Column(DateTime(timezone=True), nullable=True)

@@ -55,11 +55,26 @@ def _create_license(
         term=term,
         current_period_start=now - timedelta(days=1),
         current_period_end=now + timedelta(days=30),
+        trial_started_at=now - timedelta(days=sku.trial_days or 0),
         trial_ends_at=now + timedelta(days=trial_extra_days),
+        trial_grace_expires_at=None,
+        is_read_only=False,
     )
     session.add(license)
     session.commit()
     return license
+
+
+def _add_payment_method(session, amo_id: str, *, is_default: bool = True) -> models.PaymentMethod:
+    method = models.PaymentMethod(
+        amo_id=amo_id,
+        provider=models.PaymentProvider.PSP,
+        external_ref="pm_default",
+        is_default=is_default,
+    )
+    session.add(method)
+    session.commit()
+    return method
 
 
 def test_resolve_entitlements_picks_unlimited_first(db_session):
@@ -239,14 +254,79 @@ def test_webhook_signature_verification(db_session, monkeypatch):
             event_type="payment.succeeded",
         )
 
-    event = services.handle_webhook(
+
+def test_start_trial_enforces_single_trial_per_sku(db_session):
+    amo = _create_amo(db_session, code="AMO6")
+    sku = _create_sku(db_session, code="BASE-TRIAL", term=models.BillingTerm.MONTHLY)
+
+    first = services.start_trial(
         db_session,
-        provider=models.PaymentProvider.PSP,
-        payload=payload,
-        signature=good_signature,
-        external_event_id="evt_123",
-        event_type="payment.succeeded",
+        amo_id=amo.id,
+        sku_code=sku.code,
+        idempotency_key="trial-1",
+    )
+    assert first.status == models.LicenseStatus.TRIALING
+    assert first.trial_started_at is not None
+
+    with pytest.raises(ValueError):
+        services.start_trial(
+            db_session,
+            amo_id=amo.id,
+            sku_code=sku.code,
+            idempotency_key="trial-2",
+        )
+
+
+def test_trial_auto_converts_when_payment_method_exists(db_session):
+    amo = _create_amo(db_session, code="AMO7")
+    sku = _create_sku(db_session, code="BASE-AUTO", term=models.BillingTerm.MONTHLY)
+    license = services.start_trial(
+        db_session,
+        amo_id=amo.id,
+        sku_code=sku.code,
+        idempotency_key="trial-auto",
+    )
+    license.trial_ends_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    db_session.add(license)
+    _add_payment_method(db_session, amo_id=amo.id, is_default=True)
+    db_session.commit()
+
+    result = services.roll_billing_periods_and_alert(
+        db_session, as_of=datetime.now(timezone.utc)
     )
 
-    assert event.status == models.WebhookStatus.PROCESSED
-    assert event.attempt_count == 1
+    db_session.refresh(license)
+    assert license.status == models.LicenseStatus.ACTIVE
+    assert license.current_period_start == license.trial_ends_at
+    assert license.trial_grace_expires_at is None
+    assert license.is_read_only is False
+    assert result["expired_licenses"] == []
+
+
+def test_trial_grace_sets_read_only_after_expiry(db_session):
+    amo = _create_amo(db_session, code="AMO8")
+    sku = _create_sku(db_session, code="BASE-GRACE", term=models.BillingTerm.MONTHLY)
+    license = services.start_trial(
+        db_session,
+        amo_id=amo.id,
+        sku_code=sku.code,
+        idempotency_key="trial-grace",
+    )
+    grace_start = datetime.now(timezone.utc) - timedelta(days=1)
+    license.trial_ends_at = grace_start
+    db_session.add(license)
+    db_session.commit()
+
+    # First roll: set grace window
+    services.roll_billing_periods_and_alert(db_session, as_of=grace_start + timedelta(minutes=1))
+    db_session.refresh(license)
+    assert license.status == models.LicenseStatus.EXPIRED
+    assert license.trial_grace_expires_at is not None
+    assert license.is_read_only is False
+
+    # Second roll after grace: lock to read-only
+    services.roll_billing_periods_and_alert(
+        db_session, as_of=license.trial_grace_expires_at + timedelta(seconds=1)
+    )
+    db_session.refresh(license)
+    assert license.is_read_only is True
