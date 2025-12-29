@@ -1346,6 +1346,25 @@ def remove_payment_method(
         )
 
 
+def list_payment_methods(
+    db: Session,
+    *,
+    amo_id: str,
+) -> List[models.PaymentMethod]:
+    """
+    Return payment methods for the AMO, newest first.
+    """
+    return (
+        db.query(models.PaymentMethod)
+        .options(
+            noload(models.PaymentMethod.amo),
+        )
+        .filter(models.PaymentMethod.amo_id == amo_id)
+        .order_by(models.PaymentMethod.created_at.desc())
+        .all()
+    )
+
+
 def list_catalog_skus(
     db: Session,
     *,

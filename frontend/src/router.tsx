@@ -17,16 +17,20 @@ import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminOverviewPage from "./pages/AdminOverviewPage";
 import AdminAmoManagementPage from "./pages/AdminAmoManagementPage";
-import AdminBillingPage from "./pages/AdminBillingPage";
 import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
 import UpsellPage from "./pages/UpsellPage";
+import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
 
-import { isAuthenticated } from "./services/auth";
+import { getCachedUser, isAuthenticated } from "./services/auth";
 
 type RequireAuthProps = {
+  children: React.ReactElement;
+};
+
+type RequireTenantAdminProps = {
   children: React.ReactElement;
 };
 
@@ -64,6 +68,38 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
         state={{ from: location.pathname + location.search }}
       />
     );
+  }
+
+  return children;
+};
+
+/**
+ * RequireTenantAdmin
+ * - Requires the user to be a superuser or AMO admin.
+ * - Falls back to the AMO overview (or login) when unauthorized.
+ */
+const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => {
+  const location = useLocation();
+  const amoCode = inferAmoCodeFromPath(location.pathname);
+  const currentUser = getCachedUser();
+  const isTenantAdmin = !!currentUser?.is_superuser || !!currentUser?.is_amo_admin;
+
+  if (!currentUser) {
+    const target = amoCode ? `/maintenance/${amoCode}/login` : "/login";
+    return (
+      <Navigate
+        to={target}
+        replace
+        state={{ from: location.pathname + location.search }}
+      />
+    );
+  }
+
+  if (!isTenantAdmin) {
+    const fallback = amoCode
+      ? `/maintenance/${amoCode}/admin/overview`
+      : "/login";
+    return <Navigate to={fallback} replace />;
   }
 
   return children;
@@ -156,7 +192,9 @@ export const AppRouter: React.FC = () => {
         path="/maintenance/:amoCode/admin/billing"
         element={
           <RequireAuth>
-            <AdminBillingPage />
+            <RequireTenantAdmin>
+              <SubscriptionManagementPage />
+            </RequireTenantAdmin>
           </RequireAuth>
         }
       />

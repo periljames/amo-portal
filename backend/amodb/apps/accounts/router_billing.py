@@ -28,6 +28,15 @@ def list_catalog(
     return services.list_catalog_skus(db)
 
 
+@router.get("/entitlements", response_model=list[schemas.ResolvedEntitlement])
+def list_entitlements(
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_user),
+):
+    entitlements = services.resolve_entitlements(db, amo_id=current_user.amo_id)
+    return list(entitlements.values())
+
+
 @router.get("/subscription", response_model=schemas.SubscriptionRead)
 def get_current_subscription(
     db: Session = Depends(get_db),
@@ -53,6 +62,14 @@ def get_usage_meters(
     current_user=Depends(_require_user),
 ):
     return services.list_usage_meters(db, amo_id=current_user.amo_id)
+
+
+@router.get("/payment-methods", response_model=list[schemas.PaymentMethodRead])
+def get_payment_methods(
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_user),
+):
+    return services.list_payment_methods(db, amo_id=current_user.amo_id)
 
 
 @router.post("/payment-methods", response_model=schemas.PaymentMethodRead, status_code=status.HTTP_201_CREATED)
