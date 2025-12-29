@@ -22,12 +22,17 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ...entitlements import require_module
 from ...security import get_current_active_user
 from ..accounts import models as accounts_models
 from . import models as training_models
 from . import schemas as training_schemas
 
-router = APIRouter(prefix="/training", tags=["training"])
+router = APIRouter(
+    prefix="/training",
+    tags=["training"],
+    dependencies=[Depends(require_module("training"))],
+)
 
 _MAX_PAGE_SIZE = 1000  # hard ceiling for list endpoints to protect DB
 
