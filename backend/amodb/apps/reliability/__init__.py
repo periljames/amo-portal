@@ -1,8 +1,10 @@
 # backend/amodb/apps/reliability/__init__.py
 """
-Reliability module placeholder.
+Reliability module.
 
-This module focuses on reliability analytics and event tracking.
+Provides reliability analytics, recurring findings and recommendations
+derived from fleet utilisation and maintenance program execution.
 """
 
 from .router import router  # noqa: F401
+from . import models  # noqa: F401

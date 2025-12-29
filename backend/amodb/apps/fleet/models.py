@@ -127,7 +127,7 @@ class Aircraft(Base):
     aircraft_model_code = Column(String(32), nullable=True, index=True)
 
     # Operator Code (OPR) – typically 3 characters, may be 'ZZZZZ'
-    operator_code = Column(String(5), nullable=True, index=True)
+    operator_code = Column(String(5), nullable=True)
 
     # Supplier Code (SPL) – OEM / data supplier code when applicable
     supplier_code = Column(String(5), nullable=True)
@@ -155,7 +155,7 @@ class Aircraft(Base):
     is_active = Column(Boolean, nullable=False, default=True, index=True)
 
     # Utilisation snapshot (high-level cumulative hours / cycles)
-    last_log_date = Column(Date, nullable=True, index=True)
+    last_log_date = Column(Date, nullable=True)
     total_hours = Column(Float, nullable=True)   # cumulative flight hours
     total_cycles = Column(Float, nullable=True)  # cumulative cycles / landings
     verification_status = Column(
@@ -423,7 +423,7 @@ class AircraftComponent(Base):
     position = Column(String(50), nullable=False, index=True)
 
     # Optional ATA chapter / system reference (e.g. '72', '79', etc.)
-    ata = Column(String(20), nullable=True, index=True)
+    ata = Column(String(20), nullable=True)
 
     # Core identification
     part_number = Column(String(50), nullable=True, index=True)       # PNR
@@ -516,7 +516,7 @@ class AircraftUsage(Base):
     )
 
     date = Column(Date, nullable=False, index=True)
-    techlog_no = Column(String(64), nullable=False, index=True)
+    techlog_no = Column(String(64), nullable=False)
     station = Column(String(16), nullable=True)  # ICAO/IATA/base code
 
     block_hours = Column(Float, nullable=False)
