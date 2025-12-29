@@ -20,6 +20,14 @@ def _require_user(current_user=Depends(get_current_active_user)):
     return current_user
 
 
+@router.get("/catalog", response_model=list[schemas.CatalogSKURead])
+def list_catalog(
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_user),
+):
+    return services.list_catalog_skus(db)
+
+
 @router.get("/subscription", response_model=schemas.SubscriptionRead)
 def get_current_subscription(
     db: Session = Depends(get_db),
