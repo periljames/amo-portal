@@ -1598,7 +1598,7 @@ def start_trial(
         current_period_end=trial_end,
     )
     db.add(license)
-        db.commit()
+    db.commit()
 
     _log_billing_audit(
         db,

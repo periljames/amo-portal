@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext, getCachedUser } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
-import { AircraftDocument, listDocumentAlerts } from "../services/fleet";
+import { type AircraftDocument, listDocumentAlerts } from "../services/fleet";
 
 type DepartmentId =
   | "planning"
