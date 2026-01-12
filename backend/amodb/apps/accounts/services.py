@@ -110,11 +110,10 @@ def _validate_password_strength(password: str) -> None:
     has_upper = any(ch.isupper() for ch in password)
     has_lower = any(ch.islower() for ch in password)
     has_digit = any(ch.isdigit() for ch in password)
-    has_symbol = any(not ch.isalnum() for ch in password)
 
-    if not (has_upper and has_lower and has_digit and has_symbol):
+    if not (has_upper and has_lower and has_digit):
         raise ValueError(
-            "Password must include upper and lower case letters, a number, and a symbol."
+            "Password must include upper and lower case letters, and a number."
         )
 
 

@@ -22,10 +22,8 @@ function validatePassword(password: string, confirmPassword: string): string | n
   const hasUpper = /[A-Z]/.test(password);
   const hasLower = /[a-z]/.test(password);
   const hasDigit = /\d/.test(password);
-  const hasSymbol = /[^A-Za-z0-9]/.test(password);
-
-  if (!hasUpper || !hasLower || !hasDigit || !hasSymbol) {
-    return "Password must include uppercase, lowercase, number, and symbol.";
+  if (!hasUpper || !hasLower || !hasDigit) {
+    return "Password must include uppercase, lowercase, and a number.";
   }
 
   return null;
