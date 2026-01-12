@@ -17,6 +17,7 @@ Role model (from security / AccountRole):
 
 from __future__ import annotations
 
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -27,6 +28,8 @@ from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts.models import AccountRole, User  # type: ignore
+from amodb.apps.reliability import schemas as reliability_schemas
+from amodb.apps.reliability import services as reliability_services
 
 from . import models, schemas
 from amodb.apps.fleet import services as fleet_services
@@ -490,6 +493,13 @@ def update_task(
     is_engineering = current_user.role in ENGINEERING_ROLES
 
     data = payload.model_dump(exclude_unset=True)
+    part_movement_event_type = data.pop("part_movement_event_type", None)
+    part_movement_event_date = data.pop("part_movement_event_date", None)
+    part_movement_component_instance_id = data.pop("part_movement_component_instance_id", None)
+    part_movement_notes = data.pop("part_movement_notes", None)
+    removal_reason = data.pop("removal_reason", None)
+    hours_at_removal = data.pop("hours_at_removal", None)
+    cycles_at_removal = data.pop("cycles_at_removal", None)
 
     # Optional optimistic concurrency: if client sent last_known_updated_at,
     # check it against DB value.
@@ -539,6 +549,45 @@ def update_task(
     db.add(task)
     db.commit()
     db.refresh(task)
+
+    if part_movement_event_type:
+        component_id = data.get("aircraft_component_id") or task.aircraft_component_id
+        if component_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="aircraft_component_id is required to record a part movement.",
+            )
+        movement_payload = reliability_schemas.PartMovementLedgerCreate(
+            aircraft_serial_number=task.aircraft_serial_number,
+            component_id=component_id,
+            component_instance_id=part_movement_component_instance_id,
+            work_order_id=task.work_order_id,
+            task_card_id=task.id,
+            event_type=part_movement_event_type,
+            event_date=part_movement_event_date or date.today(),
+            notes=part_movement_notes,
+        )
+        movement = reliability_services.create_part_movement(
+            db,
+            amo_id=current_user.amo_id,
+            data=movement_payload,
+        )
+        if part_movement_event_type == reliability_schemas.PartMovementTypeEnum.REMOVE:
+            removal_payload = reliability_schemas.RemovalEventCreate(
+                aircraft_serial_number=task.aircraft_serial_number,
+                component_id=component_id,
+                component_instance_id=part_movement_component_instance_id,
+                part_movement_id=movement.id,
+                removal_reason=removal_reason,
+                hours_at_removal=hours_at_removal,
+                cycles_at_removal=cycles_at_removal,
+            )
+            reliability_services.create_removal_event(
+                db,
+                amo_id=current_user.amo_id,
+                data=removal_payload,
+            )
+
     return task
 
 

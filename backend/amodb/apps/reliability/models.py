@@ -20,7 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from ...database import Base
@@ -251,3 +251,677 @@ class ReliabilityRecommendation(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
         return f"<ReliabilityRecommendation id={self.id} title={self.title!r} priority={self.priority}>"
+
+
+class ReliabilityEventTypeEnum(str, Enum):
+    DEFECT = "DEFECT"
+    REMOVAL = "REMOVAL"
+    INSTALLATION = "INSTALLATION"
+    OCTM = "OCTM"
+    ECTM = "ECTM"
+    FRACAS = "FRACAS"
+    OTHER = "OTHER"
+
+
+class ReliabilitySeverityEnum(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class ReliabilityAlertStatusEnum(str, Enum):
+    OPEN = "OPEN"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    CLOSED = "CLOSED"
+
+
+class KPIBaseScopeEnum(str, Enum):
+    FLEET = "FLEET"
+    AIRCRAFT = "AIRCRAFT"
+    ENGINE = "ENGINE"
+    COMPONENT = "COMPONENT"
+    ATA = "ATA"
+
+
+class FRACASStatusEnum(str, Enum):
+    OPEN = "OPEN"
+    IN_ANALYSIS = "IN_ANALYSIS"
+    ACTIONS = "ACTIONS"
+    MONITORING = "MONITORING"
+    CLOSED = "CLOSED"
+
+
+class FRACASActionTypeEnum(str, Enum):
+    CORRECTIVE = "CORRECTIVE"
+    PREVENTIVE = "PREVENTIVE"
+
+
+class FRACASActionStatusEnum(str, Enum):
+    OPEN = "OPEN"
+    IN_PROGRESS = "IN_PROGRESS"
+    DONE = "DONE"
+    VERIFIED = "VERIFIED"
+    CANCELLED = "CANCELLED"
+
+
+class PartMovementTypeEnum(str, Enum):
+    INSTALL = "INSTALL"
+    REMOVE = "REMOVE"
+    SWAP = "SWAP"
+    INSPECT = "INSPECT"
+
+
+class AlertComparatorEnum(str, Enum):
+    GT = "GT"
+    GTE = "GTE"
+    LT = "LT"
+    LTE = "LTE"
+    EQ = "EQ"
+
+
+class ControlChartMethodEnum(str, Enum):
+    EWMA = "EWMA"
+    CUSUM = "CUSUM"
+    SLOPE = "SLOPE"
+
+
+class ReliabilityEvent(Base):
+    """
+    Canonical reliability event log with references to source objects.
+    """
+
+    __tablename__ = "reliability_events"
+
+    __table_args__ = (
+        Index("ix_reliability_events_amo_type", "amo_id", "event_type"),
+        Index("ix_reliability_events_aircraft_date", "aircraft_serial_number", "occurred_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    engine_position = Column(String(32), nullable=True, index=True)
+    component_id = Column(
+        Integer,
+        ForeignKey("aircraft_components.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    work_order_id = Column(
+        Integer,
+        ForeignKey("work_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    task_card_id = Column(
+        Integer,
+        ForeignKey("task_cards.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    event_type = Column(
+        SAEnum(ReliabilityEventTypeEnum, name="reliability_event_type_enum", native_enum=False),
+        nullable=False,
+        index=True,
+    )
+    severity = Column(
+        SAEnum(ReliabilitySeverityEnum, name="reliability_event_severity_enum", native_enum=False),
+        nullable=True,
+        index=True,
+    )
+    ata_chapter = Column(String(20), nullable=True, index=True)
+    reference_code = Column(String(64), nullable=True, index=True)
+    source_system = Column(String(64), nullable=True)
+    description = Column(Text, nullable=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+
+class ReliabilityKPI(Base):
+    """
+    Materialized KPI snapshots with traceability to underlying data windows.
+    """
+
+    __tablename__ = "reliability_kpis"
+
+    __table_args__ = (
+        Index("ix_reliability_kpis_scope_window", "amo_id", "kpi_code", "window_start", "window_end"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    kpi_code = Column(String(64), nullable=False, index=True)
+    scope_type = Column(
+        SAEnum(KPIBaseScopeEnum, name="reliability_kpi_scope_enum", native_enum=False),
+        nullable=False,
+        default=KPIBaseScopeEnum.FLEET,
+        index=True,
+    )
+
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    engine_position = Column(String(32), nullable=True, index=True)
+    component_id = Column(Integer, ForeignKey("aircraft_components.id", ondelete="SET NULL"), nullable=True, index=True)
+    ata_chapter = Column(String(20), nullable=True, index=True)
+
+    window_start = Column(Date, nullable=False, index=True)
+    window_end = Column(Date, nullable=False, index=True)
+
+    value = Column(Float, nullable=False)
+    numerator = Column(Float, nullable=True)
+    denominator = Column(Float, nullable=True)
+    unit = Column(String(32), nullable=True)
+    calculation_version = Column(String(32), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ReliabilityAlert(Base):
+    """
+    Alert emitted from KPI thresholds or control chart rules.
+    """
+
+    __tablename__ = "reliability_alerts"
+
+    __table_args__ = (
+        Index("ix_reliability_alerts_status", "amo_id", "status"),
+        Index("ix_reliability_alerts_triggered", "triggered_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    kpi_id = Column(Integer, ForeignKey("reliability_kpis.id", ondelete="SET NULL"), nullable=True, index=True)
+    threshold_set_id = Column(
+        Integer,
+        ForeignKey("reliability_threshold_sets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    alert_code = Column(String(64), nullable=False, index=True)
+    status = Column(
+        SAEnum(ReliabilityAlertStatusEnum, name="reliability_alert_status_enum", native_enum=False),
+        nullable=False,
+        default=ReliabilityAlertStatusEnum.OPEN,
+        index=True,
+    )
+    severity = Column(
+        SAEnum(ReliabilitySeverityEnum, name="reliability_alert_severity_enum", native_enum=False),
+        nullable=False,
+        default=ReliabilitySeverityEnum.MEDIUM,
+        index=True,
+    )
+
+    message = Column(Text, nullable=True)
+    triggered_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    resolved_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+
+class FRACASCase(Base):
+    """
+    FRACAS case tracking lifecycle.
+    """
+
+    __tablename__ = "fracas_cases"
+
+    __table_args__ = (
+        Index("ix_fracas_cases_amo_status", "amo_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+
+    status = Column(
+        SAEnum(FRACASStatusEnum, name="fracas_status_enum", native_enum=False),
+        nullable=False,
+        default=FRACASStatusEnum.OPEN,
+        index=True,
+    )
+    severity = Column(
+        SAEnum(ReliabilitySeverityEnum, name="fracas_severity_enum", native_enum=False),
+        nullable=True,
+        index=True,
+    )
+    classification = Column(String(64), nullable=True, index=True)
+
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    engine_position = Column(String(32), nullable=True, index=True)
+    component_id = Column(Integer, ForeignKey("aircraft_components.id", ondelete="SET NULL"), nullable=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    task_card_id = Column(Integer, ForeignKey("task_cards.id", ondelete="SET NULL"), nullable=True, index=True)
+    reliability_event_id = Column(
+        Integer,
+        ForeignKey("reliability_events.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    opened_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    root_cause = Column(Text, nullable=True)
+    corrective_action_summary = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    actions = relationship("FRACASAction", back_populates="case", lazy="selectin")
+
+
+class FRACASAction(Base):
+    """
+    Action items tied to a FRACAS case.
+    """
+
+    __tablename__ = "fracas_actions"
+
+    __table_args__ = (
+        Index("ix_fracas_actions_case_status", "fracas_case_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    fracas_case_id = Column(Integer, ForeignKey("fracas_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    action_type = Column(
+        SAEnum(FRACASActionTypeEnum, name="fracas_action_type_enum", native_enum=False),
+        nullable=False,
+        default=FRACASActionTypeEnum.CORRECTIVE,
+        index=True,
+    )
+    status = Column(
+        SAEnum(FRACASActionStatusEnum, name="fracas_action_status_enum", native_enum=False),
+        nullable=False,
+        default=FRACASActionStatusEnum.OPEN,
+        index=True,
+    )
+
+    description = Column(Text, nullable=False)
+    owner_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    due_date = Column(Date, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    effectiveness_notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    case = relationship("FRACASCase", back_populates="actions", lazy="joined")
+
+
+class EngineFlightSnapshot(Base):
+    """
+    Normalized per-flight per-engine snapshot (ECTM/EHM).
+    """
+
+    __tablename__ = "engine_flight_snapshots"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "aircraft_serial_number",
+            "engine_position",
+            "flight_date",
+            "flight_leg",
+            name="uq_engine_snapshot_flight",
+        ),
+        Index("ix_engine_snapshots_aircraft_date", "aircraft_serial_number", "flight_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    engine_position = Column(String(32), nullable=False, index=True)
+
+    flight_date = Column(Date, nullable=False, index=True)
+    flight_leg = Column(String(32), nullable=True)
+    flight_hours = Column(Float, nullable=True)
+    cycles = Column(Float, nullable=True)
+
+    metrics = Column(JSONB, nullable=True)
+    data_source = Column(String(64), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class OilUplift(Base):
+    """
+    Oil uplift/servicing record for OCTM.
+    """
+
+    __tablename__ = "oil_uplifts"
+
+    __table_args__ = (
+        Index("ix_oil_uplifts_aircraft_date", "aircraft_serial_number", "uplift_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    engine_position = Column(String(32), nullable=True, index=True)
+    uplift_date = Column(Date, nullable=False, index=True)
+    quantity_quarts = Column(Float, nullable=False)
+    source = Column(String(64), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class OilConsumptionRate(Base):
+    """
+    Derived oil consumption rate per engine and window.
+    """
+
+    __tablename__ = "oil_consumption_rates"
+
+    __table_args__ = (
+        Index("ix_oil_rates_aircraft_window", "aircraft_serial_number", "window_start", "window_end"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    engine_position = Column(String(32), nullable=True, index=True)
+    window_start = Column(Date, nullable=False, index=True)
+    window_end = Column(Date, nullable=False, index=True)
+    oil_used_quarts = Column(Float, nullable=False)
+    flight_hours = Column(Float, nullable=True)
+    rate_qt_per_hour = Column(Float, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ComponentInstance(Base):
+    """
+    Master record for serialized components for reliability tracking.
+    """
+
+    __tablename__ = "component_instances"
+
+    __table_args__ = (
+        UniqueConstraint("part_number", "serial_number", name="uq_component_instance_pn_sn"),
+        Index("ix_component_instances_ata", "ata"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    part_number = Column(String(50), nullable=False, index=True)
+    serial_number = Column(String(50), nullable=False, index=True)
+    description = Column(String(255), nullable=True)
+    component_class = Column(String(64), nullable=True, index=True)
+    ata = Column(String(20), nullable=True, index=True)
+    manufacturer_code = Column(String(32), nullable=True, index=True)
+    operator_code = Column(String(32), nullable=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class PartMovementLedger(Base):
+    """
+    Movement events for components tied to work orders and aircraft.
+    """
+
+    __tablename__ = "part_movement_ledger"
+
+    __table_args__ = (
+        Index("ix_part_movement_aircraft_date", "aircraft_serial_number", "event_date"),
+        Index("ix_part_movement_component", "component_id", "event_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    component_id = Column(Integer, ForeignKey("aircraft_components.id", ondelete="SET NULL"), nullable=True, index=True)
+    component_instance_id = Column(
+        Integer,
+        ForeignKey("component_instances.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    work_order_id = Column(Integer, ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    task_card_id = Column(Integer, ForeignKey("task_cards.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    event_type = Column(
+        SAEnum(PartMovementTypeEnum, name="part_movement_type_enum", native_enum=False),
+        nullable=False,
+        index=True,
+    )
+    event_date = Column(Date, nullable=False, index=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class RemovalEvent(Base):
+    """
+    Removal events with usage at removal for MTBUR/MTBF analytics.
+    """
+
+    __tablename__ = "removal_events"
+
+    __table_args__ = (
+        Index("ix_removal_events_component_date", "component_id", "removed_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    component_id = Column(Integer, ForeignKey("aircraft_components.id", ondelete="SET NULL"), nullable=True, index=True)
+    component_instance_id = Column(
+        Integer,
+        ForeignKey("component_instances.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    part_movement_id = Column(
+        Integer,
+        ForeignKey("part_movement_ledger.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    removal_reason = Column(String(128), nullable=True, index=True)
+    hours_at_removal = Column(Float, nullable=True)
+    cycles_at_removal = Column(Float, nullable=True)
+    removed_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class AircraftUtilizationDaily(Base):
+    """
+    Daily aircraft utilization denominators for reliability KPIs.
+    """
+
+    __tablename__ = "aircraft_utilization_daily"
+
+    __table_args__ = (
+        UniqueConstraint("aircraft_serial_number", "date", name="uq_aircraft_utilization_date"),
+        Index("ix_aircraft_utilization_amo_date", "amo_id", "date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    date = Column(Date, nullable=False, index=True)
+    flight_hours = Column(Float, nullable=False, default=0.0)
+    cycles = Column(Float, nullable=False, default=0.0)
+    source = Column(String(64), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class EngineUtilizationDaily(Base):
+    """
+    Daily engine utilization denominators for reliability KPIs.
+    """
+
+    __tablename__ = "engine_utilization_daily"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "aircraft_serial_number",
+            "engine_position",
+            "date",
+            name="uq_engine_utilization_date",
+        ),
+        Index("ix_engine_utilization_amo_date", "amo_id", "date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    engine_position = Column(String(32), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    flight_hours = Column(Float, nullable=False, default=0.0)
+    cycles = Column(Float, nullable=False, default=0.0)
+    source = Column(String(64), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ThresholdSet(Base):
+    """
+    Threshold configuration for KPI alerts.
+    """
+
+    __tablename__ = "reliability_threshold_sets"
+
+    __table_args__ = (
+        Index("ix_reliability_threshold_sets_scope", "amo_id", "scope_type", "scope_value"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    name = Column(String(128), nullable=False)
+    scope_type = Column(
+        SAEnum(KPIBaseScopeEnum, name="reliability_threshold_scope_enum", native_enum=False),
+        nullable=False,
+        index=True,
+    )
+    scope_value = Column(String(128), nullable=True, index=True)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class AlertRule(Base):
+    """
+    Rules that drive alert generation from KPI values.
+    """
+
+    __tablename__ = "reliability_alert_rules"
+
+    __table_args__ = (
+        Index("ix_reliability_alert_rules_threshold", "threshold_set_id", "kpi_code"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    threshold_set_id = Column(
+        Integer,
+        ForeignKey("reliability_threshold_sets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kpi_code = Column(String(64), nullable=False, index=True)
+    comparator = Column(
+        SAEnum(AlertComparatorEnum, name="reliability_alert_comparator_enum", native_enum=False),
+        nullable=False,
+        index=True,
+    )
+    threshold_value = Column(Float, nullable=False)
+    severity = Column(
+        SAEnum(ReliabilitySeverityEnum, name="reliability_alert_rule_severity_enum", native_enum=False),
+        nullable=False,
+        default=ReliabilitySeverityEnum.MEDIUM,
+        index=True,
+    )
+    enabled = Column(Boolean, nullable=False, default=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ControlChartConfig(Base):
+    """
+    Control chart configuration per KPI code.
+    """
+
+    __tablename__ = "reliability_control_chart_configs"
+
+    __table_args__ = (
+        Index("ix_reliability_control_chart_kpi", "amo_id", "kpi_code"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    kpi_code = Column(String(64), nullable=False, index=True)
+    method = Column(
+        SAEnum(ControlChartMethodEnum, name="reliability_control_chart_method_enum", native_enum=False),
+        nullable=False,
+    )
+    parameters = Column(JSONB, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

@@ -24,6 +24,7 @@ from .models import (
     TaskAssignmentStatusEnum,
     ErrorCapturingMethodEnum,
 )
+from ..reliability.models import PartMovementTypeEnum
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +106,14 @@ class TaskCardUpdate(BaseModel):
     error_capturing_method: Optional[ErrorCapturingMethodEnum] = None
     requires_duplicate_inspection: Optional[bool] = None
     hf_notes: Optional[str] = None
+
+    part_movement_event_type: Optional[PartMovementTypeEnum] = None
+    part_movement_event_date: Optional[date] = None
+    part_movement_component_instance_id: Optional[int] = None
+    part_movement_notes: Optional[str] = None
+    removal_reason: Optional[str] = None
+    hours_at_removal: Optional[float] = None
+    cycles_at_removal: Optional[float] = None
 
     last_known_updated_at: datetime
 
