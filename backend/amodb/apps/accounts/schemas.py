@@ -205,6 +205,7 @@ class UserRead(UserBase):
     is_active: bool
     is_superuser: bool
     is_amo_admin: bool
+    must_change_password: bool
     last_login_at: Optional[datetime] = None
     last_login_ip: Optional[str] = None
     created_at: datetime
@@ -343,6 +344,11 @@ class LoginRequest(BaseModel):
     amo_slug: str = Field(..., description="AMO login slug, e.g. 'maintenance.safa03'")
     email: EmailStr
     password: str
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 # ---------------------------------------------------------------------------

@@ -63,6 +63,7 @@ export interface PortalUser {
   is_active: boolean;
   is_superuser: boolean;
   is_amo_admin: boolean;
+  must_change_password: boolean;
 
   last_login_at: string | null;
   last_login_ip: string | null;
@@ -263,7 +264,7 @@ export async function login(
   amoSlug: string,
   email: string,
   password: string
-): Promise<void> {
+): Promise<LoginResponse> {
   const payload = {
     amo_slug: resolveAmoSlug(amoSlug), // MUST match AMO.login_slug; blank => "root"
     email: email.trim(),
@@ -297,6 +298,8 @@ export async function login(
   if (data.user) {
     cacheCurrentUser(data.user);
   }
+
+  return data;
 }
 
 /**
@@ -377,6 +380,30 @@ export async function confirmPasswordReset(
   if (!res.ok) {
     throw new Error(await readErrorMessage(res));
   }
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<PortalUser> {
+  const payload = {
+    current_password: currentPassword,
+    new_password: newPassword,
+  };
+
+  const res = await fetch(`${API_BASE_URL}/auth/password-change`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    throw new Error(await readErrorMessage(res));
+  }
+
+  const user = (await res.json()) as PortalUser;
+  cacheCurrentUser(user);
+  return user;
 }
 
 /**
