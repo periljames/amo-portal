@@ -191,11 +191,8 @@ const QMSHomePage: React.FC = () => {
 
       {state === "ready" && (
         <>
-          <section className="page-section">
-            <div
-              className="page-section__actions"
-              style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-            >
+          <section className="page-section" id="qms-overview">
+            <div className="page-section__actions">
               <button
                 type="button"
                 className="primary-chip-btn"
@@ -224,10 +221,17 @@ const QMSHomePage: React.FC = () => {
                 Back to dashboard
               </button>
             </div>
+
+            <div className="section-nav" style={{ marginTop: 12 }}>
+              <a href="#qms-documents">Documents</a>
+              <a href="#qms-audits">Audits</a>
+              <a href="#qms-change-control">Change control</a>
+              <a href="#qms-distributions">Distributions</a>
+            </div>
           </section>
 
           {/* Widget grid */}
-          <section className="page-section">
+          <section className="page-section" id="qms-documents">
             <div
               className="page-section__grid"
               style={{
@@ -281,118 +285,124 @@ const QMSHomePage: React.FC = () => {
                   </div>
                 </div>
               </div>
+            </div>
+          </section>
 
-              <div className="card">
-                <div className="card-header">
-                  <h2>Audit Programme</h2>
-                  <p className="text-muted">Plan, execute, and track closures.</p>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <span className="badge badge--neutral">Planned: {metrics.auditCounts.PLANNED}</span>
-                  <span className="badge badge--info">In progress: {metrics.auditCounts.IN_PROGRESS}</span>
-                  <span className="badge badge--warning">CAP open: {metrics.auditCounts.CAP_OPEN}</span>
-                  <span className="badge badge--success">Closed: {metrics.auditCounts.CLOSED}</span>
-                </div>
-
-                <div style={{ marginTop: 12 }}>
-                  <div className="table-primary-text" style={{ marginBottom: 6 }}>
-                    Upcoming (next 30 days): {metrics.auditCounts.UPCOMING_30D}
-                  </div>
-                  <div className="table-responsive">
-                    <table className="table table-compact">
-                      <thead>
-                        <tr>
-                          <th>Ref</th>
-                          <th>Title</th>
-                          <th>Start</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metrics.upcomingAudits.map((a) => (
-                          <tr key={a.id}>
-                            <td>{a.audit_ref}</td>
-                            <td>{a.title}</td>
-                            <td>{formatDate(a.planned_start)}</td>
-                          </tr>
-                        ))}
-                        {metrics.upcomingAudits.length === 0 && (
-                          <tr>
-                            <td colSpan={3} className="text-muted">
-                              No upcoming audits in the next 30 days.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+          <section className="page-section" id="qms-audits">
+            <div className="card">
+              <div className="card-header">
+                <h2>Audit Programme</h2>
+                <p className="text-muted">Plan, execute, and track closures.</p>
               </div>
 
-              <div className="card">
-                <div className="card-header">
-                  <h2>Change Control</h2>
-                  <p className="text-muted">Requests impacting manuals, processes, and compliance.</p>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <span className="badge badge--warning">Open: {metrics.crCounts.OPEN}</span>
-                  <span className="badge badge--success">Approved: {metrics.crCounts.APPROVED}</span>
-                  <span className="badge badge--danger">Rejected: {metrics.crCounts.REJECTED}</span>
-                  <span className="badge badge--neutral">Cancelled: {metrics.crCounts.CANCELLED}</span>
-                </div>
-
-                <div style={{ marginTop: 12 }}>
-                  <div className="table-primary-text" style={{ marginBottom: 6 }}>
-                    Recent requests
-                  </div>
-                  <div className="table-responsive">
-                    <table className="table table-compact">
-                      <thead>
-                        <tr>
-                          <th>Title</th>
-                          <th>Status</th>
-                          <th>Requested</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metrics.recentCRs.map((cr) => (
-                          <tr key={cr.id}>
-                            <td>{cr.title}</td>
-                            <td>{cr.status}</td>
-                            <td>{formatDate(cr.requested_at)}</td>
-                          </tr>
-                        ))}
-                        {metrics.recentCRs.length === 0 && (
-                          <tr>
-                            <td colSpan={3} className="text-muted">
-                              No change requests found.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span className="badge badge--neutral">Planned: {metrics.auditCounts.PLANNED}</span>
+                <span className="badge badge--info">In progress: {metrics.auditCounts.IN_PROGRESS}</span>
+                <span className="badge badge--warning">CAP open: {metrics.auditCounts.CAP_OPEN}</span>
+                <span className="badge badge--success">Closed: {metrics.auditCounts.CLOSED}</span>
               </div>
 
-              <div className="card">
-                <div className="card-header">
-                  <h2>Distribution & Read-and-Sign</h2>
-                  <p className="text-muted">Outstanding acknowledgements for controlled documents.</p>
+              <div style={{ marginTop: 12 }}>
+                <div className="table-primary-text" style={{ marginBottom: 6 }}>
+                  Upcoming (next 30 days): {metrics.auditCounts.UPCOMING_30D}
                 </div>
+                <div className="table-responsive">
+                  <table className="table table-compact">
+                    <thead>
+                      <tr>
+                        <th>Ref</th>
+                        <th>Title</th>
+                        <th>Start</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {metrics.upcomingAudits.map((a) => (
+                        <tr key={a.id}>
+                          <td>{a.audit_ref}</td>
+                          <td>{a.title}</td>
+                          <td>{formatDate(a.planned_start)}</td>
+                        </tr>
+                      ))}
+                      {metrics.upcomingAudits.length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="text-muted">
+                            No upcoming audits in the next 30 days.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <span className={metrics.outstandingAcks > 0 ? "badge badge--warning" : "badge badge--success"}>
-                    Outstanding acknowledgements: {metrics.outstandingAcks}
-                  </span>
-                </div>
+          <section className="page-section" id="qms-change-control">
+            <div className="card">
+              <div className="card-header">
+                <h2>Change Control</h2>
+                <p className="text-muted">Requests impacting manuals, processes, and compliance.</p>
+              </div>
 
-                <div style={{ marginTop: 12 }}>
-                  <p className="text-muted" style={{ margin: 0 }}>
-                    This figure is based on distributions marked as "requires acknowledgement" and not yet signed.
-                  </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span className="badge badge--warning">Open: {metrics.crCounts.OPEN}</span>
+                <span className="badge badge--success">Approved: {metrics.crCounts.APPROVED}</span>
+                <span className="badge badge--danger">Rejected: {metrics.crCounts.REJECTED}</span>
+                <span className="badge badge--neutral">Cancelled: {metrics.crCounts.CANCELLED}</span>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div className="table-primary-text" style={{ marginBottom: 6 }}>
+                  Recent requests
                 </div>
+                <div className="table-responsive">
+                  <table className="table table-compact">
+                    <thead>
+                      <tr>
+                        <th>Title</th>
+                        <th>Status</th>
+                        <th>Requested</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {metrics.recentCRs.map((cr) => (
+                        <tr key={cr.id}>
+                          <td>{cr.title}</td>
+                          <td>{cr.status}</td>
+                          <td>{formatDate(cr.requested_at)}</td>
+                        </tr>
+                      ))}
+                      {metrics.recentCRs.length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="text-muted">
+                            No change requests found.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="page-section" id="qms-distributions">
+            <div className="card">
+              <div className="card-header">
+                <h2>Distribution & Read-and-Sign</h2>
+                <p className="text-muted">Outstanding acknowledgements for controlled documents.</p>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span className={metrics.outstandingAcks > 0 ? "badge badge--warning" : "badge badge--success"}>
+                  Outstanding acknowledgements: {metrics.outstandingAcks}
+                </span>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <p className="text-muted" style={{ margin: 0 }}>
+                  This figure is based on distributions marked as "requires acknowledgement" and not yet signed.
+                </p>
               </div>
             </div>
           </section>

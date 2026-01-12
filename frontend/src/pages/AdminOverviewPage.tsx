@@ -21,6 +21,7 @@ const AdminOverviewPage: React.FC = () => {
   const canAccessAdmin = isSuperuser || isAmoAdmin;
   const canManageAmos = isSuperuser;
   const canAccessBilling = isSuperuser;
+  const canAccessSettings = isSuperuser || isAmoAdmin;
 
   useEffect(() => {
     if (!currentUser) return;
@@ -146,6 +147,29 @@ const AdminOverviewPage: React.FC = () => {
                   }
                 >
                   View Billing
+                </button>
+              </div>
+            </div>
+          )}
+
+          {canAccessSettings && (
+            <div className="card">
+              <div className="card-header">
+                <strong>Usage throttling</strong>
+              </div>
+              <p className="page-section__body">
+                Adjust calendar sync budgets per AMO or per user to stay within
+                free-tier limits.
+              </p>
+              <div className="page-section__actions" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() =>
+                    navigate(`/maintenance/${amoCode}/admin/settings`)
+                  }
+                >
+                  Manage throttling
                 </button>
               </div>
             </div>

@@ -24,6 +24,8 @@ import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
 import UpsellPage from "./pages/UpsellPage";
 import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
+import AdminUsageSettingsPage from "./pages/AdminUsageSettingsPage";
+import UserWidgetsPage from "./pages/UserWidgetsPage";
 
 import { getCachedUser, isAuthenticated } from "./services/auth";
 
@@ -219,6 +221,18 @@ export const AppRouter: React.FC = () => {
         }
       />
 
+      {/* Admin - usage throttling */}
+      <Route
+        path="/maintenance/:amoCode/admin/settings"
+        element={
+          <RequireAuth>
+            <RequireTenantAdmin>
+              <AdminUsageSettingsPage />
+            </RequireTenantAdmin>
+          </RequireAuth>
+        }
+      />
+
       {/* Department dashboard, e.g. /maintenance/safarilink/engineering */}
       <Route
         path="/maintenance/:amoCode/:department"
@@ -245,6 +259,16 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <TrainingPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* User widgets settings */}
+      <Route
+        path="/maintenance/:amoCode/:department/settings/widgets"
+        element={
+          <RequireAuth>
+            <UserWidgetsPage />
           </RequireAuth>
         }
       />
