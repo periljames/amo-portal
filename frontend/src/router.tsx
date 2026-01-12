@@ -10,6 +10,7 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import LoginPage from "./pages/LoginPage";
 import PasswordResetPage from "./pages/PasswordResetPage";
+import OnboardingPasswordPage from "./pages/OnboardingPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
 import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
@@ -70,6 +71,15 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
     );
   }
 
+  const currentUser = getCachedUser();
+  if (currentUser?.must_change_password) {
+    const isOnboardingRoute = location.pathname.includes("/onboarding");
+    if (!isOnboardingRoute) {
+      const amoCode = inferAmoCodeFromPath(location.pathname) || "root";
+      return <Navigate to={`/maintenance/${amoCode}/onboarding`} replace />;
+    }
+  }
+
   return children;
 };
 
@@ -124,6 +134,16 @@ export const AppRouter: React.FC = () => {
 
       {/* Password reset */}
       <Route path="/reset-password" element={<PasswordResetPage />} />
+
+      {/* First-login onboarding */}
+      <Route
+        path="/maintenance/:amoCode/onboarding"
+        element={
+          <RequireAuth>
+            <OnboardingPasswordPage />
+          </RequireAuth>
+        }
+      />
 
       {/* If someone visits /maintenance/:amoCode directly, send them somewhere safe */}
       <Route
