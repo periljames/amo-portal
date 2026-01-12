@@ -194,6 +194,39 @@ def login(
 
 
 # ---------------------------------------------------------------------------
+# PASSWORD CHANGE (AUTHENTICATED)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/password-change",
+    response_model=schemas.UserRead,
+    summary="Change password for the current user",
+)
+def change_password(
+    payload: schemas.PasswordChangeRequest,
+    request: Request,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = services.change_password(
+            db,
+            user=current_user,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+            ip=_client_ip(request),
+            user_agent=_user_agent(request),
+        )
+    except services.AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc) or "Invalid current password.",
+        )
+    return user
+
+
+# ---------------------------------------------------------------------------
 # PASSWORD RESET
 # ---------------------------------------------------------------------------
 

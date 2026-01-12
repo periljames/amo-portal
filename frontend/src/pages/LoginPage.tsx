@@ -79,6 +79,11 @@ const LoginPage: React.FC = () => {
     const u = getCachedUser();
     const admin = isAdminUser(u);
 
+    if (u?.must_change_password) {
+      navigate(`/maintenance/${slug}/onboarding`, { replace: true });
+      return;
+    }
+
     // If router gave us a "from" location, respect it
     if (fromState) {
       navigate(fromState, { replace: true });
@@ -135,7 +140,12 @@ const LoginPage: React.FC = () => {
       // - token
       // - server-provided AMO + department context
       // - cached user
-      await login(slugToUse, trimmedEmail, password);
+      const auth = await login(slugToUse, trimmedEmail, password);
+
+      if (auth.user?.must_change_password) {
+        navigate(`/maintenance/${slugToUse}/onboarding`, { replace: true });
+        return;
+      }
 
       // If router requested a return URL, go there
       if (fromState) {

@@ -62,6 +62,7 @@ export interface AdminUserRead {
   is_active: boolean;
   is_superuser: boolean;
   is_amo_admin: boolean;
+  must_change_password: boolean;
   last_login_at: string | null;
   last_login_ip: string | null;
   created_at: string;
