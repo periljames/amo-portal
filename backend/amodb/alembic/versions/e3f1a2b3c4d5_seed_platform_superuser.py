@@ -13,8 +13,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-
-from amodb.security import get_password_hash
+from argon2 import PasswordHasher
 
 # revision identifiers, used by Alembic.
 revision: str = "e3f1a2b3c4d5"
@@ -32,6 +31,14 @@ PASSWORD = os.getenv("AMODB_SUPERUSER_PASSWORD")
 FIRST_NAME = os.getenv("AMODB_SUPERUSER_FIRST_NAME", "Platform")
 LAST_NAME = os.getenv("AMODB_SUPERUSER_LAST_NAME", "Admin")
 STAFF_CODE = os.getenv("AMODB_SUPERUSER_STAFF_CODE", "SYS001")
+
+_pwd_hasher = PasswordHasher(
+    time_cost=int(os.getenv("ARGON2_TIME_COST", "3")),
+    memory_cost=int(os.getenv("ARGON2_MEMORY_COST", "65536")),
+    parallelism=int(os.getenv("ARGON2_PARALLELISM", "2")),
+    hash_len=int(os.getenv("ARGON2_HASH_LEN", "32")),
+    salt_len=int(os.getenv("ARGON2_SALT_LEN", "16")),
+)
 
 
 def upgrade() -> None:
@@ -126,7 +133,7 @@ def upgrade() -> None:
     ).scalar()
 
     full_name = f"{FIRST_NAME} {LAST_NAME}".strip()
-    hashed_password = get_password_hash(PASSWORD)
+    hashed_password = _pwd_hasher.hash(PASSWORD)
 
     if user_id:
         conn.execute(
