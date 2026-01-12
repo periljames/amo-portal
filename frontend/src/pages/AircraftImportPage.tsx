@@ -141,6 +141,42 @@ type ComponentPreviewRow = {
   }[];
 };
 
+type ManualAircraftDraft = {
+  serial_number: string;
+  registration: string;
+  template: string;
+  make: string;
+  model: string;
+  home_base: string;
+  owner: string;
+  aircraft_model_code: string;
+  operator_code: string;
+  supplier_code: string;
+  company_name: string;
+  internal_aircraft_identifier: string;
+  status: string;
+  is_active: "" | "true" | "false";
+  last_log_date: string;
+  total_hours: string;
+  total_cycles: string;
+};
+
+type ManualComponentDraft = {
+  position: string;
+  ata: string;
+  part_number: string;
+  serial_number: string;
+  description: string;
+  installed_date: string;
+  installed_hours: string;
+  installed_cycles: string;
+  current_hours: string;
+  current_cycles: string;
+  notes: string;
+  manufacturer_code: string;
+  operator_code: string;
+};
+
 type ImportSnapshot = {
   id: number;
   batch_id: string;
@@ -190,6 +226,11 @@ const FORMULA_TOLERANCE = 0.01;
 const normalizeValue = (value: unknown) =>
   value === null || value === undefined ? "" : `${value}`.trim();
 
+const toOptionalValue = (value: string) => {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
 const normalizeHeader = (value: string) =>
   value
     .trim()
@@ -200,6 +241,42 @@ const normalizeHeader = (value: string) =>
 const isSuperuser = (user: any): boolean => {
   if (!user) return false;
   return !!user.is_superuser || user.role === "SUPERUSER";
+};
+
+const emptyManualAircraftDraft: ManualAircraftDraft = {
+  serial_number: "",
+  registration: "",
+  template: "",
+  make: "",
+  model: "",
+  home_base: "",
+  owner: "",
+  aircraft_model_code: "",
+  operator_code: "",
+  supplier_code: "",
+  company_name: "",
+  internal_aircraft_identifier: "",
+  status: "",
+  is_active: "",
+  last_log_date: "",
+  total_hours: "",
+  total_cycles: "",
+};
+
+const emptyManualComponentDraft: ManualComponentDraft = {
+  position: "",
+  ata: "",
+  part_number: "",
+  serial_number: "",
+  description: "",
+  installed_date: "",
+  installed_hours: "",
+  installed_cycles: "",
+  current_hours: "",
+  current_cycles: "",
+  notes: "",
+  manufacturer_code: "",
+  operator_code: "",
 };
 
 const AircraftImportPage: React.FC = () => {
@@ -274,6 +351,10 @@ const AircraftImportPage: React.FC = () => {
     useState("{}");
   const [componentTemplateLoading, setComponentTemplateLoading] =
     useState(false);
+  const [manualAircraftDraft, setManualAircraftDraft] =
+    useState<ManualAircraftDraft>(emptyManualAircraftDraft);
+  const [manualComponentDraft, setManualComponentDraft] =
+    useState<ManualComponentDraft>(emptyManualComponentDraft);
   const [componentImportComplete, setComponentImportComplete] = useState(false);
   const [importBatchId, setImportBatchId] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<ImportSnapshot[]>([]);
@@ -381,6 +462,11 @@ const AircraftImportPage: React.FC = () => {
 
   const hasComponentErrors = (row: ComponentPreviewRow) =>
     row.errors.length > 0;
+
+  const getNextRowNumber = (rows: { row_number: number }[]) => {
+    if (rows.length === 0) return 1;
+    return rows.reduce((max, row) => Math.max(max, row.row_number), 0) + 1;
+  };
 
   const loadTemplates = async () => {
     try {
@@ -586,6 +672,95 @@ const AircraftImportPage: React.FC = () => {
         };
       })
     );
+  };
+
+  const handleAddManualAircraftRow = () => {
+    if (previewMode === "server") {
+      setMessage(
+        "Manual entry is unavailable while a large preview is active. Clear the preview or upload a smaller file to add rows manually."
+      );
+      return;
+    }
+
+    const data: AircraftRowData = {
+      serial_number: manualAircraftDraft.serial_number.trim(),
+      registration: manualAircraftDraft.registration.trim(),
+      template: toOptionalValue(manualAircraftDraft.template),
+      make: toOptionalValue(manualAircraftDraft.make),
+      model: toOptionalValue(manualAircraftDraft.model),
+      home_base: toOptionalValue(manualAircraftDraft.home_base),
+      owner: toOptionalValue(manualAircraftDraft.owner),
+      aircraft_model_code: toOptionalValue(manualAircraftDraft.aircraft_model_code),
+      operator_code: toOptionalValue(manualAircraftDraft.operator_code),
+      supplier_code: toOptionalValue(manualAircraftDraft.supplier_code),
+      company_name: toOptionalValue(manualAircraftDraft.company_name),
+      internal_aircraft_identifier: toOptionalValue(
+        manualAircraftDraft.internal_aircraft_identifier
+      ),
+      status: toOptionalValue(manualAircraftDraft.status),
+      is_active:
+        manualAircraftDraft.is_active === ""
+          ? null
+          : manualAircraftDraft.is_active === "true",
+      last_log_date: toOptionalValue(manualAircraftDraft.last_log_date),
+      total_hours: toOptionalValue(manualAircraftDraft.total_hours),
+      total_cycles: toOptionalValue(manualAircraftDraft.total_cycles),
+    };
+    const errors = validateRow(data);
+    const rowNumber = getNextRowNumber(previewRows);
+    const baseRow: PreviewRow = {
+      row_number: rowNumber,
+      data,
+      errors,
+      warnings: [],
+      action: errors.length ? "invalid" : "new",
+      approved: errors.length === 0,
+      suggested_template: null,
+    };
+    setPreviewMode("client");
+    setPreviewId(null);
+    setPreviewTotalRows(0);
+    setPreviewRowOverrides({});
+    setPreviewRows((prev) => [...prev, normalizePreviewRow(baseRow)]);
+    setManualAircraftDraft(emptyManualAircraftDraft);
+    setMessage("Manual aircraft row added to the preview.");
+  };
+
+  const handleAddManualComponentRow = () => {
+    if (!componentAircraftSerial.trim()) {
+      setMessage("Enter the aircraft serial number before adding components.");
+      return;
+    }
+    const data: ComponentRowData = {
+      position: manualComponentDraft.position.trim(),
+      ata: toOptionalValue(manualComponentDraft.ata),
+      part_number: toOptionalValue(manualComponentDraft.part_number),
+      serial_number: toOptionalValue(manualComponentDraft.serial_number),
+      description: toOptionalValue(manualComponentDraft.description),
+      installed_date: toOptionalValue(manualComponentDraft.installed_date),
+      installed_hours: toOptionalValue(manualComponentDraft.installed_hours),
+      installed_cycles: toOptionalValue(manualComponentDraft.installed_cycles),
+      current_hours: toOptionalValue(manualComponentDraft.current_hours),
+      current_cycles: toOptionalValue(manualComponentDraft.current_cycles),
+      notes: toOptionalValue(manualComponentDraft.notes),
+      manufacturer_code: toOptionalValue(manualComponentDraft.manufacturer_code),
+      operator_code: toOptionalValue(manualComponentDraft.operator_code),
+    };
+    const errors = validateComponentRow(data);
+    const rowNumber = getNextRowNumber(componentPreviewRows);
+    const row: ComponentPreviewRow = {
+      row_number: rowNumber,
+      data,
+      errors,
+      warnings: [],
+      action: errors.length ? "invalid" : "new",
+      approved: errors.length === 0,
+      existing_component: null,
+      dedupe_suggestions: [],
+    };
+    setComponentPreviewRows((prev) => [...prev, row]);
+    setManualComponentDraft(emptyManualComponentDraft);
+    setMessage("Manual component row added to the preview.");
   };
 
   const toggleApproval = (row: PreviewRow) => {
@@ -2023,6 +2198,286 @@ const AircraftImportPage: React.FC = () => {
           <div className="card card--form">
             <div className="card-header">
               <div>
+                <div className="import-step__eyebrow">Optional</div>
+                <h3 className="import-step__title">Manual aircraft entry</h3>
+              </div>
+              <span className="import-step__status">Available</span>
+            </div>
+            <p className="form-hint">
+              Add a single aircraft row without a file upload. The row will
+              appear in the preview table for review.
+            </p>
+            <div className="import-template-grid">
+              <div className="form-row">
+                <label>Serial number</label>
+                <input
+                  type="text"
+                  value={manualAircraftDraft.serial_number}
+                  onChange={(e) =>
+                    setManualAircraftDraft((prev) => ({
+                      ...prev,
+                      serial_number: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Registration</label>
+                <input
+                  type="text"
+                  value={manualAircraftDraft.registration}
+                  onChange={(e) =>
+                    setManualAircraftDraft((prev) => ({
+                      ...prev,
+                      registration: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Template</label>
+                <input
+                  type="text"
+                  value={manualAircraftDraft.template}
+                  onChange={(e) =>
+                    setManualAircraftDraft((prev) => ({
+                      ...prev,
+                      template: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Make</label>
+                <input
+                  type="text"
+                  value={manualAircraftDraft.make}
+                  onChange={(e) =>
+                    setManualAircraftDraft((prev) => ({
+                      ...prev,
+                      make: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Model</label>
+                <input
+                  type="text"
+                  value={manualAircraftDraft.model}
+                  onChange={(e) =>
+                    setManualAircraftDraft((prev) => ({
+                      ...prev,
+                      model: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Base</label>
+                <input
+                  type="text"
+                  value={manualAircraftDraft.home_base}
+                  onChange={(e) =>
+                    setManualAircraftDraft((prev) => ({
+                      ...prev,
+                      home_base: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Owner</label>
+                <input
+                  type="text"
+                  value={manualAircraftDraft.owner}
+                  onChange={(e) =>
+                    setManualAircraftDraft((prev) => ({
+                      ...prev,
+                      owner: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Status</label>
+                <input
+                  type="text"
+                  value={manualAircraftDraft.status}
+                  onChange={(e) =>
+                    setManualAircraftDraft((prev) => ({
+                      ...prev,
+                      status: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Active</label>
+                <select
+                  value={manualAircraftDraft.is_active}
+                  onChange={(e) =>
+                    setManualAircraftDraft((prev) => ({
+                      ...prev,
+                      is_active: e.target.value as ManualAircraftDraft["is_active"],
+                    }))
+                  }
+                  className="input"
+                >
+                  <option value="">Select</option>
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select>
+              </div>
+            </div>
+
+            <details className="import-advanced" open={false}>
+              <summary>Additional fields</summary>
+              <div className="import-advanced__body">
+                <div className="import-template-grid">
+                  <div className="form-row">
+                    <label>Model code</label>
+                    <input
+                      type="text"
+                      value={manualAircraftDraft.aircraft_model_code}
+                      onChange={(e) =>
+                        setManualAircraftDraft((prev) => ({
+                          ...prev,
+                          aircraft_model_code: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Operator code</label>
+                    <input
+                      type="text"
+                      value={manualAircraftDraft.operator_code}
+                      onChange={(e) =>
+                        setManualAircraftDraft((prev) => ({
+                          ...prev,
+                          operator_code: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Supplier code</label>
+                    <input
+                      type="text"
+                      value={manualAircraftDraft.supplier_code}
+                      onChange={(e) =>
+                        setManualAircraftDraft((prev) => ({
+                          ...prev,
+                          supplier_code: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Company name</label>
+                    <input
+                      type="text"
+                      value={manualAircraftDraft.company_name}
+                      onChange={(e) =>
+                        setManualAircraftDraft((prev) => ({
+                          ...prev,
+                          company_name: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Internal ID</label>
+                    <input
+                      type="text"
+                      value={manualAircraftDraft.internal_aircraft_identifier}
+                      onChange={(e) =>
+                        setManualAircraftDraft((prev) => ({
+                          ...prev,
+                          internal_aircraft_identifier: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Last log date</label>
+                    <input
+                      type="date"
+                      value={manualAircraftDraft.last_log_date}
+                      onChange={(e) =>
+                        setManualAircraftDraft((prev) => ({
+                          ...prev,
+                          last_log_date: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Total hours</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={manualAircraftDraft.total_hours}
+                      onChange={(e) =>
+                        setManualAircraftDraft((prev) => ({
+                          ...prev,
+                          total_hours: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Total cycles</label>
+                    <input
+                      type="number"
+                      step="1"
+                      value={manualAircraftDraft.total_cycles}
+                      onChange={(e) =>
+                        setManualAircraftDraft((prev) => ({
+                          ...prev,
+                          total_cycles: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <div className="form-actions form-actions--inline">
+              <button onClick={handleAddManualAircraftRow} className="btn">
+                Add aircraft row
+              </button>
+              <button
+                onClick={() => setManualAircraftDraft(emptyManualAircraftDraft)}
+                className="btn-secondary"
+                type="button"
+              >
+                Clear fields
+              </button>
+            </div>
+          </div>
+
+          <div className="card card--form">
+            <div className="card-header">
+              <div>
                 <div className="import-step__eyebrow">Step 2</div>
                 <h3 className="import-step__title">Review & map data</h3>
               </div>
@@ -2438,6 +2893,229 @@ const AircraftImportPage: React.FC = () => {
                 className="btn"
               >
                 {componentPreviewLoading ? "Parsing..." : "Parse & Preview"}
+              </button>
+            </div>
+          </div>
+
+          <div className="card card--form">
+            <div className="card-header">
+              <div>
+                <div className="import-step__eyebrow">Optional</div>
+                <h3 className="import-step__title">Manual component entry</h3>
+              </div>
+              <span className="import-step__status">Available</span>
+            </div>
+            <p className="form-hint">
+              Add component rows manually when no files are available. Rows will
+              appear in the preview table for final review.
+            </p>
+            <div className="import-template-grid">
+              <div className="form-row">
+                <label>Position</label>
+                <input
+                  type="text"
+                  value={manualComponentDraft.position}
+                  onChange={(e) =>
+                    setManualComponentDraft((prev) => ({
+                      ...prev,
+                      position: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Part number</label>
+                <input
+                  type="text"
+                  value={manualComponentDraft.part_number}
+                  onChange={(e) =>
+                    setManualComponentDraft((prev) => ({
+                      ...prev,
+                      part_number: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Serial number</label>
+                <input
+                  type="text"
+                  value={manualComponentDraft.serial_number}
+                  onChange={(e) =>
+                    setManualComponentDraft((prev) => ({
+                      ...prev,
+                      serial_number: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>ATA</label>
+                <input
+                  type="text"
+                  value={manualComponentDraft.ata}
+                  onChange={(e) =>
+                    setManualComponentDraft((prev) => ({
+                      ...prev,
+                      ata: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Description</label>
+                <input
+                  type="text"
+                  value={manualComponentDraft.description}
+                  onChange={(e) =>
+                    setManualComponentDraft((prev) => ({
+                      ...prev,
+                      description: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+              <div className="form-row">
+                <label>Installed date</label>
+                <input
+                  type="date"
+                  value={manualComponentDraft.installed_date}
+                  onChange={(e) =>
+                    setManualComponentDraft((prev) => ({
+                      ...prev,
+                      installed_date: e.target.value,
+                    }))
+                  }
+                  className="input"
+                />
+              </div>
+            </div>
+
+            <details className="import-advanced" open={false}>
+              <summary>Additional fields</summary>
+              <div className="import-advanced__body">
+                <div className="import-template-grid">
+                  <div className="form-row">
+                    <label>Installed hours</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={manualComponentDraft.installed_hours}
+                      onChange={(e) =>
+                        setManualComponentDraft((prev) => ({
+                          ...prev,
+                          installed_hours: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Installed cycles</label>
+                    <input
+                      type="number"
+                      step="1"
+                      value={manualComponentDraft.installed_cycles}
+                      onChange={(e) =>
+                        setManualComponentDraft((prev) => ({
+                          ...prev,
+                          installed_cycles: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Current hours</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={manualComponentDraft.current_hours}
+                      onChange={(e) =>
+                        setManualComponentDraft((prev) => ({
+                          ...prev,
+                          current_hours: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Current cycles</label>
+                    <input
+                      type="number"
+                      step="1"
+                      value={manualComponentDraft.current_cycles}
+                      onChange={(e) =>
+                        setManualComponentDraft((prev) => ({
+                          ...prev,
+                          current_cycles: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Manufacturer code</label>
+                    <input
+                      type="text"
+                      value={manualComponentDraft.manufacturer_code}
+                      onChange={(e) =>
+                        setManualComponentDraft((prev) => ({
+                          ...prev,
+                          manufacturer_code: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Operator code</label>
+                    <input
+                      type="text"
+                      value={manualComponentDraft.operator_code}
+                      onChange={(e) =>
+                        setManualComponentDraft((prev) => ({
+                          ...prev,
+                          operator_code: e.target.value,
+                        }))
+                      }
+                      className="input"
+                    />
+                  </div>
+                </div>
+                <div className="form-row">
+                  <label>Notes</label>
+                  <textarea
+                    value={manualComponentDraft.notes}
+                    onChange={(e) =>
+                      setManualComponentDraft((prev) => ({
+                        ...prev,
+                        notes: e.target.value,
+                      }))
+                    }
+                    rows={3}
+                    className="input"
+                  />
+                </div>
+              </div>
+            </details>
+
+            <div className="form-actions form-actions--inline">
+              <button onClick={handleAddManualComponentRow} className="btn">
+                Add component row
+              </button>
+              <button
+                onClick={() => setManualComponentDraft(emptyManualComponentDraft)}
+                className="btn-secondary"
+                type="button"
+              >
+                Clear fields
               </button>
             </div>
           </div>
