@@ -386,6 +386,12 @@ class User(Base):
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     last_login_ip = Column(String(64), nullable=True)
     last_login_user_agent = Column(Text, nullable=True)
+    must_change_password = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Require the user to change their password on first login.",
+    )
 
     # Future: mark if user has registered WebAuthn / passkeys (MFA hook)
     webauthn_registered = Column(Boolean, nullable=False, default=False)

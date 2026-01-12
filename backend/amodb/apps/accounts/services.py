@@ -110,11 +110,10 @@ def _validate_password_strength(password: str) -> None:
     has_upper = any(ch.isupper() for ch in password)
     has_lower = any(ch.islower() for ch in password)
     has_digit = any(ch.isdigit() for ch in password)
-    has_symbol = any(not ch.isalnum() for ch in password)
 
-    if not (has_upper and has_lower and has_digit and has_symbol):
+    if not (has_upper and has_lower and has_digit):
         raise ValueError(
-            "Password must include upper and lower case letters, a number, and a symbol."
+            "Password must include upper and lower case letters, and a number."
         )
 
 
@@ -319,6 +318,7 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         hashed_password=hashed,
         is_active=True,
         is_amo_admin=data.role == models.AccountRole.AMO_ADMIN,
+        must_change_password=True,
         # is_system_account defaults to False in the model – human by default.
     )
     db.add(user)
@@ -761,6 +761,52 @@ def issue_access_token_for_user(user: models.User) -> Tuple[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# Password change (authenticated)
+# ---------------------------------------------------------------------------
+
+
+def change_password(
+    db: Session,
+    *,
+    user: models.User,
+    current_password: str,
+    new_password: str,
+    ip: Optional[str],
+    user_agent: Optional[str],
+) -> models.User:
+    if not verify_password(current_password, user.hashed_password):
+        _log_security_event(
+            db,
+            user=user,
+            amo=user.amo,
+            event_type="PASSWORD_CHANGE_FAILED",
+            description="Invalid current password.",
+            ip=ip,
+            user_agent=user_agent,
+        )
+        raise AuthenticationError("Invalid current password.")
+
+    _validate_password_strength(new_password)
+    user.hashed_password = get_password_hash(new_password)
+    user.must_change_password = False
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _log_security_event(
+        db,
+        user=user,
+        amo=user.amo,
+        event_type="PASSWORD_CHANGE",
+        description="Password changed by user.",
+        ip=ip,
+        user_agent=user_agent,
+    )
+
+    return user
+
+
+# ---------------------------------------------------------------------------
 # Password reset
 # ---------------------------------------------------------------------------
 
@@ -859,6 +905,7 @@ def redeem_password_reset_token(
 
     _validate_password_strength(new_password)
     user.hashed_password = get_password_hash(new_password)
+    user.must_change_password = False
     db.add(user)
     db.commit()
     db.refresh(user)

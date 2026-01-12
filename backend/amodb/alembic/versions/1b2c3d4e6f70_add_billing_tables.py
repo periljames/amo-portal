@@ -23,6 +23,7 @@ def upgrade() -> None:
         "ANNUAL",
         "BI_ANNUAL",
         name="billing_term_enum",
+        create_type=False,
     )
     license_status_enum = sa.Enum(
         "TRIALING",
@@ -30,6 +31,7 @@ def upgrade() -> None:
         "CANCELLED",
         "EXPIRED",
         name="license_status_enum",
+        create_type=False,
     )
     ledger_entry_type_enum = sa.Enum(
         "CHARGE",
@@ -38,12 +40,14 @@ def upgrade() -> None:
         "PAYMENT",
         "USAGE",
         name="ledger_entry_type_enum",
+        create_type=False,
     )
     payment_provider_enum = sa.Enum(
         "STRIPE",
         "OFFLINE",
         "MANUAL",
         name="payment_provider_enum",
+        create_type=False,
     )
 
     bind = op.get_bind()
