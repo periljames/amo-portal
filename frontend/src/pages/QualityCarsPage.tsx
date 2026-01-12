@@ -54,11 +54,19 @@ const QualityCarsPage: React.FC = () => {
     summary: string;
     program: CARProgram;
     priority: CARPriority;
+    dueDate: string;
+    targetClosureDate: string;
+    assignedToUserId: string;
+    findingId: string;
   }>({
     title: "",
     summary: "",
     program: "QUALITY",
     priority: "MEDIUM",
+    dueDate: "",
+    targetClosureDate: "",
+    assignedToUserId: "",
+    findingId: "",
   });
 
   const load = async () => {
@@ -88,8 +96,20 @@ const QualityCarsPage: React.FC = () => {
         title: form.title.trim(),
         summary: form.summary.trim(),
         priority: form.priority,
+        due_date: form.dueDate || null,
+        target_closure_date: form.targetClosureDate || null,
+        assigned_to_user_id: form.assignedToUserId.trim() || null,
+        finding_id: form.findingId.trim() || null,
       });
-      setForm({ ...form, title: "", summary: "" });
+      setForm({
+        ...form,
+        title: "",
+        summary: "",
+        dueDate: "",
+        targetClosureDate: "",
+        assignedToUserId: "",
+        findingId: "",
+      });
       await load();
     } catch (e: any) {
       setError(e?.message || "Failed to create CAR");
@@ -179,6 +199,26 @@ const QualityCarsPage: React.FC = () => {
               </select>
             </label>
 
+            <label className="form-control">
+              <span>Due date</span>
+              <input
+                type="date"
+                value={form.dueDate}
+                onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
+              />
+            </label>
+
+            <label className="form-control">
+              <span>Target closure</span>
+              <input
+                type="date"
+                value={form.targetClosureDate}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, targetClosureDate: e.target.value }))
+                }
+              />
+            </label>
+
             <label className="form-control" style={{ gridColumn: "1 / 3" }}>
               <span>Title</span>
               <input
@@ -187,6 +227,28 @@ const QualityCarsPage: React.FC = () => {
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                 placeholder="Short, action-oriented title"
                 required
+              />
+            </label>
+
+            <label className="form-control" style={{ gridColumn: "1 / 3" }}>
+              <span>Assigned to (User ID)</span>
+              <input
+                type="text"
+                value={form.assignedToUserId}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, assignedToUserId: e.target.value }))
+                }
+                placeholder="User UUID (optional)"
+              />
+            </label>
+
+            <label className="form-control" style={{ gridColumn: "1 / 3" }}>
+              <span>Finding ID</span>
+              <input
+                type="text"
+                value={form.findingId}
+                onChange={(e) => setForm((f) => ({ ...f, findingId: e.target.value }))}
+                placeholder="Link to audit finding (optional)"
               />
             </label>
 
@@ -229,6 +291,8 @@ const QualityCarsPage: React.FC = () => {
                     <th>Priority</th>
                     <th>Status</th>
                     <th>Due</th>
+                    <th>Target closure</th>
+                    <th>Assigned</th>
                     <th>Updated</th>
                   </tr>
                 </thead>
@@ -248,12 +312,14 @@ const QualityCarsPage: React.FC = () => {
                         </span>
                       </td>
                       <td>{car.due_date || "—"}</td>
+                      <td>{car.target_closure_date || "—"}</td>
+                      <td>{car.assigned_to_user_id || "—"}</td>
                       <td>{new Date(car.updated_at).toLocaleDateString()}</td>
                     </tr>
                   ))}
                   {cars.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="text-muted">
+                      <td colSpan={8} className="text-muted">
                         No CARs logged for this programme yet.
                       </td>
                     </tr>

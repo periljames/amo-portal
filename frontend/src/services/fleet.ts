@@ -64,6 +64,35 @@ export interface AircraftComplianceSummary {
   documents: AircraftDocument[];
 }
 
+export interface AircraftUsageSummary {
+  aircraft_serial_number: string;
+  total_hours: number | null;
+  total_cycles: number | null;
+  seven_day_daily_average_hours: number | null;
+  next_due_program_item_id: number | null;
+  next_due_task_code: string | null;
+  next_due_date: string | null;
+  next_due_hours: number | null;
+  next_due_cycles: number | null;
+}
+
+export interface AircraftRead {
+  serial_number: string;
+  registration: string;
+  template?: string | null;
+  make?: string | null;
+  model?: string | null;
+  home_base?: string | null;
+  owner?: string | null;
+  status?: string | null;
+  is_active?: boolean;
+  total_hours?: number | null;
+  total_cycles?: number | null;
+  created_at?: string;
+  updated_at?: string;
+  verification_status?: string;
+}
+
 type QueryVal = string | number | boolean | null | undefined;
 
 function toQuery(params: Record<string, QueryVal>): string {
@@ -130,8 +159,22 @@ export async function listDocumentAlerts(params?: { due_within_days?: number }):
   );
 }
 
+export async function listAircraft(params?: {
+  template?: string;
+  status?: string;
+  is_active?: boolean;
+}): Promise<AircraftRead[]> {
+  return fetchJson<AircraftRead[]>(`/aircraft${toQuery(params ?? {})}`);
+}
+
 export async function listAircraftDocuments(serialNumber: string): Promise<AircraftDocument[]> {
   return fetchJson<AircraftDocument[]>(`/aircraft/${serialNumber}/documents`);
+}
+
+export async function getAircraftUsageSummary(
+  serialNumber: string
+): Promise<AircraftUsageSummary> {
+  return fetchJson<AircraftUsageSummary>(`/aircraft/${serialNumber}/usage/summary`);
 }
 
 export async function getAircraftCompliance(serialNumber: string): Promise<AircraftComplianceSummary> {

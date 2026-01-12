@@ -192,10 +192,6 @@ const AdminAmoManagementPage: React.FC = () => {
     navigate(`/maintenance/${selectedAmo.login_slug}`, { replace: false });
   };
 
-  if (currentUser && !canAccessAdmin) {
-    return null;
-  }
-
   if (!isSuperuser) {
     return (
       <DepartmentLayout

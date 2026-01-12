@@ -28,7 +28,8 @@ type AdminNavId =
   | "admin-amos"
   | "admin-users"
   | "admin-assets"
-  | "admin-billing";
+  | "admin-billing"
+  | "admin-settings";
 
 const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
   { id: "planning", label: "Planning" },
@@ -47,6 +48,7 @@ const ADMIN_NAV_ITEMS: Array<{ id: AdminNavId; label: string }> = [
   { id: "admin-users", label: "User Management" },
   { id: "admin-assets", label: "AMO Assets" },
   { id: "admin-billing", label: "Billing & Usage" },
+  { id: "admin-settings", label: "Usage Throttling" },
 ];
 
 type ColorScheme = "dark" | "light";
@@ -239,6 +241,9 @@ const DepartmentLayout: React.FC<Props> = ({
         break;
       case "admin-billing":
         navigate(`/maintenance/${amoCode}/admin/billing`);
+        break;
+      case "admin-settings":
+        navigate(`/maintenance/${amoCode}/admin/settings`);
         break;
       default:
         break;
@@ -702,6 +707,19 @@ const DepartmentLayout: React.FC<Props> = ({
                   }}
                 >
                   My Training
+                </button>
+
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="profile-menu__item"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    const dept = resolveDeptForTraining();
+                    navigate(`/maintenance/${amoCode}/${dept}/settings/widgets`);
+                  }}
+                >
+                  Dashboard widgets
                 </button>
 
                 <button
