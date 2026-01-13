@@ -310,8 +310,16 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/aircraft-import");
   }, [location.pathname]);
 
+  const isAircraftDocumentsRoute = useMemo(() => {
+    return location.pathname.includes("/aircraft-documents");
+  }, [location.pathname]);
+
   const isQmsRoute = useMemo(() => {
     return location.pathname.includes("/qms");
+  }, [location.pathname]);
+
+  const isReliabilityRoute = useMemo(() => {
+    return location.pathname.includes("/reliability-reports");
   }, [location.pathname]);
 
   const isEhmDashboardRoute = useMemo(() => {
@@ -618,20 +626,36 @@ const DepartmentLayout: React.FC<Props> = ({
           {!isAdminArea && <div className="sidebar__divider" />}
 
           {!isAdminArea && activeDepartment === "planning" && (
-            <button
-              type="button"
-              onClick={() =>
-                navigate(`/maintenance/${amoCode}/planning/aircraft-import`)
-              }
-              className={
-                "sidebar__item" +
-                (isAircraftImportRoute ? " sidebar__item--active" : "")
-              }
-              aria-label="Setup Aircraft"
-              title="Setup Aircraft"
-            >
-              <span className="sidebar__item-label">Setup Aircraft</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/planning/aircraft-import`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isAircraftImportRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Setup Aircraft"
+                title="Setup Aircraft"
+              >
+                <span className="sidebar__item-label">Setup Aircraft</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/planning/aircraft-documents`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isAircraftDocumentsRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Aircraft Documents"
+                title="Aircraft Documents"
+              >
+                <span className="sidebar__item-label">Aircraft Documents</span>
+              </button>
+            </>
           )}
 
           {!isAdminArea && (
@@ -650,17 +674,33 @@ const DepartmentLayout: React.FC<Props> = ({
           )}
 
           {!isAdminArea && activeDepartment === "quality" && (
-            <button
-              type="button"
-              onClick={() => navigate(`/maintenance/${amoCode}/quality/qms`)}
-              className={
-                "sidebar__item" + (isQmsRoute ? " sidebar__item--active" : "")
-              }
-              aria-label="Quality Management System"
-              title="Quality Management System"
-            >
-              <span className="sidebar__item-label">QMS Overview</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => navigate(`/maintenance/${amoCode}/quality/qms`)}
+                className={
+                  "sidebar__item" + (isQmsRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Quality Management System"
+                title="Quality Management System"
+              >
+                <span className="sidebar__item-label">QMS Overview</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/quality/reliability-reports`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isReliabilityRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Reliability Reports"
+                title="Reliability Reports"
+              >
+                <span className="sidebar__item-label">Reliability Reports</span>
+              </button>
+            </>
           )}
 
           {!isAdminArea && activeDepartment === "ehm" && (

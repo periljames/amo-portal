@@ -31,7 +31,8 @@
 //     Enforcement lives in backend _require_training_editor.
 
 import { apiGet, apiPost } from "./crs";
-import { authHeaders } from "./auth";
+import { authHeaders, handleAuthFailure } from "./auth";
+import { API_BASE_URL } from "./config";
 import type {
   TrainingCourseRead,
   TrainingCourseCreate,
@@ -49,6 +50,38 @@ import type {
   TrainingDeferralRequestUpdate,
   TrainingStatusItem,
 } from "../types/training";
+
+export type TrainingFileReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type TrainingFileRead = {
+  id: string;
+  amo_id: string;
+  owner_user_id: string;
+  kind: string;
+  course_id?: string | null;
+  event_id?: string | null;
+  record_id?: string | null;
+  deferral_request_id?: string | null;
+  original_filename: string;
+  content_type?: string | null;
+  size_bytes?: number | null;
+  sha256?: string | null;
+  storage_path: string;
+  review_status: TrainingFileReviewStatus;
+  reviewed_at?: string | null;
+  reviewed_by_user_id?: string | null;
+  review_comment?: string | null;
+  uploaded_by_user_id?: string | null;
+  uploaded_at: string;
+};
+
+export type TransferProgress = {
+  loadedBytes: number;
+  totalBytes?: number;
+  percent?: number;
+  megaBytesPerSecond: number;
+  megaBitsPerSecond: number;
+};
 
 // ---------------------------------------------------------------------------
 // COURSES
@@ -211,6 +244,76 @@ export async function updateTrainingEventParticipant(
       headers: authHeaders(),
     } as RequestInit,
   );
+}
+
+// ---------------------------------------------------------------------------
+// TRAINING FILES (EVIDENCE DOWNLOADS)
+// ---------------------------------------------------------------------------
+
+function buildSpeed(
+  loadedBytes: number,
+  totalBytes: number | undefined,
+  startedAt: number
+): TransferProgress {
+  const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.001);
+  const megaBytesPerSecond = loadedBytes / (1024 * 1024) / elapsedSeconds;
+  const megaBitsPerSecond = megaBytesPerSecond * 8;
+  const percent = totalBytes ? Math.min((loadedBytes / totalBytes) * 100, 100) : undefined;
+  return {
+    loadedBytes,
+    totalBytes,
+    percent,
+    megaBytesPerSecond,
+    megaBitsPerSecond,
+  };
+}
+
+export async function listTrainingFiles(): Promise<TrainingFileRead[]> {
+  return apiGet<TrainingFileRead[]>("/training/files", {
+    headers: authHeaders(),
+  });
+}
+
+export async function downloadTrainingFile(
+  fileId: string,
+  onProgress?: (progress: TransferProgress) => void
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const startedAt = performance.now();
+    xhr.open("GET", `${API_BASE_URL}/training/files/${encodeURIComponent(fileId)}/download`);
+    const headers = authHeaders();
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("progress", (event) => {
+      if (!onProgress) return;
+      const total = event.lengthComputable ? event.total : undefined;
+      onProgress(buildSpeed(event.loaded, total, startedAt));
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading training file."));
+    });
+
+    xhr.send();
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -237,6 +237,10 @@ class AircraftDocumentOverride(BaseModel):
     override_expires_on: Optional[DateType] = None
 
 
+class AircraftDocumentDownloadRequest(BaseModel):
+    document_ids: List[int] = Field(..., min_length=1)
+
+
 class AircraftComplianceSummary(BaseModel):
     aircraft_serial_number: str
     documents_total: int
