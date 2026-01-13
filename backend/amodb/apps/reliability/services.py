@@ -658,6 +658,354 @@ def list_engine_snapshots(
     )
 
 
+def _get_control_chart_config(
+    db: Session,
+    *,
+    amo_id: str,
+    kpi_code: str,
+) -> Optional[models.ControlChartConfig]:
+    return (
+        db.query(models.ControlChartConfig)
+        .filter(models.ControlChartConfig.amo_id == amo_id, models.ControlChartConfig.kpi_code == kpi_code)
+        .first()
+    )
+
+
+def _average(values: Sequence[float]) -> Optional[float]:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _calculate_baseline(values: Sequence[float], window: int) -> Optional[float]:
+    window = max(window, 1)
+    if not values:
+        return None
+    baseline_slice = values[:window]
+    return _average(baseline_slice)
+
+
+def _apply_correction(snapshot: models.EngineFlightSnapshot, metric: str, raw_value: Optional[float]) -> Optional[float]:
+    if raw_value is None:
+        return None
+    if metric.endswith("_C") and snapshot.isa_dev_c is not None:
+        return raw_value - snapshot.isa_dev_c
+    return raw_value
+
+
+def _classify_delta(delta: Optional[float], threshold: float) -> Optional[models.EngineTrendStatusEnum]:
+    if delta is None:
+        return None
+    if abs(delta) > threshold:
+        return models.EngineTrendStatusEnum.SHIFT
+    return models.EngineTrendStatusEnum.NORMAL
+
+
+def _calculate_ewma(values: Sequence[float], alpha: float) -> Optional[float]:
+    if not values:
+        return None
+    alpha = max(min(alpha, 1.0), 0.0)
+    ewma = values[0]
+    for value in values[1:]:
+        ewma = alpha * value + (1 - alpha) * ewma
+    return ewma
+
+
+def _calculate_cusum(values: Sequence[float], k: float) -> Optional[float]:
+    if not values:
+        return None
+    pos = 0.0
+    neg = 0.0
+    for value in values:
+        pos = max(0.0, pos + value - k)
+        neg = min(0.0, neg + value + k)
+    return pos if abs(pos) >= abs(neg) else neg
+
+
+def _calculate_slope(values: Sequence[float], window: int) -> Optional[float]:
+    if len(values) < 2:
+        return None
+    window = max(window, 2)
+    window_values = values[-window:]
+    n = len(window_values)
+    x_vals = list(range(n))
+    x_mean = sum(x_vals) / n
+    y_mean = sum(window_values) / n
+    numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_vals, window_values))
+    denominator = sum((x - x_mean) ** 2 for x in x_vals)
+    if denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def _build_engine_trend_series(
+    snapshots: Sequence[models.EngineFlightSnapshot],
+    *,
+    metric: str,
+    baseline_window: int,
+    shift_threshold: float,
+    method: Optional[models.ControlChartMethodEnum],
+    parameters: Optional[dict],
+) -> schemas.EngineTrendSeriesRead:
+    values: list[float] = []
+    deltas: list[float] = []
+    points: list[schemas.EngineTrendPoint] = []
+
+    for snapshot in snapshots:
+        raw_value = None
+        if snapshot.metrics:
+            raw_value = snapshot.metrics.get(metric)
+        if isinstance(raw_value, (int, float)):
+            corrected_value = _apply_correction(snapshot, metric, float(raw_value))
+            if corrected_value is not None:
+                values.append(corrected_value)
+        else:
+            corrected_value = None
+        baseline = _calculate_baseline(values, baseline_window)
+        delta = corrected_value - baseline if corrected_value is not None and baseline is not None else None
+        if delta is not None:
+            deltas.append(delta)
+
+        status = _classify_delta(delta, shift_threshold)
+        if method == models.ControlChartMethodEnum.EWMA and deltas:
+            alpha = float(parameters.get("alpha", 0.2)) if parameters else 0.2
+            ewma_value = _calculate_ewma(deltas, alpha)
+            status = _classify_delta(ewma_value, shift_threshold)
+        elif method == models.ControlChartMethodEnum.CUSUM and deltas:
+            k = float(parameters.get("k", 0.5)) if parameters else 0.5
+            cusum_value = _calculate_cusum(deltas, k)
+            status = _classify_delta(cusum_value, shift_threshold)
+        elif method == models.ControlChartMethodEnum.SLOPE and values:
+            window = int(parameters.get("window", 5)) if parameters else 5
+            slope_value = _calculate_slope(values, window)
+            status = _classify_delta(slope_value, shift_threshold)
+
+        points.append(
+            schemas.EngineTrendPoint(
+                date=snapshot.flight_date,
+                raw=float(raw_value) if isinstance(raw_value, (int, float)) else None,
+                corrected=corrected_value,
+                delta=delta,
+                status=status,
+            )
+        )
+
+    baseline = _calculate_baseline(values, baseline_window)
+    return schemas.EngineTrendSeriesRead(
+        metric=metric,
+        baseline=baseline,
+        control_limit=shift_threshold,
+        method=method,
+        parameters=parameters,
+        points=points,
+    )
+
+
+def compute_engine_trend_status(
+    db: Session,
+    *,
+    amo_id: str,
+    aircraft_serial_number: Optional[str] = None,
+    engine_position: Optional[str] = None,
+    engine_serial_number: Optional[str] = None,
+) -> list[models.EngineTrendStatus]:
+    query = db.query(models.EngineFlightSnapshot).filter(models.EngineFlightSnapshot.amo_id == amo_id)
+    if aircraft_serial_number:
+        query = query.filter(models.EngineFlightSnapshot.aircraft_serial_number == aircraft_serial_number)
+    if engine_position:
+        query = query.filter(models.EngineFlightSnapshot.engine_position == engine_position)
+    if engine_serial_number:
+        query = query.filter(models.EngineFlightSnapshot.engine_serial_number == engine_serial_number)
+
+    snapshots = query.order_by(models.EngineFlightSnapshot.flight_date.asc()).all()
+    if not snapshots:
+        return []
+
+    grouped: dict[tuple[str, str, Optional[str]], list[models.EngineFlightSnapshot]] = {}
+    for snapshot in snapshots:
+        key = (
+            snapshot.aircraft_serial_number,
+            snapshot.engine_position,
+            snapshot.engine_serial_number,
+        )
+        grouped.setdefault(key, []).append(snapshot)
+
+    statuses: list[models.EngineTrendStatus] = []
+    required_metrics = schemas._required_engine_metric_keys()
+    for (aircraft_sn, engine_pos, engine_sn), engine_snapshots in grouped.items():
+        latest_snapshot = engine_snapshots[-1]
+        has_metrics = latest_snapshot.metrics is not None
+        current_status = models.EngineTrendStatusEnum.NORMAL
+
+        if has_metrics:
+            for metric in required_metrics:
+                config = _get_control_chart_config(db, amo_id=amo_id, kpi_code=metric)
+                method = config.method if config else models.ControlChartMethodEnum.SLOPE
+                parameters = config.parameters if config else {}
+                baseline_window = int(parameters.get("baseline_window", 10))
+                shift_threshold = float(parameters.get("shift_threshold", 3.0))
+                series = _build_engine_trend_series(
+                    engine_snapshots,
+                    metric=metric,
+                    baseline_window=baseline_window,
+                    shift_threshold=shift_threshold,
+                    method=method,
+                    parameters=parameters,
+                )
+                latest_point = series.points[-1] if series.points else None
+                if latest_point and latest_point.status == models.EngineTrendStatusEnum.SHIFT:
+                    current_status = models.EngineTrendStatusEnum.SHIFT
+                    break
+        else:
+            current_status = models.EngineTrendStatusEnum.SHIFT
+
+        status = (
+            db.query(models.EngineTrendStatus)
+            .filter(
+                models.EngineTrendStatus.amo_id == amo_id,
+                models.EngineTrendStatus.aircraft_serial_number == aircraft_sn,
+                models.EngineTrendStatus.engine_position == engine_pos,
+                models.EngineTrendStatus.engine_serial_number == engine_sn,
+            )
+            .first()
+        )
+
+        if status:
+            if status.current_status != current_status:
+                status.previous_status = status.current_status
+                status.current_status = current_status
+            status.last_upload_date = latest_snapshot.flight_date
+            status.last_trend_date = latest_snapshot.flight_date
+        else:
+            status = models.EngineTrendStatus(
+                amo_id=amo_id,
+                aircraft_serial_number=aircraft_sn,
+                engine_position=engine_pos,
+                engine_serial_number=engine_sn,
+                last_upload_date=latest_snapshot.flight_date,
+                last_trend_date=latest_snapshot.flight_date,
+                previous_status=None,
+                current_status=current_status,
+            )
+        db.add(status)
+        statuses.append(status)
+
+    db.commit()
+    for status in statuses:
+        db.refresh(status)
+    return statuses
+
+
+def get_engine_trend_series(
+    db: Session,
+    *,
+    amo_id: str,
+    aircraft_serial_number: str,
+    engine_position: str,
+    metric: str,
+    engine_serial_number: Optional[str] = None,
+    baseline_window: int = 10,
+    shift_threshold: float = 3.0,
+) -> schemas.EngineTrendSeriesRead:
+    query = db.query(models.EngineFlightSnapshot).filter(
+        models.EngineFlightSnapshot.amo_id == amo_id,
+        models.EngineFlightSnapshot.aircraft_serial_number == aircraft_serial_number,
+        models.EngineFlightSnapshot.engine_position == engine_position,
+    )
+    if engine_serial_number:
+        query = query.filter(models.EngineFlightSnapshot.engine_serial_number == engine_serial_number)
+
+    snapshots = query.order_by(models.EngineFlightSnapshot.flight_date.asc()).all()
+    if not snapshots:
+        return schemas.EngineTrendSeriesRead(metric=metric, points=[])
+
+    config = _get_control_chart_config(db, amo_id=amo_id, kpi_code=metric)
+    if config and config.parameters:
+        baseline_window = int(config.parameters.get("baseline_window", baseline_window))
+        shift_threshold = float(config.parameters.get("shift_threshold", shift_threshold))
+    method = config.method if config else models.ControlChartMethodEnum.SLOPE
+    parameters = config.parameters if config else {}
+
+    series = _build_engine_trend_series(
+        snapshots,
+        metric=metric,
+        baseline_window=baseline_window,
+        shift_threshold=shift_threshold,
+        method=method,
+        parameters=parameters,
+    )
+    event_query = db.query(models.ReliabilityEvent).filter(
+        models.ReliabilityEvent.amo_id == amo_id,
+        models.ReliabilityEvent.aircraft_serial_number == aircraft_serial_number,
+    )
+    if engine_position:
+        event_query = event_query.filter(models.ReliabilityEvent.engine_position == engine_position)
+    date_range = [snapshots[0].flight_date, snapshots[-1].flight_date]
+    events = (
+        event_query.filter(
+            models.ReliabilityEvent.occurred_at >= datetime.combine(date_range[0], time.min),
+            models.ReliabilityEvent.occurred_at <= datetime.combine(date_range[1], time.max),
+        )
+        .order_by(models.ReliabilityEvent.occurred_at.asc())
+        .all()
+    )
+    event_payloads = [
+        schemas.EngineTrendEvent(
+            date=event.occurred_at.date(),
+            event_type=event.event_type,
+            reference_code=event.reference_code,
+            severity=event.severity,
+            description=event.description,
+        )
+        for event in events
+    ]
+    return schemas.EngineTrendSeriesRead(
+        metric=series.metric,
+        baseline=series.baseline,
+        control_limit=series.control_limit,
+        method=series.method,
+        parameters=series.parameters,
+        points=series.points,
+        events=event_payloads,
+    )
+
+
+def list_engine_trend_statuses(
+    db: Session,
+    *,
+    amo_id: str,
+) -> Sequence[models.EngineTrendStatus]:
+    return (
+        db.query(models.EngineTrendStatus)
+        .filter(models.EngineTrendStatus.amo_id == amo_id)
+        .order_by(models.EngineTrendStatus.aircraft_serial_number.asc())
+        .all()
+    )
+
+
+def review_engine_trend_status(
+    db: Session,
+    *,
+    amo_id: str,
+    status_id: int,
+    reviewed_by_user_id: str,
+    last_review_date: date,
+) -> models.EngineTrendStatus:
+    status = (
+        db.query(models.EngineTrendStatus)
+        .filter(models.EngineTrendStatus.amo_id == amo_id, models.EngineTrendStatus.id == status_id)
+        .first()
+    )
+    if not status:
+        raise ValueError("Engine trend status not found.")
+    status.last_review_date = last_review_date
+    status.reviewed_by_user_id = reviewed_by_user_id
+    db.add(status)
+    db.commit()
+    db.refresh(status)
+    return status
+
+
 def create_oil_uplift(
     db: Session,
     *,

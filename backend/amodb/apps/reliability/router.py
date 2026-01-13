@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
@@ -498,6 +498,85 @@ def list_engine_snapshots(
     db: Session = Depends(get_write_db),
 ):
     return services.list_engine_snapshots(db, amo_id=current_user.amo_id)
+
+
+@router.post(
+    "/engine-trends/compute",
+    response_model=List[schemas.EngineTrendStatusRead],
+)
+def compute_engine_trend_status(
+    aircraft_serial_number: Optional[str] = None,
+    engine_position: Optional[str] = None,
+    engine_serial_number: Optional[str] = None,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.compute_engine_trend_status(
+        db,
+        amo_id=current_user.amo_id,
+        aircraft_serial_number=aircraft_serial_number,
+        engine_position=engine_position,
+        engine_serial_number=engine_serial_number,
+    )
+
+
+@router.get(
+    "/engine-trends/fleet-status",
+    response_model=List[schemas.EngineTrendStatusRead],
+)
+def list_engine_trend_statuses(
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.list_engine_trend_statuses(db, amo_id=current_user.amo_id)
+
+
+@router.get(
+    "/engine-trends/series",
+    response_model=schemas.EngineTrendSeriesRead,
+)
+def get_engine_trend_series(
+    aircraft_serial_number: str,
+    engine_position: str,
+    metric: str,
+    engine_serial_number: Optional[str] = None,
+    baseline_window: int = 10,
+    shift_threshold: float = 3.0,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.get_engine_trend_series(
+        db,
+        amo_id=current_user.amo_id,
+        aircraft_serial_number=aircraft_serial_number,
+        engine_position=engine_position,
+        metric=metric,
+        engine_serial_number=engine_serial_number,
+        baseline_window=baseline_window,
+        shift_threshold=shift_threshold,
+    )
+
+
+@router.post(
+    "/engine-trends/{status_id}/review",
+    response_model=schemas.EngineTrendStatusRead,
+)
+def review_engine_trend_status(
+    status_id: int,
+    payload: schemas.EngineTrendStatusReview,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        return services.review_engine_trend_status(
+            db,
+            amo_id=current_user.amo_id,
+            status_id=status_id,
+            reviewed_by_user_id=current_user.id,
+            last_review_date=payload.last_review_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post(

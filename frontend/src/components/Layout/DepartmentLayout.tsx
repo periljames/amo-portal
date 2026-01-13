@@ -19,6 +19,7 @@ type DepartmentId =
   | "quality"
   | "safety"
   | "stores"
+  | "ehm"
   | "engineering"
   | "workshops"
   | "admin";
@@ -37,6 +38,7 @@ const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
   { id: "quality", label: "Quality & Compliance" },
   { id: "safety", label: "Safety Management" },
   { id: "stores", label: "Procurement & Stores" },
+  { id: "ehm", label: "Engine Health" },
   { id: "engineering", label: "Engineering" },
   { id: "workshops", label: "Workshops" },
   { id: "admin", label: "System Admin" },
@@ -310,6 +312,18 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const isQmsRoute = useMemo(() => {
     return location.pathname.includes("/qms");
+  }, [location.pathname]);
+
+  const isEhmDashboardRoute = useMemo(() => {
+    return location.pathname.endsWith("/ehm") || location.pathname.endsWith("/ehm/dashboard");
+  }, [location.pathname]);
+
+  const isEhmTrendsRoute = useMemo(() => {
+    return location.pathname.includes("/ehm/trends");
+  }, [location.pathname]);
+
+  const isEhmUploadsRoute = useMemo(() => {
+    return location.pathname.includes("/ehm/uploads");
   }, [location.pathname]);
 
   const lockedEventRef = useRef<string | null>(null);
@@ -647,6 +661,44 @@ const DepartmentLayout: React.FC<Props> = ({
             >
               <span className="sidebar__item-label">QMS Overview</span>
             </button>
+          )}
+
+          {!isAdminArea && activeDepartment === "ehm" && (
+            <>
+              <button
+                type="button"
+                onClick={() => navigate(`/maintenance/${amoCode}/ehm/dashboard`)}
+                className={
+                  "sidebar__item" + (isEhmDashboardRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="EHM Dashboard"
+                title="EHM Dashboard"
+              >
+                <span className="sidebar__item-label">Dashboard</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/maintenance/${amoCode}/ehm/trends`)}
+                className={
+                  "sidebar__item" + (isEhmTrendsRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="EHM Trends"
+                title="EHM Trends"
+              >
+                <span className="sidebar__item-label">Trend Graphs</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/maintenance/${amoCode}/ehm/uploads`)}
+                className={
+                  "sidebar__item" + (isEhmUploadsRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="EHM Uploads"
+                title="EHM Uploads"
+              >
+                <span className="sidebar__item-label">Uploads</span>
+              </button>
+            </>
           )}
         </nav>
 

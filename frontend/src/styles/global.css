@@ -1794,6 +1794,24 @@ button,
   border-color: var(--accent-primary);
 }
 
+.badge--warning {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border-color: rgba(249, 115, 22, 0.6);
+}
+
+.badge--danger {
+  background: rgba(248, 113, 113, 0.18);
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.7);
+}
+
+.badge--neutral {
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--text-secondary);
+  border-color: rgba(148, 163, 184, 0.6);
+}
+
 .subscription-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
