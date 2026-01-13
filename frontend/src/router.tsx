@@ -77,7 +77,7 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
   if (currentUser?.must_change_password) {
     const isOnboardingRoute = location.pathname.includes("/onboarding");
     if (!isOnboardingRoute) {
-      const amoCode = inferAmoCodeFromPath(location.pathname) || "root";
+      const amoCode = inferAmoCodeFromPath(location.pathname) || "system";
       return <Navigate to={`/maintenance/${amoCode}/onboarding`} replace />;
     }
   }
@@ -128,7 +128,7 @@ export const AppRouter: React.FC = () => {
       {/* Root → login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
 
-      {/* Global login */}
+      {/* Platform login */}
       <Route path="/login" element={<LoginPage />} />
 
       {/* AMO-specific login, e.g. /maintenance/safarilink/login */}

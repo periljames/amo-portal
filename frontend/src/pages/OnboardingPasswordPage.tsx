@@ -74,7 +74,7 @@ const OnboardingPasswordPage: React.FC = () => {
         return;
       }
 
-      const slug = amoCode || "root";
+      const slug = amoCode || "system";
       navigate(`/maintenance/${slug}/${landing}`, { replace: true });
     } catch (err) {
       console.error("Password change failed", err);

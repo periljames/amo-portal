@@ -78,6 +78,10 @@ class AuthorisationError(Exception):
     """Raised when a user tries to perform an action they are not authorised for."""
 
 
+class LoginContextConflict(Exception):
+    """Raised when a login email maps to multiple AMO contexts."""
+
+
 class IdempotencyError(Exception):
     """Raised when an idempotency key is reused with conflicting payload."""
 
@@ -94,6 +98,31 @@ def _normalise_email(value: str) -> str:
 def _normalise_staff_code(value: str) -> str:
     # Staff codes are often formatted, but it's safer to force uppercase and strip.
     return value.strip().upper()
+
+
+def resolve_login_context(db: Session, email: str) -> models.User | None:
+    email_norm = _normalise_email(email)
+    users = (
+        db.query(models.User)
+        .options(joinedload(models.User.amo))
+        .filter(
+            func.lower(models.User.email) == email_norm,
+            models.User.is_active.is_(True),
+        )
+        .all()
+    )
+
+    if not users:
+        return None
+
+    amo_ids = {u.amo_id for u in users if u.amo_id}
+    if len(amo_ids) > 1:
+        raise LoginContextConflict(
+            "Multiple AMO accounts share this email."
+        )
+
+    superuser = next((u for u in users if u.is_superuser), None)
+    return superuser or users[0]
 
 
 # ---------------------------------------------------------------------------
