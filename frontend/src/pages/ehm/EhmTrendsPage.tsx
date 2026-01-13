@@ -28,6 +28,15 @@ const EhmTrendsPage: React.FC = () => {
 
   const { isDemoMode, canToggleDemo, setDemoMode } = useEhmDemoMode();
 
+  const metricKeyMap: Record<string, string> = {
+    ITT: "ITT_C",
+    NG: "NG_PCT",
+    NH: "NH_PCT",
+    FF: "FF_PPH",
+    OAT: "OAT_C",
+  };
+  const metricKey = metricKeyMap[metricFilter] ?? metricFilter;
+
   const markers = useMemo(
     () => [
       { label: "Compressor wash", date: "2024-05-18" },
@@ -65,7 +74,7 @@ const EhmTrendsPage: React.FC = () => {
       aircraft_serial_number: aircraft,
       engine_position: position,
       engine_serial_number: serial || undefined,
-      metric: metricFilter,
+      metric: metricKey,
     })
       .then((data) => setSeries(data))
       .catch((err) => {
@@ -73,7 +82,7 @@ const EhmTrendsPage: React.FC = () => {
         setSeries(null);
       })
       .finally(() => setLoading(false));
-  }, [isDemoMode, selectedEngineId, metricFilter]);
+  }, [isDemoMode, selectedEngineId, metricFilter, metricKey]);
 
   const demoSeries = useMemo(() => demoTrendSeries[metricFilter] ?? null, [metricFilter]);
 
