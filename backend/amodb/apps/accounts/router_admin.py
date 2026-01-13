@@ -13,6 +13,7 @@ from amodb.security import get_current_active_user, require_admin, require_roles
 from . import models, schemas, services
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
+RESERVED_PLATFORM_SLUGS = {"system", "root"}
 
 
 # ---------------------------------------------------------------------------
@@ -60,11 +61,19 @@ def create_amo(
     """
     _require_superuser(current_user)
 
+    login_slug = payload.login_slug.strip().lower()
+
+    if login_slug in RESERVED_PLATFORM_SLUGS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Login slug is reserved for platform support.",
+        )
+
     existing = (
         db.query(models.AMO)
         .filter(
             (models.AMO.amo_code == payload.amo_code)
-            | (models.AMO.login_slug == payload.login_slug)
+            | (models.AMO.login_slug == login_slug)
         )
         .first()
     )
@@ -79,7 +88,7 @@ def create_amo(
         name=payload.name,
         icao_code=payload.icao_code,
         country=payload.country,
-        login_slug=payload.login_slug,
+        login_slug=login_slug,
         contact_email=payload.contact_email,
         contact_phone=payload.contact_phone,
         time_zone=payload.time_zone,

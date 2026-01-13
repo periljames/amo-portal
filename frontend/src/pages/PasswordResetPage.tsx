@@ -7,6 +7,7 @@ import TextField from "../components/UI/TextField";
 import Button from "../components/UI/Button";
 import {
   confirmPasswordReset,
+  getLoginContext,
   requestPasswordReset,
   type PasswordResetDeliveryMethod,
   type PasswordResetResponse,
@@ -44,8 +45,15 @@ const PasswordResetPage: React.FC = () => {
 
     try {
       setLoading(true);
+      let slugToUse = amoSlug;
+
+      if (!slugToUse) {
+        const context = await getLoginContext(email.trim());
+        slugToUse = context.login_slug;
+      }
+
       const response = await requestPasswordReset(
-        amoSlug || "root",
+        slugToUse || "system",
         email,
         deliveryMethod
       );
@@ -139,11 +147,11 @@ const PasswordResetPage: React.FC = () => {
                 }
               >
                 <option value="email">Email</option>
-                <option value="sms">SMS (phone on file)</option>
-                <option value="both">Email + SMS</option>
+                <option value="whatsapp">WhatsApp (phone on file)</option>
+                <option value="both">Email + WhatsApp</option>
               </select>
               <div className="auth-form__hint">
-                SMS is sent to the phone number stored on your profile.
+                WhatsApp uses the phone number stored on your profile.
               </div>
             </div>
 

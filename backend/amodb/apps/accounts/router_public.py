@@ -8,6 +8,7 @@ import urllib.request
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
+from pydantic import EmailStr
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -190,6 +191,40 @@ def login(
         user=user,
         amo=user.amo,
         department=user.department,
+    )
+
+
+@router.get(
+    "/login-context",
+    response_model=schemas.LoginContextResponse,
+    summary="Resolve login context from email",
+)
+def login_context(
+    email: EmailStr,
+    db: Session = Depends(get_db),
+):
+    try:
+        user = services.resolve_login_context(db=db, email=email)
+    except services.LoginContextConflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Multiple AMO accounts share this email. Use your AMO portal link.",
+        )
+
+    if not user or not user.amo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active account found for this email.",
+        )
+
+    amo = user.amo
+    is_platform = bool(user.is_superuser) or amo.login_slug == "system"
+
+    return schemas.LoginContextResponse(
+        login_slug=amo.login_slug,
+        amo_code=amo.amo_code,
+        amo_name=amo.name,
+        is_platform=is_platform,
     )
 
 

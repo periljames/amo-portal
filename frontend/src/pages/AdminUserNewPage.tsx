@@ -289,8 +289,7 @@ const AdminUserNewPage: React.FC = () => {
       <div className="page-header">
         <h1>{pageTitle}</h1>
         <p className="page-subtitle">
-          Create a new AMO user. The target AMO is resolved from your session
-          (and superuser support context if enabled).
+          Create an AMO user and assign their role and temporary password.
         </p>
       </div>
 
@@ -324,6 +323,9 @@ const AdminUserNewPage: React.FC = () => {
                   </option>
                 ))}
               </select>
+              <p className="form-hint">
+                Superusers must select which AMO will own this user.
+              </p>
             </div>
           )}
 
@@ -339,6 +341,7 @@ const AdminUserNewPage: React.FC = () => {
               required
               disabled={submitting}
             />
+            <p className="form-hint">Use the official staff code (e.g. AMO-123).</p>
           </div>
 
           <div className="form-row">
@@ -400,6 +403,9 @@ const AdminUserNewPage: React.FC = () => {
                 )
               )}
             </select>
+            <p className="form-hint">
+              Choose the closest operational role. Admins get dashboard access.
+            </p>
           </div>
 
           <div className="form-row">
@@ -483,7 +489,8 @@ const AdminUserNewPage: React.FC = () => {
             </div>
             <p className="form-hint">
               Passwords must be at least 12 characters and include upper/lower
-              case letters and a number (symbols optional).
+              case letters and a number (symbols optional). The user will be
+              asked to change this on first login.
             </p>
           </div>
 

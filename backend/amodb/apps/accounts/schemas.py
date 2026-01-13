@@ -346,6 +346,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class LoginContextResponse(BaseModel):
+    login_slug: str
+    amo_code: Optional[str] = None
+    amo_name: Optional[str] = None
+    is_platform: bool = False
+
+
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str

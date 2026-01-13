@@ -10,6 +10,7 @@ import { API_BASE_URL } from "./config";
 
 const TOKEN_KEY = "amo_portal_token";
 const AMO_KEY = "amo_code";
+const AMO_SLUG_KEY = "amo_slug";
 const DEPT_KEY = "amo_department";
 const USER_KEY = "amo_current_user";
 const SESSION_EVENT_KEY = "amo_session_event";
@@ -97,6 +98,13 @@ export interface LoginResponse {
   department: DepartmentContext | null;
 }
 
+export interface LoginContextResponse {
+  login_slug: string;
+  amo_code: string | null;
+  amo_name: string | null;
+  is_platform: boolean;
+}
+
 export type SessionEventDetail = {
   type: "expired" | "idle-warning" | "idle-logout";
   reason?: string;
@@ -127,10 +135,14 @@ export function clearToken(): void {
 
 export function setContext(
   amoCode: string | null,
-  departmentCode: string | null
+  departmentCode: string | null,
+  amoSlug?: string | null
 ): void {
   if (amoCode) localStorage.setItem(AMO_KEY, amoCode);
   else localStorage.removeItem(AMO_KEY);
+
+  if (amoSlug) localStorage.setItem(AMO_SLUG_KEY, amoSlug);
+  else localStorage.removeItem(AMO_SLUG_KEY);
 
   if (departmentCode) localStorage.setItem(DEPT_KEY, departmentCode);
   else localStorage.removeItem(DEPT_KEY);
@@ -138,16 +150,19 @@ export function setContext(
 
 export function getContext(): {
   amoCode: string | null;
+  amoSlug: string | null;
   department: string | null;
 } {
   return {
     amoCode: localStorage.getItem(AMO_KEY),
+    amoSlug: localStorage.getItem(AMO_SLUG_KEY),
     department: localStorage.getItem(DEPT_KEY),
   };
 }
 
 export function clearContext(): void {
   localStorage.removeItem(AMO_KEY);
+  localStorage.removeItem(AMO_SLUG_KEY);
   localStorage.removeItem(DEPT_KEY);
 }
 
@@ -236,9 +251,9 @@ async function readErrorMessage(res: Response): Promise<string> {
 }
 
 function resolveAmoSlug(input: string | null | undefined): string {
-  // Support mode: allow blank slug to mean "root"
+  // Support mode: allow blank slug to mean platform login
   const v = (input || "").trim();
-  return v ? v : "root";
+  return v ? v : "system";
 }
 
 // -----------------------------------------------------------------------------
@@ -252,7 +267,7 @@ function resolveAmoSlug(input: string | null | undefined): string {
  * Body: { amo_slug, email, password }
  *
  * Enhancements:
- * - If amoSlug is blank, defaults to "root" (platform support login).
+ * - If amoSlug is blank, defaults to "system" (platform support login).
  *
  * On success:
  * - stores JWT in localStorage
@@ -266,7 +281,7 @@ export async function login(
   password: string
 ): Promise<LoginResponse> {
   const payload = {
-    amo_slug: resolveAmoSlug(amoSlug), // MUST match AMO.login_slug; blank => "root"
+    amo_slug: resolveAmoSlug(amoSlug), // MUST match AMO.login_slug; blank => "system"
     email: email.trim(),
     password,
   };
@@ -287,7 +302,11 @@ export async function login(
 
   // Store context (AMO code + department code, if provided)
   if (data.amo) {
-    setContext(data.amo.amo_code, data.department ? data.department.code : null);
+    setContext(
+      data.amo.amo_code,
+      data.department ? data.department.code : null,
+      data.amo.login_slug
+    );
     // Track currently active AMO id (useful later for SUPERUSER support workflows)
     setActiveAmoId(data.amo.id);
   } else {
@@ -300,6 +319,24 @@ export async function login(
   }
 
   return data;
+}
+
+/**
+ * Resolve login context for a given email.
+ *
+ * Backend: GET /auth/login-context?email=...
+ */
+export async function getLoginContext(
+  email: string
+): Promise<LoginContextResponse> {
+  const query = new URLSearchParams({ email: email.trim() }).toString();
+  const res = await fetch(`${API_BASE_URL}/auth/login-context?${query}`);
+
+  if (!res.ok) {
+    throw new Error(await readErrorMessage(res));
+  }
+
+  return (await res.json()) as LoginContextResponse;
 }
 
 /**
