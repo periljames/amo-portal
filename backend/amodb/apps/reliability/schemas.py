@@ -19,8 +19,10 @@ from .models import (
     RecommendationStatusEnum,
     ReliabilityAlertStatusEnum,
     ReliabilityEventTypeEnum,
+    ReliabilityReportStatusEnum,
     ReliabilitySeverityEnum,
 )
+from ..accounts.models import AccountRole
 
 
 class ReliabilityProgramTemplateCreate(BaseModel):
@@ -165,9 +167,19 @@ class ReliabilityAlertRead(ReliabilityAlertCreate):
     created_at: datetime
     created_by_user_id: Optional[str] = None
     resolved_by_user_id: Optional[str] = None
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by_user_id: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class ReliabilityAlertAcknowledge(BaseModel):
+    message: Optional[str] = None
+
+
+class ReliabilityAlertResolve(BaseModel):
+    message: Optional[str] = None
 
 
 class FRACASCaseCreate(BaseModel):
@@ -193,9 +205,23 @@ class FRACASCaseRead(FRACASCaseCreate):
     amo_id: str
     created_at: datetime
     updated_at: datetime
+    verification_notes: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    approved_at: Optional[datetime] = None
+    verified_by_user_id: Optional[str] = None
+    approved_by_user_id: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class FRACASCaseApprove(BaseModel):
+    approval_notes: Optional[str] = None
+
+
+class FRACASCaseVerify(BaseModel):
+    verification_notes: Optional[str] = None
+    status: Optional[FRACASStatusEnum] = None
 
 
 class FRACASActionCreate(BaseModel):
@@ -213,6 +239,78 @@ class FRACASActionRead(FRACASActionCreate):
     id: int
     created_at: datetime
     updated_at: datetime
+    verified_at: Optional[datetime] = None
+    verified_by_user_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class FRACASActionVerify(BaseModel):
+    effectiveness_notes: Optional[str] = None
+
+
+class ReliabilityAlertEvaluationRequest(BaseModel):
+    kpi_id: int
+    threshold_set_id: Optional[int] = None
+
+
+class ReliabilityAlertEvaluationResult(BaseModel):
+    created_alerts: list[ReliabilityAlertRead]
+    evaluated_rules: int
+
+
+class ReliabilityNotificationRuleCreate(BaseModel):
+    department_id: Optional[str] = None
+    role: Optional[AccountRole] = None
+    severity: ReliabilitySeverityEnum = ReliabilitySeverityEnum.MEDIUM
+    is_active: bool = True
+
+
+class ReliabilityNotificationRuleRead(ReliabilityNotificationRuleCreate):
+    id: int
+    amo_id: str
+    created_at: datetime
+    created_by_user_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReliabilityNotificationRead(BaseModel):
+    id: int
+    amo_id: str
+    user_id: str
+    department_id: Optional[str] = None
+    alert_id: Optional[int] = None
+    title: str
+    message: Optional[str] = None
+    severity: ReliabilitySeverityEnum
+    created_at: datetime
+    read_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReliabilityNotificationMarkRead(BaseModel):
+    read: bool = True
+
+
+class ReliabilityReportCreate(BaseModel):
+    window_start: date
+    window_end: date
+
+
+class ReliabilityReportRead(BaseModel):
+    id: int
+    amo_id: str
+    window_start: date
+    window_end: date
+    status: ReliabilityReportStatusEnum
+    file_ref: Optional[str] = None
+    created_at: datetime
+    created_by_user_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -236,6 +334,48 @@ class EngineFlightSnapshotRead(EngineFlightSnapshotCreate):
 
     class Config:
         from_attributes = True
+
+
+class ReliabilityEventIngestCreate(BaseModel):
+    aircraft_serial_number: Optional[str] = None
+    engine_position: Optional[str] = None
+    component_id: Optional[int] = None
+    work_order_id: Optional[int] = None
+    task_card_id: Optional[int] = None
+    event_type: ReliabilityEventTypeEnum
+    severity: Optional[ReliabilitySeverityEnum] = None
+    ata_chapter: Optional[str] = None
+    reference_code: str
+    source_system: str
+    description: Optional[str] = None
+    occurred_at: datetime
+
+
+class ReliabilityEventIngestBatch(BaseModel):
+    events: list[ReliabilityEventIngestCreate]
+
+
+class ReliabilityEventIngestBatchResult(BaseModel):
+    created: list[ReliabilityEventRead]
+
+
+class EngineFlightSnapshotIngestCreate(BaseModel):
+    aircraft_serial_number: str
+    engine_position: str
+    flight_date: date
+    flight_leg: Optional[str] = None
+    flight_hours: Optional[float] = None
+    cycles: Optional[float] = None
+    metrics: Optional[dict] = None
+    data_source: str
+
+
+class EngineFlightSnapshotIngestBatch(BaseModel):
+    snapshots: list[EngineFlightSnapshotIngestCreate]
+
+
+class EngineFlightSnapshotIngestBatchResult(BaseModel):
+    created: list[EngineFlightSnapshotRead]
 
 
 class OilUpliftCreate(BaseModel):
@@ -287,6 +427,7 @@ class ComponentInstanceCreate(BaseModel):
 
 class ComponentInstanceRead(ComponentInstanceCreate):
     id: int
+    amo_id: Optional[str] = None
     created_at: datetime
 
     class Config:

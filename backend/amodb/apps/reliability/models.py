@@ -24,6 +24,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from ...database import Base
+from ..accounts.models import AccountRole
 
 
 def _utcnow() -> datetime:
@@ -471,10 +472,75 @@ class ReliabilityAlert(Base):
     message = Column(Text, nullable=True)
     triggered_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     resolved_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    acknowledged_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+
+class ReliabilityNotification(Base):
+    """
+    In-app notification for reliability alerts, scoped to an AMO.
+    """
+
+    __tablename__ = "reliability_notifications"
+
+    __table_args__ = (
+        UniqueConstraint("amo_id", "user_id", "dedupe_key", name="uq_reliability_notifications_dedupe"),
+        Index("ix_reliability_notifications_amo_user", "amo_id", "user_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
+    alert_id = Column(Integer, ForeignKey("reliability_alerts.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=True)
+    severity = Column(
+        SAEnum(ReliabilitySeverityEnum, name="reliability_notification_severity_enum", native_enum=False),
+        nullable=False,
+        default=ReliabilitySeverityEnum.MEDIUM,
+        index=True,
+    )
+    dedupe_key = Column(String(128), nullable=False)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+
+class ReliabilityNotificationRule(Base):
+    """
+    Routing rule to map alerts to users/departments for an AMO.
+    """
+
+    __tablename__ = "reliability_notification_rules"
+
+    __table_args__ = (
+        Index("ix_reliability_notification_rules_amo", "amo_id", "severity"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
+    role = Column(
+        SAEnum(AccountRole, name="reliability_notification_role_enum", native_enum=False),
+        nullable=True,
+        index=True,
+    )
+    severity = Column(
+        SAEnum(ReliabilitySeverityEnum, name="reliability_notification_rule_severity_enum", native_enum=False),
+        nullable=False,
+        default=ReliabilitySeverityEnum.MEDIUM,
+    )
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
 
 class FRACASCase(Base):
@@ -529,12 +595,17 @@ class FRACASCase(Base):
 
     root_cause = Column(Text, nullable=True)
     corrective_action_summary = Column(Text, nullable=True)
+    verification_notes = Column(Text, nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    verified_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    approved_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     actions = relationship("FRACASAction", back_populates="case", lazy="selectin")
 
@@ -571,9 +642,11 @@ class FRACASAction(Base):
     due_date = Column(Date, nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     effectiveness_notes = Column(Text, nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+    verified_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     case = relationship("FRACASCase", back_populates="actions", lazy="joined")
 
@@ -682,11 +755,12 @@ class ComponentInstance(Base):
     __tablename__ = "component_instances"
 
     __table_args__ = (
-        UniqueConstraint("part_number", "serial_number", name="uq_component_instance_pn_sn"),
+        UniqueConstraint("amo_id", "part_number", "serial_number", name="uq_component_instance_amo_pn_sn"),
         Index("ix_component_instances_ata", "ata"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=True, index=True)
     part_number = Column(String(50), nullable=False, index=True)
     serial_number = Column(String(50), nullable=False, index=True)
     description = Column(String(255), nullable=True)
@@ -925,3 +999,36 @@ class ControlChartConfig(Base):
     parameters = Column(JSONB, nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ReliabilityReportStatusEnum(str, Enum):
+    PENDING = "PENDING"
+    READY = "READY"
+    FAILED = "FAILED"
+
+
+class ReliabilityReport(Base):
+    """
+    Generated reliability report artifact.
+    """
+
+    __tablename__ = "reliability_reports"
+
+    __table_args__ = (
+        Index("ix_reliability_reports_amo_window", "amo_id", "window_start", "window_end"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    window_start = Column(Date, nullable=False, index=True)
+    window_end = Column(Date, nullable=False, index=True)
+    status = Column(
+        SAEnum(ReliabilityReportStatusEnum, name="reliability_report_status_enum", native_enum=False),
+        nullable=False,
+        default=ReliabilityReportStatusEnum.PENDING,
+        index=True,
+    )
+    file_ref = Column(String(512), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
