@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from amodb.entitlements import require_module
@@ -123,6 +124,44 @@ def list_events(
     return services.list_reliability_events(db, amo_id=current_user.amo_id)
 
 
+@router.get(
+    "/events/export",
+    response_class=Response,
+)
+def export_events(
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    csv_payload = services.export_reliability_events_csv(db, amo_id=current_user.amo_id)
+    return Response(
+        content=csv_payload,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=reliability_events.csv"},
+    )
+
+
+@router.post(
+    "/ingest/e-logbook-events",
+    response_model=schemas.ReliabilityEventIngestBatchResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def ingest_e_logbook_events(
+    payload: schemas.ReliabilityEventIngestBatch,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        created = services.create_reliability_events_bulk(
+            db,
+            amo_id=current_user.amo_id,
+            created_by_user_id=current_user.id,
+            events=payload.events,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return schemas.ReliabilityEventIngestBatchResult(created=created)
+
+
 @router.post(
     "/kpis",
     response_model=schemas.ReliabilityKPIRead,
@@ -165,6 +204,50 @@ def create_alert(
     )
 
 
+@router.post(
+    "/alerts/{alert_id}/acknowledge",
+    response_model=schemas.ReliabilityAlertRead,
+)
+def acknowledge_alert(
+    alert_id: int,
+    payload: schemas.ReliabilityAlertAcknowledge,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        return services.acknowledge_alert(
+            db,
+            amo_id=current_user.amo_id,
+            alert_id=alert_id,
+            message=payload.message,
+            acknowledged_by_user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/alerts/{alert_id}/resolve",
+    response_model=schemas.ReliabilityAlertRead,
+)
+def resolve_alert(
+    alert_id: int,
+    payload: schemas.ReliabilityAlertResolve,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        return services.resolve_alert(
+            db,
+            amo_id=current_user.amo_id,
+            alert_id=alert_id,
+            message=payload.message,
+            resolved_by_user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 @router.get(
     "/alerts",
     response_model=List[schemas.ReliabilityAlertRead],
@@ -174,6 +257,93 @@ def list_alerts(
     db: Session = Depends(get_write_db),
 ):
     return services.list_alerts(db, amo_id=current_user.amo_id)
+
+
+@router.post(
+    "/notifications/rules",
+    response_model=schemas.ReliabilityNotificationRuleRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_notification_rule(
+    payload: schemas.ReliabilityNotificationRuleCreate,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.create_notification_rule(
+        db,
+        amo_id=current_user.amo_id,
+        data=payload,
+        created_by_user_id=current_user.id,
+    )
+
+
+@router.get(
+    "/notifications/rules",
+    response_model=List[schemas.ReliabilityNotificationRuleRead],
+)
+def list_notification_rules(
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.list_notification_rules(db, amo_id=current_user.amo_id)
+
+
+@router.get(
+    "/notifications/me",
+    response_model=List[schemas.ReliabilityNotificationRead],
+)
+def list_my_notifications(
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.list_notifications(db, amo_id=current_user.amo_id, user_id=current_user.id)
+
+
+@router.post(
+    "/notifications/{notification_id}/read",
+    response_model=schemas.ReliabilityNotificationRead,
+)
+def mark_notification_read(
+    notification_id: int,
+    payload: schemas.ReliabilityNotificationMarkRead,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        return services.mark_notification_read(
+            db,
+            amo_id=current_user.amo_id,
+            user_id=current_user.id,
+            notification_id=notification_id,
+            read=payload.read,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/alerts/evaluate",
+    response_model=schemas.ReliabilityAlertEvaluationResult,
+)
+def evaluate_alerts(
+    payload: schemas.ReliabilityAlertEvaluationRequest,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        created_alerts, evaluated_rules = services.evaluate_alerts_for_kpi(
+            db,
+            amo_id=current_user.amo_id,
+            kpi_id=payload.kpi_id,
+            threshold_set_id=payload.threshold_set_id,
+            created_by_user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return schemas.ReliabilityAlertEvaluationResult(
+        created_alerts=created_alerts,
+        evaluated_rules=evaluated_rules,
+    )
 
 
 @router.post(
@@ -192,6 +362,51 @@ def create_fracas_case(
         data=payload,
         created_by_user_id=current_user.id,
     )
+
+
+@router.post(
+    "/fracas/cases/{case_id}/approve",
+    response_model=schemas.FRACASCaseRead,
+)
+def approve_fracas_case(
+    case_id: int,
+    payload: schemas.FRACASCaseApprove,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        return services.approve_fracas_case(
+            db,
+            amo_id=current_user.amo_id,
+            case_id=case_id,
+            approved_by_user_id=current_user.id,
+            approval_notes=payload.approval_notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/fracas/cases/{case_id}/verify",
+    response_model=schemas.FRACASCaseRead,
+)
+def verify_fracas_case(
+    case_id: int,
+    payload: schemas.FRACASCaseVerify,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        return services.verify_fracas_case(
+            db,
+            amo_id=current_user.amo_id,
+            case_id=case_id,
+            verified_by_user_id=current_user.id,
+            verification_notes=payload.verification_notes,
+            status=payload.status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get(
@@ -215,7 +430,32 @@ def create_fracas_action(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_fracas_action(db, data=payload)
+    try:
+        return services.create_fracas_action(db, amo_id=current_user.amo_id, data=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/fracas/actions/{action_id}/verify",
+    response_model=schemas.FRACASActionRead,
+)
+def verify_fracas_action(
+    action_id: int,
+    payload: schemas.FRACASActionVerify,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        return services.verify_fracas_action(
+            db,
+            amo_id=current_user.amo_id,
+            action_id=action_id,
+            verified_by_user_id=current_user.id,
+            effectiveness_notes=payload.effectiveness_notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get(
@@ -227,7 +467,10 @@ def list_fracas_actions(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_fracas_actions(db, fracas_case_id=fracas_case_id)
+    try:
+        return services.list_fracas_actions(db, amo_id=current_user.amo_id, fracas_case_id=fracas_case_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post(
@@ -240,7 +483,10 @@ def create_engine_snapshot(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_engine_snapshot(db, amo_id=current_user.amo_id, data=payload)
+    try:
+        return services.create_engine_snapshot(db, amo_id=current_user.amo_id, data=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get(
@@ -252,6 +498,27 @@ def list_engine_snapshots(
     db: Session = Depends(get_write_db),
 ):
     return services.list_engine_snapshots(db, amo_id=current_user.amo_id)
+
+
+@router.post(
+    "/ingest/engine-snapshots",
+    response_model=schemas.EngineFlightSnapshotIngestBatchResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def ingest_engine_snapshots(
+    payload: schemas.EngineFlightSnapshotIngestBatch,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        created = services.create_engine_snapshots_bulk(
+            db,
+            amo_id=current_user.amo_id,
+            snapshots=payload.snapshots,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return schemas.EngineFlightSnapshotIngestBatchResult(created=created)
 
 
 @router.post(
@@ -312,7 +579,7 @@ def create_component_instance(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_component_instance(db, data=payload)
+    return services.create_component_instance(db, amo_id=current_user.amo_id, data=payload)
 
 
 @router.get(
@@ -323,7 +590,7 @@ def list_component_instances(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_component_instances(db)
+    return services.list_component_instances(db, amo_id=current_user.amo_id)
 
 
 @router.post(
@@ -456,7 +723,10 @@ def create_alert_rule(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_alert_rule(db, data=payload)
+    try:
+        return services.create_alert_rule(db, amo_id=current_user.amo_id, data=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get(
@@ -468,7 +738,10 @@ def list_alert_rules(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_alert_rules(db, threshold_set_id=threshold_set_id)
+    try:
+        return services.list_alert_rules(db, amo_id=current_user.amo_id, threshold_set_id=threshold_set_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post(
@@ -493,3 +766,66 @@ def list_control_chart_configs(
     db: Session = Depends(get_write_db),
 ):
     return services.list_control_chart_configs(db, amo_id=current_user.amo_id)
+
+
+@router.post(
+    "/reports",
+    response_model=schemas.ReliabilityReportRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_report(
+    payload: schemas.ReliabilityReportCreate,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.generate_reliability_report(
+        db,
+        amo_id=current_user.amo_id,
+        created_by_user_id=current_user.id,
+        window_start=payload.window_start,
+        window_end=payload.window_end,
+    )
+
+
+@router.get(
+    "/reports",
+    response_model=List[schemas.ReliabilityReportRead],
+)
+def list_reports(
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.list_reports(db, amo_id=current_user.amo_id)
+
+
+@router.get(
+    "/reports/{report_id}",
+    response_model=schemas.ReliabilityReportRead,
+)
+def get_report(
+    report_id: int,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        return services.get_report(db, amo_id=current_user.amo_id, report_id=report_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get(
+    "/reports/{report_id}/download",
+    response_class=FileResponse,
+)
+def download_report(
+    report_id: int,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        report = services.get_report(db, amo_id=current_user.amo_id, report_id=report_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if not report.file_ref:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Report is not ready.")
+    return FileResponse(report.file_ref, filename=f"reliability_report_{report.id}.pdf")

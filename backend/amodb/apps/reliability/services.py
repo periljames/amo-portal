@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import date
+import csv
+import io
+import importlib.util
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import models, schemas
-from ..work.models import TaskCategoryEnum, TaskCard, TaskOriginTypeEnum
+from ..work.models import TaskCategoryEnum, TaskCard
 from ..fleet.models import AircraftUsage
+from ..accounts import models as account_models
 from ..quality.models import QMSAuditFinding
 
 
@@ -80,6 +85,9 @@ def compute_defect_trend(
     Calculate and persist a defect trend snapshot for the window.
     """
 
+    start_dt = datetime.combine(window_start, time.min)
+    end_dt_exclusive = datetime.combine(window_end + timedelta(days=1), time.min)
+
     utilisation_q = db.query(
         func.coalesce(func.sum(AircraftUsage.block_hours), 0.0),
         func.coalesce(func.sum(AircraftUsage.cycles), 0.0),
@@ -93,30 +101,48 @@ def compute_defect_trend(
 
     defects_q = db.query(func.count(TaskCard.id)).filter(
         TaskCard.category == TaskCategoryEnum.DEFECT,
-        TaskCard.created_at >= window_start,
-        TaskCard.created_at <= window_end,
-    )
-    repeat_q = db.query(func.count(TaskCard.id)).filter(
-        TaskCard.category == TaskCategoryEnum.DEFECT,
-        TaskCard.origin_type == TaskOriginTypeEnum.NON_ROUTINE,
-        TaskCard.created_at >= window_start,
-        TaskCard.created_at <= window_end,
+        TaskCard.created_at >= start_dt,
+        TaskCard.created_at < end_dt_exclusive,
     )
     findings_q = db.query(func.count(QMSAuditFinding.id)).filter(
-        QMSAuditFinding.created_at >= window_start,
-        QMSAuditFinding.created_at <= window_end,
+        QMSAuditFinding.created_at >= start_dt,
+        QMSAuditFinding.created_at < end_dt_exclusive,
     )
 
     if aircraft_serial_number:
         defects_q = defects_q.filter(TaskCard.aircraft_serial_number == aircraft_serial_number)
-        repeat_q = repeat_q.filter(TaskCard.aircraft_serial_number == aircraft_serial_number)
 
     if ata_chapter:
         defects_q = defects_q.filter(TaskCard.ata_chapter == ata_chapter)
-        repeat_q = repeat_q.filter(TaskCard.ata_chapter == ata_chapter)
 
     defects_count = defects_q.scalar() or 0
-    repeat_defects = repeat_q.scalar() or 0
+
+    repeat_subq = db.query(
+        TaskCard.aircraft_serial_number.label("aircraft_serial_number"),
+        TaskCard.ata_chapter.label("ata_chapter"),
+        TaskCard.task_code.label("task_code"),
+        func.count(TaskCard.id).label("defect_count"),
+    ).filter(
+        TaskCard.category == TaskCategoryEnum.DEFECT,
+        TaskCard.created_at >= start_dt,
+        TaskCard.created_at < end_dt_exclusive,
+    )
+    if aircraft_serial_number:
+        repeat_subq = repeat_subq.filter(TaskCard.aircraft_serial_number == aircraft_serial_number)
+    if ata_chapter:
+        repeat_subq = repeat_subq.filter(TaskCard.ata_chapter == ata_chapter)
+
+    repeat_subq = repeat_subq.group_by(
+        TaskCard.aircraft_serial_number,
+        TaskCard.ata_chapter,
+        TaskCard.task_code,
+    ).subquery()
+    repeat_defects = (
+        db.query(func.coalesce(func.sum(repeat_subq.c.defect_count - 1), 0))
+        .filter(repeat_subq.c.defect_count > 1)
+        .scalar()
+        or 0
+    )
     finding_events = findings_q.scalar() or 0
 
     trend = models.ReliabilityDefectTrend(
@@ -215,6 +241,28 @@ def create_reliability_event(
     return event
 
 
+def create_reliability_events_bulk(
+    db: Session,
+    *,
+    amo_id: str,
+    created_by_user_id: str,
+    events: Sequence[schemas.ReliabilityEventIngestCreate],
+) -> Sequence[models.ReliabilityEvent]:
+    created = []
+    for event_data in events:
+        event = models.ReliabilityEvent(
+            amo_id=amo_id,
+            created_by_user_id=created_by_user_id,
+            **event_data.model_dump(),
+        )
+        created.append(event)
+    db.add_all(created)
+    db.commit()
+    for event in created:
+        db.refresh(event)
+    return created
+
+
 def list_reliability_events(
     db: Session,
     *,
@@ -226,6 +274,52 @@ def list_reliability_events(
         .order_by(models.ReliabilityEvent.occurred_at.desc())
         .all()
     )
+
+
+def export_reliability_events_csv(
+    db: Session,
+    *,
+    amo_id: str,
+) -> str:
+    events = list_reliability_events(db, amo_id=amo_id)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "id",
+            "event_type",
+            "severity",
+            "occurred_at",
+            "aircraft_serial_number",
+            "engine_position",
+            "component_id",
+            "work_order_id",
+            "task_card_id",
+            "ata_chapter",
+            "reference_code",
+            "source_system",
+            "description",
+        ]
+    )
+    for event in events:
+        writer.writerow(
+            [
+                event.id,
+                event.event_type.value,
+                event.severity.value if event.severity else None,
+                event.occurred_at.isoformat() if event.occurred_at else None,
+                event.aircraft_serial_number,
+                event.engine_position,
+                event.component_id,
+                event.work_order_id,
+                event.task_card_id,
+                event.ata_chapter,
+                event.reference_code,
+                event.source_system,
+                event.description,
+            ]
+        )
+    return output.getvalue()
 
 
 def create_kpi_snapshot(
@@ -274,6 +368,64 @@ def create_alert(
     db.add(alert)
     db.commit()
     db.refresh(alert)
+    dispatch_alert_notifications(
+        db,
+        amo_id=amo_id,
+        alert=alert,
+        created_by_user_id=created_by_user_id,
+    )
+    return alert
+
+
+def acknowledge_alert(
+    db: Session,
+    *,
+    amo_id: str,
+    alert_id: int,
+    message: Optional[str],
+    acknowledged_by_user_id: str,
+) -> models.ReliabilityAlert:
+    alert = (
+        db.query(models.ReliabilityAlert)
+        .filter(models.ReliabilityAlert.amo_id == amo_id, models.ReliabilityAlert.id == alert_id)
+        .first()
+    )
+    if not alert:
+        raise ValueError("Alert not found.")
+    if message:
+        alert.message = message
+    alert.status = models.ReliabilityAlertStatusEnum.ACKNOWLEDGED
+    alert.acknowledged_at = func.now()
+    alert.acknowledged_by_user_id = acknowledged_by_user_id
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+    return alert
+
+
+def resolve_alert(
+    db: Session,
+    *,
+    amo_id: str,
+    alert_id: int,
+    message: Optional[str],
+    resolved_by_user_id: str,
+) -> models.ReliabilityAlert:
+    alert = (
+        db.query(models.ReliabilityAlert)
+        .filter(models.ReliabilityAlert.amo_id == amo_id, models.ReliabilityAlert.id == alert_id)
+        .first()
+    )
+    if not alert:
+        raise ValueError("Alert not found.")
+    if message:
+        alert.message = message
+    alert.status = models.ReliabilityAlertStatusEnum.CLOSED
+    alert.resolved_at = func.now()
+    alert.resolved_by_user_id = resolved_by_user_id
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
     return alert
 
 
@@ -311,6 +463,61 @@ def create_fracas_case(
     return case
 
 
+def approve_fracas_case(
+    db: Session,
+    *,
+    amo_id: str,
+    case_id: int,
+    approved_by_user_id: str,
+    approval_notes: Optional[str],
+) -> models.FRACASCase:
+    case = (
+        db.query(models.FRACASCase)
+        .filter(models.FRACASCase.amo_id == amo_id, models.FRACASCase.id == case_id)
+        .first()
+    )
+    if not case:
+        raise ValueError("FRACAS case not found.")
+    case.approved_at = func.now()
+    case.approved_by_user_id = approved_by_user_id
+    if approval_notes:
+        case.corrective_action_summary = approval_notes
+    db.add(case)
+    db.commit()
+    db.refresh(case)
+    return case
+
+
+def verify_fracas_case(
+    db: Session,
+    *,
+    amo_id: str,
+    case_id: int,
+    verified_by_user_id: str,
+    verification_notes: Optional[str],
+    status: Optional[models.FRACASStatusEnum],
+) -> models.FRACASCase:
+    case = (
+        db.query(models.FRACASCase)
+        .filter(models.FRACASCase.amo_id == amo_id, models.FRACASCase.id == case_id)
+        .first()
+    )
+    if not case:
+        raise ValueError("FRACAS case not found.")
+    case.verified_at = func.now()
+    case.verified_by_user_id = verified_by_user_id
+    if verification_notes:
+        case.verification_notes = verification_notes
+    if status:
+        case.status = status
+        if status == models.FRACASStatusEnum.CLOSED:
+            case.closed_at = func.now()
+    db.add(case)
+    db.commit()
+    db.refresh(case)
+    return case
+
+
 def list_fracas_cases(
     db: Session,
     *,
@@ -327,8 +534,16 @@ def list_fracas_cases(
 def create_fracas_action(
     db: Session,
     *,
+    amo_id: str,
     data: schemas.FRACASActionCreate,
 ) -> models.FRACASAction:
+    case = (
+        db.query(models.FRACASCase)
+        .filter(models.FRACASCase.amo_id == amo_id, models.FRACASCase.id == data.fracas_case_id)
+        .first()
+    )
+    if not case:
+        raise ValueError("FRACAS case not found.")
     action = models.FRACASAction(
         **data.model_dump(),
     )
@@ -338,11 +553,46 @@ def create_fracas_action(
     return action
 
 
+def verify_fracas_action(
+    db: Session,
+    *,
+    amo_id: str,
+    action_id: int,
+    verified_by_user_id: str,
+    effectiveness_notes: Optional[str],
+) -> models.FRACASAction:
+    action = (
+        db.query(models.FRACASAction)
+        .join(models.FRACASCase, models.FRACASAction.fracas_case_id == models.FRACASCase.id)
+        .filter(models.FRACASAction.id == action_id, models.FRACASCase.amo_id == amo_id)
+        .first()
+    )
+    if not action:
+        raise ValueError("FRACAS action not found.")
+    action.verified_at = func.now()
+    action.verified_by_user_id = verified_by_user_id
+    if effectiveness_notes:
+        action.effectiveness_notes = effectiveness_notes
+    action.status = models.FRACASActionStatusEnum.VERIFIED
+    db.add(action)
+    db.commit()
+    db.refresh(action)
+    return action
+
+
 def list_fracas_actions(
     db: Session,
     *,
+    amo_id: str,
     fracas_case_id: int,
 ) -> Sequence[models.FRACASAction]:
+    case = (
+        db.query(models.FRACASCase)
+        .filter(models.FRACASCase.amo_id == amo_id, models.FRACASCase.id == fracas_case_id)
+        .first()
+    )
+    if not case:
+        raise ValueError("FRACAS case not found.")
     return (
         db.query(models.FRACASAction)
         .filter(models.FRACASAction.fracas_case_id == fracas_case_id)
@@ -357,6 +607,10 @@ def create_engine_snapshot(
     amo_id: str,
     data: schemas.EngineFlightSnapshotCreate,
 ) -> models.EngineFlightSnapshot:
+    if data.flight_hours is not None and data.flight_hours < 0:
+        raise ValueError("flight_hours must be non-negative.")
+    if data.cycles is not None and data.cycles < 0:
+        raise ValueError("cycles must be non-negative.")
     snapshot = models.EngineFlightSnapshot(
         amo_id=amo_id,
         **data.model_dump(),
@@ -365,6 +619,30 @@ def create_engine_snapshot(
     db.commit()
     db.refresh(snapshot)
     return snapshot
+
+
+def create_engine_snapshots_bulk(
+    db: Session,
+    *,
+    amo_id: str,
+    snapshots: Sequence[schemas.EngineFlightSnapshotIngestCreate],
+) -> Sequence[models.EngineFlightSnapshot]:
+    created = []
+    for snapshot_data in snapshots:
+        if snapshot_data.flight_hours is not None and snapshot_data.flight_hours < 0:
+            raise ValueError("flight_hours must be non-negative.")
+        if snapshot_data.cycles is not None and snapshot_data.cycles < 0:
+            raise ValueError("cycles must be non-negative.")
+        snapshot = models.EngineFlightSnapshot(
+            amo_id=amo_id,
+            **snapshot_data.model_dump(),
+        )
+        created.append(snapshot)
+    db.add_all(created)
+    db.commit()
+    for snapshot in created:
+        db.refresh(snapshot)
+    return created
 
 
 def list_engine_snapshots(
@@ -441,9 +719,11 @@ def list_oil_consumption_rates(
 def create_component_instance(
     db: Session,
     *,
+    amo_id: str,
     data: schemas.ComponentInstanceCreate,
 ) -> models.ComponentInstance:
     instance = models.ComponentInstance(
+        amo_id=amo_id,
         **data.model_dump(),
     )
     db.add(instance)
@@ -454,8 +734,15 @@ def create_component_instance(
 
 def list_component_instances(
     db: Session,
+    *,
+    amo_id: str,
 ) -> Sequence[models.ComponentInstance]:
-    return db.query(models.ComponentInstance).order_by(models.ComponentInstance.part_number.asc()).all()
+    return (
+        db.query(models.ComponentInstance)
+        .filter(models.ComponentInstance.amo_id == amo_id)
+        .order_by(models.ComponentInstance.part_number.asc())
+        .all()
+    )
 
 
 def create_part_movement(
@@ -608,8 +895,16 @@ def list_threshold_sets(
 def create_alert_rule(
     db: Session,
     *,
+    amo_id: str,
     data: schemas.AlertRuleCreate,
 ) -> models.AlertRule:
+    threshold = (
+        db.query(models.ThresholdSet)
+        .filter(models.ThresholdSet.amo_id == amo_id, models.ThresholdSet.id == data.threshold_set_id)
+        .first()
+    )
+    if not threshold:
+        raise ValueError("Threshold set not found.")
     rule = models.AlertRule(
         **data.model_dump(),
     )
@@ -622,8 +917,16 @@ def create_alert_rule(
 def list_alert_rules(
     db: Session,
     *,
+    amo_id: str,
     threshold_set_id: int,
 ) -> Sequence[models.AlertRule]:
+    threshold = (
+        db.query(models.ThresholdSet)
+        .filter(models.ThresholdSet.amo_id == amo_id, models.ThresholdSet.id == threshold_set_id)
+        .first()
+    )
+    if not threshold:
+        raise ValueError("Threshold set not found.")
     return (
         db.query(models.AlertRule)
         .filter(models.AlertRule.threshold_set_id == threshold_set_id)
@@ -659,3 +962,418 @@ def list_control_chart_configs(
         .order_by(models.ControlChartConfig.kpi_code.asc())
         .all()
     )
+
+
+def _scope_value_for_kpi(kpi: models.ReliabilityKPI) -> Optional[str]:
+    if kpi.scope_type == models.KPIBaseScopeEnum.AIRCRAFT:
+        return kpi.aircraft_serial_number
+    if kpi.scope_type == models.KPIBaseScopeEnum.ENGINE:
+        return kpi.engine_position
+    if kpi.scope_type == models.KPIBaseScopeEnum.COMPONENT:
+        return str(kpi.component_id) if kpi.component_id is not None else None
+    if kpi.scope_type == models.KPIBaseScopeEnum.ATA:
+        return kpi.ata_chapter
+    return None
+
+
+def _compare_value(value: float, comparator: models.AlertComparatorEnum, threshold: float) -> bool:
+    if comparator == models.AlertComparatorEnum.GT:
+        return value > threshold
+    if comparator == models.AlertComparatorEnum.GTE:
+        return value >= threshold
+    if comparator == models.AlertComparatorEnum.LT:
+        return value < threshold
+    if comparator == models.AlertComparatorEnum.LTE:
+        return value <= threshold
+    if comparator == models.AlertComparatorEnum.EQ:
+        return value == threshold
+    return False
+
+
+def evaluate_alerts_for_kpi(
+    db: Session,
+    *,
+    amo_id: str,
+    kpi_id: int,
+    threshold_set_id: Optional[int],
+    created_by_user_id: str,
+) -> tuple[list[models.ReliabilityAlert], int]:
+    kpi = (
+        db.query(models.ReliabilityKPI)
+        .filter(models.ReliabilityKPI.amo_id == amo_id, models.ReliabilityKPI.id == kpi_id)
+        .first()
+    )
+    if not kpi:
+        raise ValueError("KPI not found.")
+
+    scope_value = _scope_value_for_kpi(kpi)
+    threshold_query = db.query(models.ThresholdSet).filter(models.ThresholdSet.amo_id == amo_id)
+    if threshold_set_id:
+        threshold_query = threshold_query.filter(models.ThresholdSet.id == threshold_set_id)
+    else:
+        threshold_query = threshold_query.filter(
+            models.ThresholdSet.scope_type == kpi.scope_type,
+            models.ThresholdSet.scope_value == scope_value,
+        )
+    thresholds = threshold_query.all()
+    if not thresholds:
+        return [], 0
+
+    threshold_ids = [threshold.id for threshold in thresholds]
+    rules = (
+        db.query(models.AlertRule)
+        .filter(
+            models.AlertRule.threshold_set_id.in_(threshold_ids),
+            models.AlertRule.kpi_code == kpi.kpi_code,
+            models.AlertRule.enabled.is_(True),
+        )
+        .all()
+    )
+
+    created_alerts = []
+    evaluated_rules = 0
+    for rule in rules:
+        evaluated_rules += 1
+        if _compare_value(kpi.value, rule.comparator, rule.threshold_value):
+            alert = models.ReliabilityAlert(
+                amo_id=amo_id,
+                created_by_user_id=created_by_user_id,
+                kpi_id=kpi.id,
+                threshold_set_id=rule.threshold_set_id,
+                alert_code=f"{kpi.kpi_code}:{rule.comparator}:{rule.threshold_value}",
+                severity=rule.severity,
+                message=f"KPI {kpi.kpi_code} breached {rule.comparator} {rule.threshold_value}",
+                triggered_at=func.now(),
+            )
+            db.add(alert)
+            created_alerts.append(alert)
+
+    if created_alerts:
+        db.commit()
+        for alert in created_alerts:
+            db.refresh(alert)
+            dispatch_alert_notifications(
+                db,
+                amo_id=amo_id,
+                alert=alert,
+                created_by_user_id=created_by_user_id,
+            )
+    return created_alerts, evaluated_rules
+
+
+def _severity_rank(severity: models.ReliabilitySeverityEnum) -> int:
+    ordering = {
+        models.ReliabilitySeverityEnum.LOW: 1,
+        models.ReliabilitySeverityEnum.MEDIUM: 2,
+        models.ReliabilitySeverityEnum.HIGH: 3,
+        models.ReliabilitySeverityEnum.CRITICAL: 4,
+    }
+    return ordering.get(severity, 1)
+
+
+def create_notification_rule(
+    db: Session,
+    *,
+    amo_id: str,
+    data: schemas.ReliabilityNotificationRuleCreate,
+    created_by_user_id: Optional[str] = None,
+) -> models.ReliabilityNotificationRule:
+    rule = models.ReliabilityNotificationRule(
+        amo_id=amo_id,
+        created_by_user_id=created_by_user_id,
+        **data.model_dump(),
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return rule
+
+
+def list_notification_rules(
+    db: Session,
+    *,
+    amo_id: str,
+) -> Sequence[models.ReliabilityNotificationRule]:
+    return (
+        db.query(models.ReliabilityNotificationRule)
+        .filter(models.ReliabilityNotificationRule.amo_id == amo_id)
+        .order_by(models.ReliabilityNotificationRule.created_at.desc())
+        .all()
+    )
+
+
+def dispatch_alert_notifications(
+    db: Session,
+    *,
+    amo_id: str,
+    alert: models.ReliabilityAlert,
+    created_by_user_id: Optional[str],
+) -> Sequence[models.ReliabilityNotification]:
+    rules = (
+        db.query(models.ReliabilityNotificationRule)
+        .filter(
+            models.ReliabilityNotificationRule.amo_id == amo_id,
+            models.ReliabilityNotificationRule.is_active.is_(True),
+        )
+        .all()
+    )
+    if not rules:
+        return []
+
+    created = []
+    for rule in rules:
+        if _severity_rank(alert.severity) < _severity_rank(rule.severity):
+            continue
+        user_q = db.query(account_models.User).filter(account_models.User.amo_id == amo_id)
+        if rule.department_id:
+            user_q = user_q.filter(account_models.User.department_id == rule.department_id)
+        if rule.role:
+            user_q = user_q.filter(account_models.User.role == rule.role)
+        users = user_q.all()
+        for user in users:
+            dedupe_key = f"alert:{alert.id}:user:{user.id}"
+            existing = (
+                db.query(models.ReliabilityNotification)
+                .filter(
+                    models.ReliabilityNotification.amo_id == amo_id,
+                    models.ReliabilityNotification.user_id == user.id,
+                    models.ReliabilityNotification.dedupe_key == dedupe_key,
+                )
+                .first()
+            )
+            if existing:
+                continue
+            notification = models.ReliabilityNotification(
+                amo_id=amo_id,
+                user_id=user.id,
+                department_id=user.department_id,
+                alert_id=alert.id,
+                title=f"Reliability alert: {alert.alert_code}",
+                message=alert.message,
+                severity=alert.severity,
+                dedupe_key=dedupe_key,
+                created_by_user_id=created_by_user_id,
+            )
+            db.add(notification)
+            created.append(notification)
+    if created:
+        db.commit()
+        for notification in created:
+            db.refresh(notification)
+    return created
+
+
+def list_notifications(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+) -> Sequence[models.ReliabilityNotification]:
+    return (
+        db.query(models.ReliabilityNotification)
+        .filter(
+            models.ReliabilityNotification.amo_id == amo_id,
+            models.ReliabilityNotification.user_id == user_id,
+        )
+        .order_by(models.ReliabilityNotification.created_at.desc())
+        .all()
+    )
+
+
+def mark_notification_read(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    notification_id: int,
+    read: bool,
+) -> models.ReliabilityNotification:
+    notification = (
+        db.query(models.ReliabilityNotification)
+        .filter(
+            models.ReliabilityNotification.amo_id == amo_id,
+            models.ReliabilityNotification.user_id == user_id,
+            models.ReliabilityNotification.id == notification_id,
+        )
+        .first()
+    )
+    if not notification:
+        raise ValueError("Notification not found.")
+    notification.read_at = func.now() if read else None
+    db.add(notification)
+    db.commit()
+    db.refresh(notification)
+    return notification
+
+
+def _reports_dir() -> Path:
+    base_dir = Path(__file__).resolve().parents[2]
+    output_dir = base_dir / "generated" / "reliability"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def generate_reliability_report(
+    db: Session,
+    *,
+    amo_id: str,
+    created_by_user_id: str,
+    window_start: date,
+    window_end: date,
+) -> models.ReliabilityReport:
+    report = models.ReliabilityReport(
+        amo_id=amo_id,
+        window_start=window_start,
+        window_end=window_end,
+        status=models.ReliabilityReportStatusEnum.PENDING,
+        created_by_user_id=created_by_user_id,
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+
+    if importlib.util.find_spec("reportlab") is None:
+        report.status = models.ReliabilityReportStatusEnum.FAILED
+        db.add(report)
+        db.commit()
+        return report
+
+    from reportlab.lib.pagesizes import letter  # type: ignore[import-not-found]
+    from reportlab.pdfgen import canvas  # type: ignore[import-not-found]
+    from reportlab.lib.utils import ImageReader  # type: ignore[import-not-found]
+
+    file_path = _reports_dir() / f"reliability_report_{report.id}.pdf"
+    canvas_obj = canvas.Canvas(str(file_path), pagesize=letter)
+    width, height = letter
+
+    amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
+    logo_asset = (
+        db.query(account_models.AMOAsset)
+        .filter(
+            account_models.AMOAsset.amo_id == amo_id,
+            account_models.AMOAsset.kind == account_models.AMOAssetKind.CRS_LOGO,
+            account_models.AMOAsset.is_active.is_(True),
+        )
+        .order_by(account_models.AMOAsset.created_at.desc())
+        .first()
+    )
+    if logo_asset:
+        try:
+            canvas_obj.drawImage(
+                ImageReader(logo_asset.storage_path),
+                40,
+                height - 80,
+                width=120,
+                height=40,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+        except FileNotFoundError:
+            pass
+
+    canvas_obj.setFont("Helvetica-Bold", 14)
+    canvas_obj.drawString(200, height - 50, "Reliability Report")
+    canvas_obj.setFont("Helvetica", 10)
+    canvas_obj.drawString(200, height - 65, f"AMO: {amo.name if amo else amo_id}")
+    canvas_obj.drawString(200, height - 80, f"Window: {window_start} to {window_end}")
+
+    kpis = (
+        db.query(models.ReliabilityKPI)
+        .filter(
+            models.ReliabilityKPI.amo_id == amo_id,
+            models.ReliabilityKPI.window_start >= window_start,
+            models.ReliabilityKPI.window_end <= window_end,
+        )
+        .order_by(models.ReliabilityKPI.kpi_code.asc())
+        .all()
+    )
+    alerts = (
+        db.query(models.ReliabilityAlert)
+        .filter(
+            models.ReliabilityAlert.amo_id == amo_id,
+            models.ReliabilityAlert.triggered_at >= datetime.combine(window_start, time.min),
+            models.ReliabilityAlert.triggered_at < datetime.combine(window_end + timedelta(days=1), time.min),
+        )
+        .order_by(models.ReliabilityAlert.triggered_at.desc())
+        .all()
+    )
+
+    y = height - 120
+    canvas_obj.setFont("Helvetica-Bold", 11)
+    canvas_obj.drawString(40, y, "KPI Summary")
+    y -= 15
+    canvas_obj.setFont("Helvetica", 9)
+    canvas_obj.drawString(40, y, "KPI Code")
+    canvas_obj.drawString(200, y, "Value")
+    canvas_obj.drawString(260, y, "Unit")
+    canvas_obj.drawString(320, y, "Scope")
+    y -= 12
+
+    for kpi in kpis[:30]:
+        canvas_obj.drawString(40, y, kpi.kpi_code)
+        canvas_obj.drawString(200, y, f"{kpi.value:.3f}")
+        canvas_obj.drawString(260, y, kpi.unit or "-")
+        canvas_obj.drawString(320, y, kpi.scope_type.value)
+        y -= 12
+        if y < 120:
+            canvas_obj.showPage()
+            y = height - 60
+
+    if y < 140:
+        canvas_obj.showPage()
+        y = height - 60
+
+    canvas_obj.setFont("Helvetica-Bold", 11)
+    canvas_obj.drawString(40, y, "Alerts Summary")
+    y -= 15
+    canvas_obj.setFont("Helvetica", 9)
+    canvas_obj.drawString(40, y, "Alert Code")
+    canvas_obj.drawString(200, y, "Severity")
+    canvas_obj.drawString(260, y, "Triggered At")
+    y -= 12
+    for alert in alerts[:30]:
+        canvas_obj.drawString(40, y, alert.alert_code)
+        canvas_obj.drawString(200, y, alert.severity.value)
+        canvas_obj.drawString(260, y, alert.triggered_at.strftime("%Y-%m-%d"))
+        y -= 12
+        if y < 80:
+            canvas_obj.showPage()
+            y = height - 60
+
+    canvas_obj.save()
+
+    report.status = models.ReliabilityReportStatusEnum.READY
+    report.file_ref = str(file_path)
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return report
+
+
+def list_reports(
+    db: Session,
+    *,
+    amo_id: str,
+) -> Sequence[models.ReliabilityReport]:
+    return (
+        db.query(models.ReliabilityReport)
+        .filter(models.ReliabilityReport.amo_id == amo_id)
+        .order_by(models.ReliabilityReport.created_at.desc())
+        .all()
+    )
+
+
+def get_report(
+    db: Session,
+    *,
+    amo_id: str,
+    report_id: int,
+) -> models.ReliabilityReport:
+    report = (
+        db.query(models.ReliabilityReport)
+        .filter(models.ReliabilityReport.amo_id == amo_id, models.ReliabilityReport.id == report_id)
+        .first()
+    )
+    if not report:
+        raise ValueError("Report not found.")
+    return report
