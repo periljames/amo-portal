@@ -165,6 +165,7 @@ body[data-color-scheme="light"] .auth-layout__card {
     var(--surface-elevated);
 }
 
+
 /* ---------- Session timeout overlay ---------- */
 
 body.session-timeout-active .app-shell__sidebar,
