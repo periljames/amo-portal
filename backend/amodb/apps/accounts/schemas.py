@@ -132,6 +132,16 @@ class AMOAssetRead(AMOAssetBase):
         from_attributes = True
 
 
+class AMOAssetSummary(BaseModel):
+    amo_id: str
+    crs_logo_filename: Optional[str] = None
+    crs_logo_content_type: Optional[str] = None
+    crs_logo_uploaded_at: Optional[datetime] = None
+    crs_template_filename: Optional[str] = None
+    crs_template_content_type: Optional[str] = None
+    crs_template_uploaded_at: Optional[datetime] = None
+
+
 # ---------------------------------------------------------------------------
 # USER SCHEMAS
 # ---------------------------------------------------------------------------
