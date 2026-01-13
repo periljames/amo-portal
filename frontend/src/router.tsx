@@ -17,6 +17,7 @@ import EhmTrendsPage from "./pages/ehm/EhmTrendsPage";
 import EhmUploadsPage from "./pages/ehm/EhmUploadsPage";
 import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
+import AircraftDocumentsPage from "./pages/AircraftDocumentsPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminOverviewPage from "./pages/AdminOverviewPage";
@@ -25,6 +26,7 @@ import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
+import ReliabilityReportsPage from "./pages/ReliabilityReportsPage";
 import UpsellPage from "./pages/UpsellPage";
 import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
 import AdminUsageSettingsPage from "./pages/AdminUsageSettingsPage";
@@ -329,6 +331,16 @@ export const AppRouter: React.FC = () => {
         }
       />
 
+      {/* Aircraft documents, e.g. /maintenance/safarilink/planning/aircraft-documents */}
+      <Route
+        path="/maintenance/:amoCode/:department/aircraft-documents"
+        element={
+          <RequireAuth>
+            <AircraftDocumentsPage />
+          </RequireAuth>
+        }
+      />
+
       {/* QMS dashboard, e.g. /maintenance/safarilink/quality/qms */}
       <Route
         path="/maintenance/:amoCode/:department/qms"
@@ -344,6 +356,16 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <QualityCarsPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Reliability reports, e.g. /maintenance/safarilink/quality/reliability-reports */}
+      <Route
+        path="/maintenance/:amoCode/quality/reliability-reports"
+        element={
+          <RequireAuth>
+            <ReliabilityReportsPage />
           </RequireAuth>
         }
       />

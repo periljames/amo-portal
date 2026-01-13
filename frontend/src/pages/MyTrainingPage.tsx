@@ -8,8 +8,11 @@ import {
   listTrainingCourses,
   listTrainingEvents,
   createTrainingDeferralRequest,
+  listTrainingFiles,
+  downloadTrainingFile,
 } from "../services/training";
 import type { TrainingStatusItem, TrainingCourseRead, TrainingEventRead } from "../types/training";
+import type { TrainingFileRead, TransferProgress } from "../services/training";
 
 type SortField =
   | "course_name"
@@ -518,6 +521,15 @@ function MyTrainingPage() {
   >("OPERATIONAL_REQUIREMENTS");
   const [deferralReasonText, setDeferralReasonText] = useState<string>("");
 
+  // Training evidence files
+  const [trainingFiles, setTrainingFiles] = useState<TrainingFileRead[]>([]);
+  const [trainingFilesLoading, setTrainingFilesLoading] = useState<boolean>(false);
+  const [trainingFilesError, setTrainingFilesError] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    fileId: string;
+    progress: TransferProgress;
+  } | null>(null);
+
   const selectedItem = useMemo(() => {
     if (!selectedCourseId) return null;
     return items.find((x) => x.course_id === selectedCourseId) || null;
@@ -550,6 +562,19 @@ function MyTrainingPage() {
     }
   };
 
+  const loadTrainingFiles = async () => {
+    setTrainingFilesLoading(true);
+    setTrainingFilesError(null);
+    try {
+      const data = await listTrainingFiles();
+      setTrainingFiles(data);
+    } catch (err: any) {
+      setTrainingFilesError(err?.message || "Failed to load training files.");
+    } finally {
+      setTrainingFilesLoading(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -578,6 +603,10 @@ function MyTrainingPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    loadTrainingFiles();
   }, []);
 
   const handleSortChange = (field: SortField) => {
@@ -873,6 +902,34 @@ function MyTrainingPage() {
     win.document.close();
     win.focus();
     win.print();
+  };
+
+  const handleDownloadTrainingFile = async (file: TrainingFileRead) => {
+    setTrainingFilesError(null);
+    setDownloadProgress(null);
+    try {
+      const blob = await downloadTrainingFile(file.id, (progress) =>
+        setDownloadProgress({ fileId: file.id, progress })
+      );
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.original_filename || `training_file_${file.id}`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setTrainingFilesError(err?.message || "Could not download training file.");
+    } finally {
+      setDownloadProgress(null);
+    }
+  };
+
+  const formatSpeed = (progress: TransferProgress) => {
+    const mbps = progress.megaBytesPerSecond;
+    const mbits = progress.megaBitsPerSecond;
+    const mbpsLabel = Number.isFinite(mbps) ? mbps.toFixed(2) : "0.00";
+    const mbitsLabel = Number.isFinite(mbits) ? mbits.toFixed(2) : "0.00";
+    return `${mbpsLabel} MB/s • ${mbitsLabel} Mb/s`;
   };
 
   const shiftMonth = (delta: number) => {
@@ -1461,6 +1518,96 @@ function MyTrainingPage() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </section>
+
+            {/* Training evidence files */}
+            <section className="page-section">
+              <div className="card">
+                <div className="card-header">
+                  <h2>Training evidence files</h2>
+                  <p className="text-muted">Download certificates and uploaded evidence.</p>
+                </div>
+
+                {trainingFilesLoading && (
+                  <div className="card card--info">
+                    <p style={{ margin: 0 }}>Loading training files…</p>
+                  </div>
+                )}
+
+                {trainingFilesError && (
+                  <div className="card card--error">
+                    <p style={{ margin: 0 }}>{trainingFilesError}</p>
+                    <button type="button" className="secondary-chip-btn" onClick={loadTrainingFiles}>
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {!trainingFilesLoading && !trainingFilesError && (
+                  <div className="table-responsive">
+                    <table className="table table-striped table-compact">
+                      <thead>
+                        <tr>
+                          <th>Filename</th>
+                          <th>Type</th>
+                          <th>Status</th>
+                          <th>Uploaded</th>
+                          <th>Size</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trainingFiles.map((file) => {
+                          const isDownloading = downloadProgress?.fileId === file.id;
+                          const sizeMb =
+                            typeof file.size_bytes === "number"
+                              ? `${(file.size_bytes / (1024 * 1024)).toFixed(2)} MB`
+                              : "—";
+                          return (
+                            <tr key={file.id}>
+                              <td>{file.original_filename || "—"}</td>
+                              <td>{file.kind || "OTHER"}</td>
+                              <td>{file.review_status || "PENDING"}</td>
+                              <td>{new Date(file.uploaded_at).toLocaleString()}</td>
+                              <td>{sizeMb}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="secondary-chip-btn"
+                                  onClick={() => handleDownloadTrainingFile(file)}
+                                >
+                                  Download
+                                </button>
+                                {isDownloading && (
+                                  <div style={{ marginTop: 8 }}>
+                                    {downloadProgress?.progress.percent !== undefined && (
+                                      <progress
+                                        value={downloadProgress.progress.percent}
+                                        max={100}
+                                        style={{ width: "100%", height: 8 }}
+                                      />
+                                    )}
+                                    <p style={{ marginTop: 6, opacity: 0.8 }}>
+                                      {formatSpeed(downloadProgress.progress)}
+                                    </p>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {trainingFiles.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="text-center text-muted">
+                              No training files uploaded yet.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </section>
 

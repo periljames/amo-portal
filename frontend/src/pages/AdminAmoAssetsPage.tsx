@@ -13,7 +13,7 @@ import {
   uploadAmoTemplate,
 } from "../services/amoAssets.ts";
 
-import type { AmoAssetRead } from "../services/amoAssets.ts";
+import type { AmoAssetRead, TransferProgress } from "../services/amoAssets.ts";
 
 type UrlParams = {
   amoCode?: string;
@@ -37,6 +37,12 @@ const AdminAmoAssetsPage: React.FC = () => {
   const [uploadingTemplate, setUploadingTemplate] = useState(false);
   const [selectedLogoFiles, setSelectedLogoFiles] = useState<File[]>([]);
   const [selectedTemplateFiles, setSelectedTemplateFiles] = useState<File[]>([]);
+  const [logoUploadProgress, setLogoUploadProgress] = useState<TransferProgress | null>(null);
+  const [templateUploadProgress, setTemplateUploadProgress] = useState<TransferProgress | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    kind: "logo" | "template";
+    progress: TransferProgress;
+  } | null>(null);
 
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const templateInputRef = useRef<HTMLInputElement | null>(null);
@@ -148,6 +154,7 @@ const AdminAmoAssetsPage: React.FC = () => {
   const handleUploadLogo = async (files?: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploadingLogo(true);
+    setLogoUploadProgress(null);
     setError(null);
     const uploads = Array.from(files);
     setSelectedLogoFiles(uploads);
@@ -156,7 +163,8 @@ const AdminAmoAssetsPage: React.FC = () => {
       for (const file of uploads) {
         latest = await uploadAmoLogo(
           file,
-          isSuperuser ? effectiveAmoId : null
+          isSuperuser ? effectiveAmoId : null,
+          (progress) => setLogoUploadProgress(progress)
         );
       }
       if (latest) setAssets(latest);
@@ -167,12 +175,14 @@ const AdminAmoAssetsPage: React.FC = () => {
       setError(e?.message || "Could not upload logo.");
     } finally {
       setUploadingLogo(false);
+      setLogoUploadProgress(null);
     }
   };
 
   const handleUploadTemplate = async (files?: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploadingTemplate(true);
+    setTemplateUploadProgress(null);
     setError(null);
     const uploads = Array.from(files);
     setSelectedTemplateFiles(uploads);
@@ -181,7 +191,8 @@ const AdminAmoAssetsPage: React.FC = () => {
       for (const file of uploads) {
         latest = await uploadAmoTemplate(
           file,
-          isSuperuser ? effectiveAmoId : null
+          isSuperuser ? effectiveAmoId : null,
+          (progress) => setTemplateUploadProgress(progress)
         );
       }
       if (latest) setAssets(latest);
@@ -192,15 +203,18 @@ const AdminAmoAssetsPage: React.FC = () => {
       setError(e?.message || "Could not upload template.");
     } finally {
       setUploadingTemplate(false);
+      setTemplateUploadProgress(null);
     }
   };
 
   const handleDownload = async (kind: "logo" | "template") => {
     setError(null);
+    setDownloadProgress(null);
     try {
       const blob = await downloadAmoAsset(
         kind,
-        isSuperuser ? effectiveAmoId : null
+        isSuperuser ? effectiveAmoId : null,
+        (progress) => setDownloadProgress({ kind, progress })
       );
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -216,7 +230,17 @@ const AdminAmoAssetsPage: React.FC = () => {
     } catch (e: any) {
       console.error("Failed to download asset", e);
       setError(e?.message || "Could not download asset.");
+    } finally {
+      setDownloadProgress(null);
     }
+  };
+
+  const formatSpeed = (progress: TransferProgress) => {
+    const mbps = progress.megaBytesPerSecond;
+    const mbits = progress.megaBitsPerSecond;
+    const mbpsLabel = Number.isFinite(mbps) ? mbps.toFixed(2) : "0.00";
+    const mbitsLabel = Number.isFinite(mbits) ? mbits.toFixed(2) : "0.00";
+    return `${mbpsLabel} MB/s • ${mbitsLabel} Mb/s`;
   };
 
   if (currentUser && !canAccessAdmin) {
@@ -306,6 +330,23 @@ const AdminAmoAssetsPage: React.FC = () => {
                 </button>
               </div>
             </div>
+            {downloadProgress?.kind === "logo" && (
+              <div className="form-row" style={{ marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <strong>Logo download</strong>
+                  {downloadProgress.progress.percent !== undefined && (
+                    <progress
+                      value={downloadProgress.progress.percent}
+                      max={100}
+                      style={{ width: "100%", height: 10, marginTop: 6 }}
+                    />
+                  )}
+                  <p style={{ marginTop: 6, opacity: 0.8 }}>
+                    {formatSpeed(downloadProgress.progress)}
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="form-row" style={{ marginBottom: 12 }}>
               <div style={{ flex: 1 }}>
                 <strong>CRS Template</strong>
@@ -327,6 +368,23 @@ const AdminAmoAssetsPage: React.FC = () => {
                 </button>
               </div>
             </div>
+            {downloadProgress?.kind === "template" && (
+              <div className="form-row" style={{ marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <strong>Template download</strong>
+                  {downloadProgress.progress.percent !== undefined && (
+                    <progress
+                      value={downloadProgress.progress.percent}
+                      max={100}
+                      style={{ width: "100%", height: 10, marginTop: 6 }}
+                    />
+                  )}
+                  <p style={{ marginTop: 6, opacity: 0.8 }}>
+                    {formatSpeed(downloadProgress.progress)}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -356,6 +414,23 @@ const AdminAmoAssetsPage: React.FC = () => {
               </p>
             )}
           </div>
+          {uploadingLogo && logoUploadProgress && (
+            <div className="form-row" style={{ marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <strong>Logo upload</strong>
+                {logoUploadProgress.percent !== undefined && (
+                  <progress
+                    value={logoUploadProgress.percent}
+                    max={100}
+                    style={{ width: "100%", height: 10, marginTop: 6 }}
+                  />
+                )}
+                <p style={{ marginTop: 6, opacity: 0.8 }}>
+                  {formatSpeed(logoUploadProgress)}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="form-row" style={{ alignItems: "center" }}>
             <label htmlFor="templateUpload">CRS Template (.pdf)</label>
@@ -378,6 +453,23 @@ const AdminAmoAssetsPage: React.FC = () => {
               </p>
             )}
           </div>
+          {uploadingTemplate && templateUploadProgress && (
+            <div className="form-row" style={{ marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <strong>Template upload</strong>
+                {templateUploadProgress.percent !== undefined && (
+                  <progress
+                    value={templateUploadProgress.percent}
+                    max={100}
+                    style={{ width: "100%", height: 10, marginTop: 6 }}
+                  />
+                )}
+                <p style={{ marginTop: 6, opacity: 0.8 }}>
+                  {formatSpeed(templateUploadProgress)}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
     </DepartmentLayout>

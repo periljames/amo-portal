@@ -66,6 +66,16 @@ def _normalize_pagination(limit: int, offset: int) -> Tuple[int, int]:
     return limit, offset
 
 
+def _ensure_training_upload_path(path: Path) -> Path:
+    resolved = path.resolve()
+    if not str(resolved).startswith(str(_TRAINING_UPLOAD_DIR)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid training upload path.",
+        )
+    return resolved
+
+
 def _require_training_editor(
     current_user: accounts_models.User = Depends(get_current_active_user),
 ) -> accounts_models.User:
@@ -1702,7 +1712,9 @@ def upload_training_file(
     original_name = file.filename or "upload.bin"
     ext = "".join(Path(original_name).suffixes)[-20:]  # guard weird names
     file_id = training_models.generate_user_id()  # stable name + DB id
-    dest_path = _TRAINING_UPLOAD_DIR / f"{file_id}{ext}"
+    amo_folder = _ensure_training_upload_path(_TRAINING_UPLOAD_DIR / current_user.amo_id)
+    amo_folder.mkdir(parents=True, exist_ok=True)
+    dest_path = _ensure_training_upload_path(amo_folder / f"{file_id}{ext}")
 
     sha = hashlib.sha256()
     total = 0
@@ -1898,7 +1910,7 @@ def download_training_file(
     if not is_editor and f.owner_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to download this file.")
 
-    path = Path(f.storage_path)
+    path = _ensure_training_upload_path(Path(f.storage_path))
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on server storage.")
 
