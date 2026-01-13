@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -75,6 +75,20 @@ def _get_latest_asset(
     )
 
 
+def _build_asset_summary(db: Session, amo_id: str) -> schemas.AMOAssetSummary:
+    logo = _get_latest_asset(db, amo_id, models.AMOAssetKind.CRS_LOGO)
+    template = _get_latest_asset(db, amo_id, models.AMOAssetKind.CRS_TEMPLATE)
+    return schemas.AMOAssetSummary(
+        amo_id=amo_id,
+        crs_logo_filename=logo.original_filename if logo else None,
+        crs_logo_content_type=logo.content_type if logo else None,
+        crs_logo_uploaded_at=logo.created_at if logo else None,
+        crs_template_filename=template.original_filename if template else None,
+        crs_template_content_type=template.content_type if template else None,
+        crs_template_uploaded_at=template.created_at if template else None,
+    )
+
+
 def _ensure_safe_path(path: Path) -> Path:
     resolved = path.resolve()
     if not str(resolved).startswith(str(_AMO_ASSET_UPLOAD_DIR)):
@@ -118,7 +132,7 @@ def _delete_if_exists(path: Optional[str]) -> None:
 
 @router.get(
     "/me",
-    response_model=List[schemas.AMOAssetRead],
+    response_model=schemas.AMOAssetSummary,
     summary="Get AMO asset configuration for the current AMO",
 )
 def get_amo_assets(
@@ -127,17 +141,12 @@ def get_amo_assets(
     current_user: models.User = Depends(get_current_active_user),
 ):
     target_amo_id = _resolve_target_amo_id(current_user, amo_id)
-    return (
-        db.query(models.AMOAsset)
-        .filter(models.AMOAsset.amo_id == target_amo_id)
-        .order_by(models.AMOAsset.created_at.desc())
-        .all()
-    )
+    return _build_asset_summary(db, target_amo_id)
 
 
 @router.post(
     "/logo",
-    response_model=schemas.AMOAssetRead,
+    response_model=schemas.AMOAssetSummary,
     status_code=status.HTTP_201_CREATED,
     summary="Upload CRS logo asset (AMO admin only)",
 )
@@ -193,12 +202,12 @@ def upload_crs_logo(
     db.add(asset)
     db.commit()
     db.refresh(asset)
-    return asset
+    return _build_asset_summary(db, target_amo_id)
 
 
 @router.post(
     "/template",
-    response_model=schemas.AMOAssetRead,
+    response_model=schemas.AMOAssetSummary,
     status_code=status.HTTP_201_CREATED,
     summary="Upload CRS PDF template (AMO admin only)",
 )
@@ -254,7 +263,7 @@ def upload_crs_template(
     db.add(asset)
     db.commit()
     db.refresh(asset)
-    return asset
+    return _build_asset_summary(db, target_amo_id)
 
 
 @router.get(

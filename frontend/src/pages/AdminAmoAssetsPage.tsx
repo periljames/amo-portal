@@ -1,5 +1,5 @@
 // src/pages/AdminAmoAssetsPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
@@ -35,6 +35,11 @@ const AdminAmoAssetsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingTemplate, setUploadingTemplate] = useState(false);
+  const [selectedLogoFiles, setSelectedLogoFiles] = useState<File[]>([]);
+  const [selectedTemplateFiles, setSelectedTemplateFiles] = useState<File[]>([]);
+
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const templateInputRef = useRef<HTMLInputElement | null>(null);
 
   const [amos, setAmos] = useState<AdminAmoRead[]>([]);
   const [amoLoading, setAmoLoading] = useState(false);
@@ -140,13 +145,23 @@ const AdminAmoAssetsPage: React.FC = () => {
     localStorage.setItem(LS_ACTIVE_AMO_ID, v);
   };
 
-  const handleUploadLogo = async (file?: File | null) => {
-    if (!file) return;
+  const handleUploadLogo = async (files?: FileList | null) => {
+    if (!files || files.length === 0) return;
     setUploadingLogo(true);
     setError(null);
+    const uploads = Array.from(files);
+    setSelectedLogoFiles(uploads);
     try {
-      const data = await uploadAmoLogo(file, isSuperuser ? effectiveAmoId : null);
-      setAssets(data);
+      let latest = assets;
+      for (const file of uploads) {
+        latest = await uploadAmoLogo(
+          file,
+          isSuperuser ? effectiveAmoId : null
+        );
+      }
+      if (latest) setAssets(latest);
+      setSelectedLogoFiles([]);
+      if (logoInputRef.current) logoInputRef.current.value = "";
     } catch (e: any) {
       console.error("Failed to upload logo", e);
       setError(e?.message || "Could not upload logo.");
@@ -155,16 +170,23 @@ const AdminAmoAssetsPage: React.FC = () => {
     }
   };
 
-  const handleUploadTemplate = async (file?: File | null) => {
-    if (!file) return;
+  const handleUploadTemplate = async (files?: FileList | null) => {
+    if (!files || files.length === 0) return;
     setUploadingTemplate(true);
     setError(null);
+    const uploads = Array.from(files);
+    setSelectedTemplateFiles(uploads);
     try {
-      const data = await uploadAmoTemplate(
-        file,
-        isSuperuser ? effectiveAmoId : null
-      );
-      setAssets(data);
+      let latest = assets;
+      for (const file of uploads) {
+        latest = await uploadAmoTemplate(
+          file,
+          isSuperuser ? effectiveAmoId : null
+        );
+      }
+      if (latest) setAssets(latest);
+      setSelectedTemplateFiles([]);
+      if (templateInputRef.current) templateInputRef.current.value = "";
     } catch (e: any) {
       console.error("Failed to upload template", e);
       setError(e?.message || "Could not upload template.");
@@ -318,11 +340,21 @@ const AdminAmoAssetsPage: React.FC = () => {
             <input
               id="logoUpload"
               type="file"
+              multiple
               accept=".png,.jpg,.jpeg,.svg"
-              onChange={(e) => handleUploadLogo(e.target.files?.[0])}
+              onChange={(e) => handleUploadLogo(e.target.files)}
               disabled={uploadingLogo}
+              ref={logoInputRef}
             />
             {uploadingLogo && <span>Uploading…</span>}
+            {selectedLogoFiles.length > 0 && !uploadingLogo && (
+              <p className="form-hint">
+                Selected {selectedLogoFiles.length} file
+                {selectedLogoFiles.length === 1 ? "" : "s"}:{" "}
+                {selectedLogoFiles.map((file) => file.name).join(", ")}. Only
+                the most recent upload is kept.
+              </p>
+            )}
           </div>
 
           <div className="form-row" style={{ alignItems: "center" }}>
@@ -330,11 +362,21 @@ const AdminAmoAssetsPage: React.FC = () => {
             <input
               id="templateUpload"
               type="file"
+              multiple
               accept="application/pdf"
-              onChange={(e) => handleUploadTemplate(e.target.files?.[0])}
+              onChange={(e) => handleUploadTemplate(e.target.files)}
               disabled={uploadingTemplate}
+              ref={templateInputRef}
             />
             {uploadingTemplate && <span>Uploading…</span>}
+            {selectedTemplateFiles.length > 0 && !uploadingTemplate && (
+              <p className="form-hint">
+                Selected {selectedTemplateFiles.length} file
+                {selectedTemplateFiles.length === 1 ? "" : "s"}:{" "}
+                {selectedTemplateFiles.map((file) => file.name).join(", ")}. Only
+                the most recent upload is kept.
+              </p>
+            )}
           </div>
         </div>
       </section>
