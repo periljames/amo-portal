@@ -12,6 +12,9 @@ import LoginPage from "./pages/LoginPage";
 import PasswordResetPage from "./pages/PasswordResetPage";
 import OnboardingPasswordPage from "./pages/OnboardingPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
+import EhmDashboardPage from "./pages/ehm/EhmDashboardPage";
+import EhmTrendsPage from "./pages/ehm/EhmTrendsPage";
+import EhmUploadsPage from "./pages/ehm/EhmUploadsPage";
 import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
@@ -239,6 +242,39 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <DashboardPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/ehm"
+        element={
+          <RequireAuth>
+            <EhmDashboardPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/ehm/dashboard"
+        element={
+          <RequireAuth>
+            <EhmDashboardPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/ehm/trends"
+        element={
+          <RequireAuth>
+            <EhmTrendsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/ehm/uploads"
+        element={
+          <RequireAuth>
+            <EhmUploadsPage />
           </RequireAuth>
         }
       />

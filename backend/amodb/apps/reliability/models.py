@@ -327,6 +327,11 @@ class ControlChartMethodEnum(str, Enum):
     SLOPE = "SLOPE"
 
 
+class EngineTrendStatusEnum(str, Enum):
+    NORMAL = "Trend Normal"
+    SHIFT = "Trend Shift"
+
+
 class ReliabilityEvent(Base):
     """
     Canonical reliability event log with references to source objects.
@@ -678,16 +683,73 @@ class EngineFlightSnapshot(Base):
         index=True,
     )
     engine_position = Column(String(32), nullable=False, index=True)
+    engine_serial_number = Column(String(64), nullable=True, index=True)
 
     flight_date = Column(Date, nullable=False, index=True)
     flight_leg = Column(String(32), nullable=True)
     flight_hours = Column(Float, nullable=True)
     cycles = Column(Float, nullable=True)
 
+    phase = Column(String(32), nullable=True)
+    power_reference_type = Column(String(32), nullable=True)
+    power_reference_value = Column(Float, nullable=True)
+    pressure_altitude_ft = Column(Float, nullable=True)
+    oat_c = Column(Float, nullable=True)
+    isa_dev_c = Column(Float, nullable=True)
+
     metrics = Column(JSONB, nullable=True)
     data_source = Column(String(64), nullable=True)
+    source_record_id = Column(String(128), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class EngineTrendStatus(Base):
+    """
+    Latest trend status rollup for CAMP-style fleet summaries.
+    """
+
+    __tablename__ = "engine_trend_statuses"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "amo_id",
+            "aircraft_serial_number",
+            "engine_position",
+            "engine_serial_number",
+            name="uq_engine_trend_status_engine",
+        ),
+        Index("ix_engine_trend_status_aircraft", "aircraft_serial_number"),
+        Index("ix_engine_trend_status_engine", "engine_serial_number"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    engine_position = Column(String(32), nullable=False, index=True)
+    engine_serial_number = Column(String(64), nullable=True, index=True)
+
+    last_upload_date = Column(Date, nullable=True)
+    last_trend_date = Column(Date, nullable=True)
+    last_review_date = Column(Date, nullable=True)
+    reviewed_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    previous_status = Column(
+        SAEnum(EngineTrendStatusEnum, name="engine_trend_status_enum", native_enum=False),
+        nullable=True,
+    )
+    current_status = Column(
+        SAEnum(EngineTrendStatusEnum, name="engine_trend_status_enum", native_enum=False),
+        nullable=True,
+    )
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
 class OilUplift(Base):
