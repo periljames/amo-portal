@@ -104,10 +104,15 @@ def resolve_login_context(db: Session, email: str) -> models.User | None:
     email_norm = _normalise_email(email)
     users = (
         db.query(models.User)
+        .outerjoin(models.AMO, models.User.amo_id == models.AMO.id)
         .options(joinedload(models.User.amo))
         .filter(
             func.lower(models.User.email) == email_norm,
             models.User.is_active.is_(True),
+            or_(
+                models.User.amo_id.is_(None),
+                models.AMO.is_active.is_(True),
+            ),
         )
         .all()
     )
