@@ -1020,12 +1020,19 @@ function MyTrainingPage() {
 
   const exportTrainingRecordPdf = () => {
     if (typeof window === "undefined") return;
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     const rows = sortedItems.map((it) => ({
-      course_id: it.course_id,
-      course_name: it.course_name,
-      last_completion_date: formatIsoDate(it.last_completion_date),
-      next_due_date: formatIsoDate(getDueDate(it)),
-      status: statusLabelDisplay(it.status),
+      course_id: escapeHtml(it.course_id),
+      course_name: escapeHtml(it.course_name),
+      last_completion_date: escapeHtml(formatIsoDate(it.last_completion_date) || "—"),
+      next_due_date: escapeHtml(formatIsoDate(getDueDate(it)) || "—"),
+      status: escapeHtml(statusLabelDisplay(it.status)),
     }));
 
     const tableRows = rows
@@ -1034,8 +1041,8 @@ function MyTrainingPage() {
           <tr>
             <td>${row.course_id}</td>
             <td>${row.course_name}</td>
-            <td>${row.last_completion_date || "—"}</td>
-            <td>${row.next_due_date || "—"}</td>
+            <td>${row.last_completion_date}</td>
+            <td>${row.next_due_date}</td>
             <td>${row.status}</td>
           </tr>
         `,
@@ -1045,7 +1052,7 @@ function MyTrainingPage() {
     const win = window.open("", "_blank", "width=1000,height=800");
     if (!win) return;
 
-    const name = cachedUser?.full_name || "Staff member";
+    const name = escapeHtml(cachedUser?.full_name || "Staff member");
 
     win.document.write(`
       <html>
