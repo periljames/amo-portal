@@ -6,6 +6,7 @@ import { listAdminUsers } from "../services/adminUsers";
 import { getContext } from "../services/auth";
 import { getUserTrainingStatus } from "../services/training";
 import type { TrainingStatusItem } from "../types/training";
+import "../styles/training.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -20,9 +21,53 @@ const STATUS_FILTERS = [
   { value: "ALL", label: "All statuses" },
   { value: "OVERDUE", label: "Overdue" },
   { value: "DUE_SOON", label: "Due soon" },
+  { value: "DEFERRED", label: "Deferred" },
+  { value: "SCHEDULED_ONLY", label: "Scheduled" },
   { value: "OK", label: "Compliant" },
   { value: "NOT_DONE", label: "Not done" },
 ];
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case "OVERDUE":
+      return "Overdue";
+    case "DUE_SOON":
+      return "Due soon";
+    case "DEFERRED":
+      return "Deferred";
+    case "SCHEDULED_ONLY":
+      return "Scheduled only";
+    case "NOT_DONE":
+      return "Not done";
+    case "OK":
+    default:
+      return "OK";
+  }
+}
+
+function statusPillClass(status: string): string {
+  if (status === "OVERDUE") return "qms-pill qms-pill--danger";
+  if (status === "DUE_SOON") return "qms-pill qms-pill--warning";
+  if (status === "DEFERRED") return "qms-pill qms-pill--info";
+  if (status === "SCHEDULED_ONLY") return "qms-pill qms-pill--info";
+  return "qms-pill";
+}
+
+function dueLabel(item: TrainingStatusItem): string {
+  const due = item.extended_due_date || item.valid_until;
+  if (!due) return "—";
+  if (item.extended_due_date && item.valid_until && item.extended_due_date !== item.valid_until) {
+    return `Deferred to ${formatDate(item.extended_due_date)}`;
+  }
+  return formatDate(due);
+}
+
+function daysLabel(days: number | null): string {
+  if (days == null) return "—";
+  if (days < 0) return `${Math.abs(days)} days overdue`;
+  if (days === 0) return "Due today";
+  return `${days} days remaining`;
+}
 
 const QMSTrainingUserPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string; userId?: string }>();
@@ -72,11 +117,47 @@ const QMSTrainingUserPage: React.FC = () => {
         if (item.status === "OVERDUE") acc.overdue += 1;
         if (item.status === "DUE_SOON") acc.dueSoon += 1;
         if (item.status === "OK") acc.ok += 1;
+        if (item.status === "DEFERRED") acc.deferred += 1;
+        if (item.status === "SCHEDULED_ONLY") acc.scheduled += 1;
         if (item.status === "NOT_DONE") acc.notDone += 1;
         return acc;
       },
-      { overdue: 0, dueSoon: 0, ok: 0, notDone: 0 }
+      { overdue: 0, dueSoon: 0, ok: 0, deferred: 0, scheduled: 0, notDone: 0 }
     );
+  }, [items]);
+
+  const compliance = useMemo(() => {
+    const total = items.length;
+    if (total === 0) return 0;
+    return Math.round(((summary.ok || 0) / total) * 100);
+  }, [items.length, summary.ok]);
+
+  const nextDue = useMemo(() => {
+    const withDays = items
+      .filter((item) => typeof item.days_until_due === "number")
+      .slice()
+      .sort((a, b) => (a.days_until_due ?? 0) - (b.days_until_due ?? 0));
+    return withDays[0] || null;
+  }, [items]);
+
+  const nextEvent = useMemo(() => {
+    const upcoming = items
+      .filter((item) => item.upcoming_event_date)
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(a.upcoming_event_date as string).getTime() -
+          new Date(b.upcoming_event_date as string).getTime()
+      );
+    return upcoming[0] || null;
+  }, [items]);
+
+  const actionItems = useMemo(() => {
+    return items
+      .filter((item) => ["OVERDUE", "DUE_SOON", "NOT_DONE"].includes(item.status))
+      .slice()
+      .sort((a, b) => (a.days_until_due ?? 0) - (b.days_until_due ?? 0))
+      .slice(0, 6);
   }, [items]);
 
   return (
@@ -91,7 +172,8 @@ const QMSTrainingUserPage: React.FC = () => {
         </button>
       }
     >
-      <section className="qms-toolbar">
+      <div className="training-module training-module--qms">
+        <section className="qms-toolbar">
         <label className="qms-field">
           <span>Status</span>
           <select
@@ -108,26 +190,26 @@ const QMSTrainingUserPage: React.FC = () => {
         <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
           Back to matrix
         </button>
-      </section>
+        </section>
 
-      {state === "loading" && (
-        <div className="card card--info">
-          <p>Loading training profile…</p>
-        </div>
-      )}
+        {state === "loading" && (
+          <div className="card card--info">
+            <p>Loading training profile…</p>
+          </div>
+        )}
 
-      {state === "error" && (
-        <div className="card card--error">
-          <p>{error}</p>
-          <button type="button" className="primary-chip-btn" onClick={load}>
-            Retry
-          </button>
-        </div>
-      )}
+        {state === "error" && (
+          <div className="card card--error">
+            <p>{error}</p>
+            <button type="button" className="primary-chip-btn" onClick={load}>
+              Retry
+            </button>
+          </div>
+        )}
 
-      {state === "ready" && (
-        <section className="qms-grid">
-          <div className="qms-card">
+        {state === "ready" && (
+          <section className="qms-grid">
+          <div className="qms-card qms-card--hero">
             <div className="qms-card__header">
               <div>
                 <h3 className="qms-card__title">
@@ -137,6 +219,7 @@ const QMSTrainingUserPage: React.FC = () => {
                   {user?.position_title || "Quality staff"} · {user?.staff_code || "N/A"}
                 </p>
               </div>
+              <span className="qms-pill qms-pill--info">Compliance {compliance}%</span>
             </div>
             <div className="qms-split">
               <div>
@@ -152,8 +235,75 @@ const QMSTrainingUserPage: React.FC = () => {
                 <p className="text-muted">In date and compliant.</p>
               </div>
               <div>
+                <span className="qms-pill qms-pill--info">Deferred: {summary.deferred}</span>
+                <p className="text-muted">Monitor approved extensions.</p>
+              </div>
+              <div>
+                <span className="qms-pill qms-pill--info">Scheduled: {summary.scheduled}</span>
+                <p className="text-muted">Upcoming course already planned.</p>
+              </div>
+              <div>
                 <span className="qms-pill">Not done: {summary.notDone}</span>
                 <p className="text-muted">Not yet completed by staff member.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="qms-card qms-card--attention">
+            <div className="qms-card__header">
+              <div>
+                <h3 className="qms-card__title">Priority actions</h3>
+                <p className="qms-card__subtitle">
+                  Next due items and overdue courses for this staff member.
+                </p>
+              </div>
+            </div>
+            {actionItems.length > 0 ? (
+              <div className="qms-list">
+                {actionItems.map((item) => (
+                  <div key={item.course_id} className="qms-list__item">
+                    <div>
+                      <strong>{item.course_name}</strong>
+                      <span className="qms-list__meta">{daysLabel(item.days_until_due)}</span>
+                    </div>
+                    <span className={statusPillClass(item.status)}>{statusLabel(item.status)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted">No urgent training items for this staff member.</p>
+            )}
+          </div>
+
+          <div className="qms-card">
+            <div className="qms-card__header">
+              <div>
+                <h3 className="qms-card__title">Next milestones</h3>
+                <p className="qms-card__subtitle">Upcoming due dates and scheduled sessions.</p>
+              </div>
+            </div>
+            <div className="qms-list">
+              <div className="qms-list__item">
+                <div>
+                  <strong>Next due</strong>
+                  <span className="qms-list__meta">
+                    {nextDue ? `${nextDue.course_name} · ${dueLabel(nextDue)}` : "No due dates available"}
+                  </span>
+                </div>
+                <span className="qms-pill">
+                  {nextDue ? daysLabel(nextDue.days_until_due) : "—"}
+                </span>
+              </div>
+              <div className="qms-list__item">
+                <div>
+                  <strong>Next event</strong>
+                  <span className="qms-list__meta">
+                    {nextEvent
+                      ? `${nextEvent.course_name} · ${formatDate(nextEvent.upcoming_event_date)}`
+                      : "No upcoming events scheduled"}
+                  </span>
+                </div>
+                <span className="qms-pill">Session</span>
               </div>
             </div>
           </div>
@@ -167,6 +317,7 @@ const QMSTrainingUserPage: React.FC = () => {
                     <th>Status</th>
                     <th>Last completion</th>
                     <th>Due</th>
+                    <th>Time left</th>
                     <th>Next event</th>
                   </tr>
                 </thead>
@@ -178,20 +329,13 @@ const QMSTrainingUserPage: React.FC = () => {
                         <div className="text-muted">{item.course_id}</div>
                       </td>
                       <td>
-                        <span
-                          className={
-                            item.status === "OVERDUE"
-                              ? "qms-pill qms-pill--danger"
-                              : item.status === "DUE_SOON"
-                              ? "qms-pill qms-pill--warning"
-                              : "qms-pill"
-                          }
-                        >
-                          {item.status.replace("_", " ")}
+                        <span className={statusPillClass(item.status)}>
+                          {statusLabel(item.status)}
                         </span>
                       </td>
                       <td>{formatDate(item.last_completion_date)}</td>
-                      <td>{formatDate(item.extended_due_date || item.valid_until)}</td>
+                      <td>{dueLabel(item)}</td>
+                      <td>{daysLabel(item.days_until_due)}</td>
                       <td>
                         {item.upcoming_event_date ? formatDate(item.upcoming_event_date) : "—"}
                       </td>
@@ -199,7 +343,7 @@ const QMSTrainingUserPage: React.FC = () => {
                   ))}
                   {filteredItems.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="text-muted">
+                      <td colSpan={6} className="text-muted">
                         No training records match the selected status.
                       </td>
                     </tr>
@@ -208,8 +352,9 @@ const QMSTrainingUserPage: React.FC = () => {
               </table>
             </div>
           </div>
-        </section>
-      )}
+          </section>
+        )}
+      </div>
     </QMSLayout>
   );
 };
