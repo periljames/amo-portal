@@ -3,15 +3,24 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { getCachedUser } from "../services/auth";
+import "../styles/training.css";
 import {
   getMyTrainingStatus,
   listTrainingCourses,
   listTrainingEvents,
   createTrainingDeferralRequest,
+  listMyTrainingDeferrals,
   listTrainingFiles,
   downloadTrainingFile,
+  uploadTrainingFile,
 } from "../services/training";
-import type { TrainingStatusItem, TrainingCourseRead, TrainingEventRead } from "../types/training";
+import type {
+  TrainingStatusItem,
+  TrainingCourseRead,
+  TrainingEventRead,
+  TrainingDeferralRequestRead,
+} from "../types/training";
 import type { TrainingFileRead, TransferProgress } from "../services/training";
 
 type SortField =
@@ -88,6 +97,12 @@ function formatDate(value: string | null | undefined): string {
   });
 }
 
+function formatIsoDate(value: string | null | undefined): string {
+  const d = parseDate(value);
+  if (!d) return "";
+  return toDateKey(d);
+}
+
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
@@ -153,6 +168,47 @@ function badgeClass(status: Status): string {
     default:
       return "badge badge--success";
   }
+}
+
+function deferralStatusLabel(status: string): string {
+  switch (status) {
+    case "APPROVED":
+      return "Approved";
+    case "REJECTED":
+      return "Rejected / revoked";
+    case "PENDING":
+    default:
+      return "Pending";
+  }
+}
+
+function deferralStatusBadge(status: string): string {
+  switch (status) {
+    case "APPROVED":
+      return "badge badge--success";
+    case "REJECTED":
+      return "badge badge--danger";
+    case "PENDING":
+    default:
+      return "badge badge--warning";
+  }
+}
+
+type RevocationRiskLevel = "HIGH" | "MEDIUM";
+
+function revocationRiskLabel(level: RevocationRiskLevel): string {
+  return level === "HIGH" ? "High revocation risk" : "Revocation risk";
+}
+
+function revocationRiskClass(level: RevocationRiskLevel): string {
+  return level === "HIGH" ? "badge badge--danger" : "badge badge--warning";
+}
+
+function getRevocationRisk(daysUntilDue: number | null | undefined): RevocationRiskLevel | null {
+  if (daysUntilDue == null) return null;
+  if (daysUntilDue <= -90) return "HIGH";
+  if (daysUntilDue <= -30) return "MEDIUM";
+  return null;
 }
 
 function getDueDate(item: TrainingStatusItem): string | null {
@@ -477,7 +533,10 @@ function MyTrainingPage() {
   const amoCode = (params.amoCode || "AMO").trim();
   const department = (params.department || "planning").trim();
 
+  const cachedUser = useMemo(() => getCachedUser(), []);
+
   const [items, setItems] = useState<TrainingStatusItem[]>([]);
+  const [courses, setCourses] = useState<TrainingCourseRead[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -521,6 +580,10 @@ function MyTrainingPage() {
   >("OPERATIONAL_REQUIREMENTS");
   const [deferralReasonText, setDeferralReasonText] = useState<string>("");
 
+  const [deferrals, setDeferrals] = useState<TrainingDeferralRequestRead[]>([]);
+  const [deferralsLoading, setDeferralsLoading] = useState<boolean>(false);
+  const [deferralsError, setDeferralsError] = useState<string | null>(null);
+
   // Training evidence files
   const [trainingFiles, setTrainingFiles] = useState<TrainingFileRead[]>([]);
   const [trainingFilesLoading, setTrainingFilesLoading] = useState<boolean>(false);
@@ -529,6 +592,13 @@ function MyTrainingPage() {
     fileId: string;
     progress: TransferProgress;
   } | null>(null);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadKind, setUploadKind] = useState<string>("EVIDENCE");
+  const [uploadCourseId, setUploadCourseId] = useState<string>("");
+  const [uploadDeferralId, setUploadDeferralId] = useState<string>("");
+  const [uploadSaving, setUploadSaving] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
   const selectedItem = useMemo(() => {
     if (!selectedCourseId) return null;
@@ -541,6 +611,7 @@ function MyTrainingPage() {
       map[c.course_id] = c.id;
     }
     setCoursePkByCode(map);
+    setCourses(courses);
     setCoursesLoaded(true);
   };
 
@@ -572,6 +643,19 @@ function MyTrainingPage() {
       setTrainingFilesError(err?.message || "Failed to load training files.");
     } finally {
       setTrainingFilesLoading(false);
+    }
+  };
+
+  const loadDeferrals = async () => {
+    setDeferralsLoading(true);
+    setDeferralsError(null);
+    try {
+      const data = await listMyTrainingDeferrals();
+      setDeferrals(data);
+    } catch (err: any) {
+      setDeferralsError(err?.message || "Failed to load deferrals.");
+    } finally {
+      setDeferralsLoading(false);
     }
   };
 
@@ -607,6 +691,10 @@ function MyTrainingPage() {
 
   useEffect(() => {
     loadTrainingFiles();
+  }, []);
+
+  useEffect(() => {
+    loadDeferrals();
   }, []);
 
   const handleSortChange = (field: SortField) => {
@@ -669,8 +757,34 @@ function MyTrainingPage() {
       actionRequiredCount: actionRequired.length,
       nextDue: nextDue[0]?.item || null,
       upcoming30Count: upcoming30.length,
+      actionRequiredItems: actionRequired,
     };
   }, [items]);
+
+  const revocationAlerts = useMemo(() => {
+    return items
+      .map((item) => {
+        const risk = getRevocationRisk(item.days_until_due);
+        if (!risk) return null;
+        return { item, risk };
+      })
+      .filter(Boolean) as Array<{ item: TrainingStatusItem; risk: RevocationRiskLevel }>;
+  }, [items]);
+
+  const navigationItems = [
+    { id: "training-overview", label: "Overview" },
+    { id: "training-workflow", label: "Workflow" },
+    { id: "training-deferrals", label: "Deferrals" },
+    { id: "training-calendar", label: "Calendar" },
+    { id: "training-courses", label: "All courses" },
+    { id: "training-evidence", label: "Evidence files" },
+  ];
+
+  const courseNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    courses.forEach((course) => map.set(course.id, course.course_name));
+    return map;
+  }, [courses]);
 
   const itemsByDate = useMemo(() => {
     const map = new Map<string, CalendarItem[]>();
@@ -904,6 +1018,101 @@ function MyTrainingPage() {
     win.print();
   };
 
+  const exportTrainingRecordPdf = () => {
+    if (typeof window === "undefined") return;
+    const rows = sortedItems.map((it) => ({
+      course_id: it.course_id,
+      course_name: it.course_name,
+      last_completion_date: formatIsoDate(it.last_completion_date),
+      next_due_date: formatIsoDate(getDueDate(it)),
+      status: statusLabelDisplay(it.status),
+    }));
+
+    const tableRows = rows
+      .map(
+        (row) => `
+          <tr>
+            <td>${row.course_id}</td>
+            <td>${row.course_name}</td>
+            <td>${row.last_completion_date || "—"}</td>
+            <td>${row.next_due_date || "—"}</td>
+            <td>${row.status}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    const win = window.open("", "_blank", "width=1000,height=800");
+    if (!win) return;
+
+    const name = cachedUser?.full_name || "Staff member";
+
+    win.document.write(`
+      <html>
+        <head>
+          <title>Individual Training Record</title>
+          <style>
+            @page { size: A4; margin: 18mm; }
+            body {
+              font-family: "Times New Roman", "Georgia", serif;
+              margin: 0;
+              color: #111827;
+            }
+            h1 {
+              text-align: center;
+              font-size: 20px;
+              letter-spacing: 0.08em;
+              margin: 12px 0 18px;
+            }
+            .meta {
+              font-size: 14px;
+              margin-bottom: 12px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 12px;
+            }
+            th, td {
+              border: 1px solid #d1d5db;
+              padding: 6px 8px;
+              vertical-align: top;
+            }
+            th {
+              background: #b18f2c;
+              color: #fff;
+              font-weight: 700;
+            }
+            tbody tr:nth-child(even) {
+              background: #f8f5e9;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>INDIVIDUAL TRAINING RECORD</h1>
+          <div class="meta"><strong>Name:</strong> ${name}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>CourseID</th>
+                <th>CourseName</th>
+                <th>LastTrainingDate</th>
+                <th>NextDueDate</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows || `<tr><td colspan="5">No training records available.</td></tr>`}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
   const handleDownloadTrainingFile = async (file: TrainingFileRead) => {
     setTrainingFilesError(null);
     setDownloadProgress(null);
@@ -921,6 +1130,34 @@ function MyTrainingPage() {
       setTrainingFilesError(err?.message || "Could not download training file.");
     } finally {
       setDownloadProgress(null);
+    }
+  };
+
+  const handleUploadTrainingFile = async () => {
+    if (!uploadFile) {
+      setUploadError("Please choose a file to upload.");
+      return;
+    }
+    setUploadSaving(true);
+    setUploadError(null);
+    setUploadSuccess(null);
+
+    try {
+      const payload = new FormData();
+      payload.append("file", uploadFile);
+      if (uploadKind) payload.append("kind", uploadKind);
+      if (uploadCourseId) payload.append("course_id", uploadCourseId);
+      if (uploadDeferralId) payload.append("deferral_request_id", uploadDeferralId);
+      await uploadTrainingFile(payload);
+      setUploadFile(null);
+      setUploadCourseId("");
+      setUploadDeferralId("");
+      setUploadSuccess("Evidence uploaded successfully.");
+      await loadTrainingFiles();
+    } catch (err: any) {
+      setUploadError(err?.message || "Failed to upload evidence.");
+    } finally {
+      setUploadSaving(false);
     }
   };
 
@@ -1033,6 +1270,7 @@ function MyTrainingPage() {
       setDeferralOpen(false);
       setToast({ type: "success", text: "Deferral request submitted." });
       await reload();
+      await loadDeferrals();
       // keep the details drawer open after reload
       setSelectedCourseId(statusItem.course_id);
     } catch (err: any) {
@@ -1045,7 +1283,7 @@ function MyTrainingPage() {
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment={department}>
-      <div className="page">
+      <div className="page training-module">
         <header className="page-header">
           <h1 className="page-title">My Training</h1>
           <p className="page-subtitle" style={{ marginBottom: 0 }}>
@@ -1070,8 +1308,21 @@ function MyTrainingPage() {
 
         {!loading && !error ? (
           <>
-            {/* Summary row */}
             <section className="page-section">
+              <div className="card card--info">
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <strong>Quick navigation</strong>
+                  {navigationItems.map((item) => (
+                    <a key={item.id} href={`#${item.id}`} className="secondary-chip-btn">
+                      {item.label}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* Summary row */}
+            <section className="page-section" id="training-overview">
               <div
                 className="page-section__grid"
                 style={{
@@ -1080,6 +1331,38 @@ function MyTrainingPage() {
                   gap: 12,
                 }}
               >
+                <div className="card">
+                  <div className="card-header">
+                    <h2>Your profile</h2>
+                    <p className="text-muted">Quick context for auditors and managers.</p>
+                  </div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div>
+                      <div className="text-muted" style={{ fontSize: 12 }}>
+                        Staff member
+                      </div>
+                      <div style={{ fontWeight: 700 }}>
+                        {cachedUser?.full_name || "Current user"}
+                      </div>
+                      <div className="text-muted" style={{ fontSize: 12 }}>
+                        {cachedUser?.position_title || "Role not set"} ·{" "}
+                        {cachedUser?.staff_code || "Staff code not set"}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <span className="badge badge--neutral">
+                        AMO: {amoCode.toUpperCase()}
+                      </span>
+                      <span className="badge badge--neutral">
+                        Department: {department}
+                      </span>
+                      <span className="badge badge--neutral">
+                        Courses tracked: {metrics.total}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="card">
                   <div className="card-header">
                     <h2>Compliance</h2>
@@ -1250,6 +1533,13 @@ function MyTrainingPage() {
                       <button type="button" className="secondary-chip-btn" onClick={exportPdf}>
                         Export PDF
                       </button>
+                      <button
+                        type="button"
+                        className="secondary-chip-btn"
+                        onClick={exportTrainingRecordPdf}
+                      >
+                        Download training record
+                      </button>
                       <button type="button" className="primary-chip-btn" onClick={reload}>
                         Refresh
                       </button>
@@ -1264,11 +1554,191 @@ function MyTrainingPage() {
                     ) : null}
                   </div>
                 </div>
+
+                <div className="card">
+                  <div className="card-header">
+                    <h2>Revocation watch</h2>
+                    <p className="text-muted">
+                      Overdue courses can trigger certification reviews.
+                    </p>
+                  </div>
+                  {revocationAlerts.length > 0 ? (
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {revocationAlerts.slice(0, 4).map(({ item, risk }) => (
+                        <div
+                          key={item.course_id}
+                          style={{
+                            padding: 12,
+                            borderRadius: 12,
+                            background: "rgba(255,255,255,0.04)",
+                          }}
+                        >
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <span className={revocationRiskClass(risk)}>
+                              {revocationRiskLabel(risk)}
+                            </span>
+                            <span className="badge badge--neutral">
+                              {item.course_id}
+                            </span>
+                          </div>
+                          <div style={{ fontWeight: 700, marginTop: 6 }}>{item.course_name}</div>
+                          <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                            Overdue by{" "}
+                            {typeof item.days_until_due === "number"
+                              ? Math.abs(item.days_until_due)
+                              : "—"}{" "}
+                            day(s). Upload evidence or request a deferral if applicable.
+                          </div>
+                        </div>
+                      ))}
+                      {revocationAlerts.length > 4 ? (
+                        <p className="text-muted" style={{ margin: 0 }}>
+                          {revocationAlerts.length - 4} additional items are overdue.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-muted" style={{ margin: 0 }}>
+                      No courses are at revocation risk right now.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <section className="page-section" id="training-workflow">
+              <div className="card">
+                <div className="card-header">
+                  <h2>Your training workflow</h2>
+                  <p className="text-muted">
+                    Simple steps for staying compliant and documenting delays.
+                  </p>
+                </div>
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ padding: 12, borderRadius: 12, background: "rgba(255,255,255,0.04)" }}>
+                      <div className="table-primary-text">1. Review due dates</div>
+                      <p className="text-muted" style={{ marginTop: 6 }}>
+                        Use the calendar and “All courses” list to check what is due soon or
+                        overdue.
+                      </p>
+                    </div>
+                    <div style={{ padding: 12, borderRadius: 12, background: "rgba(255,255,255,0.04)" }}>
+                      <div className="table-primary-text">2. Book or attend training</div>
+                      <p className="text-muted" style={{ marginTop: 6 }}>
+                        Confirm your scheduled sessions and mark attendance once completed.
+                      </p>
+                    </div>
+                    <div style={{ padding: 12, borderRadius: 12, background: "rgba(255,255,255,0.04)" }}>
+                      <div className="table-primary-text">3. Request deferrals when needed</div>
+                      <p className="text-muted" style={{ marginTop: 6 }}>
+                        Provide a clear reason and supporting evidence to help Quality approve
+                        faster.
+                      </p>
+                    </div>
+                    <div style={{ padding: 12, borderRadius: 12, background: "rgba(255,255,255,0.04)" }}>
+                      <div className="table-primary-text">4. Upload evidence</div>
+                      <p className="text-muted" style={{ marginTop: 6 }}>
+                        Certificates, medical notes, passport copies, and other documents should
+                        be stored in the evidence section for audits.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="card card--info">
+                    <p style={{ margin: 0 }}>
+                      Tip: if a course is overdue, submit a deferral and attach evidence immediately
+                      to reduce the risk of certification review or revocation.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="page-section" id="training-deferrals">
+              <div className="card">
+                <div className="card-header">
+                  <h2>Deferral requests</h2>
+                  <p className="text-muted">
+                    Track approvals, rejections, and new scheduled due dates.
+                  </p>
+                </div>
+
+                {deferralsLoading && (
+                  <div className="card card--info">
+                    <p style={{ margin: 0 }}>Loading deferral requests…</p>
+                  </div>
+                )}
+
+                {deferralsError && (
+                  <div className="card card--error">
+                    <p style={{ margin: 0 }}>{deferralsError}</p>
+                    <button type="button" className="secondary-chip-btn" onClick={loadDeferrals}>
+                      Retry
+                    </button>
+                  </div>
+                )}
+
+                {!deferralsLoading && !deferralsError && (
+                  <div className="table-responsive">
+                    <table className="table table-striped table-compact">
+                      <thead>
+                        <tr>
+                          <th>Course</th>
+                          <th>Requested</th>
+                          <th>New due date</th>
+                          <th>Status</th>
+                          <th>Decision</th>
+                          <th>Updated</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {deferrals.map((deferral) => (
+                          <tr key={deferral.id}>
+                            <td>
+                              <div className="table-primary-text">
+                                {courseNameById.get(deferral.course_id) || "Training course"}
+                              </div>
+                              <div className="table-secondary-text">{deferral.course_id}</div>
+                            </td>
+                            <td>{formatDate(deferral.original_due_date)}</td>
+                            <td>
+                              <strong>{formatDate(deferral.requested_new_due_date)}</strong>
+                            </td>
+                            <td>
+                              <span className={deferralStatusBadge(deferral.status)}>
+                                {deferralStatusLabel(deferral.status)}
+                              </span>
+                            </td>
+                            <td>{deferral.decision_comment || "—"}</td>
+                            <td>
+                              {deferral.decided_at
+                                ? new Date(deferral.decided_at).toLocaleString()
+                                : "Pending"}
+                            </td>
+                          </tr>
+                        ))}
+                        {deferrals.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="text-center text-muted">
+                              No deferral requests yet.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </section>
 
             {/* Calendar + list */}
-            <section className="page-section">
+            <section className="page-section" id="training-calendar">
               <div
                 className="page-section__grid"
                 style={{
@@ -1402,7 +1872,7 @@ function MyTrainingPage() {
             </section>
 
             {/* Table */}
-            <section className="page-section">
+            <section className="page-section" id="training-courses">
               <div className="card">
                 <div className="card-header">
                   <h2>All courses</h2>
@@ -1522,11 +1992,96 @@ function MyTrainingPage() {
             </section>
 
             {/* Training evidence files */}
-            <section className="page-section">
+            <section className="page-section" id="training-evidence">
               <div className="card">
                 <div className="card-header">
                   <h2>Training evidence files</h2>
-                  <p className="text-muted">Download certificates and uploaded evidence.</p>
+                  <p className="text-muted">
+                    Store certificates, medical notes, passport copies, and other supporting
+                    evidence for audit trails.
+                  </p>
+                </div>
+                <div className="card card--info" style={{ marginBottom: 12 }}>
+                  <p style={{ margin: 0 }}>
+                    Evidence should clearly explain why you could not attend. If you need to upload
+                    new evidence, upload it below and link it to the relevant course or deferral.
+                  </p>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 12,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: "1px solid rgba(148, 163, 184, 0.3)",
+                    marginBottom: 12,
+                  }}
+                >
+                  <div className="table-primary-text">Upload evidence</div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <input
+                      type="file"
+                      className="input"
+                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    />
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <select
+                        className="input"
+                        value={uploadKind}
+                        onChange={(e) => setUploadKind(e.target.value)}
+                      >
+                        <option value="CERTIFICATE">Certificate</option>
+                        <option value="AMEL">AMEL</option>
+                        <option value="LICENSE">License</option>
+                        <option value="EVIDENCE">Evidence</option>
+                        <option value="OTHER">Other</option>
+                      </select>
+                      <select
+                        className="input"
+                        value={uploadCourseId}
+                        onChange={(e) => setUploadCourseId(e.target.value)}
+                      >
+                        <option value="">Attach to course (optional)</option>
+                        {courses.map((course) => (
+                          <option key={course.id} value={course.id}>
+                            {course.course_name} ({course.course_id})
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="input"
+                        value={uploadDeferralId}
+                        onChange={(e) => setUploadDeferralId(e.target.value)}
+                      >
+                        <option value="">Attach to deferral (optional)</option>
+                        {deferrals.map((deferral) => (
+                          <option key={deferral.id} value={deferral.id}>
+                            {courseNameById.get(deferral.course_id) || "Course"} ·{" "}
+                            {deferralStatusLabel(deferral.status)}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="primary-chip-btn"
+                        onClick={handleUploadTrainingFile}
+                        disabled={uploadSaving}
+                      >
+                        {uploadSaving ? "Uploading…" : "Upload evidence"}
+                      </button>
+                    </div>
+                  </div>
+                  {uploadError && (
+                    <div className="card card--error">
+                      <p style={{ margin: 0 }}>{uploadError}</p>
+                    </div>
+                  )}
+                  {uploadSuccess && (
+                    <div className="card card--success">
+                      <p style={{ margin: 0 }}>{uploadSuccess}</p>
+                    </div>
+                  )}
                 </div>
 
                 {trainingFilesLoading && (
@@ -1648,6 +2203,11 @@ function MyTrainingPage() {
                       <span className={badgeClass(selectedItem.status)}>
                         {statusLabelDisplay(selectedItem.status)}
                       </span>
+                      {getRevocationRisk(selectedItem.days_until_due) ? (
+                        <span className={revocationRiskClass(getRevocationRisk(selectedItem.days_until_due)!)}>
+                          {revocationRiskLabel(getRevocationRisk(selectedItem.days_until_due)!)}
+                        </span>
+                      ) : null}
                       {selectedItem.frequency_months != null ? (
                         <span className="badge badge--neutral">
                           Frequency: {selectedItem.frequency_months} months
@@ -1721,6 +2281,50 @@ function MyTrainingPage() {
                         )}
                       </div>
                     </div>
+
+                    {(() => {
+                      const selectedCoursePk = coursePkByCode[selectedItem.course_id];
+                      const relatedDeferrals = selectedCoursePk
+                        ? deferrals.filter((d) => d.course_id === selectedCoursePk)
+                        : [];
+                      if (relatedDeferrals.length === 0) return null;
+                      return (
+                        <div>
+                          <div className="table-primary-text" style={{ marginBottom: 8 }}>
+                            Deferral history
+                          </div>
+                          <div style={{ display: "grid", gap: 8 }}>
+                            {relatedDeferrals.map((deferral) => (
+                              <div
+                                key={deferral.id}
+                                style={{
+                                  padding: 12,
+                                  borderRadius: 12,
+                                  background: "rgba(255,255,255,0.04)",
+                                  display: "grid",
+                                  gap: 6,
+                                }}
+                              >
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  <span className={deferralStatusBadge(deferral.status)}>
+                                    {deferralStatusLabel(deferral.status)}
+                                  </span>
+                                  <span className="badge badge--neutral">
+                                    Requested: {formatDate(deferral.original_due_date)}
+                                  </span>
+                                  <span className="badge badge--neutral">
+                                    New due: {formatDate(deferral.requested_new_due_date)}
+                                  </span>
+                                </div>
+                                <div className="text-muted" style={{ fontSize: 12 }}>
+                                  {deferral.decision_comment || "No decision comment yet."}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="card card--info">
                       <p style={{ margin: 0 }}>
@@ -1912,6 +2516,18 @@ function MyTrainingPage() {
                         <p style={{ margin: 0 }}>{deferralError}</p>
                       </div>
                     ) : null}
+
+                    <div className="card card--info">
+                      <p style={{ margin: 0 }}>
+                        Provide evidence that supports the deferral (e.g., sick leave note, passport/visa
+                        document, provider cancellation notice). Quality uses this during review and audits.
+                      </p>
+                      <ul style={{ marginTop: 8 }}>
+                        <li>Document must include dates and issuing authority</li>
+                        <li>Ensure the document matches the requested deferral window</li>
+                        <li>Upload evidence in the Training evidence files section</li>
+                      </ul>
+                    </div>
 
                     <div
                       style={{

@@ -49,6 +49,8 @@ import type {
   TrainingDeferralRequestCreate,
   TrainingDeferralRequestUpdate,
   TrainingStatusItem,
+  TrainingNotificationRead,
+  TrainingNotificationMarkRead,
 } from "../types/training";
 
 export type TrainingFileReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
@@ -274,6 +276,13 @@ export async function listTrainingFiles(): Promise<TrainingFileRead[]> {
   });
 }
 
+export async function uploadTrainingFile(payload: FormData): Promise<TrainingFileRead> {
+  return apiPost<TrainingFileRead>("/training/files/upload", payload, {
+    method: "POST",
+    headers: authHeaders(),
+  } as RequestInit);
+}
+
 export async function downloadTrainingFile(
   fileId: string,
   onProgress?: (progress: TransferProgress) => void
@@ -390,6 +399,15 @@ export async function updateTrainingDeferralRequest(
   );
 }
 
+/**
+ * List deferral requests for the current user.
+ */
+export async function listMyTrainingDeferrals(): Promise<TrainingDeferralRequestRead[]> {
+  return apiGet<TrainingDeferralRequestRead[]>("/training/deferrals/me", {
+    headers: authHeaders(),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // STATUS VIEWS
 // ---------------------------------------------------------------------------
@@ -411,6 +429,54 @@ export async function getUserTrainingStatus(
 ): Promise<TrainingStatusItem[]> {
   return apiGet<TrainingStatusItem[]>(
     `/training/status/users/${encodeURIComponent(userId)}`,
+    {
+      headers: authHeaders(),
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATIONS
+// ---------------------------------------------------------------------------
+
+export interface ListTrainingNotificationsParams {
+  unread_only?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listTrainingNotifications(
+  params: ListTrainingNotificationsParams = {},
+): Promise<TrainingNotificationRead[]> {
+  const sp = new URLSearchParams();
+  if (params.unread_only) sp.set("unread_only", "true");
+  if (params.limit) sp.set("limit", String(params.limit));
+  if (params.offset) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  const path = qs ? `/training/notifications/me?${qs}` : "/training/notifications/me";
+  return apiGet<TrainingNotificationRead[]>(path, {
+    headers: authHeaders(),
+  });
+}
+
+export async function markTrainingNotificationRead(
+  notificationId: string,
+  payload: TrainingNotificationMarkRead,
+): Promise<TrainingNotificationRead> {
+  return apiPost<TrainingNotificationRead>(
+    `/training/notifications/${encodeURIComponent(notificationId)}/read`,
+    payload,
+    {
+      method: "PUT",
+      headers: authHeaders(),
+    } as RequestInit,
+  );
+}
+
+export async function markAllTrainingNotificationsRead(): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(
+    "/training/notifications/me/read-all",
+    {},
     {
       headers: authHeaders(),
     },

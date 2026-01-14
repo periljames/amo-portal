@@ -1,0 +1,33 @@
+.training-module {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.training-module .page-section {
+  margin-bottom: 16px;
+}
+
+.training-module .page-section__grid {
+  gap: 16px;
+}
+
+.training-module .card {
+  border-radius: 16px;
+}
+
+.training-module--qms {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.training-module--qms .qms-grid {
+  gap: 16px;
+}
+
+.training-module--qms .qms-card {
+  border-radius: 16px;
+}

@@ -6,6 +6,12 @@ import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
 import { fetchSubscription } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
 import { getCachedUser, logout, onSessionEvent } from "../../services/auth";
+import {
+  listTrainingNotifications,
+  markAllTrainingNotificationsRead,
+  markTrainingNotificationRead,
+} from "../../services/training";
+import type { TrainingNotificationRead } from "../../types/training";
 
 type Props = {
   amoCode: string;
@@ -114,6 +120,11 @@ const DepartmentLayout: React.FC<Props> = ({
   const [collapsed, setCollapsed] = useState(false);
   const [colorScheme, setColorScheme] = useState<ColorScheme>("dark");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<TrainingNotificationRead[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [idleWarningOpen, setIdleWarningOpen] = useState(false);
   const [idleCountdown, setIdleCountdown] = useState(IDLE_WARNING_MS / 1000);
   const [logoutReason, setLogoutReason] = useState<"idle" | "expired" | null>(
@@ -336,6 +347,7 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const lockedEventRef = useRef<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
+  const notificationsRef = useRef<HTMLDivElement | null>(null);
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
   const idleCountdownIntervalRef = useRef<number | null>(null);
@@ -358,6 +370,68 @@ const DepartmentLayout: React.FC<Props> = ({
       active = false;
     };
   }, []);
+
+  const refreshNotifications = async (opts?: { unreadOnly?: boolean }) => {
+    if (!currentUser) return;
+    const unreadOnly = opts?.unreadOnly ?? false;
+    if (!unreadOnly) {
+      setNotificationsLoading(true);
+      setNotificationsError(null);
+    }
+    try {
+      const data = await listTrainingNotifications({
+        unread_only: unreadOnly,
+        limit: 100,
+      });
+      if (unreadOnly) {
+        setUnreadNotifications(data.length);
+      } else {
+        setNotifications(data);
+        setUnreadNotifications(data.filter((n) => !n.read_at).length);
+      }
+    } catch (err: any) {
+      if (!unreadOnly) {
+        setNotificationsError(err?.message || "Failed to load notifications.");
+      }
+    } finally {
+      if (!unreadOnly) setNotificationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshNotifications({ unreadOnly: true });
+    const timer = window.setInterval(() => refreshNotifications({ unreadOnly: true }), 60000);
+    return () => window.clearInterval(timer);
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (notificationsOpen) {
+      refreshNotifications();
+    }
+  }, [notificationsOpen]);
+
+  useEffect(() => {
+    if (!notificationsOpen) return;
+
+    const onDown = (e: MouseEvent) => {
+      const el = notificationsRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && !el.contains(e.target)) {
+        setNotificationsOpen(false);
+      }
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNotificationsOpen(false);
+    };
+
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [notificationsOpen]);
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -529,6 +603,19 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const userName = getUserDisplayName(currentUser);
   const userInitials = getUserInitials(currentUser);
+  const resolveNotificationLink = (linkPath?: string | null): string | null => {
+    if (!linkPath) return null;
+    if (linkPath.startsWith("/profile/training")) {
+      return `/maintenance/${amoCode}/${resolveDeptForTraining()}/training`;
+    }
+    if (linkPath.startsWith("/training/deferrals")) {
+      return `/maintenance/${amoCode}/${resolveDeptForTraining()}/training#training-deferrals`;
+    }
+    if (linkPath.startsWith("/training")) {
+      return `/maintenance/${amoCode}/${resolveDeptForTraining()}/training`;
+    }
+    return linkPath;
+  };
 
   const currentYear = new Date().getFullYear();
   const returnPath = location.pathname + location.search;
@@ -770,79 +857,173 @@ const DepartmentLayout: React.FC<Props> = ({
             </div>
           </div>
 
-          <div ref={profileRef} className="profile-menu">
-            <button
-              type="button"
-              onClick={() => setProfileOpen((v) => !v)}
-              aria-haspopup="menu"
-              aria-expanded={profileOpen}
-              className="profile-menu__trigger"
-              title={userName}
-            >
-              <span className="profile-menu__avatar">{userInitials}</span>
-              <span className="profile-menu__meta">
-                <span className="profile-menu__name">{userName}</span>
-                <span className="profile-menu__role">Profile</span>
-              </span>
-              <span className="profile-menu__caret">{profileOpen ? "▲" : "▼"}</span>
-            </button>
+          <div className="app-shell__topbar-actions">
+            <div ref={notificationsRef} className="notification-menu">
+              <button
+                type="button"
+                className="notification-bell"
+                aria-label="Training notifications"
+                aria-expanded={notificationsOpen}
+                onClick={() => setNotificationsOpen((v) => !v)}
+              >
+                <span className="notification-bell__icon">🔔</span>
+                {unreadNotifications > 0 ? (
+                  <span className="notification-bell__badge">{unreadNotifications}</span>
+                ) : null}
+              </button>
 
-            {profileOpen && (
-              <div role="menu" className="profile-menu__panel">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="profile-menu__item"
-                  onClick={() => {
-                    setProfileOpen(false);
-                    gotoMyTraining();
-                  }}
-                >
-                  My Training
-                </button>
+              {notificationsOpen && (
+                <div className="notification-panel notification-panel--drawer">
+                  <div className="notification-panel__header">
+                    <div>
+                      <strong>Notifications</strong>
+                      <div className="text-muted" style={{ fontSize: 12 }}>
+                        {unreadNotifications} unread
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary-chip-btn"
+                      onClick={async () => {
+                        await markAllTrainingNotificationsRead();
+                        await refreshNotifications();
+                      }}
+                    >
+                      Mark all read
+                    </button>
+                  </div>
 
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="profile-menu__item"
-                  onClick={() => {
-                    setProfileOpen(false);
-                    const dept = resolveDeptForTraining();
-                    navigate(`/maintenance/${amoCode}/${dept}/settings/widgets`);
-                  }}
-                >
-                  Dashboard widgets
-                </button>
+                  {notificationsLoading && (
+                    <div className="notification-panel__state">Loading notifications…</div>
+                  )}
 
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="profile-menu__item"
-                  onClick={() => {
-                    setProfileOpen(false);
-                    toggleColorScheme();
-                  }}
-                >
-                  {colorScheme === "dark"
-                    ? "Switch to Light mode"
-                    : "Switch to Dark mode"}
-                </button>
+                  {notificationsError && (
+                    <div className="notification-panel__state notification-panel__state--error">
+                      {notificationsError}
+                    </div>
+                  )}
 
-                <div className="profile-menu__divider" />
+                  {!notificationsLoading && !notificationsError && (
+                    <div className="notification-panel__list">
+                      {notifications.map((note) => (
+                        <button
+                          type="button"
+                          key={note.id}
+                          className={`notification-item${note.read_at ? "" : " notification-item--unread"}`}
+                          onClick={async () => {
+                            if (!note.read_at) {
+                              await markTrainingNotificationRead(note.id, {});
+                            }
+                            setNotificationsOpen(false);
+                            await refreshNotifications();
+                            const target = resolveNotificationLink(note.link_path);
+                            if (target) {
+                              navigate(target);
+                            }
+                          }}
+                        >
+                          <div className="notification-item__title">{note.title}</div>
+                          {note.body ? (
+                            <div className="notification-item__body">{note.body}</div>
+                          ) : null}
+                          <div className="notification-item__meta">
+                            <span>{new Date(note.created_at).toLocaleString()}</span>
+                            <span className="badge badge--neutral">{note.severity}</span>
+                          </div>
+                        </button>
+                      ))}
+                      {notifications.length === 0 ? (
+                        <div className="notification-panel__state">No notifications yet.</div>
+                      ) : null}
+                    </div>
+                  )}
 
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="profile-menu__item"
-                  onClick={() => {
-                    setProfileOpen(false);
-                    handleLogout();
-                  }}
-                >
-                  Sign out
-                </button>
-              </div>
-            )}
+                </div>
+              )}
+            </div>
+
+            <div ref={profileRef} className="profile-menu">
+              <button
+                type="button"
+                onClick={() => setProfileOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={profileOpen}
+                className="profile-menu__trigger"
+                title={userName}
+              >
+                <span className="profile-menu__avatar">{userInitials}</span>
+                <span className="profile-menu__meta">
+                  <span className="profile-menu__name">{userName}</span>
+                  <span className="profile-menu__role">Profile</span>
+                </span>
+                <span className="profile-menu__caret">{profileOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {profileOpen && (
+                <div role="menu" className="profile-drawer">
+                  <div className="profile-drawer__header">
+                    <div className="profile-drawer__avatar">{userInitials}</div>
+                    <div>
+                      <div className="profile-drawer__name">{userName}</div>
+                      <div className="profile-drawer__meta">Profile & settings</div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="profile-drawer__item"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      gotoMyTraining();
+                    }}
+                  >
+                    My Training
+                  </button>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="profile-drawer__item"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      const dept = resolveDeptForTraining();
+                      navigate(`/maintenance/${amoCode}/${dept}/settings/widgets`);
+                    }}
+                  >
+                    Dashboard widgets
+                  </button>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="profile-drawer__item"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      toggleColorScheme();
+                    }}
+                  >
+                    {colorScheme === "dark"
+                      ? "Switch to Light mode"
+                      : "Switch to Dark mode"}
+                  </button>
+
+                  <div className="profile-drawer__divider" />
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="profile-drawer__item profile-drawer__item--danger"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      handleLogout();
+                    }}
+                  >
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
