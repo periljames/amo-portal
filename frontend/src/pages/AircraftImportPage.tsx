@@ -1907,6 +1907,7 @@ const AircraftImportPage: React.FC = () => {
               ? buildConfirmedRows(approvedRows)
               : buildConfirmedRows(approvedOverrideRows),
           batch_id: importBatchId,
+          ispec_strict: ispecStrict,
         }),
       });
 
@@ -1955,6 +1956,7 @@ const AircraftImportPage: React.FC = () => {
               row_number: row.row_number,
               ...row.data,
             })),
+            ispec_strict: componentIspecStrict,
           }),
         }
       );

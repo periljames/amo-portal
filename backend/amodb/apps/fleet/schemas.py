@@ -296,6 +296,7 @@ class AircraftImportRequest(BaseModel):
     preview_id: Optional[str] = None
     approved_row_numbers: Optional[List[int]] = None
     rejected_row_numbers: Optional[List[int]] = None
+    ispec_strict: Optional[bool] = None
 
 
 class AircraftImportPreviewRow(BaseModel):
@@ -509,6 +510,7 @@ class AircraftComponentImportRow(BaseModel):
 
 class AircraftComponentImportRequest(BaseModel):
     rows: List[AircraftComponentImportRow]
+    ispec_strict: Optional[bool] = None
 
 
 # For responses that show one aircraft with its components:

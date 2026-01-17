@@ -171,6 +171,24 @@ AIRCRAFT_SAFETY_FIELDS = {
     "last_log_date",
 }
 
+ISPEC_REQUIRED_FIELDS = {
+    "aircraft": [
+        "serial_number",
+        "registration",
+        "aircraft_model_code",
+        "operator_code",
+    ],
+    "components": [
+        "position",
+        "ata",
+        "part_number",
+        "serial_number",
+        "description",
+        "manufacturer_code",
+        "operator_code",
+    ],
+}
+
 COMPONENT_SAFETY_FIELDS = {
     "position",
     "part_number",
@@ -1754,6 +1772,23 @@ def _validate_component_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]
     return {"errors": errors, "warnings": warnings}
 
 
+def _collect_ispec_issues(
+    payload: Dict[str, Any],
+    required_fields: List[str],
+) -> tuple[List[str], List[Dict[str, str]]]:
+    missing_fields: List[str] = []
+    issues: List[Dict[str, str]] = []
+
+    for field in required_fields:
+        value = payload.get(field)
+        if value is None:
+            missing_fields.append(field)
+            continue
+        if isinstance(value, str) and not value.strip():
+            missing_fields.append(field)
+    return missing_fields, issues
+
+
 def _require_safety_confirmation(
     entity_label: str,
     safety_confirmed: Optional[bool],
@@ -2508,6 +2543,7 @@ async def import_aircraft_file(
     if not rows_to_process:
         raise HTTPException(status_code=400, detail="No approved rows to import.")
 
+    ispec_strict = bool(payload.ispec_strict)
     for row in rows_to_process:
         row_idx = row.get("row_number")
         row_data = row.get("data") or {}
@@ -2528,6 +2564,29 @@ async def import_aircraft_file(
                 }
             )
             continue
+
+        if ispec_strict:
+            missing_fields, issues = _collect_ispec_issues(
+                row_data,
+                ISPEC_REQUIRED_FIELDS["aircraft"],
+            )
+            if missing_fields or issues:
+                skipped += 1
+                reasons = [issue["message"] for issue in issues]
+                if missing_fields:
+                    reasons.insert(
+                        0,
+                        "Missing required iSpec 2000 fields: "
+                        + ", ".join(missing_fields)
+                        + ".",
+                    )
+                skipped_rows.append(
+                    {
+                        "row": row_idx,
+                        "reason": "; ".join(reasons),
+                    }
+                )
+                continue
 
         serial = str(row_data.get("serial_number") or "").strip()
         registration = str(row_data.get("registration") or "").strip()
@@ -3026,6 +3085,7 @@ async def confirm_components_import(
     skipped = 0
     skipped_rows: List[Dict[str, Any]] = []
 
+    ispec_strict = bool(payload.ispec_strict)
     for row in payload.rows:
         row_idx = row.row_number
         row_data = row.model_dump(exclude={"row_number"})
@@ -3048,6 +3108,29 @@ async def confirm_components_import(
                 }
             )
             continue
+
+        if ispec_strict:
+            missing_fields, issues = _collect_ispec_issues(
+                row_data,
+                ISPEC_REQUIRED_FIELDS["components"],
+            )
+            if missing_fields or issues:
+                skipped += 1
+                reasons = [issue["message"] for issue in issues]
+                if missing_fields:
+                    reasons.insert(
+                        0,
+                        "Missing required iSpec 2000 fields: "
+                        + ", ".join(missing_fields)
+                        + ".",
+                    )
+                skipped_rows.append(
+                    {
+                        "row": row_idx,
+                        "reason": "; ".join(reasons),
+                    }
+                )
+                continue
 
         position = (row_data.get("position") or "").strip()
         if not position:
