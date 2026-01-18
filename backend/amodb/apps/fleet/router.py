@@ -1,7 +1,7 @@
 # backend/amodb/apps/fleet/router.py
 
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from io import BytesIO
 import importlib
 import math
@@ -19,9 +19,11 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Response,
     status,
     UploadFile,
     File,
+    Query,
 )
 from fastapi.responses import FileResponse
 from sqlalchemy import or_, tuple_
@@ -41,6 +43,210 @@ MANAGEMENT_ROLES = [
     "PLANNING_ENGINEER",
     "PRODUCTION_ENGINEER",
 ]
+
+ISPEC_REQUIRED_FIELDS = {
+    "aircraft": [
+        "serial_number",
+        "registration",
+        "aircraft_model_code",
+        "operator_code",
+        "company_name",
+        "supplier_code",
+    ],
+    "components": [
+        "position",
+        "ata",
+        "part_number",
+        "serial_number",
+        "manufacturer_code",
+        "operator_code",
+    ],
+}
+
+ISPEC_SPEC_NAME = "ispec2000"
+ISPEC_SPEC_VERSION = "1.0"
+
+ISPEC_FIELD_VALIDATORS = {
+    "aircraft": {
+        "aircraft_model_code": lambda value: (
+            None
+            if re.match(r"^[A-Z0-9\\-]+$", value or "")
+            else "Aircraft model code must be A-Z/0-9 with hyphens only."
+        ),
+        "operator_code": lambda value: (
+            None
+            if re.match(r"^[A-Z0-9]{3,5}$", value or "")
+            else "Operator code must be 3-5 alphanumeric characters."
+        ),
+        "supplier_code": lambda value: (
+            None
+            if re.match(r"^[A-Z0-9]{3,5}$", value or "")
+            else "Supplier code must be 3-5 alphanumeric characters."
+        ),
+        "serial_number": lambda value: (
+            None
+            if AIRCRAFT_SERIAL_PATTERN.match(value or "")
+            else "Serial number must be A-Z/0-9 with hyphens only."
+        ),
+        "registration": lambda value: (
+            None
+            if REGISTRATION_PATTERN.match(value or "")
+            else "Registration must be A-Z/0-9 with hyphens only."
+        ),
+    },
+    "components": {
+        "manufacturer_code": lambda value: (
+            None
+            if re.match(r"^[A-Z0-9]{5}$", value or "")
+            else "Manufacturer code must be 5 alphanumeric characters."
+        ),
+        "operator_code": lambda value: (
+            None
+            if re.match(r"^[A-Z0-9]{3,5}$", value or "")
+            else "Operator code must be 3-5 alphanumeric characters."
+        ),
+        "ata": lambda value: (
+            None
+            if re.match(r"^[0-9]{2,4}$", value or "")
+            else "ATA chapter must be 2-4 digits."
+        ),
+        "part_number": lambda value: (
+            None
+            if PART_NUMBER_PATTERN.match(value or "")
+            else "Part number contains invalid characters."
+        ),
+        "serial_number": lambda value: (
+            None
+            if COMPONENT_SERIAL_PATTERN.match(value or "")
+            else "Serial number contains invalid characters."
+        ),
+    },
+}
+
+ISPEC_SCHEMA_FIELDS = {
+    "aircraft": [
+        {
+            "field": "serial_number",
+            "label": "Aircraft Identification Number (AIN)",
+            "required": True,
+            "pattern": "^[A-Z0-9-]+$",
+        },
+        {
+            "field": "registration",
+            "label": "Registration (REG)",
+            "required": True,
+            "pattern": "^[A-Z0-9-]+$",
+        },
+        {
+            "field": "aircraft_model_code",
+            "label": "Aircraft Model Code (AMC)",
+            "required": True,
+            "pattern": "^[A-Z0-9-]+$",
+        },
+        {
+            "field": "operator_code",
+            "label": "Operator Code (OPR)",
+            "required": True,
+            "pattern": "^[A-Z0-9]{3,5}$",
+        },
+        {
+            "field": "supplier_code",
+            "label": "Supplier Code (SPL)",
+            "required": True,
+            "pattern": "^[A-Z0-9]{3,5}$",
+        },
+        {
+            "field": "company_name",
+            "label": "Company Name (WHO)",
+            "required": True,
+        },
+        {
+            "field": "internal_aircraft_identifier",
+            "label": "Internal Aircraft Identifier",
+            "required": False,
+        },
+        {
+            "field": "last_log_date",
+            "label": "Last Log Date",
+            "required": False,
+        },
+        {
+            "field": "total_hours",
+            "label": "Total Hours",
+            "required": False,
+        },
+        {
+            "field": "total_cycles",
+            "label": "Total Cycles",
+            "required": False,
+        },
+    ],
+    "components": [
+        {
+            "field": "position",
+            "label": "Component Position",
+            "required": True,
+        },
+        {
+            "field": "ata",
+            "label": "ATA Chapter",
+            "required": True,
+            "pattern": "^[0-9]{2,4}$",
+        },
+        {
+            "field": "part_number",
+            "label": "Part Number (PNR)",
+            "required": True,
+        },
+        {
+            "field": "serial_number",
+            "label": "Serial Number",
+            "required": True,
+        },
+        {
+            "field": "manufacturer_code",
+            "label": "Manufacturer Code (MFR)",
+            "required": True,
+            "pattern": "^[A-Z0-9]{5}$",
+        },
+        {
+            "field": "operator_code",
+            "label": "Operator Code (OPR)",
+            "required": True,
+            "pattern": "^[A-Z0-9]{3,5}$",
+        },
+        {
+            "field": "installed_date",
+            "label": "Installed Date",
+            "required": False,
+        },
+        {
+            "field": "installed_hours",
+            "label": "Installed Hours",
+            "required": False,
+        },
+        {
+            "field": "installed_cycles",
+            "label": "Installed Cycles",
+            "required": False,
+        },
+        {
+            "field": "current_hours",
+            "label": "Current Hours",
+            "required": False,
+        },
+        {
+            "field": "current_cycles",
+            "label": "Current Cycles",
+            "required": False,
+        },
+        {
+            "field": "notes",
+            "label": "Notes",
+            "required": False,
+        },
+    ],
+}
 
 # Include Quality for document management
 DOCUMENT_WRITE_ROLES = MANAGEMENT_ROLES + ["QUALITY_MANAGER"]
@@ -1754,6 +1960,158 @@ def _validate_component_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]
     return {"errors": errors, "warnings": warnings}
 
 
+def _build_ispec_report(
+    rows: List[Dict[str, Any]],
+    colmap: Dict[str, str | None],
+    required_fields: List[str],
+    validator_group: str,
+    max_row_issues: int = 25,
+) -> Dict[str, Any]:
+    missing_columns = [
+        field for field in required_fields if not colmap.get(field)
+    ]
+    row_issues: List[Dict[str, Any]] = []
+    issues: List[Dict[str, Any]] = []
+    truncated = False
+
+    for row in rows:
+        data = row.get("data") or {}
+        missing_fields = [
+            field
+            for field in required_fields
+            if not str(data.get(field) or "").strip()
+        ]
+        if missing_fields:
+            if len(row_issues) >= max_row_issues:
+                truncated = True
+                break
+            row_issues.append(
+                {
+                    "row_number": row.get("row_number"),
+                    "missing_fields": missing_fields,
+                }
+            )
+            for field in missing_fields:
+                issues.append(
+                    {
+                        "row_number": row.get("row_number"),
+                        "field": field,
+                        "code": "ISPEC_REQUIRED",
+                        "message": f"Missing required iSpec 2000 field: {field}.",
+                    }
+                )
+
+        field_validators = ISPEC_FIELD_VALIDATORS.get(validator_group, {})
+        for field in required_fields:
+            raw_value = data.get(field)
+            value = str(raw_value).strip().upper() if raw_value is not None else ""
+            if not value:
+                continue
+            validator = field_validators.get(field)
+            if not validator:
+                continue
+            message = validator(value)
+            if message:
+                issues.append(
+                    {
+                        "row_number": row.get("row_number"),
+                        "field": field,
+                        "code": "ISPEC_FORMAT",
+                        "message": message,
+                    }
+                )
+
+    compliant = not missing_columns and not row_issues and not issues
+    return {
+        "compliant": compliant,
+        "required_fields": required_fields,
+        "missing_columns": missing_columns,
+        "rows_missing_required_fields": row_issues,
+        "issues": issues[: max_row_issues * 3],
+        "truncated": truncated,
+    }
+
+
+def _apply_ispec_requirements(
+    rows: List[Dict[str, Any]],
+    report: Dict[str, Any],
+    strict: bool,
+) -> None:
+    if report["missing_columns"] and strict:
+        missing = ", ".join(report["missing_columns"])
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required iSpec 2000 columns: {missing}.",
+        )
+
+    missing_by_row = {
+        issue["row_number"]: issue["missing_fields"]
+        for issue in report["rows_missing_required_fields"]
+    }
+    issue_by_row: Dict[int, List[str]] = {}
+    for issue in report.get("issues", []):
+        row_number = issue.get("row_number")
+        if row_number is None:
+            continue
+        issue_by_row.setdefault(row_number, []).append(issue["message"])
+    for row in rows:
+        row_number = row.get("row_number")
+        missing_fields = missing_by_row.get(row_number)
+        issue_messages = issue_by_row.get(row_number, [])
+        if missing_fields:
+            message = (
+                "Missing required iSpec 2000 fields: "
+                + ", ".join(missing_fields)
+                + "."
+            )
+            issue_messages = [message, *issue_messages]
+        if not issue_messages:
+            continue
+        target = "errors" if strict else "warnings"
+        row.setdefault(target, []).extend(issue_messages)
+
+
+def _collect_ispec_issues(
+    payload: Dict[str, Any],
+    required_fields: List[str],
+    validator_group: str,
+) -> tuple[List[str], List[Dict[str, Any]]]:
+    missing_fields = [
+        field
+        for field in required_fields
+        if not str(payload.get(field) or "").strip()
+    ]
+    issues: List[Dict[str, Any]] = [
+        {
+            "row_number": 0,
+            "field": field,
+            "code": "ISPEC_REQUIRED",
+            "message": f"Missing required iSpec 2000 field: {field}.",
+        }
+        for field in missing_fields
+    ]
+    field_validators = ISPEC_FIELD_VALIDATORS.get(validator_group, {})
+    for field in required_fields:
+        raw_value = payload.get(field)
+        value = str(raw_value).strip().upper() if raw_value is not None else ""
+        if not value:
+            continue
+        validator = field_validators.get(field)
+        if not validator:
+            continue
+        message = validator(value)
+        if message:
+            issues.append(
+                {
+                    "row_number": 0,
+                    "field": field,
+                    "code": "ISPEC_FORMAT",
+                    "message": message,
+                }
+            )
+    return missing_fields, issues
+
+
 def _require_safety_confirmation(
     entity_label: str,
     safety_confirmed: Optional[bool],
@@ -2058,6 +2416,7 @@ def delete_import_template(
 async def preview_aircraft_import(
     files: List[UploadFile] | None = File(None),
     file: UploadFile | None = File(None),
+    ispec_strict: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(
         require_roles(*MANAGEMENT_ROLES)
@@ -2327,7 +2686,21 @@ async def preview_aircraft_import(
         if serial and seen_serials.get(serial, 0) > 1:
             warnings.append("Duplicate serial number in uploaded file.")
 
-        if errors:
+        row["errors"] = errors
+        row["warnings"] = warnings
+
+    ispec_report = _build_ispec_report(
+        rows,
+        colmap,
+        ISPEC_REQUIRED_FIELDS["aircraft"],
+        "aircraft",
+    )
+    _apply_ispec_requirements(rows, ispec_report, ispec_strict)
+
+    for row in rows:
+        payload = row["data"]
+        serial = payload.get("serial_number") or ""
+        if row["errors"]:
             action = "invalid"
             invalid_count += 1
         else:
@@ -2337,9 +2710,6 @@ async def preview_aircraft_import(
             else:
                 action = "new"
                 new_count += 1
-
-        row["errors"] = errors
-        row["warnings"] = warnings
         row["action"] = action
 
     preview_id = str(uuid4())
@@ -2381,6 +2751,7 @@ async def preview_aircraft_import(
         "summary": {"new": new_count, "update": update_count, "invalid": invalid_count},
         "ocr": ocr_info,
         "formula_discrepancies": formula_discrepancies,
+        "ispec": ispec_report,
     }
 
 
@@ -2750,6 +3121,7 @@ async def preview_components_import(
     serial_number: str,
     files: List[UploadFile] | None = File(None),
     file: UploadFile | None = File(None),
+    ispec_strict: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(
         require_roles(*MANAGEMENT_ROLES)
@@ -2957,14 +3329,8 @@ async def preview_components_import(
 
         if errors:
             action = "invalid"
-            invalid_count += 1
         else:
-            if existing_component:
-                action = "update"
-                update_count += 1
-            else:
-                action = "new"
-                new_count += 1
+            action = "update" if existing_component else "new"
 
         rows.append(
             {
@@ -2984,6 +3350,28 @@ async def preview_components_import(
             }
         )
 
+    ispec_report = _build_ispec_report(
+        rows,
+        colmap,
+        ISPEC_REQUIRED_FIELDS["components"],
+        "components",
+    )
+    _apply_ispec_requirements(rows, ispec_report, ispec_strict)
+
+    new_count = 0
+    update_count = 0
+    invalid_count = 0
+    for row in rows:
+        if row["errors"]:
+            row["action"] = "invalid"
+            invalid_count += 1
+        else:
+            row["action"] = "update" if row.get("existing_component") else "new"
+            if row["action"] == "update":
+                update_count += 1
+            else:
+                new_count += 1
+
     return {
         "rows": rows,
         "column_mapping": colmap,
@@ -2992,6 +3380,7 @@ async def preview_components_import(
             "update": update_count,
             "invalid": invalid_count,
         },
+        "ispec": ispec_report,
     }
 
 
@@ -3254,4 +3643,170 @@ async def import_components_file(
         "components_created": created,
         "components_skipped": skipped,
         "skipped_rows": skipped_rows,
+    }
+
+
+@router.get(
+    "/exchange/ispec",
+    tags=["aircraft"],
+    response_model=schemas.ISpecExchangeEnvelope,
+    summary="Export aircraft/component data in iSpec 2000 exchange envelope",
+)
+def export_ispec_exchange(
+    offset: int = 0,
+    limit: int = 500,
+    include_components: bool = True,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    query = db.query(models.Aircraft).order_by(models.Aircraft.serial_number.asc())
+    total = query.count()
+    aircraft_records = query.offset(offset).limit(limit).all()
+
+    aircraft_payload: List[Dict[str, Any]] = []
+    for aircraft in aircraft_records:
+        components_payload = None
+        if include_components:
+            components_payload = [
+                {
+                    "position": comp.position,
+                    "ata": comp.ata,
+                    "part_number": comp.part_number,
+                    "serial_number": comp.serial_number,
+                    "manufacturer_code": comp.manufacturer_code,
+                    "operator_code": comp.operator_code,
+                    "installed_date": comp.installed_date,
+                    "installed_hours": comp.installed_hours,
+                    "installed_cycles": comp.installed_cycles,
+                    "current_hours": comp.current_hours,
+                    "current_cycles": comp.current_cycles,
+                    "notes": comp.notes,
+                }
+                for comp in aircraft.components
+            ]
+        aircraft_payload.append(
+            {
+                "serial_number": aircraft.serial_number,
+                "registration": aircraft.registration,
+                "aircraft_model_code": aircraft.aircraft_model_code,
+                "operator_code": aircraft.operator_code,
+                "supplier_code": aircraft.supplier_code,
+                "company_name": aircraft.company_name,
+                "internal_aircraft_identifier": aircraft.internal_aircraft_identifier,
+                "last_log_date": aircraft.last_log_date,
+                "total_hours": aircraft.total_hours,
+                "total_cycles": aircraft.total_cycles,
+                "components": components_payload,
+            }
+        )
+
+    return {
+        "spec": ISPEC_SPEC_NAME,
+        "version": ISPEC_SPEC_VERSION,
+        "generated_at": datetime.now(timezone.utc),
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "aircraft": aircraft_payload,
+    }
+
+
+@router.get(
+    "/exchange/ispec/schema",
+    tags=["aircraft"],
+    summary="Return iSpec 2000 exchange schema definitions",
+)
+def get_ispec_schema(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    return {
+        "spec": ISPEC_SPEC_NAME,
+        "version": ISPEC_SPEC_VERSION,
+        "schemas": ISPEC_SCHEMA_FIELDS,
+    }
+
+
+@router.get(
+    "/import/ispec-template",
+    tags=["aircraft"],
+    summary="Download iSpec 2000 CSV template headers",
+)
+def download_ispec_template(
+    template_type: str = Query("aircraft", pattern="^(aircraft|components)$"),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    fields = ISPEC_SCHEMA_FIELDS.get(template_type, [])
+    headers = [field["field"] for field in fields]
+    content = ",".join(headers) + "\n"
+    filename = f"ispec-{template_type}-template.csv"
+    return Response(
+        content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.post(
+    "/exchange/ispec/validate",
+    tags=["aircraft"],
+    response_model=schemas.ISpecExchangeValidationReport,
+    summary="Validate an iSpec exchange payload for compliance",
+)
+def validate_ispec_exchange(
+    payload: schemas.ISpecExchangeEnvelope,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    aircraft_results: List[Dict[str, Any]] = []
+    component_results: List[Dict[str, Any]] = []
+
+    for aircraft in payload.aircraft:
+        aircraft_payload = aircraft.model_dump(exclude={"components"})
+        missing_fields, issues = _collect_ispec_issues(
+            aircraft_payload,
+            ISPEC_REQUIRED_FIELDS["aircraft"],
+            "aircraft",
+        )
+        aircraft_results.append(
+            {
+                "identifier": aircraft.serial_number,
+                "compliant": not missing_fields and not issues,
+                "missing_fields": missing_fields,
+                "issues": issues,
+            }
+        )
+
+        for component in aircraft.components or []:
+            component_payload = component.model_dump()
+            missing_fields, issues = _collect_ispec_issues(
+                component_payload,
+                ISPEC_REQUIRED_FIELDS["components"],
+                "components",
+            )
+            component_results.append(
+                {
+                    "identifier": f"{aircraft.serial_number}:{component.position}",
+                    "compliant": not missing_fields and not issues,
+                    "missing_fields": missing_fields,
+                    "issues": issues,
+                }
+            )
+
+    compliant = all(item["compliant"] for item in aircraft_results) and all(
+        item["compliant"] for item in component_results
+    )
+    return {
+        "compliant": compliant,
+        "aircraft": aircraft_results,
+        "components": component_results,
     }
