@@ -1299,6 +1299,34 @@ button,
 
 /* Import workflow */
 
+.import-section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.import-section-nav__tab {
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.import-section-nav__tab.is-active {
+  color: var(--text-primary);
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.import-section-nav__tab:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .import-progress {
   display: flex;
   flex-direction: column;
@@ -1370,6 +1398,25 @@ button,
   border: 1px solid var(--border-subtle);
 }
 
+.import-stepper__button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.import-stepper__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.import-stepper__item.is-active {
+  color: var(--text-primary);
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(56, 189, 248, 0.12);
+}
+
 .import-stepper li.is-complete {
   color: var(--text-primary);
   border-color: rgba(34, 197, 94, 0.6);
@@ -1394,6 +1441,23 @@ button,
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid var(--border-subtle);
+}
+
+.import-stage {
+  margin-top: 12px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.import-stage__track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 100%;
+  transition: transform 360ms ease;
+}
+
+.import-stage__panel {
+  padding: 4px 2px 2px;
 }
 
 .import-summary-grid {
@@ -1549,6 +1613,12 @@ button,
 
 .import-row-warning--warn {
   color: rgba(249, 115, 22, 0.85);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .import-stage__track {
+    transition: none;
+  }
 }
 
 .alert {

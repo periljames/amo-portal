@@ -800,6 +800,14 @@ const DashboardPage: React.FC = () => {
               >
                 Configure fleet inputs
               </button>
+              <button
+                type="button"
+                className="primary-chip-btn"
+                style={{ marginLeft: 8 }}
+                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/component-import`)}
+              >
+                Import components
+              </button>
             </div>
             <div className="card">
               <h3 style={{ marginTop: 0 }}>Inventory health</h3>
