@@ -316,6 +316,7 @@ class AircraftImportPreviewResponse(BaseModel):
     summary: Dict[str, int]
     ocr: Optional[Dict[str, Any]] = None
     formula_discrepancies: Optional[List[Dict[str, Any]]] = None
+    ispec: Optional["ISpecComplianceReport"] = None
 
 
 class AircraftImportTemplateBase(BaseModel):
@@ -361,6 +362,79 @@ class ImportSnapshotRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ISpecComplianceRow(BaseModel):
+    row_number: int
+    missing_fields: List[str]
+
+
+class ISpecComplianceIssue(BaseModel):
+    row_number: int
+    field: str
+    code: str
+    message: str
+
+
+class ISpecComplianceReport(BaseModel):
+    compliant: bool
+    required_fields: List[str]
+    missing_columns: List[str]
+    rows_missing_required_fields: List[ISpecComplianceRow]
+    issues: List[ISpecComplianceIssue]
+    truncated: bool = False
+
+
+class ISpecExchangeComponent(BaseModel):
+    position: str
+    ata: Optional[str] = None
+    part_number: Optional[str] = None
+    serial_number: Optional[str] = None
+    manufacturer_code: Optional[str] = None
+    operator_code: Optional[str] = None
+    installed_date: Optional[DateType] = None
+    installed_hours: Optional[float] = None
+    installed_cycles: Optional[float] = None
+    current_hours: Optional[float] = None
+    current_cycles: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class ISpecExchangeAircraft(BaseModel):
+    serial_number: str
+    registration: str
+    aircraft_model_code: Optional[str] = None
+    operator_code: Optional[str] = None
+    supplier_code: Optional[str] = None
+    company_name: Optional[str] = None
+    internal_aircraft_identifier: Optional[str] = None
+    last_log_date: Optional[DateType] = None
+    total_hours: Optional[float] = None
+    total_cycles: Optional[float] = None
+    components: Optional[List[ISpecExchangeComponent]] = None
+
+
+class ISpecExchangeEnvelope(BaseModel):
+    spec: str
+    version: str
+    generated_at: DateTimeType
+    total: int
+    offset: int
+    limit: int
+    aircraft: List[ISpecExchangeAircraft]
+
+
+class ISpecExchangeValidationItem(BaseModel):
+    identifier: str
+    compliant: bool
+    missing_fields: List[str]
+    issues: List[ISpecComplianceIssue]
+
+
+class ISpecExchangeValidationReport(BaseModel):
+    compliant: bool
+    aircraft: List[ISpecExchangeValidationItem]
+    components: List[ISpecExchangeValidationItem]
 
 
 # ---------------- COMPONENTS ----------------

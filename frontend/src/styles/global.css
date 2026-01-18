@@ -1299,6 +1299,28 @@ button,
 
 /* Import workflow */
 
+.import-nav {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.import-nav__link {
+  text-decoration: none;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.import-nav__link.is-active {
+  color: var(--text-primary);
+  border-color: rgba(34, 197, 94, 0.6);
+  background: rgba(34, 197, 94, 0.12);
+}
+
 .import-progress {
   display: flex;
   flex-direction: column;
@@ -1376,6 +1398,27 @@ button,
   background: rgba(34, 197, 94, 0.12);
 }
 
+.import-stepper li.is-active {
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.import-stepper__button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.import-stepper__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .import-step__eyebrow {
   font-size: 11px;
   text-transform: uppercase;
@@ -1418,6 +1461,23 @@ button,
 
 .import-grid {
   margin-top: 12px;
+}
+
+.import-slider {
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.import-slider__track {
+  display: flex;
+  transition: transform 280ms ease;
+  transform: translateX(calc(-100% * var(--import-step, 0)));
+  will-change: transform;
+}
+
+.import-slide {
+  min-width: 100%;
+  box-sizing: border-box;
 }
 
 .import-template-grid {
