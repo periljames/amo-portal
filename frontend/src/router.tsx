@@ -17,6 +17,7 @@ import EhmTrendsPage from "./pages/ehm/EhmTrendsPage";
 import EhmUploadsPage from "./pages/ehm/EhmUploadsPage";
 import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
+import ComponentImportPage from "./pages/ComponentImportPage";
 import AircraftDocumentsPage from "./pages/AircraftDocumentsPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
@@ -334,6 +335,14 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <AircraftImportPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/component-import"
+        element={
+          <RequireAuth>
+            <ComponentImportPage />
           </RequireAuth>
         }
       />

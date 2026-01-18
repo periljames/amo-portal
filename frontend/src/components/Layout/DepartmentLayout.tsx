@@ -321,6 +321,10 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/aircraft-import");
   }, [location.pathname]);
 
+  const isComponentImportRoute = useMemo(() => {
+    return location.pathname.includes("/component-import");
+  }, [location.pathname]);
+
   const isAircraftDocumentsRoute = useMemo(() => {
     return location.pathname.includes("/aircraft-documents");
   }, [location.pathname]);
@@ -727,6 +731,20 @@ const DepartmentLayout: React.FC<Props> = ({
                 title="Setup Aircraft"
               >
                 <span className="sidebar__item-label">Setup Aircraft</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/planning/component-import`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isComponentImportRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Import Components"
+                title="Import Components"
+              >
+                <span className="sidebar__item-label">Import Components</span>
               </button>
               <button
                 type="button"

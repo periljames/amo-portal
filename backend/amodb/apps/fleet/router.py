@@ -1310,12 +1310,23 @@ def _normalise_header(name: str) -> str:
     - remove common punctuation (space, slash, dash, dot)
     so that 'A/C REG', 'A-C REG.' -> 'ac_reg'.
     """
-    cleaned = name.strip().lower()
-    for ch in [" ", "-", "/", "."]:
-        cleaned = cleaned.replace(ch, "_")
-    while "__" in cleaned:
-        cleaned = cleaned.replace("__", "_")
-    return cleaned
+    cleaned = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+    parts = [part for part in cleaned.split("_") if part]
+    merged: list[str] = []
+    idx = 0
+    while idx < len(parts):
+        part = parts[idx]
+        if len(part) == 1:
+            letters: list[str] = []
+            while idx < len(parts) and len(parts[idx]) == 1:
+                letters.append(parts[idx])
+                idx += 1
+            for letter_index in range(0, len(letters), 2):
+                merged.append("".join(letters[letter_index : letter_index + 2]))
+        else:
+            merged.append(part)
+            idx += 1
+    return "_".join(merged)
 
 
 def _map_aircraft_columns(raw_cols: List[str]) -> Dict[str, str | None]:
