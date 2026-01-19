@@ -5,13 +5,10 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext, getCachedUser } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
-  type AircraftDocument,
-  type AircraftUsageSummary,
-  getAircraftUsageSummary,
-  listAircraft,
-  listDocumentAlerts,
-} from "../services/fleet";
-import { DASHBOARD_WIDGETS, getWidgetStorageKey } from "../utils/dashboardWidgets";
+  qmsListNotifications,
+  qmsMarkNotificationRead,
+  type QMSNotificationOut,
+} from "../services/qms";
 
 type DepartmentId =
   | "planning"
@@ -143,36 +140,7 @@ const DashboardPage: React.FC = () => {
 
   const currentUser = getCachedUser();
   const isAdmin = isAdminUser(currentUser);
-  const [docAlerts, setDocAlerts] = useState<AircraftDocument[] | null>(null);
-  const [docAlertsError, setDocAlertsError] = useState<string | null>(null);
-  const [docAlertsLoading, setDocAlertsLoading] = useState(false);
-  const [fleetCount, setFleetCount] = useState(0);
-  const [fleetLoading, setFleetLoading] = useState(false);
-  const [fleetError, setFleetError] = useState<string | null>(null);
-  const [dueSummaries, setDueSummaries] = useState<AircraftUsageSummary[]>([]);
-  const [dueLoading, setDueLoading] = useState(false);
-  const [dueError, setDueError] = useState<string | null>(null);
-  const [holidayCountry, setHolidayCountry] = useState(() =>
-    getLocalStorageJson<string>("amo_holiday_country", "KE")
-  );
-  const [holidayYear, setHolidayYear] = useState(() => new Date().getFullYear());
-  const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [holidayLoading, setHolidayLoading] = useState(false);
-  const [holidayError, setHolidayError] = useState<string | null>(null);
-  const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
-  const [leaveEntries, setLeaveEntries] = useState<LeaveEntry[]>(() =>
-    getLocalStorageJson<LeaveEntry[]>("amo_leave_entries", [])
-  );
-  const [leaveForm, setLeaveForm] = useState({ date: "", reason: "" });
-  const [calendarConnections, setCalendarConnections] = useState(() =>
-    getLocalStorageJson<{ google: boolean; outlook: boolean }>(
-      "amo_calendar_connections",
-      { google: false, outlook: false }
-    )
-  );
-  const [throttleStore, setThrottleStore] = useState<ThrottleStore>(() =>
-    getThrottleStore()
-  );
+  const [notifications, setNotifications] = useState<QMSNotificationOut[]>([]);
 
   // For normal users, this MUST be their assigned department (server-driven context).
   // We also fall back to cached user.department_id if you ever store codes there.
@@ -268,161 +236,28 @@ const DashboardPage: React.FC = () => {
     navigate(`/maintenance/${amoSlug}/${department}/qms`);
   };
 
-  const renderMetric = (label: string, value: number, max = 100) => {
-    const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
-    return (
-      <div className="metric-card">
-        <div className="metric-card__value">{value}</div>
-        <div className="metric-card__label">{label}</div>
-        <div className="metric-card__bar">
-          <span style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-    );
-  };
-
-  const renderDueStatus = (summary: AircraftUsageSummary) => {
-    if (summary.next_due_date) return `Due ${summary.next_due_date}`;
-    if (summary.next_due_hours !== null) return `Due ${summary.next_due_hours}h`;
-    if (summary.next_due_cycles !== null)
-      return `Due ${summary.next_due_cycles} cycles`;
-    return "No due data";
-  };
-
-  const fetchHolidays = async (countryCode: string, year: number) => {
-    if (!throttleStore.cacheHolidays) {
-      setHolidays([]);
-    }
-    setHolidayLoading(true);
-    setHolidayError(null);
+  const loadNotifications = async () => {
     try {
-      const res = await fetch(
-        `https://date.nager.at/api/v3/PublicHolidays/${year}/${countryCode}`
-      );
-      if (!res.ok) {
-        throw new Error(`Holiday feed error ${res.status}`);
-      }
-      const data = (await res.json()) as Holiday[];
-      setHolidays(data);
-      setLocalStorageJson("amo_holidays_cache", data);
-    } catch (e: any) {
-      setHolidayError(e?.message || "Failed to load public holidays.");
-      if (throttleStore.cacheHolidays) {
-        const cached = getLocalStorageJson<Holiday[]>("amo_holidays_cache", []);
-        if (cached.length) setHolidays(cached);
-      }
-    } finally {
-      setHolidayLoading(false);
+      const data = await qmsListNotifications();
+      setNotifications(data.filter((n) => !n.read_at));
+    } catch {
+      setNotifications([]);
     }
   };
 
-  const handleConnectCalendar = (provider: "google" | "outlook") => {
-    const envKey =
-      provider === "google"
-        ? (import.meta as any).env?.VITE_CALENDAR_GOOGLE_OAUTH_URL
-        : (import.meta as any).env?.VITE_CALENDAR_OUTLOOK_OAUTH_URL;
-    if (envKey) {
-      window.open(envKey, "_blank", "width=720,height=720");
-    }
-    setCalendarConnections((prev) => {
-      const next = { ...prev, [provider]: true };
-      setLocalStorageJson("amo_calendar_connections", next);
-      return next;
-    });
-  };
-
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === THROTTLE_STORAGE_KEY) {
-        setThrottleStore(getThrottleStore());
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  const handleDisconnectCalendar = (provider: "google" | "outlook") => {
-    setCalendarConnections((prev) => {
-      const next = { ...prev, [provider]: false };
-      setLocalStorageJson("amo_calendar_connections", next);
-      return next;
-    });
-  };
-
-  const handleAddLeave = (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (!leaveForm.date) return;
-    const entry: LeaveEntry = {
-      id: `${leaveForm.date}-${Date.now()}`,
-      date: leaveForm.date,
-      reason: leaveForm.reason.trim() || "Leave",
-    };
-    const next = [entry, ...leaveEntries];
-    setLeaveEntries(next);
-    setLocalStorageJson("amo_leave_entries", next);
-    setLeaveForm({ date: "", reason: "" });
-  };
-
-  const handleRemoveLeave = (id: string) => {
-    const next = leaveEntries.filter((entry) => entry.id !== id);
-    setLeaveEntries(next);
-    setLocalStorageJson("amo_leave_entries", next);
-  };
-
-  useEffect(() => {
-    setLocalStorageJson("amo_holiday_country", holidayCountry);
-  }, [holidayCountry]);
-
-  useEffect(() => {
-    fetchHolidays(holidayCountry, holidayYear);
+    loadNotifications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holidayCountry, holidayYear, throttleStore.cacheHolidays]);
-
-  useEffect(() => {
-    if (!shouldShowComplianceAlerts) {
-      setDocAlerts(null);
-      return;
-    }
-
-    setDocAlertsLoading(true);
-    setDocAlertsError(null);
-    listDocumentAlerts({ due_within_days: 45 })
-      .then((alerts) => setDocAlerts(alerts))
-      .catch((err) => {
-        setDocAlertsError(err?.message || "Could not load document alerts.");
-      })
-      .finally(() => setDocAlertsLoading(false));
-  }, [department, shouldShowComplianceAlerts]);
-
-  useEffect(() => {
-    setFleetLoading(true);
-    setFleetError(null);
-    listAircraft({ is_active: true })
-      .then((data) => setFleetCount(data.length))
-      .catch((err) => {
-        setFleetError(err?.message || "Could not load fleet count.");
-        setFleetCount(0);
-      })
-      .finally(() => setFleetLoading(false));
   }, []);
 
-  useEffect(() => {
-    if (department !== "planning") return;
-    setDueLoading(true);
-    setDueError(null);
-    listAircraft({ is_active: true })
-      .then((aircraft) =>
-        Promise.all(
-          aircraft.slice(0, 6).map((item) => getAircraftUsageSummary(item.serial_number))
-        )
-      )
-      .then((summaries) => setDueSummaries(summaries))
-      .catch((err) => {
-        setDueError(err?.message || "Could not load due schedules.");
-        setDueSummaries([]);
-      })
-      .finally(() => setDueLoading(false));
-  }, [department]);
+  const handleMarkRead = async (id: string) => {
+    try {
+      await qmsMarkNotificationRead(id);
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+    } catch {
+      // noop
+    }
+  };
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
@@ -435,6 +270,48 @@ const DashboardPage: React.FC = () => {
           <strong>{amoDisplay}</strong>.
         </p>
       </header>
+
+      {notifications.length > 0 && (
+        <section className="page-section">
+          <div className="card">
+            <div className="card-header">
+              <h2>Notifications</h2>
+              <p className="text-muted">
+                Recent quality actions that need your attention.
+              </p>
+            </div>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {notifications.map((note) => (
+                <li
+                  key={note.id}
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "8px 0",
+                    borderBottom: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <div>
+                    <div>{note.message}</div>
+                    <div className="text-muted" style={{ fontSize: 12 }}>
+                      {new Date(note.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-chip-btn"
+                    onClick={() => handleMarkRead(note.id)}
+                  >
+                    Mark read
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
 
       {isCRSDept && (
         <section className="page-section">

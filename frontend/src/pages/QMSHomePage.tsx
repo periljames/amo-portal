@@ -329,10 +329,38 @@ const QMSHomePage: React.FC = () => {
 
       {state === "ready" && (
         <>
-          <section className="qms-section-header">
-            <div>
-              <h2>Executive focus</h2>
-              <p>Prioritize the biggest compliance risks and quick actions.</p>
+          <section className="page-section">
+            <div
+              className="page-section__actions"
+              style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+            >
+              <button
+                type="button"
+                className="primary-chip-btn"
+                onClick={load}
+              >
+                Refresh
+              </button>
+
+              <button
+                type="button"
+                className="secondary-chip-btn"
+                onClick={() =>
+                  navigate(`/maintenance/${amoSlug}/${department}/qms/cars`)
+                }
+              >
+                Open CAR register
+              </button>
+
+              <button
+                type="button"
+                className="secondary-chip-btn"
+                onClick={() =>
+                  navigate(`/maintenance/${amoSlug}/${department}`)
+                }
+              >
+                Back to dashboard
+              </button>
             </div>
           </section>
 

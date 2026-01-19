@@ -27,18 +27,7 @@ import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
-import ReliabilityReportsPage from "./pages/ReliabilityReportsPage";
-import UpsellPage from "./pages/UpsellPage";
-import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
-import AdminUsageSettingsPage from "./pages/AdminUsageSettingsPage";
-import UserWidgetsPage from "./pages/UserWidgetsPage";
-import QMSDocumentsPage from "./pages/QMSDocumentsPage";
-import QMSAuditsPage from "./pages/QMSAuditsPage";
-import QMSChangeControlPage from "./pages/QMSChangeControlPage";
-import QMSTrainingPage from "./pages/QMSTrainingPage";
-import QMSTrainingUserPage from "./pages/QMSTrainingUserPage";
-import QMSEventsPage from "./pages/QMSEventsPage";
-import QMSKpisPage from "./pages/QMSKpisPage";
+import PublicCarInvitePage from "./pages/PublicCarInvitePage";
 
 import { getCachedUser, isAuthenticated } from "./services/auth";
 
@@ -150,15 +139,8 @@ export const AppRouter: React.FC = () => {
       {/* Password reset */}
       <Route path="/reset-password" element={<PasswordResetPage />} />
 
-      {/* First-login onboarding */}
-      <Route
-        path="/maintenance/:amoCode/onboarding"
-        element={
-          <RequireAuth>
-            <OnboardingPasswordPage />
-          </RequireAuth>
-        }
-      />
+      {/* CAR invite response page (external auditees) */}
+      <Route path="/car-invite" element={<PublicCarInvitePage />} />
 
       {/* If someone visits /maintenance/:amoCode directly, send them somewhere safe */}
       <Route
@@ -368,83 +350,10 @@ export const AppRouter: React.FC = () => {
       />
 
       <Route
-        path="/maintenance/:amoCode/:department/qms/documents"
-        element={
-          <RequireAuth>
-            <QMSDocumentsPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/audits"
-        element={
-          <RequireAuth>
-            <QMSAuditsPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/change-control"
-        element={
-          <RequireAuth>
-            <QMSChangeControlPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
         path="/maintenance/:amoCode/:department/qms/cars"
         element={
           <RequireAuth>
             <QualityCarsPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/training"
-        element={
-          <RequireAuth>
-            <QMSTrainingPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/training/:userId"
-        element={
-          <RequireAuth>
-            <QMSTrainingUserPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/events"
-        element={
-          <RequireAuth>
-            <QMSEventsPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/kpis"
-        element={
-          <RequireAuth>
-            <QMSKpisPage />
-          </RequireAuth>
-        }
-      />
-
-      {/* Reliability reports, e.g. /maintenance/safarilink/quality/reliability-reports */}
-      <Route
-        path="/maintenance/:amoCode/quality/reliability-reports"
-        element={
-          <RequireAuth>
-            <ReliabilityReportsPage />
           </RequireAuth>
         }
       />

@@ -91,6 +91,7 @@ class QMSCAPStatus(str, enum.Enum):
     OPEN = "OPEN"
     IN_PROGRESS = "IN_PROGRESS"
     CLOSED = "CLOSED"
+    REJECTED = "REJECTED"
 
 
 class CARProgram(str, enum.Enum):
@@ -121,3 +122,9 @@ class CARActionType(str, enum.Enum):
     REMINDER = "REMINDER"
     ESCALATION = "ESCALATION"
     ASSIGNMENT = "ASSIGNMENT"
+
+
+class QMSNotificationSeverity(str, enum.Enum):
+    INFO = "INFO"
+    ACTION_REQUIRED = "ACTION_REQUIRED"
+    WARNING = "WARNING"

@@ -1,7 +1,9 @@
 # backend/amodb/apps/quality/service.py
 from __future__ import annotations
 
-from datetime import date, timedelta
+import os
+import uuid
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, or_
@@ -21,6 +23,13 @@ from .enums import (
     QMSDomain,
     infer_level_from_severity,
 )
+
+# Default reminder window in days based on finding level (quicker for Level 1).
+CAR_LEVEL_REMINDER_DAYS: dict[FindingLevel, int] = {
+    FindingLevel.LEVEL_1: 2,
+    FindingLevel.LEVEL_2: 7,
+    FindingLevel.LEVEL_3: 14,
+}
 
 
 def compute_target_close_date(level: FindingLevel, base: Optional[date] = None) -> date:
@@ -158,6 +167,14 @@ def create_car(
     target_closure_date: Optional[date],
     finding_id: Optional[str],
 ) -> models.CorrectiveActionRequest:
+    reminder_days = 7
+    if finding_id:
+        finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
+        if finding:
+            reminder_days = CAR_LEVEL_REMINDER_DAYS.get(finding.level, 7)
+
+    invite_token = uuid.uuid4().hex
+    next_reminder_at = datetime.now(timezone.utc) + timedelta(days=reminder_days)
     car = models.CorrectiveActionRequest(
         program=program,
         car_number=_next_car_number(db, program),
@@ -170,6 +187,9 @@ def create_car(
         due_date=due_date,
         target_closure_date=target_closure_date,
         finding_id=finding_id,
+        invite_token=invite_token,
+        reminder_interval_days=reminder_days,
+        next_reminder_at=next_reminder_at,
     )
     db.add(car)
     db.flush()
@@ -199,3 +219,14 @@ def add_car_action(
     )
     db.add(log)
     return log
+
+
+def schedule_next_reminder(car: models.CorrectiveActionRequest, days: Optional[int] = None) -> None:
+    interval = days or car.reminder_interval_days or 7
+    car.reminder_interval_days = interval
+    car.next_reminder_at = datetime.now(timezone.utc) + timedelta(days=interval)
+
+
+def build_car_invite_link(car: models.CorrectiveActionRequest) -> str:
+    base = os.getenv("PORTAL_FRONTEND_BASE_URL", "http://localhost:5173")
+    return f"{base}/car-invite?token={car.invite_token}"
