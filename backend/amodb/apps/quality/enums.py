@@ -91,3 +91,40 @@ class QMSCAPStatus(str, enum.Enum):
     OPEN = "OPEN"
     IN_PROGRESS = "IN_PROGRESS"
     CLOSED = "CLOSED"
+    REJECTED = "REJECTED"
+
+
+class CARProgram(str, enum.Enum):
+    QUALITY = "QUALITY"
+    RELIABILITY = "RELIABILITY"
+
+
+class CARStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    OPEN = "OPEN"
+    IN_PROGRESS = "IN_PROGRESS"
+    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    CLOSED = "CLOSED"
+    ESCALATED = "ESCALATED"
+    CANCELLED = "CANCELLED"
+
+
+class CARPriority(str, enum.Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class CARActionType(str, enum.Enum):
+    COMMENT = "COMMENT"
+    STATUS_CHANGE = "STATUS_CHANGE"
+    REMINDER = "REMINDER"
+    ESCALATION = "ESCALATION"
+    ASSIGNMENT = "ASSIGNMENT"
+
+
+class QMSNotificationSeverity(str, enum.Enum):
+    INFO = "INFO"
+    ACTION_REQUIRED = "ACTION_REQUIRED"
+    WARNING = "WARNING"

@@ -208,6 +208,16 @@ const QMSHomePage: React.FC = () => {
                 type="button"
                 className="secondary-chip-btn"
                 onClick={() =>
+                  navigate(`/maintenance/${amoSlug}/${department}/qms/cars`)
+                }
+              >
+                Open CAR register
+              </button>
+
+              <button
+                type="button"
+                className="secondary-chip-btn"
+                onClick={() =>
                   navigate(`/maintenance/${amoSlug}/${department}`)
                 }
               >
