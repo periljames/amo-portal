@@ -9,11 +9,13 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
+from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts import models as account_models
 from amodb.apps.work.schemas import WorkOrderRead
 
-from . import services
+from . import service as services
 from .models import ProgramItemStatusEnum, AircraftProgramStatusEnum
 from .schemas import (
     MaintenanceProgramItemCreate,
@@ -35,6 +37,7 @@ PROGRAM_WRITE_ROLES = [
 router = APIRouter(
     prefix="/maintenance-program",
     tags=["maintenance_program"],
+    dependencies=[Depends(require_module("maintenance_program"))],
 )
 
 
@@ -322,6 +325,21 @@ def create_work_order_from_program_items(
         wo_number=payload.wo_number,
         description=payload.description,
         created_by_user_id=current_user.id,
+    )
+    run_count = max(1, len(payload.program_item_ids))
+    account_services.record_usage(
+        db,
+        amo_id=current_user.amo_id,
+        meter_key=account_services.METER_KEY_AUTOMATION_RUNS,
+        quantity=run_count,
+        commit=False,
+    )
+    account_services.record_usage(
+        db,
+        amo_id=current_user.amo_id,
+        meter_key=account_services.METER_KEY_SCHEDULED_JOBS,
+        quantity=run_count,
+        commit=False,
     )
     db.commit()
     db.refresh(wo)

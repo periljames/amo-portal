@@ -109,9 +109,8 @@ const AdminUserNewPage: React.FC = () => {
     const hasUpper = /[A-Z]/.test(form.password);
     const hasLower = /[a-z]/.test(form.password);
     const hasDigit = /\d/.test(form.password);
-    const hasSymbol = /[^A-Za-z0-9]/.test(form.password);
-    if (!(hasUpper && hasLower && hasDigit && hasSymbol)) {
-      return "Password must include upper/lower case, a number, and a symbol.";
+    if (!(hasUpper && hasLower && hasDigit)) {
+      return "Password must include upper/lower case letters and a number.";
     }
 
     // Only SUPERUSER can create SUPERUSER
@@ -290,8 +289,7 @@ const AdminUserNewPage: React.FC = () => {
       <div className="page-header">
         <h1>{pageTitle}</h1>
         <p className="page-subtitle">
-          Create a new AMO user. The target AMO is resolved from your session
-          (and superuser support context if enabled).
+          Create an AMO user and assign their role and temporary password.
         </p>
       </div>
 
@@ -325,6 +323,9 @@ const AdminUserNewPage: React.FC = () => {
                   </option>
                 ))}
               </select>
+              <p className="form-hint">
+                Superusers must select which AMO will own this user.
+              </p>
             </div>
           )}
 
@@ -340,6 +341,7 @@ const AdminUserNewPage: React.FC = () => {
               required
               disabled={submitting}
             />
+            <p className="form-hint">Use the official staff code (e.g. AMO-123).</p>
           </div>
 
           <div className="form-row">
@@ -401,6 +403,9 @@ const AdminUserNewPage: React.FC = () => {
                 )
               )}
             </select>
+            <p className="form-hint">
+              Choose the closest operational role. Admins get dashboard access.
+            </p>
           </div>
 
           <div className="form-row">
@@ -484,7 +489,8 @@ const AdminUserNewPage: React.FC = () => {
             </div>
             <p className="form-hint">
               Passwords must be at least 12 characters and include upper/lower
-              case letters, a number, and a symbol.
+              case letters and a number (symbols optional). The user will be
+              asked to change this on first login.
             </p>
           </div>
 

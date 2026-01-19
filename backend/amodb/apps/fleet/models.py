@@ -57,6 +57,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from ...database import Base
+from ..accounts.models import RegulatoryAuthority
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ class Aircraft(Base):
     aircraft_model_code = Column(String(32), nullable=True, index=True)
 
     # Operator Code (OPR) – typically 3 characters, may be 'ZZZZZ'
-    operator_code = Column(String(5), nullable=True, index=True)
+    operator_code = Column(String(5), nullable=True)
 
     # Supplier Code (SPL) – OEM / data supplier code when applicable
     supplier_code = Column(String(5), nullable=True)
@@ -154,7 +155,7 @@ class Aircraft(Base):
     is_active = Column(Boolean, nullable=False, default=True, index=True)
 
     # Utilisation snapshot (high-level cumulative hours / cycles)
-    last_log_date = Column(Date, nullable=True, index=True)
+    last_log_date = Column(Date, nullable=True)
     total_hours = Column(Float, nullable=True)   # cumulative flight hours
     total_cycles = Column(Float, nullable=True)  # cumulative cycles / landings
     verification_status = Column(
@@ -228,8 +229,142 @@ class Aircraft(Base):
         passive_deletes=True,
     )
 
+    documents = relationship(
+        "AircraftDocument",
+        back_populates="aircraft",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
     def __repr__(self) -> str:
         return f"<Aircraft serial_number={self.serial_number} registration={self.registration}>"
+
+
+# ---------------------------------------------------------------------------
+# AIRCRAFT DOCUMENTS (Regulatory compliance)
+# ---------------------------------------------------------------------------
+
+
+class AircraftDocumentType(str, Enum):
+    CERTIFICATE_OF_AIRWORTHINESS = "CERTIFICATE_OF_AIRWORTHINESS"
+    CERTIFICATE_OF_REGISTRATION = "CERTIFICATE_OF_REGISTRATION"
+    AIRWORTHINESS_REVIEW_CERTIFICATE = "AIRWORTHINESS_REVIEW_CERTIFICATE"
+    RADIO_TELEPHONY_LICENSE = "RADIO_TELEPHONY_LICENSE"
+    NOISE_CERTIFICATE = "NOISE_CERTIFICATE"
+    INSURANCE = "INSURANCE"
+    WEIGHT_AND_BALANCE_SCHEDULE = "WEIGHT_AND_BALANCE_SCHEDULE"
+    MEL_APPROVAL = "MEL_APPROVAL"
+    OTHER = "OTHER"
+
+
+class AircraftDocumentStatus(str, Enum):
+    CURRENT = "CURRENT"
+    DUE_SOON = "DUE_SOON"
+    OVERDUE = "OVERDUE"
+    OVERRIDDEN = "OVERRIDDEN"
+
+
+class AircraftDocument(Base):
+    """
+    Regulatory documents that must remain current for each aircraft (C of A, ARC, radio license, insurance, etc.).
+
+    Aligns with KCARs/KCAA, FAA and EASA evidence needs and records Quality overrides explicitly.
+    """
+
+    __tablename__ = "aircraft_documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "aircraft_serial_number",
+            "document_type",
+            "authority",
+            name="uq_aircraft_document_unique",
+        ),
+        CheckConstraint("alert_window_days >= 0", name="ck_aircraft_doc_alert_window_nonneg"),
+        CheckConstraint(
+            "expires_on IS NULL OR issued_on IS NULL OR expires_on >= issued_on",
+            name="ck_aircraft_doc_issue_before_expiry",
+        ),
+        Index("ix_aircraft_documents_status_due", "status", "expires_on"),
+        Index("ix_aircraft_documents_aircraft_due", "aircraft_serial_number", "expires_on"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    document_type = Column(
+        SQLEnum(AircraftDocumentType, name="aircraft_document_type_enum", native_enum=False),
+        nullable=False,
+        index=True,
+    )
+
+    authority = Column(
+        SQLEnum(RegulatoryAuthority, name="regulatory_authority_enum", native_enum=False),
+        nullable=False,
+        default=RegulatoryAuthority.KCAA,
+        index=True,
+    )
+
+    title = Column(String(255), nullable=True)
+    reference_number = Column(String(128), nullable=True)
+    compliance_basis = Column(String(255), nullable=True)
+    issued_on = Column(Date, nullable=True)
+    expires_on = Column(Date, nullable=True)
+    alert_window_days = Column(Integer, nullable=False, default=30)
+
+    status = Column(
+        SQLEnum(AircraftDocumentStatus, name="aircraft_document_status_enum", native_enum=False),
+        nullable=False,
+        default=AircraftDocumentStatus.CURRENT,
+        index=True,
+    )
+
+    file_storage_path = Column(String(512), nullable=True)
+    file_original_name = Column(String(255), nullable=True)
+    file_content_type = Column(String(128), nullable=True)
+    last_uploaded_at = Column(DateTime(timezone=True), nullable=True)
+    last_uploaded_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    override_reason = Column(Text, nullable=True)
+    override_expires_on = Column(Date, nullable=True)
+    override_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    override_recorded_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    aircraft = relationship("Aircraft", back_populates="documents", lazy="joined")
+
+    def __repr__(self) -> str:
+        return (
+            f"<AircraftDocument id={self.id} aircraft={self.aircraft_serial_number} "
+            f"type={self.document_type} authority={self.authority}>"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +423,7 @@ class AircraftComponent(Base):
     position = Column(String(50), nullable=False, index=True)
 
     # Optional ATA chapter / system reference (e.g. '72', '79', etc.)
-    ata = Column(String(20), nullable=True, index=True)
+    ata = Column(String(20), nullable=True)
 
     # Core identification
     part_number = Column(String(50), nullable=True, index=True)       # PNR
@@ -381,7 +516,7 @@ class AircraftUsage(Base):
     )
 
     date = Column(Date, nullable=False, index=True)
-    techlog_no = Column(String(64), nullable=False, index=True)
+    techlog_no = Column(String(64), nullable=False)
     station = Column(String(16), nullable=True)  # ICAO/IATA/base code
 
     block_hours = Column(Float, nullable=False)
@@ -778,3 +913,6 @@ class ImportReconciliationLog(Base):
             f"<ImportReconciliationLog id={self.id} batch_id={self.batch_id} "
             f"field={self.field_name}>"
         )
+# ---------------------------------------------------------------------------
+# AIRCRAFT MASTER (Spec 2000-aligned)
+# ---------------------------------------------------------------------------

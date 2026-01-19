@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
-from typing import Iterable
+from datetime import date, datetime, timedelta
+from typing import Iterable, List, Optional
+from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,221 @@ HOURS_BASED_FIELDS: tuple[str, ...] = (
 )
 
 CYCLES_BASED_FIELDS: tuple[str, ...] = ("tcesn_after", "tcsoh_after")
+
+
+@dataclass
+class DocumentEvaluation:
+    status: models.AircraftDocumentStatus
+    is_blocking: bool
+    days_to_expiry: Optional[int]
+    override_active: bool
+    missing_evidence: bool
+
+
+def _is_override_active(doc: models.AircraftDocument, today: date) -> bool:
+    if not doc.override_reason or not doc.override_by_user_id:
+        return False
+    if doc.override_expires_on is None:
+        return True
+    return doc.override_expires_on >= today
+
+
+def evaluate_document(doc: models.AircraftDocument, today: Optional[date] = None) -> DocumentEvaluation:
+    """
+    Compute the effective status for a document and whether it blocks maintenance.
+
+    Rules (aligned with KCARs / KCAA, FAA and EASA expectations):
+    - Missing evidence (no stored file) is treated as OVERDUE / blocking.
+    - Documents due within alert_window_days are DUE_SOON and block work until renewed.
+    - Expired documents are OVERDUE.
+    - Quality overrides (with reason) mark the document OVERRIDDEN and clear the block
+      until the override expires (if an expiry date is set).
+    """
+    today = today or date.today()
+    override_active = _is_override_active(doc, today)
+    missing_evidence = not doc.file_storage_path and not doc.file_original_name
+
+    days_to_expiry: Optional[int] = None
+    if doc.expires_on:
+        days_to_expiry = (doc.expires_on - today).days
+
+    status = models.AircraftDocumentStatus.CURRENT
+    if override_active:
+        status = models.AircraftDocumentStatus.OVERRIDDEN
+    else:
+        if missing_evidence:
+            status = models.AircraftDocumentStatus.OVERDUE
+        if doc.expires_on:
+            if doc.expires_on < today:
+                status = models.AircraftDocumentStatus.OVERDUE
+            elif doc.expires_on <= today + timedelta(days=doc.alert_window_days or 0):
+                status = models.AircraftDocumentStatus.DUE_SOON
+
+    is_blocking = status in {
+        models.AircraftDocumentStatus.DUE_SOON,
+        models.AircraftDocumentStatus.OVERDUE,
+    }
+    return DocumentEvaluation(
+        status=status,
+        is_blocking=is_blocking,
+        days_to_expiry=days_to_expiry,
+        override_active=override_active,
+        missing_evidence=missing_evidence,
+    )
+
+
+def refresh_document_status(doc: models.AircraftDocument, today: Optional[date] = None) -> DocumentEvaluation:
+    """
+    Recompute and update the stored status for a document (without committing).
+    """
+    evaluation = evaluate_document(doc, today=today)
+    if doc.status != evaluation.status:
+        doc.status = evaluation.status
+    return evaluation
+
+
+def collect_document_alerts(
+    db: Session,
+    *,
+    due_within_days: int = 30,
+) -> List[dict]:
+    """
+    Return documents that are due soon or overdue to drive department notifications.
+    """
+    today = date.today()
+    alerts: List[dict] = []
+    docs: Iterable[models.AircraftDocument] = (
+        db.query(models.AircraftDocument)
+        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
+        .all()
+    )
+
+    for doc in docs:
+        evaluation = evaluate_document(doc, today=today)
+        if evaluation.status == models.AircraftDocumentStatus.CURRENT:
+            if evaluation.days_to_expiry is not None and evaluation.days_to_expiry <= due_within_days:
+                evaluation = DocumentEvaluation(
+                    status=models.AircraftDocumentStatus.DUE_SOON,
+                    is_blocking=True,
+                    days_to_expiry=evaluation.days_to_expiry,
+                    override_active=evaluation.override_active,
+                    missing_evidence=evaluation.missing_evidence,
+                )
+        if evaluation.status in {
+            models.AircraftDocumentStatus.DUE_SOON,
+            models.AircraftDocumentStatus.OVERDUE,
+        }:
+            alerts.append(
+                {
+                    "id": doc.id,
+                    "aircraft_serial_number": doc.aircraft_serial_number,
+                    "document_type": doc.document_type,
+                    "authority": doc.authority,
+                    "status": evaluation.status,
+                    "expires_on": doc.expires_on,
+                    "days_to_expiry": evaluation.days_to_expiry,
+                    "override_active": evaluation.override_active,
+                    "missing_evidence": evaluation.missing_evidence,
+                    "reference_number": doc.reference_number,
+                    "title": doc.title,
+                }
+            )
+    return alerts
+
+
+def build_aircraft_compliance_summary(
+    db: Session,
+    serial_number: str,
+    *,
+    due_within_days: int = 30,
+) -> dict:
+    today = date.today()
+    docs: Iterable[models.AircraftDocument] = (
+        db.query(models.AircraftDocument)
+        .filter(models.AircraftDocument.aircraft_serial_number == serial_number)
+        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
+        .all()
+    )
+
+    summary = {
+        "aircraft_serial_number": serial_number,
+        "documents_total": len(docs),
+        "blocking_documents": [],
+        "due_soon_documents": [],
+        "overdue_documents": [],
+        "overrides": [],
+        "documents": [],
+    }
+
+    for doc in docs:
+        evaluation = refresh_document_status(doc, today=today)
+        item = {
+            "id": doc.id,
+            "document_type": doc.document_type,
+            "authority": doc.authority,
+            "status": evaluation.status,
+            "is_blocking": evaluation.is_blocking,
+            "override_active": evaluation.override_active,
+            "days_to_expiry": evaluation.days_to_expiry,
+            "expires_on": doc.expires_on,
+            "issued_on": doc.issued_on,
+            "reference_number": doc.reference_number,
+            "title": doc.title,
+            "missing_evidence": evaluation.missing_evidence,
+            "alert_window_days": doc.alert_window_days,
+            "compliance_basis": doc.compliance_basis,
+            "file_original_name": doc.file_original_name,
+            "file_storage_path": doc.file_storage_path,
+            "file_content_type": doc.file_content_type,
+            "last_uploaded_at": doc.last_uploaded_at,
+            "last_uploaded_by_user_id": doc.last_uploaded_by_user_id,
+            "override_expires_on": doc.override_expires_on,
+            "override_by_user_id": doc.override_by_user_id,
+            "override_recorded_at": doc.override_recorded_at,
+            "created_at": doc.created_at,
+            "updated_at": doc.updated_at,
+        }
+        summary["documents"].append(item)
+        if evaluation.is_blocking:
+            summary["blocking_documents"].append(item)
+        if evaluation.status == models.AircraftDocumentStatus.DUE_SOON:
+            summary["due_soon_documents"].append(item)
+        if evaluation.status == models.AircraftDocumentStatus.OVERDUE:
+            summary["overdue_documents"].append(item)
+        if evaluation.override_active:
+            summary["overrides"].append(item)
+        # If document is still current but within the requested window, surface it as due soon for notification purposes.
+        if (
+            evaluation.status == models.AircraftDocumentStatus.CURRENT
+            and evaluation.days_to_expiry is not None
+            and evaluation.days_to_expiry <= due_within_days
+        ):
+            summary["due_soon_documents"].append(
+                {**item, "status": models.AircraftDocumentStatus.DUE_SOON}
+            )
+
+    summary["is_blocking"] = len(summary["blocking_documents"]) > 0
+    return summary
+
+
+def get_blocking_documents(
+    db: Session,
+    serial_number: str,
+) -> List[tuple[models.AircraftDocument, DocumentEvaluation]]:
+    """
+    Return blocking documents for an aircraft (due soon or overdue without a Quality override).
+    """
+    docs: Iterable[models.AircraftDocument] = (
+        db.query(models.AircraftDocument)
+        .filter(models.AircraftDocument.aircraft_serial_number == serial_number)
+        .all()
+    )
+    results: List[tuple[models.AircraftDocument, DocumentEvaluation]] = []
+    for doc in docs:
+        evaluation = evaluate_document(doc)
+        if evaluation.is_blocking:
+            results.append((doc, evaluation))
+    return results
 
 
 def get_previous_usage(

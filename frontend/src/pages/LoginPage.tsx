@@ -4,28 +4,22 @@ import { useNavigate, useLocation, useParams } from "react-router-dom";
 import AuthLayout from "../components/Layout/AuthLayout";
 import TextField from "../components/UI/TextField";
 import Button from "../components/UI/Button";
-import { login, getToken, getCachedUser, getContext } from "../services/auth";
+import {
+  login,
+  getToken,
+  getCachedUser,
+  getContext,
+  getLoginContext,
+  type LoginContextResponse,
+} from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Optional default AMO slug for /login (no AMO in URL)
-const DEFAULT_AMO_CODE: string | null =
-  import.meta.env.VITE_DEFAULT_AMO_CODE || null;
-
 // Platform support slug (superuser login)
-const PLATFORM_SUPPORT_SLUG = "root";
+const PLATFORM_SUPPORT_SLUG = "system";
 
-const DEPARTMENTS = [
-  { value: "planning", label: "Planning" },
-  { value: "production", label: "Production" },
-  { value: "quality", label: "Quality & Compliance" },
-  { value: "safety", label: "Safety Management" },
-  { value: "stores", label: "Procurement & Stores" },
-  { value: "engineering", label: "Engineering" },
-  { value: "workshops", label: "Workshops" },
-  { value: "admin", label: "System Admin" },
-];
+type LoginStep = "identify" | "password";
 
 function isAdminUser(u: any): boolean {
   if (!u) return false;
@@ -45,39 +39,45 @@ const LoginPage: React.FC = () => {
   const [email, setEmail] = useState(import.meta.env.DEV ? "admin@amo.local" : "");
   const [password, setPassword] = useState(import.meta.env.DEV ? "ChangeMe123!" : "");
 
-  // Admin landing preference ONLY (normal users ignore)
-  const [department, setDepartment] = useState<string>("planning");
-  const [supportMode, setSupportMode] = useState<boolean>(false);
-
   const [loading, setLoading] = useState(false);
+  const [loadingContext, setLoadingContext] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [loginContext, setLoginContext] = useState<LoginContextResponse | null>(
+    amoCode
+      ? {
+          login_slug: amoCode,
+          amo_code: null,
+          amo_name: decodeAmoCertFromUrl(amoCode),
+          is_platform: false,
+        }
+      : null
+  );
+  const [step, setStep] = useState<LoginStep>(amoCode ? "password" : "identify");
 
   const fromState = (location.state as { from?: string } | null)?.from;
 
   const effectiveAmoSlug = useMemo(() => {
-    if (supportMode) return PLATFORM_SUPPORT_SLUG;
-    return amoCode ?? DEFAULT_AMO_CODE ?? "";
-  }, [supportMode, amoCode]);
-
-  const canAttemptNormalLogin = useMemo(() => {
-    if (supportMode) return true;
-    return !!(amoCode ?? DEFAULT_AMO_CODE);
-  }, [supportMode, amoCode]);
+    if (loginContext?.login_slug) return loginContext.login_slug;
+    return "";
+  }, [loginContext?.login_slug]);
 
   // If already logged in, bounce straight to dashboard
   useEffect(() => {
     const token = getToken();
     if (!token) return;
 
-    const slug = supportMode
-      ? PLATFORM_SUPPORT_SLUG
-      : (amoCode ?? DEFAULT_AMO_CODE);
+    const ctx = getContext();
+    const slug =
+      effectiveAmoSlug || ctx.amoSlug || amoCode || PLATFORM_SUPPORT_SLUG;
 
     if (!slug) return;
-
-    const ctx = getContext();
     const u = getCachedUser();
     const admin = isAdminUser(u);
+
+    if (u?.must_change_password) {
+      navigate(`/maintenance/${slug}/onboarding`, { replace: true });
+      return;
+    }
 
     // If router gave us a "from" location, respect it
     if (fromState) {
@@ -86,7 +86,7 @@ const LoginPage: React.FC = () => {
     }
 
     // Normal users MUST go to server-assigned department
-    const landingDept = admin ? (department || ctx.department || "admin") : (ctx.department || null);
+    const landingDept = admin ? (ctx.department || "admin") : (ctx.department || null);
 
     if (!admin && !landingDept) {
       // Stay on login and show a clean error
@@ -97,7 +97,42 @@ const LoginPage: React.FC = () => {
     }
 
     navigate(`/maintenance/${slug}/${landingDept}`, { replace: true });
-  }, [navigate, fromState, amoCode, department, supportMode]);
+  }, [navigate, fromState, amoCode, effectiveAmoSlug]);
+
+  const handleIdentify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setErrorMsg("Please enter your work email.");
+      return;
+    }
+    if (!emailRegex.test(trimmedEmail)) {
+      setErrorMsg("Please enter a valid email address.");
+      return;
+    }
+
+    try {
+      setLoadingContext(true);
+      const context = await getLoginContext(trimmedEmail);
+      setLoginContext(context);
+      setStep("password");
+    } catch (err: unknown) {
+      console.error("Login context error:", err);
+      const msg = err instanceof Error ? err.message : "Could not find your account.";
+      setErrorMsg(msg);
+    } finally {
+      setLoadingContext(false);
+    }
+  };
+
+  const resetContext = () => {
+    if (amoCode) return;
+    setLoginContext(null);
+    setStep("identify");
+    setPassword("");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,9 +148,9 @@ const LoginPage: React.FC = () => {
       return;
     }
 
-    if (!canAttemptNormalLogin) {
+    if (!effectiveAmoSlug) {
       setErrorMsg(
-        "AMO code is missing. Use your AMO-specific portal link, or enable platform support login."
+        "We could not determine your login context. Please start again."
       );
       return;
     }
@@ -123,7 +158,7 @@ const LoginPage: React.FC = () => {
     const slugToUse = effectiveAmoSlug.trim();
     if (!slugToUse) {
       setErrorMsg(
-        "AMO code is missing. Use your AMO-specific portal link, or enable platform support login."
+        "We could not determine your login context. Please start again."
       );
       return;
     }
@@ -135,7 +170,12 @@ const LoginPage: React.FC = () => {
       // - token
       // - server-provided AMO + department context
       // - cached user
-      await login(slugToUse, trimmedEmail, password);
+      const auth = await login(slugToUse, trimmedEmail, password);
+
+      if (auth.user?.must_change_password) {
+        navigate(`/maintenance/${slugToUse}/onboarding`, { replace: true });
+        return;
+      }
 
       // If router requested a return URL, go there
       if (fromState) {
@@ -160,7 +200,7 @@ const LoginPage: React.FC = () => {
       }
 
       // Admin/superuser: use dropdown as landing preference (DO NOT override stored context)
-      const landingDept = (department || "").trim() || ctx.department || "admin";
+      const landingDept = ctx.department || "admin";
       navigate(`/maintenance/${slugToUse}/${landingDept}`, { replace: true });
     } catch (err: unknown) {
       console.error("Login error:", err);
@@ -179,7 +219,7 @@ const LoginPage: React.FC = () => {
           setErrorMsg("Invalid email or password.");
         } else if (msg.includes("not found") || msg.includes("amo")) {
           setErrorMsg(
-            "AMO not found. Check the AMO portal link or disable support mode."
+            "AMO not found. Check the AMO portal link or contact support."
           );
         } else {
           setErrorMsg("Could not sign in. Please try again.");
@@ -192,53 +232,36 @@ const LoginPage: React.FC = () => {
     }
   };
 
-  const amoSlugForLabel = supportMode
-    ? PLATFORM_SUPPORT_SLUG
-    : (amoCode ?? DEFAULT_AMO_CODE);
+  const amoSlugForLabel = loginContext?.login_slug || amoCode || null;
 
-  const humanAmoLabel = amoSlugForLabel
-    ? decodeAmoCertFromUrl(amoSlugForLabel)
-    : "AMO";
-
-  const title = supportMode
-    ? "Sign in (Platform Support)"
+  const humanAmoLabel = loginContext?.amo_name
+    ? loginContext.amo_name
     : amoSlugForLabel
-      ? `Sign in to AMO Portal (${humanAmoLabel})`
-      : "Sign in to AMO Portal";
+      ? decodeAmoCertFromUrl(amoSlugForLabel)
+      : "AMO";
 
-  const subtitle = supportMode
-    ? "Use your platform superuser credentials. You can switch AMO context after login."
-    : amoSlugForLabel
-      ? `Use your personal Safarilink AMO credentials for ${humanAmoLabel}.`
-      : "Use your personal Safarilink AMO credentials.";
+  const isPlatformLogin = !!loginContext?.is_platform;
 
-  const amoUrlHint =
-    !supportMode && amoSlugForLabel
-      ? `/maintenance/${amoSlugForLabel}/login`
-      : null;
+  const title = loginContext
+    ? isPlatformLogin
+      ? "Platform sign in"
+      : `AMO sign in (${humanAmoLabel})`
+    : "Find your sign-in";
+
+  const subtitle = loginContext
+    ? isPlatformLogin
+      ? "Superusers only. Use your platform credentials."
+      : `Use your AMO work email and password for ${humanAmoLabel}.`
+    : "Enter your work email and we will route you to the right portal.";
 
   return (
     <AuthLayout title={title} subtitle={subtitle}>
-      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+      <form
+        className="auth-form"
+        onSubmit={step === "identify" ? handleIdentify : handleSubmit}
+        noValidate
+      >
         {errorMsg && <div className="auth-form__error">{errorMsg}</div>}
-
-        <div className="auth-form__field">
-          <label className="auth-form__label">Login mode</label>
-          <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={supportMode}
-              onChange={(e) => setSupportMode(e.target.checked)}
-              disabled={loading}
-            />
-            Platform support login (SUPERUSER)
-          </label>
-          {!supportMode && !amoCode && !DEFAULT_AMO_CODE && (
-            <div className="auth-form__hint" style={{ marginTop: 6 }}>
-              No AMO code detected. Enable support login or use an AMO-specific link.
-            </div>
-          )}
-        </div>
 
         <TextField
           label="Work email"
@@ -248,17 +271,20 @@ const LoginPage: React.FC = () => {
           onChange={(e) => setEmail(e.target.value)}
           name="email"
           required
+          disabled={step === "password"}
         />
 
-        <TextField
-          label="Password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          name="password"
-          required
-        />
+        {step === "password" && (
+          <TextField
+            label="Password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            name="password"
+            required
+          />
+        )}
 
         <div className="auth-form__field">
           <button
@@ -273,42 +299,35 @@ const LoginPage: React.FC = () => {
           </button>
         </div>
 
-        <div className="auth-form__field">
-          <label className="auth-form__label">
-            Landing department (admins/superusers only)
-          </label>
-          <select
-            className="auth-form__select"
-            value={department}
-            onChange={(e) => setDepartment(e.target.value)}
+        {step === "password" && !amoCode && (
+          <button
+            type="button"
+            className="auth-form__link"
+            onClick={resetContext}
             disabled={loading}
           >
-            {DEPARTMENTS.map((d) => (
-              <option key={d.value} value={d.value}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-          <div className="auth-form__hint" style={{ marginTop: 6 }}>
-            Normal users will be routed to their assigned department automatically.
-          </div>
-        </div>
-
-        {amoUrlHint && (
-          <div className="auth-form__hint">
-            AMO URL:&nbsp;<code>{amoUrlHint}</code>
-          </div>
+            Use a different email
+          </button>
         )}
 
         <p className="auth-form__smallprint">
-          Use only your personal account. All access and actions are logged in
-          line with AMO and authority requirements.
+          Access is logged. Use only your personal account.
         </p>
 
         <div className="auth-form__actions">
-          <Button type="submit" loading={loading} disabled={loading}>
-            {loading ? "Signing in..." : "Sign in"}
-          </Button>
+          {step === "identify" ? (
+            <Button
+              type="submit"
+              loading={loadingContext}
+              disabled={loadingContext}
+            >
+              {loadingContext ? "Checking..." : "Continue"}
+            </Button>
+          ) : (
+            <Button type="submit" loading={loading} disabled={loading}>
+              {loading ? "Signing in..." : "Sign in"}
+            </Button>
+          )}
         </div>
       </form>
     </AuthLayout>

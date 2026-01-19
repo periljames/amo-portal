@@ -105,8 +105,8 @@ class AmpProgramItem(Base):
 
     # Technical identification
     ata_chapter = Column(String(20), nullable=True, index=True)
-    task_number = Column(String(64), nullable=True, index=True)
-    task_code = Column(String(64), nullable=True, index=True)
+    task_number = Column(String(64), nullable=True)
+    task_code = Column(String(64), nullable=True)
 
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
