@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
+import { getApiBaseUrl, normaliseBaseUrl, setApiBaseRuntime } from "../services/config";
 import {
   type AdminAmoRead,
   type AdminUserRead,
@@ -11,6 +12,11 @@ import {
   listAdminUsers,
   LS_ACTIVE_AMO_ID,
 } from "../services/adminUsers";
+import {
+  type PlatformSettings,
+  fetchPlatformSettings,
+  updatePlatformSettings,
+} from "../services/platformSettings";
 
 type UrlParams = {
   amoCode?: string;
@@ -62,6 +68,16 @@ const AdminUsageSettingsPage: React.FC = () => {
       return DEFAULT_THROTTLE;
     }
   });
+  const [apiBaseDraft, setApiBaseDraft] = useState(() => {
+    return getApiBaseUrl();
+  });
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(
+    null
+  );
+  const [platformLoading, setPlatformLoading] = useState(false);
+  const [apiBaseMessage, setApiBaseMessage] = useState<string | null>(null);
+  const [healthStatus, setHealthStatus] = useState<string | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -118,6 +134,80 @@ const AdminUsageSettingsPage: React.FC = () => {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   }, [store]);
+
+  useEffect(() => {
+    if (!isSuperuser) return;
+    setPlatformLoading(true);
+    fetchPlatformSettings()
+      .then((data) => {
+        setPlatformSettings(data);
+        if (data.api_base_url) {
+          setApiBaseDraft(data.api_base_url);
+          setApiBaseRuntime(data.api_base_url);
+        }
+      })
+      .catch((err: any) => {
+        setError(err?.message || "Failed to load platform settings.");
+      })
+      .finally(() => setPlatformLoading(false));
+  }, [isSuperuser]);
+
+  const handleSaveApiBase = () => {
+    const next = normaliseBaseUrl(apiBaseDraft);
+    if (!next) {
+      setApiBaseMessage("Please enter a valid API base URL.");
+      return;
+    }
+    updatePlatformSettings({ api_base_url: next })
+      .then((data) => {
+        setPlatformSettings(data);
+        setApiBaseRuntime(next);
+        setApiBaseMessage("Saved. New API base URL is active.");
+      })
+      .catch((err: any) => {
+        setApiBaseMessage(err?.message || "Failed to save API base URL.");
+      });
+  };
+
+  const handleClearApiBase = () => {
+    updatePlatformSettings({ api_base_url: null })
+      .then((data) => {
+        setPlatformSettings(data);
+        setApiBaseRuntime(null);
+        setApiBaseDraft(getApiBaseUrl());
+        setApiBaseMessage("Cleared override. Default API base URL restored.");
+      })
+      .catch((err: any) => {
+        setApiBaseMessage(err?.message || "Failed to clear API base URL.");
+      });
+  };
+
+  const runHealthCheck = async () => {
+    const base = normaliseBaseUrl(apiBaseDraft);
+    if (!base) {
+      setHealthStatus("Enter a valid API base URL before running diagnostics.");
+      return;
+    }
+    setHealthLoading(true);
+    setHealthStatus(null);
+    try {
+      const res = await fetch(`${base}/health`, { method: "GET" });
+      const text = await res.text().catch(() => "");
+      setHealthStatus(
+        `Status ${res.status}: ${text || res.statusText || "OK"}`
+      );
+    } catch (err: any) {
+      setHealthStatus(err?.message || "Health check failed.");
+    } finally {
+      setHealthLoading(false);
+    }
+  };
+
+  const formatTimestamp = (value?: string | null) => {
+    if (!value) return "Not set";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+  };
 
   if (currentUser && !canAccess) {
     return null;
@@ -290,6 +380,94 @@ const AdminUsageSettingsPage: React.FC = () => {
           )}
         </div>
       </section>
+
+      {isSuperuser && (
+        <section className="page-section">
+          <div className="card card--form">
+            <h3 style={{ marginTop: 0 }}>HTTPS & connectivity diagnostics</h3>
+            <p className="text-muted">
+              Configure the API base URL used by the portal and run a health check. Settings are
+              stored server-side for all sessions.
+            </p>
+
+            <div className="form-row">
+              <label htmlFor="apiBaseUrl">API base URL (HTTPS)</label>
+              <input
+                id="apiBaseUrl"
+                type="url"
+                placeholder="https://api.example.com"
+                value={apiBaseDraft}
+                onChange={(e) => setApiBaseDraft(e.target.value)}
+              />
+              <p className="text-muted" style={{ marginTop: 6 }}>
+                Current default: <strong>{getApiBaseUrl()}</strong>
+              </p>
+            </div>
+
+            <div className="form-row" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <button type="button" className="btn" onClick={handleSaveApiBase}>
+                Save override
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={handleClearApiBase}>
+                Clear override
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={runHealthCheck}
+                disabled={healthLoading}
+              >
+                {healthLoading ? "Running..." : "Run health check"}
+              </button>
+            </div>
+
+            {apiBaseMessage && (
+              <p className="text-muted" style={{ marginTop: 8 }}>
+                {apiBaseMessage}
+              </p>
+            )}
+
+            {healthStatus && (
+              <div className="card card--info" style={{ marginTop: 12 }}>
+                <strong>Health check:</strong> {healthStatus}
+              </div>
+            )}
+
+            <div className="card" style={{ marginTop: 16 }}>
+              <h4 style={{ marginTop: 0 }}>ACME / Let’s Encrypt status</h4>
+              {platformLoading && <p className="text-muted">Loading status…</p>}
+              {!platformLoading && (
+                <dl style={{ display: "grid", gap: 8, margin: 0 }}>
+                  <div>
+                    <dt>ACME client</dt>
+                    <dd>{platformSettings?.acme_client || "Not set"}</dd>
+                  </div>
+                  <div>
+                    <dt>Directory URL</dt>
+                    <dd>{platformSettings?.acme_directory_url || "Not set"}</dd>
+                  </div>
+                  <div>
+                    <dt>Certificate status</dt>
+                    <dd>{platformSettings?.certificate_status || "Not set"}</dd>
+                  </div>
+                  <div>
+                    <dt>Issuer</dt>
+                    <dd>{platformSettings?.certificate_issuer || "Not set"}</dd>
+                  </div>
+                  <div>
+                    <dt>Expires at</dt>
+                    <dd>{formatTimestamp(platformSettings?.certificate_expires_at)}</dd>
+                  </div>
+                  <div>
+                    <dt>Last renewed</dt>
+                    <dd>{formatTimestamp(platformSettings?.last_renewed_at)}</dd>
+                  </div>
+                </dl>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
     </DepartmentLayout>
   );
 };

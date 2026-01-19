@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -57,6 +57,51 @@ def _require_superuser(current_user: models.User) -> models.User:
             detail="Superuser privileges required.",
         )
     return current_user
+
+
+def _parse_env_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _platform_settings_defaults() -> dict:
+    return {
+        "api_base_url": os.getenv("PLATFORM_API_BASE_URL"),
+        "acme_directory_url": os.getenv("ACME_DIRECTORY_URL"),
+        "acme_client": os.getenv("ACME_CLIENT"),
+        "certificate_status": os.getenv("ACME_CERT_STATUS"),
+        "certificate_issuer": os.getenv("ACME_CERT_ISSUER"),
+        "certificate_expires_at": _parse_env_datetime(
+            os.getenv("ACME_CERT_EXPIRES_AT")
+        ),
+        "last_renewed_at": _parse_env_datetime(os.getenv("ACME_CERT_RENEWED_AT")),
+        "notes": os.getenv("PLATFORM_NOTES"),
+    }
+
+
+def _get_or_create_platform_settings(db: Session) -> models.PlatformSettings:
+    settings = db.query(models.PlatformSettings).first()
+    if not settings:
+        settings = models.PlatformSettings(**_platform_settings_defaults())
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+        return settings
+
+    defaults = _platform_settings_defaults()
+    updated = False
+    for key, value in defaults.items():
+        if value is not None and getattr(settings, key) in (None, ""):
+            setattr(settings, key, value)
+            updated = True
+    if updated:
+        db.commit()
+        db.refresh(settings)
+    return settings
 
 
 @router.post(
@@ -691,3 +736,41 @@ def grant_user_authorisation(
     db.commit()
     db.refresh(ua)
     return ua
+
+
+# ---------------------------------------------------------------------------
+# PLATFORM SETTINGS (SUPERUSER)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/platform-settings",
+    response_model=schemas.PlatformSettingsRead,
+    summary="Get platform settings (superuser only)",
+)
+def get_platform_settings(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    return _get_or_create_platform_settings(db)
+
+
+@router.put(
+    "/platform-settings",
+    response_model=schemas.PlatformSettingsRead,
+    summary="Update platform settings (superuser only)",
+)
+def update_platform_settings(
+    payload: schemas.PlatformSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    settings = _get_or_create_platform_settings(db)
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(settings, key, value)
+    db.commit()
+    db.refresh(settings)
+    return settings

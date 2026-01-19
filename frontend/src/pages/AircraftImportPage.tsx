@@ -18,7 +18,7 @@ import {
   type AdminAmoRead,
 } from "../services/adminUsers";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "../services/config";
 
 type AircraftRowData = {
   serial_number: string;
@@ -497,7 +497,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
   const loadTemplates = async () => {
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/templates?template_type=aircraft`,
+        `${getApiBaseUrl()}/aircraft/import/templates?template_type=aircraft`,
         { headers: authHeaders() }
       );
       const data = await res.json();
@@ -513,7 +513,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
   const loadComponentTemplates = async () => {
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/templates?template_type=components`,
+        `${getApiBaseUrl()}/aircraft/import/templates?template_type=components`,
         { headers: authHeaders() }
       );
       const data = await res.json();
@@ -843,7 +843,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     });
 
     try {
-      const res = await fetch(`${API_BASE}/aircraft/import/preview`, {
+      const res = await fetch(`${getApiBaseUrl()}/aircraft/import/preview`, {
         method: "POST",
         headers: authHeaders(),
         body: formData,
@@ -902,7 +902,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
         const limit = Math.max(1, endRow - startRow);
         try {
           const res = await fetch(
-            `${API_BASE}/aircraft/import/preview/${encodeURIComponent(
+            `${getApiBaseUrl()}/aircraft/import/preview/${encodeURIComponent(
               previewId
             )}/rows?offset=${startRow}&limit=${limit}`,
             { headers: authHeaders() }
@@ -955,7 +955,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
 
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/${encodeURIComponent(
+        `${getApiBaseUrl()}/aircraft/${encodeURIComponent(
           componentAircraftSerial.trim()
         )}/components/import/preview`,
         {
@@ -1002,7 +1002,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     setSnapshotLoading(true);
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/snapshots?batch_id=${encodeURIComponent(
+        `${getApiBaseUrl()}/aircraft/import/snapshots?batch_id=${encodeURIComponent(
           batchId
         )}`,
         { headers: authHeaders() }
@@ -1107,8 +1107,8 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
       };
       const method = selectedTemplateId ? "PUT" : "POST";
       const url = selectedTemplateId
-        ? `${API_BASE}/aircraft/import/templates/${selectedTemplateId}`
-        : `${API_BASE}/aircraft/import/templates`;
+        ? `${getApiBaseUrl()}/aircraft/import/templates/${selectedTemplateId}`
+        : `${getApiBaseUrl()}/aircraft/import/templates`;
       const res = await fetch(url, {
         method,
         headers: authHeaders({ "Content-Type": "application/json" }),
@@ -1161,8 +1161,8 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
       };
       const method = componentSelectedTemplateId ? "PUT" : "POST";
       const url = componentSelectedTemplateId
-        ? `${API_BASE}/aircraft/import/templates/${componentSelectedTemplateId}`
-        : `${API_BASE}/aircraft/import/templates`;
+        ? `${getApiBaseUrl()}/aircraft/import/templates/${componentSelectedTemplateId}`
+        : `${getApiBaseUrl()}/aircraft/import/templates`;
       const res = await fetch(url, {
         method,
         headers: authHeaders({ "Content-Type": "application/json" }),
@@ -1912,7 +1912,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
         previewMode === "server"
           ? rejectedOverrideRows.map((row) => row.row_number)
           : [];
-      const res = await fetch(`${API_BASE}/aircraft/import`, {
+      const res = await fetch(`${getApiBaseUrl()}/aircraft/import`, {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -1970,7 +1970,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
 
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/${encodeURIComponent(
+        `${getApiBaseUrl()}/aircraft/${encodeURIComponent(
           componentAircraftSerial.trim()
         )}/components/import/confirm`,
         {
@@ -2081,7 +2081,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     setMessage(null);
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/snapshots/${selectedSnapshotId}/restore`,
+        `${getApiBaseUrl()}/aircraft/import/snapshots/${selectedSnapshotId}/restore`,
         { method: "POST", headers: authHeaders() }
       );
       const data = await res.json();
@@ -2106,7 +2106,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     setMessage(null);
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/snapshots/${selectedSnapshotId}/reapply`,
+        `${getApiBaseUrl()}/aircraft/import/snapshots/${selectedSnapshotId}/reapply`,
         { method: "POST", headers: authHeaders() }
       );
       const data = await res.json();

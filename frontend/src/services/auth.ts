@@ -1,12 +1,12 @@
 /**
  * Auth service
- * - Defines API_BASE_URL used by all frontend services.
+ * - Defines getApiBaseUrl used by all frontend services.
  * - Talks to backend auth endpoints (amodb/apps/accounts/router_public.py).
  * - Manages JWT token, AMO + department context, and cached current user.
  * - Exposes authHeaders() so other services can call protected routes.
  */
 
-import { API_BASE_URL } from "./config";
+import { getApiBaseUrl } from "./config";
 
 const TOKEN_KEY = "amo_portal_token";
 const AMO_KEY = "amo_code";
@@ -286,7 +286,7 @@ export async function login(
     password,
   };
 
-  const res = await fetch(`${API_BASE_URL}/auth/login`, {
+  const res = await fetch(`${getApiBaseUrl()}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -330,7 +330,7 @@ export async function getLoginContext(
   email: string
 ): Promise<LoginContextResponse> {
   const query = new URLSearchParams({ email: email.trim() }).toString();
-  const res = await fetch(`${API_BASE_URL}/auth/login-context?${query}`);
+  const res = await fetch(`${getApiBaseUrl()}/auth/login-context?${query}`);
 
   if (!res.ok) {
     throw new Error(await readErrorMessage(res));
@@ -350,7 +350,7 @@ export async function fetchCurrentUser(): Promise<PortalUser> {
     throw new Error("No auth token");
   }
 
-  const res = await fetch(`${API_BASE_URL}/auth/me`, {
+  const res = await fetch(`${getApiBaseUrl()}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -381,7 +381,7 @@ export async function requestPasswordReset(
     delivery_method: deliveryMethod,
   };
 
-  const res = await fetch(`${API_BASE_URL}/auth/password-reset/request`, {
+  const res = await fetch(`${getApiBaseUrl()}/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -408,7 +408,7 @@ export async function confirmPasswordReset(
     new_password: newPassword,
   };
 
-  const res = await fetch(`${API_BASE_URL}/auth/password-reset/confirm`, {
+  const res = await fetch(`${getApiBaseUrl()}/auth/password-reset/confirm`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -428,7 +428,7 @@ export async function changePassword(
     new_password: newPassword,
   };
 
-  const res = await fetch(`${API_BASE_URL}/auth/password-change`, {
+  const res = await fetch(`${getApiBaseUrl()}/auth/password-change`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),

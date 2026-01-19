@@ -67,3 +67,46 @@ It depends on where you terminate TLS:
 If you want the FastAPI process itself to terminate TLS in production (not typical), you still
 need a valid cert + key pair from a CA (Let’s Encrypt or another provider) and then set
 `SSL_CERTFILE`/`SSL_KEYFILE` accordingly.
+
+## Production checklist (recommended)
+
+1. **Terminate TLS at a reverse proxy/load balancer** (Nginx/Traefik/ALB) with a trusted
+   certificate (Let’s Encrypt). The proxy forwards plain HTTP to the app on the private network.
+2. **Set CORS origins** to your HTTPS frontend origin(s), e.g.:
+   ```bash
+   export CORS_ALLOWED_ORIGINS="https://portal.example.com"
+   ```
+3. **Set the frontend API base URL** to the HTTPS backend origin:
+   ```bash
+   export VITE_API_BASE_URL="https://api.example.com"
+   ```
+
+### Example: Nginx + Let’s Encrypt (proxying to Uvicorn)
+
+```nginx
+server {
+  listen 80;
+  server_name api.example.com;
+  location /.well-known/acme-challenge/ { root /var/www/certbot; }
+  location / { return 301 https://$host$request_uri; }
+}
+
+server {
+  listen 443 ssl;
+  server_name api.example.com;
+
+  ssl_certificate /etc/letsencrypt/live/api.example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+```
+
+Then provision/renew certs with Certbot (Let’s Encrypt). The backend launcher already enables
+`proxy_headers` so forwarded proto/host are honored.

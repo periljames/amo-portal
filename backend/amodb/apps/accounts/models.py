@@ -1318,3 +1318,34 @@ class WebhookEvent(Base):
 
     def __repr__(self) -> str:
         return f"<WebhookEvent provider={self.provider} status={self.status} attempts={self.attempt_count}>"
+
+
+class PlatformSettings(Base):
+    """
+    Singleton record for platform-wide configuration (superuser only).
+    """
+
+    __tablename__ = "platform_settings"
+
+    id = Column(Integer, primary_key=True, default=1)
+    api_base_url = Column(String(255), nullable=True)
+
+    acme_directory_url = Column(String(255), nullable=True)
+    acme_client = Column(String(128), nullable=True)
+    certificate_status = Column(String(64), nullable=True)
+    certificate_issuer = Column(String(255), nullable=True)
+    certificate_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_renewed_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
