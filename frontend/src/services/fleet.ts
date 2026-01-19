@@ -2,9 +2,7 @@
 // Fleet-facing API helpers (aircraft compliance documents and alerts).
 
 import { getToken, handleAuthFailure } from "./auth";
-
-const API_BASE =
-  (import.meta as any).env?.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "./config";
 
 export type AircraftDocumentStatus =
   | "CURRENT"
@@ -107,7 +105,7 @@ function toQuery(params: Record<string, QueryVal>): string {
 
 async function fetchJson<T>(path: string): Promise<T> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
     method: "GET",
     headers: {
       Accept: "application/json",
@@ -130,7 +128,7 @@ async function fetchJson<T>(path: string): Promise<T> {
 
 async function sendJson<T>(path: string, method: "POST" | "PUT", body: unknown): Promise<T> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
     method,
     headers: {
       Accept: "application/json",
@@ -220,14 +218,17 @@ export async function uploadAircraftDocumentFile(
   const form = new FormData();
   form.append("file", file);
 
-  const res = await fetch(`${API_BASE}/aircraft/documents/${documentId}/upload`, {
-    method: "POST",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: form,
-    credentials: "include",
-  });
+  const res = await fetch(
+    `${getApiBaseUrl()}/aircraft/documents/${documentId}/upload`,
+    {
+      method: "POST",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: form,
+      credentials: "include",
+    }
+  );
 
   if (res.status === 401) {
     handleAuthFailure("expired");
@@ -254,13 +255,16 @@ export async function overrideAircraftDocument(
 
 export async function clearAircraftDocumentOverride(documentId: number): Promise<void> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}/aircraft/documents/${documentId}/override`, {
-    method: "DELETE",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: "include",
-  });
+  const res = await fetch(
+    `${getApiBaseUrl()}/aircraft/documents/${documentId}/override`,
+    {
+      method: "DELETE",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: "include",
+    }
+  );
 
   if (res.status === 401) {
     handleAuthFailure("expired");

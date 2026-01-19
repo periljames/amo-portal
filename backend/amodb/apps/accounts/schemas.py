@@ -600,3 +600,32 @@ class SecurityEventRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# PLATFORM SETTINGS (SUPERUSER)
+# ---------------------------------------------------------------------------
+
+
+class PlatformSettingsBase(BaseModel):
+    api_base_url: Optional[str] = None
+    acme_directory_url: Optional[str] = None
+    acme_client: Optional[str] = None
+    certificate_status: Optional[str] = None
+    certificate_issuer: Optional[str] = None
+    certificate_expires_at: Optional[datetime] = None
+    last_renewed_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class PlatformSettingsUpdate(PlatformSettingsBase):
+    pass
+
+
+class PlatformSettingsRead(PlatformSettingsBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

@@ -1,6 +1,6 @@
 // src/services/amoAssets.ts
 
-import { API_BASE_URL } from "./config";
+import { getApiBaseUrl } from "./config";
 import { authHeaders, getToken, handleAuthFailure } from "./auth";
 
 export type AmoAssetRead = {
@@ -25,7 +25,9 @@ function withAmoId(path: string, amoId?: string | null): string {
 }
 
 export async function getAmoAssets(amoId?: string | null): Promise<AmoAssetRead> {
-  const res = await fetch(withAmoId(`${API_BASE_URL}/accounts/amo-assets/me`, amoId), {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/me`, amoId),
+    {
     method: "GET",
     headers: authHeaders(),
   });
@@ -47,7 +49,9 @@ export async function uploadAmoLogo(file: File, amoId?: string | null): Promise<
   const form = new FormData();
   form.append("file", file);
 
-  const res = await fetch(withAmoId(`${API_BASE_URL}/accounts/amo-assets/logo`, amoId), {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/logo`, amoId),
+    {
     method: "POST",
     headers: buildAuthHeader(),
     body: form,
@@ -70,7 +74,9 @@ export async function uploadAmoTemplate(file: File, amoId?: string | null): Prom
   const form = new FormData();
   form.append("file", file);
 
-  const res = await fetch(withAmoId(`${API_BASE_URL}/accounts/amo-assets/template`, amoId), {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/template`, amoId),
+    {
     method: "POST",
     headers: buildAuthHeader(),
     body: form,
@@ -93,7 +99,9 @@ export async function downloadAmoAsset(
   kind: "logo" | "template",
   amoId?: string | null
 ): Promise<Blob> {
-  const res = await fetch(withAmoId(`${API_BASE_URL}/accounts/amo-assets/${kind}`, amoId), {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/${kind}`, amoId),
+    {
     method: "GET",
     headers: buildAuthHeader(),
   });
