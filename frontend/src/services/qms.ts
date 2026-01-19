@@ -23,6 +23,17 @@ export type QMSChangeRequestStatus =
   | "REJECTED"
   | "CANCELLED";
 
+export type CARProgram = "QUALITY" | "RELIABILITY";
+export type CARStatus =
+  | "DRAFT"
+  | "OPEN"
+  | "IN_PROGRESS"
+  | "PENDING_VERIFICATION"
+  | "CLOSED"
+  | "ESCALATED"
+  | "CANCELLED";
+export type CARPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
 export interface QMSDocumentOut {
   id: string;
   domain: string;
@@ -70,6 +81,36 @@ export interface QMSAuditOut {
   created_at: string; // ISO datetime
 }
 
+export interface CAROut {
+  id: string;
+  program: CARProgram;
+  car_number: string;
+  title: string;
+  summary: string;
+  priority: CARPriority;
+  status: CARStatus;
+  due_date: string | null; // YYYY-MM-DD
+  target_closure_date: string | null; // YYYY-MM-DD
+  closed_at: string | null;
+  escalated_at: string | null;
+  finding_id: string | null;
+  requested_by_user_id: string | null;
+  assigned_to_user_id: string | null;
+  invite_token: string;
+  reminder_interval_days: number;
+  next_reminder_at: string | null;
+  containment_action?: string | null;
+  root_cause?: string | null;
+  corrective_action?: string | null;
+  preventive_action?: string | null;
+  evidence_ref?: string | null;
+  submitted_by_name?: string | null;
+  submitted_by_email?: string | null;
+  submitted_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 type QueryVal = string | number | boolean | null | undefined;
 
 function toQuery(params: Record<string, QueryVal>): string {
@@ -90,6 +131,31 @@ async function fetchJson<T>(path: string): Promise<T> {
       Accept: "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
+    credentials: "include",
+  });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
+async function sendJson<T>(path: string, method: "POST" | "PATCH", body: unknown): Promise<T> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body ?? {}),
     credentials: "include",
   });
 
@@ -140,4 +206,98 @@ export async function qmsListAudits(params?: {
   kind?: string;
 }): Promise<QMSAuditOut[]> {
   return fetchJson<QMSAuditOut[]>(`/quality/audits${toQuery(params ?? {})}`);
+}
+
+export async function qmsListCars(params?: {
+  program?: CARProgram;
+  status_?: CARStatus;
+  assigned_to_user_id?: string;
+}): Promise<CAROut[]> {
+  return fetchJson<CAROut[]>(`/quality/cars${toQuery(params ?? {})}`);
+}
+
+export async function qmsCreateCar(payload: {
+  program: CARProgram;
+  title: string;
+  summary: string;
+  priority?: CARPriority;
+  due_date?: string | null;
+  target_closure_date?: string | null;
+  assigned_to_user_id?: string | null;
+  finding_id?: string | null;
+}): Promise<CAROut> {
+  return sendJson<CAROut>("/quality/cars", "POST", payload);
+}
+
+export async function qmsGetCarInvite(carId: string): Promise<{
+  car_id: string;
+  invite_token: string;
+  invite_url: string;
+  next_reminder_at: string | null;
+  car_number: string;
+  title: string;
+  summary: string;
+  priority: CARPriority;
+  status: CARStatus;
+  due_date: string | null;
+  target_closure_date: string | null;
+}> {
+  return fetchJson(`/quality/cars/${carId}/invite`);
+}
+
+export async function qmsRescheduleCarReminder(carId: string, intervalDays: number): Promise<CAROut> {
+  return sendJson<CAROut>(`/quality/cars/${carId}/reminders?reminder_interval_days=${intervalDays}`, "POST", {});
+}
+
+export async function qmsGetCarInviteByToken(token: string): Promise<{
+  car_id: string;
+  invite_token: string;
+  invite_url: string;
+  next_reminder_at: string | null;
+  car_number: string;
+  title: string;
+  summary: string;
+  priority: CARPriority;
+  status: CARStatus;
+  due_date: string | null;
+  target_closure_date: string | null;
+}> {
+  return fetchJson(`/quality/cars/invite/${token}`);
+}
+
+export async function qmsSubmitCarInvite(
+  token: string,
+  payload: {
+    submitted_by_name: string;
+    submitted_by_email: string;
+    containment_action?: string | null;
+    root_cause?: string | null;
+    corrective_action?: string | null;
+    preventive_action?: string | null;
+    evidence_ref?: string | null;
+    due_date?: string | null;
+    target_closure_date?: string | null;
+  }
+): Promise<CAROut> {
+  return sendJson<CAROut>(`/quality/cars/invite/${token}`, "PATCH", payload);
+}
+
+export type QMSNotificationSeverity = "INFO" | "ACTION_REQUIRED" | "WARNING";
+
+export interface QMSNotificationOut {
+  id: string;
+  user_id: string;
+  message: string;
+  severity: QMSNotificationSeverity;
+  created_by_user_id: string | null;
+  created_at: string;
+  read_at: string | null;
+}
+
+export async function qmsListNotifications(): Promise<QMSNotificationOut[]> {
+  return fetchJson<QMSNotificationOut[]>("/quality/notifications/me");
+}
+
+export async function qmsMarkNotificationRead(notificationId: string): Promise<QMSNotificationOut> {
+  return sendJson<QMSNotificationOut>(`/quality/notifications/${notificationId}/read`, "POST", {});
 }
