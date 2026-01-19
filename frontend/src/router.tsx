@@ -12,8 +12,13 @@ import LoginPage from "./pages/LoginPage";
 import PasswordResetPage from "./pages/PasswordResetPage";
 import OnboardingPasswordPage from "./pages/OnboardingPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
+import EhmDashboardPage from "./pages/ehm/EhmDashboardPage";
+import EhmTrendsPage from "./pages/ehm/EhmTrendsPage";
+import EhmUploadsPage from "./pages/ehm/EhmUploadsPage";
 import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
+import ComponentImportPage from "./pages/ComponentImportPage";
+import AircraftDocumentsPage from "./pages/AircraftDocumentsPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminOverviewPage from "./pages/AdminOverviewPage";
@@ -22,10 +27,18 @@ import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
+import ReliabilityReportsPage from "./pages/ReliabilityReportsPage";
 import UpsellPage from "./pages/UpsellPage";
 import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
 import AdminUsageSettingsPage from "./pages/AdminUsageSettingsPage";
 import UserWidgetsPage from "./pages/UserWidgetsPage";
+import QMSDocumentsPage from "./pages/QMSDocumentsPage";
+import QMSAuditsPage from "./pages/QMSAuditsPage";
+import QMSChangeControlPage from "./pages/QMSChangeControlPage";
+import QMSTrainingPage from "./pages/QMSTrainingPage";
+import QMSTrainingUserPage from "./pages/QMSTrainingUserPage";
+import QMSEventsPage from "./pages/QMSEventsPage";
+import QMSKpisPage from "./pages/QMSKpisPage";
 
 import { getCachedUser, isAuthenticated } from "./services/auth";
 
@@ -243,6 +256,39 @@ export const AppRouter: React.FC = () => {
         }
       />
 
+      <Route
+        path="/maintenance/:amoCode/ehm"
+        element={
+          <RequireAuth>
+            <EhmDashboardPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/ehm/dashboard"
+        element={
+          <RequireAuth>
+            <EhmDashboardPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/ehm/trends"
+        element={
+          <RequireAuth>
+            <EhmTrendsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/ehm/uploads"
+        element={
+          <RequireAuth>
+            <EhmUploadsPage />
+          </RequireAuth>
+        }
+      />
+
       {/* Upsell + pricing page */}
       <Route
         path="/maintenance/:amoCode/upsell"
@@ -292,6 +338,24 @@ export const AppRouter: React.FC = () => {
           </RequireAuth>
         }
       />
+      <Route
+        path="/maintenance/:amoCode/:department/component-import"
+        element={
+          <RequireAuth>
+            <ComponentImportPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Aircraft documents, e.g. /maintenance/safarilink/planning/aircraft-documents */}
+      <Route
+        path="/maintenance/:amoCode/:department/aircraft-documents"
+        element={
+          <RequireAuth>
+            <AircraftDocumentsPage />
+          </RequireAuth>
+        }
+      />
 
       {/* QMS dashboard, e.g. /maintenance/safarilink/quality/qms */}
       <Route
@@ -304,10 +368,83 @@ export const AppRouter: React.FC = () => {
       />
 
       <Route
+        path="/maintenance/:amoCode/:department/qms/documents"
+        element={
+          <RequireAuth>
+            <QMSDocumentsPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/audits"
+        element={
+          <RequireAuth>
+            <QMSAuditsPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/change-control"
+        element={
+          <RequireAuth>
+            <QMSChangeControlPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
         path="/maintenance/:amoCode/:department/qms/cars"
         element={
           <RequireAuth>
             <QualityCarsPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/training"
+        element={
+          <RequireAuth>
+            <QMSTrainingPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/training/:userId"
+        element={
+          <RequireAuth>
+            <QMSTrainingUserPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/events"
+        element={
+          <RequireAuth>
+            <QMSEventsPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/kpis"
+        element={
+          <RequireAuth>
+            <QMSKpisPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Reliability reports, e.g. /maintenance/safarilink/quality/reliability-reports */}
+      <Route
+        path="/maintenance/:amoCode/quality/reliability-reports"
+        element={
+          <RequireAuth>
+            <ReliabilityReportsPage />
           </RequireAuth>
         }
       />

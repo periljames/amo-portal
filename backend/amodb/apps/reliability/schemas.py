@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from .models import (
     AlertComparatorEnum,
     ControlChartMethodEnum,
+    EngineTrendStatusEnum,
     FRACASActionStatusEnum,
     FRACASActionTypeEnum,
     FRACASStatusEnum,
@@ -23,6 +24,27 @@ from .models import (
     ReliabilitySeverityEnum,
 )
 from ..accounts.models import AccountRole
+
+
+def _required_engine_metric_keys() -> set[str]:
+    return {
+        "ITT_C",
+        "NG_PCT",
+        "NH_PCT",
+        "FF_PPH",
+        "OAT_C",
+        "ISA_DEV_C",
+        "PRESS_ALT_FT",
+        "POWER_REF",
+    }
+
+
+class EngineTrendEvent(BaseModel):
+    date: date
+    event_type: ReliabilityEventTypeEnum
+    reference_code: Optional[str] = None
+    severity: Optional[ReliabilitySeverityEnum] = None
+    description: Optional[str] = None
 
 
 class ReliabilityProgramTemplateCreate(BaseModel):
@@ -319,12 +341,36 @@ class ReliabilityReportRead(BaseModel):
 class EngineFlightSnapshotCreate(BaseModel):
     aircraft_serial_number: str
     engine_position: str
+    engine_serial_number: Optional[str] = None
     flight_date: date
     flight_leg: Optional[str] = None
     flight_hours: Optional[float] = None
     cycles: Optional[float] = None
+    phase: Optional[str] = None
+    power_reference_type: Optional[str] = None
+    power_reference_value: Optional[float] = None
+    pressure_altitude_ft: Optional[float] = None
+    oat_c: Optional[float] = None
+    isa_dev_c: Optional[float] = None
     metrics: Optional[dict] = None
     data_source: Optional[str] = None
+    source_record_id: Optional[str] = None
+
+    @field_validator("metrics")
+    @classmethod
+    def validate_metrics(cls, value: Optional[dict]) -> Optional[dict]:
+        if value is None:
+            return value
+        required_keys = _required_engine_metric_keys()
+        missing = required_keys - set(value.keys())
+        if missing:
+            missing_list = ", ".join(sorted(missing))
+            raise ValueError(f"metrics missing required keys: {missing_list}")
+        for key in required_keys:
+            metric_value = value.get(key)
+            if metric_value is not None and not isinstance(metric_value, (int, float)):
+                raise ValueError(f"metrics[{key}] must be a number when provided")
+        return value
 
 
 class EngineFlightSnapshotRead(EngineFlightSnapshotCreate):
@@ -362,12 +408,80 @@ class ReliabilityEventIngestBatchResult(BaseModel):
 class EngineFlightSnapshotIngestCreate(BaseModel):
     aircraft_serial_number: str
     engine_position: str
+    engine_serial_number: Optional[str] = None
     flight_date: date
     flight_leg: Optional[str] = None
     flight_hours: Optional[float] = None
     cycles: Optional[float] = None
+    phase: Optional[str] = None
+    power_reference_type: Optional[str] = None
+    power_reference_value: Optional[float] = None
+    pressure_altitude_ft: Optional[float] = None
+    oat_c: Optional[float] = None
+    isa_dev_c: Optional[float] = None
     metrics: Optional[dict] = None
     data_source: str
+    source_record_id: Optional[str] = None
+
+    @field_validator("metrics")
+    @classmethod
+    def validate_metrics(cls, value: Optional[dict]) -> Optional[dict]:
+        if value is None:
+            return value
+        required_keys = _required_engine_metric_keys()
+        missing = required_keys - set(value.keys())
+        if missing:
+            missing_list = ", ".join(sorted(missing))
+            raise ValueError(f"metrics missing required keys: {missing_list}")
+        for key in required_keys:
+            metric_value = value.get(key)
+            if metric_value is not None and not isinstance(metric_value, (int, float)):
+                raise ValueError(f"metrics[{key}] must be a number when provided")
+        return value
+
+
+class EngineTrendStatusBase(BaseModel):
+    aircraft_serial_number: str
+    engine_position: str
+    engine_serial_number: Optional[str] = None
+    last_upload_date: Optional[date] = None
+    last_trend_date: Optional[date] = None
+    last_review_date: Optional[date] = None
+    previous_status: Optional[EngineTrendStatusEnum] = None
+    current_status: Optional[EngineTrendStatusEnum] = None
+
+
+class EngineTrendStatusRead(EngineTrendStatusBase):
+    id: int
+    amo_id: str
+    reviewed_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EngineTrendStatusReview(BaseModel):
+    last_review_date: date
+
+
+class EngineTrendPoint(BaseModel):
+    date: date
+    raw: Optional[float] = None
+    corrected: Optional[float] = None
+    delta: Optional[float] = None
+    status: Optional[EngineTrendStatusEnum] = None
+
+
+class EngineTrendSeriesRead(BaseModel):
+    metric: str
+    baseline: Optional[float] = None
+    control_limit: Optional[float] = None
+    method: Optional[ControlChartMethodEnum] = None
+    parameters: Optional[dict] = None
+    points: list[EngineTrendPoint]
+    events: list[EngineTrendEvent] = Field(default_factory=list)
 
 
 class EngineFlightSnapshotIngestBatch(BaseModel):

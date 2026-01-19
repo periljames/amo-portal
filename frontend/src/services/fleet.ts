@@ -91,6 +91,14 @@ export interface AircraftRead {
   verification_status?: string;
 }
 
+export type TransferProgress = {
+  loadedBytes: number;
+  totalBytes?: number;
+  percent?: number;
+  megaBytesPerSecond: number;
+  megaBitsPerSecond: number;
+};
+
 type QueryVal = string | number | boolean | null | undefined;
 
 function toQuery(params: Record<string, QueryVal>): string {
@@ -149,6 +157,24 @@ async function sendJson<T>(path: string, method: "POST" | "PUT", body: unknown):
     throw new Error(`Fleet API ${res.status}: ${text || res.statusText}`);
   }
   return (await res.json()) as T;
+}
+
+function buildSpeed(
+  loadedBytes: number,
+  totalBytes: number | undefined,
+  startedAt: number
+): TransferProgress {
+  const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.001);
+  const megaBytesPerSecond = loadedBytes / (1024 * 1024) / elapsedSeconds;
+  const megaBitsPerSecond = megaBytesPerSecond * 8;
+  const percent = totalBytes ? Math.min((loadedBytes / totalBytes) * 100, 100) : undefined;
+  return {
+    loadedBytes,
+    totalBytes,
+    percent,
+    megaBytesPerSecond,
+    megaBitsPerSecond,
+  };
 }
 
 export async function listDocumentAlerts(params?: { due_within_days?: number }): Promise<AircraftDocument[]> {
@@ -240,6 +266,91 @@ export async function uploadAircraftDocumentFile(
     throw new Error(`Fleet API ${res.status}: ${text || res.statusText}`);
   }
   return (await res.json()) as AircraftDocument;
+}
+
+export async function downloadAircraftDocumentFile(
+  documentId: number,
+  onProgress?: (progress: TransferProgress) => void
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const startedAt = performance.now();
+    xhr.open("GET", `${API_BASE}/aircraft/documents/${documentId}/download`);
+    const token = getToken();
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("progress", (event) => {
+      if (!onProgress) return;
+      const total = event.lengthComputable ? event.total : undefined;
+      onProgress(buildSpeed(event.loaded, total, startedAt));
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Fleet API ${xhr.status}`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading document evidence."));
+    });
+
+    xhr.send();
+  });
+}
+
+export async function downloadAircraftDocumentsZip(
+  documentIds: number[],
+  onProgress?: (progress: TransferProgress) => void
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const startedAt = performance.now();
+    xhr.open("POST", `${API_BASE}/aircraft/documents/download-zip`);
+    const token = getToken();
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("progress", (event) => {
+      if (!onProgress) return;
+      const total = event.lengthComputable ? event.total : undefined;
+      onProgress(buildSpeed(event.loaded, total, startedAt));
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Fleet API ${xhr.status}`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading document bundle."));
+    });
+
+    xhr.send(JSON.stringify({ document_ids: documentIds }));
+  });
 }
 
 export async function overrideAircraftDocument(

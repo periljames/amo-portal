@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import QMSLayout from "../components/QMS/QMSLayout";
 import { getContext } from "../services/auth";
-import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
   type CAROut,
   type CARPriority,
@@ -42,7 +41,6 @@ const QualityCarsPage: React.FC = () => {
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
-  const amoDisplay = amoSlug !== "UNKNOWN" ? decodeAmoCertFromUrl(amoSlug) : "AMO";
 
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -117,36 +115,34 @@ const QualityCarsPage: React.FC = () => {
   };
 
   return (
-    <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
-      <header className="page-header">
-        <h1 className="page-header__title">
-          Corrective Action Requests · {amoDisplay}
-        </h1>
-        <p className="page-header__subtitle">
-          Register for Quality & Reliability programmes with escalation tracking.
-        </p>
-      </header>
-
-      <section className="page-section" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <button
-          type="button"
-          className="secondary-chip-btn"
-          onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms`)}
-        >
-          Back to QMS overview
+    <QMSLayout
+      amoCode={amoSlug}
+      department={department}
+      title="Corrective Action Register"
+      subtitle="Register for Quality & Reliability programmes with escalation tracking."
+      actions={
+        <button type="button" className="primary-chip-btn" onClick={load}>
+          Refresh CARs
         </button>
-        <select
-          value={programFilter}
-          onChange={(e) => setProgramFilter(e.target.value as CARProgram)}
-          className="form-control"
-          style={{ width: 220 }}
-        >
-          {PROGRAM_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label} programme
-            </option>
-          ))}
-        </select>
+      }
+    >
+      <section className="qms-toolbar">
+        <label className="qms-field">
+          <span>Programme</span>
+          <select
+            value={programFilter}
+            onChange={(e) => setProgramFilter(e.target.value as CARProgram)}
+          >
+            {PROGRAM_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label} programme
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
+          Back
+        </button>
       </section>
 
       {state === "error" && (
@@ -158,13 +154,15 @@ const QualityCarsPage: React.FC = () => {
         </div>
       )}
 
-      <section className="page-section">
-        <div className="card">
-          <div className="card-header">
-            <h2>Log a new CAR</h2>
-            <p className="text-muted">
-              Assign programme, priority, and a concise summary. Numbers are auto-generated per programme and year.
-            </p>
+      <section className="qms-grid">
+        <div className="qms-card">
+          <div className="qms-card__header">
+            <div>
+              <h2 className="qms-card__title">Log a new CAR</h2>
+              <p className="qms-card__subtitle">
+                Assign programme, priority, and a concise summary. Numbers are auto-generated per programme and year.
+              </p>
+            </div>
           </div>
 
           <form onSubmit={handleSubmit} className="form-grid">
@@ -270,13 +268,15 @@ const QualityCarsPage: React.FC = () => {
             </div>
           </form>
         </div>
-      </section>
 
-      <section className="page-section">
-        <div className="card">
-          <div className="card-header">
-            <h2>Register</h2>
-            <p className="text-muted">Auto-numbered entries with status, priority, and ownership.</p>
+        <div className="qms-card qms-card--wide">
+          <div className="qms-card__header">
+            <div>
+              <h2 className="qms-card__title">Register</h2>
+              <p className="qms-card__subtitle">
+                Auto-numbered entries with status, priority, and ownership.
+              </p>
+            </div>
           </div>
 
           {state === "loading" && <p>Loading register…</p>}
@@ -330,7 +330,7 @@ const QualityCarsPage: React.FC = () => {
           )}
         </div>
       </section>
-    </DepartmentLayout>
+    </QMSLayout>
   );
 };
 

@@ -10,17 +10,20 @@ import re
 from pathlib import Path
 import subprocess
 import tempfile
+import zipfile
 from typing import List, Dict, Any, Optional
 from uuid import uuid4
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     HTTPException,
     status,
     UploadFile,
     File,
 )
+from fastapi.responses import FileResponse
 from sqlalchemy import or_, tuple_
 from sqlalchemy.orm import Session
 
@@ -59,6 +62,7 @@ DOC_UPLOAD_DIR = Path(
 ).resolve()
 DOC_MAX_UPLOAD_BYTES = int(os.getenv("AIRCRAFT_DOC_MAX_UPLOAD_BYTES", "20971520"))
 ALLOWED_DOC_EXTS = {".pdf", ".png", ".jpg", ".jpeg"}
+DOC_AMO_SUBDIR = "aircraft"
 
 
 def _get_aircraft_or_404(db: Session, serial_number: str) -> models.Aircraft:
@@ -109,6 +113,7 @@ def _save_document_file(
     *,
     file: UploadFile,
     doc: models.AircraftDocument,
+    amo_id: str,
 ) -> Path:
     filename = file.filename or "document"
     ext = Path(filename).suffix.lower()
@@ -119,7 +124,9 @@ def _save_document_file(
         )
 
     DOC_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    doc_folder = _ensure_doc_upload_path(DOC_UPLOAD_DIR / doc.aircraft_serial_number)
+    doc_root = _ensure_doc_upload_path(DOC_UPLOAD_DIR / amo_id / DOC_AMO_SUBDIR)
+    doc_root.mkdir(parents=True, exist_ok=True)
+    doc_folder = _ensure_doc_upload_path(doc_root / doc.aircraft_serial_number)
     doc_folder.mkdir(parents=True, exist_ok=True)
 
     dest_path = _ensure_doc_upload_path(
@@ -497,7 +504,7 @@ def upload_document_evidence(
         except Exception:
             pass
 
-    dest_path = _save_document_file(file=file, doc=doc)
+    dest_path = _save_document_file(file=file, doc=doc, amo_id=current_user.amo_id)
 
     doc.file_storage_path = str(dest_path)
     doc.file_original_name = file.filename or Path(dest_path).name
@@ -525,6 +532,105 @@ def upload_document_evidence(
     db.commit()
     db.refresh(doc)
     return _document_to_schema(doc, evaluation)
+
+
+@router.get(
+    "/documents/{document_id}/download",
+    response_class=FileResponse,
+    summary="Download aircraft document evidence",
+)
+def download_document_evidence(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+
+    if not doc.file_storage_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No evidence uploaded for this document.")
+
+    path = _ensure_doc_upload_path(Path(doc.file_storage_path))
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document evidence not found.")
+
+    return FileResponse(
+        path=str(path),
+        media_type=doc.file_content_type or "application/octet-stream",
+        filename=doc.file_original_name or path.name,
+    )
+
+
+@router.post(
+    "/documents/download-zip",
+    response_class=FileResponse,
+    summary="Download multiple aircraft document evidence files as a ZIP",
+)
+def download_document_evidence_zip(
+    payload: schemas.AircraftDocumentDownloadRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    doc_ids = list({int(doc_id) for doc_id in payload.document_ids})
+    if not doc_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No document IDs supplied.",
+        )
+
+    docs = db.query(models.AircraftDocument).filter(
+        models.AircraftDocument.id.in_(doc_ids)
+    ).all()
+    if len(docs) != len(doc_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more documents were not found.",
+        )
+
+    export_dir = _ensure_doc_upload_path(
+        DOC_UPLOAD_DIR / current_user.amo_id / "exports"
+    )
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    temp_file = tempfile.NamedTemporaryFile(
+        suffix=".zip",
+        dir=export_dir,
+        delete=False,
+    )
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+
+    try:
+        with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for doc in docs:
+                if not doc.file_storage_path:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"No evidence uploaded for document {doc.id}.",
+                    )
+                path = _ensure_doc_upload_path(Path(doc.file_storage_path))
+                if not path.exists():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Evidence not found for document {doc.id}.",
+                    )
+
+                filename = doc.file_original_name or path.name
+                zf.write(path, arcname=filename)
+    except HTTPException:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+    background_tasks.add_task(temp_path.unlink, missing_ok=True)
+    return FileResponse(
+        path=str(temp_path),
+        media_type="application/zip",
+        filename="aircraft_documents.zip",
+    )
 
 
 @router.post(
@@ -1204,12 +1310,23 @@ def _normalise_header(name: str) -> str:
     - remove common punctuation (space, slash, dash, dot)
     so that 'A/C REG', 'A-C REG.' -> 'ac_reg'.
     """
-    cleaned = name.strip().lower()
-    for ch in [" ", "-", "/", "."]:
-        cleaned = cleaned.replace(ch, "_")
-    while "__" in cleaned:
-        cleaned = cleaned.replace("__", "_")
-    return cleaned
+    cleaned = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+    parts = [part for part in cleaned.split("_") if part]
+    merged: list[str] = []
+    idx = 0
+    while idx < len(parts):
+        part = parts[idx]
+        if len(part) == 1:
+            letters: list[str] = []
+            while idx < len(parts) and len(parts[idx]) == 1:
+                letters.append(parts[idx])
+                idx += 1
+            for letter_index in range(0, len(letters), 2):
+                merged.append("".join(letters[letter_index : letter_index + 2]))
+        else:
+            merged.append(part)
+            idx += 1
+    return "_".join(merged)
 
 
 def _map_aircraft_columns(raw_cols: List[str]) -> Dict[str, str | None]:

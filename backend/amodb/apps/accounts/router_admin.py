@@ -16,6 +16,21 @@ from . import models, schemas, services
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
 RESERVED_PLATFORM_SLUGS = {"system", "root"}
+AMO_ASSET_UPLOAD_DIR = Path(os.getenv("AMO_ASSET_UPLOAD_DIR", "uploads/amo_assets")).resolve()
+TRAINING_UPLOAD_DIR = Path(os.getenv("TRAINING_UPLOAD_DIR", "uploads/training")).resolve()
+AIRCRAFT_DOC_UPLOAD_DIR = Path(
+    os.getenv("AIRCRAFT_DOC_UPLOAD_DIR", "/tmp/amo_aircraft_documents")
+).resolve()
+AIRCRAFT_DOC_AMO_SUBDIR = "aircraft"
+
+
+def _ensure_amo_storage_dirs(amo_id: str) -> None:
+    for base in (AMO_ASSET_UPLOAD_DIR, TRAINING_UPLOAD_DIR, AIRCRAFT_DOC_UPLOAD_DIR):
+        base.mkdir(parents=True, exist_ok=True)
+
+    (AMO_ASSET_UPLOAD_DIR / amo_id).mkdir(parents=True, exist_ok=True)
+    (TRAINING_UPLOAD_DIR / amo_id).mkdir(parents=True, exist_ok=True)
+    (AIRCRAFT_DOC_UPLOAD_DIR / amo_id / AIRCRAFT_DOC_AMO_SUBDIR).mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +159,7 @@ def create_amo(
     db.add(amo)
     db.commit()
     db.refresh(amo)
+    _ensure_amo_storage_dirs(amo.id)
     return amo
 
 

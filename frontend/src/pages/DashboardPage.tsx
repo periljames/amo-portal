@@ -138,6 +138,7 @@ const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
 
   const ctx = getContext();
+
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
 
   const currentUser = getCachedUser();
@@ -513,6 +514,7 @@ const DashboardPage: React.FC = () => {
         </section>
       )}
 
+
       {department === "planning" && (
         <section className="page-section">
           <h2 className="page-section__title">Upcoming maintenance due</h2>
@@ -797,6 +799,14 @@ const DashboardPage: React.FC = () => {
                 onClick={() => navigate(`/maintenance/${amoSlug}/${department}/aircraft-import`)}
               >
                 Configure fleet inputs
+              </button>
+              <button
+                type="button"
+                className="primary-chip-btn"
+                style={{ marginLeft: 8 }}
+                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/component-import`)}
+              >
+                Import components
               </button>
             </div>
             <div className="card">

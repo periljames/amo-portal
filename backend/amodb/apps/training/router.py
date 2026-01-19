@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -64,6 +66,16 @@ def _normalize_pagination(limit: int, offset: int) -> Tuple[int, int]:
     if offset < 0:
         offset = 0
     return limit, offset
+
+
+def _ensure_training_upload_path(path: Path) -> Path:
+    resolved = path.resolve()
+    if not str(resolved).startswith(str(_TRAINING_UPLOAD_DIR)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid training upload path.",
+        )
+    return resolved
 
 
 def _require_training_editor(
@@ -260,6 +272,39 @@ def _maybe_send_email(background_tasks: BackgroundTasks, to_email: Optional[str]
             if user and pwd:
                 s.login(user, pwd)
             s.send_message(msg)
+
+    background_tasks.add_task(_send)
+
+
+def _maybe_send_whatsapp(background_tasks: BackgroundTasks, to_phone: Optional[str], message: str) -> None:
+    """
+    Optional WhatsApp hook (safe-by-default).
+    If WHATSAPP_WEBHOOK_URL is not set, this does nothing.
+
+    Env expected:
+      WHATSAPP_WEBHOOK_URL
+      WHATSAPP_WEBHOOK_BEARER (optional)
+    """
+    if not to_phone or not isinstance(to_phone, str):
+        return
+
+    url = os.getenv("WHATSAPP_WEBHOOK_URL")
+    if not url:
+        return
+
+    token = os.getenv("WHATSAPP_WEBHOOK_BEARER")
+
+    def _send() -> None:
+        payload = json.dumps({"to": to_phone, "message": message}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=10):
+            pass
 
     background_tasks.add_task(_send)
 
@@ -986,6 +1031,7 @@ def update_event(
             trainee = db.query(accounts_models.User).filter(accounts_models.User.id == p.user_id).first()
             if trainee:
                 _maybe_send_email(background_tasks, getattr(trainee, "email", None), title, body)
+                _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), body)
 
     db.commit()
     db.refresh(event)
@@ -1065,6 +1111,7 @@ def add_event_participant(
 
     # Optional email hook
     _maybe_send_email(background_tasks, getattr(trainee, "email", None), notif_title, notif_body)
+    _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), notif_body)
 
     _audit(
         db,
@@ -1271,6 +1318,7 @@ def create_training_record(
         created_by_user_id=current_user.id,
     )
     _maybe_send_email(background_tasks, getattr(trainee, "email", None), notif_title, notif_body)
+    _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), notif_body)
 
     _audit(
         db,
@@ -1334,6 +1382,7 @@ def verify_training_record(
             created_by_user_id=current_user.id,
         )
         _maybe_send_email(background_tasks, getattr(trainee, "email", None), title, body)
+        _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), body)
 
     _audit(
         db,
@@ -1511,6 +1560,7 @@ def update_deferral_request(
             created_by_user_id=current_user.id,
         )
         _maybe_send_email(background_tasks, getattr(trainee, "email", None), title, body)
+        _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), body)
 
     _audit(
         db,
@@ -1702,7 +1752,9 @@ def upload_training_file(
     original_name = file.filename or "upload.bin"
     ext = "".join(Path(original_name).suffixes)[-20:]  # guard weird names
     file_id = training_models.generate_user_id()  # stable name + DB id
-    dest_path = _TRAINING_UPLOAD_DIR / f"{file_id}{ext}"
+    amo_folder = _ensure_training_upload_path(_TRAINING_UPLOAD_DIR / current_user.amo_id)
+    amo_folder.mkdir(parents=True, exist_ok=True)
+    dest_path = _ensure_training_upload_path(amo_folder / f"{file_id}{ext}")
 
     sha = hashlib.sha256()
     total = 0
@@ -1898,7 +1950,7 @@ def download_training_file(
     if not is_editor and f.owner_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to download this file.")
 
-    path = Path(f.storage_path)
+    path = _ensure_training_upload_path(Path(f.storage_path))
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on server storage.")
 
