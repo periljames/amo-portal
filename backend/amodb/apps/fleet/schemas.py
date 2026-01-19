@@ -141,9 +141,32 @@ class AircraftImportConfirmedRow(BaseModel):
 
 
 class AircraftImportRequest(BaseModel):
-    rows: List[AircraftImportRow]
+    rows: List[AircraftImportRow] = []
     confirmed_rows: Optional[List[AircraftImportConfirmedRow]] = None
     batch_id: Optional[str] = None
+    preview_id: Optional[str] = None
+    approved_row_numbers: Optional[List[int]] = None
+    rejected_row_numbers: Optional[List[int]] = None
+
+
+class AircraftImportPreviewRow(BaseModel):
+    row_number: int
+    data: Dict[str, Any]
+    errors: List[str]
+    warnings: List[str]
+    action: str
+    suggested_template: Optional[Dict[str, Any]] = None
+    formula_proposals: Optional[List[Dict[str, Any]]] = None
+
+
+class AircraftImportPreviewResponse(BaseModel):
+    preview_id: str
+    total_rows: int
+    rows: List[AircraftImportPreviewRow]
+    column_mapping: Dict[str, Optional[str]]
+    summary: Dict[str, int]
+    ocr: Optional[Dict[str, Any]] = None
+    formula_discrepancies: Optional[List[Dict[str, Any]]] = None
 
 
 class AircraftImportTemplateBase(BaseModel):
@@ -302,7 +325,10 @@ class AircraftComponentImportRow(BaseModel):
 
 
 class AircraftComponentImportRequest(BaseModel):
-    rows: List[AircraftComponentImportRow]
+    rows: List[AircraftComponentImportRow] = []
+    preview_id: Optional[str] = None
+    approved_row_numbers: Optional[List[int]] = None
+    rejected_row_numbers: Optional[List[int]] = None
 
 
 # For responses that show one aircraft with its components:

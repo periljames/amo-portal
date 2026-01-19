@@ -1,8 +1,9 @@
 // frontend/src/pages/AircraftImportPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CellValueChangedEvent,
   ColDef,
+  GridReadyEvent,
   ICellRendererParams,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
@@ -142,6 +143,8 @@ type ImportSnapshot = {
   created_by_user_id?: string | null;
 };
 
+const MAX_CLIENT_PREVIEW_ROWS = 1500;
+
 const AIRCRAFT_DIFF_FIELDS: AircraftRowField[] = [
   "serial_number",
   "registration",
@@ -195,6 +198,9 @@ const AircraftImportPage: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
+  const [previewRowOverrides, setPreviewRowOverrides] = useState<
+    Record<number, PreviewRow>
+  >({});
   const [columnMapping, setColumnMapping] = useState<
     Record<string, string | null> | null
   >(null);
@@ -212,12 +218,18 @@ const AircraftImportPage: React.FC = () => {
   const [templateModelCode, setTemplateModelCode] = useState("");
   const [templateOperatorCode, setTemplateOperatorCode] = useState("");
   const [templateDefaultsJson, setTemplateDefaultsJson] = useState("{}");
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewTotalRows, setPreviewTotalRows] = useState(0);
+  const [previewMode, setPreviewMode] = useState<"client" | "server">("client");
+  const [previewGridApi, setPreviewGridApi] = useState<any>(null);
   const [templateLoading, setTemplateLoading] = useState(false);
   const [componentPreviewLoading, setComponentPreviewLoading] = useState(false);
   const [componentConfirmLoading, setComponentConfirmLoading] = useState(false);
   const [componentPreviewRows, setComponentPreviewRows] = useState<
     ComponentPreviewRow[]
   >([]);
+  const [componentPreviewRowOverrides, setComponentPreviewRowOverrides] =
+    useState<Record<number, ComponentPreviewRow>>({});
   const [componentColumnMapping, setComponentColumnMapping] = useState<
     Record<string, string | null> | null
   >(null);
@@ -242,6 +254,15 @@ const AircraftImportPage: React.FC = () => {
     useState("{}");
   const [componentTemplateLoading, setComponentTemplateLoading] =
     useState(false);
+  const [componentPreviewId, setComponentPreviewId] = useState<string | null>(
+    null
+  );
+  const [componentPreviewTotalRows, setComponentPreviewTotalRows] = useState(0);
+  const [componentPreviewMode, setComponentPreviewMode] = useState<
+    "client" | "server"
+  >("client");
+  const [componentPreviewGridApi, setComponentPreviewGridApi] =
+    useState<any>(null);
   const [importBatchId, setImportBatchId] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<ImportSnapshot[]>([]);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(
@@ -275,6 +296,62 @@ const AircraftImportPage: React.FC = () => {
   };
 
   const hasErrors = (row: PreviewRow) => row.errors.length > 0;
+
+  const normalizePreviewRow = (row: PreviewRow): PreviewRow => ({
+    ...row,
+    approved: row.errors.length === 0,
+    original_data: { ...row.data },
+    proposed_fields: row.proposed_fields ?? [],
+    user_overrides: row.user_overrides ?? [],
+    formula_proposals: row.formula_proposals ?? [],
+    formula_decisions: row.formula_decisions ?? {},
+  });
+
+  const mergePreviewOverride = (row: PreviewRow): PreviewRow => {
+    const override = previewRowOverrides[row.row_number];
+    if (!override) {
+      return row;
+    }
+    return {
+      ...row,
+      ...override,
+      data: { ...row.data, ...override.data },
+      errors: override.errors ?? row.errors,
+      warnings: override.warnings ?? row.warnings,
+      approved: override.approved ?? row.approved,
+      original_data: override.original_data ?? row.original_data,
+      proposed_fields: override.proposed_fields ?? row.proposed_fields,
+      user_overrides: override.user_overrides ?? row.user_overrides,
+      formula_decisions: override.formula_decisions ?? row.formula_decisions,
+      formula_proposals: override.formula_proposals ?? row.formula_proposals,
+    };
+  };
+
+  const normalizeComponentPreviewRow = (
+    row: ComponentPreviewRow
+  ): ComponentPreviewRow => ({
+    ...row,
+    approved: row.errors.length === 0,
+  });
+
+  const mergeComponentPreviewOverride = (
+    row: ComponentPreviewRow
+  ): ComponentPreviewRow => {
+    const override = componentPreviewRowOverrides[row.row_number];
+    if (!override) {
+      return row;
+    }
+    return {
+      ...row,
+      ...override,
+      data: { ...row.data, ...override.data },
+      errors: override.errors ?? row.errors,
+      warnings: override.warnings ?? row.warnings,
+      approved: override.approved ?? row.approved,
+      existing_component: override.existing_component ?? row.existing_component,
+      dedupe_suggestions: override.dedupe_suggestions ?? row.dedupe_suggestions,
+    };
+  };
 
   const validateComponentRow = (data: ComponentRowData) => {
     const errors: string[] = [];
@@ -375,100 +452,152 @@ const AircraftImportPage: React.FC = () => {
     field: AircraftRowField,
     value: any,
     source: "user" | "system" = "user",
-    decision?: FormulaDecision
+    decision?: FormulaDecision,
+    rowContext?: PreviewRow
   ) => {
-    setPreviewRows((prev) =>
-      prev.map((row) => {
-        if (row.row_number !== rowNumber) {
-          return row;
+    const applyUpdate = (row: PreviewRow) => {
+      const nextData = {
+        ...row.data,
+        [field]: value,
+      };
+      const errors = validateRow(nextData);
+      const originalValue = normalizeValue(row.original_data?.[field]);
+      const userOverrides = new Set(row.user_overrides ?? []);
+      if (source === "user") {
+        if (normalizeValue(value) === originalValue) {
+          userOverrides.delete(field);
+        } else {
+          userOverrides.add(field);
         }
-        const nextData = {
-          ...row.data,
-          [field]: value,
-        };
-        const errors = validateRow(nextData);
-        const originalValue = normalizeValue(row.original_data?.[field]);
-        const userOverrides = new Set(row.user_overrides ?? []);
-        if (source === "user") {
-          if (normalizeValue(value) === originalValue) {
-            userOverrides.delete(field);
-          } else {
-            userOverrides.add(field);
+      }
+      const formulaDecisions = { ...(row.formula_decisions ?? {}) };
+      if (decision) {
+        formulaDecisions[field] = decision;
+      }
+      return {
+        ...row,
+        data: nextData,
+        errors,
+        approved: errors.length === 0 && row.approved,
+        user_overrides: Array.from(userOverrides),
+        formula_decisions: formulaDecisions,
+      };
+    };
+
+    if (previewMode === "client") {
+      setPreviewRows((prev) =>
+        prev.map((row) => {
+          if (row.row_number !== rowNumber) {
+            return row;
           }
-        }
-        const formulaDecisions = { ...(row.formula_decisions ?? {}) };
-        if (decision) {
-          formulaDecisions[field] = decision;
-        }
-        return {
-          ...row,
-          data: nextData,
-          errors,
-          approved: errors.length === 0 && row.approved,
-          user_overrides: Array.from(userOverrides),
-          formula_decisions: formulaDecisions,
-        };
-      })
-    );
+          return applyUpdate(row);
+        })
+      );
+      return;
+    }
+
+    if (!rowContext) {
+      return;
+    }
+    setPreviewRowOverrides((prev) => ({
+      ...prev,
+      [rowNumber]: applyUpdate(rowContext),
+    }));
   };
 
-  const handleComponentPreviewRowChange = (
-    index: number,
+  const updateComponentPreviewRowValue = (
+    rowNumber: number,
     field: keyof ComponentRowData,
-    value: string
+    value: any,
+    rowContext?: ComponentPreviewRow
   ) => {
-    setComponentPreviewRows((prev) =>
-      prev.map((row, rowIndex) => {
-        if (rowIndex !== index) {
-          return row;
-        }
-        const nextData = {
-          ...row.data,
-          [field]: value,
-        };
-        const errors = validateComponentRow(nextData);
-        return {
-          ...row,
-          data: nextData,
-          errors,
-          approved: errors.length === 0 && row.approved,
-        };
-      })
-    );
+    const applyUpdate = (row: ComponentPreviewRow) => {
+      const nextData = {
+        ...row.data,
+        [field]: value,
+      };
+      const errors = validateComponentRow(nextData);
+      return {
+        ...row,
+        data: nextData,
+        errors,
+        approved: errors.length === 0 && row.approved,
+      };
+    };
+
+    if (componentPreviewMode === "client") {
+      setComponentPreviewRows((prev) =>
+        prev.map((row) => {
+          if (row.row_number !== rowNumber) {
+            return row;
+          }
+          return applyUpdate(row);
+        })
+      );
+      return;
+    }
+
+    if (!rowContext) {
+      return;
+    }
+    setComponentPreviewRowOverrides((prev) => ({
+      ...prev,
+      [rowNumber]: applyUpdate(rowContext),
+    }));
   };
 
-  const toggleApproval = (rowNumber: number) => {
-    setPreviewRows((prev) =>
-      prev.map((row) => {
-        if (row.row_number !== rowNumber) {
-          return row;
-        }
-        if (hasErrors(row)) {
-          return row;
-        }
-        return {
-          ...row,
-          approved: !row.approved,
-        };
-      })
-    );
+  const toggleApproval = (row: PreviewRow) => {
+    if (hasErrors(row)) {
+      return;
+    }
+    if (previewMode === "client") {
+      setPreviewRows((prev) =>
+        prev.map((entry) => {
+          if (entry.row_number !== row.row_number) {
+            return entry;
+          }
+          return {
+            ...entry,
+            approved: !entry.approved,
+          };
+        })
+      );
+      return;
+    }
+    setPreviewRowOverrides((prev) => ({
+      ...prev,
+      [row.row_number]: {
+        ...row,
+        approved: !row.approved,
+      },
+    }));
   };
 
-  const toggleComponentApproval = (index: number) => {
-    setComponentPreviewRows((prev) =>
-      prev.map((row, rowIndex) => {
-        if (rowIndex !== index) {
-          return row;
-        }
-        if (hasComponentErrors(row)) {
-          return row;
-        }
-        return {
-          ...row,
-          approved: !row.approved,
-        };
-      })
-    );
+  const toggleComponentApproval = (row: ComponentPreviewRow) => {
+    if (hasComponentErrors(row)) {
+      return;
+    }
+    if (componentPreviewMode === "client") {
+      setComponentPreviewRows((prev) =>
+        prev.map((entry) => {
+          if (entry.row_number !== row.row_number) {
+            return entry;
+          }
+          return {
+            ...entry,
+            approved: !entry.approved,
+          };
+        })
+      );
+      return;
+    }
+    setComponentPreviewRowOverrides((prev) => ({
+      ...prev,
+      [row.row_number]: {
+        ...row,
+        approved: !row.approved,
+      },
+    }));
   };
 
   const submitPreviewFile = async (file: File) => {
@@ -488,16 +617,17 @@ const AircraftImportPage: React.FC = () => {
       if (!res.ok) {
         throw new Error(data.detail ?? "Preview failed");
       }
-      const rows: PreviewRow[] = (data.rows ?? []).map((row: PreviewRow) => ({
-        ...row,
-        approved: row.errors.length === 0,
-        original_data: { ...row.data },
-        proposed_fields: [],
-        user_overrides: [],
-        formula_proposals: row.formula_proposals ?? [],
-        formula_decisions: {},
-      }));
+      const rows: PreviewRow[] = (data.rows ?? []).map((row: PreviewRow) =>
+        normalizePreviewRow(row)
+      );
+      const totalRows = data.total_rows ?? rows.length;
+      const nextMode =
+        totalRows > MAX_CLIENT_PREVIEW_ROWS ? "server" : "client";
       setPreviewRows(rows);
+      setPreviewRowOverrides({});
+      setPreviewId(data.preview_id ?? null);
+      setPreviewTotalRows(totalRows);
+      setPreviewMode(nextMode);
       const nextBatchId = generateBatchId();
       setImportBatchId(nextBatchId);
       setSnapshots([]);
@@ -509,10 +639,129 @@ const AircraftImportPage: React.FC = () => {
       setMessage("Preview ready. Review and confirm import.");
     } catch (err: any) {
       setMessage(err.message ?? "Error previewing aircraft.");
+      setPreviewId(null);
+      setPreviewTotalRows(0);
+      setPreviewMode("client");
+      setPreviewRows([]);
+      setPreviewRowOverrides({});
     } finally {
       setPreviewLoading(false);
     }
   };
+
+  const createPreviewDatasource = useCallback(
+    () => ({
+      getRows: async (params: {
+        startRow: number;
+        endRow: number;
+        successCallback: (rows: PreviewRow[], lastRow?: number) => void;
+        failCallback: () => void;
+      }) => {
+        if (!previewId) {
+          params.successCallback([], 0);
+          return;
+        }
+        const startRow = params.startRow ?? 0;
+        const endRow = params.endRow ?? startRow + 200;
+        const limit = Math.max(1, endRow - startRow);
+        try {
+          const res = await fetch(
+            `${API_BASE}/aircraft/import/preview/${encodeURIComponent(
+              previewId
+            )}/rows?offset=${startRow}&limit=${limit}`
+          );
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.detail ?? "Failed to fetch preview rows.");
+          }
+          const rows: PreviewRow[] = (data.rows ?? [])
+            .map((row: PreviewRow) => normalizePreviewRow(row))
+            .map((row: PreviewRow) => mergePreviewOverride(row));
+          const totalRows = data.total_rows ?? 0;
+          params.successCallback(rows, totalRows);
+        } catch (err) {
+          params.failCallback();
+        }
+      },
+    }),
+    [previewId, previewRowOverrides]
+  );
+
+  useEffect(() => {
+    if (previewMode === "server" && previewGridApi) {
+      previewGridApi.setDatasource(createPreviewDatasource());
+    }
+  }, [previewMode, previewGridApi, createPreviewDatasource]);
+
+  const handlePreviewGridReady = useCallback(
+    (params: GridReadyEvent) => {
+      setPreviewGridApi(params.api);
+      if (previewMode === "server") {
+        params.api.setDatasource(createPreviewDatasource());
+      }
+    },
+    [previewMode, createPreviewDatasource]
+  );
+
+  const createComponentPreviewDatasource = useCallback(
+    () => ({
+      getRows: async (params: {
+        startRow: number;
+        endRow: number;
+        successCallback: (rows: ComponentPreviewRow[], lastRow?: number) => void;
+        failCallback: () => void;
+      }) => {
+        if (!componentPreviewId) {
+          params.successCallback([], 0);
+          return;
+        }
+        const startRow = params.startRow ?? 0;
+        const endRow = params.endRow ?? startRow + 200;
+        const limit = Math.max(1, endRow - startRow);
+        try {
+          const res = await fetch(
+            `${API_BASE}/aircraft/${encodeURIComponent(
+              componentAircraftSerial.trim()
+            )}/components/import/preview/${encodeURIComponent(
+              componentPreviewId
+            )}/rows?offset=${startRow}&limit=${limit}`
+          );
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.detail ?? "Failed to fetch component preview.");
+          }
+          const rows: ComponentPreviewRow[] = (data.rows ?? [])
+            .map((row: ComponentPreviewRow) => normalizeComponentPreviewRow(row))
+            .map((row: ComponentPreviewRow) => mergeComponentPreviewOverride(row));
+          const totalRows = data.total_rows ?? 0;
+          params.successCallback(rows, totalRows);
+        } catch (err) {
+          params.failCallback();
+        }
+      },
+    }),
+    [componentPreviewId, componentPreviewRowOverrides, componentAircraftSerial]
+  );
+
+  useEffect(() => {
+    if (componentPreviewMode === "server" && componentPreviewGridApi) {
+      componentPreviewGridApi.setDatasource(createComponentPreviewDatasource());
+    }
+  }, [
+    componentPreviewMode,
+    componentPreviewGridApi,
+    createComponentPreviewDatasource,
+  ]);
+
+  const handleComponentGridReady = useCallback(
+    (params: GridReadyEvent) => {
+      setComponentPreviewGridApi(params.api);
+      if (componentPreviewMode === "server") {
+        params.api.setDatasource(createComponentPreviewDatasource());
+      }
+    },
+    [componentPreviewMode, createComponentPreviewDatasource]
+  );
 
   const submitComponentPreviewFile = async (file: File) => {
     if (!componentAircraftSerial.trim()) {
@@ -541,17 +790,26 @@ const AircraftImportPage: React.FC = () => {
         throw new Error(data.detail ?? "Component preview failed");
       }
       const rows: ComponentPreviewRow[] = (data.rows ?? []).map(
-        (row: ComponentPreviewRow) => ({
-          ...row,
-          approved: row.errors.length === 0,
-        })
+        (row: ComponentPreviewRow) => normalizeComponentPreviewRow(row)
       );
+      const totalRows = data.total_rows ?? rows.length;
+      const nextMode =
+        totalRows > MAX_CLIENT_PREVIEW_ROWS ? "server" : "client";
       setComponentPreviewRows(rows);
+      setComponentPreviewRowOverrides({});
+      setComponentPreviewId(data.preview_id ?? null);
+      setComponentPreviewTotalRows(totalRows);
+      setComponentPreviewMode(nextMode);
       setComponentColumnMapping(data.column_mapping ?? null);
       setComponentSummary(data.summary ?? null);
       setMessage("Component preview ready. Review and confirm import.");
     } catch (err: any) {
       setMessage(err.message ?? "Error previewing components.");
+      setComponentPreviewId(null);
+      setComponentPreviewTotalRows(0);
+      setComponentPreviewMode("client");
+      setComponentPreviewRows([]);
+      setComponentPreviewRowOverrides({});
     } finally {
       setComponentPreviewLoading(false);
     }
@@ -786,9 +1044,17 @@ const AircraftImportPage: React.FC = () => {
     rowNumber: number,
     field: AircraftRowField,
     decision: FormulaDecision,
-    value: any
+    value: any,
+    rowContext?: PreviewRow
   ) => {
-    updatePreviewRowValue(rowNumber, field, value ?? "", "user", decision);
+    updatePreviewRowValue(
+      rowNumber,
+      field,
+      value ?? "",
+      "user",
+      decision,
+      rowContext
+    );
   };
 
   const buildFormulaDecision = (
@@ -883,7 +1149,8 @@ const AircraftImportPage: React.FC = () => {
                   row.row_number,
                   field,
                   "accept",
-                  proposedValue
+                  proposedValue,
+                  params.data ?? undefined
                 )
               }
             >
@@ -897,7 +1164,8 @@ const AircraftImportPage: React.FC = () => {
                   row.row_number,
                   field,
                   "keep",
-                  row.original_data?.[field] ?? ""
+                  row.original_data?.[field] ?? "",
+                  params.data ?? undefined
                 )
               }
             >
@@ -925,6 +1193,12 @@ const AircraftImportPage: React.FC = () => {
     };
 
   const applyTemplateToPreview = () => {
+    if (previewMode === "server") {
+      setMessage(
+        "Template defaults are disabled in large preview mode. Apply defaults in the source file instead."
+      );
+      return;
+    }
     const selected = templates.find(
       (template) => template.id === selectedTemplateId
     );
@@ -987,6 +1261,12 @@ const AircraftImportPage: React.FC = () => {
   };
 
   const applyComponentTemplateToPreview = () => {
+    if (componentPreviewMode === "server") {
+      setMessage(
+        "Template defaults are disabled in large preview mode. Apply defaults in the source file instead."
+      );
+      return;
+    }
     const selected = componentTemplates.find(
       (template) => template.id === componentSelectedTemplateId
     );
@@ -1044,7 +1324,17 @@ const AircraftImportPage: React.FC = () => {
               type="checkbox"
               checked={params.data.approved}
               disabled={hasErrors(params.data)}
-              onChange={() => toggleApproval(params.data!.row_number)}
+              onChange={() => {
+                const currentRow = params.data!;
+                const nextRow = {
+                  ...currentRow,
+                  approved: !currentRow.approved,
+                };
+                if (previewMode === "server") {
+                  params.node?.setData(nextRow);
+                }
+                toggleApproval(currentRow);
+              }}
             />
           );
         },
@@ -1340,7 +1630,12 @@ const AircraftImportPage: React.FC = () => {
         },
       },
     ],
-    []
+    [
+      previewMode,
+      renderFormulaCell,
+      toggleApproval,
+      hasErrors,
+    ]
   );
 
   const aircraftGridDefaultColDef = useMemo<ColDef<PreviewRow>>(
@@ -1372,7 +1667,239 @@ const AircraftImportPage: React.FC = () => {
       field,
       event.newValue ?? "",
       "user",
-      decision
+      decision,
+      event.data
+    );
+  };
+
+  const componentGridColumns = useMemo<ColDef<ComponentPreviewRow>[]>(
+    () => [
+      {
+        headerName: "Approve",
+        colId: "approved",
+        width: 110,
+        pinned: "left",
+        suppressMovable: true,
+        cellRenderer: (params: ICellRendererParams<ComponentPreviewRow>) => {
+          if (!params.data) {
+            return null;
+          }
+          return (
+            <input
+              type="checkbox"
+              checked={params.data.approved}
+              disabled={hasComponentErrors(params.data)}
+              onChange={() => {
+                const currentRow = params.data!;
+                const nextRow = {
+                  ...currentRow,
+                  approved: !currentRow.approved,
+                };
+                if (componentPreviewMode === "server") {
+                  params.node?.setData(nextRow);
+                }
+                toggleComponentApproval(currentRow);
+              }}
+            />
+          );
+        },
+      },
+      {
+        headerName: "Row",
+        field: "row_number",
+        width: 80,
+        pinned: "left",
+      },
+      {
+        headerName: "Action",
+        colId: "action",
+        minWidth: 200,
+        cellRenderer: (params: ICellRendererParams<ComponentPreviewRow>) => {
+          const row = params.data;
+          if (!row) {
+            return null;
+          }
+          const action = row.errors.length > 0 ? "invalid" : row.action;
+          return (
+            <div className="flex flex-col gap-1 text-xs">
+              <span
+                className={`inline-flex w-fit items-center rounded-full px-2 py-1 text-xs font-semibold ${
+                  action === "new"
+                    ? "bg-emerald-500/20 text-emerald-200"
+                    : action === "update"
+                    ? "bg-sky-500/20 text-sky-200"
+                    : "bg-rose-500/20 text-rose-200"
+                }`}
+              >
+                {action}
+              </span>
+              {row.errors.length > 0 && (
+                <div className="text-rose-300">{row.errors.join(" ")}</div>
+              )}
+              {row.warnings.length > 0 && (
+                <div className="text-amber-200">{row.warnings.join(" ")}</div>
+              )}
+              {row.dedupe_suggestions &&
+                row.dedupe_suggestions.length > 0 && (
+                  <div className="text-amber-200">
+                    {row.dedupe_suggestions.map((suggestion, idx) => (
+                      <div key={`${row.row_number}-dedupe-${idx}`}>
+                        {suggestion.source === "existing" ? "Existing" : "File"}{" "}
+                        match for {suggestion.part_number}/
+                        {suggestion.serial_number}:{" "}
+                        {suggestion.positions.join(", ")}
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "Position",
+        colId: "position",
+        editable: true,
+        width: 140,
+        valueGetter: (params) => params.data?.data.position ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            position: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Part Number",
+        colId: "part_number",
+        editable: true,
+        width: 160,
+        valueGetter: (params) => params.data?.data.part_number ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            part_number: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Serial Number",
+        colId: "serial_number",
+        editable: true,
+        width: 160,
+        valueGetter: (params) => params.data?.data.serial_number ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            serial_number: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Existing PN/SN",
+        colId: "existing_component",
+        minWidth: 200,
+        cellRenderer: (params: ICellRendererParams<ComponentPreviewRow>) => {
+          const existing = params.data?.existing_component;
+          if (!existing?.part_number && !existing?.serial_number) {
+            return <span className="text-slate-500">—</span>;
+          }
+          return (
+            <div className="text-xs text-slate-300">
+              <div>{existing.part_number ?? "—"}</div>
+              <div className="text-slate-400">
+                {existing.serial_number ?? "—"}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "ATA",
+        colId: "ata",
+        editable: true,
+        width: 100,
+        valueGetter: (params) => params.data?.data.ata ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            ata: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Notes",
+        colId: "notes",
+        editable: true,
+        minWidth: 200,
+        valueGetter: (params) => params.data?.data.notes ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            notes: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+    ],
+    [componentPreviewMode, toggleComponentApproval, hasComponentErrors]
+  );
+
+  const componentGridDefaultColDef = useMemo<ColDef<ComponentPreviewRow>>(
+    () => ({
+      editable: false,
+      resizable: true,
+      sortable: true,
+      suppressMovable: false,
+      filter: true,
+    }),
+    []
+  );
+
+  const handleComponentCellValueChanged = (
+    event: CellValueChangedEvent<ComponentPreviewRow>
+  ) => {
+    if (!event.data) {
+      return;
+    }
+    const field = event.colDef.colId as keyof ComponentRowData | undefined;
+    if (!field) {
+      return;
+    }
+    const editableFields: (keyof ComponentRowData)[] = [
+      "position",
+      "part_number",
+      "serial_number",
+      "ata",
+      "notes",
+    ];
+    if (!editableFields.includes(field)) {
+      return;
+    }
+    updateComponentPreviewRowValue(
+      event.data.row_number,
+      field,
+      event.newValue ?? "",
+      event.data
     );
   };
 
@@ -1399,10 +1926,29 @@ const AircraftImportPage: React.FC = () => {
   };
 
   const confirmImport = async () => {
-    const approvedRows = previewRows.filter(
+    const approvedRows =
+      previewMode === "client"
+        ? previewRows.filter((row) => row.approved && row.errors.length === 0)
+        : [];
+    const overrideRows = Object.values(previewRowOverrides);
+    const approvedOverrideRows = overrideRows.filter(
       (row) => row.approved && row.errors.length === 0
     );
-    if (approvedRows.length === 0) {
+    const rejectedOverrideRows = overrideRows.filter((row) => !row.approved);
+    if (
+      previewMode === "client" &&
+      approvedRows.length === 0 &&
+      approvedOverrideRows.length === 0
+    ) {
+      setMessage("Select at least one valid row to import.");
+      return;
+    }
+    if (
+      previewMode === "server" &&
+      !previewSummary?.new &&
+      !previewSummary?.update &&
+      approvedOverrideRows.length === 0
+    ) {
       setMessage("Select at least one valid row to import.");
       return;
     }
@@ -1410,15 +1956,34 @@ const AircraftImportPage: React.FC = () => {
     setMessage(null);
 
     try {
+      const approvedRowNumbers =
+        previewMode === "client"
+          ? approvedRows.map((row) => row.row_number)
+          : approvedOverrideRows.map((row) => row.row_number);
+      const rejectedRowNumbers =
+        previewMode === "server"
+          ? rejectedOverrideRows.map((row) => row.row_number)
+          : [];
       const res = await fetch(`${API_BASE}/aircraft/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          rows: approvedRows.map((row) => ({
-            row_number: row.row_number,
-            ...row.data,
-          })),
-          confirmed_rows: buildConfirmedRows(approvedRows),
+          rows:
+            previewMode === "client"
+              ? approvedRows.map((row) => ({
+                  row_number: row.row_number,
+                  ...row.data,
+                }))
+              : [],
+          preview_id: previewId,
+          approved_row_numbers:
+            previewMode === "server" ? approvedRowNumbers : undefined,
+          rejected_row_numbers:
+            previewMode === "server" ? rejectedRowNumbers : undefined,
+          confirmed_rows:
+            previewMode === "client"
+              ? buildConfirmedRows(approvedRows)
+              : buildConfirmedRows(approvedOverrideRows),
           batch_id: importBatchId,
         }),
       });
@@ -1444,10 +2009,31 @@ const AircraftImportPage: React.FC = () => {
       setMessage("Enter the aircraft serial number for components.");
       return;
     }
-    const approvedRows = componentPreviewRows.filter(
+    const approvedRows =
+      componentPreviewMode === "client"
+        ? componentPreviewRows.filter(
+            (row) => row.approved && row.errors.length === 0
+          )
+        : [];
+    const overrideRows = Object.values(componentPreviewRowOverrides);
+    const approvedOverrideRows = overrideRows.filter(
       (row) => row.approved && row.errors.length === 0
     );
-    if (approvedRows.length === 0) {
+    const rejectedOverrideRows = overrideRows.filter((row) => !row.approved);
+    if (
+      componentPreviewMode === "client" &&
+      approvedRows.length === 0 &&
+      approvedOverrideRows.length === 0
+    ) {
+      setMessage("Select at least one valid component row to import.");
+      return;
+    }
+    if (
+      componentPreviewMode === "server" &&
+      !componentSummary?.new &&
+      !componentSummary?.update &&
+      approvedOverrideRows.length === 0
+    ) {
       setMessage("Select at least one valid component row to import.");
       return;
     }
@@ -1455,6 +2041,14 @@ const AircraftImportPage: React.FC = () => {
     setMessage(null);
 
     try {
+      const approvedRowNumbers =
+        componentPreviewMode === "client"
+          ? approvedRows.map((row) => row.row_number)
+          : approvedOverrideRows.map((row) => row.row_number);
+      const rejectedRowNumbers =
+        componentPreviewMode === "server"
+          ? rejectedOverrideRows.map((row) => row.row_number)
+          : [];
       const res = await fetch(
         `${API_BASE}/aircraft/${encodeURIComponent(
           componentAircraftSerial.trim()
@@ -1463,10 +2057,21 @@ const AircraftImportPage: React.FC = () => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            rows: approvedRows.map((row) => ({
-              row_number: row.row_number,
-              ...row.data,
-            })),
+            rows:
+              componentPreviewMode === "client"
+                ? approvedRows.map((row) => ({
+                    row_number: row.row_number,
+                    ...row.data,
+                  }))
+                : approvedOverrideRows.map((row) => ({
+                    row_number: row.row_number,
+                    ...row.data,
+                  })),
+            preview_id: componentPreviewId,
+            approved_row_numbers:
+              componentPreviewMode === "server" ? approvedRowNumbers : undefined,
+            rejected_row_numbers:
+              componentPreviewMode === "server" ? rejectedRowNumbers : undefined,
           }),
         }
       );
@@ -1486,18 +2091,40 @@ const AircraftImportPage: React.FC = () => {
     }
   };
 
-  const approvedCount = useMemo(
-    () => previewRows.filter((row) => row.approved && !hasErrors(row)).length,
-    [previewRows]
-  );
+  const approvedCount = useMemo(() => {
+    if (previewMode === "client") {
+      return previewRows.filter((row) => row.approved && !hasErrors(row))
+        .length;
+    }
+    const baseApproved =
+      (previewSummary?.new ?? 0) + (previewSummary?.update ?? 0);
+    const overrides = Object.values(previewRowOverrides);
+    const rejected = overrides.filter(
+      (row) => !row.approved && row.errors.length === 0
+    ).length;
+    const added = overrides.filter(
+      (row) => row.approved && row.errors.length === 0 && row.action === "invalid"
+    ).length;
+    return Math.max(0, baseApproved - rejected + added);
+  }, [previewMode, previewRows, previewSummary, previewRowOverrides]);
 
-  const componentApprovedCount = useMemo(
-    () =>
-      componentPreviewRows.filter(
+  const componentApprovedCount = useMemo(() => {
+    if (componentPreviewMode === "client") {
+      return componentPreviewRows.filter(
         (row) => row.approved && !hasComponentErrors(row)
-      ).length,
-    [componentPreviewRows]
-  );
+      ).length;
+    }
+    const baseApproved =
+      (componentSummary?.new ?? 0) + (componentSummary?.update ?? 0);
+    const overrides = Object.values(componentPreviewRowOverrides);
+    const rejected = overrides.filter(
+      (row) => !row.approved && row.errors.length === 0
+    ).length;
+    const added = overrides.filter(
+      (row) => row.approved && row.errors.length === 0 && row.action === "invalid"
+    ).length;
+    return Math.max(0, baseApproved - rejected + added);
+  }, [componentPreviewMode, componentPreviewRows, componentSummary, componentPreviewRowOverrides]);
 
   const handleUndoSnapshot = async () => {
     if (!selectedSnapshotId) {
@@ -1751,7 +2378,11 @@ const AircraftImportPage: React.FC = () => {
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={applyTemplateToPreview}
-                  disabled={!previewRows.length || !selectedTemplateId}
+                  disabled={
+                    previewMode === "server" ||
+                    !previewRows.length ||
+                    !selectedTemplateId
+                  }
                   className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
                 >
                   Apply Template to Preview
@@ -1849,25 +2480,31 @@ const AircraftImportPage: React.FC = () => {
             </div>
           )}
 
-          {previewRows.length > 0 && (
+          {(previewRows.length > 0 || previewTotalRows > 0) && (
             <div className="mt-6">
               <div
                 className="ag-theme-alpine-dark border border-slate-800 rounded-2xl overflow-hidden"
                 style={{ height: 560 }}
               >
                 <AgGridReact<PreviewRow>
-                  rowData={previewRows}
+                  key={previewMode}
+                  rowData={previewMode === "client" ? previewRows : undefined}
                   columnDefs={aircraftGridColumns}
                   defaultColDef={aircraftGridDefaultColDef}
                   rowSelection="multiple"
                   suppressRowClickSelection
                   rowBuffer={12}
-                  rowModelType="clientSide"
+                  rowModelType={
+                    previewMode === "server" ? "infinite" : "clientSide"
+                  }
+                  cacheBlockSize={200}
+                  maxBlocksInCache={5}
                   suppressColumnVirtualisation={false}
                   suppressRowVirtualisation={false}
                   enableCellTextSelection
                   enableRangeSelection
                   getRowId={(params) => `${params.data.row_number}`}
+                  onGridReady={handlePreviewGridReady}
                   onCellValueChanged={handleAircraftCellValueChanged}
                 />
               </div>
@@ -1959,7 +2596,11 @@ const AircraftImportPage: React.FC = () => {
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={applyComponentTemplateToPreview}
-                  disabled={!componentPreviewRows.length || !componentSelectedTemplateId}
+                  disabled={
+                    componentPreviewMode === "server" ||
+                    !componentPreviewRows.length ||
+                    !componentSelectedTemplateId
+                  }
                   className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
                 >
                   Apply Template to Preview
@@ -2065,186 +2706,38 @@ const AircraftImportPage: React.FC = () => {
             </div>
           )}
 
-          {componentPreviewRows.length > 0 && (
-            <div className="mt-6 overflow-x-auto border border-slate-800 rounded-2xl">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-950 text-slate-200">
-                  <tr>
-                    <th className="p-3 text-left">Approve</th>
-                    <th className="p-3 text-left">Row</th>
-                    <th className="p-3 text-left">Action</th>
-                    <th className="p-3 text-left">Position</th>
-                    <th className="p-3 text-left">Part Number</th>
-                    <th className="p-3 text-left">Serial Number</th>
-                    <th className="p-3 text-left">Existing PN/SN</th>
-                    <th className="p-3 text-left">ATA</th>
-                    <th className="p-3 text-left">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {componentPreviewRows.map((row, index) => {
-                    const action =
-                      row.errors.length > 0 ? "invalid" : row.action;
-                    const positionMissing = !row.data.position?.trim();
-                    const existingPart = row.existing_component?.part_number;
-                    const existingSerial = row.existing_component?.serial_number;
-                    const partDiff =
-                      existingPart &&
-                      row.data.part_number &&
-                      existingPart !== row.data.part_number;
-                    const serialDiff =
-                      existingSerial &&
-                      row.data.serial_number &&
-                      existingSerial !== row.data.serial_number;
-                    return (
-                      <tr
-                        key={`${row.row_number}-${index}`}
-                        className="border-t border-slate-800"
-                      >
-                        <td className="p-3">
-                          <input
-                            type="checkbox"
-                            checked={row.approved}
-                            disabled={hasComponentErrors(row)}
-                            onChange={() => toggleComponentApproval(index)}
-                          />
-                        </td>
-                        <td className="p-3 text-slate-300">{row.row_number}</td>
-                        <td className="p-3">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${
-                              action === "new"
-                                ? "bg-emerald-500/20 text-emerald-200"
-                                : action === "update"
-                                ? "bg-sky-500/20 text-sky-200"
-                                : "bg-rose-500/20 text-rose-200"
-                            }`}
-                          >
-                            {action}
-                          </span>
-                          {row.errors.length > 0 && (
-                            <div className="mt-1 text-xs text-rose-300">
-                              {row.errors.join(" ")}
-                            </div>
-                          )}
-                          {row.warnings.length > 0 && (
-                            <div className="mt-1 text-xs text-amber-200">
-                              {row.warnings.join(" ")}
-                            </div>
-                          )}
-                          {row.dedupe_suggestions &&
-                            row.dedupe_suggestions.length > 0 && (
-                              <div className="mt-1 text-xs text-amber-200">
-                                {row.dedupe_suggestions.map((suggestion, idx) => (
-                                  <div key={`${row.row_number}-dedupe-${idx}`}>
-                                    {suggestion.source === "existing"
-                                      ? "Existing"
-                                      : "File"}{" "}
-                                    match for {suggestion.part_number}/
-                                    {suggestion.serial_number}:{" "}
-                                    {suggestion.positions.join(", ")}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.position ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "position",
-                                e.target.value
-                              )
-                            }
-                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
-                              positionMissing
-                                ? "border-rose-400"
-                                : "border-slate-700"
-                            }`}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.part_number ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "part_number",
-                                e.target.value
-                              )
-                            }
-                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
-                              partDiff ? "border-amber-400" : "border-slate-700"
-                            }`}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.serial_number ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "serial_number",
-                                e.target.value
-                              )
-                            }
-                            className={`w-32 rounded-lg bg-slate-950 border px-2 py-1 text-slate-100 ${
-                              serialDiff
-                                ? "border-amber-400"
-                                : "border-slate-700"
-                            }`}
-                          />
-                        </td>
-                        <td className="p-3 text-xs text-slate-300">
-                          {existingPart || existingSerial ? (
-                            <div>
-                              <div>{existingPart ?? "—"}</div>
-                              <div className="text-slate-400">
-                                {existingSerial ?? "—"}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-slate-500">—</span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.ata ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "ata",
-                                e.target.value
-                              )
-                            }
-                            className="w-20 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="text"
-                            value={row.data.notes ?? ""}
-                            onChange={(e) =>
-                              handleComponentPreviewRowChange(
-                                index,
-                                "notes",
-                                e.target.value
-                              )
-                            }
-                            className="w-40 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-slate-100"
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          {(componentPreviewRows.length > 0 || componentPreviewTotalRows > 0) && (
+            <div className="mt-6">
+              <div
+                className="ag-theme-alpine-dark border border-slate-800 rounded-2xl overflow-hidden"
+                style={{ height: 520 }}
+              >
+                <AgGridReact<ComponentPreviewRow>
+                  key={componentPreviewMode}
+                  rowData={
+                    componentPreviewMode === "client"
+                      ? componentPreviewRows
+                      : undefined
+                  }
+                  columnDefs={componentGridColumns}
+                  defaultColDef={componentGridDefaultColDef}
+                  rowSelection="multiple"
+                  suppressRowClickSelection
+                  rowBuffer={12}
+                  rowModelType={
+                    componentPreviewMode === "server" ? "infinite" : "clientSide"
+                  }
+                  cacheBlockSize={200}
+                  maxBlocksInCache={5}
+                  suppressColumnVirtualisation={false}
+                  suppressRowVirtualisation={false}
+                  enableCellTextSelection
+                  enableRangeSelection
+                  getRowId={(params) => `${params.data.row_number}`}
+                  onGridReady={handleComponentGridReady}
+                  onCellValueChanged={handleComponentCellValueChanged}
+                />
+              </div>
             </div>
           )}
 
