@@ -34,6 +34,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -66,10 +67,12 @@ class WorkOrderTypeEnum(str, Enum):
 
 class WorkOrderStatusEnum(str, Enum):
     """Lifecycle state of the work order."""
-    OPEN = "OPEN"
+    DRAFT = "DRAFT"
+    RELEASED = "RELEASED"
     IN_PROGRESS = "IN_PROGRESS"
-    ON_HOLD = "ON_HOLD"
+    INSPECTED = "INSPECTED"
     CLOSED = "CLOSED"
+    ARCHIVED = "ARCHIVED"
     CANCELLED = "CANCELLED"
 
 
@@ -104,8 +107,10 @@ class TaskStatusEnum(str, Enum):
     """Execution status of a task card."""
     PLANNED = "PLANNED"
     IN_PROGRESS = "IN_PROGRESS"
+    INSPECTED = "INSPECTED"
     PAUSED = "PAUSED"
     COMPLETED = "COMPLETED"
+    CLOSED = "CLOSED"
     DEFERRED = "DEFERRED"
     CANCELLED = "CANCELLED"
 
@@ -155,6 +160,9 @@ class WorkOrder(Base):
 
     __tablename__ = "work_orders"
     __table_args__ = (
+        UniqueConstraint("amo_id", "wo_number", name="uq_work_orders_amo_number"),
+        Index("ix_work_orders_amo_status", "amo_id", "status"),
+        Index("ix_work_orders_amo_aircraft", "amo_id", "aircraft_serial_number"),
         Index("ix_work_orders_aircraft_status", "aircraft_serial_number", "status"),
         Index("ix_work_orders_status_due", "status", "due_date"),
         Index("ix_work_orders_type_status", "wo_type", "status"),
@@ -166,8 +174,15 @@ class WorkOrder(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
     # Organisation-specific work order number (e.g. YYNNNN or similar)
-    wo_number = Column(String(32), nullable=False, unique=True, index=True)
+    wo_number = Column(String(32), nullable=False, index=True)
 
     # Link to aircraft
     aircraft_serial_number = Column(
@@ -181,6 +196,7 @@ class WorkOrder(Base):
     amo_code = Column(String(20), nullable=True)
     originating_org = Column(String(64), nullable=True)
     work_package_ref = Column(String(64), nullable=True)  # planning system pack reference
+    operator_event_id = Column(String(36), nullable=True, index=True)
 
     description = Column(String(255), nullable=True)
 
@@ -197,7 +213,7 @@ class WorkOrder(Base):
     status = Column(
         SAEnum(WorkOrderStatusEnum, name="work_order_status_enum", native_enum=False),
         nullable=False,
-        default=WorkOrderStatusEnum.OPEN,
+        default=WorkOrderStatusEnum.DRAFT,
         index=True,
     )
 
@@ -207,6 +223,8 @@ class WorkOrder(Base):
     due_date = Column(Date, nullable=True, index=True)
     open_date = Column(Date, nullable=True, index=True)
     closed_date = Column(Date, nullable=True, index=True)
+    closure_reason = Column(String(64), nullable=True, index=True)
+    closure_notes = Column(Text, nullable=True)
 
     # Audit (accounts.users.id is GUID string)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -242,6 +260,14 @@ class WorkOrder(Base):
         lazy="selectin",
     )
 
+    inspector_signoffs = relationship(
+        "InspectorSignOff",
+        back_populates="work_order",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
     def __repr__(self) -> str:
         return f"<WorkOrder id={self.id} wo_number={self.wo_number} status={self.status}>"
 
@@ -269,6 +295,8 @@ class TaskCard(Base):
         # Note: Postgres allows multiple NULLs for a UNIQUE constraint.
         # That is acceptable for non-coded ad-hoc cards.
         UniqueConstraint("work_order_id", "task_code", name="uq_taskcard_workorder_taskcode"),
+        Index("ix_task_cards_amo_status", "amo_id", "status"),
+        Index("ix_task_cards_amo_aircraft", "amo_id", "aircraft_serial_number"),
         Index("ix_task_cards_workorder_status", "work_order_id", "status"),
         Index("ix_task_cards_aircraft_status", "aircraft_serial_number", "status"),
         Index("ix_task_cards_status_priority", "status", "priority"),
@@ -290,6 +318,13 @@ class TaskCard(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     work_order_id = Column(
         Integer,
@@ -334,6 +369,7 @@ class TaskCard(Base):
     # Technical classification
     ata_chapter = Column(String(20), nullable=True, index=True)
     task_code = Column(String(64), nullable=True, index=True)  # internal card number or OEM task number
+    operator_event_id = Column(String(36), nullable=True, index=True)
 
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
@@ -425,6 +461,22 @@ class TaskCard(Base):
         lazy="selectin",
     )
 
+    steps = relationship(
+        "TaskStep",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
+    inspector_signoffs = relationship(
+        "InspectorSignOff",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
     work_logs = relationship(
         "WorkLogEntry",
         back_populates="task",
@@ -455,6 +507,8 @@ class TaskAssignment(Base):
     __tablename__ = "task_assignments"
     __table_args__ = (
         UniqueConstraint("task_id", "user_id", "role_on_task", name="uq_task_assignments_task_user_role"),
+        Index("ix_task_assignments_amo_status", "amo_id", "status"),
+        Index("ix_task_assignments_amo_user", "amo_id", "user_id"),
         Index("ix_task_assignments_task_status", "task_id", "status"),
         Index("ix_task_assignments_user_status", "user_id", "status"),
         CheckConstraint(
@@ -464,6 +518,13 @@ class TaskAssignment(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     task_id = Column(
         Integer,
@@ -521,6 +582,7 @@ class WorkLogEntry(Base):
 
     __tablename__ = "work_log_entries"
     __table_args__ = (
+        Index("ix_work_log_amo_time", "amo_id", "start_time"),
         Index("ix_work_log_task_time", "task_id", "start_time"),
         Index("ix_work_log_user_time", "user_id", "start_time"),
         CheckConstraint("end_time >= start_time", name="ck_work_log_end_after_start"),
@@ -528,6 +590,13 @@ class WorkLogEntry(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     task_id = Column(
         Integer,
@@ -561,3 +630,154 @@ class WorkLogEntry(Base):
 
     def __repr__(self) -> str:
         return f"<WorkLogEntry id={self.id} task={self.task_id} hours={self.actual_hours}>"
+
+
+# ---------------------------------------------------------------------------
+# TaskStep – step-level execution scaffolding
+# ---------------------------------------------------------------------------
+
+
+class TaskStep(Base):
+    """
+    Step-by-step execution instructions for a TaskCard.
+    """
+
+    __tablename__ = "task_steps"
+    __table_args__ = (
+        UniqueConstraint("task_id", "step_no", name="uq_task_steps_task_stepno"),
+        Index("ix_task_steps_task", "task_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_id = Column(
+        Integer,
+        ForeignKey("task_cards.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_no = Column(Integer, nullable=False)
+    instruction_text = Column(Text, nullable=False)
+    required_flag = Column(Boolean, nullable=False, default=True)
+    measurement_type = Column(String(32), nullable=True)
+    expected_range = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    task = relationship("TaskCard", back_populates="steps", lazy="joined")
+    executions = relationship(
+        "TaskStepExecution",
+        back_populates="task_step",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<TaskStep id={self.id} task={self.task_id} step_no={self.step_no}>"
+
+
+class TaskStepExecution(Base):
+    """
+    Execution record for a TaskStep.
+    """
+
+    __tablename__ = "task_step_executions"
+    __table_args__ = (
+        Index("ix_task_step_exec_task", "task_id", "performed_at"),
+        Index("ix_task_step_exec_user", "performed_by_user_id", "performed_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_step_id = Column(
+        Integer,
+        ForeignKey("task_steps.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_id = Column(
+        Integer,
+        ForeignKey("task_cards.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    performed_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    performed_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    result_text = Column(Text, nullable=True)
+    measurement_value = Column(Float, nullable=True)
+    attachment_id = Column(String(64), nullable=True)
+    signed_flag = Column(Boolean, nullable=False, default=False)
+    signature_hash = Column(String(128), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    task_step = relationship("TaskStep", back_populates="executions", lazy="joined")
+    task = relationship("TaskCard", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<TaskStepExecution id={self.id} step={self.task_step_id} task={self.task_id}>"
+
+
+class InspectorSignOff(Base):
+    """
+    Inspector sign-off at task or work-order level.
+    """
+
+    __tablename__ = "inspector_signoffs"
+    __table_args__ = (
+        Index("ix_inspector_signoffs_task", "amo_id", "task_card_id"),
+        Index("ix_inspector_signoffs_workorder", "amo_id", "work_order_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_card_id = Column(
+        Integer,
+        ForeignKey("task_cards.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    work_order_id = Column(
+        Integer,
+        ForeignKey("work_orders.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    inspector_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    signed_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    notes = Column(Text, nullable=True)
+    signed_flag = Column(Boolean, nullable=False, default=False)
+    signature_hash = Column(String(128), nullable=True)
+
+    task = relationship("TaskCard", back_populates="inspector_signoffs", lazy="joined")
+    work_order = relationship("WorkOrder", back_populates="inspector_signoffs", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<InspectorSignOff id={self.id} task={self.task_card_id} work_order={self.work_order_id}>"

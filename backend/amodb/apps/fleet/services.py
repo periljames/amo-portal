@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, List, Optional
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
 from . import models
+from ..audit import services as audit_services
+from ..audit import schemas as audit_schemas
 
 
 HOURS_BASED_FIELDS: tuple[str, ...] = (
@@ -216,18 +218,121 @@ def build_aircraft_compliance_summary(
     return summary
 
 
+def apply_part_movement_configuration(
+    db: Session,
+    *,
+    amo_id: str,
+    movement: "models.PartMovementLedger",
+    removal_tracking_id: Optional[str] = None,
+    actor_user_id: Optional[str] = None,
+) -> Optional[models.AircraftConfigurationEvent]:
+    """
+    Apply a part movement to aircraft configuration history and current state.
+    """
+    if movement.event_type.value not in {
+        models.ConfigurationEventTypeEnum.INSTALL.value,
+        models.ConfigurationEventTypeEnum.REMOVE.value,
+        models.ConfigurationEventTypeEnum.SWAP.value,
+    }:
+        return None
+
+    if movement.component_id is None:
+        raise ValueError("component_id is required for configuration events.")
+
+    component = (
+        db.query(models.AircraftComponent)
+        .filter(
+            models.AircraftComponent.id == movement.component_id,
+            models.AircraftComponent.amo_id == amo_id,
+        )
+        .first()
+    )
+    if not component:
+        raise ValueError("Component not found for configuration update.")
+
+    existing_installed = (
+        db.query(models.AircraftComponent)
+        .filter(
+            models.AircraftComponent.amo_id == amo_id,
+            models.AircraftComponent.aircraft_serial_number == component.aircraft_serial_number,
+            models.AircraftComponent.position == component.position,
+            models.AircraftComponent.is_installed.is_(True),
+        )
+        .first()
+    )
+
+    from_part_number = None
+    from_serial_number = None
+    if existing_installed and existing_installed.id != component.id:
+        from_part_number = existing_installed.part_number
+        from_serial_number = existing_installed.serial_number
+        existing_installed.is_installed = False
+        existing_installed.removed_date = movement.event_date
+        db.add(existing_installed)
+
+    if movement.event_type.value == models.ConfigurationEventTypeEnum.REMOVE.value:
+        component.is_installed = False
+        component.removed_date = movement.event_date
+    else:
+        component.is_installed = True
+        component.removed_date = None
+        if component.installed_date is None:
+            component.installed_date = movement.event_date
+    db.add(component)
+
+    occurred_at = datetime.combine(movement.event_date, time.min, tzinfo=timezone.utc)
+    event = models.AircraftConfigurationEvent(
+        amo_id=amo_id,
+        aircraft_serial_number=component.aircraft_serial_number,
+        component_instance_id=movement.component_instance_id,
+        occurred_at=occurred_at,
+        event_type=models.ConfigurationEventTypeEnum(movement.event_type.value),
+        position=component.position,
+        part_number=component.part_number,
+        serial_number=component.serial_number,
+        from_part_number=from_part_number,
+        from_serial_number=from_serial_number,
+        work_order_id=movement.work_order_id,
+        task_card_id=movement.task_card_id,
+        removal_tracking_id=removal_tracking_id,
+    )
+    db.add(event)
+    db.flush()
+
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="AircraftConfigurationEvent",
+            entity_id=str(event.id),
+            action="create",
+            actor_user_id=actor_user_id,
+            before_json=None,
+            after_json={
+                "event_type": event.event_type.value,
+                "aircraft_serial_number": event.aircraft_serial_number,
+                "position": event.position,
+            },
+        ),
+    )
+    return event
+
+
 def get_blocking_documents(
     db: Session,
     serial_number: str,
+    *,
+    amo_id: Optional[str] = None,
 ) -> List[tuple[models.AircraftDocument, DocumentEvaluation]]:
     """
     Return blocking documents for an aircraft (due soon or overdue without a Quality override).
     """
-    docs: Iterable[models.AircraftDocument] = (
-        db.query(models.AircraftDocument)
-        .filter(models.AircraftDocument.aircraft_serial_number == serial_number)
-        .all()
+    query = db.query(models.AircraftDocument).filter(
+        models.AircraftDocument.aircraft_serial_number == serial_number
     )
+    if amo_id:
+        query = query.join(models.Aircraft).filter(models.Aircraft.amo_id == amo_id)
+    docs: Iterable[models.AircraftDocument] = query.all()
     results: List[tuple[models.AircraftDocument, DocumentEvaluation]] = []
     for doc in docs:
         evaluation = evaluate_document(doc)
@@ -240,19 +345,19 @@ def get_previous_usage(
     db: Session,
     serial_number: str,
     entry_date: date,
+    *,
+    amo_id: Optional[str] = None,
 ) -> models.AircraftUsage | None:
-    return (
-        db.query(models.AircraftUsage)
-        .filter(
-            models.AircraftUsage.aircraft_serial_number == serial_number,
-            models.AircraftUsage.date < entry_date,
-        )
-        .order_by(
-            models.AircraftUsage.date.desc(),
-            models.AircraftUsage.techlog_no.desc(),
-        )
-        .first()
+    query = db.query(models.AircraftUsage).filter(
+        models.AircraftUsage.aircraft_serial_number == serial_number,
+        models.AircraftUsage.date < entry_date,
     )
+    if amo_id:
+        query = query.filter(models.AircraftUsage.amo_id == amo_id)
+    return query.order_by(
+        models.AircraftUsage.date.desc(),
+        models.AircraftUsage.techlog_no.desc(),
+    ).first()
 
 
 def _increment_field(
@@ -295,12 +400,15 @@ def update_maintenance_remaining(
     serial_number: str,
     entry_date: date,
     data: dict,
+    *,
+    amo_id: Optional[str] = None,
 ) -> None:
-    statuses: Iterable[models.MaintenanceStatus] = (
-        db.query(models.MaintenanceStatus)
-        .filter(models.MaintenanceStatus.aircraft_serial_number == serial_number)
-        .all()
+    query = db.query(models.MaintenanceStatus).filter(
+        models.MaintenanceStatus.aircraft_serial_number == serial_number
     )
+    if amo_id:
+        query = query.filter(models.MaintenanceStatus.amo_id == amo_id)
+    statuses: Iterable[models.MaintenanceStatus] = query.all()
     hours_values: list[float] = []
     day_values: list[int] = []
 
@@ -322,16 +430,18 @@ def update_maintenance_remaining(
 def build_usage_summary(
     db: Session,
     serial_number: str,
+    *,
+    amo_id: Optional[str] = None,
 ) -> dict:
-    latest_usage = (
-        db.query(models.AircraftUsage)
-        .filter(models.AircraftUsage.aircraft_serial_number == serial_number)
-        .order_by(
-            models.AircraftUsage.date.desc(),
-            models.AircraftUsage.techlog_no.desc(),
-        )
-        .first()
+    query = db.query(models.AircraftUsage).filter(
+        models.AircraftUsage.aircraft_serial_number == serial_number
     )
+    if amo_id:
+        query = query.filter(models.AircraftUsage.amo_id == amo_id)
+    latest_usage = query.order_by(
+        models.AircraftUsage.date.desc(),
+        models.AircraftUsage.techlog_no.desc(),
+    ).first()
 
     if not latest_usage:
         return {
@@ -349,23 +459,23 @@ def build_usage_summary(
     latest_date = latest_usage.date
     range_start = latest_date - timedelta(days=6)
 
-    recent_entries = (
-        db.query(models.AircraftUsage)
-        .filter(
-            models.AircraftUsage.aircraft_serial_number == serial_number,
-            models.AircraftUsage.date >= range_start,
-            models.AircraftUsage.date <= latest_date,
-        )
-        .all()
+    recent_query = db.query(models.AircraftUsage).filter(
+        models.AircraftUsage.aircraft_serial_number == serial_number,
+        models.AircraftUsage.date >= range_start,
+        models.AircraftUsage.date <= latest_date,
     )
+    if amo_id:
+        recent_query = recent_query.filter(models.AircraftUsage.amo_id == amo_id)
+    recent_entries = recent_query.all()
     total_recent_hours = sum(entry.block_hours for entry in recent_entries)
     seven_day_average = total_recent_hours / 7 if recent_entries else None
 
-    statuses: Iterable[models.MaintenanceStatus] = (
-        db.query(models.MaintenanceStatus)
-        .filter(models.MaintenanceStatus.aircraft_serial_number == serial_number)
-        .all()
+    status_query = db.query(models.MaintenanceStatus).filter(
+        models.MaintenanceStatus.aircraft_serial_number == serial_number
     )
+    if amo_id:
+        status_query = status_query.filter(models.MaintenanceStatus.amo_id == amo_id)
+    statuses: Iterable[models.MaintenanceStatus] = status_query.all()
 
     next_due_status = None
     next_due_score = None

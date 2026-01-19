@@ -25,6 +25,7 @@ from sqlalchemy.orm import relationship
 
 from ...database import Base
 from ..accounts.models import AccountRole
+from ...utils.identifiers import generate_uuid7
 
 
 def _utcnow() -> datetime:
@@ -378,6 +379,7 @@ class ReliabilityEvent(Base):
         nullable=False,
         index=True,
     )
+    operator_event_id = Column(String(36), nullable=True, index=True)
     severity = Column(
         SAEnum(ReliabilitySeverityEnum, name="reliability_event_severity_enum", native_enum=False),
         nullable=True,
@@ -822,7 +824,7 @@ class ComponentInstance(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
     part_number = Column(String(50), nullable=False, index=True)
     serial_number = Column(String(50), nullable=False, index=True)
     description = Column(String(255), nullable=True)
@@ -844,10 +846,12 @@ class PartMovementLedger(Base):
     __table_args__ = (
         Index("ix_part_movement_aircraft_date", "aircraft_serial_number", "event_date"),
         Index("ix_part_movement_component", "component_id", "event_date"),
+        UniqueConstraint("amo_id", "idempotency_key", name="uq_part_movement_idempotency"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    idempotency_key = Column(String(128), nullable=True, index=True)
     aircraft_serial_number = Column(
         String(50),
         ForeignKey("aircraft.serial_number", ondelete="SET NULL"),
@@ -884,6 +888,7 @@ class RemovalEvent(Base):
 
     __table_args__ = (
         Index("ix_removal_events_component_date", "component_id", "removed_at"),
+        UniqueConstraint("amo_id", "removal_tracking_id", name="uq_removal_tracking_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -907,10 +912,37 @@ class RemovalEvent(Base):
         nullable=True,
         index=True,
     )
+    removal_tracking_id = Column(String(36), nullable=False, default=generate_uuid7, index=True)
     removal_reason = Column(String(128), nullable=True, index=True)
     hours_at_removal = Column(Float, nullable=True)
     cycles_at_removal = Column(Float, nullable=True)
     removed_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ShopVisit(Base):
+    """
+    Placeholder for shop visit linkage (future repair order integration).
+    """
+
+    __tablename__ = "shop_visits"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "shop_record_id", name="uq_shop_visit_record"),
+        Index("ix_shop_visits_component", "amo_id", "component_instance_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    shop_record_id = Column(String(36), nullable=False, default=generate_uuid7, index=True)
+    component_instance_id = Column(
+        Integer,
+        ForeignKey("component_instances.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    work_order_id = Column(Integer, ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 

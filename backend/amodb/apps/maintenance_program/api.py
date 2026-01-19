@@ -319,6 +319,7 @@ def create_work_order_from_program_items(
 
     wo = services.create_work_order_from_program_items(
         db,
+        amo_id=current_user.amo_id,
         aircraft_serial_number=aircraft_sn,
         program_item_ids=payload.program_item_ids,
         check_type=payload.check_type,

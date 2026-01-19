@@ -22,14 +22,21 @@ from fastapi import (
     status,
     UploadFile,
     File,
+    Header,
 )
+from fastapi.responses import FileResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ...database import WriteSessionLocal, get_db
+from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts import models as account_models
+from amodb.apps.work import models as work_models
+from amodb.apps.work import schemas as work_schemas
+from amodb.apps.work import services as work_services
+from amodb.utils.identifiers import generate_uuid7
 from . import models, ocr as ocr_service, schemas, services
 
 # Roles allowed to manage aircraft, components, usage
@@ -63,17 +70,28 @@ ALLOWED_DOC_EXTS = {".pdf", ".png", ".jpg", ".jpeg"}
 DOC_AMO_SUBDIR = "aircraft"
 
 
-def _get_aircraft_or_404(db: Session, serial_number: str) -> models.Aircraft:
-    ac = db.query(models.Aircraft).get(serial_number)
+def _get_aircraft_or_404(db: Session, serial_number: str, amo_id: str) -> models.Aircraft:
+    ac = (
+        db.query(models.Aircraft)
+        .filter(
+            models.Aircraft.serial_number == serial_number,
+            models.Aircraft.amo_id == amo_id,
+        )
+        .first()
+    )
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
     return ac
 
 
-def _get_document_or_404(db: Session, document_id: int) -> models.AircraftDocument:
+def _get_document_or_404(db: Session, document_id: int, amo_id: str) -> models.AircraftDocument:
     doc = (
         db.query(models.AircraftDocument)
-        .filter(models.AircraftDocument.id == document_id)
+        .join(models.Aircraft)
+        .filter(
+            models.AircraftDocument.id == document_id,
+            models.Aircraft.amo_id == amo_id,
+        )
         .first()
     )
     if not doc:
@@ -194,8 +212,9 @@ def list_aircraft(
     limit: int = 100,
     only_active: bool = True,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    query = db.query(models.Aircraft)
+    query = db.query(models.Aircraft).filter(models.Aircraft.amo_id == current_user.amo_id)
     if only_active:
         query = query.filter(models.Aircraft.is_active.is_(True))
     return (
@@ -207,8 +226,19 @@ def list_aircraft(
 
 
 @router.get("/{serial_number}", response_model=schemas.AircraftRead)
-def get_aircraft(serial_number: str, db: Session = Depends(get_db)):
-    ac = db.query(models.Aircraft).get(serial_number)
+def get_aircraft(
+    serial_number: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    ac = (
+        db.query(models.Aircraft)
+        .filter(
+            models.Aircraft.serial_number == serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
     return ac
@@ -234,7 +264,14 @@ def create_aircraft(
     _require_safety_confirmation("aircraft", safety_confirmed, safety_fields)
 
     # Check serial_number (AIN-style)
-    existing = db.query(models.Aircraft).get(payload.serial_number)
+    existing = (
+        db.query(models.Aircraft)
+        .filter(
+            models.Aircraft.serial_number == payload.serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -244,7 +281,10 @@ def create_aircraft(
     # Extra safety: avoid duplicate registration on a different AIN
     reg_conflict = (
         db.query(models.Aircraft)
-        .filter(models.Aircraft.registration == payload.registration)
+        .filter(
+            models.Aircraft.registration == payload.registration,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if reg_conflict:
@@ -256,7 +296,7 @@ def create_aircraft(
             ),
         )
 
-    ac = models.Aircraft(**data)
+    ac = models.Aircraft(amo_id=current_user.amo_id, **data)
     _set_verification_status(ac, safety_confirmed)
     db.add(ac)
     db.commit()
@@ -273,7 +313,14 @@ def update_aircraft(
         require_roles(*MANAGEMENT_ROLES)
     ),
 ):
-    ac = db.query(models.Aircraft).get(serial_number)
+    ac = (
+        db.query(models.Aircraft)
+        .filter(
+            models.Aircraft.serial_number == serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
@@ -309,6 +356,7 @@ def update_aircraft(
             .filter(
                 models.Aircraft.registration == new_reg,
                 models.Aircraft.serial_number != serial_number,
+                models.Aircraft.amo_id == current_user.amo_id,
             )
             .first()
         )
@@ -345,9 +393,7 @@ def deactivate_aircraft(
     Soft-delete: mark as inactive instead of dropping the row.
     Keeps history and allows future reactivation.
     """
-    ac = db.query(models.Aircraft).get(serial_number)
-    if not ac:
-        raise HTTPException(status_code=404, detail="Aircraft not found")
+    ac = _get_aircraft_or_404(db, serial_number, current_user.amo_id)
 
     ac.is_active = False
     db.add(ac)
@@ -367,11 +413,16 @@ def deactivate_aircraft(
 def list_aircraft_documents(
     serial_number: str,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _get_aircraft_or_404(db, serial_number)
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
     docs = (
         db.query(models.AircraftDocument)
-        .filter(models.AircraftDocument.aircraft_serial_number == serial_number)
+        .join(models.Aircraft)
+        .filter(
+            models.AircraftDocument.aircraft_serial_number == serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
         .order_by(models.AircraftDocument.expires_on.asc().nullslast())
         .all()
     )
@@ -391,13 +442,15 @@ def create_aircraft_document(
         require_roles(*DOCUMENT_WRITE_ROLES)
     ),
 ):
-    _get_aircraft_or_404(db, serial_number)
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
     existing = (
         db.query(models.AircraftDocument)
+        .join(models.Aircraft)
         .filter(
             models.AircraftDocument.aircraft_serial_number == serial_number,
             models.AircraftDocument.document_type == payload.document_type,
             models.AircraftDocument.authority == payload.authority,
+            models.Aircraft.amo_id == current_user.amo_id,
         )
         .first()
     )
@@ -440,7 +493,7 @@ def update_aircraft_document(
         require_roles(*DOCUMENT_WRITE_ROLES)
     ),
 ):
-    doc = _get_document_or_404(db, document_id)
+    doc = _get_document_or_404(db, document_id, current_user.amo_id)
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(doc, field, value)
@@ -466,7 +519,7 @@ def upload_document_evidence(
         require_roles(*DOCUMENT_WRITE_ROLES)
     ),
 ):
-    doc = _get_document_or_404(db, document_id)
+    doc = _get_document_or_404(db, document_id, current_user.amo_id)
 
     # Replace any previous evidence to avoid stale copies floating around.
     if doc.file_storage_path:
@@ -650,7 +703,7 @@ def clear_document_override(
         require_roles(*QUALITY_OVERRIDE_ROLES)
     ),
 ):
-    doc = _get_document_or_404(db, document_id)
+    doc = _get_document_or_404(db, document_id, current_user.amo_id)
 
     doc.override_reason = None
     doc.override_expires_on = None
@@ -671,11 +724,16 @@ def clear_document_override(
 def get_aircraft_compliance_summary(
     serial_number: str,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _get_aircraft_or_404(db, serial_number)
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
     docs = (
         db.query(models.AircraftDocument)
-        .filter(models.AircraftDocument.aircraft_serial_number == serial_number)
+        .join(models.Aircraft)
+        .filter(
+            models.AircraftDocument.aircraft_serial_number == serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
         .order_by(models.AircraftDocument.expires_on.asc().nullslast())
         .all()
     )
@@ -754,8 +812,16 @@ def list_document_alerts(
 def list_components(
     serial_number: str,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    ac = db.query(models.Aircraft).get(serial_number)
+    ac = (
+        db.query(models.Aircraft)
+        .filter(
+            models.Aircraft.serial_number == serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
     return ac.components
@@ -774,7 +840,14 @@ def create_component(
         require_roles(*MANAGEMENT_ROLES)
     ),
 ):
-    ac = db.query(models.Aircraft).get(serial_number)
+    ac = (
+        db.query(models.Aircraft)
+        .filter(
+            models.Aircraft.serial_number == serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
@@ -786,6 +859,7 @@ def create_component(
     _require_safety_confirmation("component", safety_confirmed, safety_fields)
     # Ensure the component is always attached to the path aircraft
     data["aircraft_serial_number"] = serial_number
+    data["amo_id"] = current_user.amo_id
 
     validation = _validate_component_payload(data)
     if validation["errors"]:
@@ -796,6 +870,7 @@ def create_component(
 
     collision = _find_component_collision(
         db,
+        current_user.amo_id,
         data.get("part_number"),
         data.get("serial_number"),
         exclude_aircraft_serial=serial_number,
@@ -831,7 +906,10 @@ def update_component(
 ):
     comp = (
         db.query(models.AircraftComponent)
-        .filter(models.AircraftComponent.id == component_id)
+        .filter(
+            models.AircraftComponent.id == component_id,
+            models.AircraftComponent.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not comp:
@@ -887,6 +965,7 @@ def update_component(
     serial_number = data.get("serial_number", comp.serial_number)
     collision = _find_component_collision(
         db,
+        current_user.amo_id,
         part_number,
         serial_number,
         exclude_component_id=comp.id,
@@ -922,7 +1001,10 @@ def delete_component(
 ):
     comp = (
         db.query(models.AircraftComponent)
-        .filter(models.AircraftComponent.id == component_id)
+        .filter(
+            models.AircraftComponent.id == component_id,
+            models.AircraftComponent.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not comp:
@@ -931,6 +1013,218 @@ def delete_component(
     db.delete(comp)
     db.commit()
     return
+
+
+# ---------------------------------------------------------------------------
+# COMPONENT CONFIGURATION HISTORY
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{serial_number}/configuration-history",
+    response_model=List[schemas.AircraftConfigurationEventRead],
+)
+def list_configuration_history(
+    serial_number: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    position: Optional[str] = None,
+    part_number: Optional[str] = None,
+    serial_number_filter: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    query = db.query(models.AircraftConfigurationEvent).filter(
+        models.AircraftConfigurationEvent.amo_id == current_user.amo_id,
+        models.AircraftConfigurationEvent.aircraft_serial_number == serial_number,
+    )
+    if start_date:
+        query = query.filter(models.AircraftConfigurationEvent.occurred_at >= start_date)
+    if end_date:
+        query = query.filter(models.AircraftConfigurationEvent.occurred_at <= end_date)
+    if position:
+        query = query.filter(models.AircraftConfigurationEvent.position == position)
+    if part_number:
+        query = query.filter(models.AircraftConfigurationEvent.part_number == part_number)
+    if serial_number_filter:
+        query = query.filter(models.AircraftConfigurationEvent.serial_number == serial_number_filter)
+    return query.order_by(models.AircraftConfigurationEvent.occurred_at.desc()).all()
+
+
+@router.get(
+    "/components/{component_instance_id}/history",
+    response_model=List[schemas.AircraftConfigurationEventRead],
+)
+def list_component_history(
+    component_instance_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    query = db.query(models.AircraftConfigurationEvent).filter(
+        models.AircraftConfigurationEvent.amo_id == current_user.amo_id,
+        models.AircraftConfigurationEvent.component_instance_id == component_instance_id,
+    )
+    return query.order_by(models.AircraftConfigurationEvent.occurred_at.desc()).all()
+
+
+# ---------------------------------------------------------------------------
+# DEFECT REPORTS
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{serial_number}/defects",
+    response_model=schemas.DefectReportRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_defect_report(
+    serial_number: str,
+    payload: schemas.DefectReportCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
+    idem_key = payload.idempotency_key or idempotency_key
+    if not idem_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="idempotency_key is required for defect ingestion.",
+        )
+
+    existing = (
+        db.query(models.DefectReport)
+        .filter(
+            models.DefectReport.amo_id == current_user.amo_id,
+            models.DefectReport.idempotency_key == idem_key,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+
+    safe_payload = payload.model_dump()
+    if isinstance(payload.occurred_at, datetime):
+        safe_payload["occurred_at"] = payload.occurred_at.isoformat()
+    account_services.register_idempotency_key(
+        db,
+        scope=f"defect-report:{current_user.amo_id}",
+        key=idem_key,
+        payload=safe_payload,
+    )
+
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    operator_event_id = payload.operator_event_id or generate_uuid7()
+
+    defect = models.DefectReport(
+        amo_id=current_user.amo_id,
+        aircraft_serial_number=serial_number,
+        reported_by=payload.reported_by,
+        source=payload.source,
+        description=payload.description,
+        ata_chapter=payload.ata_chapter,
+        occurred_at=payload.occurred_at,
+        operator_event_id=operator_event_id,
+        idempotency_key=idem_key,
+        created_by_user_id=current_user.id,
+    )
+
+    if payload.create_work_order:
+        wo_status = (
+            work_models.WorkOrderStatusEnum.RELEASED
+            if current_user.role
+            in {
+                account_models.AccountRole.AMO_ADMIN,
+                account_models.AccountRole.PLANNING_ENGINEER,
+                account_models.AccountRole.PRODUCTION_ENGINEER,
+            }
+            else work_models.WorkOrderStatusEnum.DRAFT
+        )
+        wo_number = f"DEF-{payload.occurred_at:%Y%m%d}-{operator_event_id[-6:]}"
+        wo_payload = work_schemas.WorkOrderCreate(
+            wo_number=wo_number,
+            aircraft_serial_number=serial_number,
+            description=payload.description,
+            wo_type=work_models.WorkOrderTypeEnum.DEFECT,
+            status=wo_status,
+            is_scheduled=False,
+            open_date=payload.occurred_at.date(),
+            operator_event_id=operator_event_id,
+            tasks=[
+                work_schemas.TaskCardCreate(
+                    title=payload.description[:255],
+                    description=payload.description,
+                    category=work_models.TaskCategoryEnum.DEFECT,
+                    origin_type=work_models.TaskOriginTypeEnum.NON_ROUTINE,
+                    priority=work_models.TaskPriorityEnum.MEDIUM,
+                    ata_chapter=payload.ata_chapter,
+                    operator_event_id=operator_event_id,
+                )
+            ],
+        )
+        wo = work_services.create_work_order(
+            db,
+            amo_id=current_user.amo_id,
+            payload=wo_payload,
+            actor=current_user,
+        )
+        defect.work_order_id = wo.id
+        first_task = (
+            db.query(work_models.TaskCard)
+            .filter(work_models.TaskCard.work_order_id == wo.id)
+            .order_by(work_models.TaskCard.id.asc())
+            .first()
+        )
+        if first_task:
+            defect.task_card_id = first_task.id
+
+    db.add(defect)
+    db.commit()
+    db.refresh(defect)
+    return defect
+
+
+@router.get(
+    "/{serial_number}/defects",
+    response_model=List[schemas.DefectReportRead],
+)
+def list_defects_for_aircraft(
+    serial_number: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    return (
+        db.query(models.DefectReport)
+        .filter(
+            models.DefectReport.amo_id == current_user.amo_id,
+            models.DefectReport.aircraft_serial_number == serial_number,
+        )
+        .order_by(models.DefectReport.occurred_at.desc())
+        .all()
+    )
+
+
+@router.get(
+    "/defects/by-operator-event/{operator_event_id}",
+    response_model=schemas.DefectReportRead,
+)
+def get_defect_by_operator_event(
+    operator_event_id: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    defect = (
+        db.query(models.DefectReport)
+        .filter(
+            models.DefectReport.amo_id == current_user.amo_id,
+            models.DefectReport.operator_event_id == operator_event_id,
+        )
+        .first()
+    )
+    if not defect:
+        raise HTTPException(status_code=404, detail="Defect report not found")
+    return defect
 
 
 # ---------------------------------------------------------------------------
@@ -950,14 +1244,14 @@ def list_usage_entries(
     end_date: date | None = None,
     techlog_no: str | None = None,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
     # Ensure aircraft exists
-    ac = db.query(models.Aircraft).get(serial_number)
-    if not ac:
-        raise HTTPException(status_code=404, detail="Aircraft not found")
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
 
     query = db.query(models.AircraftUsage).filter(
-        models.AircraftUsage.aircraft_serial_number == serial_number
+        models.AircraftUsage.aircraft_serial_number == serial_number,
+        models.AircraftUsage.amo_id == current_user.amo_id,
     )
 
     if start_date is not None:
@@ -992,9 +1286,7 @@ def create_usage_entry(
     ),
 ):
     # Ensure aircraft exists
-    ac = db.query(models.Aircraft).get(serial_number)
-    if not ac:
-        raise HTTPException(status_code=404, detail="Aircraft not found")
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
 
     safety_confirmed = bool(payload.safety_confirmed)
     data = payload.model_dump(exclude={"safety_confirmed"})
@@ -1010,6 +1302,7 @@ def create_usage_entry(
             models.AircraftUsage.aircraft_serial_number == serial_number,
             models.AircraftUsage.date == payload.date,
             models.AircraftUsage.techlog_no == payload.techlog_no,
+            models.AircraftUsage.amo_id == current_user.amo_id,
         )
         .first()
     )
@@ -1019,10 +1312,11 @@ def create_usage_entry(
             detail="Usage entry for this aircraft, date and techlog already exists.",
         )
 
-    previous_usage = services.get_previous_usage(db, serial_number, payload.date)
+    previous_usage = services.get_previous_usage(db, serial_number, payload.date, amo_id=current_user.amo_id)
     services.apply_usage_calculations(data, previous_usage)
-    services.update_maintenance_remaining(db, serial_number, payload.date, data)
+    services.update_maintenance_remaining(db, serial_number, payload.date, data, amo_id=current_user.amo_id)
     usage = models.AircraftUsage(
+        amo_id=current_user.amo_id,
         aircraft_serial_number=serial_number,
         created_by_user_id=current_user.id,
         updated_by_user_id=current_user.id,
@@ -1050,7 +1344,10 @@ def update_usage_entry(
 ):
     usage = (
         db.query(models.AircraftUsage)
-        .filter(models.AircraftUsage.id == usage_id)
+        .filter(
+            models.AircraftUsage.id == usage_id,
+            models.AircraftUsage.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not usage:
@@ -1099,13 +1396,14 @@ def update_usage_entry(
         "note": data.get("note", usage.note),
     }
 
-    previous_usage = services.get_previous_usage(db, usage.aircraft_serial_number, effective_date)
+    previous_usage = services.get_previous_usage(db, usage.aircraft_serial_number, effective_date, amo_id=current_user.amo_id)
     services.apply_usage_calculations(merged_data, previous_usage)
     services.update_maintenance_remaining(
         db,
         usage.aircraft_serial_number,
         effective_date,
         merged_data,
+        amo_id=current_user.amo_id,
     )
 
     for field, value in merged_data.items():
@@ -1134,7 +1432,10 @@ def delete_usage_entry(
 ):
     usage = (
         db.query(models.AircraftUsage)
-        .filter(models.AircraftUsage.id == usage_id)
+        .filter(
+            models.AircraftUsage.id == usage_id,
+            models.AircraftUsage.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not usage:
@@ -1152,11 +1453,10 @@ def delete_usage_entry(
 def get_usage_summary(
     serial_number: str,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    ac = db.query(models.Aircraft).get(serial_number)
-    if not ac:
-        raise HTTPException(status_code=404, detail="Aircraft not found")
-    summary = services.build_usage_summary(db, serial_number)
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    summary = services.build_usage_summary(db, serial_number, amo_id=current_user.amo_id)
     return summary
 
 
@@ -1255,14 +1555,16 @@ def update_maintenance_program_item(
 def list_maintenance_status_for_aircraft(
     serial_number: str,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    ac = db.query(models.Aircraft).get(serial_number)
-    if not ac:
-        raise HTTPException(status_code=404, detail="Aircraft not found")
+    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
 
     statuses = (
         db.query(models.MaintenanceStatus)
-        .filter(models.MaintenanceStatus.aircraft_serial_number == serial_number)
+        .filter(
+            models.MaintenanceStatus.aircraft_serial_number == serial_number,
+            models.MaintenanceStatus.amo_id == current_user.amo_id,
+        )
         .all()
     )
     return statuses
@@ -1762,6 +2064,7 @@ def _set_verification_status(
 
 def _find_component_collision(
     db: Session,
+    amo_id: str,
     part_number: Optional[str],
     serial_number: Optional[str],
     exclude_component_id: Optional[int] = None,
@@ -1772,6 +2075,7 @@ def _find_component_collision(
     query = db.query(models.AircraftComponent).filter(
         models.AircraftComponent.part_number == part_number,
         models.AircraftComponent.serial_number == serial_number,
+        models.AircraftComponent.amo_id == amo_id,
     )
     if exclude_component_id is not None:
         query = query.filter(models.AircraftComponent.id != exclude_component_id)
@@ -1795,7 +2099,11 @@ def _values_differ(original: Any, final: Any) -> bool:
 
 
 def _apply_snapshot_rows(
-    db: Session, snapshot_rows: List[Dict[str, Any]], mode: str
+    db: Session,
+    snapshot_rows: List[Dict[str, Any]],
+    mode: str,
+    *,
+    amo_id: str,
 ) -> int:
     applied = 0
     use_original = mode == "restore"
@@ -1809,7 +2117,14 @@ def _apply_snapshot_rows(
 
         if action == "new" and use_original:
             if final_serial:
-                ac = db.query(models.Aircraft).get(final_serial)
+                ac = (
+                    db.query(models.Aircraft)
+                    .filter(
+                        models.Aircraft.serial_number == final_serial,
+                        models.Aircraft.amo_id == amo_id,
+                    )
+                    .first()
+                )
                 if ac:
                     db.delete(ac)
                     applied += 1
@@ -1817,12 +2132,27 @@ def _apply_snapshot_rows(
 
         ac = None
         if final_serial:
-            ac = db.query(models.Aircraft).get(final_serial)
+            ac = (
+                db.query(models.Aircraft)
+                .filter(
+                    models.Aircraft.serial_number == final_serial,
+                    models.Aircraft.amo_id == amo_id,
+                )
+                .first()
+            )
         if ac is None and original_serial:
-            ac = db.query(models.Aircraft).get(original_serial)
+            ac = (
+                db.query(models.Aircraft)
+                .filter(
+                    models.Aircraft.serial_number == original_serial,
+                    models.Aircraft.amo_id == amo_id,
+                )
+                .first()
+            )
 
         if ac is None:
             ac = models.Aircraft(
+                amo_id=amo_id,
                 serial_number=target_serial or "",
                 registration="",
             )
@@ -2547,7 +2877,14 @@ async def import_aircraft_file(
             if isinstance(val, str) and not val.strip():
                 row_data[key] = None
 
-        ac = db.query(models.Aircraft).get(serial)
+        ac = (
+            db.query(models.Aircraft)
+            .filter(
+                models.Aircraft.serial_number == serial,
+                models.Aircraft.amo_id == current_user.amo_id,
+            )
+            .first()
+        )
         action = "new" if ac is None else "update"
         original_serial = ac.serial_number if ac is not None else None
         original_values: Dict[str, Any] = {}
@@ -2583,7 +2920,7 @@ async def import_aircraft_file(
 
         if ac is None:
             # New aircraft
-            ac = models.Aircraft(**row_data)
+            ac = models.Aircraft(amo_id=current_user.amo_id, **row_data)
             db.add(ac)
             created += 1
         else:
@@ -2705,7 +3042,7 @@ def restore_import_snapshot(
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
     rows = snapshot.diff_map.get("rows", [])
-    restored = _apply_snapshot_rows(db, rows, mode="restore")
+    restored = _apply_snapshot_rows(db, rows, mode="restore", amo_id=current_user.amo_id)
     db.commit()
 
     return {
@@ -2733,7 +3070,7 @@ def reapply_import_snapshot(
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
     rows = snapshot.diff_map.get("rows", [])
-    reapplied = _apply_snapshot_rows(db, rows, mode="reapply")
+    reapplied = _apply_snapshot_rows(db, rows, mode="reapply", amo_id=current_user.amo_id)
     db.commit()
 
     return {
@@ -2777,7 +3114,14 @@ async def preview_components_import(
             detail="pandas is required for import. Install with 'pip install pandas openpyxl'.",
         )
 
-    ac = db.query(models.Aircraft).get(serial_number)
+    ac = (
+        db.query(models.Aircraft)
+        .filter(
+            models.Aircraft.serial_number == serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
@@ -3089,8 +3433,8 @@ def list_component_import_preview_rows(
                 "errors": row.errors or [],
                 "warnings": row.warnings or [],
                 "action": row.action,
-                "existing_component": (row.metadata or {}).get("existing_component"),
-                "dedupe_suggestions": (row.metadata or {}).get("dedupe_suggestions")
+                "existing_component": (row.metadata_json or {}).get("existing_component"),
+                "dedupe_suggestions": (row.metadata_json or {}).get("dedupe_suggestions")
                 or [],
             }
             for row in rows
@@ -3111,13 +3455,23 @@ async def confirm_components_import(
         require_roles(*MANAGEMENT_ROLES)
     ),
 ):
-    ac = db.query(models.Aircraft).get(serial_number)
+    ac = (
+        db.query(models.Aircraft)
+        .filter(
+            models.Aircraft.serial_number == serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
     existing_components = (
         db.query(models.AircraftComponent)
-        .filter(models.AircraftComponent.aircraft_serial_number == serial_number)
+        .filter(
+            models.AircraftComponent.aircraft_serial_number == serial_number,
+            models.AircraftComponent.amo_id == current_user.amo_id,
+        )
         .all()
     )
     existing_by_position = {
@@ -3227,6 +3581,7 @@ async def confirm_components_import(
         comp = existing_by_position.get(position.lower())
         if comp is None:
             comp = models.AircraftComponent(
+                amo_id=current_user.amo_id,
                 aircraft_serial_number=serial_number,
                 position=position,
             )
@@ -3236,6 +3591,7 @@ async def confirm_components_import(
 
         collision = _find_component_collision(
             db,
+            current_user.amo_id,
             row_data.get("part_number"),
             row_data.get("serial_number"),
             exclude_component_id=comp.id if comp.id else None,
@@ -3305,7 +3661,14 @@ async def import_components_file(
             detail="pandas is required for import. Install with 'pip install pandas openpyxl'.",
         )
 
-    ac = db.query(models.Aircraft).get(serial_number)
+    ac = (
+        db.query(models.Aircraft)
+        .filter(
+            models.Aircraft.serial_number == serial_number,
+            models.Aircraft.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
@@ -3375,6 +3738,7 @@ async def import_components_file(
 
         collision = _find_component_collision(
             db,
+            current_user.amo_id,
             payload.get("part_number"),
             payload.get("serial_number"),
             exclude_aircraft_serial=serial_number,
@@ -3393,6 +3757,7 @@ async def import_components_file(
             continue
 
         comp = models.AircraftComponent(
+            amo_id=current_user.amo_id,
             aircraft_serial_number=serial_number,
             position=position,
             ata=payload.get("ata"),
