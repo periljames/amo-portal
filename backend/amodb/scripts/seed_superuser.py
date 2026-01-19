@@ -1,18 +1,28 @@
+import os
+
+from argon2 import PasswordHasher
 from sqlalchemy.orm import Session
 
 from amodb.database import SessionLocal
-from amodb.security import get_password_hash
 from amodb.apps.accounts.models import AMO, User, AccountRole
 
-EMAIL = "jamesmuisyo99@outlook.com"
-PASSWORD = "Q1w2e3r4t5y6!"  # don't commit this to git
-FIRST_NAME = "James"
-LAST_NAME = "Muisyo"
-STAFF_CODE = "SYS001"
+EMAIL = os.getenv("AMODB_SUPERUSER_EMAIL")
+PASSWORD = os.getenv("AMODB_SUPERUSER_PASSWORD")
+FIRST_NAME = os.getenv("AMODB_SUPERUSER_FIRST_NAME", "Platform")
+LAST_NAME = os.getenv("AMODB_SUPERUSER_LAST_NAME", "Admin")
+STAFF_CODE = os.getenv("AMODB_SUPERUSER_STAFF_CODE", "SYS001")
 
-PLATFORM_AMO_CODE = "PLATFORM"
-PLATFORM_AMO_NAME = "AMOdb Platform"
-PLATFORM_LOGIN_SLUG = "root"
+PLATFORM_AMO_CODE = os.getenv("AMODB_PLATFORM_AMO_CODE", "PLATFORM")
+PLATFORM_AMO_NAME = os.getenv("AMODB_PLATFORM_AMO_NAME", "AMOdb Platform")
+PLATFORM_LOGIN_SLUG = os.getenv("AMODB_PLATFORM_LOGIN_SLUG", "root")
+
+_pwd_hasher = PasswordHasher(
+    time_cost=int(os.getenv("ARGON2_TIME_COST", "3")),
+    memory_cost=int(os.getenv("ARGON2_MEMORY_COST", "65536")),
+    parallelism=int(os.getenv("ARGON2_PARALLELISM", "2")),
+    hash_len=int(os.getenv("ARGON2_HASH_LEN", "32")),
+    salt_len=int(os.getenv("ARGON2_SALT_LEN", "16")),
+)
 
 
 def ensure_platform_amo(db: Session) -> AMO:
@@ -63,7 +73,7 @@ def ensure_superuser(db: Session, amo: AMO) -> User:
         is_superuser=True,
         is_amo_admin=True,
         is_system_account=False,
-        hashed_password=get_password_hash(PASSWORD),
+        hashed_password=_pwd_hasher.hash(PASSWORD),
     )
     db.add(user)
     db.commit()
@@ -72,6 +82,11 @@ def ensure_superuser(db: Session, amo: AMO) -> User:
 
 
 def main() -> None:
+    if not EMAIL or not PASSWORD:
+        raise SystemExit(
+            "Set AMODB_SUPERUSER_EMAIL and AMODB_SUPERUSER_PASSWORD before running."
+        )
+
     db = SessionLocal()
     try:
         amo = ensure_platform_amo(db)

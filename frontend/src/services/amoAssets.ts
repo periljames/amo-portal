@@ -1,7 +1,7 @@
 // src/services/amoAssets.ts
 
-import { API_BASE_URL } from "./config";
-import { authHeaders, getToken } from "./auth";
+import { getApiBaseUrl } from "./config";
+import { authHeaders, getToken, handleAuthFailure } from "./auth";
 
 export type AmoAssetRead = {
   amo_id: string;
@@ -25,10 +25,17 @@ function withAmoId(path: string, amoId?: string | null): string {
 }
 
 export async function getAmoAssets(amoId?: string | null): Promise<AmoAssetRead> {
-  const res = await fetch(withAmoId(`${API_BASE_URL}/accounts/amo-assets/me`, amoId), {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/me`, amoId),
+    {
     method: "GET",
     headers: authHeaders(),
   });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   if (!res.ok) {
     const text = await res.text();
@@ -42,51 +49,85 @@ export async function uploadAmoLogo(file: File, amoId?: string | null): Promise<
   const form = new FormData();
   form.append("file", file);
 
-  const res = await fetch(withAmoId(`${API_BASE_URL}/accounts/amo-assets/logo`, amoId), {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/logo`, amoId),
+    {
     method: "POST",
     headers: buildAuthHeader(),
     body: form,
   });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);
   }
 
-  return (await res.json()) as AmoAssetRead;
+function buildSpeed(
+  loadedBytes: number,
+  totalBytes: number | undefined,
+  startedAt: number
+): TransferProgress {
+  const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.001);
+  const megaBytesPerSecond = loadedBytes / (1024 * 1024) / elapsedSeconds;
+  const megaBitsPerSecond = megaBytesPerSecond * 8;
+  const percent = totalBytes ? Math.min((loadedBytes / totalBytes) * 100, 100) : undefined;
+  return {
+    loadedBytes,
+    totalBytes,
+    percent,
+    megaBytesPerSecond,
+    megaBitsPerSecond,
+  };
 }
 
-export async function uploadAmoTemplate(file: File, amoId?: string | null): Promise<AmoAssetRead> {
+function uploadAmoAsset(
+  file: File,
+  kind: "logo" | "template",
+  amoId?: string | null,
+  onProgress?: (progress: TransferProgress) => void
+): Promise<AmoAssetRead> {
   const form = new FormData();
   form.append("file", file);
 
-  const res = await fetch(withAmoId(`${API_BASE_URL}/accounts/amo-assets/template`, amoId), {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/template`, amoId),
+    {
     method: "POST",
     headers: buildAuthHeader(),
     body: form,
   });
+}
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
+export function uploadAmoLogo(
+  file: File,
+  amoId?: string | null,
+  onProgress?: (progress: TransferProgress) => void
+): Promise<AmoAssetRead> {
+  return uploadAmoAsset(file, "logo", amoId, onProgress);
+}
 
-  return (await res.json()) as AmoAssetRead;
+export function uploadAmoTemplate(
+  file: File,
+  amoId?: string | null,
+  onProgress?: (progress: TransferProgress) => void
+): Promise<AmoAssetRead> {
+  return uploadAmoAsset(file, "template", amoId, onProgress);
 }
 
 export async function downloadAmoAsset(
   kind: "logo" | "template",
-  amoId?: string | null
+  amoId?: string | null,
+  onProgress?: (progress: TransferProgress) => void
 ): Promise<Blob> {
-  const res = await fetch(withAmoId(`${API_BASE_URL}/accounts/amo-assets/${kind}`, amoId), {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/${kind}`, amoId),
+    {
     method: "GET",
     headers: buildAuthHeader(),
   });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-
-  return await res.blob();
 }

@@ -382,9 +382,16 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     login_attempts = Column(Integer, nullable=False, default=0)
     locked_until = Column(DateTime(timezone=True), nullable=True)
+    lockout_count = Column(Integer, nullable=False, default=0)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     last_login_ip = Column(String(64), nullable=True)
     last_login_user_agent = Column(Text, nullable=True)
+    must_change_password = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Require the user to change their password on first login.",
+    )
 
     # Future: mark if user has registered WebAuthn / passkeys (MFA hook)
     webauthn_registered = Column(Boolean, nullable=False, default=False)
@@ -736,3 +743,609 @@ class AccountSecurityEvent(Base):
 
     def __repr__(self) -> str:
         return f"<SecurityEvent {self.event_type} user={self.user_id}>"
+
+
+# ---------------------------------------------------------------------------
+# BILLING / LICENSING
+# ---------------------------------------------------------------------------
+
+
+class BillingTerm(str, enum.Enum):
+    MONTHLY = "MONTHLY"
+    ANNUAL = "ANNUAL"
+    BI_ANNUAL = "BI_ANNUAL"
+
+
+class LicenseStatus(str, enum.Enum):
+    TRIALING = "TRIALING"
+    ACTIVE = "ACTIVE"
+    CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
+
+
+class LedgerEntryType(str, enum.Enum):
+    CHARGE = "CHARGE"
+    REFUND = "REFUND"
+    ADJUSTMENT = "ADJUSTMENT"
+    PAYMENT = "PAYMENT"
+    USAGE = "USAGE"
+
+
+class PaymentProvider(str, enum.Enum):
+    STRIPE = "STRIPE"
+    OFFLINE = "OFFLINE"
+    MANUAL = "MANUAL"
+    PSP = "PSP"
+
+
+class InvoiceStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    PAID = "PAID"
+    VOID = "VOID"
+
+
+class WebhookStatus(str, enum.Enum):
+    RECEIVED = "RECEIVED"
+    PROCESSED = "PROCESSED"
+    FAILED = "FAILED"
+
+
+class CatalogSKU(Base):
+    """
+    Commercial product definition, e.g. "Starter Monthly" or "Enterprise Annual".
+    """
+
+    __tablename__ = "catalog_skus"
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    code = Column(String(64), nullable=False, unique=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+
+    term = Column(
+        Enum(BillingTerm, name="billing_term_enum"),
+        nullable=False,
+        index=True,
+    )
+    trial_days = Column(Integer, nullable=False, default=0)
+
+    amount_cents = Column(Integer, nullable=False, doc="Price in the smallest currency unit.")
+    currency = Column(String(8), nullable=False, default="USD")
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    licenses = relationship(
+        "TenantLicense",
+        back_populates="catalog_sku",
+        lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<CatalogSKU code={self.code} term={self.term}>"
+
+
+class TenantLicense(Base):
+    """
+    A tenant's subscribed SKU, including term, status and billing cadence.
+    """
+
+    __tablename__ = "tenant_licenses"
+    __table_args__ = (
+        Index("idx_tenant_licenses_status_term", "status", "term"),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sku_id = Column(
+        String(36),
+        ForeignKey("catalog_skus.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    term = Column(
+        Enum(BillingTerm, name="billing_term_enum"),
+        nullable=False,
+        index=True,
+    )
+    status = Column(
+        Enum(LicenseStatus, name="license_status_enum"),
+        nullable=False,
+        default=LicenseStatus.TRIALING,
+        index=True,
+    )
+    trial_started_at = Column(DateTime(timezone=True), nullable=True)
+    trial_ends_at = Column(DateTime(timezone=True), nullable=True)
+    trial_grace_expires_at = Column(DateTime(timezone=True), nullable=True)
+    is_read_only = Column(Boolean, nullable=False, default=False)
+    current_period_start = Column(DateTime(timezone=True), nullable=False)
+    current_period_end = Column(DateTime(timezone=True), nullable=True)
+    canceled_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    amo = relationship("AMO", lazy="joined")
+    catalog_sku = relationship("CatalogSKU", back_populates="licenses", lazy="joined")
+    entitlements = relationship(
+        "LicenseEntitlement",
+        back_populates="license",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    ledger_entries = relationship(
+        "LedgerEntry",
+        back_populates="license",
+        lazy="selectin",
+    )
+    usage_meters = relationship(
+        "UsageMeter",
+        back_populates="license",
+        lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<TenantLicense amo={self.amo_id} sku={self.sku_id} status={self.status}>"
+
+
+class LicenseEntitlement(Base):
+    """
+    Grants a specific entitlement (feature flag, seat count, storage, etc.) for a license.
+    """
+
+    __tablename__ = "license_entitlements"
+    __table_args__ = (
+        UniqueConstraint("license_id", "key", name="uq_license_entitlement_unique"),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    license_id = Column(
+        String(36),
+        ForeignKey("tenant_licenses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    key = Column(String(128), nullable=False)
+    limit = Column(Integer, nullable=True, doc="Numeric ceiling for the entitlement (e.g. seats).")
+    is_unlimited = Column(Boolean, nullable=False, default=False)
+    description = Column(Text, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    license = relationship("TenantLicense", back_populates="entitlements", lazy="joined")
+
+    def __repr__(self) -> str:
+        qualifier = "unlimited" if self.is_unlimited else self.limit
+        return f"<LicenseEntitlement {self.key}={qualifier}>"
+
+
+class UsageMeter(Base):
+    """
+    Tracks usage against an entitlement or billing meter, per tenant.
+    """
+
+    __tablename__ = "usage_meters"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "meter_key", name="uq_usage_meter_key"),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    license_id = Column(
+        String(36),
+        ForeignKey("tenant_licenses.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    meter_key = Column(String(128), nullable=False)
+    used_units = Column(Integer, nullable=False, default=0)
+    last_recorded_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    amo = relationship("AMO", lazy="joined")
+    license = relationship("TenantLicense", back_populates="usage_meters", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<UsageMeter amo={self.amo_id} key={self.meter_key} used={self.used_units}>"
+
+
+class LedgerEntry(Base):
+    """
+    Financial ledger entries with idempotent writes for external billing systems.
+    """
+
+    __tablename__ = "ledger_entries"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "idempotency_key", name="uq_ledger_entry_idempotent"),
+        Index("idx_ledger_entries_amo_recorded", "amo_id", "recorded_at"),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    license_id = Column(
+        String(36),
+        ForeignKey("tenant_licenses.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    amount_cents = Column(Integer, nullable=False)
+    currency = Column(String(8), nullable=False, default="USD")
+    entry_type = Column(
+        Enum(LedgerEntryType, name="ledger_entry_type_enum"),
+        nullable=False,
+        index=True,
+    )
+    description = Column(Text, nullable=True)
+    idempotency_key = Column(String(128), nullable=False)
+    recorded_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    amo = relationship("AMO", lazy="joined")
+    license = relationship("TenantLicense", back_populates="ledger_entries", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<LedgerEntry amo={self.amo_id} amount={self.amount_cents} {self.entry_type}>"
+
+
+class PaymentMethod(Base):
+    """
+    Stored payment instrument for a tenant (card token, offline reference, etc.).
+    """
+
+    __tablename__ = "payment_methods"
+    __table_args__ = (
+        UniqueConstraint(
+            "amo_id",
+            "provider",
+            "external_ref",
+            name="uq_payment_method_external_ref",
+        ),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    provider = Column(
+        Enum(PaymentProvider, name="payment_provider_enum"),
+        nullable=False,
+        index=True,
+    )
+    external_ref = Column(String(128), nullable=False)
+    display_name = Column(String(255), nullable=True)
+    card_last4 = Column(String(4), nullable=True)
+    card_exp_month = Column(Integer, nullable=True)
+    card_exp_year = Column(Integer, nullable=True)
+    is_default = Column(Boolean, nullable=False, default=False, index=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    amo = relationship("AMO", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<PaymentMethod amo={self.amo_id} provider={self.provider}>"
+
+
+class IdempotencyKey(Base):
+    """
+    Tracks idempotent operations across billing mutations.
+    """
+
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (
+        UniqueConstraint("scope", "key", name="uq_idempotency_scope_key"),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    scope = Column(String(64), nullable=False, index=True)
+    key = Column(String(128), nullable=False)
+    payload_hash = Column(String(128), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    last_used_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    def __repr__(self) -> str:
+        return f"<Idempotency scope={self.scope} key={self.key}>"
+
+
+class BillingInvoice(Base):
+    """
+    Minimal invoice representation backed by ledger entries.
+    """
+
+    __tablename__ = "billing_invoices"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "idempotency_key", name="uq_invoice_idempotency"),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    license_id = Column(
+        String(36),
+        ForeignKey("tenant_licenses.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ledger_entry_id = Column(
+        String(36),
+        ForeignKey("ledger_entries.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    amount_cents = Column(Integer, nullable=False)
+    currency = Column(String(8), nullable=False, default="USD")
+    status = Column(
+        Enum(InvoiceStatus, name="invoice_status_enum"),
+        nullable=False,
+        default=InvoiceStatus.PENDING,
+        index=True,
+    )
+    description = Column(Text, nullable=True)
+    idempotency_key = Column(String(128), nullable=False)
+    issued_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    due_at = Column(DateTime(timezone=True), nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    amo = relationship("AMO", lazy="joined")
+    license = relationship("TenantLicense", lazy="joined")
+    ledger_entry = relationship("LedgerEntry", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<BillingInvoice amo={self.amo_id} amount={self.amount_cents} status={self.status}>"
+
+
+class BillingAuditLog(Base):
+    """
+    Audit log for billing events (webhooks, mutations, retries).
+    """
+
+    __tablename__ = "billing_audit_logs"
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    event_type = Column(String(128), nullable=False)
+    details = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    amo = relationship("AMO", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<BillingAuditLog event={self.event_type}>"
+
+
+class WebhookEvent(Base):
+    """
+    Stores PSP webhook deliveries with retry metadata.
+    """
+
+    __tablename__ = "webhook_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "external_event_id",
+            name="uq_webhook_provider_event",
+        ),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    provider = Column(
+        Enum(PaymentProvider, name="payment_provider_enum"),
+        nullable=False,
+        index=True,
+    )
+    external_event_id = Column(String(128), nullable=False)
+    signature = Column(String(256), nullable=True)
+    event_type = Column(String(128), nullable=True)
+    payload = Column(Text, nullable=False)
+    status = Column(
+        Enum(WebhookStatus, name="webhook_status_enum"),
+        nullable=False,
+        default=WebhookStatus.RECEIVED,
+        index=True,
+    )
+    attempt_count = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    audit_log_id = Column(
+        String(36),
+        ForeignKey("billing_audit_logs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    audit_log = relationship("BillingAuditLog", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<WebhookEvent provider={self.provider} status={self.status} attempts={self.attempt_count}>"
+
+
+class PlatformSettings(Base):
+    """
+    Singleton record for platform-wide configuration (superuser only).
+    """
+
+    __tablename__ = "platform_settings"
+
+    id = Column(Integer, primary_key=True, default=1)
+    api_base_url = Column(String(255), nullable=True)
+
+    acme_directory_url = Column(String(255), nullable=True)
+    acme_client = Column(String(128), nullable=True)
+    certificate_status = Column(String(64), nullable=True)
+    certificate_issuer = Column(String(255), nullable=True)
+    certificate_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_renewed_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )

@@ -187,7 +187,7 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("wo_number"),
+        sa.UniqueConstraint("wo_number", name="work_orders_wo_number_key"),
     )
     op.create_index(op.f("ix_work_orders_id"), "work_orders", ["id"], unique=False)
     op.create_table(

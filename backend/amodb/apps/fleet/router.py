@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from ...database import WriteSessionLocal, get_db
 from ...security import get_current_active_user, require_roles
+from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts import models as account_models
 from . import models, ocr as ocr_service, schemas, services
 
@@ -39,6 +40,14 @@ MANAGEMENT_ROLES = [
     "PRODUCTION_ENGINEER",
 ]
 
+# Include Quality for document management
+DOCUMENT_WRITE_ROLES = MANAGEMENT_ROLES + ["QUALITY_MANAGER"]
+QUALITY_OVERRIDE_ROLES = [
+    "SUPERUSER",
+    "AMO_ADMIN",
+    "QUALITY_MANAGER",
+]
+
 # Roles allowed to manage maintenance programme template items
 PROGRAM_WRITE_ROLES = [
     "SUPERUSER",
@@ -46,11 +55,101 @@ PROGRAM_WRITE_ROLES = [
     "PLANNING_ENGINEER",
 ]
 
+DOC_UPLOAD_DIR = Path(
+    os.getenv("AIRCRAFT_DOC_UPLOAD_DIR", "/tmp/amo_aircraft_documents")
+).resolve()
+DOC_MAX_UPLOAD_BYTES = int(os.getenv("AIRCRAFT_DOC_MAX_UPLOAD_BYTES", "20971520"))
+ALLOWED_DOC_EXTS = {".pdf", ".png", ".jpg", ".jpeg"}
+DOC_AMO_SUBDIR = "aircraft"
+
+
+def _get_aircraft_or_404(db: Session, serial_number: str) -> models.Aircraft:
+    ac = db.query(models.Aircraft).get(serial_number)
+    if not ac:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+    return ac
+
+
+def _get_document_or_404(db: Session, document_id: int) -> models.AircraftDocument:
+    doc = (
+        db.query(models.AircraftDocument)
+        .filter(models.AircraftDocument.id == document_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+def _document_to_schema(
+    doc: models.AircraftDocument,
+    evaluation: services.DocumentEvaluation | None = None,
+) -> schemas.AircraftDocumentRead:
+    evaluation = evaluation or services.evaluate_document(doc)
+    base = schemas.AircraftDocumentRead.model_validate(doc, from_attributes=True)
+    return base.model_copy(
+        update={
+            "status": evaluation.status,
+            "is_blocking": evaluation.is_blocking,
+            "days_to_expiry": evaluation.days_to_expiry,
+            "missing_evidence": evaluation.missing_evidence,
+        }
+    )
+
+
+def _ensure_doc_upload_path(dest: Path) -> Path:
+    resolved = dest.resolve()
+    if not str(resolved).startswith(str(DOC_UPLOAD_DIR)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid document upload path.",
+        )
+    return resolved
+
+
+def _save_document_file(
+    *,
+    file: UploadFile,
+    doc: models.AircraftDocument,
+    amo_id: str,
+) -> Path:
+    filename = file.filename or "document"
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_DOC_EXTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Upload must be a PDF or image file (.pdf, .png, .jpg, .jpeg).",
+        )
+
+    DOC_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    doc_root = _ensure_doc_upload_path(DOC_UPLOAD_DIR / amo_id / DOC_AMO_SUBDIR)
+    doc_root.mkdir(parents=True, exist_ok=True)
+    doc_folder = _ensure_doc_upload_path(doc_root / doc.aircraft_serial_number)
+    doc_folder.mkdir(parents=True, exist_ok=True)
+
+    dest_path = _ensure_doc_upload_path(
+        doc_folder / f"{doc.document_type.lower()}_{uuid4().hex}{ext}"
+    )
+    total = 0
+    with dest_path.open("wb") as out:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if DOC_MAX_UPLOAD_BYTES and total > DOC_MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Upload exceeds maximum file size.",
+                )
+            out.write(chunk)
+    return dest_path
+
 router = APIRouter(
     prefix="/aircraft",
     tags=["aircraft"],
-    # Require an authenticated, active user for everything in this router
-    dependencies=[Depends(get_current_active_user)],
+    # Require an entitled, authenticated user for everything in this router
+    dependencies=[Depends(require_module("fleet"))],
 )
 
 logger = logging.getLogger(__name__)
@@ -127,6 +226,13 @@ def create_aircraft(
         require_roles(*MANAGEMENT_ROLES)
     ),
 ):
+    safety_confirmed = bool(payload.safety_confirmed)
+    data = payload.model_dump(exclude={"safety_confirmed"})
+    safety_fields = [
+        field for field in AIRCRAFT_SAFETY_FIELDS if data.get(field) is not None
+    ]
+    _require_safety_confirmation("aircraft", safety_confirmed, safety_fields)
+
     # Check serial_number (AIN-style)
     existing = db.query(models.Aircraft).get(payload.serial_number)
     if existing:
@@ -150,7 +256,8 @@ def create_aircraft(
             ),
         )
 
-    ac = models.Aircraft(**payload.model_dump())
+    ac = models.Aircraft(**data)
+    _set_verification_status(ac, safety_confirmed)
     db.add(ac)
     db.commit()
     db.refresh(ac)
@@ -170,7 +277,29 @@ def update_aircraft(
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True, exclude={"safety_confirmed"})
+    safety_fields = [
+        field
+        for field in AIRCRAFT_SAFETY_FIELDS
+        if field in data and _values_differ(getattr(ac, field), data[field])
+    ]
+    _require_safety_confirmation(
+        "aircraft", payload.safety_confirmed, safety_fields
+    )
+
+    merged_data = {
+        "serial_number": ac.serial_number,
+        "registration": data.get("registration", ac.registration),
+        "last_log_date": data.get("last_log_date", ac.last_log_date),
+        "total_hours": data.get("total_hours", ac.total_hours),
+        "total_cycles": data.get("total_cycles", ac.total_cycles),
+    }
+    validation = _validate_aircraft_payload(merged_data)
+    if validation["errors"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(validation["errors"]),
+        )
 
     # If registration is changing, ensure no conflicts
     new_reg = data.get("registration")
@@ -194,6 +323,9 @@ def update_aircraft(
 
     for field, value in data.items():
         setattr(ac, field, value)
+
+    if safety_fields:
+        _set_verification_status(ac, True)
 
     db.add(ac)
     db.commit()
@@ -221,6 +353,393 @@ def deactivate_aircraft(
     db.add(ac)
     db.commit()
     return
+
+
+# ---------------------------------------------------------------------------
+# AIRCRAFT DOCUMENTS (C of A / regulatory evidence)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{serial_number}/documents",
+    response_model=List[schemas.AircraftDocumentRead],
+)
+def list_aircraft_documents(
+    serial_number: str,
+    db: Session = Depends(get_db),
+):
+    _get_aircraft_or_404(db, serial_number)
+    docs = (
+        db.query(models.AircraftDocument)
+        .filter(models.AircraftDocument.aircraft_serial_number == serial_number)
+        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
+        .all()
+    )
+    return [_document_to_schema(doc) for doc in docs]
+
+
+@router.post(
+    "/{serial_number}/documents",
+    response_model=schemas.AircraftDocumentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_aircraft_document(
+    serial_number: str,
+    payload: schemas.AircraftDocumentCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    _get_aircraft_or_404(db, serial_number)
+    existing = (
+        db.query(models.AircraftDocument)
+        .filter(
+            models.AircraftDocument.aircraft_serial_number == serial_number,
+            models.AircraftDocument.document_type == payload.document_type,
+            models.AircraftDocument.authority == payload.authority,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document for this authority and type already exists for this aircraft.",
+        )
+
+    doc = models.AircraftDocument(
+        aircraft_serial_number=serial_number,
+        document_type=payload.document_type,
+        authority=payload.authority,
+        title=payload.title,
+        reference_number=payload.reference_number,
+        compliance_basis=payload.compliance_basis,
+        issued_on=payload.issued_on,
+        expires_on=payload.expires_on,
+        alert_window_days=payload.alert_window_days,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    evaluation = services.refresh_document_status(doc)
+
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_schema(doc, evaluation)
+
+
+@router.put(
+    "/documents/{document_id}",
+    response_model=schemas.AircraftDocumentRead,
+)
+def update_aircraft_document(
+    document_id: int,
+    payload: schemas.AircraftDocumentUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(doc, field, value)
+
+    evaluation = services.refresh_document_status(doc)
+    doc.updated_at = datetime.utcnow()
+
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_schema(doc, evaluation)
+
+
+@router.post(
+    "/documents/{document_id}/upload",
+    response_model=schemas.AircraftDocumentRead,
+)
+def upload_document_evidence(
+    document_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+
+    # Replace any previous evidence to avoid stale copies floating around.
+    if doc.file_storage_path:
+        try:
+            Path(doc.file_storage_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    dest_path = _save_document_file(file=file, doc=doc, amo_id=current_user.amo_id)
+
+    doc.file_storage_path = str(dest_path)
+    doc.file_original_name = file.filename or Path(dest_path).name
+    doc.file_content_type = file.content_type
+    doc.last_uploaded_at = datetime.utcnow()
+    doc.last_uploaded_by_user_id = current_user.id
+    doc.updated_at = datetime.utcnow()
+
+    evaluation = services.refresh_document_status(doc)
+
+    try:
+        size_bytes = Path(dest_path).stat().st_size
+    except FileNotFoundError:
+        size_bytes = 0
+
+    account_services.record_usage(
+        db,
+        amo_id=current_user.amo_id,
+        meter_key=account_services.METER_KEY_STORAGE_MB,
+        quantity=account_services.megabytes_from_bytes(size_bytes),
+        commit=False,
+    )
+
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_schema(doc, evaluation)
+
+
+@router.get(
+    "/documents/{document_id}/download",
+    response_class=FileResponse,
+    summary="Download aircraft document evidence",
+)
+def download_document_evidence(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+
+    if not doc.file_storage_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No evidence uploaded for this document.")
+
+    path = _ensure_doc_upload_path(Path(doc.file_storage_path))
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document evidence not found.")
+
+    return FileResponse(
+        path=str(path),
+        media_type=doc.file_content_type or "application/octet-stream",
+        filename=doc.file_original_name or path.name,
+    )
+
+
+@router.post(
+    "/documents/download-zip",
+    response_class=FileResponse,
+    summary="Download multiple aircraft document evidence files as a ZIP",
+)
+def download_document_evidence_zip(
+    payload: schemas.AircraftDocumentDownloadRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*DOCUMENT_WRITE_ROLES)
+    ),
+):
+    doc_ids = list({int(doc_id) for doc_id in payload.document_ids})
+    if not doc_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No document IDs supplied.",
+        )
+
+    docs = db.query(models.AircraftDocument).filter(
+        models.AircraftDocument.id.in_(doc_ids)
+    ).all()
+    if len(docs) != len(doc_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more documents were not found.",
+        )
+
+    export_dir = _ensure_doc_upload_path(
+        DOC_UPLOAD_DIR / current_user.amo_id / "exports"
+    )
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    temp_file = tempfile.NamedTemporaryFile(
+        suffix=".zip",
+        dir=export_dir,
+        delete=False,
+    )
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+
+    try:
+        with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for doc in docs:
+                if not doc.file_storage_path:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"No evidence uploaded for document {doc.id}.",
+                    )
+                path = _ensure_doc_upload_path(Path(doc.file_storage_path))
+                if not path.exists():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Evidence not found for document {doc.id}.",
+                    )
+
+                filename = doc.file_original_name or path.name
+                zf.write(path, arcname=filename)
+    except HTTPException:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+    background_tasks.add_task(temp_path.unlink, missing_ok=True)
+    return FileResponse(
+        path=str(temp_path),
+        media_type="application/zip",
+        filename="aircraft_documents.zip",
+    )
+
+
+@router.post(
+    "/documents/{document_id}/override",
+    response_model=schemas.AircraftDocumentRead,
+)
+def quality_override_document(
+    document_id: int,
+    payload: schemas.AircraftDocumentOverride,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*QUALITY_OVERRIDE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Override reason is required.",
+        )
+
+    doc.override_reason = reason
+    doc.override_expires_on = payload.override_expires_on
+    doc.override_by_user_id = current_user.id
+    doc.override_recorded_at = datetime.utcnow()
+    doc.updated_at = datetime.utcnow()
+
+    evaluation = services.refresh_document_status(doc)
+
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_schema(doc, evaluation)
+
+
+@router.delete(
+    "/documents/{document_id}/override",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def clear_document_override(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*QUALITY_OVERRIDE_ROLES)
+    ),
+):
+    doc = _get_document_or_404(db, document_id)
+
+    doc.override_reason = None
+    doc.override_expires_on = None
+    doc.override_by_user_id = None
+    doc.override_recorded_at = None
+    doc.updated_at = datetime.utcnow()
+
+    services.refresh_document_status(doc)
+    db.add(doc)
+    db.commit()
+    return
+
+
+@router.get(
+    "/{serial_number}/compliance",
+    response_model=schemas.AircraftComplianceSummary,
+)
+def get_aircraft_compliance_summary(
+    serial_number: str,
+    db: Session = Depends(get_db),
+):
+    _get_aircraft_or_404(db, serial_number)
+    docs = (
+        db.query(models.AircraftDocument)
+        .filter(models.AircraftDocument.aircraft_serial_number == serial_number)
+        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
+        .all()
+    )
+
+    blocking: List[schemas.AircraftDocumentRead] = []
+    due_soon: List[schemas.AircraftDocumentRead] = []
+    overdue: List[schemas.AircraftDocumentRead] = []
+    overrides: List[schemas.AircraftDocumentRead] = []
+    all_docs: List[schemas.AircraftDocumentRead] = []
+
+    for doc in docs:
+        evaluation = services.evaluate_document(doc)
+        schema_doc = _document_to_schema(doc, evaluation)
+        all_docs.append(schema_doc)
+        if evaluation.is_blocking:
+            blocking.append(schema_doc)
+        if evaluation.status == models.AircraftDocumentStatus.DUE_SOON:
+            due_soon.append(schema_doc)
+        if evaluation.status == models.AircraftDocumentStatus.OVERDUE:
+            overdue.append(schema_doc)
+        if evaluation.override_active:
+            overrides.append(schema_doc)
+
+    return schemas.AircraftComplianceSummary(
+        aircraft_serial_number=serial_number,
+        documents_total=len(all_docs),
+        is_blocking=len(blocking) > 0,
+        blocking_documents=blocking,
+        due_soon_documents=due_soon,
+        overdue_documents=overdue,
+        overrides=overrides,
+        documents=all_docs,
+    )
+
+
+@router.get(
+    "/document-alerts",
+    response_model=List[schemas.AircraftDocumentRead],
+)
+def list_document_alerts(
+    due_within_days: int = 45,
+    db: Session = Depends(get_db),
+):
+    alerts: List[schemas.AircraftDocumentRead] = []
+    docs = (
+        db.query(models.AircraftDocument)
+        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
+        .all()
+    )
+    today = date.today()
+    for doc in docs:
+        evaluation = services.evaluate_document(doc, today=today)
+        days_to_expiry = evaluation.days_to_expiry
+        if evaluation.status in {
+            models.AircraftDocumentStatus.OVERDUE,
+            models.AircraftDocumentStatus.DUE_SOON,
+        } or (
+            evaluation.status == models.AircraftDocumentStatus.CURRENT
+            and days_to_expiry is not None
+            and days_to_expiry <= due_within_days
+        ):
+            schema_doc = _document_to_schema(doc, evaluation)
+            alerts.append(schema_doc)
+    return alerts
 
 
 # ---------------------------------------------------------------------------
@@ -259,11 +778,39 @@ def create_component(
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
-    data = payload.model_dump(exclude_unset=True)
+    safety_confirmed = bool(payload.safety_confirmed)
+    data = payload.model_dump(exclude_unset=True, exclude={"safety_confirmed"})
+    safety_fields = [
+        field for field in COMPONENT_SAFETY_FIELDS if data.get(field) is not None
+    ]
+    _require_safety_confirmation("component", safety_confirmed, safety_fields)
     # Ensure the component is always attached to the path aircraft
     data["aircraft_serial_number"] = serial_number
 
+    validation = _validate_component_payload(data)
+    if validation["errors"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(validation["errors"]),
+        )
+
+    collision = _find_component_collision(
+        db,
+        data.get("part_number"),
+        data.get("serial_number"),
+        exclude_aircraft_serial=serial_number,
+    )
+    if collision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Part/serial pair already assigned to aircraft "
+                f"{collision.aircraft_serial_number}."
+            ),
+        )
+
     comp = models.AircraftComponent(**data)
+    _set_verification_status(comp, safety_confirmed)
     db.add(comp)
     db.commit()
     db.refresh(comp)
@@ -290,9 +837,74 @@ def update_component(
     if not comp:
         raise HTTPException(status_code=404, detail="Component not found")
 
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True, exclude={"safety_confirmed"})
+    safety_fields = [
+        field
+        for field in COMPONENT_SAFETY_FIELDS
+        if field in data and _values_differ(getattr(comp, field), data[field])
+    ]
+    _require_safety_confirmation(
+        "component", payload.safety_confirmed, safety_fields
+    )
+
+    merged_data = {
+        "position": data.get("position", comp.position),
+        "part_number": data.get("part_number", comp.part_number),
+        "serial_number": data.get("serial_number", comp.serial_number),
+        "installed_date": data.get("installed_date", comp.installed_date),
+        "installed_hours": data.get("installed_hours", comp.installed_hours),
+        "installed_cycles": data.get("installed_cycles", comp.installed_cycles),
+        "current_hours": data.get("current_hours", comp.current_hours),
+        "current_cycles": data.get("current_cycles", comp.current_cycles),
+        "tbo_hours": data.get("tbo_hours", comp.tbo_hours),
+        "tbo_cycles": data.get("tbo_cycles", comp.tbo_cycles),
+        "tbo_calendar_months": data.get(
+            "tbo_calendar_months", comp.tbo_calendar_months
+        ),
+        "hsi_hours": data.get("hsi_hours", comp.hsi_hours),
+        "hsi_cycles": data.get("hsi_cycles", comp.hsi_cycles),
+        "hsi_calendar_months": data.get(
+            "hsi_calendar_months", comp.hsi_calendar_months
+        ),
+        "last_overhaul_date": data.get(
+            "last_overhaul_date", comp.last_overhaul_date
+        ),
+        "last_overhaul_hours": data.get(
+            "last_overhaul_hours", comp.last_overhaul_hours
+        ),
+        "last_overhaul_cycles": data.get(
+            "last_overhaul_cycles", comp.last_overhaul_cycles
+        ),
+    }
+    validation = _validate_component_payload(merged_data)
+    if validation["errors"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(validation["errors"]),
+        )
+
+    part_number = data.get("part_number", comp.part_number)
+    serial_number = data.get("serial_number", comp.serial_number)
+    collision = _find_component_collision(
+        db,
+        part_number,
+        serial_number,
+        exclude_component_id=comp.id,
+        exclude_aircraft_serial=comp.aircraft_serial_number,
+    )
+    if collision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Part/serial pair already assigned to aircraft "
+                f"{collision.aircraft_serial_number}."
+            ),
+        )
     for field, value in data.items():
         setattr(comp, field, value)
+
+    if safety_fields:
+        _set_verification_status(comp, True)
 
     db.add(comp)
     db.commit()
@@ -384,6 +996,13 @@ def create_usage_entry(
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
+    safety_confirmed = bool(payload.safety_confirmed)
+    data = payload.model_dump(exclude={"safety_confirmed"})
+    safety_fields = [
+        field for field in USAGE_SAFETY_FIELDS if data.get(field) is not None
+    ]
+    _require_safety_confirmation("usage", safety_confirmed, safety_fields)
+
     # Uniqueness check: aircraft + date + techlog_no
     existing = (
         db.query(models.AircraftUsage)
@@ -400,7 +1019,6 @@ def create_usage_entry(
             detail="Usage entry for this aircraft, date and techlog already exists.",
         )
 
-    data = payload.model_dump()
     previous_usage = services.get_previous_usage(db, serial_number, payload.date)
     services.apply_usage_calculations(data, previous_usage)
     services.update_maintenance_remaining(db, serial_number, payload.date, data)
@@ -410,6 +1028,7 @@ def create_usage_entry(
         updated_by_user_id=current_user.id,
         **data,
     )
+    _set_verification_status(usage, safety_confirmed)
 
     db.add(usage)
     db.commit()
@@ -446,7 +1065,15 @@ def update_usage_entry(
 
     data = payload.model_dump(
         exclude_unset=True,
-        exclude={"last_seen_updated_at"},
+        exclude={"last_seen_updated_at", "safety_confirmed"},
+    )
+    safety_fields = [
+        field
+        for field in USAGE_SAFETY_FIELDS
+        if field in data and _values_differ(getattr(usage, field), data[field])
+    ]
+    _require_safety_confirmation(
+        "usage", payload.safety_confirmed, safety_fields
     )
     
     effective_date = data.get("date", usage.date)
@@ -485,6 +1112,8 @@ def update_usage_entry(
         setattr(usage, field, value)
 
     usage.updated_by_user_id = current_user.id
+    if safety_fields:
+        _set_verification_status(usage, True)
 
     db.add(usage)
     db.commit()
@@ -652,12 +1281,23 @@ def _normalise_header(name: str) -> str:
     - remove common punctuation (space, slash, dash, dot)
     so that 'A/C REG', 'A-C REG.' -> 'ac_reg'.
     """
-    cleaned = name.strip().lower()
-    for ch in [" ", "-", "/", "."]:
-        cleaned = cleaned.replace(ch, "_")
-    while "__" in cleaned:
-        cleaned = cleaned.replace("__", "_")
-    return cleaned
+    cleaned = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+    parts = [part for part in cleaned.split("_") if part]
+    merged: list[str] = []
+    idx = 0
+    while idx < len(parts):
+        part = parts[idx]
+        if len(part) == 1:
+            letters: list[str] = []
+            while idx < len(parts) and len(parts[idx]) == 1:
+                letters.append(parts[idx])
+                idx += 1
+            for letter_index in range(0, len(letters), 2):
+                merged.append("".join(letters[letter_index : letter_index + 2]))
+        else:
+            merged.append(part)
+            idx += 1
+    return "_".join(merged)
 
 
 def _map_aircraft_columns(raw_cols: List[str]) -> Dict[str, str | None]:
@@ -846,12 +1486,12 @@ def _build_aircraft_payload(
     registration_value = row.get(reg_raw_col) if reg_raw_col else None
 
     serial = (
-        str(_coerce_import_value(serial_value)).strip()
+        str(_coerce_import_value(serial_value)).strip().upper()
         if serial_value is not None
         else ""
     )
     registration = (
-        str(_coerce_import_value(registration_value)).strip()
+        str(_coerce_import_value(registration_value)).strip().upper()
         if registration_value is not None
         else ""
     )
@@ -976,11 +1616,14 @@ def _build_component_payload(
             return None
         return _coerce_import_value(row.get(raw_col))
 
+    part_number = to_str(pick_value("part_number"))
+    serial_number = to_str(pick_value("serial_number"))
+
     return {
         "position": to_str(pick_value("position")) or "",
         "ata": to_str(pick_value("ata")),
-        "part_number": to_str(pick_value("part_number")),
-        "serial_number": to_str(pick_value("serial_number")),
+        "part_number": part_number.upper() if part_number else None,
+        "serial_number": serial_number.upper() if serial_number else None,
         "description": to_str(pick_value("description")),
         "installed_date": pick_value("installed_date"),
         "installed_hours": pick_value("installed_hours"),
@@ -997,8 +1640,8 @@ def _validate_aircraft_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]:
     errors: List[str] = []
     warnings: List[str] = []
 
-    serial = payload.get("serial_number") or ""
-    registration = payload.get("registration") or ""
+    serial = str(payload.get("serial_number") or "").strip().upper()
+    registration = str(payload.get("registration") or "").strip().upper()
 
     if not serial and not registration:
         errors.append("Missing both aircraft serial (AIN) and registration.")
@@ -1006,6 +1649,28 @@ def _validate_aircraft_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]:
         errors.append("Missing aircraft serial (AIN).")
     elif not registration:
         errors.append(f"Missing registration for aircraft serial {serial}.")
+
+    if serial and not AIRCRAFT_SERIAL_PATTERN.match(serial):
+        errors.append("Aircraft serial (AIN) must be A-Z/0-9 with hyphens only.")
+    if registration and not REGISTRATION_PATTERN.match(registration):
+        errors.append("Registration must be A-Z/0-9 with hyphens only.")
+
+    last_log_date = payload.get("last_log_date")
+    if isinstance(last_log_date, date):
+        if last_log_date < MIN_VALID_DATE:
+            errors.append("Last log date is earlier than allowed.")
+        if last_log_date > date.today():
+            errors.append("Last log date cannot be in the future.")
+
+    total_hours = payload.get("total_hours")
+    if isinstance(total_hours, numbers.Number):
+        if total_hours < 0 or total_hours > MAX_HOURS:
+            errors.append("Total hours are out of allowed range.")
+
+    total_cycles = payload.get("total_cycles")
+    if isinstance(total_cycles, numbers.Number):
+        if total_cycles < 0 or total_cycles > MAX_CYCLES:
+            errors.append("Total cycles are out of allowed range.")
 
     return {"errors": errors, "warnings": warnings}
 
@@ -1015,16 +1680,106 @@ def _validate_component_payload(payload: Dict[str, Any]) -> Dict[str, List[str]]
     warnings: List[str] = []
 
     position = (payload.get("position") or "").strip()
-    part_number = (payload.get("part_number") or "").strip()
-    serial_number = (payload.get("serial_number") or "").strip()
+    part_number = (payload.get("part_number") or "").strip().upper()
+    serial_number = (payload.get("serial_number") or "").strip().upper()
 
     if not position:
         errors.append("Missing component position.")
 
     if (part_number and not serial_number) or (serial_number and not part_number):
-        warnings.append("Part/serial number pair is incomplete.")
+        errors.append("Part/serial number pair is incomplete.")
+
+    if part_number and not PART_NUMBER_PATTERN.match(part_number):
+        errors.append("Part number contains invalid characters.")
+
+    if serial_number and not COMPONENT_SERIAL_PATTERN.match(serial_number):
+        errors.append("Serial number contains invalid characters.")
+
+    hours_fields = [
+        "installed_hours",
+        "current_hours",
+        "tbo_hours",
+        "hsi_hours",
+        "last_overhaul_hours",
+    ]
+    cycles_fields = [
+        "installed_cycles",
+        "current_cycles",
+        "tbo_cycles",
+        "hsi_cycles",
+        "last_overhaul_cycles",
+    ]
+    for field in hours_fields:
+        value = payload.get(field)
+        if isinstance(value, numbers.Number) and (value < 0 or value > MAX_HOURS):
+            errors.append(f"{field.replace('_', ' ').title()} is out of range.")
+    for field in cycles_fields:
+        value = payload.get(field)
+        if isinstance(value, numbers.Number) and (value < 0 or value > MAX_CYCLES):
+            errors.append(f"{field.replace('_', ' ').title()} is out of range.")
+
+    for field in ["tbo_calendar_months", "hsi_calendar_months"]:
+        value = payload.get(field)
+        if isinstance(value, numbers.Number) and (
+            value < 0 or value > MAX_CALENDAR_MONTHS
+        ):
+            errors.append(f"{field.replace('_', ' ').title()} is out of range.")
+
+    for field in ["installed_date", "last_overhaul_date"]:
+        value = payload.get(field)
+        if isinstance(value, date):
+            if value < MIN_VALID_DATE:
+                errors.append(f"{field.replace('_', ' ').title()} is too early.")
+            if value > date.today():
+                errors.append(f"{field.replace('_', ' ').title()} cannot be future.")
 
     return {"errors": errors, "warnings": warnings}
+
+
+def _require_safety_confirmation(
+    entity_label: str,
+    safety_confirmed: Optional[bool],
+    fields_changed: List[str],
+) -> None:
+    if fields_changed and not safety_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Safety-critical {entity_label} fields changed "
+                f"({', '.join(sorted(fields_changed))}). "
+                "Confirmation is required."
+            ),
+        )
+
+
+def _set_verification_status(
+    record: Any,
+    safety_confirmed: bool,
+) -> None:
+    if safety_confirmed:
+        record.verification_status = "CONFIRMED"
+
+
+def _find_component_collision(
+    db: Session,
+    part_number: Optional[str],
+    serial_number: Optional[str],
+    exclude_component_id: Optional[int] = None,
+    exclude_aircraft_serial: Optional[str] = None,
+) -> Optional[models.AircraftComponent]:
+    if not part_number or not serial_number:
+        return None
+    query = db.query(models.AircraftComponent).filter(
+        models.AircraftComponent.part_number == part_number,
+        models.AircraftComponent.serial_number == serial_number,
+    )
+    if exclude_component_id is not None:
+        query = query.filter(models.AircraftComponent.id != exclude_component_id)
+    if exclude_aircraft_serial is not None:
+        query = query.filter(
+            models.AircraftComponent.aircraft_serial_number != exclude_aircraft_serial
+        )
+    return query.first()
 
 
 def _normalize_reconciliation_value(value: Any) -> Any:
@@ -1304,40 +2059,87 @@ async def preview_aircraft_import(
             detail="pandas is required for import. Install with 'pip install pandas openpyxl'.",
         )
 
-    content = await file.read()
-    buffer = BytesIO(content)
-    file_type = ocr_service.detect_file_type(content, file.filename)
-    ocr_info: Dict[str, Any] | None = None
-
-    ext = Path(file.filename).suffix.lower()
-    if file_type == "csv":
-        df = pd.read_csv(buffer)
-    elif file_type == "excel" and ext in [".xlsx", ".xlsm", ".xls"]:
-        df = pd.read_excel(buffer)
-    elif file_type in ["pdf", "image"]:
-        try:
-            ocr_table = ocr_service.extract_table_from_bytes(content, file_type)
-        except ocr_service.OCRDependencyError as exc:  # pragma: no cover
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        df = pd.DataFrame(ocr_table.rows, columns=ocr_table.headers)
-        ocr_info = {
-            "confidence": ocr_table.confidence,
-            "samples": ocr_table.samples,
-            "text": ocr_table.text,
-            "file_type": file_type,
-        }
-    else:
+    uploads = files or ([file] if file else [])
+    if not uploads:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Unsupported file type. Upload CSV, XLSX, XLSM, XLS, PDF, or an image."
-            ),
+            detail="No files uploaded. Upload up to 10 CSV/Excel/PDF/image files.",
+        )
+    if len(uploads) > 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload up to 10 files at a time.",
         )
 
-    if df.empty:
-        raise HTTPException(status_code=400, detail="Uploaded file contains no data.")
+    ocr_infos: List[Dict[str, Any]] = []
+    dataframes: List[Any] = []
+    base_columns: List[str] | None = None
+    single_file_type: str | None = None
+    single_ext: str | None = None
+    single_content: bytes | None = None
 
-    colmap = _map_aircraft_columns(list(df.columns))
+    for upload in uploads:
+        content = await upload.read()
+        buffer = BytesIO(content)
+        file_type = ocr_service.detect_file_type(content, upload.filename)
+        ext = Path(upload.filename or "").suffix.lower()
+        ocr_info: Dict[str, Any] | None = None
+
+        if file_type == "csv":
+            df = pd.read_csv(buffer)
+        elif file_type == "excel" and ext in [".xlsx", ".xlsm", ".xls"]:
+            df = pd.read_excel(buffer)
+        elif file_type in ["pdf", "image"]:
+            try:
+                ocr_table = ocr_service.extract_table_from_bytes(content, file_type)
+            except ocr_service.OCRDependencyError as exc:  # pragma: no cover
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            df = pd.DataFrame(ocr_table.rows, columns=ocr_table.headers)
+            ocr_info = {
+                "confidence": ocr_table.confidence,
+                "samples": ocr_table.samples,
+                "text": ocr_table.text,
+                "file_type": file_type,
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Unsupported file type. Upload CSV, XLSX, XLSM, XLS, PDF, or an image."
+                ),
+            )
+
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Uploaded file '{upload.filename}' contains no data.",
+            )
+
+        columns = list(df.columns)
+        if base_columns is None:
+            base_columns = columns
+        elif columns != base_columns:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "All uploaded files must use identical column headers. "
+                    f"File '{upload.filename}' does not match the first file."
+                ),
+            )
+
+        dataframes.append(df)
+        if ocr_info:
+            ocr_infos.append(ocr_info)
+
+        if len(uploads) == 1:
+            single_file_type = file_type
+            single_ext = ext
+            single_content = content
+
+    df = pd.concat(dataframes, ignore_index=True)
+    colmap = _map_aircraft_columns(base_columns or list(df.columns))
     if not colmap["serial_number"] or not colmap["registration"]:
         raise HTTPException(
             status_code=400,
@@ -1351,7 +2153,12 @@ async def preview_aircraft_import(
     formula_discrepancies: List[Dict[str, Any]] = []
     row_formula_proposals: Dict[int, List[Dict[str, Any]]] = {}
 
-    if file_type == "excel" and ext in [".xlsx", ".xlsm", ".xls"]:
+    if (
+        len(uploads) == 1
+        and single_file_type == "excel"
+        and single_ext in [".xlsx", ".xlsm", ".xls"]
+        and single_content
+    ):
         openpyxl_spec = importlib.util.find_spec("openpyxl")
         if not openpyxl_spec:
             raise HTTPException(
@@ -1359,13 +2166,17 @@ async def preview_aircraft_import(
                 detail="openpyxl is required for Excel formula checks.",
             )
         openpyxl = importlib.import_module("openpyxl")
-        workbook = openpyxl.load_workbook(BytesIO(content), data_only=False)
+        workbook = openpyxl.load_workbook(
+            BytesIO(single_content), data_only=False
+        )
         sheet = workbook.active
         recalc_df = None
         evaluator = None
 
         try:
-            recalc_content = _recalculate_excel_with_libreoffice(content, ext)
+            recalc_content = _recalculate_excel_with_libreoffice(
+                single_content, single_ext
+            )
             recalc_df = pd.read_excel(BytesIO(recalc_content))
         except Exception:
             xlcalculator_spec = importlib.util.find_spec("xlcalculator")
@@ -1373,8 +2184,8 @@ async def preview_aircraft_import(
                 xlcalculator = importlib.import_module("xlcalculator")
                 compiler = xlcalculator.ModelCompiler()
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    input_path = Path(tmpdir) / f"input{ext}"
-                    input_path.write_bytes(content)
+                    input_path = Path(tmpdir) / f"input{single_ext}"
+                    input_path.write_bytes(single_content)
                     model = compiler.read_and_parse_archive(str(input_path))
                 evaluator = xlcalculator.Evaluator(model)
 
@@ -1744,6 +2555,32 @@ async def import_aircraft_file(
             for field in row_data.keys():
                 original_values[field] = getattr(ac, field, None)
 
+        safety_fields = []
+        if action == "new":
+            safety_fields = [
+                field
+                for field in AIRCRAFT_SAFETY_FIELDS
+                if row_data.get(field) is not None
+            ]
+        else:
+            safety_fields = [
+                field
+                for field in AIRCRAFT_SAFETY_FIELDS
+                if _values_differ(original_values.get(field), row_data.get(field))
+            ]
+        if safety_fields and not confirmed_row:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": (
+                        "Safety-critical fields require confirmation: "
+                        f"{', '.join(sorted(safety_fields))}."
+                    ),
+                }
+            )
+            continue
+
         if ac is None:
             # New aircraft
             ac = models.Aircraft(**row_data)
@@ -1754,6 +2591,9 @@ async def import_aircraft_file(
             for field, value in row_data.items():
                 setattr(ac, field, value)
             updated += 1
+
+        if safety_fields:
+            _set_verification_status(ac, True)
 
         snapshot_cells: Dict[str, Dict[str, Any]] = {}
         if confirmed_row:
@@ -1941,29 +2781,69 @@ async def preview_components_import(
     if not ac:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
-    ext = Path(file.filename).suffix.lower()
-    content = await file.read()
-    buffer = BytesIO(content)
-
-    if ext in [".csv", ".txt"]:
-        df = pd.read_csv(buffer)
-    elif ext in [".xlsx", ".xlsm", ".xls"]:
-        df = pd.read_excel(buffer)
-    elif ext == ".pdf":
-        raise HTTPException(
-            status_code=501,
-            detail="PDF ingestion for components not yet implemented. Use CSV/Excel for now.",
-        )
-    else:
+    uploads = files or ([file] if file else [])
+    if not uploads:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{ext}'. Upload CSV, XLSX, XLSM or XLS.",
+            detail="No files uploaded. Upload up to 10 CSV/Excel files.",
+        )
+    if len(uploads) > 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload up to 10 files at a time.",
         )
 
-    if df.empty:
-        raise HTTPException(status_code=400, detail="Uploaded file contains no data.")
+    dataframes: List[Any] = []
+    base_columns: List[str] | None = None
 
-    colmap = _map_component_columns(list(df.columns))
+    for upload in uploads:
+        ext = Path(upload.filename or "").suffix.lower()
+        content = await upload.read()
+        buffer = BytesIO(content)
+
+        if ext in [".csv", ".txt"]:
+            df = pd.read_csv(buffer)
+        elif ext in [".xlsx", ".xlsm", ".xls"]:
+            df = pd.read_excel(buffer)
+        elif ext == ".pdf":
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "PDF ingestion for components not yet implemented. "
+                    "Use CSV/Excel for now."
+                ),
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported file type '{ext}'. Upload CSV, XLSX, XLSM or XLS."
+                ),
+            )
+
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Uploaded file '{upload.filename}' contains no data.",
+            )
+
+        columns = list(df.columns)
+        if base_columns is None:
+            base_columns = columns
+        elif columns != base_columns:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "All uploaded files must use identical column headers. "
+                    f"File '{upload.filename}' does not match the first file."
+                ),
+            )
+
+        dataframes.append(df)
+
+    df = pd.concat(dataframes, ignore_index=True)
+
+    colmap = _map_component_columns(base_columns or list(df.columns))
     if not colmap["position"]:
         raise HTTPException(
             status_code=400,
@@ -1994,9 +2874,41 @@ async def preview_components_import(
     update_count = 0
     invalid_count = 0
 
+    raw_rows: List[Dict[str, Any]] = []
+    pn_sn_pairs: set[tuple[str, str]] = set()
     for idx, row in df.iterrows():
         row_idx = int(idx) + 2  # approx Excel row number
         payload = _build_component_payload(row.to_dict(), colmap)
+        part_number = (payload.get("part_number") or "").strip().upper()
+        serial = (payload.get("serial_number") or "").strip().upper()
+        if part_number and serial:
+            pn_sn_pairs.add((part_number, serial))
+        raw_rows.append({"row_number": row_idx, "payload": payload})
+
+    collisions_by_pn_sn: Dict[tuple[str, str], List[models.AircraftComponent]] = {}
+    if pn_sn_pairs:
+        collisions = (
+            db.query(models.AircraftComponent)
+            .filter(
+                models.AircraftComponent.aircraft_serial_number != serial_number,
+                tuple_(
+                    models.AircraftComponent.part_number,
+                    models.AircraftComponent.serial_number,
+                ).in_(pn_sn_pairs),
+            )
+            .all()
+        )
+        for comp in collisions:
+            key = (
+                (comp.part_number or "").strip().upper(),
+                (comp.serial_number or "").strip().upper(),
+            )
+            if all(key):
+                collisions_by_pn_sn.setdefault(key, []).append(comp)
+
+    for row in raw_rows:
+        row_idx = row["row_number"]
+        payload = row["payload"]
         validation = _validate_component_payload(payload)
         errors = validation["errors"]
         warnings = validation["warnings"]
@@ -2033,6 +2945,23 @@ async def preview_components_import(
                     }
                 )
             seen_in_file.setdefault(key, []).append(position or f"row {row_idx}")
+
+            normalized_key = (part_number.upper(), serial.upper())
+            if normalized_key in collisions_by_pn_sn:
+                warnings.append(
+                    "Part/serial pair already exists on another aircraft."
+                )
+                dedupe_suggestions.append(
+                    {
+                        "source": "fleet",
+                        "part_number": part_number,
+                        "serial_number": serial,
+                        "aircraft_serial_numbers": [
+                            comp.aircraft_serial_number
+                            for comp in collisions_by_pn_sn[normalized_key]
+                        ],
+                    }
+                )
 
         if errors:
             action = "invalid"
@@ -2271,6 +3200,10 @@ async def confirm_components_import(
         for key, value in list(row_data.items()):
             if isinstance(value, str) and not value.strip():
                 row_data[key] = None
+        if row_data.get("part_number"):
+            row_data["part_number"] = row_data["part_number"].strip().upper()
+        if row_data.get("serial_number"):
+            row_data["serial_number"] = row_data["serial_number"].strip().upper()
 
         validation = _validate_component_payload(row_data)
         if validation["errors"]:
@@ -2301,8 +3234,29 @@ async def confirm_components_import(
         else:
             updated += 1
 
+        collision = _find_component_collision(
+            db,
+            row_data.get("part_number"),
+            row_data.get("serial_number"),
+            exclude_component_id=comp.id if comp.id else None,
+            exclude_aircraft_serial=serial_number,
+        )
+        if collision:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": (
+                        "Part/serial pair already assigned to aircraft "
+                        f"{collision.aircraft_serial_number}."
+                    ),
+                }
+            )
+            continue
+
         for field, value in row_data.items():
             setattr(comp, field, value)
+        _set_verification_status(comp, True)
 
         db.add(comp)
         existing_by_position[position.lower()] = comp
@@ -2396,11 +3350,45 @@ async def import_components_file(
 
         payload = _build_component_payload(row.to_dict(), colmap)
         position = payload.get("position") or ""
+        if payload.get("part_number"):
+            payload["part_number"] = payload["part_number"].strip().upper()
+        if payload.get("serial_number"):
+            payload["serial_number"] = payload["serial_number"].strip().upper()
 
         if not position:
             skipped += 1
             skipped_rows.append(
                 {"row": row_idx, "reason": "Missing component position."}
+            )
+            continue
+
+        validation = _validate_component_payload(payload)
+        if validation["errors"]:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": "; ".join(validation["errors"]),
+                }
+            )
+            continue
+
+        collision = _find_component_collision(
+            db,
+            payload.get("part_number"),
+            payload.get("serial_number"),
+            exclude_aircraft_serial=serial_number,
+        )
+        if collision:
+            skipped += 1
+            skipped_rows.append(
+                {
+                    "row": row_idx,
+                    "reason": (
+                        "Part/serial pair already assigned to aircraft "
+                        f"{collision.aircraft_serial_number}."
+                    ),
+                }
             )
             continue
 
@@ -2420,6 +3408,7 @@ async def import_components_file(
             manufacturer_code=payload.get("manufacturer_code"),
             operator_code=payload.get("operator_code"),
         )
+        _set_verification_status(comp, True)
 
         db.add(comp)
         created += 1

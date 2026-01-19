@@ -9,10 +9,20 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from amodb.entitlements import require_module
 from amodb.database import get_db
 
 from . import models
 from .schemas import (
+    CARActionCreate,
+    CARActionOut,
+    CARCreate,
+    CARInviteOut,
+    CARInviteUpdate,
+    CAROut,
+    CARUpdate,
+    AuditorStatsOut,
+    QMSNotificationOut,
     QMSDashboardOut,
     QMSDocumentCreate, QMSDocumentUpdate, QMSDocumentOut,
     QMSDocumentRevisionCreate, QMSDocumentRevisionOut, QMSPublishRevision,
@@ -22,10 +32,22 @@ from .schemas import (
     QMSFindingCreate, QMSFindingOut,
     QMSCAPUpsert, QMSCAPOut,
 )
-from .enums import QMSDomain, QMSAuditStatus
-from .service import get_dashboard, normalize_finding_level, compute_target_close_date
+from .enums import CARStatus, QMSDomain, QMSAuditStatus
+from .service import (
+    add_car_action,
+    build_car_invite_link,
+    compute_target_close_date,
+    create_car,
+    get_dashboard,
+    normalize_finding_level,
+    schedule_next_reminder,
+)
 
-router = APIRouter(prefix="/quality", tags=["Quality / QMS"])
+router = APIRouter(
+    prefix="/quality",
+    tags=["Quality / QMS"],
+    dependencies=[Depends(require_module("quality"))],
+)
 
 
 def get_actor() -> Optional[str]:
@@ -34,6 +56,18 @@ def get_actor() -> Optional[str]:
     Return a stable user id string (e.g., UUID or int as str).
     """
     return None
+
+
+def _notify_user(db: Session, user_id: Optional[str], message: str, severity=models.QMSNotificationSeverity):
+    if not user_id:
+        return
+    note = models.QMSNotification(
+        user_id=user_id,
+        message=message,
+        severity=severity,
+        created_by_user_id=get_actor(),
+    )
+    db.add(note)
 
 
 @router.get("/qms/dashboard", response_model=QMSDashboardOut)
@@ -306,6 +340,10 @@ def create_audit(payload: QMSAuditCreate, db: Session = Depends(get_db)):
         scope=payload.scope,
         criteria=payload.criteria,
         auditee=payload.auditee,
+        auditee_email=payload.auditee_email,
+        lead_auditor_user_id=payload.lead_auditor_user_id,
+        observer_auditor_user_id=payload.observer_auditor_user_id,
+        assistant_auditor_user_id=payload.assistant_auditor_user_id,
         planned_start=payload.planned_start,
         planned_end=payload.planned_end,
         created_by_user_id=get_actor(),
@@ -337,9 +375,12 @@ def update_audit(audit_id: UUID, payload: QMSAuditUpdate, db: Session = Depends(
         raise HTTPException(status_code=404, detail="Audit not found")
 
     for field in (
-        "status", "scope", "criteria", "auditee",
+        "status", "scope", "criteria", "auditee", "auditee_email",
         "planned_start", "planned_end", "actual_start", "actual_end",
         "report_file_ref",
+        "lead_auditor_user_id",
+        "observer_auditor_user_id",
+        "assistant_auditor_user_id",
     ):
         val = getattr(payload, field)
         if val is not None:
@@ -351,6 +392,8 @@ def update_audit(audit_id: UUID, payload: QMSAuditUpdate, db: Session = Depends(
             audit.retention_until = date(audit.actual_end.year + 5, audit.actual_end.month, audit.actual_end.day)
         elif audit.planned_end:
             audit.retention_until = date(audit.planned_end.year + 5, audit.planned_end.month, audit.planned_end.day)
+        note_msg = f"Audit {audit.audit_ref} closed. Please send closure pack to {audit.auditee_email or 'auditee'}."
+        _notify_user(db, audit.lead_auditor_user_id, note_msg, models.QMSNotificationSeverity.INFO)
 
     db.commit()
     db.refresh(audit)
@@ -422,6 +465,350 @@ def upsert_cap(finding_id: UUID, payload: QMSCAPUpsert, db: Session = Depends(ge
         if val is not None:
             setattr(cap, field, val)
 
+    if payload.status in (models.QMSCAPStatus.CLOSED, models.QMSCAPStatus.REJECTED):
+        audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
+        if audit:
+            note_msg = (
+                f"CAP {payload.status.value} for audit {audit.audit_ref} ({audit.title})."
+            )
+            for auditor_id in (
+                audit.lead_auditor_user_id,
+                audit.observer_auditor_user_id,
+                audit.assistant_auditor_user_id,
+            ):
+                _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.WARNING)
+
     db.commit()
     db.refresh(cap)
     return cap
+
+
+# -----------------------------
+# Corrective Action Requests (CAR)
+# -----------------------------
+
+
+@router.post("/cars", response_model=CAROut, status_code=status.HTTP_201_CREATED)
+def create_car_request(payload: CARCreate, db: Session = Depends(get_db)):
+    car = create_car(
+        db=db,
+        program=payload.program,
+        title=payload.title.strip(),
+        summary=payload.summary.strip(),
+        priority=payload.priority,
+        requested_by_user_id=get_actor(),
+        assigned_to_user_id=payload.assigned_to_user_id,
+        due_date=payload.due_date,
+        target_closure_date=payload.target_closure_date,
+        finding_id=payload.finding_id,
+    )
+    db.commit()
+    db.refresh(car)
+    return car
+
+
+@router.get("/cars", response_model=List[CAROut])
+def list_cars(
+    db: Session = Depends(get_db),
+    program: Optional[models.CARProgram] = None,
+    status_: Optional[models.CARStatus] = None,
+    assigned_to_user_id: Optional[str] = None,
+):
+    qs = db.query(models.CorrectiveActionRequest)
+    if program:
+        qs = qs.filter(models.CorrectiveActionRequest.program == program)
+    if status_:
+        qs = qs.filter(models.CorrectiveActionRequest.status == status_)
+    if assigned_to_user_id:
+        qs = qs.filter(models.CorrectiveActionRequest.assigned_to_user_id == assigned_to_user_id)
+    return qs.order_by(models.CorrectiveActionRequest.created_at.desc()).all()
+
+
+@router.patch("/cars/{car_id}", response_model=CAROut)
+def update_car(car_id: UUID, payload: CARUpdate, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+
+    changed_status = False
+    for field in (
+        "title",
+        "summary",
+        "priority",
+        "status",
+        "due_date",
+        "target_closure_date",
+        "assigned_to_user_id",
+        "closed_at",
+        "reminder_interval_days",
+    ):
+        val = getattr(payload, field)
+        if val is not None:
+            setattr(car, field, val)
+            if field == "status":
+                changed_status = True
+
+    if changed_status:
+        add_car_action(
+            db=db,
+            car=car,
+            action_type=models.CARActionType.STATUS_CHANGE,
+            message=f"Status changed to {car.status}",
+            actor_user_id=get_actor(),
+        )
+
+    db.commit()
+    db.refresh(car)
+    return car
+
+
+@router.post("/cars/{car_id}/escalate", response_model=CAROut)
+def escalate_car(car_id: UUID, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+
+    car.status = models.CARStatus.ESCALATED
+    car.escalated_at = func.now()
+    add_car_action(
+        db=db,
+        car=car,
+        action_type=models.CARActionType.ESCALATION,
+        message="Escalated due to inactivity or overdue status",
+        actor_user_id=get_actor(),
+    )
+    db.commit()
+    db.refresh(car)
+    return car
+
+
+@router.post("/cars/{car_id}/reminders", response_model=CAROut)
+def reschedule_car_reminder(car_id: UUID, reminder_interval_days: int = 7, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    if reminder_interval_days < 1 or reminder_interval_days > 90:
+        raise HTTPException(status_code=400, detail="Reminder interval must be between 1 and 90 days")
+    schedule_next_reminder(car, reminder_interval_days)
+    add_car_action(
+        db=db,
+        car=car,
+        action_type=models.CARActionType.REMINDER,
+        message=f"Reminder window set to every {reminder_interval_days} days",
+        actor_user_id=get_actor(),
+    )
+    db.commit()
+    db.refresh(car)
+    return car
+
+
+@router.get("/cars/{car_id}/invite", response_model=CARInviteOut)
+def get_car_invite(car_id: UUID, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    url = build_car_invite_link(car)
+    return {
+        "car_id": car.id,
+        "invite_token": car.invite_token,
+        "invite_url": url,
+        "next_reminder_at": car.next_reminder_at,
+        "car_number": car.car_number,
+        "title": car.title,
+        "summary": car.summary,
+        "priority": car.priority,
+        "status": car.status,
+        "due_date": car.due_date,
+        "target_closure_date": car.target_closure_date,
+    }
+
+
+@router.get("/cars/invite/{invite_token}", response_model=CARInviteOut)
+def get_car_invite_by_token(invite_token: str, db: Session = Depends(get_db)):
+    car = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.invite_token == invite_token)
+        .first()
+    )
+    if not car:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    url = build_car_invite_link(car)
+    return {
+        "car_id": car.id,
+        "invite_token": car.invite_token,
+        "invite_url": url,
+        "next_reminder_at": car.next_reminder_at,
+        "car_number": car.car_number,
+        "title": car.title,
+        "summary": car.summary,
+        "priority": car.priority,
+        "status": car.status,
+        "due_date": car.due_date,
+        "target_closure_date": car.target_closure_date,
+    }
+
+
+@router.patch("/cars/invite/{invite_token}", response_model=CAROut)
+def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, db: Session = Depends(get_db)):
+    car = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.invite_token == invite_token)
+        .first()
+    )
+    if not car:
+        raise HTTPException(status_code=404, detail="Invite not found")
+
+    for field in (
+        "containment_action",
+        "root_cause",
+        "corrective_action",
+        "preventive_action",
+        "evidence_ref",
+        "target_closure_date",
+        "due_date",
+        "submitted_by_name",
+        "submitted_by_email",
+    ):
+        val = getattr(payload, field)
+        if val is not None:
+            setattr(car, field, val)
+
+    car.submitted_at = func.now()
+    if car.status in (models.CARStatus.OPEN, models.CARStatus.DRAFT):
+        car.status = models.CARStatus.IN_PROGRESS
+
+    add_car_action(
+        db=db,
+        car=car,
+        action_type=models.CARActionType.COMMENT,
+        message="Auditee submitted CAR response via invite link",
+        actor_user_id=None,
+    )
+
+    if car.finding_id:
+        audit = (
+            db.query(models.QMSAudit)
+            .join(models.QMSAuditFinding)
+            .filter(models.QMSAuditFinding.id == car.finding_id)
+            .first()
+        )
+    else:
+        audit = None
+
+    note_msg = f"CAR response submitted for {car.car_number} ({car.title})."
+    if audit:
+        note_msg = f"{note_msg} Audit {audit.audit_ref}."
+        for auditor_id in (
+            audit.lead_auditor_user_id,
+            audit.observer_auditor_user_id,
+            audit.assistant_auditor_user_id,
+        ):
+            _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.ACTION_REQUIRED)
+    _notify_user(db, car.assigned_to_user_id, note_msg, models.QMSNotificationSeverity.ACTION_REQUIRED)
+
+    db.commit()
+    db.refresh(car)
+    return car
+
+
+@router.get("/auditors/{user_id}/stats", response_model=AuditorStatsOut)
+def get_auditor_stats(user_id: str, db: Session = Depends(get_db)):
+    qs = db.query(models.QMSAudit)
+    audits_total = qs.filter(
+        (models.QMSAudit.lead_auditor_user_id == user_id)
+        | (models.QMSAudit.observer_auditor_user_id == user_id)
+        | (models.QMSAudit.assistant_auditor_user_id == user_id)
+    ).count()
+
+    audits_open = qs.filter(
+        (models.QMSAudit.lead_auditor_user_id == user_id)
+        | (models.QMSAudit.observer_auditor_user_id == user_id)
+        | (models.QMSAudit.assistant_auditor_user_id == user_id),
+        models.QMSAudit.status != models.QMSAuditStatus.CLOSED,
+    ).count()
+
+    audits_closed = qs.filter(
+        (models.QMSAudit.lead_auditor_user_id == user_id)
+        | (models.QMSAudit.observer_auditor_user_id == user_id)
+        | (models.QMSAudit.assistant_auditor_user_id == user_id),
+        models.QMSAudit.status == models.QMSAuditStatus.CLOSED,
+    ).count()
+
+    lead_audits = qs.filter(models.QMSAudit.lead_auditor_user_id == user_id).count()
+    observer_audits = qs.filter(models.QMSAudit.observer_auditor_user_id == user_id).count()
+    assistant_audits = qs.filter(models.QMSAudit.assistant_auditor_user_id == user_id).count()
+
+    return {
+        "user_id": user_id,
+        "audits_total": audits_total,
+        "audits_open": audits_open,
+        "audits_closed": audits_closed,
+        "lead_audits": lead_audits,
+        "observer_audits": observer_audits,
+        "assistant_audits": assistant_audits,
+    }
+
+
+@router.get("/notifications/me", response_model=List[QMSNotificationOut])
+def list_my_notifications(db: Session = Depends(get_db)):
+    user_id = get_actor()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    notes = (
+        db.query(models.QMSNotification)
+        .filter(models.QMSNotification.user_id == user_id)
+        .filter(models.QMSNotification.read_at.is_(None))
+        .order_by(models.QMSNotification.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return notes
+
+
+@router.post("/notifications/{notification_id}/read", response_model=QMSNotificationOut)
+def mark_notification_read(notification_id: UUID, db: Session = Depends(get_db)):
+    user_id = get_actor()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    note = (
+        db.query(models.QMSNotification)
+        .filter(models.QMSNotification.id == notification_id, models.QMSNotification.user_id == user_id)
+        .first()
+    )
+    if not note:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    note.read_at = func.now()
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+@router.post("/cars/{car_id}/actions", response_model=CARActionOut, status_code=status.HTTP_201_CREATED)
+def add_car_action_log(car_id: UUID, payload: CARActionCreate, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+
+    log = add_car_action(
+        db=db,
+        car=car,
+        action_type=payload.action_type,
+        message=payload.message.strip(),
+        actor_user_id=get_actor(),
+    )
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+@router.get("/cars/{car_id}/actions", response_model=List[CARActionOut])
+def list_car_actions(car_id: UUID, db: Session = Depends(get_db)):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    return (
+        db.query(models.CARActionLog)
+        .filter(models.CARActionLog.car_id == car_id)
+        .order_by(models.CARActionLog.created_at.desc())
+        .all()
+    )

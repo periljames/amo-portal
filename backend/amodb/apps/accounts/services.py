@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, date, timezone
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
+import math
 
+import hashlib
+import hmac
+import json
+import os
 import secrets
 import string
 
 from jose import JWTError, jwt  # noqa: F401  (imported for future token use)
 
+from fastapi import HTTPException
 from sqlalchemy import or_, func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, noload
 
 from amodb.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -17,8 +23,17 @@ from amodb.security import (
     get_password_hash,
     verify_password,
 )
-from . import models, schemas
-from .models import MaintenanceScope, RegulatoryAuthority
+from . import audit, models, schemas
+from .models import (
+    MaintenanceScope,
+    RegulatoryAuthority,
+    BillingTerm,
+    LedgerEntryType,
+    LicenseStatus,
+    PaymentProvider,
+    InvoiceStatus,
+    WebhookStatus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -26,8 +41,19 @@ from .models import MaintenanceScope, RegulatoryAuthority
 # ---------------------------------------------------------------------------
 
 PASSWORD_RESET_TOKEN_TTL_MINUTES = 60 * 24  # 24 hours
-MAX_LOGIN_ATTEMPTS = 5
-ACCOUNT_LOCKOUT_MINUTES = 15
+MAX_LOGIN_ATTEMPTS = 3
+LOCKOUT_SCHEDULE_SECONDS = (30, 90, 900)
+MIN_PASSWORD_LENGTH = 12
+DEFAULT_USAGE_WARN_THRESHOLD = float(os.getenv("USAGE_WARN_THRESHOLD", "0.8"))
+METER_KEY_STORAGE_MB = "storage_mb"
+METER_KEY_AUTOMATION_RUNS = "automation_runs"
+METER_KEY_SCHEDULED_JOBS = "scheduled_jobs"
+METER_KEY_NOTIFICATIONS = "notifications_sent"
+METER_KEY_API_CALLS = "api_calls"
+# Map meter keys to entitlement keys when limits are defined in different units
+METER_LIMIT_KEY_MAP = {
+    METER_KEY_STORAGE_MB: ("storage_gb", 1024),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -38,9 +64,26 @@ ACCOUNT_LOCKOUT_MINUTES = 15
 class AuthenticationError(Exception):
     """Raised when login credentials are invalid or account is locked."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after_seconds: Optional[int] = None,
+    ) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
 
 class AuthorisationError(Exception):
     """Raised when a user tries to perform an action they are not authorised for."""
+
+
+class LoginContextConflict(Exception):
+    """Raised when a login email maps to multiple AMO contexts."""
+
+
+class IdempotencyError(Exception):
+    """Raised when an idempotency key is reused with conflicting payload."""
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +98,95 @@ def _normalise_email(value: str) -> str:
 def _normalise_staff_code(value: str) -> str:
     # Staff codes are often formatted, but it's safer to force uppercase and strip.
     return value.strip().upper()
+
+
+def resolve_login_context(db: Session, email: str) -> models.User | None:
+    email_norm = _normalise_email(email)
+    users = (
+        db.query(models.User)
+        .outerjoin(models.AMO, models.User.amo_id == models.AMO.id)
+        .options(joinedload(models.User.amo))
+        .filter(
+            func.lower(models.User.email) == email_norm,
+            models.User.is_active.is_(True),
+            or_(
+                models.User.amo_id.is_(None),
+                models.AMO.is_active.is_(True),
+            ),
+        )
+        .all()
+    )
+
+    if not users:
+        return None
+
+    amo_ids = {u.amo_id for u in users if u.amo_id}
+    if len(amo_ids) > 1:
+        raise LoginContextConflict(
+            "Multiple AMO accounts share this email."
+        )
+
+    superuser = next((u for u in users if u.is_superuser), None)
+    return superuser or users[0]
+
+
+# ---------------------------------------------------------------------------
+# Password policy
+# ---------------------------------------------------------------------------
+
+
+def _validate_password_strength(password: str) -> None:
+    if not password or len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(
+            f"Password must be at least {MIN_PASSWORD_LENGTH} characters long."
+        )
+
+    has_upper = any(ch.isupper() for ch in password)
+    has_lower = any(ch.islower() for ch in password)
+    has_digit = any(ch.isdigit() for ch in password)
+
+    if not (has_upper and has_lower and has_digit):
+        raise ValueError(
+            "Password must include upper and lower case letters, and a number."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Usage metering helpers
+# ---------------------------------------------------------------------------
+
+
+def megabytes_from_bytes(size_bytes: int) -> int:
+    """
+    Convert a byte count to whole megabytes (rounded up, minimum 1).
+    """
+    if size_bytes <= 0:
+        return 0
+    return max(1, math.ceil(size_bytes / (1024 * 1024)))
+
+
+def _resolve_meter_limit_for_key(
+    meter_key: str, entitlements: Dict[str, schemas.ResolvedEntitlement]
+) -> tuple[Optional[int], bool]:
+    """
+    Resolve a numeric limit and unlimited flag for a given meter key.
+
+    Supports explicit matches, plus any cross-unit mappings in METER_LIMIT_KEY_MAP
+    (e.g., usage tracked in MB while entitlement is expressed in GB).
+    """
+    ent = entitlements.get(meter_key)
+    if ent:
+        return ent.limit, ent.is_unlimited
+
+    mapped = METER_LIMIT_KEY_MAP.get(meter_key)
+    if mapped:
+        ent_key, multiplier = mapped
+        mapped_ent = entitlements.get(ent_key)
+        if mapped_ent:
+            limit = None if mapped_ent.limit is None else mapped_ent.limit * multiplier
+            return limit, mapped_ent.is_unlimited
+
+    return None, False
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +330,7 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         or f"{first_name} {last_name}".strip()
     )
 
+    _validate_password_strength(data.password)
     hashed = get_password_hash(data.password)
 
     user = models.User(
@@ -218,6 +351,8 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         licence_expires_on=data.licence_expires_on,
         hashed_password=hashed,
         is_active=True,
+        is_amo_admin=data.role == models.AccountRole.AMO_ADMIN,
+        must_change_password=True,
         # is_system_account defaults to False in the model – human by default.
     )
     db.add(user)
@@ -247,6 +382,8 @@ def update_user(
     # Role / org placement
     if data.role is not None:
         user.role = data.role
+        if data.is_amo_admin is None:
+            user.is_amo_admin = data.role == models.AccountRole.AMO_ADMIN
     if data.position_title is not None:
         user.position_title = data.position_title
     if data.phone is not None:
@@ -311,6 +448,71 @@ def _is_account_locked(user: models.User) -> bool:
     return locked_until > now
 
 
+def _seconds_until_unlock(user: models.User) -> Optional[int]:
+    locked_until = user.locked_until
+    if not locked_until:
+        return None
+    if locked_until.tzinfo is None:
+        locked_until = locked_until.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    remaining = locked_until - now
+    return max(0, int(remaining.total_seconds()))
+
+
+def _notify_amo_admins_of_lockout(
+    db: Session,
+    *,
+    user: models.User,
+    amo: Optional[models.AMO],
+    ip: Optional[str],
+    user_agent: Optional[str],
+) -> None:
+    if not amo:
+        return
+
+    try:
+        from amodb.apps.training import models as training_models
+        from amodb.apps.training.models import TrainingNotificationSeverity
+    except Exception:
+        return
+
+    admins = (
+        db.query(models.User)
+        .filter(
+            models.User.amo_id == amo.id,
+            models.User.is_active.is_(True),
+            or_(
+                models.User.is_amo_admin.is_(True),
+                models.User.is_superuser.is_(True),
+            ),
+        )
+        .all()
+    )
+
+    if not admins:
+        return
+
+    title = "Security alert: account lockout"
+    body = (
+        f"User {user.email} was locked out after repeated failed login attempts."
+        f"\nIP: {ip or 'unknown'}"
+        f"\nUser agent: {user_agent or 'unknown'}"
+    )
+
+    for admin in admins:
+        note = training_models.TrainingNotification(
+            amo_id=amo.id,
+            user_id=admin.id,
+            title=title,
+            body=body,
+            severity=TrainingNotificationSeverity.WARNING,
+            dedupe_key=f"account-lockout:{user.id}:{user.lockout_count}",
+        )
+        db.add(note)
+
+    db.commit()
+
+
 def _register_failed_login(
     db: Session,
     user: models.User,
@@ -319,12 +521,6 @@ def _register_failed_login(
     user_agent: Optional[str],
 ) -> None:
     user.login_attempts = (user.login_attempts or 0) + 1
-    if user.login_attempts >= MAX_LOGIN_ATTEMPTS:
-        user.locked_until = datetime.now(timezone.utc) + timedelta(
-            minutes=ACCOUNT_LOCKOUT_MINUTES
-        )
-    db.add(user)
-    db.commit()
 
     _log_security_event(
         db,
@@ -336,6 +532,45 @@ def _register_failed_login(
         user_agent=user_agent,
     )
 
+    if user.login_attempts < MAX_LOGIN_ATTEMPTS:
+        db.add(user)
+        db.commit()
+        return
+
+    user.login_attempts = 0
+    user.lockout_count = (user.lockout_count or 0) + 1
+    lockout_index = min(user.lockout_count - 1, len(LOCKOUT_SCHEDULE_SECONDS) - 1)
+    lockout_seconds = LOCKOUT_SCHEDULE_SECONDS[lockout_index]
+    user.locked_until = datetime.now(timezone.utc) + timedelta(
+        seconds=lockout_seconds
+    )
+    db.add(user)
+    db.commit()
+
+    _log_security_event(
+        db,
+        user=user,
+        amo=amo,
+        event_type="LOCKOUT",
+        description=(
+            f"Account locked for {lockout_seconds} seconds after repeated failures."
+        ),
+        ip=ip,
+        user_agent=user_agent,
+    )
+
+    if user.lockout_count >= 3:
+        _log_security_event(
+            db,
+            user=user,
+            amo=amo,
+            event_type="LOCKOUT_ESCALATED",
+            description="Lockout escalation threshold reached; notify AMO admin.",
+            ip=ip,
+            user_agent=user_agent,
+        )
+        _notify_amo_admins_of_lockout(db, user=user, amo=amo, ip=ip, user_agent=user_agent)
+
 
 def _reset_failed_logins(
     db: Session,
@@ -346,6 +581,7 @@ def _reset_failed_logins(
 ) -> None:
     user.login_attempts = 0
     user.locked_until = None
+    user.lockout_count = 0
     user.last_login_at = datetime.now(timezone.utc)
     user.last_login_ip = ip
     user.last_login_user_agent = user_agent
@@ -363,16 +599,11 @@ def _reset_failed_logins(
     )
 
 
-def get_user_for_login(
-    db: Session,
-    *,
-    amo_slug: str,
-    email: str,
-) -> Optional[models.User]:
-    email = _normalise_email(email)
+def _find_amo_by_slug_or_code(db: Session, amo_slug: str) -> Optional[models.AMO]:
     amo_slug_norm = (amo_slug or "").strip().lower()
+    if not amo_slug_norm:
+        return None
 
-    # Look up AMO case-insensitively on login_slug
     amo = (
         db.query(models.AMO)
         .filter(
@@ -381,6 +612,29 @@ def get_user_for_login(
         )
         .first()
     )
+    if amo:
+        return amo
+
+    return (
+        db.query(models.AMO)
+        .filter(
+            func.lower(models.AMO.amo_code) == amo_slug_norm,
+            models.AMO.is_active.is_(True),
+        )
+        .first()
+    )
+
+
+def get_user_for_login(
+    db: Session,
+    *,
+    amo_slug: str,
+    email: str,
+) -> Optional[models.User]:
+    email = _normalise_email(email)
+
+    # Look up AMO case-insensitively on login_slug or amo_code
+    amo = _find_amo_by_slug_or_code(db, amo_slug)
     if not amo:
         return None
 
@@ -462,11 +716,7 @@ def authenticate_user(
             amo = user.amo
         else:
             # If AMO exists, log a generic failed login.
-            amo = (
-                db.query(models.AMO)
-                .filter(func.lower(models.AMO.login_slug) == amo_slug)
-                .first()
-            )
+            amo = _find_amo_by_slug_or_code(db, amo_slug_raw)
             _log_security_event(
                 db,
                 user=None,
@@ -492,6 +742,7 @@ def authenticate_user(
         return None
 
     if _is_account_locked(user):
+        retry_after = _seconds_until_unlock(user)
         _log_security_event(
             db,
             user=user,
@@ -501,11 +752,14 @@ def authenticate_user(
             ip=ip,
             user_agent=user_agent,
         )
-        return None
+        raise AuthenticationError(
+            "Account locked due to repeated failed attempts.",
+            retry_after_seconds=retry_after,
+        )
 
     if not verify_password(login_req.password, user.hashed_password):
         _register_failed_login(db, user, amo, ip, user_agent)
-        return None
+        raise AuthenticationError("Invalid credentials.")
 
     _reset_failed_logins(db, user, amo, ip, user_agent)
     return user
@@ -538,6 +792,52 @@ def issue_access_token_for_user(user: models.User) -> Tuple[str, int]:
         expires_delta=expires_delta,
     )
     return access_token, int(ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+
+
+# ---------------------------------------------------------------------------
+# Password change (authenticated)
+# ---------------------------------------------------------------------------
+
+
+def change_password(
+    db: Session,
+    *,
+    user: models.User,
+    current_password: str,
+    new_password: str,
+    ip: Optional[str],
+    user_agent: Optional[str],
+) -> models.User:
+    if not verify_password(current_password, user.hashed_password):
+        _log_security_event(
+            db,
+            user=user,
+            amo=user.amo,
+            event_type="PASSWORD_CHANGE_FAILED",
+            description="Invalid current password.",
+            ip=ip,
+            user_agent=user_agent,
+        )
+        raise AuthenticationError("Invalid current password.")
+
+    _validate_password_strength(new_password)
+    user.hashed_password = get_password_hash(new_password)
+    user.must_change_password = False
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    _log_security_event(
+        db,
+        user=user,
+        amo=user.amo,
+        event_type="PASSWORD_CHANGE",
+        description="Password changed by user.",
+        ip=ip,
+        user_agent=user_agent,
+    )
+
+    return user
 
 
 # ---------------------------------------------------------------------------
@@ -637,7 +937,9 @@ def redeem_password_reset_token(
         db.commit()
         return None
 
+    _validate_password_strength(new_password)
     user.hashed_password = get_password_hash(new_password)
+    user.must_change_password = False
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -834,3 +1136,990 @@ def get_current_certifying_staff_for_wo(
             results.append((user, ua))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# BILLING / LICENSING
+# ---------------------------------------------------------------------------
+
+
+def _license_is_active(license: models.TenantLicense, at: datetime) -> bool:
+    if license.status == LicenseStatus.EXPIRED:
+        if (
+            license.trial_grace_expires_at
+            and at <= license.trial_grace_expires_at
+            and not license.is_read_only
+        ):
+            return True
+        return False
+    if license.status == LicenseStatus.CANCELLED:
+        return False
+    if license.current_period_start and license.current_period_start > at:
+        return False
+    if license.current_period_end and license.current_period_end < at:
+        return False
+    if license.trial_ends_at and license.status == LicenseStatus.TRIALING:
+        return license.trial_ends_at >= at
+    return True
+
+
+def grant_entitlement(
+    db: Session,
+    *,
+    license_id: str,
+    key: str,
+    limit: Optional[int] = None,
+    is_unlimited: bool = False,
+    description: Optional[str] = None,
+) -> models.LicenseEntitlement:
+    """
+    Create or update a license entitlement and emit an audit entry.
+    """
+    license = (
+        db.query(models.TenantLicense)
+        .filter(models.TenantLicense.id == license_id)
+        .first()
+    )
+    if not license:
+        raise ValueError("License not found.")
+
+    entitlement = (
+        db.query(models.LicenseEntitlement)
+        .filter(
+            models.LicenseEntitlement.license_id == license_id,
+            models.LicenseEntitlement.key == key,
+        )
+        .first()
+    )
+    event = "ENTITLEMENT_GRANTED"
+    if entitlement:
+        entitlement.limit = limit
+        entitlement.is_unlimited = is_unlimited
+        entitlement.description = description
+        event = "ENTITLEMENT_UPDATED"
+    else:
+        entitlement = models.LicenseEntitlement(
+            license_id=license_id,
+            key=key,
+            limit=limit,
+            is_unlimited=is_unlimited,
+            description=description,
+        )
+    db.add(entitlement)
+    db.commit()
+    _log_billing_audit(
+        db,
+        amo_id=license.amo_id,
+        event=event,
+        details={
+            "license_id": license_id,
+            "key": key,
+            "limit": limit,
+            "is_unlimited": is_unlimited,
+        },
+    )
+    return entitlement
+
+
+def revoke_entitlement(
+    db: Session,
+    *,
+    license_id: str,
+    key: str,
+) -> bool:
+    """
+    Remove a license entitlement (no-op if not present) and log the change.
+    """
+    entitlement = (
+        db.query(models.LicenseEntitlement)
+        .filter(
+            models.LicenseEntitlement.license_id == license_id,
+            models.LicenseEntitlement.key == key,
+        )
+        .first()
+    )
+    if not entitlement:
+        return False
+
+    license = (
+        db.query(models.TenantLicense)
+        .filter(models.TenantLicense.id == license_id)
+        .first()
+    )
+    db.delete(entitlement)
+    db.commit()
+    _log_billing_audit(
+        db,
+        amo_id=license.amo_id if license else None,
+        event="ENTITLEMENT_REVOKED",
+        details={"license_id": license_id, "key": key},
+    )
+    return True
+
+
+def resolve_entitlements(
+    db: Session,
+    *,
+    amo_id: str,
+    as_of: Optional[datetime] = None,
+) -> Dict[str, schemas.ResolvedEntitlement]:
+    """
+    Return the strongest entitlement per key for the AMO.
+
+    - Only active/trialing licenses with current coverage are considered.
+    - Unlimited entitlements always win over numeric limits.
+    - For numeric entitlements, the highest limit wins.
+    """
+    as_of = as_of or datetime.now(timezone.utc)
+    resolved: Dict[str, schemas.ResolvedEntitlement] = {}
+
+    licenses = (
+        db.query(models.TenantLicense)
+        .options(
+            joinedload(models.TenantLicense.entitlements),
+            noload(models.TenantLicense.amo),
+            noload(models.TenantLicense.catalog_sku),
+            noload(models.TenantLicense.ledger_entries),
+            noload(models.TenantLicense.usage_meters),
+        )
+        .filter(models.TenantLicense.amo_id == amo_id)
+        .all()
+    )
+
+    for license in licenses:
+        if not _license_is_active(license, as_of):
+            continue
+
+        for entitlement in license.entitlements:
+            if entitlement.is_unlimited:
+                resolved[entitlement.key] = schemas.ResolvedEntitlement(
+                    key=entitlement.key,
+                    is_unlimited=True,
+                    limit=None,
+                    source_license_id=license.id,
+                    license_term=license.term,
+                    license_status=license.status,
+                )
+                continue
+
+            candidate_limit = entitlement.limit if entitlement.limit is not None else 0
+            existing = resolved.get(entitlement.key)
+
+            if existing is None or (
+                existing.limit is not None and candidate_limit > existing.limit
+            ):
+                resolved[entitlement.key] = schemas.ResolvedEntitlement(
+                    key=entitlement.key,
+                    is_unlimited=False,
+                    limit=candidate_limit,
+                    source_license_id=license.id,
+                    license_term=license.term,
+                    license_status=license.status,
+                )
+
+    return resolved
+
+
+def record_usage(
+    db: Session,
+    *,
+    amo_id: str,
+    meter_key: str,
+    quantity: int,
+    license_id: Optional[str] = None,
+    at: Optional[datetime] = None,
+    attach_license: bool = True,
+    commit: bool = True,
+) -> models.UsageMeter:
+    """
+    Increment usage for a meter, creating it if needed.
+
+    attach_license:
+        When True, link the meter to the current active/trialing subscription if no
+        license_id is supplied.
+
+    commit:
+        When False, the caller is responsible for committing the session (useful when
+        recording usage inside a broader transaction).
+    """
+    if quantity < 0:
+        raise ValueError("Quantity must be non-negative.")
+
+    at = at or datetime.now(timezone.utc)
+    meter = (
+        db.query(models.UsageMeter)
+        .filter(
+            models.UsageMeter.amo_id == amo_id,
+            models.UsageMeter.meter_key == meter_key,
+        )
+        .first()
+    )
+
+    if meter is None:
+        meter = models.UsageMeter(
+            amo_id=amo_id,
+            meter_key=meter_key,
+            license_id=license_id,
+            used_units=0,
+        )
+
+    # Preserve any existing license link but allow initial association
+    if license_id and meter.license_id is None:
+        meter.license_id = license_id
+    elif attach_license and meter.license_id is None:
+        current_license = get_current_subscription(db, amo_id=amo_id)
+        if current_license:
+            meter.license_id = current_license.id
+
+    meter.used_units += quantity
+    meter.last_recorded_at = at
+
+    db.add(meter)
+    if commit:
+        db.commit()
+        db.refresh(meter)
+    else:
+        db.flush()
+    return meter
+
+
+def _assert_ledger_idempotency(
+    existing: models.LedgerEntry,
+    *,
+    amount_cents: int,
+    currency: str,
+    entry_type: LedgerEntryType,
+    license_id: Optional[str],
+) -> None:
+    if (
+        existing.amount_cents != amount_cents
+        or existing.currency != currency
+        or existing.entry_type != entry_type
+        or existing.license_id != license_id
+    ):
+        raise IdempotencyError(
+            "Idempotency key reuse with a different ledger payload is not allowed."
+        )
+
+
+def append_ledger_entry(
+    db: Session,
+    *,
+    amo_id: str,
+    amount_cents: int,
+    currency: str,
+    entry_type: LedgerEntryType,
+    description: Optional[str],
+    idempotency_key: str,
+    license_id: Optional[str] = None,
+    recorded_at: Optional[datetime] = None,
+) -> models.LedgerEntry:
+    """
+    Append a ledger entry, enforcing idempotency per AMO + key.
+    """
+    if not idempotency_key:
+        raise ValueError("idempotency_key is required.")
+
+    existing = (
+        db.query(models.LedgerEntry)
+        .options(
+            noload(models.LedgerEntry.amo),
+            noload(models.LedgerEntry.license),
+        )
+        .filter(
+            models.LedgerEntry.amo_id == amo_id,
+            models.LedgerEntry.idempotency_key == idempotency_key,
+        )
+        .first()
+    )
+    if existing:
+        _assert_ledger_idempotency(
+            existing,
+            amount_cents=amount_cents,
+            currency=currency,
+            entry_type=entry_type,
+            license_id=license_id,
+        )
+        return existing
+
+    entry = models.LedgerEntry(
+        amo_id=amo_id,
+        license_id=license_id,
+        amount_cents=amount_cents,
+        currency=currency,
+        entry_type=entry_type,
+        description=description,
+        idempotency_key=idempotency_key,
+        recorded_at=recorded_at or datetime.now(timezone.utc),
+    )
+    db.add(entry)
+    db.commit()
+    return entry
+
+
+# ---------------------------------------------------------------------------
+# BILLING OPERATIONS / IDEMPOTENCY
+# ---------------------------------------------------------------------------
+
+
+def _hash_payload(payload: dict) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def register_idempotency_key(
+    db: Session,
+    *,
+    scope: str,
+    key: str,
+    payload: dict,
+) -> models.IdempotencyKey:
+    if not key:
+        raise ValueError("idempotency key is required")
+
+    payload_hash = _hash_payload(payload)
+    existing = (
+        db.query(models.IdempotencyKey)
+        .filter(
+            models.IdempotencyKey.scope == scope,
+            models.IdempotencyKey.key == key,
+        )
+        .first()
+    )
+    if existing:
+        if existing.payload_hash != payload_hash:
+            raise IdempotencyError("Idempotency key reuse with different payload.")
+        return existing
+
+    idem = models.IdempotencyKey(
+        scope=scope,
+        key=key,
+        payload_hash=payload_hash,
+    )
+    db.add(idem)
+    db.commit()
+    return idem
+
+
+def _log_billing_audit(db: Session, *, amo_id: Optional[str], event: str, details: object) -> Optional[models.BillingAuditLog]:
+    """
+    Best-effort audit logger shared by billing workflows.
+    """
+    return audit.safe_record_audit_event(db, amo_id=amo_id, event=event, details=details)
+
+
+def add_payment_method(
+    db: Session,
+    *,
+    amo_id: str,
+    data: schemas.PaymentMethodCreate,
+    idempotency_key: str,
+) -> models.PaymentMethod:
+    register_idempotency_key(
+        db,
+        scope=f"payment_method:{amo_id}",
+        key=idempotency_key,
+        payload=data.model_dump(),
+    )
+
+    method = (
+        db.query(models.PaymentMethod)
+        .filter(
+            models.PaymentMethod.amo_id == amo_id,
+            models.PaymentMethod.provider == data.provider,
+            models.PaymentMethod.external_ref == data.external_ref,
+        )
+        .first()
+    )
+    if method:
+        return method
+
+    if data.is_default:
+        db.query(models.PaymentMethod).filter(
+            models.PaymentMethod.amo_id == amo_id,
+            models.PaymentMethod.is_default.is_(True),
+        ).update({"is_default": False})
+
+    method = models.PaymentMethod(
+        amo_id=amo_id,
+        provider=data.provider,
+        external_ref=data.external_ref,
+        display_name=data.display_name,
+        card_last4=data.card_last4,
+        card_exp_month=data.card_exp_month,
+        card_exp_year=data.card_exp_year,
+        is_default=data.is_default,
+    )
+    db.add(method)
+    db.commit()
+    _log_billing_audit(
+        db,
+        amo_id=amo_id,
+        event="PAYMENT_METHOD_ADDED",
+        details=f"Provider={data.provider} ref={data.external_ref}",
+    )
+    return method
+
+
+def remove_payment_method(
+    db: Session,
+    *,
+    amo_id: str,
+    payment_method_id: str,
+    idempotency_key: str,
+) -> None:
+    register_idempotency_key(
+        db,
+        scope=f"payment_method_delete:{amo_id}",
+        key=idempotency_key,
+        payload={"payment_method_id": payment_method_id},
+    )
+    method = (
+        db.query(models.PaymentMethod)
+        .filter(
+            models.PaymentMethod.id == payment_method_id,
+            models.PaymentMethod.amo_id == amo_id,
+        )
+        .first()
+    )
+    if method:
+        db.delete(method)
+        db.commit()
+        _log_billing_audit(
+            db,
+            amo_id=amo_id,
+            event="PAYMENT_METHOD_REMOVED",
+            details=f"id={payment_method_id}",
+        )
+
+
+def list_payment_methods(
+    db: Session,
+    *,
+    amo_id: str,
+) -> List[models.PaymentMethod]:
+    """
+    Return payment methods for the AMO, newest first.
+    """
+    return (
+        db.query(models.PaymentMethod)
+        .options(
+            noload(models.PaymentMethod.amo),
+        )
+        .filter(models.PaymentMethod.amo_id == amo_id)
+        .order_by(models.PaymentMethod.created_at.desc())
+        .all()
+    )
+
+
+def list_catalog_skus(
+    db: Session,
+    *,
+    include_inactive: bool = False,
+) -> List[models.CatalogSKU]:
+    query = db.query(models.CatalogSKU)
+    if not include_inactive:
+        query = query.filter(models.CatalogSKU.is_active.is_(True))
+    return query.order_by(models.CatalogSKU.amount_cents.asc()).all()
+
+
+def _price_for_sku(db: Session, sku_code: str) -> models.CatalogSKU:
+    sku = (
+        db.query(models.CatalogSKU)
+        .filter(
+            models.CatalogSKU.code == sku_code,
+            models.CatalogSKU.is_active.is_(True),
+        )
+        .first()
+    )
+    if not sku:
+        raise ValueError("Unknown or inactive SKU.")
+    return sku
+
+
+def start_trial(
+    db: Session,
+    *,
+    amo_id: str,
+    sku_code: str,
+    idempotency_key: str,
+) -> models.TenantLicense:
+    sku = _price_for_sku(db, sku_code)
+    register_idempotency_key(
+        db,
+        scope=f"trial:{amo_id}",
+        key=idempotency_key,
+        payload={"sku": sku_code},
+    )
+
+    # Enforce a single trial per tenant per SKU (evergreen)
+    prior_trial = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.sku_id == sku.id,
+            models.TenantLicense.trial_started_at.isnot(None),
+        )
+        .first()
+    )
+    if prior_trial:
+        raise ValueError("Trial for this SKU already consumed for this tenant.")
+
+    now = datetime.now(timezone.utc)
+    trial_end = now + timedelta(days=sku.trial_days or 0)
+    license = models.TenantLicense(
+        amo_id=amo_id,
+        sku_id=sku.id,
+        term=sku.term,
+        status=LicenseStatus.TRIALING,
+        trial_started_at=now,
+        trial_ends_at=trial_end,
+        trial_grace_expires_at=None,
+        is_read_only=False,
+        current_period_start=now,
+        current_period_end=trial_end,
+    )
+    db.add(license)
+    db.commit()
+
+    _log_billing_audit(
+        db,
+        amo_id=amo_id,
+        event="TRIAL_STARTED",
+        details={
+            "sku": sku.code,
+            "license_id": license.id,
+            "trial_ends_at": trial_end.isoformat(),
+        },
+    )
+    return license
+
+
+def purchase_sku(
+    db: Session,
+    *,
+    amo_id: str,
+    sku_code: str,
+    idempotency_key: str,
+    purchase_kind: str = "PURCHASE",
+    expected_amount_cents: Optional[int] = None,
+    expected_currency: Optional[str] = None,
+) -> Tuple[models.TenantLicense, models.LedgerEntry, models.BillingInvoice]:
+    sku = _price_for_sku(db, sku_code)
+    if expected_amount_cents is not None and expected_amount_cents != sku.amount_cents:
+        raise ValueError("Client price does not match server SKU pricing.")
+    if expected_currency is not None and expected_currency != sku.currency:
+        raise ValueError("Client currency does not match server SKU pricing.")
+    register_idempotency_key(
+        db,
+        scope=f"purchase:{amo_id}",
+        key=idempotency_key,
+        payload={"sku": sku_code, "purchase_kind": purchase_kind},
+    )
+
+    _log_billing_audit(
+        db,
+        amo_id=amo_id,
+        event="PAYMENT_ATTEMPT",
+        details={
+            "sku": sku.code,
+            "purchase_kind": purchase_kind,
+            "amount_cents": sku.amount_cents,
+            "currency": sku.currency,
+            "idempotency_key": idempotency_key,
+        },
+    )
+
+    now = datetime.now(timezone.utc)
+    existing = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.status.in_(
+                [LicenseStatus.ACTIVE, LicenseStatus.TRIALING]
+            ),
+        )
+        .all()
+    )
+    for lic in existing:
+        lic.status = LicenseStatus.CANCELLED
+        lic.canceled_at = now
+
+    license = models.TenantLicense(
+        amo_id=amo_id,
+        sku_id=sku.id,
+        term=sku.term,
+        status=LicenseStatus.ACTIVE,
+        is_read_only=False,
+        current_period_start=now,
+        current_period_end=now + timedelta(days=30 if sku.term == BillingTerm.MONTHLY else 365),
+    )
+    db.add(license)
+    db.commit()
+
+    ledger = append_ledger_entry(
+        db,
+        amo_id=amo_id,
+        amount_cents=sku.amount_cents,
+        currency=sku.currency,
+        entry_type=LedgerEntryType.CHARGE,
+        description=f"{purchase_kind}:{sku.code}",
+        idempotency_key=idempotency_key,
+        license_id=license.id,
+    )
+
+    invoice = models.BillingInvoice(
+        amo_id=amo_id,
+        license_id=license.id,
+        ledger_entry_id=ledger.id,
+        amount_cents=sku.amount_cents,
+        currency=sku.currency,
+        status=InvoiceStatus.PAID if sku.amount_cents == 0 else InvoiceStatus.PENDING,
+        description=f"Invoice for {sku.code}",
+        idempotency_key=idempotency_key,
+        issued_at=now,
+        due_at=now if sku.amount_cents == 0 else now + timedelta(days=7),
+        paid_at=now if sku.amount_cents == 0 else None,
+    )
+    db.add(invoice)
+    db.commit()
+
+    _log_billing_audit(
+        db,
+        amo_id=amo_id,
+        event=purchase_kind,
+        details={
+            "sku": sku.code,
+            "license_id": license.id,
+            "amount_cents": sku.amount_cents,
+            "currency": sku.currency,
+            "invoice_id": invoice.id,
+        },
+    )
+    return license, ledger, invoice
+
+
+def cancel_subscription(
+    db: Session,
+    *,
+    amo_id: str,
+    effective_date: datetime,
+    idempotency_key: str,
+) -> Optional[models.TenantLicense]:
+    register_idempotency_key(
+        db,
+        scope=f"cancel:{amo_id}",
+        key=idempotency_key,
+        payload={"effective_date": effective_date.isoformat()},
+    )
+    license = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.status.in_(
+                [LicenseStatus.ACTIVE, LicenseStatus.TRIALING]
+            ),
+        )
+        .order_by(models.TenantLicense.created_at.desc())
+        .first()
+    )
+    if license:
+        license.status = LicenseStatus.CANCELLED
+        license.canceled_at = effective_date
+        license.current_period_end = effective_date
+        db.add(license)
+        db.commit()
+        _log_billing_audit(
+            db,
+            amo_id=amo_id,
+            event="CANCELLED",
+            details={
+                "license_id": license.id,
+                "effective": effective_date.isoformat(),
+            },
+        )
+    return license
+
+
+def list_invoices(db: Session, *, amo_id: str) -> List[models.BillingInvoice]:
+    return (
+        db.query(models.BillingInvoice)
+        .filter(models.BillingInvoice.amo_id == amo_id)
+        .order_by(models.BillingInvoice.issued_at.desc())
+        .all()
+    )
+
+
+def get_current_subscription(db: Session, *, amo_id: str) -> Optional[models.TenantLicense]:
+    active_or_trialing = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.status.in_(
+                [LicenseStatus.ACTIVE, LicenseStatus.TRIALING]
+            ),
+        )
+        .order_by(models.TenantLicense.current_period_end.desc())
+        .first()
+    )
+    if active_or_trialing:
+        return active_or_trialing
+
+    now = datetime.now(timezone.utc)
+    return (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.amo_id == amo_id,
+            models.TenantLicense.status == LicenseStatus.EXPIRED,
+            models.TenantLicense.trial_grace_expires_at.isnot(None),
+            models.TenantLicense.trial_grace_expires_at >= now,
+        )
+        .order_by(models.TenantLicense.trial_grace_expires_at.desc())
+        .first()
+    )
+
+
+def list_usage_meters(db: Session, *, amo_id: str) -> List[models.UsageMeter]:
+    return (
+        db.query(models.UsageMeter)
+        .filter(models.UsageMeter.amo_id == amo_id)
+        .order_by(models.UsageMeter.meter_key)
+        .all()
+    )
+
+
+def roll_billing_periods_and_alert(
+    db: Session,
+    *,
+    as_of: Optional[datetime] = None,
+    warn_threshold: float = DEFAULT_USAGE_WARN_THRESHOLD,
+) -> dict:
+    """
+    Rolls subscription periods that have ended and logs alerts for meters nearing limits.
+
+    Returns a summary dict for logging/cron visibility.
+    """
+    now = as_of or datetime.now(timezone.utc)
+    rolled: List[str] = []
+    expired: List[str] = []
+    warned: List[str] = []
+
+    # 1) Roll or expire licenses where needed
+    delta_by_term = {
+        BillingTerm.MONTHLY: timedelta(days=30),
+        BillingTerm.BI_ANNUAL: timedelta(days=182),
+        BillingTerm.ANNUAL: timedelta(days=365),
+    }
+    grace_period = timedelta(days=7)
+    has_payment_method = {
+        row[0]: True
+        for row in db.query(models.PaymentMethod.amo_id).distinct().all()
+        if row[0]
+    }
+    licenses = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.status.in_([LicenseStatus.ACTIVE, LicenseStatus.TRIALING])
+        )
+        .all()
+    )
+    for license in licenses:
+        if (
+            license.status == LicenseStatus.TRIALING
+            and license.trial_ends_at
+            and license.trial_ends_at <= now
+        ):
+            # Auto-convert to paid if a payment method is available
+            if has_payment_method.get(license.amo_id):
+                delta = delta_by_term.get(license.term, timedelta(days=30))
+                license.status = LicenseStatus.ACTIVE
+                license.current_period_start = license.trial_ends_at
+                license.current_period_end = license.trial_ends_at + delta
+                license.trial_grace_expires_at = None
+                license.is_read_only = False
+                db.add(license)
+                _log_billing_audit(
+                    db,
+                    amo_id=license.amo_id,
+                    event="TRIAL_CONVERTED",
+                    details={
+                        "license_id": license.id,
+                        "converted_at": now.isoformat(),
+                        "next_period_end": license.current_period_end.isoformat(),
+                    },
+                )
+            else:
+                license.status = LicenseStatus.EXPIRED
+                license.current_period_end = license.trial_ends_at
+                if not license.trial_grace_expires_at:
+                    license.trial_grace_expires_at = license.trial_ends_at + grace_period
+                    _log_billing_audit(
+                        db,
+                        amo_id=license.amo_id,
+                        event="TRIAL_GRACE_STARTED",
+                        details={
+                            "license_id": license.id,
+                            "grace_until": license.trial_grace_expires_at.isoformat(),
+                        },
+                    )
+                license.is_read_only = now >= (license.trial_grace_expires_at or now)
+                db.add(license)
+                _log_billing_audit(
+                    db,
+                    amo_id=license.amo_id,
+                    event="TRIAL_EXPIRED",
+                    details={
+                        "license_id": license.id,
+                        "trial_ended": license.trial_ends_at.isoformat(),
+                    },
+                )
+                expired.append(license.id)
+            continue
+
+        if license.current_period_end and license.current_period_end <= now:
+            delta = delta_by_term.get(license.term, timedelta(days=30))
+            prev_end = license.current_period_end
+            license.current_period_start = prev_end
+            license.current_period_end = prev_end + delta
+            if license.status != LicenseStatus.ACTIVE:
+                license.status = LicenseStatus.ACTIVE
+            db.add(license)
+            _log_billing_audit(
+                db,
+                amo_id=license.amo_id,
+                event="PERIOD_ROLLED",
+                details={
+                    "license_id": license.id,
+                    "next_period_end": license.current_period_end.isoformat(),
+                },
+            )
+            rolled.append(license.id)
+
+    # 1b) Flip read-only after grace for expired trials
+    expired_grace = (
+        db.query(models.TenantLicense)
+        .filter(
+            models.TenantLicense.status == LicenseStatus.EXPIRED,
+            models.TenantLicense.trial_grace_expires_at.isnot(None),
+        )
+        .all()
+    )
+    for license in expired_grace:
+        if license.trial_grace_expires_at and license.trial_grace_expires_at <= now:
+            if not license.is_read_only:
+                license.is_read_only = True
+                db.add(license)
+                _log_billing_audit(
+                    db,
+                    amo_id=license.amo_id,
+                    event="TRIAL_LOCKED",
+                    details={
+                        "license_id": license.id,
+                        "locked_at": now.isoformat(),
+                        "grace_until": license.trial_grace_expires_at.isoformat(),
+                    },
+                )
+
+    db.commit()
+
+    # 2) Emit alerts for usage meters approaching limits
+    warn_pct = int(warn_threshold * 100)
+    amo_ids: Set[str] = {
+        row[0]
+        for row in db.query(models.UsageMeter.amo_id).distinct().all()
+        if row[0]
+    }
+    for amo_id in amo_ids:
+        entitlements = resolve_entitlements(db, amo_id=amo_id, as_of=now)
+        for meter in list_usage_meters(db, amo_id=amo_id):
+            limit, is_unlimited = _resolve_meter_limit_for_key(meter.meter_key, entitlements)
+            if is_unlimited or limit in (None, 0):
+                continue
+            percent = int(min(100, round((meter.used_units / limit) * 100)))
+            if percent >= warn_pct:
+                _log_billing_audit(
+                    db,
+                    amo_id=amo_id,
+                    event="USAGE_THRESHOLD",
+                    details={
+                        "meter": meter.meter_key,
+                        "used_units": meter.used_units,
+                        "limit": limit,
+                        "percent": percent,
+                    },
+                )
+                warned.append(f"{amo_id}:{meter.meter_key}")
+
+    return {
+        "rolled_licenses": rolled,
+        "expired_licenses": expired,
+        "warned_meters": warned,
+    }
+
+
+def _compute_backoff_seconds(attempt_count: int, *, base: int = 5, cap: int = 3600) -> int:
+    delay = base * (2 ** max(attempt_count - 1, 0))
+    return min(delay, cap)
+
+
+def handle_webhook(
+    db: Session,
+    *,
+    provider: PaymentProvider,
+    payload: dict,
+    signature: str,
+    external_event_id: str,
+    event_type: Optional[str] = None,
+    should_fail: bool = False,
+) -> models.WebhookEvent:
+    secret = (
+        os.getenv("PSP_WEBHOOK_SECRET") or ""
+    )
+    if not secret:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured.")
+
+    computed = hmac.new(
+        secret.encode("utf-8"),
+        msg=json.dumps(payload, sort_keys=True).encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(computed, signature or ""):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature.")
+
+    register_idempotency_key(
+        db,
+        scope=f"webhook:{provider.value}",
+        key=external_event_id,
+        payload=payload,
+    )
+
+    log = _log_billing_audit(
+        db,
+        amo_id=None,
+        event="WEBHOOK_RECEIVED",
+        details={
+            "provider": provider.value,
+            "external_event_id": external_event_id,
+            "event_type": event_type,
+        },
+    )
+
+    event = models.WebhookEvent(
+        provider=provider,
+        external_event_id=external_event_id,
+        signature=signature,
+        event_type=event_type,
+        payload=json.dumps(payload, sort_keys=True),
+        status=WebhookStatus.PROCESSED if not should_fail else WebhookStatus.FAILED,
+        attempt_count=1,
+        processed_at=datetime.now(timezone.utc) if not should_fail else None,
+        audit_log_id=log.id if log else None,
+    )
+    if should_fail:
+        event.status = WebhookStatus.FAILED
+        event.last_error = "Processing failed"
+        event.next_retry_at = datetime.now(timezone.utc) + timedelta(
+            seconds=_compute_backoff_seconds(event.attempt_count)
+        )
+    db.add(event)
+    db.commit()
+    return event

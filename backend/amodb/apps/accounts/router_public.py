@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+import json
+import os
+import urllib.request
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
+from pydantic import EmailStr
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -12,6 +18,11 @@ from . import models, schemas, services
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 RESERVED_PLATFORM_SLUGS = {"", "system", "root"}
+RESET_LINK_BASE_URL = (
+    os.getenv("PORTAL_BASE_URL")
+    or os.getenv("FRONTEND_BASE_URL")
+    or ""
+).strip()
 
 
 def _client_ip(request: Request) -> str | None:
@@ -33,6 +44,114 @@ def _normalise_amo_slug(amo_slug: str | None) -> str:
     if v.lower() in RESERVED_PLATFORM_SLUGS:
         return "system"
     return v
+
+
+def _build_reset_link(*, amo_slug: str, token: str) -> str | None:
+    if not RESET_LINK_BASE_URL:
+        return None
+    base = RESET_LINK_BASE_URL.rstrip("/")
+    query = urlencode({"token": token, "amo": amo_slug})
+    return f"{base}/reset-password?{query}"
+
+
+def _dev_seed_login_enabled() -> bool:
+    return os.getenv("AMODB_DEV_SEED_LOGIN_ENABLED", "").lower() in {"1", "true", "yes"}
+
+
+def _require_dev_seed_token(request: Request) -> None:
+    expected = os.getenv("AMODB_DEV_SEED_TOKEN")
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Dev seed login is misconfigured.",
+        )
+    provided = request.headers.get("x-dev-seed-token")
+    if not provided or provided != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized.",
+        )
+
+
+def _maybe_send_email(
+    background_tasks: BackgroundTasks,
+    to_email: str | None,
+    subject: str,
+    body: str,
+) -> None:
+    """
+    Optional email hook (safe-by-default).
+    If SMTP env vars are not set, this does nothing.
+
+    Env expected:
+      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+    """
+    if not to_email or not isinstance(to_email, str) or "@" not in to_email:
+        return
+
+    host = os.getenv("SMTP_HOST")
+    port = os.getenv("SMTP_PORT")
+    user = os.getenv("SMTP_USER")
+    pwd = os.getenv("SMTP_PASS")
+    sender = os.getenv("SMTP_FROM")
+
+    if not (host and port and sender):
+        return
+
+    def _send() -> None:
+        import smtplib
+        from email.message import EmailMessage
+
+        msg = EmailMessage()
+        msg["From"] = sender
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.set_content(body)
+
+        with smtplib.SMTP(host, int(port)) as s:
+            s.starttls()
+            if user and pwd:
+                s.login(user, pwd)
+            s.send_message(msg)
+
+    background_tasks.add_task(_send)
+
+
+def _maybe_send_whatsapp(
+    background_tasks: BackgroundTasks,
+    to_phone: str | None,
+    message: str,
+) -> None:
+    """
+    Optional WhatsApp hook (safe-by-default).
+    If WHATSAPP_WEBHOOK_URL is not set, this does nothing.
+
+    Env expected:
+      WHATSAPP_WEBHOOK_URL
+      WHATSAPP_WEBHOOK_BEARER (optional)
+    """
+    if not to_phone or not isinstance(to_phone, str):
+        return
+
+    url = os.getenv("WHATSAPP_WEBHOOK_URL")
+    if not url:
+        return
+
+    token = os.getenv("WHATSAPP_WEBHOOK_BEARER")
+
+    def _send() -> None:
+        payload = json.dumps({"to": to_phone, "message": message}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+
+    background_tasks.add_task(_send)
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +182,19 @@ def login(
     """
     payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
 
-    user = services.authenticate_user(
-        db=db,
-        login_req=payload,
-        ip=_client_ip(request),
-        user_agent=_user_agent(request),
-    )
+    try:
+        user = services.authenticate_user(
+            db=db,
+            login_req=payload,
+            ip=_client_ip(request),
+            user_agent=_user_agent(request),
+        )
+    except services.AuthenticationError as exc:
+        detail = str(exc) or "Incorrect email, password or AMO slug."
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+        )
 
     if not user:
         raise HTTPException(
@@ -87,6 +213,116 @@ def login(
     )
 
 
+@router.post(
+    "/dev-seed-login",
+    response_model=schemas.Token,
+    include_in_schema=False,
+    summary="DEV ONLY: Login as the seeded superuser",
+)
+def dev_seed_login(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not _dev_seed_login_enabled():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
+
+    _require_dev_seed_token(request)
+
+    email = os.getenv("AMODB_SUPERUSER_EMAIL")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Seed login is not configured.",
+        )
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.email == email.lower().strip())
+        .first()
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Seed user not found.",
+        )
+
+    token, expires_in = services.issue_access_token_for_user(user)
+    return schemas.Token(
+        access_token=token,
+        expires_in=expires_in,
+        user=user,
+        amo=user.amo,
+        department=user.department,
+    )
+
+
+@router.get(
+    "/login-context",
+    response_model=schemas.LoginContextResponse,
+    summary="Resolve login context from email",
+)
+def login_context(
+    email: EmailStr,
+    db: Session = Depends(get_db),
+):
+    try:
+        user = services.resolve_login_context(db=db, email=email)
+    except services.LoginContextConflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Multiple AMO accounts share this email. Use your AMO portal link.",
+        )
+
+    if not user or not user.amo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active account found for this email.",
+        )
+
+    amo = user.amo
+    is_platform = bool(user.is_superuser) or amo.login_slug == "system"
+
+    return schemas.LoginContextResponse(
+        login_slug=amo.login_slug,
+        amo_code=amo.amo_code,
+        amo_name=amo.name,
+        is_platform=is_platform,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PASSWORD CHANGE (AUTHENTICATED)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/password-change",
+    response_model=schemas.UserRead,
+    summary="Change password for the current user",
+)
+def change_password(
+    payload: schemas.PasswordChangeRequest,
+    request: Request,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = services.change_password(
+            db,
+            user=current_user,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+            ip=_client_ip(request),
+            user_agent=_user_agent(request),
+        )
+    except services.AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc) or "Invalid current password.",
+        )
+    return user
+
+
 # ---------------------------------------------------------------------------
 # PASSWORD RESET
 # ---------------------------------------------------------------------------
@@ -100,6 +336,7 @@ def login(
 def request_password_reset(
     payload: schemas.PasswordResetRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
@@ -121,7 +358,7 @@ def request_password_reset(
     )
 
     if not amo:
-        return {"message": "If the account exists, a reset email will be sent."}
+        return {"message": "If the account exists, a reset link will be sent."}
 
     user = services.get_active_user_by_email(
         db=db,
@@ -129,7 +366,7 @@ def request_password_reset(
         email=payload.email,
     )
     if not user:
-        return {"message": "If the account exists, a reset email will be sent."}
+        return {"message": "If the account exists, a reset link will be sent."}
 
     raw_token = services.create_password_reset_token(
         db=db,
@@ -138,9 +375,23 @@ def request_password_reset(
         user_agent=_user_agent(request),
     )
 
+    reset_link = _build_reset_link(amo_slug=payload.amo_slug, token=raw_token)
+    delivery = payload.delivery_method
+    subject = "Reset your AMO Portal password"
+    message = (
+        f"Use this link to reset your password: {reset_link}"
+        if reset_link
+        else f"Use this reset token to set a new password: {raw_token}"
+    )
+
+    if delivery in {"email", "both"}:
+        _maybe_send_email(background_tasks, getattr(user, "email", None), subject, message)
+
+    if delivery in {"whatsapp", "both"}:
+        _maybe_send_whatsapp(background_tasks, getattr(user, "phone", None), message)
     return {
-        "message": "If the account exists, a reset email will be sent.",
-        "token_demo_only": raw_token,  # dev only
+        "message": "If the account exists, a reset link will be sent.",
+        "reset_link": reset_link,
     }
 
 
@@ -153,11 +404,17 @@ def confirm_password_reset(
     payload: schemas.PasswordResetConfirm,
     db: Session = Depends(get_db),
 ):
-    user = services.redeem_password_reset_token(
-        db=db,
-        raw_token=payload.token,
-        new_password=payload.new_password,
-    )
+    try:
+        user = services.redeem_password_reset_token(
+            db=db,
+            raw_token=payload.token,
+            new_password=payload.new_password,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

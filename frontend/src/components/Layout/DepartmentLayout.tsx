@@ -1,8 +1,17 @@
 // src/components/Layout/DepartmentLayout.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
-import { getCachedUser, logout } from "../../services/auth";
+import { fetchSubscription } from "../../services/billing";
+import type { Subscription } from "../../types/billing";
+import { getCachedUser, logout, onSessionEvent } from "../../services/auth";
+import {
+  listTrainingNotifications,
+  markAllTrainingNotificationsRead,
+  markTrainingNotificationRead,
+} from "../../services/training";
+import type { TrainingNotificationRead } from "../../types/training";
 
 type Props = {
   amoCode: string;
@@ -16,9 +25,18 @@ type DepartmentId =
   | "quality"
   | "safety"
   | "stores"
+  | "ehm"
   | "engineering"
   | "workshops"
   | "admin";
+
+type AdminNavId =
+  | "admin-overview"
+  | "admin-amos"
+  | "admin-users"
+  | "admin-assets"
+  | "admin-billing"
+  | "admin-settings";
 
 const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
   { id: "planning", label: "Planning" },
@@ -26,15 +44,32 @@ const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
   { id: "quality", label: "Quality & Compliance" },
   { id: "safety", label: "Safety Management" },
   { id: "stores", label: "Procurement & Stores" },
+  { id: "ehm", label: "Engine Health" },
   { id: "engineering", label: "Engineering" },
   { id: "workshops", label: "Workshops" },
   { id: "admin", label: "System Admin" },
 ];
 
+const ADMIN_NAV_ITEMS: Array<{ id: AdminNavId; label: string }> = [
+  { id: "admin-overview", label: "Overview" },
+  { id: "admin-amos", label: "AMO Management" },
+  { id: "admin-users", label: "User Management" },
+  { id: "admin-assets", label: "AMO Assets" },
+  { id: "admin-billing", label: "Billing & Usage" },
+  { id: "admin-settings", label: "Usage Throttling" },
+];
+
 type ColorScheme = "dark" | "light";
+
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+const IDLE_WARNING_MS = 3 * 60 * 1000;
 
 function isDepartmentId(v: string): v is DepartmentId {
   return DEPARTMENTS.some((d) => d.id === v);
+}
+
+function isAdminNavId(v: string): v is AdminNavId {
+  return ADMIN_NAV_ITEMS.some((d) => d.id === v);
 }
 
 function isAdminUser(u: any): boolean {
@@ -85,16 +120,33 @@ const DepartmentLayout: React.FC<Props> = ({
   const [collapsed, setCollapsed] = useState(false);
   const [colorScheme, setColorScheme] = useState<ColorScheme>("dark");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<TrainingNotificationRead[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [idleWarningOpen, setIdleWarningOpen] = useState(false);
+  const [idleCountdown, setIdleCountdown] = useState(IDLE_WARNING_MS / 1000);
+  const [logoutReason, setLogoutReason] = useState<"idle" | "expired" | null>(
+    null
+  );
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
 
   const navigate = useNavigate();
   const location = useLocation();
+  const { trackEvent } = useAnalytics();
 
   const currentUser = getCachedUser();
+  const isSuperuser = !!currentUser?.is_superuser;
+  const isTenantAdmin = isSuperuser || !!currentUser?.is_amo_admin;
+  const isAdminArea = isAdminNavId(activeDepartment);
 
   // Admins/SUPERUSER can see all departments and the System Admin area.
   const canAccessAdmin = isAdminUser(currentUser);
 
   const visibleDepartments = useMemo(() => {
+    if (isAdminArea) return [];
     if (canAccessAdmin) return DEPARTMENTS;
 
     // Non-admin users: show ONLY their current department in the ribbon.
@@ -106,7 +158,16 @@ const DepartmentLayout: React.FC<Props> = ({
 
     const match = DEPARTMENTS.find((d) => d.id === deptId);
     return match ? [match] : [];
-  }, [canAccessAdmin, activeDepartment]);
+  }, [canAccessAdmin, activeDepartment, isAdminArea]);
+
+  const visibleAdminNav = useMemo(() => {
+    if (!isAdminArea) return [];
+    return ADMIN_NAV_ITEMS.filter((i) => {
+      if (i.id === "admin-amos" && !isSuperuser) return false;
+      if (i.id === "admin-billing" && !isTenantAdmin) return false;
+      return true;
+    });
+  }, [isAdminArea, isSuperuser, isTenantAdmin]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -138,22 +199,68 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const handleNav = (deptId: DepartmentId) => {
+    const targetPath = `/maintenance/${amoCode}/${deptId}`;
+    if (
+      subscription?.is_read_only &&
+      !targetPath.includes("/billing") &&
+      !targetPath.includes("/upsell")
+    ) {
+      navigate(`/maintenance/${amoCode}/admin/billing?lockout=1`, {
+        replace: true,
+        state: { from: targetPath },
+      });
+      return;
+    }
+
     // Non-admins should not navigate across departments.
     if (!canAccessAdmin) {
       const active = isDepartmentId(activeDepartment) ? activeDepartment : null;
       if (active && deptId === active) {
-        navigate(`/maintenance/${amoCode}/${deptId}`);
+        navigate(targetPath);
       }
       return;
     }
 
     // System Admin is NOT a normal department dashboard; route is explicit.
     if (deptId === "admin") {
-      navigate(`/maintenance/${amoCode}/admin`);
+      navigate(`/maintenance/${amoCode}/admin/overview`);
       return;
     }
 
-    navigate(`/maintenance/${amoCode}/${deptId}`);
+    navigate(targetPath);
+  };
+
+  const handleAdminNav = (navId: AdminNavId) => {
+    if (subscription?.is_read_only && navId !== "admin-billing") {
+      navigate(`/maintenance/${amoCode}/admin/billing?lockout=1`, {
+        replace: true,
+        state: { from: location.pathname + location.search },
+      });
+      return;
+    }
+
+    switch (navId) {
+      case "admin-overview":
+        navigate(`/maintenance/${amoCode}/admin/overview`);
+        break;
+      case "admin-amos":
+        navigate(`/maintenance/${amoCode}/admin/amos`);
+        break;
+      case "admin-users":
+        navigate(`/maintenance/${amoCode}/admin/users`);
+        break;
+      case "admin-assets":
+        navigate(`/maintenance/${amoCode}/admin/amo-assets`);
+        break;
+      case "admin-billing":
+        navigate(`/maintenance/${amoCode}/admin/billing`);
+        break;
+      case "admin-settings":
+        navigate(`/maintenance/${amoCode}/admin/settings`);
+        break;
+      default:
+        break;
+    }
   };
 
   const resolveDeptForTraining = (): string => {
@@ -198,11 +305,137 @@ const DepartmentLayout: React.FC<Props> = ({
     ? "app-shell app-shell--collapsed"
     : "app-shell";
 
+  const isBillingRoute = useMemo(() => {
+    return location.pathname.includes("/billing");
+  }, [location.pathname]);
+
+  const isUpsellRoute = useMemo(() => {
+    return location.pathname.includes("/upsell");
+  }, [location.pathname]);
+
   const isTrainingRoute = useMemo(() => {
     return location.pathname.includes("/training");
   }, [location.pathname]);
 
+  const isAircraftImportRoute = useMemo(() => {
+    return location.pathname.includes("/aircraft-import");
+  }, [location.pathname]);
+
+  const isComponentImportRoute = useMemo(() => {
+    return location.pathname.includes("/component-import");
+  }, [location.pathname]);
+
+  const isAircraftDocumentsRoute = useMemo(() => {
+    return location.pathname.includes("/aircraft-documents");
+  }, [location.pathname]);
+
+  const isQmsRoute = useMemo(() => {
+    return location.pathname.includes("/qms");
+  }, [location.pathname]);
+
+  const isReliabilityRoute = useMemo(() => {
+    return location.pathname.includes("/reliability-reports");
+  }, [location.pathname]);
+
+  const isEhmDashboardRoute = useMemo(() => {
+    return location.pathname.endsWith("/ehm") || location.pathname.endsWith("/ehm/dashboard");
+  }, [location.pathname]);
+
+  const isEhmTrendsRoute = useMemo(() => {
+    return location.pathname.includes("/ehm/trends");
+  }, [location.pathname]);
+
+  const isEhmUploadsRoute = useMemo(() => {
+    return location.pathname.includes("/ehm/uploads");
+  }, [location.pathname]);
+
+  const lockedEventRef = useRef<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
+  const notificationsRef = useRef<HTMLDivElement | null>(null);
+  const idleWarningTimeoutRef = useRef<number | null>(null);
+  const idleLogoutTimeoutRef = useRef<number | null>(null);
+  const idleCountdownIntervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchSubscription()
+      .then((sub) => {
+        if (!active) return;
+        setSubscription(sub);
+        setSubscriptionError(null);
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        setSubscription(null);
+        setSubscriptionError(err?.message || "Unable to load subscription status.");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const refreshNotifications = async (opts?: { unreadOnly?: boolean }) => {
+    if (!currentUser) return;
+    const unreadOnly = opts?.unreadOnly ?? false;
+    if (!unreadOnly) {
+      setNotificationsLoading(true);
+      setNotificationsError(null);
+    }
+    try {
+      const data = await listTrainingNotifications({
+        unread_only: unreadOnly,
+        limit: 100,
+      });
+      if (unreadOnly) {
+        setUnreadNotifications(data.length);
+      } else {
+        setNotifications(data);
+        setUnreadNotifications(data.filter((n) => !n.read_at).length);
+      }
+    } catch (err: any) {
+      if (!unreadOnly) {
+        setNotificationsError(err?.message || "Failed to load notifications.");
+      }
+    } finally {
+      if (!unreadOnly) setNotificationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshNotifications({ unreadOnly: true });
+    const timer = window.setInterval(() => refreshNotifications({ unreadOnly: true }), 60000);
+    return () => window.clearInterval(timer);
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (notificationsOpen) {
+      refreshNotifications();
+    }
+  }, [notificationsOpen]);
+
+  useEffect(() => {
+    if (!notificationsOpen) return;
+
+    const onDown = (e: MouseEvent) => {
+      const el = notificationsRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && !el.contains(e.target)) {
+        setNotificationsOpen(false);
+      }
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNotificationsOpen(false);
+    };
+
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [notificationsOpen]);
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -227,14 +460,207 @@ const DepartmentLayout: React.FC<Props> = ({
     };
   }, [profileOpen]);
 
+  const clearIdleTimers = () => {
+    if (idleWarningTimeoutRef.current) {
+      window.clearTimeout(idleWarningTimeoutRef.current);
+      idleWarningTimeoutRef.current = null;
+    }
+    if (idleLogoutTimeoutRef.current) {
+      window.clearTimeout(idleLogoutTimeoutRef.current);
+      idleLogoutTimeoutRef.current = null;
+    }
+    if (idleCountdownIntervalRef.current) {
+      window.clearInterval(idleCountdownIntervalRef.current);
+      idleCountdownIntervalRef.current = null;
+    }
+  };
+
+  const scheduleIdleTimers = () => {
+    clearIdleTimers();
+    if (!currentUser || logoutReason) return;
+
+    const warningDelay = Math.max(IDLE_TIMEOUT_MS - IDLE_WARNING_MS, 0);
+
+    idleWarningTimeoutRef.current = window.setTimeout(() => {
+      setIdleWarningOpen(true);
+      setIdleCountdown(IDLE_WARNING_MS / 1000);
+    }, warningDelay);
+
+    idleLogoutTimeoutRef.current = window.setTimeout(() => {
+      logout();
+      setIdleWarningOpen(false);
+      setLogoutReason("idle");
+    }, IDLE_TIMEOUT_MS);
+  };
+
+  const resetIdleTimers = () => {
+    if (!currentUser || logoutReason) return;
+    setIdleWarningOpen(false);
+    setIdleCountdown(IDLE_WARNING_MS / 1000);
+    scheduleIdleTimers();
+  };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    scheduleIdleTimers();
+
+    const activityEvents = [
+      "mousemove",
+      "keydown",
+      "click",
+      "scroll",
+      "touchstart",
+    ];
+    const handleActivity = () => {
+      if (logoutReason) return;
+      resetIdleTimers();
+    };
+
+    activityEvents.forEach((evt) =>
+      window.addEventListener(evt, handleActivity, { passive: true })
+    );
+
+    return () => {
+      activityEvents.forEach((evt) =>
+        window.removeEventListener(evt, handleActivity)
+      );
+      clearIdleTimers();
+    };
+  }, [currentUser, logoutReason]);
+
+  useEffect(() => {
+    if (!idleWarningOpen) return;
+
+    idleCountdownIntervalRef.current = window.setInterval(() => {
+      setIdleCountdown((prev) => {
+        if (prev <= 1) {
+          const intervalId = idleCountdownIntervalRef.current;
+          if (intervalId) {
+            window.clearInterval(intervalId);
+            idleCountdownIntervalRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (idleCountdownIntervalRef.current) {
+        window.clearInterval(idleCountdownIntervalRef.current);
+        idleCountdownIntervalRef.current = null;
+      }
+    };
+  }, [idleWarningOpen]);
+
+  useEffect(() => {
+    const unsubscribe = onSessionEvent((detail) => {
+      if (detail.type !== "expired") return;
+      clearIdleTimers();
+      setIdleWarningOpen(false);
+      setLogoutReason("expired");
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const shouldBlur = idleWarningOpen || !!logoutReason;
+    document.body.classList.toggle("session-timeout-active", shouldBlur);
+  }, [idleWarningOpen, logoutReason]);
+
+  useEffect(() => {
+    if (!subscription?.is_read_only) return;
+    if (isBillingRoute || isUpsellRoute) return;
+
+    const key = `${location.pathname}${location.search}`;
+    if (lockedEventRef.current !== key) {
+      lockedEventRef.current = key;
+      trackEvent("ACCESS_BLOCKED", {
+        path: location.pathname,
+        query: location.search || undefined,
+        amo_code: amoCode,
+        reason: "read_only_subscription",
+      });
+    }
+
+    navigate(`/maintenance/${amoCode}/admin/billing?lockout=1`, {
+      replace: true,
+      state: { from: location.pathname + location.search },
+    });
+  }, [
+    subscription?.is_read_only,
+    isBillingRoute,
+    isUpsellRoute,
+    amoCode,
+    location.pathname,
+    location.search,
+    navigate,
+    trackEvent,
+  ]);
+
   const deptLabel =
+    ADMIN_NAV_ITEMS.find((d) => d.id === (activeDepartment as AdminNavId))
+      ?.label ||
     DEPARTMENTS.find((d) => d.id === (activeDepartment as any))?.label ||
     (activeDepartment || "Department");
 
   const userName = getUserDisplayName(currentUser);
   const userInitials = getUserInitials(currentUser);
+  const resolveNotificationLink = (linkPath?: string | null): string | null => {
+    if (!linkPath) return null;
+    if (linkPath.startsWith("/profile/training")) {
+      return `/maintenance/${amoCode}/${resolveDeptForTraining()}/training`;
+    }
+    if (linkPath.startsWith("/training/deferrals")) {
+      return `/maintenance/${amoCode}/${resolveDeptForTraining()}/training#training-deferrals`;
+    }
+    if (linkPath.startsWith("/training")) {
+      return `/maintenance/${amoCode}/${resolveDeptForTraining()}/training`;
+    }
+    return linkPath;
+  };
 
   const currentYear = new Date().getFullYear();
+  const returnPath = location.pathname + location.search;
+  const formattedCountdown = new Date(idleCountdown * 1000)
+    .toISOString()
+    .substring(14, 19);
+  const formatCountdown = (iso?: string | null): string | null => {
+    if (!iso) return null;
+    const target = new Date(iso).getTime();
+    const now = Date.now();
+    const diff = target - now;
+    if (diff <= 0) return "0d";
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    if (days > 0) return `${days}d ${hours}h`;
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
+  const trialCountdown = formatCountdown(subscription?.trial_ends_at || null);
+  const graceCountdown = formatCountdown(subscription?.trial_grace_expires_at || null);
+  const isTrialing = subscription?.status === "TRIALING";
+  const isExpired = subscription?.status === "EXPIRED";
+  const isReadOnly = !!subscription?.is_read_only;
+
+  const handleStaySignedIn = () => {
+    resetIdleTimers();
+  };
+
+  const handleIdleLogout = () => {
+    logout();
+    clearIdleTimers();
+    setIdleWarningOpen(false);
+    setLogoutReason("idle");
+  };
+
+  const handleResumeLogin = () => {
+    const code = (amoCode || "").trim();
+    const target = code ? `/maintenance/${code}/login` : "/login";
+    navigate(target, { replace: true, state: { from: returnPath } });
+  };
 
   return (
     <div className={shellClassName}>
@@ -256,6 +682,22 @@ const DepartmentLayout: React.FC<Props> = ({
         </div>
 
         <nav className="sidebar__nav">
+          {visibleAdminNav.map((nav) => {
+            const isActive = nav.id === activeDepartment;
+            return (
+              <button
+                key={nav.id}
+                type="button"
+                onClick={() => handleAdminNav(nav.id)}
+                className={
+                  "sidebar__item" + (isActive ? " sidebar__item--active" : "")
+                }
+              >
+                <span className="sidebar__item-label">{nav.label}</span>
+              </button>
+            );
+          })}
+
           {visibleDepartments.map((dept) => {
             const isActive = dept.id === activeDepartment;
             return (
@@ -272,19 +714,137 @@ const DepartmentLayout: React.FC<Props> = ({
             );
           })}
 
-          <div className="sidebar__divider" />
+          {!isAdminArea && <div className="sidebar__divider" />}
 
-          <button
-            type="button"
-            onClick={gotoMyTraining}
-            className={
-              "sidebar__item" + (isTrainingRoute ? " sidebar__item--active" : "")
-            }
-            aria-label="My Training"
-            title="My Training"
-          >
-            <span className="sidebar__item-label">My Training</span>
-          </button>
+          {!isAdminArea && activeDepartment === "planning" && (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/planning/aircraft-import`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isAircraftImportRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Setup Aircraft"
+                title="Setup Aircraft"
+              >
+                <span className="sidebar__item-label">Setup Aircraft</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/planning/component-import`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isComponentImportRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Import Components"
+                title="Import Components"
+              >
+                <span className="sidebar__item-label">Import Components</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/planning/aircraft-documents`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isAircraftDocumentsRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Aircraft Documents"
+                title="Aircraft Documents"
+              >
+                <span className="sidebar__item-label">Aircraft Documents</span>
+              </button>
+            </>
+          )}
+
+          {!isAdminArea && (
+            <button
+              type="button"
+              onClick={gotoMyTraining}
+              className={
+                "sidebar__item" +
+                (isTrainingRoute ? " sidebar__item--active" : "")
+              }
+              aria-label="My Training"
+              title="My Training"
+            >
+              <span className="sidebar__item-label">My Training</span>
+            </button>
+          )}
+
+          {!isAdminArea && activeDepartment === "quality" && (
+            <>
+              <button
+                type="button"
+                onClick={() => navigate(`/maintenance/${amoCode}/quality/qms`)}
+                className={
+                  "sidebar__item" + (isQmsRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Quality Management System"
+                title="Quality Management System"
+              >
+                <span className="sidebar__item-label">QMS Overview</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/quality/reliability-reports`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isReliabilityRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Reliability Reports"
+                title="Reliability Reports"
+              >
+                <span className="sidebar__item-label">Reliability Reports</span>
+              </button>
+            </>
+          )}
+
+          {!isAdminArea && activeDepartment === "ehm" && (
+            <>
+              <button
+                type="button"
+                onClick={() => navigate(`/maintenance/${amoCode}/ehm/dashboard`)}
+                className={
+                  "sidebar__item" + (isEhmDashboardRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="EHM Dashboard"
+                title="EHM Dashboard"
+              >
+                <span className="sidebar__item-label">Dashboard</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/maintenance/${amoCode}/ehm/trends`)}
+                className={
+                  "sidebar__item" + (isEhmTrendsRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="EHM Trends"
+                title="EHM Trends"
+              >
+                <span className="sidebar__item-label">Trend Graphs</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/maintenance/${amoCode}/ehm/uploads`)}
+                className={
+                  "sidebar__item" + (isEhmUploadsRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="EHM Uploads"
+                title="EHM Uploads"
+              >
+                <span className="sidebar__item-label">Uploads</span>
+              </button>
+            </>
+          )}
         </nav>
 
         <div className="sidebar__footer">
@@ -315,68 +875,244 @@ const DepartmentLayout: React.FC<Props> = ({
             </div>
           </div>
 
-          <div ref={profileRef} className="profile-menu">
-            <button
-              type="button"
-              onClick={() => setProfileOpen((v) => !v)}
-              aria-haspopup="menu"
-              aria-expanded={profileOpen}
-              className="profile-menu__trigger"
-              title={userName}
-            >
-              <span className="profile-menu__avatar">{userInitials}</span>
-              <span className="profile-menu__meta">
-                <span className="profile-menu__name">{userName}</span>
-                <span className="profile-menu__role">Profile</span>
-              </span>
-              <span className="profile-menu__caret">{profileOpen ? "▲" : "▼"}</span>
-            </button>
+          <div className="app-shell__topbar-actions">
+            <div ref={notificationsRef} className="notification-menu">
+              <button
+                type="button"
+                className="notification-bell"
+                aria-label="Training notifications"
+                aria-expanded={notificationsOpen}
+                onClick={() => setNotificationsOpen((v) => !v)}
+              >
+                <span className="notification-bell__icon">🔔</span>
+                {unreadNotifications > 0 ? (
+                  <span className="notification-bell__badge">{unreadNotifications}</span>
+                ) : null}
+              </button>
 
-            {profileOpen && (
-              <div role="menu" className="profile-menu__panel">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="profile-menu__item"
-                  onClick={() => {
-                    setProfileOpen(false);
-                    gotoMyTraining();
-                  }}
-                >
-                  My Training
-                </button>
+              {notificationsOpen && (
+                <div className="notification-panel notification-panel--drawer">
+                  <div className="notification-panel__header">
+                    <div>
+                      <strong>Notifications</strong>
+                      <div className="text-muted" style={{ fontSize: 12 }}>
+                        {unreadNotifications} unread
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary-chip-btn"
+                      onClick={async () => {
+                        await markAllTrainingNotificationsRead();
+                        await refreshNotifications();
+                      }}
+                    >
+                      Mark all read
+                    </button>
+                  </div>
 
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="profile-menu__item"
-                  onClick={() => {
-                    setProfileOpen(false);
-                    toggleColorScheme();
-                  }}
-                >
-                  {colorScheme === "dark"
-                    ? "Switch to Light mode"
-                    : "Switch to Dark mode"}
-                </button>
+                  {notificationsLoading && (
+                    <div className="notification-panel__state">Loading notifications…</div>
+                  )}
 
-                <div className="profile-menu__divider" />
+                  {notificationsError && (
+                    <div className="notification-panel__state notification-panel__state--error">
+                      {notificationsError}
+                    </div>
+                  )}
 
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="profile-menu__item"
-                  onClick={() => {
-                    setProfileOpen(false);
-                    handleLogout();
-                  }}
-                >
-                  Sign out
-                </button>
-              </div>
-            )}
+                  {!notificationsLoading && !notificationsError && (
+                    <div className="notification-panel__list">
+                      {notifications.map((note) => (
+                        <button
+                          type="button"
+                          key={note.id}
+                          className={`notification-item${note.read_at ? "" : " notification-item--unread"}`}
+                          onClick={async () => {
+                            if (!note.read_at) {
+                              await markTrainingNotificationRead(note.id, {});
+                            }
+                            setNotificationsOpen(false);
+                            await refreshNotifications();
+                            const target = resolveNotificationLink(note.link_path);
+                            if (target) {
+                              navigate(target);
+                            }
+                          }}
+                        >
+                          <div className="notification-item__title">{note.title}</div>
+                          {note.body ? (
+                            <div className="notification-item__body">{note.body}</div>
+                          ) : null}
+                          <div className="notification-item__meta">
+                            <span>{new Date(note.created_at).toLocaleString()}</span>
+                            <span className="badge badge--neutral">{note.severity}</span>
+                          </div>
+                        </button>
+                      ))}
+                      {notifications.length === 0 ? (
+                        <div className="notification-panel__state">No notifications yet.</div>
+                      ) : null}
+                    </div>
+                  )}
+
+                </div>
+              )}
+            </div>
+
+            <div ref={profileRef} className="profile-menu">
+              <button
+                type="button"
+                onClick={() => setProfileOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={profileOpen}
+                className="profile-menu__trigger"
+                title={userName}
+              >
+                <span className="profile-menu__avatar">{userInitials}</span>
+                <span className="profile-menu__meta">
+                  <span className="profile-menu__name">{userName}</span>
+                  <span className="profile-menu__role">Profile</span>
+                </span>
+                <span className="profile-menu__caret">{profileOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {profileOpen && (
+                <div role="menu" className="profile-drawer">
+                  <div className="profile-drawer__header">
+                    <div className="profile-drawer__avatar">{userInitials}</div>
+                    <div>
+                      <div className="profile-drawer__name">{userName}</div>
+                      <div className="profile-drawer__meta">Profile & settings</div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="profile-drawer__item"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      gotoMyTraining();
+                    }}
+                  >
+                    My Training
+                  </button>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="profile-drawer__item"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      const dept = resolveDeptForTraining();
+                      navigate(`/maintenance/${amoCode}/${dept}/settings/widgets`);
+                    }}
+                  >
+                    Dashboard widgets
+                  </button>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="profile-drawer__item"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      toggleColorScheme();
+                    }}
+                  >
+                    {colorScheme === "dark"
+                      ? "Switch to Light mode"
+                      : "Switch to Dark mode"}
+                  </button>
+
+                  <div className="profile-drawer__divider" />
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="profile-drawer__item profile-drawer__item--danger"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      handleLogout();
+                    }}
+                  >
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
+
+        {isTrialing && subscription?.trial_ends_at && (
+          <div className="info-banner info-banner--soft" style={{ margin: "12px 16px 0" }}>
+            <div>
+              <strong>Trial in progress</strong>
+              <p className="text-muted" style={{ margin: 0 }}>
+                {trialCountdown
+                  ? `Ends in ${trialCountdown}.`
+                  : "Trial ending soon."}{" "}
+                Convert to paid to avoid any grace or lockout.
+              </p>
+            </div>
+            <div className="page-section__actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`)}
+              >
+                Convert to paid
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => navigate(`/maintenance/${amoCode}/upsell`)}
+              >
+                View plans
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isExpired && (
+          <div
+            className={`card ${isReadOnly ? "card--error" : "card--warning"}`}
+            style={{ margin: "12px 16px 0" }}
+          >
+            <div className="card-header">
+              <div>
+                <h3 style={{ margin: "4px 0" }}>
+                  {isReadOnly ? "Trial locked" : "Trial expired"}
+                </h3>
+                <p className="text-muted" style={{ margin: 0 }}>
+                  {isReadOnly
+                    ? "Grace ended; workspace is read-only until a paid plan starts."
+                    : graceCountdown
+                    ? `Grace expires in ${graceCountdown}.`
+                    : "Grace period is in effect. Add a payment method to keep access."}
+                </p>
+                {subscriptionError && (
+                  <p className="text-muted" style={{ margin: 0 }}>
+                    {subscriptionError}
+                  </p>
+                )}
+              </div>
+              <div className="page-section__actions">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`)}
+                >
+                  Go to billing
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => navigate(`/maintenance/${amoCode}/upsell`)}
+                >
+                  See plans
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="app-shell__main-inner">{children}</div>
 
@@ -385,6 +1121,47 @@ const DepartmentLayout: React.FC<Props> = ({
           <span>All rights reserved.</span>
         </footer>
       </main>
+
+      {(idleWarningOpen || logoutReason) && (
+        <div className="session-timeout-overlay" role="dialog" aria-live="polite">
+          <div className="session-timeout-card">
+            {idleWarningOpen && !logoutReason && (
+              <>
+                <h2>Inactivity warning</h2>
+                <p>
+                  You will be logged out in{" "}
+                  <strong>{formattedCountdown}</strong> due to inactivity.
+                </p>
+                <p>Please click below to stay signed in.</p>
+                <div className="session-timeout-actions">
+                  <button className="btn btn-secondary" onClick={handleIdleLogout}>
+                    Log out now
+                  </button>
+                  <button className="btn btn-primary" onClick={handleStaySignedIn}>
+                    Stay signed in
+                  </button>
+                </div>
+              </>
+            )}
+
+            {logoutReason && (
+              <>
+                <h2>Session ended</h2>
+                <p>
+                  {logoutReason === "idle"
+                    ? "You have been logged out due to inactivity."
+                    : "Your session has expired. Please log in again."}
+                </p>
+                <div className="session-timeout-actions">
+                  <button className="btn btn-primary" onClick={handleResumeLogin}>
+                    Log in
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

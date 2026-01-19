@@ -62,6 +62,7 @@ export interface AdminUserRead {
   is_active: boolean;
   is_superuser: boolean;
   is_amo_admin: boolean;
+  must_change_password: boolean;
   last_login_at: string | null;
   last_login_ip: string | null;
   created_at: string;
@@ -85,6 +86,17 @@ export interface AdminAmoRead {
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface AdminAmoCreatePayload {
+  amo_code: string;
+  name: string;
+  login_slug: string;
+  icao_code?: string | null;
+  country?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  time_zone?: string | null;
 }
 
 /**
@@ -212,6 +224,10 @@ type ListParams = {
   search?: string;
 };
 
+type ListOptions = {
+  signal?: AbortSignal;
+};
+
 function resolveListAmoId(params?: ListParams): string | undefined {
   const current = getCachedUser();
   if (!current) return undefined;
@@ -239,7 +255,8 @@ function resolveListAmoId(params?: ListParams): string | undefined {
  * - skip / limit / search
  */
 export async function listAdminUsers(
-  params: ListParams = {}
+  params: ListParams = {},
+  options: ListOptions = {}
 ): Promise<AdminUserRead[]> {
   const sp = new URLSearchParams();
 
@@ -257,6 +274,7 @@ export async function listAdminUsers(
 
   return apiGet<AdminUserRead[]>(path, {
     headers: authHeaders(),
+    signal: options.signal,
   });
 }
 
@@ -266,6 +284,18 @@ export async function listAdminUsers(
  */
 export async function listAdminAmos(): Promise<AdminAmoRead[]> {
   return apiGet<AdminAmoRead[]>("/accounts/admin/amos", {
+    headers: authHeaders(),
+  });
+}
+
+/**
+ * SUPERUSER ONLY: create an AMO.
+ * POST /accounts/admin/amos
+ */
+export async function createAdminAmo(
+  payload: AdminAmoCreatePayload
+): Promise<AdminAmoRead> {
+  return apiPost<AdminAmoRead>("/accounts/admin/amos", JSON.stringify(payload), {
     headers: authHeaders(),
   });
 }

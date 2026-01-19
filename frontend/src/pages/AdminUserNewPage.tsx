@@ -2,8 +2,17 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { createAdminUser } from "../services/adminUsers";
-import type { AdminUserCreatePayload, AccountRole } from "../services/adminUsers";
+import {
+  createAdminUser,
+  listAdminAmos,
+  setActiveAmoId,
+  LS_ACTIVE_AMO_ID,
+} from "../services/adminUsers";
+import type {
+  AdminAmoRead,
+  AdminUserCreatePayload,
+  AccountRole,
+} from "../services/adminUsers";
 import { getCachedUser, getContext } from "../services/auth";
 
 type UrlParams = {
@@ -42,7 +51,7 @@ const AdminUserNewPage: React.FC = () => {
 
   const backTarget = useMemo(() => {
     const slug = amoCode ?? ctx.amoCode ?? null;
-    return slug ? `/maintenance/${slug}/admin` : "/login";
+    return slug ? `/maintenance/${slug}/admin/users` : "/login";
   }, [amoCode, ctx.amoCode]);
 
   const pageTitle = useMemo(() => {
@@ -60,6 +69,14 @@ const AdminUserNewPage: React.FC = () => {
     phone: "",
     password: "",
     confirmPassword: "",
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [amos, setAmos] = useState<AdminAmoRead[]>([]);
+  const [amoLoading, setAmoLoading] = useState(false);
+  const [amoError, setAmoError] = useState<string | null>(null);
+  const [selectedAmoId, setSelectedAmoId] = useState<string>(() => {
+    const stored = localStorage.getItem(LS_ACTIVE_AMO_ID);
+    return stored && stored.trim() ? stored.trim() : "";
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -86,9 +103,14 @@ const AdminUserNewPage: React.FC = () => {
     if (!form.password) return "Password is required.";
     if (form.password !== form.confirmPassword) return "Passwords do not match.";
 
-    // Basic client-side sanity. Real enforcement should be server-side.
-    if (form.password.length < 10) {
-      return "Password must be at least 10 characters.";
+    if (form.password.length < 12) {
+      return "Password must be at least 12 characters.";
+    }
+    const hasUpper = /[A-Z]/.test(form.password);
+    const hasLower = /[a-z]/.test(form.password);
+    const hasDigit = /\d/.test(form.password);
+    if (!(hasUpper && hasLower && hasDigit)) {
+      return "Password must include upper/lower case letters and a number.";
     }
 
     // Only SUPERUSER can create SUPERUSER
@@ -96,8 +118,78 @@ const AdminUserNewPage: React.FC = () => {
       return "Only a platform superuser can create another superuser.";
     }
 
+    if (isSuperuser && !selectedAmoId) {
+      return "Select an AMO for this user.";
+    }
+
     return null;
   };
+
+  const generateSecurePassword = () => {
+    const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const lower = "abcdefghijklmnopqrstuvwxyz";
+    const digits = "0123456789";
+    const symbols = "!@#$%^&*()-_=+[]{}<>?";
+    const all = upper + lower + digits + symbols;
+
+    const pick = (chars: string) =>
+      chars[Math.floor(Math.random() * chars.length)];
+
+    const base = [
+      pick(upper),
+      pick(lower),
+      pick(digits),
+      pick(symbols),
+    ];
+
+    for (let i = base.length; i < 14; i += 1) {
+      base.push(pick(all));
+    }
+
+    const shuffled = base.sort(() => Math.random() - 0.5).join("");
+    setForm((prev) => ({
+      ...prev,
+      password: shuffled,
+      confirmPassword: shuffled,
+    }));
+  };
+
+  const copyPassword = async () => {
+    if (!form.password) return;
+    try {
+      if (!navigator.clipboard) {
+        throw new Error("Clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(form.password);
+      setSuccess("Temporary password copied to clipboard.");
+    } catch (err) {
+      console.error("Failed to copy password", err);
+      setError("Could not copy password. Please copy it manually.");
+    }
+  };
+
+  React.useEffect(() => {
+    if (!isSuperuser) return;
+
+    const loadAmos = async () => {
+      setAmoError(null);
+      setAmoLoading(true);
+      try {
+        const data = await listAdminAmos();
+        setAmos(data);
+        if (!selectedAmoId && data.length > 0) {
+          setSelectedAmoId(data[0].id);
+        }
+      } catch (err: any) {
+        console.error("Failed to load AMOs", err);
+        setAmoError(err?.message || "Failed to load AMOs.");
+      } finally {
+        setAmoLoading(false);
+      }
+    };
+
+    loadAmos();
+  }, [isSuperuser, selectedAmoId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,6 +226,7 @@ const AdminUserNewPage: React.FC = () => {
         position_title: form.positionTitle.trim() || undefined,
         phone: form.phone.trim() || undefined,
         password: form.password,
+        amo_id: isSuperuser ? selectedAmoId || undefined : undefined,
         // NOTE:
         // Do NOT force amo_id here. adminUsers.ts resolves it safely:
         // - SUPERUSER: can target selected/active AMO
@@ -196,8 +289,7 @@ const AdminUserNewPage: React.FC = () => {
       <div className="page-header">
         <h1>{pageTitle}</h1>
         <p className="page-subtitle">
-          Create a new AMO user. The target AMO is resolved from your session
-          (and superuser support context if enabled).
+          Create an AMO user and assign their role and temporary password.
         </p>
       </div>
 
@@ -205,6 +297,37 @@ const AdminUserNewPage: React.FC = () => {
         <form onSubmit={handleSubmit} className="form-grid">
           {error && <div className="alert alert-error">{error}</div>}
           {success && <div className="alert alert-success">{success}</div>}
+          {amoError && <div className="alert alert-error">{amoError}</div>}
+
+          {isSuperuser && (
+            <div className="form-row">
+              <label htmlFor="amoId">Target AMO</label>
+              <select
+                id="amoId"
+                name="amoId"
+                value={selectedAmoId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setSelectedAmoId(nextId);
+                  setActiveAmoId(nextId);
+                }}
+                disabled={submitting || amoLoading}
+                required
+              >
+                <option value="" disabled>
+                  {amoLoading ? "Loading AMOs..." : "Select an AMO"}
+                </option>
+                {amos.map((amo) => (
+                  <option key={amo.id} value={amo.id}>
+                    {amo.name} ({amo.amo_code})
+                  </option>
+                ))}
+              </select>
+              <p className="form-hint">
+                Superusers must select which AMO will own this user.
+              </p>
+            </div>
+          )}
 
           <div className="form-row">
             <label htmlFor="staffCode">Staff Code</label>
@@ -218,6 +341,7 @@ const AdminUserNewPage: React.FC = () => {
               required
               disabled={submitting}
             />
+            <p className="form-hint">Use the official staff code (e.g. AMO-123).</p>
           </div>
 
           <div className="form-row">
@@ -279,6 +403,9 @@ const AdminUserNewPage: React.FC = () => {
                 )
               )}
             </select>
+            <p className="form-hint">
+              Choose the closest operational role. Admins get dashboard access.
+            </p>
           </div>
 
           <div className="form-row">
@@ -312,7 +439,7 @@ const AdminUserNewPage: React.FC = () => {
             <input
               id="password"
               name="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               value={form.password}
               onChange={handleChange}
               required
@@ -325,12 +452,46 @@ const AdminUserNewPage: React.FC = () => {
             <input
               id="confirmPassword"
               name="confirmPassword"
-              type="password"
+              type={showPassword ? "text" : "password"}
               value={form.confirmPassword}
               onChange={handleChange}
               required
               disabled={submitting}
             />
+          </div>
+
+          <div className="form-row">
+            <div className="form-actions form-actions--inline">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={generateSecurePassword}
+                disabled={submitting}
+              >
+                Generate secure password
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowPassword((prev) => !prev)}
+                disabled={submitting}
+              >
+                {showPassword ? "Hide password" : "Show password"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={copyPassword}
+                disabled={submitting || !form.password}
+              >
+                Copy password
+              </button>
+            </div>
+            <p className="form-hint">
+              Passwords must be at least 12 characters and include upper/lower
+              case letters and a number (symbols optional). The user will be
+              asked to change this on first login.
+            </p>
           </div>
 
           <div className="form-actions">

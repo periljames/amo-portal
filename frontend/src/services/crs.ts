@@ -10,8 +10,8 @@
 // - Uses authHeaders() from auth.ts so requests carry the JWT.
 
 import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
-import { authHeaders } from "./auth";
-import { API_BASE_URL } from "./config";
+import { authHeaders, handleAuthFailure } from "./auth";
+import { getApiBaseUrl } from "./config";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
@@ -21,7 +21,7 @@ async function request<T>(
   body?: BodyInit,
   init: RequestInit = {}
 ): Promise<T> {
-  const url = `${API_BASE_URL}${path}`;
+  const url = `${getApiBaseUrl()}${path}`;
 
   const res = await fetch(url, {
     method,
@@ -29,10 +29,14 @@ async function request<T>(
     ...init,
   });
 
-  const contentType = res.headers.get("Content-Type") || "";
-  const text = await res.text(); // read once, then decide what to do
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   if (!res.ok) {
+    const contentType = res.headers.get("Content-Type") || "";
+    const text = await res.text();
     // Log for easier debugging in the browser console
     console.error(
       `API ${method} ${url} failed:`,
@@ -43,8 +47,15 @@ async function request<T>(
     throw new Error(text || `HTTP ${res.status}`);
   }
 
+  if (res.status === 204 || res.status === 205) {
+    return null as T;
+  }
+
+  const contentType = res.headers.get("Content-Type") || "";
+
   // We expect these helpers to talk to JSON endpoints.
   if (!contentType.includes("application/json")) {
+    const text = await res.text();
     console.error(
       `API ${method} ${url} returned non-JSON success response:`,
       contentType,
@@ -56,13 +67,11 @@ async function request<T>(
   }
 
   try {
-    return JSON.parse(text) as T;
+    return (await res.json()) as T;
   } catch (err) {
     console.error(
       `API ${method} ${url} JSON parse error:`,
-      err,
-      "raw body:",
-      text.slice(0, 300)
+      err
     );
     throw err;
   }
@@ -83,7 +92,39 @@ export async function apiPost<T>(
     bodyInit = JSON.stringify(body);
   }
 
-  return request<T>("POST", path, bodyInit, init);
+  const headers = new Headers(init.headers);
+  if (bodyInit !== undefined && !(bodyInit instanceof FormData)) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+  }
+
+  return request<T>("POST", path, bodyInit, { ...init, headers });
+}
+
+export async function apiPut<T>(
+  path: string,
+  body?: unknown,
+  init: RequestInit = {}
+): Promise<T> {
+  let bodyInit: BodyInit | undefined;
+
+  if (body === undefined || body === null) {
+    bodyInit = undefined;
+  } else if (typeof body === "string" || body instanceof FormData) {
+    bodyInit = body;
+  } else {
+    bodyInit = JSON.stringify(body);
+  }
+
+  const headers = new Headers(init.headers);
+  if (bodyInit !== undefined && !(bodyInit instanceof FormData)) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+  }
+
+  return request<T>("PUT", path, bodyInit, { ...init, headers });
 }
 
 export async function apiGet<T>(
@@ -91,6 +132,31 @@ export async function apiGet<T>(
   init: RequestInit = {}
 ): Promise<T> {
   return request<T>("GET", path, undefined, init);
+}
+
+export async function apiDelete<T>(
+  path: string,
+  body?: unknown,
+  init: RequestInit = {}
+): Promise<T> {
+  let bodyInit: BodyInit | undefined;
+
+  if (body === undefined || body === null) {
+    bodyInit = undefined;
+  } else if (typeof body === "string" || body instanceof FormData) {
+    bodyInit = body;
+  } else {
+    bodyInit = JSON.stringify(body);
+  }
+
+  const headers = new Headers(init.headers);
+  if (bodyInit !== undefined && !(bodyInit instanceof FormData)) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+  }
+
+  return request<T>("DELETE", path, bodyInit, { ...init, headers });
 }
 
 // -----------------------------------------------------------------------------
@@ -130,7 +196,7 @@ export async function listCRS(
 }
 
 export function getCRSPdfUrl(crsId: number): string {
-  return `${API_BASE_URL}/crs/${crsId}/pdf`;
+  return `${getApiBaseUrl()}/crs/${crsId}/pdf`;
 }
 
 // -----------------------------------------------------------------------------
@@ -162,12 +228,17 @@ export async function fetchCRSTemplateMeta(): Promise<CRSTemplateMeta> {
 }
 
 export async function fetchCRSTemplatePdf(): Promise<Blob> {
-  const url = `${API_BASE_URL}/crs/template/pdf`;
+  const url = `${getApiBaseUrl()}/crs/template/pdf`;
 
   const res = await fetch(url, {
     method: "GET",
     headers: authHeaders(),
   });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   const contentType = res.headers.get("Content-Type") || "";
 

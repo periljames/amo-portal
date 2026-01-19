@@ -11,11 +11,27 @@ Scope:
 from __future__ import annotations
 
 from datetime import date as DateType, datetime as DateTimeType
+import re
 from typing import Optional, List, Dict, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from .models import MaintenanceProgramCategoryEnum
+from amodb.apps.accounts.models import RegulatoryAuthority
+from .models import (
+    MaintenanceProgramCategoryEnum,
+    AircraftDocumentStatus,
+    AircraftDocumentType,
+)
+
+MIN_VALID_DATE = DateType(1950, 1, 1)
+MAX_HOURS = 1_000_000.0
+MAX_CYCLES = 1_000_000.0
+MAX_CALENDAR_MONTHS = 1_200
+
+AIRCRAFT_SERIAL_PATTERN = re.compile(r"^[A-Z0-9-]{1,50}$")
+REGISTRATION_PATTERN = re.compile(r"^[A-Z0-9-]{1,20}$")
+PART_NUMBER_PATTERN = re.compile(r"^[A-Z0-9./-]{1,50}$")
+COMPONENT_SERIAL_PATTERN = re.compile(r"^[A-Z0-9./-]{1,50}$")
 
 
 # ---------------- AIRCRAFT ----------------
@@ -54,8 +70,39 @@ class AircraftBase(BaseModel):
 
     # Utilisation snapshot (as of last_log_date)
     last_log_date: Optional[DateType] = None
-    total_hours: Optional[float] = None
-    total_cycles: Optional[float] = None
+    total_hours: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
+    total_cycles: Optional[float] = Field(default=None, ge=0, le=MAX_CYCLES)
+
+    @field_validator("serial_number", mode="before")
+    @classmethod
+    def validate_serial_number(cls, value: str) -> str:
+        if value is None:
+            raise ValueError("serial_number is required")
+        trimmed = str(value).strip().upper()
+        if not AIRCRAFT_SERIAL_PATTERN.match(trimmed):
+            raise ValueError("serial_number must be A-Z/0-9 with optional hyphens.")
+        return trimmed
+
+    @field_validator("registration", mode="before")
+    @classmethod
+    def validate_registration(cls, value: str) -> str:
+        if value is None:
+            raise ValueError("registration is required")
+        trimmed = str(value).strip().upper()
+        if not REGISTRATION_PATTERN.match(trimmed):
+            raise ValueError("registration must be A-Z/0-9 with optional hyphens.")
+        return trimmed
+
+    @field_validator("last_log_date")
+    @classmethod
+    def validate_last_log_date(cls, value: Optional[DateType]) -> Optional[DateType]:
+        if value is None:
+            return value
+        if value < MIN_VALID_DATE:
+            raise ValueError("last_log_date is earlier than allowed.")
+        if value > DateType.today():
+            raise ValueError("last_log_date cannot be in the future.")
+        return value
 
 
 class AircraftCreate(AircraftBase):
@@ -63,7 +110,7 @@ class AircraftCreate(AircraftBase):
     Used when initially loading / creating aircraft.
     All fields from AircraftBase are allowed.
     """
-    pass
+    safety_confirmed: Optional[bool] = Field(default=None, exclude=True)
 
 
 class AircraftUpdate(BaseModel):
@@ -93,14 +140,116 @@ class AircraftUpdate(BaseModel):
     last_log_date: Optional[DateType] = None
     total_hours: Optional[float] = None
     total_cycles: Optional[float] = None
+    safety_confirmed: Optional[bool] = Field(default=None, exclude=True)
 
 
 class AircraftRead(AircraftBase):
     created_at: DateTimeType
     updated_at: DateTimeType
+    verification_status: str
 
     class Config:
         from_attributes = True
+
+
+# ---------------- AIRCRAFT DOCUMENTS ----------------
+
+
+class AircraftDocumentBase(BaseModel):
+    document_type: AircraftDocumentType
+    authority: RegulatoryAuthority = RegulatoryAuthority.KCAA
+    title: Optional[str] = None
+    reference_number: Optional[str] = None
+    compliance_basis: Optional[str] = None
+    issued_on: Optional[DateType] = None
+    expires_on: Optional[DateType] = None
+    alert_window_days: int = Field(default=30, ge=0, le=365)
+
+    @field_validator("issued_on", "expires_on")
+    @classmethod
+    def validate_dates(cls, value: Optional[DateType]) -> Optional[DateType]:
+        if value is None:
+            return value
+        if value < MIN_VALID_DATE:
+            raise ValueError("Date is earlier than allowed.")
+        return value
+
+    @field_validator("expires_on")
+    @classmethod
+    def validate_expiry_after_issue(
+        cls, value: Optional[DateType], values: Dict[str, Any]
+    ) -> Optional[DateType]:
+        issued_on = values.get("issued_on")
+        if value and issued_on and value < issued_on:
+            raise ValueError("expires_on cannot be earlier than issued_on.")
+        return value
+
+
+class AircraftDocumentCreate(AircraftDocumentBase):
+    pass
+
+
+class AircraftDocumentUpdate(BaseModel):
+    title: Optional[str] = None
+    reference_number: Optional[str] = None
+    compliance_basis: Optional[str] = None
+    issued_on: Optional[DateType] = None
+    expires_on: Optional[DateType] = None
+    alert_window_days: Optional[int] = Field(default=None, ge=0, le=365)
+    status: Optional[AircraftDocumentStatus] = None
+
+    @field_validator("expires_on")
+    @classmethod
+    def validate_expiry_after_issue(
+        cls, value: Optional[DateType], values: Dict[str, Any]
+    ) -> Optional[DateType]:
+        issued_on = values.get("issued_on")
+        if value and issued_on and value < issued_on:
+            raise ValueError("expires_on cannot be earlier than issued_on.")
+        return value
+
+
+class AircraftDocumentRead(AircraftDocumentBase):
+    id: int
+    aircraft_serial_number: str
+    status: AircraftDocumentStatus
+    is_blocking: bool
+    days_to_expiry: Optional[int] = None
+    missing_evidence: bool = False
+    file_original_name: Optional[str] = None
+    file_storage_path: Optional[str] = None
+    file_content_type: Optional[str] = None
+    last_uploaded_at: Optional[DateTimeType] = None
+    last_uploaded_by_user_id: Optional[str] = None
+    override_reason: Optional[str] = None
+    override_expires_on: Optional[DateType] = None
+    override_by_user_id: Optional[str] = None
+    override_recorded_at: Optional[DateTimeType] = None
+    created_at: DateTimeType
+    updated_at: DateTimeType
+
+    class Config:
+        from_attributes = True
+
+
+class AircraftDocumentOverride(BaseModel):
+    reason: str
+    override_expires_on: Optional[DateType] = None
+
+
+class AircraftDocumentDownloadRequest(BaseModel):
+    document_ids: List[int] = Field(..., min_length=1)
+
+
+class AircraftComplianceSummary(BaseModel):
+    aircraft_serial_number: str
+    documents_total: int
+    is_blocking: bool
+    blocking_documents: List[AircraftDocumentRead]
+    due_soon_documents: List[AircraftDocumentRead]
+    overdue_documents: List[AircraftDocumentRead]
+    overrides: List[AircraftDocumentRead]
+    documents: List[AircraftDocumentRead]
 
 
 class AircraftImportRow(BaseModel):
@@ -227,27 +376,31 @@ class AircraftComponentBase(BaseModel):
     description: Optional[str] = None
 
     installed_date: Optional[DateType] = None
-    installed_hours: Optional[float] = None
-    installed_cycles: Optional[float] = None
+    installed_hours: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
+    installed_cycles: Optional[float] = Field(default=None, ge=0, le=MAX_CYCLES)
 
-    current_hours: Optional[float] = None
-    current_cycles: Optional[float] = None
+    current_hours: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
+    current_cycles: Optional[float] = Field(default=None, ge=0, le=MAX_CYCLES)
 
     notes: Optional[str] = None
 
     # Life limit configuration
-    tbo_hours: Optional[float] = None
-    tbo_cycles: Optional[float] = None
-    tbo_calendar_months: Optional[int] = None
+    tbo_hours: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
+    tbo_cycles: Optional[float] = Field(default=None, ge=0, le=MAX_CYCLES)
+    tbo_calendar_months: Optional[int] = Field(
+        default=None, ge=0, le=MAX_CALENDAR_MONTHS
+    )
 
-    hsi_hours: Optional[float] = None
-    hsi_cycles: Optional[float] = None
-    hsi_calendar_months: Optional[int] = None
+    hsi_hours: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
+    hsi_cycles: Optional[float] = Field(default=None, ge=0, le=MAX_CYCLES)
+    hsi_calendar_months: Optional[int] = Field(
+        default=None, ge=0, le=MAX_CALENDAR_MONTHS
+    )
 
     # Overhaul reference
     last_overhaul_date: Optional[DateType] = None
-    last_overhaul_hours: Optional[float] = None
-    last_overhaul_cycles: Optional[float] = None
+    last_overhaul_hours: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
+    last_overhaul_cycles: Optional[float] = Field(default=None, ge=0, le=MAX_CYCLES)
 
     # Standardisation for reliability
     manufacturer_code: Optional[str] = None
@@ -255,9 +408,37 @@ class AircraftComponentBase(BaseModel):
     unit_of_measure_hours: Optional[str] = "H"
     unit_of_measure_cycles: Optional[str] = "C"
 
+    @field_validator("part_number", "serial_number", mode="before")
+    @classmethod
+    def validate_part_serial_format(cls, value: Optional[str], info) -> Optional[str]:
+        if value is None:
+            return value
+        trimmed = str(value).strip().upper()
+        pattern = (
+            PART_NUMBER_PATTERN
+            if info.field_name == "part_number"
+            else COMPONENT_SERIAL_PATTERN
+        )
+        if not pattern.match(trimmed):
+            raise ValueError(f"{info.field_name} contains invalid characters.")
+        return trimmed
+
+    @field_validator("installed_date", "last_overhaul_date")
+    @classmethod
+    def validate_component_dates(
+        cls, value: Optional[DateType]
+    ) -> Optional[DateType]:
+        if value is None:
+            return value
+        if value < MIN_VALID_DATE:
+            raise ValueError("date is earlier than allowed.")
+        if value > DateType.today():
+            raise ValueError("date cannot be in the future.")
+        return value
+
 
 class AircraftComponentCreate(AircraftComponentBase):
-    pass
+    safety_confirmed: Optional[bool] = Field(default=None, exclude=True)
 
 
 class AircraftComponentUpdate(BaseModel):
@@ -294,10 +475,12 @@ class AircraftComponentUpdate(BaseModel):
     operator_code: Optional[str] = None
     unit_of_measure_hours: Optional[str] = None
     unit_of_measure_cycles: Optional[str] = None
+    safety_confirmed: Optional[bool] = Field(default=None, exclude=True)
 
 
 class AircraftComponentRead(AircraftComponentBase):
     id: int
+    verification_status: str
 
     class Config:
         from_attributes = True
@@ -349,8 +532,8 @@ class AircraftUsageBase(BaseModel):
     techlog_no: str = Field(..., min_length=1)
     station: Optional[str] = None
 
-    block_hours: float = Field(..., ge=0)
-    cycles: float = Field(..., ge=0)
+    block_hours: float = Field(..., ge=0, le=MAX_HOURS)
+    cycles: float = Field(..., ge=0, le=MAX_CYCLES)
 
     ttaf_after: Optional[float] = None
     tca_after: Optional[float] = None
@@ -363,11 +546,20 @@ class AircraftUsageBase(BaseModel):
     pttso_after: Optional[float] = None
     tscoa_after: Optional[float] = None
 
-    hours_to_mx: Optional[float] = None
-    days_to_mx: Optional[int] = None
+    hours_to_mx: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
+    days_to_mx: Optional[int] = Field(default=None, ge=0, le=MAX_CALENDAR_MONTHS * 31)
 
     remarks: Optional[str] = None
     note: Optional[str] = None
+
+    @field_validator("date")
+    @classmethod
+    def validate_usage_date(cls, value: DateType) -> DateType:
+        if value < MIN_VALID_DATE:
+            raise ValueError("date is earlier than allowed.")
+        if value > DateType.today():
+            raise ValueError("date cannot be in the future.")
+        return value
 
 
 class AircraftUsageCreate(AircraftUsageBase):
@@ -375,7 +567,7 @@ class AircraftUsageCreate(AircraftUsageBase):
     Create payload – aircraft_serial_number is taken from the path,
     not from the body.
     """
-    pass
+    safety_confirmed: Optional[bool] = Field(default=None, exclude=True)
 
 
 class AircraftUsageUpdate(BaseModel):
@@ -391,8 +583,8 @@ class AircraftUsageUpdate(BaseModel):
     techlog_no: Optional[str] = None
     station: Optional[str] = None
 
-    block_hours: Optional[float] = Field(default=None, ge=0)
-    cycles: Optional[float] = Field(default=None, ge=0)
+    block_hours: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
+    cycles: Optional[float] = Field(default=None, ge=0, le=MAX_CYCLES)
 
     ttaf_after: Optional[float] = None
     tca_after: Optional[float] = None
@@ -405,13 +597,27 @@ class AircraftUsageUpdate(BaseModel):
     pttso_after: Optional[float] = None
     tscoa_after: Optional[float] = None
 
-    hours_to_mx: Optional[float] = None
-    days_to_mx: Optional[int] = None
+    hours_to_mx: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
+    days_to_mx: Optional[int] = Field(default=None, ge=0, le=MAX_CALENDAR_MONTHS * 31)
 
     remarks: Optional[str] = None
     note: Optional[str] = None
 
     last_seen_updated_at: DateTimeType
+    safety_confirmed: Optional[bool] = Field(default=None, exclude=True)
+
+    @field_validator("date")
+    @classmethod
+    def validate_usage_update_date(
+        cls, value: Optional[DateType]
+    ) -> Optional[DateType]:
+        if value is None:
+            return value
+        if value < MIN_VALID_DATE:
+            raise ValueError("date is earlier than allowed.")
+        if value > DateType.today():
+            raise ValueError("date cannot be in the future.")
+        return value
 
 
 class AircraftUsageRead(AircraftUsageBase):
@@ -422,6 +628,7 @@ class AircraftUsageRead(AircraftUsageBase):
     updated_at: DateTimeType
     created_by_user_id: Optional[int] = None
     updated_by_user_id: Optional[int] = None
+    verification_status: str
 
     class Config:
         from_attributes = True

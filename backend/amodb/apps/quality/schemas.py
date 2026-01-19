@@ -8,6 +8,11 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import (
+    CARActionType,
+    CARPriority,
+    CARProgram,
+    CARStatus,
+    QMSNotificationSeverity,
     QMSDomain,
     QMSDocType,
     QMSDocStatus,
@@ -216,6 +221,10 @@ class QMSAuditCreate(BaseModel):
     scope: Optional[str] = None
     criteria: Optional[str] = None
     auditee: Optional[str] = None
+    auditee_email: Optional[str] = None
+    lead_auditor_user_id: Optional[str] = None
+    observer_auditor_user_id: Optional[str] = None
+    assistant_auditor_user_id: Optional[str] = None
 
     planned_start: Optional[date] = None
     planned_end: Optional[date] = None
@@ -227,6 +236,10 @@ class QMSAuditUpdate(BaseModel):
     scope: Optional[str] = None
     criteria: Optional[str] = None
     auditee: Optional[str] = None
+    auditee_email: Optional[str] = None
+    lead_auditor_user_id: Optional[str] = None
+    observer_auditor_user_id: Optional[str] = None
+    assistant_auditor_user_id: Optional[str] = None
 
     planned_start: Optional[date] = None
     planned_end: Optional[date] = None
@@ -250,8 +263,11 @@ class QMSAuditOut(BaseModel):
     scope: Optional[str]
     criteria: Optional[str]
     auditee: Optional[str]
+    auditee_email: Optional[str]
 
     lead_auditor_user_id: Optional[str]
+    observer_auditor_user_id: Optional[str]
+    assistant_auditor_user_id: Optional[str]
 
     planned_start: Optional[date]
     planned_end: Optional[date]
@@ -360,3 +376,127 @@ class QMSDashboardOut(BaseModel):
     findings_open_level_3: int
 
     findings_overdue_total: int
+
+
+# -----------------------------
+# Corrective Action Requests (CAR)
+# -----------------------------
+
+
+class CARCreate(BaseModel):
+    program: CARProgram = CARProgram.QUALITY
+    title: str = Field(min_length=1, max_length=255)
+    summary: str = Field(min_length=1)
+    priority: CARPriority = CARPriority.MEDIUM
+    due_date: Optional[date] = None
+    target_closure_date: Optional[date] = None
+    assigned_to_user_id: Optional[str] = None
+    finding_id: Optional[UUID] = None
+
+
+class CARUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=255)
+    summary: Optional[str] = None
+    priority: Optional[CARPriority] = None
+    status: Optional[CARStatus] = None
+    due_date: Optional[date] = None
+    target_closure_date: Optional[date] = None
+    assigned_to_user_id: Optional[str] = None
+    closed_at: Optional[datetime] = None
+    reminder_interval_days: Optional[int] = Field(default=None, ge=1, le=90)
+
+
+class CAROut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    program: CARProgram
+    car_number: str
+    title: str
+    summary: str
+    priority: CARPriority
+    status: CARStatus
+    due_date: Optional[date]
+    target_closure_date: Optional[date]
+    closed_at: Optional[datetime]
+    escalated_at: Optional[datetime]
+    finding_id: Optional[UUID]
+    requested_by_user_id: Optional[str]
+    assigned_to_user_id: Optional[str]
+    invite_token: str
+    reminder_interval_days: int
+    next_reminder_at: Optional[datetime]
+    containment_action: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    preventive_action: Optional[str] = None
+    evidence_ref: Optional[str] = None
+    submitted_by_name: Optional[str] = None
+    submitted_by_email: Optional[str] = None
+    submitted_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CARActionCreate(BaseModel):
+    action_type: CARActionType = CARActionType.COMMENT
+    message: str = Field(min_length=1)
+
+
+class CARActionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    car_id: UUID
+    action_type: CARActionType
+    message: str
+    actor_user_id: Optional[str]
+    created_at: datetime
+
+
+class CARInviteOut(BaseModel):
+    car_id: UUID
+    invite_token: str
+    invite_url: str
+    next_reminder_at: Optional[datetime]
+    car_number: str
+    title: str
+    summary: str
+    priority: CARPriority
+    status: CARStatus
+    due_date: Optional[date]
+    target_closure_date: Optional[date]
+
+
+class CARInviteUpdate(BaseModel):
+    containment_action: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    preventive_action: Optional[str] = None
+    evidence_ref: Optional[str] = None
+    target_closure_date: Optional[date] = None
+    due_date: Optional[date] = None
+    submitted_by_name: Optional[str] = Field(default=None, max_length=255)
+    submitted_by_email: Optional[str] = Field(default=None, max_length=255)
+
+
+class QMSNotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: str
+    message: str
+    severity: QMSNotificationSeverity
+    created_by_user_id: Optional[str]
+    created_at: datetime
+    read_at: Optional[datetime]
+
+
+class AuditorStatsOut(BaseModel):
+    user_id: str
+    audits_total: int
+    audits_open: int
+    audits_closed: int
+    lead_audits: int
+    observer_audits: int
+    assistant_audits: int

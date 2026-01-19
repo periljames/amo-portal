@@ -37,7 +37,12 @@ from amodb.apps.accounts.models import AccountRole
 # ---------------------------------------------------------------------------
 
 # In production, ALWAYS override these via environment variables.
-SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_ME_IN_PRODUCTION")
+SECRET_KEY = (os.getenv("SECRET_KEY") or "").strip()
+if not SECRET_KEY or SECRET_KEY == "CHANGE_ME_IN_PRODUCTION":
+    raise RuntimeError(
+        "SECRET_KEY must be provided via environment variable and cannot use the default placeholder."
+    )
+
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
 try:
@@ -231,6 +236,9 @@ def require_admin(
     if getattr(current_user, "is_superuser", False) or getattr(
         current_user, "is_amo_admin", False
     ):
+        return current_user
+
+    if current_user.role == AccountRole.AMO_ADMIN:
         return current_user
 
     if current_user.role in {

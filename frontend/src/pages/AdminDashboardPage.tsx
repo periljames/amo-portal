@@ -1,48 +1,28 @@
 // src/pages/AdminDashboardPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { authHeaders, getCachedUser, getContext } from "../services/auth";
-import { API_BASE_URL } from "../services/config";
-import { listAdminUsers } from "../services/adminUsers";
-import type { AdminUserRead } from "../services/adminUsers";
+import { getCachedUser, getContext } from "../services/auth";
+import {
+  createAdminAmo,
+  listAdminAmos,
+  listAdminUsers,
+} from "../services/adminUsers";
+import type { AdminAmoRead, AdminUserRead } from "../services/adminUsers";
 import { LS_ACTIVE_AMO_ID } from "../services/adminUsers";
 
 type UrlParams = {
   amoCode?: string;
 };
 
-type AmoRead = {
-  id: string;
-  amo_code: string;
-  name: string;
-  login_slug: string;
-  contact_email?: string | null;
-  contact_phone?: string | null;
-  time_zone?: string | null;
-  is_active: boolean;
-};
-
-async function fetchAdminAmos(): Promise<AmoRead[]> {
-  const res = await fetch(`${API_BASE_URL}/accounts/admin/amos`, {
-    method: "GET",
-    headers: authHeaders(),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-
-  return (await res.json()) as AmoRead[];
-}
+const RESERVED_LOGIN_SLUGS = new Set(["system", "root"]);
 
 const AdminDashboardPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
 
-  const currentUser = getCachedUser();
+  const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
 
   const isSuperuser = !!currentUser?.is_superuser;
@@ -52,11 +32,42 @@ const AdminDashboardPage: React.FC = () => {
   const [users, setUsers] = useState<AdminUserRead[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lastUsersRequestKey = useRef<string | null>(null);
+  const lastUsersFetchAt = useRef<number>(0);
+  const usersRequestRef = useRef<{
+    key: string;
+    controller: AbortController;
+  } | null>(null);
 
   // SUPERUSER AMO picker
-  const [amos, setAmos] = useState<AmoRead[]>([]);
+  const [amos, setAmos] = useState<AdminAmoRead[]>([]);
   const [amoLoading, setAmoLoading] = useState(false);
   const [amoError, setAmoError] = useState<string | null>(null);
+  const [amoCreateError, setAmoCreateError] = useState<string | null>(null);
+  const [amoCreateSuccess, setAmoCreateSuccess] = useState<string | null>(null);
+  const [lastCreatedAmoId, setLastCreatedAmoId] = useState<string | null>(null);
+
+  type AmoFormState = {
+    amoCode: string;
+    name: string;
+    loginSlug: string;
+    icaoCode: string;
+    country: string;
+    contactEmail: string;
+    contactPhone: string;
+    timeZone: string;
+  };
+
+  const [amoForm, setAmoForm] = useState<AmoFormState>({
+    amoCode: "",
+    name: "",
+    loginSlug: "",
+    icaoCode: "",
+    country: "",
+    contactEmail: "",
+    contactPhone: "",
+    timeZone: "",
+  });
 
   const [activeAmoId, setActiveAmoId] = useState<string | null>(() => {
     const v = localStorage.getItem(LS_ACTIVE_AMO_ID);
@@ -101,7 +112,7 @@ const AdminDashboardPage: React.FC = () => {
       setAmoError(null);
       setAmoLoading(true);
       try {
-        const data = await fetchAdminAmos();
+        const data = await listAdminAmos();
         setAmos(data);
 
         const stored = localStorage.getItem(LS_ACTIVE_AMO_ID);
@@ -134,6 +145,18 @@ const AdminDashboardPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuperuser]);
 
+  const trimmedSearch = search.trim();
+  const usersRequestKey = useMemo(
+    () =>
+      JSON.stringify({
+        amo_id: effectiveAmoId,
+        skip,
+        limit,
+        search: trimmedSearch,
+      }),
+    [effectiveAmoId, skip, limit, trimmedSearch]
+  );
+
   // Load users
   useEffect(() => {
     const loadUsers = async () => {
@@ -154,30 +177,78 @@ const AdminDashboardPage: React.FC = () => {
         return;
       }
 
+      if (lastUsersRequestKey.current === usersRequestKey) {
+        const now = Date.now();
+        if (now - lastUsersFetchAt.current < 1000) {
+          return;
+        }
+      }
+
+      if (usersRequestRef.current?.key === usersRequestKey) {
+        return;
+      }
+
+      if (usersRequestRef.current) {
+        usersRequestRef.current.controller.abort();
+        usersRequestRef.current = null;
+      }
+
       try {
+        const controller = new AbortController();
+        usersRequestRef.current = { key: usersRequestKey, controller };
+        lastUsersRequestKey.current = usersRequestKey;
+        lastUsersFetchAt.current = Date.now();
         setLoading(true);
 
-        const data = await listAdminUsers({
-          amo_id: isSuperuser ? effectiveAmoId : undefined,
-          skip,
-          limit,
-          search: search.trim() || undefined,
-        });
+        const data = await listAdminUsers(
+          {
+            amo_id: isSuperuser ? effectiveAmoId : undefined,
+            skip,
+            limit,
+            search: trimmedSearch || undefined,
+          },
+          {
+            signal: controller.signal,
+          }
+        );
 
         setUsers(data);
+        lastUsersRequestKey.current = usersRequestKey;
       } catch (err: any) {
+        if (err?.name === "AbortError") {
+          return;
+        }
         console.error("Failed to load users", err);
         setError(
           err?.message ||
             "Could not load users. Please try again or contact Quality/IT."
         );
       } finally {
+        if (usersRequestRef.current?.key === usersRequestKey) {
+          usersRequestRef.current = null;
+        }
         setLoading(false);
       }
     };
 
     loadUsers();
-  }, [currentUser, canAccessAdmin, effectiveAmoId, isSuperuser, skip, limit, search]);
+
+    return () => {
+      if (usersRequestRef.current) {
+        usersRequestRef.current.controller.abort();
+        usersRequestRef.current = null;
+      }
+    };
+  }, [
+    currentUser,
+    canAccessAdmin,
+    effectiveAmoId,
+    isSuperuser,
+    skip,
+    limit,
+    trimmedSearch,
+    usersRequestKey,
+  ]);
 
   const handleNewUser = () => {
     const target = amoCode ? `/maintenance/${amoCode}/admin/users/new` : "/login";
@@ -292,6 +363,80 @@ const AdminDashboardPage: React.FC = () => {
     setSkip(0);
   };
 
+  const handleAmoFormChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ): void => {
+    const { name, value } = e.target;
+    const key = name as keyof AmoFormState;
+    setAmoForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleCreateAmo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAmoCreateError(null);
+    setAmoCreateSuccess(null);
+
+    const amoCodeValue = amoForm.amoCode.trim();
+    const nameValue = amoForm.name.trim();
+    const loginSlugValue = amoForm.loginSlug.trim().toLowerCase();
+
+    if (!amoCodeValue || !nameValue || !loginSlugValue) {
+      setAmoCreateError("AMO code, name, and login slug are required.");
+      return;
+    }
+
+    if (RESERVED_LOGIN_SLUGS.has(loginSlugValue)) {
+      setAmoCreateError("Login slug is reserved for platform support.");
+      return;
+    }
+
+    try {
+      const created = await createAdminAmo({
+        amo_code: amoCodeValue.toUpperCase(),
+        name: nameValue,
+        login_slug: loginSlugValue,
+        icao_code: amoForm.icaoCode.trim() || undefined,
+        country: amoForm.country.trim() || undefined,
+        contact_email: amoForm.contactEmail.trim() || undefined,
+        contact_phone: amoForm.contactPhone.trim() || undefined,
+        time_zone: amoForm.timeZone.trim() || undefined,
+      });
+
+      setAmoForm({
+        amoCode: "",
+        name: "",
+        loginSlug: "",
+        icaoCode: "",
+        country: "",
+        contactEmail: "",
+        contactPhone: "",
+        timeZone: "",
+      });
+
+      setAmoCreateSuccess(
+        `AMO ${created.amo_code} created. You can now add its first user.`
+      );
+      setLastCreatedAmoId(created.id);
+      setActiveAmoId(created.id);
+      localStorage.setItem(LS_ACTIVE_AMO_ID, created.id);
+
+      const data = await listAdminAmos();
+      setAmos(data);
+    } catch (err: any) {
+      console.error("Failed to create AMO", err);
+      const msg =
+        err?.response?.data?.detail ||
+        err?.detail ||
+        err?.message ||
+        "Could not create AMO. Please try again.";
+      setAmoCreateError(
+        typeof msg === "string"
+          ? msg
+          : "Could not create AMO. Please try again."
+      );
+    }
+  };
+
   const activeAmoLabel = useMemo(() => {
     if (!isSuperuser) return null;
     const a = amos.find((x) => x.id === effectiveAmoId);
@@ -303,9 +448,12 @@ const AdminDashboardPage: React.FC = () => {
   }
 
   return (
-    <DepartmentLayout amoCode={amoCode ?? "UNKNOWN"} activeDepartment="admin">
+    <DepartmentLayout
+      amoCode={amoCode ?? "UNKNOWN"}
+      activeDepartment="admin-users"
+    >
       <header className="page-header">
-        <h1 className="page-header__title">User Administration</h1>
+        <h1 className="page-header__title">User Management</h1>
         <p className="page-header__subtitle">
           Manage AMO users, roles and access.
           {currentUser && (
@@ -320,9 +468,11 @@ const AdminDashboardPage: React.FC = () => {
       {isSuperuser && (
         <section className="page-section">
           <div className="card card--form" style={{ padding: 16 }}>
-            <h3 style={{ marginTop: 0, marginBottom: 8 }}>
-              Support mode (SUPERUSER)
-            </h3>
+            <h3 style={{ marginTop: 0, marginBottom: 8 }}>AMO Context</h3>
+            <p style={{ marginTop: 0, opacity: 0.85 }}>
+              Select which AMO you are managing. Need to create a new AMO? Use
+              the AMO Management page.
+            </p>
 
             {amoLoading && <p>Loading AMOs…</p>}
             {amoError && <div className="alert alert-error">{amoError}</div>}
@@ -350,6 +500,136 @@ const AdminDashboardPage: React.FC = () => {
                 )}
               </div>
             )}
+
+            <hr style={{ margin: "16px 0" }} />
+
+            <h4 style={{ marginTop: 0 }}>Create a new AMO</h4>
+            <p style={{ marginTop: 0, opacity: 0.85 }}>
+              Register a new AMO, then create its first admin user.
+            </p>
+
+            {amoCreateError && (
+              <div className="alert alert-error">{amoCreateError}</div>
+            )}
+            {amoCreateSuccess && (
+              <div className="alert alert-success">{amoCreateSuccess}</div>
+            )}
+
+            <form onSubmit={handleCreateAmo} className="form-grid">
+              <div className="form-row">
+                <label htmlFor="amoCode">AMO Code</label>
+                <input
+                  id="amoCode"
+                  name="amoCode"
+                  type="text"
+                  value={amoForm.amoCode}
+                  onChange={handleAmoFormChange}
+                  placeholder="e.g. SKYJET"
+                  required
+                />
+                <p className="form-hint">Short code used internally and on reports.</p>
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="amoName">AMO Name</label>
+                <input
+                  id="amoName"
+                  name="name"
+                  type="text"
+                  value={amoForm.name}
+                  onChange={handleAmoFormChange}
+                  placeholder="SkyJet Maintenance"
+                  required
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="loginSlug">Login Slug</label>
+                <input
+                  id="loginSlug"
+                  name="loginSlug"
+                  type="text"
+                  value={amoForm.loginSlug}
+                  onChange={handleAmoFormChange}
+                  placeholder="skyjet"
+                  required
+                />
+                <p className="form-hint">
+                  Login URL:{" "}
+                  <code>/maintenance/{amoForm.loginSlug || "your-amo"}/login</code>
+                </p>
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="icaoCode">ICAO Code</label>
+                <input
+                  id="icaoCode"
+                  name="icaoCode"
+                  type="text"
+                  value={amoForm.icaoCode}
+                  onChange={handleAmoFormChange}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="country">Country</label>
+                <input
+                  id="country"
+                  name="country"
+                  type="text"
+                  value={amoForm.country}
+                  onChange={handleAmoFormChange}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="contactEmail">Contact Email</label>
+                <input
+                  id="contactEmail"
+                  name="contactEmail"
+                  type="email"
+                  value={amoForm.contactEmail}
+                  onChange={handleAmoFormChange}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="contactPhone">Contact Phone</label>
+                <input
+                  id="contactPhone"
+                  name="contactPhone"
+                  type="tel"
+                  value={amoForm.contactPhone}
+                  onChange={handleAmoFormChange}
+                />
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="timeZone">Time Zone</label>
+                <input
+                  id="timeZone"
+                  name="timeZone"
+                  type="text"
+                  value={amoForm.timeZone}
+                  onChange={handleAmoFormChange}
+                  placeholder="Africa/Nairobi"
+                />
+              </div>
+
+              <div className="form-actions">
+                <button type="submit" className="btn btn-primary">
+                  Create AMO
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleNewUser}
+                  disabled={!lastCreatedAmoId}
+                >
+                  Create first user
+                </button>
+              </div>
+            </form>
           </div>
         </section>
       )}
@@ -366,6 +646,15 @@ const AdminDashboardPage: React.FC = () => {
           >
             + Create user
           </button>
+          {isSuperuser && (
+            <button
+              type="button"
+              className="secondary-chip-btn"
+              onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}
+            >
+              Manage AMOs
+            </button>
+          )}
           <button
             type="button"
             className="secondary-chip-btn"

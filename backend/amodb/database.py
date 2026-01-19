@@ -57,11 +57,19 @@ COMMON_ENGINE_KWARGS = {
 # ENGINES
 # -------------------------------------------------------------------
 
+def _engine_kwargs(url: str) -> dict:
+    if url.startswith("sqlite"):
+        kwargs = {k: v for k, v in COMMON_ENGINE_KWARGS.items() if k not in {"pool_size", "max_overflow", "pool_timeout", "pool_recycle"}}
+        kwargs["connect_args"] = {"check_same_thread": False}
+        return kwargs
+    return COMMON_ENGINE_KWARGS
+
+
 # All writes go here (and reads if you have a single DB)
-write_engine = create_engine(WRITE_DB_URL, **COMMON_ENGINE_KWARGS)
+write_engine = create_engine(WRITE_DB_URL, **_engine_kwargs(WRITE_DB_URL))
 
 # Read engine – today this can be the same as write, later a replica
-read_engine = create_engine(READ_DB_URL, **COMMON_ENGINE_KWARGS)
+read_engine = create_engine(READ_DB_URL, **_engine_kwargs(READ_DB_URL))
 
 # -------------------------------------------------------------------
 # SESSIONS
@@ -71,6 +79,7 @@ WriteSessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=write_engine,
+    expire_on_commit=False,
     future=True,
 )
 
@@ -78,6 +87,7 @@ ReadSessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=read_engine,
+    expire_on_commit=False,
     future=True,
 )
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import re
@@ -16,7 +17,7 @@ from ...database import SessionLocal
 from . import models as crs_models
 
 if TYPE_CHECKING:
-    from reportlab.lib.utils import ImageReader
+    from reportlab.lib.utils import ImageReader  # type: ignore[reportMissingModuleSource]
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -516,7 +517,7 @@ def _fill_pdf(template: Path, output: Path, data: Dict[str, Any]) -> None:
     writer.write(str(output))
 
 
-def get_fillable_crs_template() -> Path:
+def get_fillable_crs_template(template_path: Optional[Path] = None) -> Path:
     """
     Return a CRS template path that has form appearance metadata enabled.
 
@@ -524,9 +525,10 @@ def get_fillable_crs_template() -> Path:
     AcroForm fields correctly. We generate a cached copy to avoid mutating
     the original template.
     """
-    template_path = get_latest_crs_template()
+    template_path = template_path or get_latest_crs_template()
+    template_key = hashlib.sha1(str(template_path).encode("utf-8")).hexdigest()[:8]
     cache_name = (
-        f"{template_path.stem}-fillable-"
+        f"{template_path.stem}-{template_key}-fillable-"
         f"{int(template_path.stat().st_mtime)}{template_path.suffix}"
     )
     output_path = TEMPLATE_OUTPUT_DIR / cache_name
@@ -546,7 +548,7 @@ def get_fillable_crs_template() -> Path:
     return output_path
 
 
-def create_crs_pdf(crs_id: int) -> Path:
+def create_crs_pdf(crs_id: int, template_path: Optional[Path] = None) -> Path:
     """
     Create a filled, read-only CRS PDF for the given CRS id.
 
@@ -559,7 +561,7 @@ def create_crs_pdf(crs_id: int) -> Path:
             raise ValueError(f"CRS id {crs_id} not found")
 
         data = _build_field_values(crs)
-        template_path = get_latest_crs_template()
+        template_path = template_path or get_latest_crs_template()
 
         filename = f"{crs.crs_serial or f'CRS-{crs_id:06d}'}.pdf"
         output_path = OUTPUT_DIR / filename
@@ -579,7 +581,7 @@ def create_crs_pdf(crs_id: int) -> Path:
         db.close()
 
 
-def get_crs_form_template_metadata() -> Dict[str, Any]:
+def get_crs_form_template_metadata(template_path: Optional[Path] = None) -> Dict[str, Any]:
     """
     Introspect the current CRS PDF template and return:
 
@@ -589,7 +591,7 @@ def get_crs_form_template_metadata() -> Dict[str, Any]:
     This is generic enough to be reused for other AMOs / forms by just
     changing the template path/pattern.
     """
-    template = get_latest_crs_template()
+    template = template_path or get_latest_crs_template()
     pdf = PdfReader(str(template))
 
     pages: List[Dict[str, Any]] = []

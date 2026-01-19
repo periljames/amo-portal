@@ -9,9 +9,15 @@ import type {
 import { AgGridReact } from "ag-grid-react";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
-import "ag-grid-community/styles/ag-theme-alpine-dark.css";
+import { authHeaders, getCachedUser } from "../services/auth";
+import {
+  getActiveAmoId as getAdminActiveAmoId,
+  listAdminAmos,
+  setActiveAmoId as setAdminActiveAmoId,
+  type AdminAmoRead,
+} from "../services/adminUsers";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "../services/config";
 
 type AircraftRowData = {
   serial_number: string;
@@ -127,11 +133,48 @@ type ComponentPreviewRow = {
     serial_number?: string | null;
   } | null;
   dedupe_suggestions?: {
-    source: "file" | "existing";
+    source: "file" | "existing" | "fleet";
     part_number: string;
     serial_number: string;
-    positions: string[];
+    positions?: string[];
+    aircraft_serial_numbers?: string[];
   }[];
+};
+
+type ManualAircraftDraft = {
+  serial_number: string;
+  registration: string;
+  template: string;
+  make: string;
+  model: string;
+  home_base: string;
+  owner: string;
+  aircraft_model_code: string;
+  operator_code: string;
+  supplier_code: string;
+  company_name: string;
+  internal_aircraft_identifier: string;
+  status: string;
+  is_active: "" | "true" | "false";
+  last_log_date: string;
+  total_hours: string;
+  total_cycles: string;
+};
+
+type ManualComponentDraft = {
+  position: string;
+  ata: string;
+  part_number: string;
+  serial_number: string;
+  description: string;
+  installed_date: string;
+  installed_hours: string;
+  installed_cycles: string;
+  current_hours: string;
+  current_cycles: string;
+  notes: string;
+  manufacturer_code: string;
+  operator_code: string;
 };
 
 type ImportSnapshot = {
@@ -183,6 +226,11 @@ const FORMULA_TOLERANCE = 0.01;
 const normalizeValue = (value: unknown) =>
   value === null || value === undefined ? "" : `${value}`.trim();
 
+const toOptionalValue = (value: string) => {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
 const normalizeHeader = (value: string) =>
   value
     .trim()
@@ -190,13 +238,73 @@ const normalizeHeader = (value: string) =>
     .replace(/[.\-/\s]+/g, "_")
     .replace(/_+/g, "_");
 
-const AircraftImportPage: React.FC = () => {
-  const [aircraftFile, setAircraftFile] = useState<File | null>(null);
-  const [componentsFile, setComponentsFile] = useState<File | null>(null);
+const isSuperuser = (user: any): boolean => {
+  if (!user) return false;
+  return !!user.is_superuser || user.role === "SUPERUSER";
+};
+
+const emptyManualAircraftDraft: ManualAircraftDraft = {
+  serial_number: "",
+  registration: "",
+  template: "",
+  make: "",
+  model: "",
+  home_base: "",
+  owner: "",
+  aircraft_model_code: "",
+  operator_code: "",
+  supplier_code: "",
+  company_name: "",
+  internal_aircraft_identifier: "",
+  status: "",
+  is_active: "",
+  last_log_date: "",
+  total_hours: "",
+  total_cycles: "",
+};
+
+const emptyManualComponentDraft: ManualComponentDraft = {
+  position: "",
+  ata: "",
+  part_number: "",
+  serial_number: "",
+  description: "",
+  installed_date: "",
+  installed_hours: "",
+  installed_cycles: "",
+  current_hours: "",
+  current_cycles: "",
+  notes: "",
+  manufacturer_code: "",
+  operator_code: "",
+};
+
+type ImportSection = "aircraft" | "components";
+
+type AircraftImportPageProps = {
+  initialSection?: ImportSection;
+};
+
+const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
+  initialSection,
+}) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { amoCode, department } = useParams<{
+    amoCode?: string;
+    department?: string;
+  }>();
+  const [aircraftFiles, setAircraftFiles] = useState<File[]>([]);
+  const [componentsFiles, setComponentsFiles] = useState<File[]>([]);
   const [componentAircraftSerial, setComponentAircraftSerial] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [amoOptions, setAmoOptions] = useState<AdminAmoRead[]>([]);
+  const [amoLoading, setAmoLoading] = useState(false);
+  const [amoError, setAmoError] = useState<string | null>(null);
+  const [selectedAmoId, setSelectedAmoId] = useState<string>("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [aircraftImportComplete, setAircraftImportComplete] = useState(false);
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [previewRowOverrides, setPreviewRowOverrides] = useState<
     Record<number, PreviewRow>
@@ -271,16 +379,64 @@ const AircraftImportPage: React.FC = () => {
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshotActionLoading, setSnapshotActionLoading] = useState(false);
 
+  const currentUser = getCachedUser();
+  const userIsSuperuser = isSuperuser(currentUser);
+  const currentDepartment = department || "planning";
+  const sectionFromPath: ImportSection = location.pathname.includes(
+    "/component-import"
+  )
+    ? "components"
+    : "aircraft";
+  const activeSection = initialSection ?? sectionFromPath;
+  const showAircraft = activeSection === "aircraft";
+  const showComponents = activeSection === "components";
+  const sectionPathSegment =
+    activeSection === "components" ? "component-import" : "aircraft-import";
+  const aircraftImportUrl = amoCode
+    ? `/maintenance/${amoCode}/${currentDepartment}/aircraft-import`
+    : "";
+  const componentImportUrl = amoCode
+    ? `/maintenance/${amoCode}/${currentDepartment}/component-import`
+    : "";
+
   const handleAircraftFileChange = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    setAircraftFile(e.target.files?.[0] ?? null);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 10) {
+      setMessage("Upload up to 10 aircraft files at a time.");
+      setAircraftFiles(files.slice(0, 10));
+    } else {
+      setAircraftFiles(files);
+    }
+    setAircraftImportComplete(false);
   };
 
   const handleComponentsFileChange = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    setComponentsFile(e.target.files?.[0] ?? null);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 10) {
+      setMessage("Upload up to 10 component files at a time.");
+      setComponentsFiles(files.slice(0, 10));
+    } else {
+      setComponentsFiles(files);
+    }
+    setComponentImportComplete(false);
+  };
+
+  const handleAmoChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const nextId = event.target.value;
+    setSelectedAmoId(nextId);
+    if (nextId) {
+      setAdminActiveAmoId(nextId);
+    }
+    const amo = amoOptions.find((entry) => entry.id === nextId);
+    if (amo?.login_slug) {
+      navigate(
+        `/maintenance/${amo.login_slug}/${currentDepartment}/${sectionPathSegment}`
+      );
+    }
   };
 
   const validateRow = (data: AircraftRowData) => {
@@ -364,10 +520,16 @@ const AircraftImportPage: React.FC = () => {
   const hasComponentErrors = (row: ComponentPreviewRow) =>
     row.errors.length > 0;
 
+  const getNextRowNumber = (rows: { row_number: number }[]) => {
+    if (rows.length === 0) return 1;
+    return rows.reduce((max, row) => Math.max(max, row.row_number), 0) + 1;
+  };
+
   const loadTemplates = async () => {
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/templates?template_type=aircraft`
+        `${getApiBaseUrl()}/aircraft/import/templates?template_type=aircraft`,
+        { headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -382,7 +544,8 @@ const AircraftImportPage: React.FC = () => {
   const loadComponentTemplates = async () => {
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/templates?template_type=components`
+        `${getApiBaseUrl()}/aircraft/import/templates?template_type=components`,
+        { headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -398,6 +561,44 @@ const AircraftImportPage: React.FC = () => {
     void loadTemplates();
     void loadComponentTemplates();
   }, []);
+
+  useEffect(() => {
+    if (!userIsSuperuser) return;
+    let active = true;
+
+    const loadAmos = async () => {
+      setAmoLoading(true);
+      setAmoError(null);
+      try {
+        const data = await listAdminAmos();
+        if (!active) return;
+        setAmoOptions(data ?? []);
+      } catch (err: any) {
+        if (!active) return;
+        setAmoError(err?.message ?? "Could not load AMO list.");
+      } finally {
+        if (active) setAmoLoading(false);
+      }
+    };
+
+    void loadAmos();
+    return () => {
+      active = false;
+    };
+  }, [userIsSuperuser]);
+
+  useEffect(() => {
+    if (!userIsSuperuser || amoOptions.length === 0) return;
+    const storedAmoId = getAdminActiveAmoId();
+    const matchBySlug = amoCode
+      ? amoOptions.find((amo) => amo.login_slug === amoCode)
+      : undefined;
+    const nextId = storedAmoId || matchBySlug?.id || amoOptions[0]?.id || "";
+    if (nextId && nextId !== selectedAmoId) {
+      setSelectedAmoId(nextId);
+      setAdminActiveAmoId(nextId);
+    }
+  }, [userIsSuperuser, amoOptions, amoCode, selectedAmoId]);
 
   useEffect(() => {
     if (selectedTemplateId === "") {
@@ -600,16 +801,19 @@ const AircraftImportPage: React.FC = () => {
     }));
   };
 
-  const submitPreviewFile = async (file: File) => {
+  const submitPreviewFiles = async (files: File[]) => {
     setPreviewLoading(true);
     setMessage(null);
 
     const formData = new FormData();
-    formData.append("file", file);
+    files.forEach((upload) => {
+      formData.append("files", upload);
+    });
 
     try {
-      const res = await fetch(`${API_BASE}/aircraft/import/preview`, {
+      const res = await fetch(`${getApiBaseUrl()}/aircraft/import/preview`, {
         method: "POST",
+        headers: authHeaders(),
         body: formData,
       });
 
@@ -772,15 +976,18 @@ const AircraftImportPage: React.FC = () => {
     setMessage(null);
 
     const formData = new FormData();
-    formData.append("file", file);
+    files.forEach((upload) => {
+      formData.append("files", upload);
+    });
 
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/${encodeURIComponent(
+        `${getApiBaseUrl()}/aircraft/${encodeURIComponent(
           componentAircraftSerial.trim()
         )}/components/import/preview`,
         {
           method: "POST",
+          headers: authHeaders(),
           body: formData,
         }
       );
@@ -816,11 +1023,12 @@ const AircraftImportPage: React.FC = () => {
   };
 
   const parseAircraftFile = async () => {
-    if (!aircraftFile) {
-      setMessage("Select an aircraft file first.");
+    if (aircraftFiles.length === 0) {
+      setMessage("Select up to 10 aircraft files first.");
       return;
     }
-    await submitPreviewFile(aircraftFile);
+    setAircraftImportComplete(false);
+    await submitPreviewFiles(aircraftFiles);
   };
 
   const loadSnapshotHistory = async (batchId: string | null) => {
@@ -830,9 +1038,10 @@ const AircraftImportPage: React.FC = () => {
     setSnapshotLoading(true);
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/snapshots?batch_id=${encodeURIComponent(
+        `${getApiBaseUrl()}/aircraft/import/snapshots?batch_id=${encodeURIComponent(
           batchId
-        )}`
+        )}`,
+        { headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -854,11 +1063,12 @@ const AircraftImportPage: React.FC = () => {
   }, [importBatchId]);
 
   const parseComponentsFile = async () => {
-    if (!componentsFile) {
-      setMessage("Select a component file first.");
+    if (componentsFiles.length === 0) {
+      setMessage("Select up to 10 component files first.");
       return;
     }
-    await submitComponentPreviewFile(componentsFile);
+    setComponentImportComplete(false);
+    await submitComponentPreviewFile(componentsFiles);
   };
 
   const reparseOcrText = async () => {
@@ -866,10 +1076,11 @@ const AircraftImportPage: React.FC = () => {
       setMessage("Add corrected OCR text before re-parsing.");
       return;
     }
+    setAircraftImportComplete(false);
     const ocrFile = new File([ocrTextDraft], "ocr-corrected.csv", {
       type: "text/csv",
     });
-    await submitPreviewFile(ocrFile);
+    await submitPreviewFiles([ocrFile]);
   };
 
   const parseTemplateDefaults = () => {
@@ -932,11 +1143,11 @@ const AircraftImportPage: React.FC = () => {
       };
       const method = selectedTemplateId ? "PUT" : "POST";
       const url = selectedTemplateId
-        ? `${API_BASE}/aircraft/import/templates/${selectedTemplateId}`
-        : `${API_BASE}/aircraft/import/templates`;
+        ? `${getApiBaseUrl()}/aircraft/import/templates/${selectedTemplateId}`
+        : `${getApiBaseUrl()}/aircraft/import/templates`;
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -986,11 +1197,11 @@ const AircraftImportPage: React.FC = () => {
       };
       const method = componentSelectedTemplateId ? "PUT" : "POST";
       const url = componentSelectedTemplateId
-        ? `${API_BASE}/aircraft/import/templates/${componentSelectedTemplateId}`
-        : `${API_BASE}/aircraft/import/templates`;
+        ? `${getApiBaseUrl()}/aircraft/import/templates/${componentSelectedTemplateId}`
+        : `${getApiBaseUrl()}/aircraft/import/templates`;
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1180,7 +1391,7 @@ const AircraftImportPage: React.FC = () => {
                   return;
                 }
                 params.api.startEditingCell({
-                  rowIndex: params.rowIndex ?? 0,
+                  rowIndex: params.node?.rowIndex ?? 0,
                   colKey: colId,
                 });
               }}
@@ -1209,7 +1420,8 @@ const AircraftImportPage: React.FC = () => {
     setPreviewRows((prev) =>
       prev.map((row) => {
         const nextData = { ...row.data };
-        const defaults = selected.default_values ?? {};
+        const defaults =
+          (selected.default_values ?? {}) as Partial<AircraftRowData>;
         const proposedFields = new Set(row.proposed_fields ?? []);
 
         if (selected.aircraft_template && !nextData.template?.trim()) {
@@ -1222,21 +1434,30 @@ const AircraftImportPage: React.FC = () => {
           nextData.operator_code = selected.operator_code;
         }
 
-        (Object.entries(defaults) as [keyof AircraftRowData, any][]).forEach(
-          ([key, value]) => {
-            if (value === null || value === undefined) {
-              return;
-            }
-            const currentValue = nextData[key];
-            if (
-              currentValue === null ||
-              currentValue === undefined ||
-              `${currentValue}`.trim() === ""
-            ) {
-              nextData[key] = value;
-            }
+        const applyDefault = <K extends AircraftRowField,>(
+          key: K,
+          value: AircraftRowData[K]
+        ) => {
+          if (value === null || value === undefined) {
+            return;
           }
-        );
+          const currentValue = nextData[key];
+          if (
+            currentValue === null ||
+            currentValue === undefined ||
+            `${currentValue}`.trim() === ""
+          ) {
+            nextData[key] = value;
+          }
+        };
+
+        (
+          Object.entries(defaults) as Array<
+            [AircraftRowField, AircraftRowData[AircraftRowField]]
+          >
+        ).forEach(([key, value]) => {
+          applyDefault(key, value);
+        });
 
         AIRCRAFT_DIFF_FIELDS.forEach((field) => {
           if (
@@ -1966,7 +2187,7 @@ const AircraftImportPage: React.FC = () => {
           : [];
       const res = await fetch(`${API_BASE}/aircraft/import`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           rows:
             previewMode === "client"
@@ -1997,6 +2218,7 @@ const AircraftImportPage: React.FC = () => {
       setMessage(
         `Aircraft import OK. Created: ${data.created}, Updated: ${data.updated}`
       );
+      setAircraftImportComplete(true);
     } catch (err: any) {
       setMessage(err.message ?? "Error importing aircraft.");
     } finally {
@@ -2050,12 +2272,12 @@ const AircraftImportPage: React.FC = () => {
           ? rejectedOverrideRows.map((row) => row.row_number)
           : [];
       const res = await fetch(
-        `${API_BASE}/aircraft/${encodeURIComponent(
+        `${getApiBaseUrl()}/aircraft/${encodeURIComponent(
           componentAircraftSerial.trim()
         )}/components/import/confirm`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             rows:
               componentPreviewMode === "client"
@@ -2084,6 +2306,7 @@ const AircraftImportPage: React.FC = () => {
         `Components import OK for aircraft ${data.aircraft_serial_number}. ` +
           `Created: ${data.components_created}, Updated: ${data.components_updated}`
       );
+      setComponentImportComplete(true);
     } catch (err: any) {
       setMessage(err.message ?? "Error importing components.");
     } finally {
@@ -2126,6 +2349,52 @@ const AircraftImportPage: React.FC = () => {
     return Math.max(0, baseApproved - rejected + added);
   }, [componentPreviewMode, componentPreviewRows, componentSummary, componentPreviewRowOverrides]);
 
+  const aircraftHasPreview =
+    previewRows.length > 0 || previewTotalRows > 0 || !!previewId;
+  const componentHasPreview = componentPreviewRows.length > 0;
+
+  const aircraftStep = aircraftImportComplete
+    ? 3
+    : aircraftHasPreview
+    ? 2
+    : aircraftFiles.length > 0
+    ? 1
+    : 0;
+  const componentStep = componentImportComplete
+    ? 3
+    : componentHasPreview
+    ? 2
+    : componentsFiles.length > 0
+    ? 1
+    : 0;
+
+  const aircraftProgress = Math.round((aircraftStep / 3) * 100);
+  const componentProgress = Math.round((componentStep / 3) * 100);
+  const maxAircraftStage = Math.max(0, Math.min(aircraftStep, 3) - 1);
+  const maxComponentStage = Math.max(0, Math.min(componentStep, 3) - 1);
+  const [aircraftStageIndex, setAircraftStageIndex] = useState(0);
+  const [componentStageIndex, setComponentStageIndex] = useState(0);
+  const prevAircraftMaxRef = useRef(maxAircraftStage);
+  const prevComponentMaxRef = useRef(maxComponentStage);
+
+  useEffect(() => {
+    if (maxAircraftStage > prevAircraftMaxRef.current) {
+      setAircraftStageIndex(maxAircraftStage);
+    } else if (aircraftStageIndex > maxAircraftStage) {
+      setAircraftStageIndex(maxAircraftStage);
+    }
+    prevAircraftMaxRef.current = maxAircraftStage;
+  }, [maxAircraftStage, aircraftStageIndex]);
+
+  useEffect(() => {
+    if (maxComponentStage > prevComponentMaxRef.current) {
+      setComponentStageIndex(maxComponentStage);
+    } else if (componentStageIndex > maxComponentStage) {
+      setComponentStageIndex(maxComponentStage);
+    }
+    prevComponentMaxRef.current = maxComponentStage;
+  }, [maxComponentStage, componentStageIndex]);
+
   const handleUndoSnapshot = async () => {
     if (!selectedSnapshotId) {
       setMessage("Select a snapshot to undo.");
@@ -2135,8 +2404,8 @@ const AircraftImportPage: React.FC = () => {
     setMessage(null);
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/snapshots/${selectedSnapshotId}/restore`,
-        { method: "POST" }
+        `${getApiBaseUrl()}/aircraft/import/snapshots/${selectedSnapshotId}/restore`,
+        { method: "POST", headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -2160,8 +2429,8 @@ const AircraftImportPage: React.FC = () => {
     setMessage(null);
     try {
       const res = await fetch(
-        `${API_BASE}/aircraft/import/snapshots/${selectedSnapshotId}/reapply`,
-        { method: "POST" }
+        `${getApiBaseUrl()}/aircraft/import/snapshots/${selectedSnapshotId}/reapply`,
+        { method: "POST", headers: authHeaders() }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -2177,205 +2446,121 @@ const AircraftImportPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center py-10">
-      <div className="w-full max-w-6xl space-y-8">
-        <h1 className="text-2xl font-semibold">Aircraft Loader / Setup</h1>
+    <div className="page-layout">
+      <div className="page-header">
+        <h1 className="page-header__title">Aircraft Loader / Setup</h1>
+        <p className="page-header__subtitle">
+          Follow the guided steps to upload aircraft masters, review the preview,
+          and confirm updates. The progress bar shows where you are in the
+          process.
+        </p>
+      </div>
 
-        {/* AIRCRAFT MASTER IMPORT */}
-        <section className="bg-slate-900 rounded-2xl p-6 shadow">
-          <h2 className="text-lg font-semibold mb-2">
-            1. Import Aircraft Master List
-          </h2>
-          <p className="text-sm text-slate-300 mb-4">
-            Upload a CSV or Excel file containing all aircraft
-            (serial, registration, type, model, base, hours, cycles).
+      <div className="import-section-nav" role="tablist" aria-label="Import type">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={showAircraft}
+          aria-current={showAircraft ? "page" : undefined}
+          className={
+            "import-section-nav__tab" + (showAircraft ? " is-active" : "")
+          }
+          onClick={() => aircraftImportUrl && navigate(aircraftImportUrl)}
+          disabled={!aircraftImportUrl}
+        >
+          Aircraft import
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={showComponents}
+          aria-current={showComponents ? "page" : undefined}
+          className={
+            "import-section-nav__tab" + (showComponents ? " is-active" : "")
+          }
+          onClick={() => componentImportUrl && navigate(componentImportUrl)}
+          disabled={!componentImportUrl}
+        >
+          Component import
+        </button>
+      </div>
+
+      {userIsSuperuser && (
+        <section className="page-section">
+          <h2 className="page-section__title">Target AMO</h2>
+          <p className="page-section__body">
+            Select the AMO you are configuring. This is only available to
+            platform superusers.
           </p>
-
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <input
-              type="file"
-              accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
-              onChange={handleAircraftFileChange}
-              className="block"
-            />
-
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={parseAircraftFile}
-                disabled={previewLoading}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
-              >
-                {previewLoading ? "Parsing..." : "Parse & Preview"}
-              </button>
-              <button
-                onClick={confirmImport}
-                disabled={confirmLoading || approvedCount === 0}
-                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50"
-              >
-                {confirmLoading
-                  ? "Importing..."
-                  : `Confirm Import (${approvedCount})`}
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-200">
-                  Undo / Redo
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Snapshot history for this import batch.
-                </p>
-              </div>
-              <button
-                onClick={() => loadSnapshotHistory(importBatchId)}
-                disabled={!importBatchId || snapshotLoading}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-sm"
-              >
-                {snapshotLoading ? "Refreshing..." : "Refresh"}
-              </button>
-            </div>
-
-            <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center">
+          <div className="page-section__grid">
+            <div className="form-row">
+              <label htmlFor="amo-target">AMO</label>
               <select
-                value={selectedSnapshotId ?? ""}
-                onChange={(event) =>
-                  setSelectedSnapshotId(
-                    event.target.value ? Number(event.target.value) : null
-                  )
-                }
-                disabled={!snapshots.length}
-                className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-100"
+                id="amo-target"
+                className="input"
+                value={selectedAmoId}
+                onChange={handleAmoChange}
+                disabled={amoLoading || amoOptions.length === 0}
               >
-                <option value="">Select snapshot...</option>
-                {snapshots.map((snapshot) => (
-                  <option key={snapshot.id} value={snapshot.id}>
-                    {new Date(snapshot.created_at).toLocaleString()} (#
-                    {snapshot.id})
+                <option value="">
+                  {amoLoading ? "Loading AMOs..." : "Select AMO"}
+                </option>
+                {amoOptions.map((amo) => (
+                  <option key={amo.id} value={amo.id}>
+                    {amo.amo_code} · {amo.name}
                   </option>
                 ))}
               </select>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleUndoSnapshot}
-                  disabled={
-                    snapshotActionLoading ||
-                    !selectedSnapshotId ||
-                    !snapshots.length
-                  }
-                  className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-sm"
-                >
-                  Undo
-                </button>
-                <button
-                  onClick={handleRedoSnapshot}
-                  disabled={
-                    snapshotActionLoading ||
-                    !selectedSnapshotId ||
-                    !snapshots.length
-                  }
-                  className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-sm"
-                >
-                  Redo
-                </button>
-              </div>
+              {amoError && <div className="alert alert-error">{amoError}</div>}
             </div>
-            {importBatchId && (
-              <p className="mt-2 text-xs text-slate-500">
-                Batch ID: {importBatchId}
-              </p>
-            )}
           </div>
+        </section>
+      )}
 
-          {ocrPreview && (
-            <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs uppercase text-slate-400">
-                    OCR Preview
-                  </div>
-                  <div className="text-sm text-slate-200">
-                    {ocrPreview.file_type
-                      ? `Detected ${ocrPreview.file_type.toUpperCase()}`
-                      : "Detected OCR content"}
-                  </div>
-                </div>
-                <div className="text-sm text-slate-200">
-                  Confidence:{" "}
-                  <span className="font-semibold">
-                    {ocrPreview.confidence !== null &&
-                    ocrPreview.confidence !== undefined
-                      ? `${ocrPreview.confidence.toFixed(1)}%`
-                      : "n/a"}
-                  </span>
-                </div>
-              </div>
+      {/* AIRCRAFT MASTER IMPORT */}
+      {showAircraft && (
+        <section className="page-section">
+          <h2 className="page-section__title">
+            1. Import Aircraft Master List
+          </h2>
+          <p className="page-section__body">
+            Upload a CSV/Excel file containing aircraft serials, registration,
+            type, base, hours, and cycles. iSpec 2000 headers (A/C REG, AIN,
+            OPR, SPL, WHO, TTAF) are recognized alongside standard labels.
+          </p>
 
-              {ocrPreview.samples && ocrPreview.samples.length > 0 && (
-                <div className="mt-3 text-sm text-slate-300">
-                  <div className="text-xs uppercase text-slate-400">
-                    Extracted Samples
-                  </div>
-                  <ul className="mt-1 list-disc space-y-1 pl-5">
-                    {ocrPreview.samples.map((sample, index) => (
-                      <li key={`${sample}-${index}`}>{sample}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="mt-4">
-                <label className="block text-xs uppercase text-slate-400">
-                  OCR Text (edit to correct before re-parsing)
-                </label>
-                <textarea
-                  value={ocrTextDraft}
-                  onChange={(e) => setOcrTextDraft(e.target.value)}
-                  rows={6}
-                  className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs"
-                />
-                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
-                  <span>
-                    Re-parsing expects CSV/TSV-style rows with a header line.
-                  </span>
-                </div>
-                <button
-                  onClick={reparseOcrText}
-                  disabled={previewLoading}
-                  className="mt-3 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50"
-                >
-                  {previewLoading ? "Re-parsing..." : "Rebuild Preview from OCR"}
-                </button>
-              </div>
+          <div className="import-progress">
+            <div className="import-progress__summary">
+              <span>Aircraft master progress</span>
+              <span>{aircraftProgress}%</span>
             </div>
-          )}
-
-          <div className="mt-4 grid gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs uppercase text-slate-400">
-                  Template
-                </label>
-                <select
-                  value={selectedTemplateId}
-                  onChange={(e) =>
-                    setSelectedTemplateId(
-                      e.target.value ? Number(e.target.value) : ""
-                    )
-                  }
-                  className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+            <div
+              className={`import-progress__bar ${
+                previewLoading || confirmLoading ? "is-loading" : ""
+              }`}
+            >
+              <span style={{ width: `${aircraftProgress}%` }} />
+            </div>
+            <ol className="import-stepper">
+              <li
+                className={`import-stepper__item ${
+                  aircraftStep >= 1 ? "is-complete" : ""
+                } ${aircraftStageIndex === 0 ? "is-active" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="import-stepper__button"
+                  onClick={() => setAircraftStageIndex(0)}
+                  disabled={maxAircraftStage < 0}
                 >
-                  <option value="">Select template</option>
-                  {templates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-wrap gap-3">
+                  Upload file
+                </button>
+              </li>
+              <li
+                className={`import-stepper__item ${
+                  aircraftStep >= 2 ? "is-complete" : ""
+                } ${aircraftStageIndex === 1 ? "is-active" : ""}`}
+              >
                 <button
                   onClick={applyTemplateToPreview}
                   disabled={
@@ -2385,100 +2570,571 @@ const AircraftImportPage: React.FC = () => {
                   }
                   className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
                 >
-                  Apply Template to Preview
+                  Review preview
                 </button>
+              </li>
+              <li
+                className={`import-stepper__item ${
+                  aircraftStep >= 3 ? "is-complete" : ""
+                } ${aircraftStageIndex === 2 ? "is-active" : ""}`}
+              >
                 <button
-                  onClick={saveMappingTemplate}
-                  disabled={templateLoading || !columnMapping}
-                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50"
+                  type="button"
+                  className="import-stepper__button"
+                  onClick={() => setAircraftStageIndex(2)}
+                  disabled={maxAircraftStage < 2}
                 >
-                  {templateLoading ? "Saving..." : "Save Mapping as Template"}
+                  Confirm import
                 </button>
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-4">
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Template Name
-                </label>
-                <input
-                  type="text"
-                  value={templateName}
-                  onChange={(e) => setTemplateName(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Aircraft Template
-                </label>
-                <input
-                  type="text"
-                  value={templateAircraftTemplate}
-                  onChange={(e) => setTemplateAircraftTemplate(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Model Code
-                </label>
-                <input
-                  type="text"
-                  value={templateModelCode}
-                  onChange={(e) => setTemplateModelCode(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Operator Code
-                </label>
-                <input
-                  type="text"
-                  value={templateOperatorCode}
-                  onChange={(e) => setTemplateOperatorCode(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase text-slate-400">
-                Default Values (JSON)
-              </label>
-              <textarea
-                value={templateDefaultsJson}
-                onChange={(e) => setTemplateDefaultsJson(e.target.value)}
-                rows={4}
-                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs"
-              />
-            </div>
+              </li>
+            </ol>
           </div>
 
-          {previewSummary && (
-            <div className="mt-4 grid gap-2 text-sm text-slate-200 md:grid-cols-3">
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">New</div>
-                <div className="text-lg font-semibold">
-                  {previewSummary.new}
+          <div className="import-stage">
+            <div
+              className="import-stage__track"
+              style={{ transform: `translateX(-${aircraftStageIndex * 100}%)` }}
+            >
+              <div className="import-stage__panel">
+                <div className="page-section__grid">
+                  <div className="card card--form">
+                    <div className="card-header">
+                      <div>
+                        <div className="import-step__eyebrow">Step 1</div>
+                        <h3 className="import-step__title">Upload aircraft file</h3>
+                      </div>
+                      <span className="import-step__status">
+                        {aircraftStep >= 1 ? "Ready" : "Waiting"}
+                      </span>
+                    </div>
+
+                    <div className="form-row">
+                      <label htmlFor="aircraft-file">Aircraft master files</label>
+                      <input
+                        id="aircraft-file"
+                        type="file"
+                        multiple
+                        accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
+                        onChange={handleAircraftFileChange}
+                        className="input"
+                      />
+                      <p className="form-hint">
+                        Accepted formats: CSV, XLSX, PDF, or image scans (OCR supported).
+                        iSpec 2000 headers (A/C REG, AIN, OPR, SPL, WHO, TTAF) are
+                        supported. Upload up to 10 files with identical column headers.
+                      </p>
+                      {aircraftFiles.length > 0 && (
+                        <p className="form-hint">
+                          Selected {aircraftFiles.length} file
+                          {aircraftFiles.length === 1 ? "" : "s"}:{" "}
+                          {aircraftFiles.map((file) => file.name).join(", ")}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="form-actions form-actions--inline">
+                      <button
+                        onClick={parseAircraftFile}
+                        disabled={previewLoading}
+                        className="btn"
+                      >
+                        {previewLoading ? "Parsing..." : "Parse & Preview"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="card card--form">
+                    <div className="card-header">
+                      <div>
+                        <div className="import-step__eyebrow">Optional</div>
+                        <h3 className="import-step__title">Manual aircraft entry</h3>
+                      </div>
+                      <span className="import-step__status">Available</span>
+                    </div>
+                    <p className="form-hint">
+                      Add a single aircraft row without a file upload. The row will
+                      appear in the preview table for review.
+                    </p>
+                    <div className="import-template-grid">
+                      <div className="form-row">
+                        <label>Serial number</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.serial_number}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              serial_number: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Registration</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.registration}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              registration: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Template</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.template}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              template: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Make</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.make}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              make: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Model</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.model}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              model: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Base</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.home_base}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              home_base: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Owner</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.owner}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              owner: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Model code</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.aircraft_model_code}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              aircraft_model_code: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Operator code</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.operator_code}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              operator_code: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Supplier code</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.supplier_code}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              supplier_code: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Company name</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.company_name}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              company_name: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Internal ID</label>
+                        <input
+                          type="text"
+                          value={manualAircraftDraft.internal_aircraft_identifier}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              internal_aircraft_identifier: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Last log date</label>
+                        <input
+                          type="date"
+                          value={manualAircraftDraft.last_log_date}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              last_log_date: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Total hours</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={manualAircraftDraft.total_hours}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              total_hours: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Total cycles</label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={manualAircraftDraft.total_cycles}
+                          onChange={(e) =>
+                            setManualAircraftDraft((prev) => ({
+                              ...prev,
+                              total_cycles: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-actions form-actions--inline">
+                      <button onClick={handleAddManualAircraftRow} className="btn">
+                        Add aircraft row
+                      </button>
+                      <button
+                        onClick={() =>
+                          setManualAircraftDraft(emptyManualAircraftDraft)
+                        }
+                        className="btn-secondary"
+                        type="button"
+                      >
+                        Clear fields
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">Update</div>
-                <div className="text-lg font-semibold">
-                  {previewSummary.update}
+
+              <div className="import-stage__panel">
+                <div className="page-section__grid">
+                  <div className="card card--form">
+                    <div className="card-header">
+                      <div>
+                        <div className="import-step__eyebrow">Step 2</div>
+                        <h3 className="import-step__title">Review & map data</h3>
+                      </div>
+                      <span className="import-step__status">
+                        {aircraftStep >= 2 ? "Ready" : "Waiting"}
+                      </span>
+                    </div>
+
+                    {previewSummary && (
+                      <div className="import-summary-grid">
+                        <div className="card card--success">
+                          <div className="import-summary__label">New</div>
+                          <div className="import-summary__value">
+                            {previewSummary.new}
+                          </div>
+                        </div>
+                        <div className="card card--info">
+                          <div className="import-summary__label">Update</div>
+                          <div className="import-summary__value">
+                            {previewSummary.update}
+                          </div>
+                        </div>
+                        <div className="card card--warning">
+                          <div className="import-summary__label">Invalid</div>
+                          <div className="import-summary__value">
+                            {previewSummary.invalid}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {(previewRows.length > 0 || previewTotalRows > 0) && (
+                      <div className="table-wrapper import-grid">
+                        <div
+                          className="ag-theme-alpine"
+                          style={{ height: 520, minWidth: 720 }}
+                        >
+                          <AgGridReact<PreviewRow>
+                            key={previewMode}
+                            rowData={
+                              previewMode === "client" ? previewRows : undefined
+                            }
+                            columnDefs={aircraftGridColumns}
+                            defaultColDef={aircraftGridDefaultColDef}
+                            rowSelection="multiple"
+                            suppressRowClickSelection
+                            rowBuffer={12}
+                            rowModelType={
+                              previewMode === "server" ? "infinite" : "clientSide"
+                            }
+                            cacheBlockSize={200}
+                            maxBlocksInCache={5}
+                            suppressColumnVirtualisation={false}
+                            suppressRowVirtualisation={false}
+                            enableCellTextSelection
+                            enableRangeSelection
+                            getRowId={(params) => `${params.data.row_number}`}
+                            onGridReady={handlePreviewGridReady}
+                            onCellValueChanged={handleAircraftCellValueChanged}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {columnMapping && (
+                      <div className="form-hint">
+                        Detected mapping:{" "}
+                        {Object.entries(columnMapping)
+                          .filter(([, value]) => value)
+                          .map(([key, value]) => `${key} → ${value}`)
+                          .join(", ")}
+                      </div>
+                    )}
+
+                    <details className="import-advanced" open={false}>
+                      <summary>Templates & defaults</summary>
+                      <div className="import-advanced__body">
+                        <div className="form-row">
+                          <label>Template</label>
+                          <select
+                            value={selectedTemplateId}
+                            onChange={(e) =>
+                              setSelectedTemplateId(
+                                e.target.value ? Number(e.target.value) : ""
+                              )
+                            }
+                            className="input"
+                          >
+                            <option value="">Select template</option>
+                            {templates.map((template) => (
+                              <option key={template.id} value={template.id}>
+                                {template.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="form-actions form-actions--inline">
+                          <button
+                            onClick={applyTemplateToPreview}
+                            disabled={
+                              previewMode === "server" ||
+                              !previewRows.length ||
+                              !selectedTemplateId
+                            }
+                            className="btn"
+                          >
+                            Apply template to preview
+                          </button>
+                          <button
+                            onClick={saveMappingTemplate}
+                            disabled={templateLoading || !columnMapping}
+                            className="btn-secondary"
+                          >
+                            {templateLoading
+                              ? "Saving..."
+                              : "Save mapping template"}
+                          </button>
+                        </div>
+
+                        <div className="import-template-grid">
+                          <div className="form-row">
+                            <label>Template name</label>
+                            <input
+                              type="text"
+                              value={templateName}
+                              onChange={(e) => setTemplateName(e.target.value)}
+                              className="input"
+                            />
+                          </div>
+                          <div className="form-row">
+                            <label>Aircraft template</label>
+                            <input
+                              type="text"
+                              value={templateAircraftTemplate}
+                              onChange={(e) =>
+                                setTemplateAircraftTemplate(e.target.value)
+                              }
+                              className="input"
+                            />
+                          </div>
+                          <div className="form-row">
+                            <label>Model code</label>
+                            <input
+                              type="text"
+                              value={templateModelCode}
+                              onChange={(e) => setTemplateModelCode(e.target.value)}
+                              className="input"
+                            />
+                          </div>
+                          <div className="form-row">
+                            <label>Operator code</label>
+                            <input
+                              type="text"
+                              value={templateOperatorCode}
+                              onChange={(e) =>
+                                setTemplateOperatorCode(e.target.value)
+                              }
+                              className="input"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="form-row">
+                          <label>Default values (JSON)</label>
+                          <textarea
+                            value={templateDefaultsJson}
+                            onChange={(e) => setTemplateDefaultsJson(e.target.value)}
+                            rows={4}
+                            className="input"
+                          />
+                        </div>
+                      </div>
+                    </details>
+
+                    {ocrPreview && (
+                      <details className="import-advanced" open={false}>
+                        <summary>OCR preview details</summary>
+                        <div className="import-advanced__body">
+                          <div className="import-ocr__header">
+                            <div>
+                              <div className="import-ocr__title">OCR Preview</div>
+                              <div className="form-hint">
+                                {ocrPreview.file_type
+                                  ? `Detected ${ocrPreview.file_type.toUpperCase()}`
+                                  : "Detected OCR content"}
+                              </div>
+                            </div>
+                            <div className="import-ocr__confidence">
+                              Confidence:{" "}
+                              <strong>
+                                {ocrPreview.confidence !== null &&
+                                ocrPreview.confidence !== undefined
+                                  ? `${ocrPreview.confidence.toFixed(1)}%`
+                                  : "n/a"}
+                              </strong>
+                            </div>
+                          </div>
+
+                          {ocrPreview.samples && ocrPreview.samples.length > 0 && (
+                            <div className="import-ocr__samples">
+                              <div className="import-ocr__label">
+                                Extracted samples
+                              </div>
+                              <ul>
+                                {ocrPreview.samples.map((sample, index) => (
+                                  <li key={`${sample}-${index}`}>{sample}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          <div className="form-row">
+                            <label>OCR text (edit before re-parsing)</label>
+                            <textarea
+                              value={ocrTextDraft}
+                              onChange={(e) => setOcrTextDraft(e.target.value)}
+                              rows={6}
+                              className="input import-ocr__textarea"
+                            />
+                            <p className="form-hint">
+                              Re-parsing expects CSV/TSV-style rows with a header line.
+                            </p>
+                          </div>
+
+                          <div className="form-actions form-actions--inline">
+                            <button
+                              onClick={reparseOcrText}
+                              disabled={previewLoading}
+                              className="btn"
+                            >
+                              {previewLoading
+                                ? "Re-parsing..."
+                                : "Rebuild Preview from OCR"}
+                            </button>
+                          </div>
+                        </div>
+                      </details>
+                    )}
+                  </div>
                 </div>
               </div>
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">Invalid</div>
-                <div className="text-lg font-semibold">
-                  {previewSummary.invalid}
-                </div>
-              </div>
-            </div>
-          )}
 
           {(previewRows.length > 0 || previewTotalRows > 0) && (
             <div className="mt-6">
@@ -2509,91 +3165,56 @@ const AircraftImportPage: React.FC = () => {
                 />
               </div>
             </div>
-          )}
-
-          {columnMapping && (
-            <div className="mt-4 text-xs text-slate-400">
-              Detected mapping:{" "}
-              {Object.entries(columnMapping)
-                .filter(([, value]) => value)
-                .map(([key, value]) => `${key} → ${value}`)
-                .join(", ")}
-            </div>
-          )}
+          </div>
         </section>
+      )}
 
-        {/* COMPONENT IMPORT */}
-        <section className="bg-slate-900 rounded-2xl p-6 shadow">
-          <h2 className="text-lg font-semibold mb-2">
+      {/* COMPONENT IMPORT */}
+      {showComponents && (
+        <section className="page-section">
+          <h2 className="page-section__title">
             2. Import Components for One Aircraft
           </h2>
-          <p className="text-sm text-slate-300 mb-4">
-            Upload CSV/Excel with component positions (e.g. L ENGINE, R ENGINE,
-            APU), part and serial numbers, installed values, etc.
+          <p className="page-section__body">
+            Upload components for one aircraft at a time, then review and confirm
+            before committing. iSpec 2000 columns (ATA, PN, SN, MFR, OPR) are
+            supported.
           </p>
 
-          <div className="mb-3">
-            <label className="block text-sm mb-1">
-              Aircraft Serial Number (e.g. 574, 510, 331)
-            </label>
-            <input
-              type="text"
-              value={componentAircraftSerial}
-              onChange={(e) => setComponentAircraftSerial(e.target.value)}
-              className="w-full rounded-xl px-3 py-2 bg-slate-950 border border-slate-700"
-            />
-          </div>
-
-          <input
-            type="file"
-            accept=".csv,.txt,.xlsx,.xlsm,.xls,.pdf"
-            onChange={handleComponentsFileChange}
-            className="block mb-3"
-          />
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={parseComponentsFile}
-              disabled={componentPreviewLoading}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
+          <div className="import-progress">
+            <div className="import-progress__summary">
+              <span>Component import progress</span>
+              <span>{componentProgress}%</span>
+            </div>
+            <div
+              className={`import-progress__bar ${
+                componentPreviewLoading || componentConfirmLoading
+                  ? "is-loading"
+                  : ""
+              }`}
             >
-              {componentPreviewLoading ? "Parsing..." : "Parse & Preview"}
-            </button>
-            <button
-              onClick={confirmComponentImport}
-              disabled={componentConfirmLoading || componentApprovedCount === 0}
-              className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50"
-            >
-              {componentConfirmLoading
-                ? "Importing..."
-                : `Confirm Import (${componentApprovedCount})`}
-            </button>
-          </div>
-
-          <div className="mt-4 grid gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs uppercase text-slate-400">
-                  Component Template
-                </label>
-                <select
-                  value={componentSelectedTemplateId}
-                  onChange={(e) =>
-                    setComponentSelectedTemplateId(
-                      e.target.value ? Number(e.target.value) : ""
-                    )
-                  }
-                  className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+              <span style={{ width: `${componentProgress}%` }} />
+            </div>
+            <ol className="import-stepper">
+              <li
+                className={`import-stepper__item ${
+                  componentStep >= 1 ? "is-complete" : ""
+                } ${componentStageIndex === 0 ? "is-active" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="import-stepper__button"
+                  onClick={() => setComponentStageIndex(0)}
+                  disabled={maxComponentStage < 0}
                 >
-                  <option value="">Select template</option>
-                  {componentTemplates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-wrap gap-3">
+                  Upload file
+                </button>
+              </li>
+              <li
+                className={`import-stepper__item ${
+                  componentStep >= 2 ? "is-complete" : ""
+                } ${componentStageIndex === 1 ? "is-active" : ""}`}
+              >
                 <button
                   onClick={applyComponentTemplateToPreview}
                   disabled={
@@ -2603,104 +3224,308 @@ const AircraftImportPage: React.FC = () => {
                   }
                   className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
                 >
-                  Apply Template to Preview
+                  Review preview
                 </button>
+              </li>
+              <li
+                className={`import-stepper__item ${
+                  componentStep >= 3 ? "is-complete" : ""
+                } ${componentStageIndex === 2 ? "is-active" : ""}`}
+              >
                 <button
-                  onClick={saveComponentTemplate}
-                  disabled={componentTemplateLoading || !componentColumnMapping}
-                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50"
+                  type="button"
+                  className="import-stepper__button"
+                  onClick={() => setComponentStageIndex(2)}
+                  disabled={maxComponentStage < 2}
                 >
-                  {componentTemplateLoading
-                    ? "Saving..."
-                    : "Save Mapping as Template"}
+                  Confirm import
                 </button>
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-4">
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Template Name
-                </label>
-                <input
-                  type="text"
-                  value={componentTemplateName}
-                  onChange={(e) => setComponentTemplateName(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Aircraft Template
-                </label>
-                <input
-                  type="text"
-                  value={componentTemplateAircraftTemplate}
-                  onChange={(e) =>
-                    setComponentTemplateAircraftTemplate(e.target.value)
-                  }
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Model Code
-                </label>
-                <input
-                  type="text"
-                  value={componentTemplateModelCode}
-                  onChange={(e) => setComponentTemplateModelCode(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-400">
-                  Operator Code
-                </label>
-                <input
-                  type="text"
-                  value={componentTemplateOperatorCode}
-                  onChange={(e) =>
-                    setComponentTemplateOperatorCode(e.target.value)
-                  }
-                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase text-slate-400">
-                Default Values (JSON)
-              </label>
-              <textarea
-                value={componentTemplateDefaultsJson}
-                onChange={(e) =>
-                  setComponentTemplateDefaultsJson(e.target.value)
-                }
-                rows={4}
-                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs"
-              />
-            </div>
+              </li>
+            </ol>
           </div>
 
-          {componentSummary && (
-            <div className="mt-4 grid gap-2 text-sm text-slate-200 md:grid-cols-3">
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">New</div>
-                <div className="text-lg font-semibold">
-                  {componentSummary.new}
-                </div>
-              </div>
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">Update</div>
-                <div className="text-lg font-semibold">
-                  {componentSummary.update}
-                </div>
-              </div>
-              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-xs uppercase text-slate-400">Invalid</div>
-                <div className="text-lg font-semibold">
-                  {componentSummary.invalid}
+          <div className="import-stage">
+            <div
+              className="import-stage__track"
+              style={{ transform: `translateX(-${componentStageIndex * 100}%)` }}
+            >
+              <div className="import-stage__panel">
+                <div className="page-section__grid">
+                  <div className="card card--form">
+                    <div className="card-header">
+                      <div>
+                        <div className="import-step__eyebrow">Step 1</div>
+                        <h3 className="import-step__title">
+                          Identify the aircraft & upload
+                        </h3>
+                      </div>
+                      <span className="import-step__status">
+                        {componentStep >= 1 ? "Ready" : "Waiting"}
+                      </span>
+                    </div>
+
+                    <div className="import-template-grid">
+                      <div className="form-row">
+                        <label>Aircraft serial number</label>
+                        <input
+                          type="text"
+                          value={componentAircraftSerial}
+                          onChange={(e) => setComponentAircraftSerial(e.target.value)}
+                          className="input"
+                          placeholder="e.g. 574, 510, 331"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Components files</label>
+                        <input
+                          type="file"
+                          multiple
+                          accept=".csv,.txt,.xlsx,.xlsm,.xls"
+                          onChange={handleComponentsFileChange}
+                          className="input"
+                        />
+                        <p className="form-hint">
+                          Use component positions (L ENGINE, R ENGINE, APU) with iSpec
+                          2000 columns for ATA, PN, SN, MFR, and OPR. Upload up to 10
+                          files with identical headers.
+                        </p>
+                        {componentsFiles.length > 0 && (
+                          <p className="form-hint">
+                            Selected {componentsFiles.length} file
+                            {componentsFiles.length === 1 ? "" : "s"}:{" "}
+                            {componentsFiles.map((file) => file.name).join(", ")}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="form-actions form-actions--inline">
+                      <button
+                        onClick={parseComponentsFile}
+                        disabled={componentPreviewLoading}
+                        className="btn"
+                      >
+                        {componentPreviewLoading ? "Parsing..." : "Parse & Preview"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="card card--form">
+                    <div className="card-header">
+                      <div>
+                        <div className="import-step__eyebrow">Optional</div>
+                        <h3 className="import-step__title">Manual component entry</h3>
+                      </div>
+                      <span className="import-step__status">Available</span>
+                    </div>
+                    <p className="form-hint">
+                      Add component rows manually when no files are available. Rows will
+                      appear in the preview table for final review.
+                    </p>
+                    <div className="import-template-grid">
+                      <div className="form-row">
+                        <label>Position</label>
+                        <input
+                          type="text"
+                          value={manualComponentDraft.position}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              position: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Part number</label>
+                        <input
+                          type="text"
+                          value={manualComponentDraft.part_number}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              part_number: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Serial number</label>
+                        <input
+                          type="text"
+                          value={manualComponentDraft.serial_number}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              serial_number: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>ATA</label>
+                        <input
+                          type="text"
+                          value={manualComponentDraft.ata}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              ata: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Description</label>
+                        <input
+                          type="text"
+                          value={manualComponentDraft.description}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              description: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Installed date</label>
+                        <input
+                          type="date"
+                          value={manualComponentDraft.installed_date}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              installed_date: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Installed hours</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={manualComponentDraft.installed_hours}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              installed_hours: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Installed cycles</label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={manualComponentDraft.installed_cycles}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              installed_cycles: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Current hours</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={manualComponentDraft.current_hours}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              current_hours: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Current cycles</label>
+                        <input
+                          type="number"
+                          step="1"
+                          value={manualComponentDraft.current_cycles}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              current_cycles: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Manufacturer code</label>
+                        <input
+                          type="text"
+                          value={manualComponentDraft.manufacturer_code}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              manufacturer_code: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Operator code</label>
+                        <input
+                          type="text"
+                          value={manualComponentDraft.operator_code}
+                          onChange={(e) =>
+                            setManualComponentDraft((prev) => ({
+                              ...prev,
+                              operator_code: e.target.value,
+                            }))
+                          }
+                          className="input"
+                        />
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <label>Notes</label>
+                      <textarea
+                        value={manualComponentDraft.notes}
+                        onChange={(e) =>
+                          setManualComponentDraft((prev) => ({
+                            ...prev,
+                            notes: e.target.value,
+                          }))
+                        }
+                        rows={3}
+                        className="input"
+                      />
+                    </div>
+
+                    <div className="form-actions form-actions--inline">
+                      <button onClick={handleAddManualComponentRow} className="btn">
+                        Add component row
+                      </button>
+                      <button
+                        onClick={() =>
+                          setManualComponentDraft(emptyManualComponentDraft)
+                        }
+                        className="btn-secondary"
+                        type="button"
+                      >
+                        Clear fields
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2749,15 +3574,11 @@ const AircraftImportPage: React.FC = () => {
                 .map(([key, value]) => `${key} → ${value}`)
                 .join(", ")}
             </div>
-          )}
-        </section>
-
-        {message && (
-          <div className="mt-4 text-sm bg-slate-900 border border-slate-700 rounded-2xl p-3">
-            {message}
           </div>
-        )}
-      </div>
+        </section>
+      )}
+
+      {message && <div className="alert">{message}</div>}
     </div>
   );
 };
