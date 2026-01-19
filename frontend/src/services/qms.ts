@@ -300,3 +300,17 @@ export async function qmsListNotifications(): Promise<QMSNotificationOut[]> {
 export async function qmsMarkNotificationRead(notificationId: string): Promise<QMSNotificationOut> {
   return sendJson<QMSNotificationOut>(`/quality/notifications/${notificationId}/read`, "POST", {});
 }
+
+export interface AuditorStatsOut {
+  user_id: string;
+  audits_total: number;
+  audits_open: number;
+  audits_closed: number;
+  lead_audits: number;
+  observer_audits: number;
+  assistant_audits: number;
+}
+
+export async function qmsGetAuditorStats(userId: string): Promise<AuditorStatsOut> {
+  return fetchJson<AuditorStatsOut>(`/quality/auditors/${userId}/stats`);
+}

@@ -757,6 +757,7 @@ def list_my_notifications(db: Session = Depends(get_db)):
     notes = (
         db.query(models.QMSNotification)
         .filter(models.QMSNotification.user_id == user_id)
+        .filter(models.QMSNotification.read_at.is_(None))
         .order_by(models.QMSNotification.created_at.desc())
         .limit(20)
         .all()

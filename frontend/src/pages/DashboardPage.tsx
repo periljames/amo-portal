@@ -5,8 +5,10 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext, getCachedUser } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
+  qmsGetAuditorStats,
   qmsListNotifications,
   qmsMarkNotificationRead,
+  type AuditorStatsOut,
   type QMSNotificationOut,
 } from "../services/qms";
 
@@ -141,6 +143,7 @@ const DashboardPage: React.FC = () => {
   const currentUser = getCachedUser();
   const isAdmin = isAdminUser(currentUser);
   const [notifications, setNotifications] = useState<QMSNotificationOut[]>([]);
+  const [auditorStats, setAuditorStats] = useState<AuditorStatsOut | null>(null);
 
   // For normal users, this MUST be their assigned department (server-driven context).
   // We also fall back to cached user.department_id if you ever store codes there.
@@ -245,8 +248,19 @@ const DashboardPage: React.FC = () => {
     }
   };
 
+  const loadAuditorStats = async () => {
+    if (!currentUser?.id) return;
+    try {
+      const data = await qmsGetAuditorStats(currentUser.id);
+      setAuditorStats(data);
+    } catch {
+      setAuditorStats(null);
+    }
+  };
+
   useEffect(() => {
     loadNotifications();
+    loadAuditorStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -294,7 +308,20 @@ const DashboardPage: React.FC = () => {
                   }}
                 >
                   <div>
-                    <div>{note.message}</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <span
+                        className={
+                          note.severity === "ACTION_REQUIRED"
+                            ? "badge badge--warning"
+                            : note.severity === "WARNING"
+                            ? "badge badge--danger"
+                            : "badge badge--info"
+                        }
+                      >
+                        {note.severity}
+                      </span>
+                      <span>{note.message}</span>
+                    </div>
                     <div className="text-muted" style={{ fontSize: 12 }}>
                       {new Date(note.created_at).toLocaleString()}
                     </div>
@@ -309,6 +336,27 @@ const DashboardPage: React.FC = () => {
                 </li>
               ))}
             </ul>
+          </div>
+        </section>
+      )}
+
+      {auditorStats && (
+        <section className="page-section">
+          <div className="card">
+            <div className="card-header">
+              <h2>Auditor workload</h2>
+              <p className="text-muted">
+                Summary of audits assigned to you across lead/observer/assistant roles.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <span className="badge badge--info">Total: {auditorStats.audits_total}</span>
+              <span className="badge badge--warning">Open: {auditorStats.audits_open}</span>
+              <span className="badge badge--success">Closed: {auditorStats.audits_closed}</span>
+              <span className="badge badge--neutral">Lead: {auditorStats.lead_audits}</span>
+              <span className="badge badge--neutral">Observer: {auditorStats.observer_audits}</span>
+              <span className="badge badge--neutral">Assistant: {auditorStats.assistant_audits}</span>
+            </div>
           </div>
         </section>
       )}
