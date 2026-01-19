@@ -21,6 +21,8 @@ from .models import (
     MaintenanceProgramCategoryEnum,
     AircraftDocumentStatus,
     AircraftDocumentType,
+    DefectSourceEnum,
+    ConfigurationEventTypeEnum,
 )
 
 MIN_VALID_DATE = DateType(1950, 1, 1)
@@ -376,6 +378,8 @@ class AircraftComponentBase(BaseModel):
     description: Optional[str] = None
 
     installed_date: Optional[DateType] = None
+    removed_date: Optional[DateType] = None
+    is_installed: Optional[bool] = True
     installed_hours: Optional[float] = Field(default=None, ge=0, le=MAX_HOURS)
     installed_cycles: Optional[float] = Field(default=None, ge=0, le=MAX_CYCLES)
 
@@ -712,6 +716,60 @@ class MaintenanceStatusRead(BaseModel):
 
     # Optional embedded programme item if you want richer responses
     program_item: Optional[MaintenanceProgramItemRead] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------- CONFIGURATION HISTORY ----------------
+
+
+class AircraftConfigurationEventRead(BaseModel):
+    id: int
+    amo_id: str
+    aircraft_serial_number: Optional[str] = None
+    component_instance_id: Optional[int] = None
+    occurred_at: DateTimeType
+    event_type: ConfigurationEventTypeEnum
+    position: Optional[str] = None
+    part_number: Optional[str] = None
+    serial_number: Optional[str] = None
+    from_part_number: Optional[str] = None
+    from_serial_number: Optional[str] = None
+    work_order_id: Optional[int] = None
+    task_card_id: Optional[int] = None
+    removal_tracking_id: Optional[str] = None
+    created_at: DateTimeType
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------- DEFECT REPORTS ----------------
+
+
+class DefectReportBase(BaseModel):
+    reported_by: Optional[str] = None
+    source: DefectSourceEnum = DefectSourceEnum.SYSTEM
+    description: str
+    ata_chapter: Optional[str] = None
+    occurred_at: DateTimeType
+    operator_event_id: Optional[str] = None
+
+
+class DefectReportCreate(DefectReportBase):
+    create_work_order: bool = True
+    idempotency_key: Optional[str] = None
+
+
+class DefectReportRead(DefectReportBase):
+    id: int
+    amo_id: str
+    aircraft_serial_number: Optional[str] = None
+    work_order_id: Optional[int] = None
+    task_card_id: Optional[int] = None
+    created_by_user_id: Optional[str] = None
+    created_at: DateTimeType
 
     class Config:
         from_attributes = True

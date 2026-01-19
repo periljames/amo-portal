@@ -30,8 +30,9 @@ from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts.models import AccountRole, User  # type: ignore
 from amodb.apps.reliability import schemas as reliability_schemas
 from amodb.apps.reliability import services as reliability_services
+from amodb.utils.identifiers import generate_uuid7
 
-from . import models, schemas
+from . import models, schemas, services
 from amodb.apps.fleet import services as fleet_services
 
 # ---------------------------------------------------------------------------
@@ -59,12 +60,12 @@ ENGINEERING_ROLES = {
 }
 
 
-def _ensure_aircraft_documents_clear(db: Session, aircraft_serial_number: str) -> None:
+def _ensure_aircraft_documents_clear(db: Session, aircraft_serial_number: str, amo_id: str) -> None:
     """
     Block work when mandatory aircraft documents (e.g., C of A) are due or missing evidence,
     unless Quality has an active override.
     """
-    blockers = fleet_services.get_blocking_documents(db, aircraft_serial_number)
+    blockers = fleet_services.get_blocking_documents(db, aircraft_serial_number, amo_id=amo_id)
     if not blockers:
         return
 
@@ -102,11 +103,12 @@ def list_work_orders(
     status: Optional[models.WorkOrderStatusEnum] = None,
     wo_type: Optional[models.WorkOrderTypeEnum] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     List work orders with optional filters by aircraft, status and type.
     """
-    q = db.query(models.WorkOrder)
+    q = db.query(models.WorkOrder).filter(models.WorkOrder.amo_id == current_user.amo_id)
 
     if aircraft_serial_number:
         q = q.filter(
@@ -127,10 +129,14 @@ def list_work_orders(
 def get_work_order(
     work_order_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     wo = (
         db.query(models.WorkOrder)
-        .filter(models.WorkOrder.id == work_order_id)
+        .filter(
+            models.WorkOrder.id == work_order_id,
+            models.WorkOrder.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not wo:
@@ -142,10 +148,14 @@ def get_work_order(
 def get_work_order_by_number(
     wo_number: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     wo = (
         db.query(models.WorkOrder)
-        .filter(models.WorkOrder.wo_number == wo_number)
+        .filter(
+            models.WorkOrder.wo_number == wo_number,
+            models.WorkOrder.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not wo:
@@ -177,7 +187,10 @@ def create_work_order(
     """
     existing = (
         db.query(models.WorkOrder)
-        .filter(models.WorkOrder.wo_number == payload.wo_number)
+        .filter(
+            models.WorkOrder.wo_number == payload.wo_number,
+            models.WorkOrder.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if existing:
@@ -186,60 +199,14 @@ def create_work_order(
             detail=f"Work order {payload.wo_number} already exists.",
         )
 
-    _ensure_aircraft_documents_clear(db, payload.aircraft_serial_number)
+    _ensure_aircraft_documents_clear(db, payload.aircraft_serial_number, current_user.amo_id)
 
-    wo = models.WorkOrder(
-        wo_number=payload.wo_number,
-        aircraft_serial_number=payload.aircraft_serial_number,
-        amo_code=payload.amo_code,
-        originating_org=getattr(payload, "originating_org", None),
-        work_package_ref=getattr(payload, "work_package_ref", None),
-        description=payload.description,
-        check_type=payload.check_type,
-        wo_type=getattr(payload, "wo_type", models.WorkOrderTypeEnum.PERIODIC),
-        status=getattr(
-            payload,
-            "status",
-            models.WorkOrderStatusEnum.OPEN,
-        ),
-        is_scheduled=payload.is_scheduled,
-        due_date=payload.due_date,
-        open_date=payload.open_date,
-        closed_date=None,
-        created_by_user_id=current_user.id,
+    wo = services.create_work_order(
+        db,
+        amo_id=current_user.amo_id,
+        payload=payload,
+        actor=current_user,
     )
-    db.add(wo)
-    db.flush()  # so wo.id is available
-
-    # Optional initial task cards on create, if schema supports it
-    initial_tasks = getattr(payload, "tasks", None)
-    if initial_tasks:
-        for t in initial_tasks:
-            task = models.TaskCard(
-                work_order_id=wo.id,
-                aircraft_serial_number=wo.aircraft_serial_number,
-                aircraft_component_id=t.aircraft_component_id,
-                program_item_id=t.program_item_id,
-                parent_task_id=t.parent_task_id,
-                ata_chapter=t.ata_chapter,
-                task_code=t.task_code,
-                title=t.title,
-                description=t.description,
-                category=t.category,
-                origin_type=t.origin_type,
-                priority=t.priority,
-                zone=t.zone,
-                access_panel=t.access_panel,
-                planned_start=t.planned_start,
-                planned_end=t.planned_end,
-                estimated_manhours=t.estimated_manhours,
-                status=t.status,
-                error_capturing_method=t.error_capturing_method,
-                requires_duplicate_inspection=t.requires_duplicate_inspection,
-                hf_notes=t.hf_notes,
-                created_by_user_id=current_user.id,
-            )
-            db.add(task)
 
     if payload.is_scheduled:
         account_services.record_usage(
@@ -260,7 +227,7 @@ def update_work_order(
     work_order_id: int,
     payload: schemas.WorkOrderUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(
+    current_user: User = Depends(
         require_roles(
             AccountRole.AMO_ADMIN,
             AccountRole.PLANNING_ENGINEER,
@@ -273,26 +240,21 @@ def update_work_order(
 
     Restricted to planning / production / AMO admin.
     """
-    wo = (
-        db.query(models.WorkOrder)
-        .filter(models.WorkOrder.id == work_order_id)
-        .first()
-    )
+    wo = db.query(models.WorkOrder).filter(models.WorkOrder.id == work_order_id).first()
     if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    if wo.amo_id != current_user.amo_id:
         raise HTTPException(status_code=404, detail="Work order not found")
 
     data = payload.model_dump(exclude_unset=True)
     new_status = data.get("status")
     if new_status in {
-        models.WorkOrderStatusEnum.OPEN,
+        models.WorkOrderStatusEnum.RELEASED,
         models.WorkOrderStatusEnum.IN_PROGRESS,
     }:
-        _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number)
-    # updated_at optimistic concurrency could be added here later if needed
-    for field, value in data.items():
-        setattr(wo, field, value)
+        _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number, current_user.amo_id)
 
-    db.add(wo)
+    services.update_work_order(db, work_order=wo, payload=payload, actor=current_user)
     db.commit()
     db.refresh(wo)
     return wo
@@ -302,7 +264,7 @@ def update_work_order(
 def delete_work_order(
     work_order_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(
+    current_user: User = Depends(
         require_roles(
             AccountRole.AMO_ADMIN,
             AccountRole.PLANNING_ENGINEER,
@@ -318,7 +280,10 @@ def delete_work_order(
     """
     wo = (
         db.query(models.WorkOrder)
-        .filter(models.WorkOrder.id == work_order_id)
+        .filter(
+            models.WorkOrder.id == work_order_id,
+            models.WorkOrder.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not wo:
@@ -341,13 +306,17 @@ def delete_work_order(
 def list_tasks_for_work_order(
     work_order_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     List all task cards for a given work order.
     """
     tasks = (
         db.query(models.TaskCard)
-        .filter(models.TaskCard.work_order_id == work_order_id)
+        .filter(
+            models.TaskCard.work_order_id == work_order_id,
+            models.TaskCard.amo_id == current_user.amo_id,
+        )
         .order_by(models.TaskCard.id.asc())
         .all()
     )
@@ -358,10 +327,14 @@ def list_tasks_for_work_order(
 def get_task(
     task_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     task = (
         db.query(models.TaskCard)
-        .filter(models.TaskCard.id == task_id)
+        .filter(
+            models.TaskCard.id == task_id,
+            models.TaskCard.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not task:
@@ -386,17 +359,20 @@ def create_task(
     Rules:
     - Planning / production / AMO admin can create scheduled and non-routine.
     - Certifying staff / technicians can only create NON_ROUTINE tasks with
-      category UNSCHEDULED or DEFECT under an OPEN / IN_PROGRESS work order.
+      category UNSCHEDULED or DEFECT under a RELEASED / IN_PROGRESS work order.
     """
     wo = (
         db.query(models.WorkOrder)
-        .filter(models.WorkOrder.id == work_order_id)
+        .filter(
+            models.WorkOrder.id == work_order_id,
+            models.WorkOrder.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
 
-    _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number)
+    _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number, current_user.amo_id)
 
     is_planning = (
         current_user.is_superuser
@@ -416,12 +392,12 @@ def create_task(
     # Engineers / technicians – enforce NON_ROUTINE / UNSCHEDULED / DEFECT only
     if is_engineering and not is_planning:
         if wo.status not in {
-            models.WorkOrderStatusEnum.OPEN,
+            models.WorkOrderStatusEnum.RELEASED,
             models.WorkOrderStatusEnum.IN_PROGRESS,
         }:
             raise HTTPException(
                 status_code=400,
-                detail="Non-routine tasks can only be raised on OPEN or IN_PROGRESS work orders.",
+                detail="Non-routine tasks can only be raised on RELEASED or IN_PROGRESS work orders.",
             )
 
         # Force NON_ROUTINE origin
@@ -435,6 +411,7 @@ def create_task(
             category = models.TaskCategoryEnum.UNSCHEDULED
 
     task = models.TaskCard(
+        amo_id=current_user.amo_id,
         work_order_id=wo.id,
         aircraft_serial_number=wo.aircraft_serial_number,
         aircraft_component_id=payload.aircraft_component_id,
@@ -442,6 +419,7 @@ def create_task(
         parent_task_id=payload.parent_task_id,
         ata_chapter=payload.ata_chapter,
         task_code=payload.task_code,
+        operator_event_id=payload.operator_event_id or wo.operator_event_id,
         title=payload.title,
         description=payload.description,
         category=category,
@@ -459,6 +437,17 @@ def create_task(
         created_by_user_id=current_user.id,
     )
     db.add(task)
+    db.flush()
+
+    steps = getattr(payload, "steps", None)
+    if steps:
+        services.create_task_steps(
+            db,
+            amo_id=current_user.amo_id,
+            task=task,
+            steps=steps,
+            actor=current_user,
+        )
     db.commit()
     db.refresh(task)
     return task
@@ -480,7 +469,10 @@ def update_task(
     """
     task = (
         db.query(models.TaskCard)
-        .filter(models.TaskCard.id == task_id)
+        .filter(
+            models.TaskCard.id == task_id,
+            models.TaskCard.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not task:
@@ -497,6 +489,7 @@ def update_task(
     part_movement_event_date = data.pop("part_movement_event_date", None)
     part_movement_component_instance_id = data.pop("part_movement_component_instance_id", None)
     part_movement_notes = data.pop("part_movement_notes", None)
+    part_movement_idempotency_key = data.pop("part_movement_idempotency_key", None)
     removal_reason = data.pop("removal_reason", None)
     hours_at_removal = data.pop("hours_at_removal", None)
     cycles_at_removal = data.pop("cycles_at_removal", None)
@@ -512,14 +505,11 @@ def update_task(
 
     incoming_status = data.get("status")
     if incoming_status == models.TaskStatusEnum.IN_PROGRESS:
-        _ensure_aircraft_documents_clear(db, task.aircraft_serial_number)
+        _ensure_aircraft_documents_clear(db, task.aircraft_serial_number, current_user.amo_id)
 
     if is_planning:
-        # Full update allowed
-        for field, value in data.items():
-            setattr(task, field, value)
+        allowed_data = data
     elif is_engineering:
-        # Must be assigned to this task
         assignment = (
             db.query(models.TaskAssignment)
             .filter(
@@ -534,19 +524,15 @@ def update_task(
                 detail="You are not assigned to this task.",
             )
 
-        # Restrict to execution-related fields
         allowed_fields = {"status", "actual_start", "actual_end"}
-        for field, value in data.items():
-            if field in allowed_fields:
-                setattr(task, field, value)
+        allowed_data = {k: v for k, v in data.items() if k in allowed_fields}
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient privileges to update task cards",
         )
 
-    task.updated_by_user_id = current_user.id
-    db.add(task)
+    services.update_task(db, task=task, data=allowed_data, actor=current_user)
     db.commit()
     db.refresh(task)
 
@@ -557,6 +543,12 @@ def update_task(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="aircraft_component_id is required to record a part movement.",
             )
+        removal_tracking_id = None
+        if part_movement_event_type in {
+            reliability_schemas.PartMovementTypeEnum.REMOVE,
+            reliability_schemas.PartMovementTypeEnum.SWAP,
+        }:
+            removal_tracking_id = generate_uuid7()
         movement_payload = reliability_schemas.PartMovementLedgerCreate(
             aircraft_serial_number=task.aircraft_serial_number,
             component_id=component_id,
@@ -566,11 +558,14 @@ def update_task(
             event_type=part_movement_event_type,
             event_date=part_movement_event_date or date.today(),
             notes=part_movement_notes,
+            idempotency_key=part_movement_idempotency_key,
         )
         movement = reliability_services.create_part_movement(
             db,
             amo_id=current_user.amo_id,
             data=movement_payload,
+            removal_tracking_id=removal_tracking_id,
+            actor_user_id=current_user.id,
         )
         if part_movement_event_type == reliability_schemas.PartMovementTypeEnum.REMOVE:
             removal_payload = reliability_schemas.RemovalEventCreate(
@@ -578,6 +573,7 @@ def update_task(
                 component_id=component_id,
                 component_instance_id=part_movement_component_instance_id,
                 part_movement_id=movement.id,
+                removal_tracking_id=removal_tracking_id,
                 removal_reason=removal_reason,
                 hours_at_removal=hours_at_removal,
                 cycles_at_removal=cycles_at_removal,
@@ -595,7 +591,7 @@ def update_task(
 def delete_task(
     task_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(
+    current_user: User = Depends(
         require_roles(
             AccountRole.AMO_ADMIN,
             AccountRole.PLANNING_ENGINEER,
@@ -608,7 +604,10 @@ def delete_task(
     """
     task = (
         db.query(models.TaskCard)
-        .filter(models.TaskCard.id == task_id)
+        .filter(
+            models.TaskCard.id == task_id,
+            models.TaskCard.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not task:
@@ -617,6 +616,191 @@ def delete_task(
     db.delete(task)
     db.commit()
     return
+
+
+# ---------------------------------------------------------------------------
+# Task steps + execution + inspection
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/tasks/{task_id}/steps",
+    response_model=List[schemas.TaskStepRead],
+    status_code=status.HTTP_201_CREATED,
+)
+def create_task_steps(
+    task_id: int,
+    payload: List[schemas.TaskStepCreate],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(
+            AccountRole.AMO_ADMIN,
+            AccountRole.PLANNING_ENGINEER,
+            AccountRole.PRODUCTION_ENGINEER,
+        )
+    ),
+):
+    task = (
+        db.query(models.TaskCard)
+        .filter(
+            models.TaskCard.id == task_id,
+            models.TaskCard.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Task card not found")
+    steps = services.create_task_steps(
+        db,
+        amo_id=current_user.amo_id,
+        task=task,
+        steps=payload,
+        actor=current_user,
+    )
+    db.commit()
+    for step in steps:
+        db.refresh(step)
+    return steps
+
+
+@router.post(
+    "/tasks/{task_id}/steps/{step_id}/execute",
+    response_model=schemas.TaskStepExecutionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def execute_task_step(
+    task_id: int,
+    step_id: int,
+    payload: schemas.TaskStepExecutionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    task = (
+        db.query(models.TaskCard)
+        .filter(
+            models.TaskCard.id == task_id,
+            models.TaskCard.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Task card not found")
+
+    assignment = (
+        db.query(models.TaskAssignment)
+        .filter(
+            models.TaskAssignment.task_id == task.id,
+            models.TaskAssignment.user_id == current_user.id,
+        )
+        .first()
+    )
+    is_planning = current_user.is_superuser or current_user.role in PLANNING_ROLES
+    if not (assignment or is_planning):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not assigned to this task.",
+        )
+
+    step = (
+        db.query(models.TaskStep)
+        .filter(
+            models.TaskStep.id == step_id,
+            models.TaskStep.task_id == task.id,
+        )
+        .first()
+    )
+    if not step:
+        raise HTTPException(status_code=404, detail="Task step not found")
+
+    execution = services.execute_task_step(
+        db,
+        amo_id=current_user.amo_id,
+        task=task,
+        step=step,
+        payload=payload,
+        actor=current_user,
+    )
+    db.commit()
+    db.refresh(execution)
+    return execution
+
+
+@router.post(
+    "/tasks/{task_id}/inspect",
+    response_model=schemas.InspectorSignOffRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def inspect_task(
+    task_id: int,
+    payload: schemas.InspectorSignOffCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(
+            AccountRole.AMO_ADMIN,
+            AccountRole.CERTIFYING_ENGINEER,
+            AccountRole.CERTIFYING_TECHNICIAN,
+        )
+    ),
+):
+    task = (
+        db.query(models.TaskCard)
+        .filter(
+            models.TaskCard.id == task_id,
+            models.TaskCard.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Task card not found")
+    signoff = services.record_task_inspection(
+        db,
+        amo_id=current_user.amo_id,
+        task=task,
+        payload=payload,
+        actor=current_user,
+    )
+    db.commit()
+    db.refresh(signoff)
+    return signoff
+
+
+@router.post(
+    "/{work_order_id}/inspect",
+    response_model=schemas.InspectorSignOffRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def inspect_work_order(
+    work_order_id: int,
+    payload: schemas.InspectorSignOffCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(
+            AccountRole.AMO_ADMIN,
+            AccountRole.CERTIFYING_ENGINEER,
+            AccountRole.CERTIFYING_TECHNICIAN,
+        )
+    ),
+):
+    work_order = (
+        db.query(models.WorkOrder)
+        .filter(
+            models.WorkOrder.id == work_order_id,
+            models.WorkOrder.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    signoff = services.record_work_order_inspection(
+        db,
+        amo_id=current_user.amo_id,
+        work_order=work_order,
+        payload=payload,
+        actor=current_user,
+    )
+    db.commit()
+    db.refresh(signoff)
+    return signoff
 
 
 # ---------------------------------------------------------------------------
@@ -631,10 +815,14 @@ def delete_task(
 def list_assignments_for_task(
     task_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     assignments = (
         db.query(models.TaskAssignment)
-        .filter(models.TaskAssignment.task_id == task_id)
+        .filter(
+            models.TaskAssignment.task_id == task_id,
+            models.TaskAssignment.amo_id == current_user.amo_id,
+        )
         .order_by(models.TaskAssignment.id.asc())
         .all()
     )
@@ -650,7 +838,7 @@ def create_assignment(
     task_id: int,
     payload: schemas.TaskAssignmentCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(
+    current_user: User = Depends(
         require_roles(
             AccountRole.AMO_ADMIN,
             AccountRole.PLANNING_ENGINEER,
@@ -663,13 +851,17 @@ def create_assignment(
     """
     task = (
         db.query(models.TaskCard)
-        .filter(models.TaskCard.id == task_id)
+        .filter(
+            models.TaskCard.id == task_id,
+            models.TaskCard.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not task:
         raise HTTPException(status_code=404, detail="Task card not found")
 
     assignment = models.TaskAssignment(
+        amo_id=current_user.amo_id,
         task_id=task.id,
         user_id=payload.user_id,
         role_on_task=payload.role_on_task,
@@ -700,7 +892,10 @@ def update_assignment(
     """
     assignment = (
         db.query(models.TaskAssignment)
-        .filter(models.TaskAssignment.id == assignment_id)
+        .filter(
+            models.TaskAssignment.id == assignment_id,
+            models.TaskAssignment.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not assignment:
@@ -746,10 +941,14 @@ def update_assignment(
 def list_work_logs_for_task(
     task_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     logs = (
         db.query(models.WorkLogEntry)
-        .filter(models.WorkLogEntry.task_id == task_id)
+        .filter(
+            models.WorkLogEntry.task_id == task_id,
+            models.WorkLogEntry.amo_id == current_user.amo_id,
+        )
         .order_by(models.WorkLogEntry.start_time.asc())
         .all()
     )
@@ -776,7 +975,10 @@ def create_work_log(
     """
     task = (
         db.query(models.TaskCard)
-        .filter(models.TaskCard.id == task_id)
+        .filter(
+            models.TaskCard.id == task_id,
+            models.TaskCard.amo_id == current_user.amo_id,
+        )
         .first()
     )
     if not task:
@@ -807,6 +1009,7 @@ def create_work_log(
     user_id = getattr(payload, "user_id", None) or current_user.id
 
     log = models.WorkLogEntry(
+        amo_id=current_user.amo_id,
         task_id=task.id,
         user_id=user_id,
         start_time=payload.start_time,

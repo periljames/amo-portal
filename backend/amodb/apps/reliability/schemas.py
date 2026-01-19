@@ -135,6 +135,7 @@ class ReliabilityEventCreate(BaseModel):
     reference_code: Optional[str] = None
     source_system: Optional[str] = None
     description: Optional[str] = None
+    operator_event_id: Optional[str] = None
     occurred_at: Optional[datetime] = None
 
 
@@ -393,6 +394,7 @@ class ReliabilityEventIngestCreate(BaseModel):
     ata_chapter: Optional[str] = None
     reference_code: str
     source_system: str
+    operator_event_id: Optional[str] = None
     description: Optional[str] = None
     occurred_at: datetime
 
@@ -557,6 +559,7 @@ class PartMovementLedgerCreate(BaseModel):
     event_type: PartMovementTypeEnum
     event_date: date
     notes: Optional[str] = None
+    idempotency_key: Optional[str] = None
 
 
 class PartMovementLedgerRead(PartMovementLedgerCreate):
@@ -573,6 +576,7 @@ class RemovalEventCreate(BaseModel):
     component_id: Optional[int] = None
     component_instance_id: Optional[int] = None
     part_movement_id: Optional[int] = None
+    removal_tracking_id: Optional[str] = None
     removal_reason: Optional[str] = None
     hours_at_removal: Optional[float] = None
     cycles_at_removal: Optional[float] = None
@@ -632,6 +636,22 @@ class ThresholdSetCreate(BaseModel):
 
 
 class ThresholdSetRead(ThresholdSetCreate):
+    id: int
+    amo_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ShopVisitCreate(BaseModel):
+    component_instance_id: Optional[int] = None
+    work_order_id: Optional[int] = None
+    notes: Optional[str] = None
+    shop_record_id: Optional[str] = None
+
+
+class ShopVisitRead(ShopVisitCreate):
     id: int
     amo_id: str
     created_at: datetime

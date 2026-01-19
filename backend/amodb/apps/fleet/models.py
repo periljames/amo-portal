@@ -53,11 +53,13 @@ from sqlalchemy import (
     UniqueConstraint,
     Enum as SQLEnum,
     JSON,
+    text,
 )
 from sqlalchemy.orm import relationship
 
 from ...database import Base
 from ..accounts.models import RegulatoryAuthority
+from ...utils.identifiers import generate_uuid7
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +106,9 @@ class Aircraft(Base):
     __tablename__ = "aircraft"
 
     __table_args__ = (
+        Index("ix_aircraft_amo_status_active", "amo_id", "status", "is_active"),
+        Index("ix_aircraft_amo_serial", "amo_id", "serial_number"),
+        UniqueConstraint("amo_id", "registration", name="uq_aircraft_amo_registration"),
         # Typical filters in ops/planning UIs
         Index("ix_aircraft_model_code", "aircraft_model_code"),
         Index("ix_aircraft_operator_code", "operator_code"),
@@ -117,6 +122,13 @@ class Aircraft(Base):
     # Primary key = aircraft identification (AIN-style internal ID)
     # Spec 2000: Aircraft Identification Number (AIN)
     serial_number = Column(String(50), primary_key=True, index=True)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     # --- Spec 2000 Identification / Ownership ---
 
@@ -256,6 +268,13 @@ class AircraftDocumentType(str, Enum):
     WEIGHT_AND_BALANCE_SCHEDULE = "WEIGHT_AND_BALANCE_SCHEDULE"
     MEL_APPROVAL = "MEL_APPROVAL"
     OTHER = "OTHER"
+
+
+class DefectSourceEnum(str, Enum):
+    SYSTEM = "SYSTEM"
+    PILOT = "PILOT"
+    LOGBOOK = "LOGBOOK"
+    API = "API"
 
 
 class AircraftDocumentStatus(str, Enum):
@@ -401,7 +420,16 @@ class AircraftComponent(Base):
     __table_args__ = (
         # One component position per aircraft (prevents duplicate "L ENGINE" entries)
         UniqueConstraint("aircraft_serial_number", "position", name="uq_aircraft_component_aircraft_position"),
+        Index(
+            "uq_aircraft_component_position_installed",
+            "amo_id",
+            "aircraft_serial_number",
+            "position",
+            unique=True,
+            postgresql_where=text("is_installed = true"),
+        ),
         Index("ix_aircraft_components_aircraft_position", "aircraft_serial_number", "position"),
+        Index("ix_aircraft_components_amo_position", "amo_id", "position"),
         Index("ix_aircraft_components_pn_sn", "part_number", "serial_number"),
         Index("ix_aircraft_components_ata", "ata"),
         CheckConstraint("installed_hours IS NULL OR installed_hours >= 0", name="ck_aircraft_comp_installed_hours_nonneg"),
@@ -411,6 +439,13 @@ class AircraftComponent(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     aircraft_serial_number = Column(
         String(50),
@@ -432,6 +467,8 @@ class AircraftComponent(Base):
 
     # Installation reference
     installed_date = Column(Date, nullable=True)
+    removed_date = Column(Date, nullable=True)
+    is_installed = Column(Boolean, nullable=False, default=True, index=True)
     installed_hours = Column(Float, nullable=True)
     installed_cycles = Column(Float, nullable=True)
 
@@ -495,18 +532,27 @@ class AircraftUsage(Base):
 
     __table_args__ = (
         UniqueConstraint(
+            "amo_id",
             "aircraft_serial_number",
             "date",
             "techlog_no",
             name="uq_aircraft_usage_aircraft_date_techlog",
         ),
         Index("ix_aircraft_usage_aircraft_date", "aircraft_serial_number", "date"),
+        Index("ix_aircraft_usage_amo_date", "amo_id", "date"),
         Index("ix_aircraft_usage_techlog_no", "techlog_no"),
         CheckConstraint("block_hours >= 0", name="ck_aircraft_usage_block_hours_nonneg"),
         CheckConstraint("cycles >= 0", name="ck_aircraft_usage_cycles_nonneg"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
+
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     aircraft_serial_number = Column(
         String(50),
@@ -575,6 +621,106 @@ class AircraftUsage(Base):
 
     def __repr__(self) -> str:
         return f"<AircraftUsage id={self.id} aircraft={self.aircraft_serial_number} date={self.date} techlog={self.techlog_no}>"
+
+
+# ---------------------------------------------------------------------------
+# Configuration history events (install/remove/swap)
+# ---------------------------------------------------------------------------
+
+
+class ConfigurationEventTypeEnum(str, Enum):
+    INSTALL = "INSTALL"
+    REMOVE = "REMOVE"
+    SWAP = "SWAP"
+
+
+class AircraftConfigurationEvent(Base):
+    """
+    Append-only configuration event history for installed components.
+    """
+
+    __tablename__ = "aircraft_configuration_events"
+
+    __table_args__ = (
+        Index("ix_config_events_amo_aircraft_date", "amo_id", "aircraft_serial_number", "occurred_at"),
+        Index("ix_config_events_amo_position_date", "amo_id", "position", "occurred_at"),
+        Index("ix_config_events_removal_tracking", "amo_id", "removal_tracking_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    component_instance_id = Column(
+        Integer,
+        ForeignKey("component_instances.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    event_type = Column(
+        SQLEnum(ConfigurationEventTypeEnum, name="config_event_type_enum", native_enum=False),
+        nullable=False,
+        index=True,
+    )
+    position = Column(String(50), nullable=True, index=True)
+    part_number = Column(String(50), nullable=True, index=True)
+    serial_number = Column(String(50), nullable=True, index=True)
+    from_part_number = Column(String(50), nullable=True)
+    from_serial_number = Column(String(50), nullable=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    task_card_id = Column(Integer, ForeignKey("task_cards.id", ondelete="SET NULL"), nullable=True, index=True)
+    removal_tracking_id = Column(String(36), nullable=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Defect reports (logbook/pilot/system)
+# ---------------------------------------------------------------------------
+
+
+class DefectReport(Base):
+    """
+    Minimal defect report records used to seed work orders and tasks.
+    """
+
+    __tablename__ = "defect_reports"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "operator_event_id", name="uq_defect_report_operator_event"),
+        UniqueConstraint("amo_id", "idempotency_key", name="uq_defect_report_idempotency"),
+        Index("ix_defect_reports_amo_aircraft", "amo_id", "aircraft_serial_number"),
+        Index("ix_defect_reports_amo_occurred", "amo_id", "occurred_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    reported_by = Column(String(255), nullable=True)
+    source = Column(
+        SQLEnum(DefectSourceEnum, name="defect_source_enum", native_enum=False),
+        nullable=False,
+        default=DefectSourceEnum.SYSTEM,
+    )
+    description = Column(Text, nullable=False)
+    ata_chapter = Column(String(20), nullable=True, index=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    operator_event_id = Column(String(36), nullable=False, default=generate_uuid7, index=True)
+    idempotency_key = Column(String(128), nullable=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    task_card_id = Column(Integer, ForeignKey("task_cards.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 # ---------------------------------------------------------------------------
@@ -832,7 +978,7 @@ class AircraftImportPreviewRow(Base):
     action = Column(String(16), nullable=False)
     suggested_template = Column(JSON, nullable=True)
     formula_proposals = Column(JSON, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    metadata_json = Column("metadata", JSON, nullable=True)
 
 
 # ---------------------------------------------------------------------------

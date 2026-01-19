@@ -363,6 +363,7 @@ def get_due_list_for_aircraft(
 def create_work_order_from_program_items(
     db: Session,
     *,
+    amo_id: str,
     aircraft_serial_number: str,
     program_item_ids: Sequence[int],
     check_type: Optional[str] = None,
@@ -381,12 +382,13 @@ def create_work_order_from_program_items(
         wo_number = f"{aircraft_serial_number}-{int(datetime.utcnow().timestamp())}"
 
     wo = WorkOrder(
+        amo_id=amo_id,
         wo_number=wo_number,
         aircraft_serial_number=aircraft_serial_number,
         check_type=check_type,
         description=description or f"Scheduled tasks for {aircraft_serial_number}",
         wo_type=WorkOrderTypeEnum.PERIODIC,
-        status=WorkOrderStatusEnum.OPEN,
+        status=WorkOrderStatusEnum.DRAFT,
         is_scheduled=True,
         open_date=date.today(),
         created_by_user_id=created_by_user_id,
@@ -429,6 +431,7 @@ def create_work_order_from_program_items(
         )
 
         card = TaskCard(
+            amo_id=amo_id,
             work_order_id=wo.id,
             aircraft_serial_number=aircraft_serial_number,
             aircraft_component_id=api.aircraft_component_id,

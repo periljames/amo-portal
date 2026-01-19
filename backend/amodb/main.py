@@ -17,6 +17,7 @@ from .apps.crs.router import router as crs_router
 from .apps.training.router import router as training_router
 from .apps.quality import router as quality_router  
 from .apps.reliability.router import router as reliability_router
+from .apps.audit.router import router as audit_router
 from .apps.accounts.router_billing import router as billing_router
 from .apps.accounts import services as account_services
 
@@ -100,3 +101,4 @@ app.include_router(training_router)
 app.include_router(quality_router) 
 app.include_router(reliability_router)
 app.include_router(billing_router)
+app.include_router(audit_router)

@@ -682,7 +682,12 @@ def create_part_movement(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_part_movement(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_part_movement(
+        db,
+        amo_id=current_user.amo_id,
+        data=payload,
+        actor_user_id=current_user.id,
+    )
 
 
 @router.get(
@@ -718,6 +723,30 @@ def list_removal_events(
     db: Session = Depends(get_write_db),
 ):
     return services.list_removal_events(db, amo_id=current_user.amo_id)
+
+
+@router.post(
+    "/shop-visits",
+    response_model=schemas.ShopVisitRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_shop_visit(
+    payload: schemas.ShopVisitCreate,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.create_shop_visit(db, amo_id=current_user.amo_id, data=payload)
+
+
+@router.get(
+    "/shop-visits",
+    response_model=List[schemas.ShopVisitRead],
+)
+def list_shop_visits(
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.list_shop_visits(db, amo_id=current_user.amo_id)
 
 
 @router.post(

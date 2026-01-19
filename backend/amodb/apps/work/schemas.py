@@ -39,6 +39,7 @@ class TaskCardBase(BaseModel):
 
     ata_chapter: Optional[str] = None
     task_code: Optional[str] = None
+    operator_event_id: Optional[str] = None
     title: str
     description: Optional[str] = None
 
@@ -69,7 +70,7 @@ class TaskCardCreate(TaskCardBase):
     The work_order_id and aircraft_serial_number come from the path / parent
     work order; they are not supplied in this payload.
     """
-    pass
+    steps: List["TaskStepCreate"] = []
 
 
 class TaskCardUpdate(BaseModel):
@@ -85,6 +86,7 @@ class TaskCardUpdate(BaseModel):
 
     ata_chapter: Optional[str] = None
     task_code: Optional[str] = None
+    operator_event_id: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
 
@@ -111,6 +113,7 @@ class TaskCardUpdate(BaseModel):
     part_movement_event_date: Optional[date] = None
     part_movement_component_instance_id: Optional[int] = None
     part_movement_notes: Optional[str] = None
+    part_movement_idempotency_key: Optional[str] = None
     removal_reason: Optional[str] = None
     hours_at_removal: Optional[float] = None
     cycles_at_removal: Optional[float] = None
@@ -125,8 +128,8 @@ class TaskCardRead(TaskCardBase):
 
     created_at: datetime
     updated_at: datetime
-    created_by_user_id: Optional[int] = None
-    updated_by_user_id: Optional[int] = None
+    created_by_user_id: Optional[str] = None
+    updated_by_user_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -144,17 +147,20 @@ class WorkOrderBase(BaseModel):
     amo_code: Optional[str] = None
     originating_org: Optional[str] = None
     work_package_ref: Optional[str] = None
+    operator_event_id: Optional[str] = None
 
     description: Optional[str] = None
     check_type: Optional[str] = None
 
     wo_type: WorkOrderTypeEnum = WorkOrderTypeEnum.PERIODIC
-    status: WorkOrderStatusEnum = WorkOrderStatusEnum.OPEN
+    status: WorkOrderStatusEnum = WorkOrderStatusEnum.DRAFT
     is_scheduled: bool = True
 
     due_date: Optional[date] = None
     open_date: Optional[date] = None
     closed_date: Optional[date] = None
+    closure_reason: Optional[str] = None
+    closure_notes: Optional[str] = None
 
 
 class WorkOrderCreate(WorkOrderBase):
@@ -173,6 +179,7 @@ class WorkOrderUpdate(BaseModel):
     amo_code: Optional[str] = None
     originating_org: Optional[str] = None
     work_package_ref: Optional[str] = None
+    operator_event_id: Optional[str] = None
 
     description: Optional[str] = None
     check_type: Optional[str] = None
@@ -184,16 +191,82 @@ class WorkOrderUpdate(BaseModel):
     due_date: Optional[date] = None
     open_date: Optional[date] = None
     closed_date: Optional[date] = None
+    closure_reason: Optional[str] = None
+    closure_notes: Optional[str] = None
 
 
 class WorkOrderRead(WorkOrderBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    created_by_user_id: Optional[int] = None
-    updated_by_user_id: Optional[int] = None
+    created_by_user_id: Optional[str] = None
+    updated_by_user_id: Optional[str] = None
 
     tasks: List[TaskCardRead] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# Task steps + executions
+# ---------------------------------------------------------------------------
+
+
+class TaskStepBase(BaseModel):
+    step_no: int
+    instruction_text: str
+    required_flag: bool = True
+    measurement_type: Optional[str] = None
+    expected_range: Optional[dict] = None
+
+
+class TaskStepCreate(TaskStepBase):
+    pass
+
+
+class TaskStepRead(TaskStepBase):
+    id: int
+    task_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TaskStepExecutionCreate(BaseModel):
+    result_text: Optional[str] = None
+    measurement_value: Optional[float] = None
+    attachment_id: Optional[str] = None
+    signed_flag: bool = False
+    signature_hash: Optional[str] = None
+
+
+class TaskStepExecutionRead(TaskStepExecutionCreate):
+    id: int
+    task_step_id: int
+    task_id: int
+    performed_by_user_id: Optional[str] = None
+    performed_at: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class InspectorSignOffCreate(BaseModel):
+    notes: Optional[str] = None
+    signed_flag: bool = False
+    signature_hash: Optional[str] = None
+
+
+class InspectorSignOffRead(InspectorSignOffCreate):
+    id: int
+    task_card_id: Optional[int] = None
+    work_order_id: Optional[int] = None
+    inspector_user_id: Optional[str] = None
+    signed_at: datetime
 
     class Config:
         from_attributes = True
@@ -205,7 +278,7 @@ class WorkOrderRead(WorkOrderBase):
 
 
 class TaskAssignmentBase(BaseModel):
-    user_id: int
+    user_id: str
     role_on_task: TaskRoleOnTaskEnum = TaskRoleOnTaskEnum.SUPPORT
     allocated_hours: Optional[float] = None
     status: TaskAssignmentStatusEnum = TaskAssignmentStatusEnum.ASSIGNED
@@ -247,7 +320,7 @@ class WorkLogBase(BaseModel):
 
     description: Optional[str] = None
     station: Optional[str] = None
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
 
 
 class WorkLogCreate(WorkLogBase):
@@ -271,3 +344,6 @@ class WorkLogRead(WorkLogBase):
 
     class Config:
         from_attributes = True
+
+
+TaskCardCreate.model_rebuild()

@@ -17,6 +17,12 @@ from ..work.models import TaskCategoryEnum, TaskCard
 from ..fleet.models import AircraftUsage
 from ..accounts import models as account_models
 from ..quality.models import QMSAuditFinding
+from ..fleet import services as fleet_services
+from ..audit import services as audit_services
+from ..audit import schemas as audit_schemas
+from datetime import date as DateType, datetime as DateTimeType
+from ..accounts import services as account_services
+from ...utils.identifiers import generate_uuid7
 
 
 def seed_default_templates(db: Session, *, amo_id: str, created_by_user_id: Optional[str] = None) -> Iterable[models.ReliabilityProgramTemplate]:
@@ -228,10 +234,12 @@ def create_reliability_event(
     data: schemas.ReliabilityEventCreate,
     created_by_user_id: Optional[str] = None,
 ) -> models.ReliabilityEvent:
+    operator_event_id = data.operator_event_id or generate_uuid7()
     event = models.ReliabilityEvent(
         amo_id=amo_id,
         created_by_user_id=created_by_user_id,
-        **data.model_dump(),
+        operator_event_id=operator_event_id,
+        **data.model_dump(exclude={"operator_event_id"}),
     )
     if data.occurred_at is None:
         event.occurred_at = func.now()
@@ -250,10 +258,12 @@ def create_reliability_events_bulk(
 ) -> Sequence[models.ReliabilityEvent]:
     created = []
     for event_data in events:
+        operator_event_id = event_data.operator_event_id or generate_uuid7()
         event = models.ReliabilityEvent(
             amo_id=amo_id,
             created_by_user_id=created_by_user_id,
-            **event_data.model_dump(),
+            operator_event_id=operator_event_id,
+            **event_data.model_dump(exclude={"operator_event_id"}),
         )
         created.append(event)
     db.add_all(created)
@@ -1098,12 +1108,63 @@ def create_part_movement(
     *,
     amo_id: str,
     data: schemas.PartMovementLedgerCreate,
+    removal_tracking_id: Optional[str] = None,
+    actor_user_id: Optional[str] = None,
 ) -> models.PartMovementLedger:
+    payload = data.model_dump()
+    safe_payload = {
+        key: (value.isoformat() if isinstance(value, (DateType, DateTimeType)) else value)
+        for key, value in payload.items()
+    }
+    if data.idempotency_key:
+        existing = (
+            db.query(models.PartMovementLedger)
+            .filter(
+                models.PartMovementLedger.amo_id == amo_id,
+                models.PartMovementLedger.idempotency_key == data.idempotency_key,
+            )
+            .first()
+        )
+        if existing:
+            return existing
+        account_services.register_idempotency_key(
+            db,
+            scope=f"part-movement:{amo_id}",
+            key=data.idempotency_key,
+            payload=safe_payload,
+        )
+
     movement = models.PartMovementLedger(
         amo_id=amo_id,
         **data.model_dump(),
     )
     db.add(movement)
+    db.flush()
+
+    fleet_services.apply_part_movement_configuration(
+        db,
+        amo_id=amo_id,
+        movement=movement,
+        removal_tracking_id=removal_tracking_id,
+        actor_user_id=actor_user_id,
+    )
+
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="PartMovementLedger",
+            entity_id=str(movement.id),
+            action="create",
+            actor_user_id=actor_user_id,
+            before_json=None,
+            after_json={
+                "event_type": movement.event_type.value,
+                "aircraft_serial_number": movement.aircraft_serial_number,
+            },
+        ),
+    )
+
     db.commit()
     db.refresh(movement)
     return movement
@@ -1128,9 +1189,11 @@ def create_removal_event(
     amo_id: str,
     data: schemas.RemovalEventCreate,
 ) -> models.RemovalEvent:
+    removal_tracking_id = data.removal_tracking_id or generate_uuid7()
     removal = models.RemovalEvent(
         amo_id=amo_id,
-        **data.model_dump(),
+        removal_tracking_id=removal_tracking_id,
+        **data.model_dump(exclude={"removal_tracking_id"}),
     )
     if data.removed_at is None:
         removal.removed_at = func.now()
@@ -1149,6 +1212,35 @@ def list_removal_events(
         db.query(models.RemovalEvent)
         .filter(models.RemovalEvent.amo_id == amo_id)
         .order_by(models.RemovalEvent.removed_at.desc())
+        .all()
+    )
+
+
+def create_shop_visit(
+    db: Session,
+    *,
+    amo_id: str,
+    data: schemas.ShopVisitCreate,
+) -> models.ShopVisit:
+    visit = models.ShopVisit(
+        amo_id=amo_id,
+        **data.model_dump(),
+    )
+    db.add(visit)
+    db.commit()
+    db.refresh(visit)
+    return visit
+
+
+def list_shop_visits(
+    db: Session,
+    *,
+    amo_id: str,
+) -> Sequence[models.ShopVisit]:
+    return (
+        db.query(models.ShopVisit)
+        .filter(models.ShopVisit.amo_id == amo_id)
+        .order_by(models.ShopVisit.created_at.desc())
         .all()
     )
 
