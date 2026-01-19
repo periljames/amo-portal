@@ -978,7 +978,7 @@ class AircraftImportPreviewRow(Base):
     action = Column(String(16), nullable=False)
     suggested_template = Column(JSON, nullable=True)
     formula_proposals = Column(JSON, nullable=True)
-    metadata_json = Column("metadata", JSON, nullable=True)
+    row_metadata = Column("metadata", JSON, nullable=True)
 
 
 # ---------------------------------------------------------------------------
