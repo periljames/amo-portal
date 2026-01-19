@@ -1,6 +1,5 @@
 // frontend/src/pages/AircraftImportPage.tsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CellValueChangedEvent,
   ColDef,
@@ -337,6 +336,8 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
   const [componentPreviewRows, setComponentPreviewRows] = useState<
     ComponentPreviewRow[]
   >([]);
+  const [componentPreviewRowOverrides, setComponentPreviewRowOverrides] =
+    useState<Record<number, ComponentPreviewRow>>({});
   const [componentColumnMapping, setComponentColumnMapping] = useState<
     Record<string, string | null> | null
   >(null);
@@ -361,11 +362,15 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     useState("{}");
   const [componentTemplateLoading, setComponentTemplateLoading] =
     useState(false);
-  const [manualAircraftDraft, setManualAircraftDraft] =
-    useState<ManualAircraftDraft>(emptyManualAircraftDraft);
-  const [manualComponentDraft, setManualComponentDraft] =
-    useState<ManualComponentDraft>(emptyManualComponentDraft);
-  const [componentImportComplete, setComponentImportComplete] = useState(false);
+  const [componentPreviewId, setComponentPreviewId] = useState<string | null>(
+    null
+  );
+  const [componentPreviewTotalRows, setComponentPreviewTotalRows] = useState(0);
+  const [componentPreviewMode, setComponentPreviewMode] = useState<
+    "client" | "server"
+  >("client");
+  const [componentPreviewGridApi, setComponentPreviewGridApi] =
+    useState<any>(null);
   const [importBatchId, setImportBatchId] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<ImportSnapshot[]>([]);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(
@@ -475,6 +480,32 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
       user_overrides: override.user_overrides ?? row.user_overrides,
       formula_decisions: override.formula_decisions ?? row.formula_decisions,
       formula_proposals: override.formula_proposals ?? row.formula_proposals,
+    };
+  };
+
+  const normalizeComponentPreviewRow = (
+    row: ComponentPreviewRow
+  ): ComponentPreviewRow => ({
+    ...row,
+    approved: row.errors.length === 0,
+  });
+
+  const mergeComponentPreviewOverride = (
+    row: ComponentPreviewRow
+  ): ComponentPreviewRow => {
+    const override = componentPreviewRowOverrides[row.row_number];
+    if (!override) {
+      return row;
+    }
+    return {
+      ...row,
+      ...override,
+      data: { ...row.data, ...override.data },
+      errors: override.errors ?? row.errors,
+      warnings: override.warnings ?? row.warnings,
+      approved: override.approved ?? row.approved,
+      existing_component: override.existing_component ?? row.existing_component,
+      dedupe_suggestions: override.dedupe_suggestions ?? row.dedupe_suggestions,
     };
   };
 
@@ -675,118 +706,45 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     }));
   };
 
-  const handleComponentPreviewRowChange = (
-    index: number,
+  const updateComponentPreviewRowValue = (
+    rowNumber: number,
     field: keyof ComponentRowData,
-    value: string
+    value: any,
+    rowContext?: ComponentPreviewRow
   ) => {
-    setComponentPreviewRows((prev) =>
-      prev.map((row, rowIndex) => {
-        if (rowIndex !== index) {
-          return row;
-        }
-        const nextData = {
-          ...row.data,
-          [field]: value,
-        };
-        const errors = validateComponentRow(nextData);
-        return {
-          ...row,
-          data: nextData,
-          errors,
-          approved: errors.length === 0 && row.approved,
-        };
-      })
-    );
-  };
+    const applyUpdate = (row: ComponentPreviewRow) => {
+      const nextData = {
+        ...row.data,
+        [field]: value,
+      };
+      const errors = validateComponentRow(nextData);
+      return {
+        ...row,
+        data: nextData,
+        errors,
+        approved: errors.length === 0 && row.approved,
+      };
+    };
 
-  const handleAddManualAircraftRow = () => {
-    if (previewMode === "server") {
-      setMessage(
-        "Manual entry is unavailable while a large preview is active. Clear the preview or upload a smaller file to add rows manually."
+    if (componentPreviewMode === "client") {
+      setComponentPreviewRows((prev) =>
+        prev.map((row) => {
+          if (row.row_number !== rowNumber) {
+            return row;
+          }
+          return applyUpdate(row);
+        })
       );
       return;
     }
 
-    const data: AircraftRowData = {
-      serial_number: manualAircraftDraft.serial_number.trim(),
-      registration: manualAircraftDraft.registration.trim(),
-      template: toOptionalValue(manualAircraftDraft.template),
-      make: toOptionalValue(manualAircraftDraft.make),
-      model: toOptionalValue(manualAircraftDraft.model),
-      home_base: toOptionalValue(manualAircraftDraft.home_base),
-      owner: toOptionalValue(manualAircraftDraft.owner),
-      aircraft_model_code: toOptionalValue(manualAircraftDraft.aircraft_model_code),
-      operator_code: toOptionalValue(manualAircraftDraft.operator_code),
-      supplier_code: toOptionalValue(manualAircraftDraft.supplier_code),
-      company_name: toOptionalValue(manualAircraftDraft.company_name),
-      internal_aircraft_identifier: toOptionalValue(
-        manualAircraftDraft.internal_aircraft_identifier
-      ),
-      status: toOptionalValue(manualAircraftDraft.status),
-      is_active:
-        manualAircraftDraft.is_active === ""
-          ? null
-          : manualAircraftDraft.is_active === "true",
-      last_log_date: toOptionalValue(manualAircraftDraft.last_log_date),
-      total_hours: toOptionalValue(manualAircraftDraft.total_hours),
-      total_cycles: toOptionalValue(manualAircraftDraft.total_cycles),
-    };
-    const errors = validateRow(data);
-    const rowNumber = getNextRowNumber(previewRows);
-    const baseRow: PreviewRow = {
-      row_number: rowNumber,
-      data,
-      errors,
-      warnings: [],
-      action: errors.length ? "invalid" : "new",
-      approved: errors.length === 0,
-      suggested_template: null,
-    };
-    setPreviewMode("client");
-    setPreviewId(null);
-    setPreviewTotalRows(0);
-    setPreviewRowOverrides({});
-    setPreviewRows((prev) => [...prev, normalizePreviewRow(baseRow)]);
-    setManualAircraftDraft(emptyManualAircraftDraft);
-    setMessage("Manual aircraft row added to the preview.");
-  };
-
-  const handleAddManualComponentRow = () => {
-    if (!componentAircraftSerial.trim()) {
-      setMessage("Enter the aircraft serial number before adding components.");
+    if (!rowContext) {
       return;
     }
-    const data: ComponentRowData = {
-      position: manualComponentDraft.position.trim(),
-      ata: toOptionalValue(manualComponentDraft.ata),
-      part_number: toOptionalValue(manualComponentDraft.part_number),
-      serial_number: toOptionalValue(manualComponentDraft.serial_number),
-      description: toOptionalValue(manualComponentDraft.description),
-      installed_date: toOptionalValue(manualComponentDraft.installed_date),
-      installed_hours: toOptionalValue(manualComponentDraft.installed_hours),
-      installed_cycles: toOptionalValue(manualComponentDraft.installed_cycles),
-      current_hours: toOptionalValue(manualComponentDraft.current_hours),
-      current_cycles: toOptionalValue(manualComponentDraft.current_cycles),
-      notes: toOptionalValue(manualComponentDraft.notes),
-      manufacturer_code: toOptionalValue(manualComponentDraft.manufacturer_code),
-      operator_code: toOptionalValue(manualComponentDraft.operator_code),
-    };
-    const errors = validateComponentRow(data);
-    const rowNumber = getNextRowNumber(componentPreviewRows);
-    const row: ComponentPreviewRow = {
-      row_number: rowNumber,
-      data,
-      errors,
-      warnings: [],
-      action: errors.length ? "invalid" : "new",
-      approved: errors.length === 0,
-      existing_component: null,
-      dedupe_suggestions: [],
-    };
-    setComponentPreviewRows((prev) => [...prev, row]);
-    setManualComponentDraft(emptyManualComponentDraft);
-    setMessage("Manual component row added to the preview.");
+    setComponentPreviewRowOverrides((prev) => ({
+      ...prev,
+      [rowNumber]: applyUpdate(rowContext),
+    }));
   };
 
   const toggleApproval = (row: PreviewRow) => {
@@ -816,21 +774,31 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     }));
   };
 
-  const toggleComponentApproval = (index: number) => {
-    setComponentPreviewRows((prev) =>
-      prev.map((row, rowIndex) => {
-        if (rowIndex !== index) {
-          return row;
-        }
-        if (hasComponentErrors(row)) {
-          return row;
-        }
-        return {
-          ...row,
-          approved: !row.approved,
-        };
-      })
-    );
+  const toggleComponentApproval = (row: ComponentPreviewRow) => {
+    if (hasComponentErrors(row)) {
+      return;
+    }
+    if (componentPreviewMode === "client") {
+      setComponentPreviewRows((prev) =>
+        prev.map((entry) => {
+          if (entry.row_number !== row.row_number) {
+            return entry;
+          }
+          return {
+            ...entry,
+            approved: !entry.approved,
+          };
+        })
+      );
+      return;
+    }
+    setComponentPreviewRowOverrides((prev) => ({
+      ...prev,
+      [row.row_number]: {
+        ...row,
+        approved: !row.approved,
+      },
+    }));
   };
 
   const submitPreviewFiles = async (files: File[]) => {
@@ -902,10 +870,9 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
         const limit = Math.max(1, endRow - startRow);
         try {
           const res = await fetch(
-            `${getApiBaseUrl()}/aircraft/import/preview/${encodeURIComponent(
+            `${API_BASE}/aircraft/import/preview/${encodeURIComponent(
               previewId
-            )}/rows?offset=${startRow}&limit=${limit}`,
-            { headers: authHeaders() }
+            )}/rows?offset=${startRow}&limit=${limit}`
           );
           const data = await res.json();
           if (!res.ok) {
@@ -926,7 +893,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
 
   useEffect(() => {
     if (previewMode === "server" && previewGridApi) {
-      previewGridApi.setGridOption("datasource", createPreviewDatasource());
+      previewGridApi.setDatasource(createPreviewDatasource());
     }
   }, [previewMode, previewGridApi, createPreviewDatasource]);
 
@@ -934,13 +901,73 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     (params: GridReadyEvent) => {
       setPreviewGridApi(params.api);
       if (previewMode === "server") {
-        params.api.setGridOption("datasource", createPreviewDatasource());
+        params.api.setDatasource(createPreviewDatasource());
       }
     },
     [previewMode, createPreviewDatasource]
   );
 
-  const submitComponentPreviewFile = async (files: File[]) => {
+  const createComponentPreviewDatasource = useCallback(
+    () => ({
+      getRows: async (params: {
+        startRow: number;
+        endRow: number;
+        successCallback: (rows: ComponentPreviewRow[], lastRow?: number) => void;
+        failCallback: () => void;
+      }) => {
+        if (!componentPreviewId) {
+          params.successCallback([], 0);
+          return;
+        }
+        const startRow = params.startRow ?? 0;
+        const endRow = params.endRow ?? startRow + 200;
+        const limit = Math.max(1, endRow - startRow);
+        try {
+          const res = await fetch(
+            `${API_BASE}/aircraft/${encodeURIComponent(
+              componentAircraftSerial.trim()
+            )}/components/import/preview/${encodeURIComponent(
+              componentPreviewId
+            )}/rows?offset=${startRow}&limit=${limit}`
+          );
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.detail ?? "Failed to fetch component preview.");
+          }
+          const rows: ComponentPreviewRow[] = (data.rows ?? [])
+            .map((row: ComponentPreviewRow) => normalizeComponentPreviewRow(row))
+            .map((row: ComponentPreviewRow) => mergeComponentPreviewOverride(row));
+          const totalRows = data.total_rows ?? 0;
+          params.successCallback(rows, totalRows);
+        } catch (err) {
+          params.failCallback();
+        }
+      },
+    }),
+    [componentPreviewId, componentPreviewRowOverrides, componentAircraftSerial]
+  );
+
+  useEffect(() => {
+    if (componentPreviewMode === "server" && componentPreviewGridApi) {
+      componentPreviewGridApi.setDatasource(createComponentPreviewDatasource());
+    }
+  }, [
+    componentPreviewMode,
+    componentPreviewGridApi,
+    createComponentPreviewDatasource,
+  ]);
+
+  const handleComponentGridReady = useCallback(
+    (params: GridReadyEvent) => {
+      setComponentPreviewGridApi(params.api);
+      if (componentPreviewMode === "server") {
+        params.api.setDatasource(createComponentPreviewDatasource());
+      }
+    },
+    [componentPreviewMode, createComponentPreviewDatasource]
+  );
+
+  const submitComponentPreviewFile = async (file: File) => {
     if (!componentAircraftSerial.trim()) {
       setMessage("Enter the aircraft serial number for components.");
       return;
@@ -970,17 +997,26 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
         throw new Error(data.detail ?? "Component preview failed");
       }
       const rows: ComponentPreviewRow[] = (data.rows ?? []).map(
-        (row: ComponentPreviewRow) => ({
-          ...row,
-          approved: row.errors.length === 0,
-        })
+        (row: ComponentPreviewRow) => normalizeComponentPreviewRow(row)
       );
+      const totalRows = data.total_rows ?? rows.length;
+      const nextMode =
+        totalRows > MAX_CLIENT_PREVIEW_ROWS ? "server" : "client";
       setComponentPreviewRows(rows);
+      setComponentPreviewRowOverrides({});
+      setComponentPreviewId(data.preview_id ?? null);
+      setComponentPreviewTotalRows(totalRows);
+      setComponentPreviewMode(nextMode);
       setComponentColumnMapping(data.column_mapping ?? null);
       setComponentSummary(data.summary ?? null);
       setMessage("Component preview ready. Review and confirm import.");
     } catch (err: any) {
       setMessage(err.message ?? "Error previewing components.");
+      setComponentPreviewId(null);
+      setComponentPreviewTotalRows(0);
+      setComponentPreviewMode("client");
+      setComponentPreviewRows([]);
+      setComponentPreviewRowOverrides({});
     } finally {
       setComponentPreviewLoading(false);
     }
@@ -1446,6 +1482,12 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
   };
 
   const applyComponentTemplateToPreview = () => {
+    if (componentPreviewMode === "server") {
+      setMessage(
+        "Template defaults are disabled in large preview mode. Apply defaults in the source file instead."
+      );
+      return;
+    }
     const selected = componentTemplates.find(
       (template) => template.id === componentSelectedTemplateId
     );
@@ -1851,6 +1893,237 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     );
   };
 
+  const componentGridColumns = useMemo<ColDef<ComponentPreviewRow>[]>(
+    () => [
+      {
+        headerName: "Approve",
+        colId: "approved",
+        width: 110,
+        pinned: "left",
+        suppressMovable: true,
+        cellRenderer: (params: ICellRendererParams<ComponentPreviewRow>) => {
+          if (!params.data) {
+            return null;
+          }
+          return (
+            <input
+              type="checkbox"
+              checked={params.data.approved}
+              disabled={hasComponentErrors(params.data)}
+              onChange={() => {
+                const currentRow = params.data!;
+                const nextRow = {
+                  ...currentRow,
+                  approved: !currentRow.approved,
+                };
+                if (componentPreviewMode === "server") {
+                  params.node?.setData(nextRow);
+                }
+                toggleComponentApproval(currentRow);
+              }}
+            />
+          );
+        },
+      },
+      {
+        headerName: "Row",
+        field: "row_number",
+        width: 80,
+        pinned: "left",
+      },
+      {
+        headerName: "Action",
+        colId: "action",
+        minWidth: 200,
+        cellRenderer: (params: ICellRendererParams<ComponentPreviewRow>) => {
+          const row = params.data;
+          if (!row) {
+            return null;
+          }
+          const action = row.errors.length > 0 ? "invalid" : row.action;
+          return (
+            <div className="flex flex-col gap-1 text-xs">
+              <span
+                className={`inline-flex w-fit items-center rounded-full px-2 py-1 text-xs font-semibold ${
+                  action === "new"
+                    ? "bg-emerald-500/20 text-emerald-200"
+                    : action === "update"
+                    ? "bg-sky-500/20 text-sky-200"
+                    : "bg-rose-500/20 text-rose-200"
+                }`}
+              >
+                {action}
+              </span>
+              {row.errors.length > 0 && (
+                <div className="text-rose-300">{row.errors.join(" ")}</div>
+              )}
+              {row.warnings.length > 0 && (
+                <div className="text-amber-200">{row.warnings.join(" ")}</div>
+              )}
+              {row.dedupe_suggestions &&
+                row.dedupe_suggestions.length > 0 && (
+                  <div className="text-amber-200">
+                    {row.dedupe_suggestions.map((suggestion, idx) => (
+                      <div key={`${row.row_number}-dedupe-${idx}`}>
+                        {suggestion.source === "existing" ? "Existing" : "File"}{" "}
+                        match for {suggestion.part_number}/
+                        {suggestion.serial_number}:{" "}
+                        {suggestion.positions.join(", ")}
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "Position",
+        colId: "position",
+        editable: true,
+        width: 140,
+        valueGetter: (params) => params.data?.data.position ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            position: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Part Number",
+        colId: "part_number",
+        editable: true,
+        width: 160,
+        valueGetter: (params) => params.data?.data.part_number ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            part_number: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Serial Number",
+        colId: "serial_number",
+        editable: true,
+        width: 160,
+        valueGetter: (params) => params.data?.data.serial_number ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            serial_number: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Existing PN/SN",
+        colId: "existing_component",
+        minWidth: 200,
+        cellRenderer: (params: ICellRendererParams<ComponentPreviewRow>) => {
+          const existing = params.data?.existing_component;
+          if (!existing?.part_number && !existing?.serial_number) {
+            return <span className="text-slate-500">—</span>;
+          }
+          return (
+            <div className="text-xs text-slate-300">
+              <div>{existing.part_number ?? "—"}</div>
+              <div className="text-slate-400">
+                {existing.serial_number ?? "—"}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        headerName: "ATA",
+        colId: "ata",
+        editable: true,
+        width: 100,
+        valueGetter: (params) => params.data?.data.ata ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            ata: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+      {
+        headerName: "Notes",
+        colId: "notes",
+        editable: true,
+        minWidth: 200,
+        valueGetter: (params) => params.data?.data.notes ?? "",
+        valueSetter: (params) => {
+          if (!params.data) {
+            return false;
+          }
+          params.data.data = {
+            ...params.data.data,
+            notes: params.newValue ?? "",
+          };
+          return true;
+        },
+      },
+    ],
+    [componentPreviewMode, toggleComponentApproval, hasComponentErrors]
+  );
+
+  const componentGridDefaultColDef = useMemo<ColDef<ComponentPreviewRow>>(
+    () => ({
+      editable: false,
+      resizable: true,
+      sortable: true,
+      suppressMovable: false,
+      filter: true,
+    }),
+    []
+  );
+
+  const handleComponentCellValueChanged = (
+    event: CellValueChangedEvent<ComponentPreviewRow>
+  ) => {
+    if (!event.data) {
+      return;
+    }
+    const field = event.colDef.colId as keyof ComponentRowData | undefined;
+    if (!field) {
+      return;
+    }
+    const editableFields: (keyof ComponentRowData)[] = [
+      "position",
+      "part_number",
+      "serial_number",
+      "ata",
+      "notes",
+    ];
+    if (!editableFields.includes(field)) {
+      return;
+    }
+    updateComponentPreviewRowValue(
+      event.data.row_number,
+      field,
+      event.newValue ?? "",
+      event.data
+    );
+  };
+
   const buildConfirmedRows = (rows: PreviewRow[]): ConfirmedRow[] => {
     return rows.map((row) => {
       const cells: Record<string, ConfirmedCell> = {};
@@ -1912,7 +2185,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
         previewMode === "server"
           ? rejectedOverrideRows.map((row) => row.row_number)
           : [];
-      const res = await fetch(`${getApiBaseUrl()}/aircraft/import`, {
+      const res = await fetch(`${API_BASE}/aircraft/import`, {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -1958,10 +2231,31 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
       setMessage("Enter the aircraft serial number for components.");
       return;
     }
-    const approvedRows = componentPreviewRows.filter(
+    const approvedRows =
+      componentPreviewMode === "client"
+        ? componentPreviewRows.filter(
+            (row) => row.approved && row.errors.length === 0
+          )
+        : [];
+    const overrideRows = Object.values(componentPreviewRowOverrides);
+    const approvedOverrideRows = overrideRows.filter(
       (row) => row.approved && row.errors.length === 0
     );
-    if (approvedRows.length === 0) {
+    const rejectedOverrideRows = overrideRows.filter((row) => !row.approved);
+    if (
+      componentPreviewMode === "client" &&
+      approvedRows.length === 0 &&
+      approvedOverrideRows.length === 0
+    ) {
+      setMessage("Select at least one valid component row to import.");
+      return;
+    }
+    if (
+      componentPreviewMode === "server" &&
+      !componentSummary?.new &&
+      !componentSummary?.update &&
+      approvedOverrideRows.length === 0
+    ) {
       setMessage("Select at least one valid component row to import.");
       return;
     }
@@ -1969,6 +2263,14 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     setMessage(null);
 
     try {
+      const approvedRowNumbers =
+        componentPreviewMode === "client"
+          ? approvedRows.map((row) => row.row_number)
+          : approvedOverrideRows.map((row) => row.row_number);
+      const rejectedRowNumbers =
+        componentPreviewMode === "server"
+          ? rejectedOverrideRows.map((row) => row.row_number)
+          : [];
       const res = await fetch(
         `${getApiBaseUrl()}/aircraft/${encodeURIComponent(
           componentAircraftSerial.trim()
@@ -1977,10 +2279,21 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
           method: "POST",
           headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
-            rows: approvedRows.map((row) => ({
-              row_number: row.row_number,
-              ...row.data,
-            })),
+            rows:
+              componentPreviewMode === "client"
+                ? approvedRows.map((row) => ({
+                    row_number: row.row_number,
+                    ...row.data,
+                  }))
+                : approvedOverrideRows.map((row) => ({
+                    row_number: row.row_number,
+                    ...row.data,
+                  })),
+            preview_id: componentPreviewId,
+            approved_row_numbers:
+              componentPreviewMode === "server" ? approvedRowNumbers : undefined,
+            rejected_row_numbers:
+              componentPreviewMode === "server" ? rejectedRowNumbers : undefined,
           }),
         }
       );
@@ -2018,13 +2331,23 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     return Math.max(0, baseApproved - rejected + added);
   }, [previewMode, previewRows, previewSummary, previewRowOverrides]);
 
-  const componentApprovedCount = useMemo(
-    () =>
-      componentPreviewRows.filter(
+  const componentApprovedCount = useMemo(() => {
+    if (componentPreviewMode === "client") {
+      return componentPreviewRows.filter(
         (row) => row.approved && !hasComponentErrors(row)
-      ).length,
-    [componentPreviewRows]
-  );
+      ).length;
+    }
+    const baseApproved =
+      (componentSummary?.new ?? 0) + (componentSummary?.update ?? 0);
+    const overrides = Object.values(componentPreviewRowOverrides);
+    const rejected = overrides.filter(
+      (row) => !row.approved && row.errors.length === 0
+    ).length;
+    const added = overrides.filter(
+      (row) => row.approved && row.errors.length === 0 && row.action === "invalid"
+    ).length;
+    return Math.max(0, baseApproved - rejected + added);
+  }, [componentPreviewMode, componentPreviewRows, componentSummary, componentPreviewRowOverrides]);
 
   const aircraftHasPreview =
     previewRows.length > 0 || previewTotalRows > 0 || !!previewId;
@@ -2239,10 +2562,13 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                 } ${aircraftStageIndex === 1 ? "is-active" : ""}`}
               >
                 <button
-                  type="button"
-                  className="import-stepper__button"
-                  onClick={() => setAircraftStageIndex(1)}
-                  disabled={maxAircraftStage < 1}
+                  onClick={applyTemplateToPreview}
+                  disabled={
+                    previewMode === "server" ||
+                    !previewRows.length ||
+                    !selectedTemplateId
+                  }
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
                 >
                   Review preview
                 </button>
@@ -2810,98 +3136,33 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                 </div>
               </div>
 
-              <div className="import-stage__panel">
-                <div className="page-section__grid">
-                  <div className="card card--form">
-                    <div className="card-header">
-                      <div>
-                        <div className="import-step__eyebrow">Step 3</div>
-                        <h3 className="import-step__title">Confirm & finalize</h3>
-                      </div>
-                      <span className="import-step__status">
-                        {aircraftStep >= 3 ? "Complete" : "Waiting"}
-                      </span>
-                    </div>
-
-                    <div className="form-actions form-actions--inline">
-                      <button
-                        onClick={confirmImport}
-                        disabled={confirmLoading || approvedCount === 0}
-                        className="btn"
-                      >
-                        {confirmLoading
-                          ? "Importing..."
-                          : `Confirm Import (${approvedCount})`}
-                      </button>
-                    </div>
-
-                    <div className="import-snapshot">
-                      <div className="import-snapshot__header">
-                        <div>
-                          <h4>Undo / Redo</h4>
-                          <p>Snapshot history for this import batch.</p>
-                        </div>
-                        <button
-                          onClick={() => loadSnapshotHistory(importBatchId)}
-                          disabled={!importBatchId || snapshotLoading}
-                          className="btn-secondary"
-                        >
-                          {snapshotLoading ? "Refreshing..." : "Refresh"}
-                        </button>
-                      </div>
-
-                      <div className="import-snapshot__controls">
-                        <select
-                          value={selectedSnapshotId ?? ""}
-                          onChange={(event) =>
-                            setSelectedSnapshotId(
-                              event.target.value
-                                ? Number(event.target.value)
-                                : null
-                            )
-                          }
-                          disabled={!snapshots.length}
-                          className="input"
-                        >
-                          <option value="">Select snapshot...</option>
-                          {snapshots.map((snapshot) => (
-                            <option key={snapshot.id} value={snapshot.id}>
-                              {new Date(snapshot.created_at).toLocaleString()} (#
-                              {snapshot.id})
-                            </option>
-                          ))}
-                        </select>
-                        <div className="import-snapshot__actions">
-                          <button
-                            onClick={handleUndoSnapshot}
-                            disabled={
-                              snapshotActionLoading ||
-                              !selectedSnapshotId ||
-                              !snapshots.length
-                            }
-                            className="btn-secondary"
-                          >
-                            Undo
-                          </button>
-                          <button
-                            onClick={handleRedoSnapshot}
-                            disabled={
-                              snapshotActionLoading ||
-                              !selectedSnapshotId ||
-                              !snapshots.length
-                            }
-                            className="btn-secondary"
-                          >
-                            Redo
-                          </button>
-                        </div>
-                      </div>
-                      {importBatchId && (
-                        <p className="form-hint">Batch ID: {importBatchId}</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
+          {(previewRows.length > 0 || previewTotalRows > 0) && (
+            <div className="mt-6">
+              <div
+                className="ag-theme-alpine-dark border border-slate-800 rounded-2xl overflow-hidden"
+                style={{ height: 560 }}
+              >
+                <AgGridReact<PreviewRow>
+                  key={previewMode}
+                  rowData={previewMode === "client" ? previewRows : undefined}
+                  columnDefs={aircraftGridColumns}
+                  defaultColDef={aircraftGridDefaultColDef}
+                  rowSelection="multiple"
+                  suppressRowClickSelection
+                  rowBuffer={12}
+                  rowModelType={
+                    previewMode === "server" ? "infinite" : "clientSide"
+                  }
+                  cacheBlockSize={200}
+                  maxBlocksInCache={5}
+                  suppressColumnVirtualisation={false}
+                  suppressRowVirtualisation={false}
+                  enableCellTextSelection
+                  enableRangeSelection
+                  getRowId={(params) => `${params.data.row_number}`}
+                  onGridReady={handlePreviewGridReady}
+                  onCellValueChanged={handleAircraftCellValueChanged}
+                />
               </div>
             </div>
           </div>
@@ -2955,10 +3216,13 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                 } ${componentStageIndex === 1 ? "is-active" : ""}`}
               >
                 <button
-                  type="button"
-                  className="import-stepper__button"
-                  onClick={() => setComponentStageIndex(1)}
-                  disabled={maxComponentStage < 1}
+                  onClick={applyComponentTemplateToPreview}
+                  disabled={
+                    componentPreviewMode === "server" ||
+                    !componentPreviewRows.length ||
+                    !componentSelectedTemplateId
+                  }
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
                 >
                   Review preview
                 </button>
@@ -3264,379 +3528,51 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                   </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              <div className="import-stage__panel">
-                <div className="page-section__grid">
-                  <div className="card card--form">
-                    <div className="card-header">
-                      <div>
-                        <div className="import-step__eyebrow">Step 2</div>
-                        <h3 className="import-step__title">Review & map components</h3>
-                      </div>
-                      <span className="import-step__status">
-                        {componentStep >= 2 ? "Ready" : "Waiting"}
-                      </span>
-                    </div>
-
-                    {componentSummary && (
-                      <div className="import-summary-grid">
-                        <div className="card card--success">
-                          <div className="import-summary__label">New</div>
-                          <div className="import-summary__value">
-                            {componentSummary.new}
-                          </div>
-                        </div>
-                        <div className="card card--info">
-                          <div className="import-summary__label">Update</div>
-                          <div className="import-summary__value">
-                            {componentSummary.update}
-                          </div>
-                        </div>
-                        <div className="card card--warning">
-                          <div className="import-summary__label">Invalid</div>
-                          <div className="import-summary__value">
-                            {componentSummary.invalid}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    <details className="import-advanced" open={false}>
-                      <summary>Templates & defaults</summary>
-                      <div className="import-advanced__body">
-                        <div className="form-row">
-                          <label>Component template</label>
-                          <select
-                            value={componentSelectedTemplateId}
-                            onChange={(e) =>
-                              setComponentSelectedTemplateId(
-                                e.target.value ? Number(e.target.value) : ""
-                              )
-                            }
-                            className="input"
-                          >
-                            <option value="">Select template</option>
-                            {componentTemplates.map((template) => (
-                              <option key={template.id} value={template.id}>
-                                {template.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="form-actions form-actions--inline">
-                          <button
-                            onClick={applyComponentTemplateToPreview}
-                            disabled={
-                              !componentPreviewRows.length ||
-                              !componentSelectedTemplateId
-                            }
-                            className="btn"
-                          >
-                            Apply template to preview
-                          </button>
-                          <button
-                            onClick={saveComponentTemplate}
-                            disabled={
-                              componentTemplateLoading || !componentColumnMapping
-                            }
-                            className="btn-secondary"
-                          >
-                            {componentTemplateLoading
-                              ? "Saving..."
-                              : "Save mapping template"}
-                          </button>
-                        </div>
-
-                        <div className="import-template-grid">
-                          <div className="form-row">
-                            <label>Template name</label>
-                            <input
-                              type="text"
-                              value={componentTemplateName}
-                              onChange={(e) =>
-                                setComponentTemplateName(e.target.value)
-                              }
-                              className="input"
-                            />
-                          </div>
-                          <div className="form-row">
-                            <label>Aircraft template</label>
-                            <input
-                              type="text"
-                              value={componentTemplateAircraftTemplate}
-                              onChange={(e) =>
-                                setComponentTemplateAircraftTemplate(e.target.value)
-                              }
-                              className="input"
-                            />
-                          </div>
-                          <div className="form-row">
-                            <label>Model code</label>
-                            <input
-                              type="text"
-                              value={componentTemplateModelCode}
-                              onChange={(e) =>
-                                setComponentTemplateModelCode(e.target.value)
-                              }
-                              className="input"
-                            />
-                          </div>
-                          <div className="form-row">
-                            <label>Operator code</label>
-                            <input
-                              type="text"
-                              value={componentTemplateOperatorCode}
-                              onChange={(e) =>
-                                setComponentTemplateOperatorCode(e.target.value)
-                              }
-                              className="input"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="form-row">
-                          <label>Default values (JSON)</label>
-                          <textarea
-                            value={componentTemplateDefaultsJson}
-                            onChange={(e) =>
-                              setComponentTemplateDefaultsJson(e.target.value)
-                            }
-                            rows={4}
-                            className="input"
-                          />
-                        </div>
-                      </div>
-                    </details>
-
-                    {componentPreviewRows.length > 0 && (
-                      <div className="table-wrapper import-grid">
-                        <table className="table table-compact table-striped">
-                          <thead>
-                            <tr>
-                              <th>Approve</th>
-                              <th>Row</th>
-                              <th>Action</th>
-                              <th>Position</th>
-                              <th>Part Number</th>
-                              <th>Serial Number</th>
-                              <th>Existing PN/SN</th>
-                              <th>ATA</th>
-                              <th>Notes</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {componentPreviewRows.map((row, index) => {
-                              const action =
-                                row.errors.length > 0 ? "invalid" : row.action;
-                              const positionMissing = !row.data.position?.trim();
-                              const existingPart = row.existing_component?.part_number;
-                              const existingSerial =
-                                row.existing_component?.serial_number;
-                              const partDiff =
-                                existingPart &&
-                                row.data.part_number &&
-                                existingPart !== row.data.part_number;
-                              const serialDiff =
-                                existingSerial &&
-                                row.data.serial_number &&
-                                existingSerial !== row.data.serial_number;
-                              return (
-                                <tr key={`${row.row_number}-${index}`}>
-                                  <td>
-                                    <input
-                                      type="checkbox"
-                                      checked={row.approved}
-                                      disabled={hasComponentErrors(row)}
-                                      onChange={() => toggleComponentApproval(index)}
-                                    />
-                                  </td>
-                                  <td className="table-secondary-text">
-                                    {row.row_number}
-                                  </td>
-                                  <td>
-                                    <span
-                                      className={`import-badge import-badge--${action}`}
-                                    >
-                                      {action}
-                                    </span>
-                                    {row.errors.length > 0 && (
-                                      <div className="import-row-warning">
-                                        {row.errors.join(" ")}
-                                      </div>
-                                    )}
-                                    {row.warnings.length > 0 && (
-                                      <div className="import-row-warning import-row-warning--warn">
-                                        {row.warnings.join(" ")}
-                                      </div>
-                                    )}
-                                    {row.dedupe_suggestions &&
-                                      row.dedupe_suggestions.length > 0 && (
-                                        <div className="import-row-warning import-row-warning--warn">
-                                          {row.dedupe_suggestions.map(
-                                            (suggestion, idx) => {
-                                              const sourceLabel =
-                                                suggestion.source === "existing"
-                                                  ? "Existing"
-                                                  : suggestion.source === "fleet"
-                                                    ? "Fleet"
-                                                    : "File";
-                                              const matchList =
-                                                suggestion.source === "fleet"
-                                                  ? suggestion.aircraft_serial_numbers
-                                                  : suggestion.positions;
-                                              return (
-                                                <div
-                                                  key={`${row.row_number}-dedupe-${idx}`}
-                                                >
-                                                  {sourceLabel} match for{" "}
-                                                  {suggestion.part_number}/
-                                                  {suggestion.serial_number}:{" "}
-                                                  {(matchList ?? ["—"]).join(", ")}
-                                                </div>
-                                              );
-                                            }
-                                          )}
-                                        </div>
-                                      )}
-                                  </td>
-                                  <td>
-                                    <input
-                                      type="text"
-                                      value={row.data.position ?? ""}
-                                      onChange={(e) =>
-                                        handleComponentPreviewRowChange(
-                                          index,
-                                          "position",
-                                          e.target.value
-                                        )
-                                      }
-                                      className={`input input--compact ${
-                                        positionMissing ? "input--error" : ""
-                                      }`}
-                                    />
-                                  </td>
-                                  <td>
-                                    <input
-                                      type="text"
-                                      value={row.data.part_number ?? ""}
-                                      onChange={(e) =>
-                                        handleComponentPreviewRowChange(
-                                          index,
-                                          "part_number",
-                                          e.target.value
-                                        )
-                                      }
-                                      className={`input input--compact ${
-                                        partDiff ? "input--warn" : ""
-                                      }`}
-                                    />
-                                  </td>
-                                  <td>
-                                    <input
-                                      type="text"
-                                      value={row.data.serial_number ?? ""}
-                                      onChange={(e) =>
-                                        handleComponentPreviewRowChange(
-                                          index,
-                                          "serial_number",
-                                          e.target.value
-                                        )
-                                      }
-                                      className={`input input--compact ${
-                                        serialDiff ? "input--warn" : ""
-                                      }`}
-                                    />
-                                  </td>
-                                  <td className="table-secondary-text">
-                                    {existingPart || existingSerial ? (
-                                      <div>
-                                        <div>{existingPart ?? "—"}</div>
-                                        <div className="table-secondary-text">
-                                          {existingSerial ?? "—"}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <span className="table-secondary-text">—</span>
-                                    )}
-                                  </td>
-                                  <td>
-                                    <input
-                                      type="text"
-                                      value={row.data.ata ?? ""}
-                                      onChange={(e) =>
-                                        handleComponentPreviewRowChange(
-                                          index,
-                                          "ata",
-                                          e.target.value
-                                        )
-                                      }
-                                      className="input input--compact"
-                                    />
-                                  </td>
-                                  <td>
-                                    <input
-                                      type="text"
-                                      value={row.data.notes ?? ""}
-                                      onChange={(e) =>
-                                        handleComponentPreviewRowChange(
-                                          index,
-                                          "notes",
-                                          e.target.value
-                                        )
-                                      }
-                                      className="input input--compact"
-                                    />
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {componentColumnMapping && (
-                      <div className="form-hint">
-                        Detected mapping:{" "}
-                        {Object.entries(componentColumnMapping)
-                          .filter(([, value]) => value)
-                          .map(([key, value]) => `${key} → ${value}`)
-                          .join(", ")}
-                      </div>
-                    )}
-                  </div>
-                </div>
+          {(componentPreviewRows.length > 0 || componentPreviewTotalRows > 0) && (
+            <div className="mt-6">
+              <div
+                className="ag-theme-alpine-dark border border-slate-800 rounded-2xl overflow-hidden"
+                style={{ height: 520 }}
+              >
+                <AgGridReact<ComponentPreviewRow>
+                  key={componentPreviewMode}
+                  rowData={
+                    componentPreviewMode === "client"
+                      ? componentPreviewRows
+                      : undefined
+                  }
+                  columnDefs={componentGridColumns}
+                  defaultColDef={componentGridDefaultColDef}
+                  rowSelection="multiple"
+                  suppressRowClickSelection
+                  rowBuffer={12}
+                  rowModelType={
+                    componentPreviewMode === "server" ? "infinite" : "clientSide"
+                  }
+                  cacheBlockSize={200}
+                  maxBlocksInCache={5}
+                  suppressColumnVirtualisation={false}
+                  suppressRowVirtualisation={false}
+                  enableCellTextSelection
+                  enableRangeSelection
+                  getRowId={(params) => `${params.data.row_number}`}
+                  onGridReady={handleComponentGridReady}
+                  onCellValueChanged={handleComponentCellValueChanged}
+                />
               </div>
+            </div>
+          )}
 
-              <div className="import-stage__panel">
-                <div className="page-section__grid">
-                  <div className="card card--form">
-                    <div className="card-header">
-                      <div>
-                        <div className="import-step__eyebrow">Step 3</div>
-                        <h3 className="import-step__title">Confirm component import</h3>
-                      </div>
-                      <span className="import-step__status">
-                        {componentStep >= 3 ? "Complete" : "Waiting"}
-                      </span>
-                    </div>
-                    <div className="form-actions form-actions--inline">
-                      <button
-                        onClick={confirmComponentImport}
-                        disabled={
-                          componentConfirmLoading || componentApprovedCount === 0
-                        }
-                        className="btn"
-                      >
-                        {componentConfirmLoading
-                          ? "Importing..."
-                          : `Confirm Import (${componentApprovedCount})`}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
+          {componentColumnMapping && (
+            <div className="mt-4 text-xs text-slate-400">
+              Detected mapping:{" "}
+              {Object.entries(componentColumnMapping)
+                .filter(([, value]) => value)
+                .map(([key, value]) => `${key} → ${value}`)
+                .join(", ")}
             </div>
           </div>
         </section>

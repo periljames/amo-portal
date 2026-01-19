@@ -1,16 +1,16 @@
 # backend/amodb/apps/fleet/router.py
 
-import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 import importlib
+import logging
 import math
 import numbers
-import re
+import os
 from pathlib import Path
 import subprocess
 import tempfile
-import zipfile
+import time
 from typing import List, Dict, Any, Optional
 from uuid import uuid4
 
@@ -23,12 +23,10 @@ from fastapi import (
     UploadFile,
     File,
 )
-from fastapi.responses import FileResponse
-from sqlalchemy import or_, tuple_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ...database import get_db
-from ...entitlements import require_module
+from ...database import WriteSessionLocal, get_db
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts import models as account_models
@@ -154,63 +152,36 @@ router = APIRouter(
     dependencies=[Depends(require_module("fleet"))],
 )
 
-MAX_HOURS = 1_000_000.0
-MAX_CYCLES = 1_000_000.0
-MAX_CALENDAR_MONTHS = 1_200
-MIN_VALID_DATE = date(1950, 1, 1)
+logger = logging.getLogger(__name__)
+MAX_PREVIEW_PAGE_SIZE = int(os.getenv("PREVIEW_PAGE_SIZE_MAX", "500"))
+DEFAULT_PREVIEW_PAGE_SIZE = int(os.getenv("PREVIEW_PAGE_SIZE_DEFAULT", "200"))
+PREVIEW_SESSION_TTL_HOURS = int(os.getenv("PREVIEW_SESSION_TTL_HOURS", "24"))
 
-AIRCRAFT_SERIAL_PATTERN = re.compile(r"^[A-Z0-9-]{1,50}$")
-REGISTRATION_PATTERN = re.compile(r"^[A-Z0-9-]{1,20}$")
-PART_NUMBER_PATTERN = re.compile(r"^[A-Z0-9./-]{1,50}$")
-COMPONENT_SERIAL_PATTERN = re.compile(r"^[A-Z0-9./-]{1,50}$")
 
-AIRCRAFT_SAFETY_FIELDS = {
-    "registration",
-    "total_hours",
-    "total_cycles",
-    "last_log_date",
-}
+def _clamp_preview_limit(limit: int) -> int:
+    return max(1, min(limit, MAX_PREVIEW_PAGE_SIZE))
 
-COMPONENT_SAFETY_FIELDS = {
-    "position",
-    "part_number",
-    "serial_number",
-    "installed_date",
-    "installed_hours",
-    "installed_cycles",
-    "current_hours",
-    "current_cycles",
-    "tbo_hours",
-    "tbo_cycles",
-    "tbo_calendar_months",
-    "hsi_hours",
-    "hsi_cycles",
-    "hsi_calendar_months",
-    "last_overhaul_date",
-    "last_overhaul_hours",
-    "last_overhaul_cycles",
-    "unit_of_measure_hours",
-    "unit_of_measure_cycles",
-}
 
-USAGE_SAFETY_FIELDS = {
-    "date",
-    "techlog_no",
-    "block_hours",
-    "cycles",
-    "ttaf_after",
-    "tca_after",
-    "ttesn_after",
-    "tcesn_after",
-    "ttsoh_after",
-    "ttshsi_after",
-    "tcsoh_after",
-    "pttsn_after",
-    "pttso_after",
-    "tscoa_after",
-    "hours_to_mx",
-    "days_to_mx",
-}
+def _cleanup_expired_preview_sessions() -> None:
+    if PREVIEW_SESSION_TTL_HOURS <= 0:
+        return
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=PREVIEW_SESSION_TTL_HOURS)
+    db = WriteSessionLocal()
+    try:
+        deleted = (
+            db.query(models.AircraftImportPreviewSession)
+            .filter(models.AircraftImportPreviewSession.created_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        if deleted:
+            logger.info(
+                "Deleted %s expired import preview sessions older than %s hours",
+                deleted,
+                PREVIEW_SESSION_TTL_HOURS,
+            )
+    finally:
+        db.close()
 
 # ---------------------------------------------------------------------------
 # BASIC AIRCRAFT CRUD
@@ -2067,8 +2038,8 @@ def delete_import_template(
     response_model=schemas.AircraftImportPreviewResponse,
 )
 async def preview_aircraft_import(
-    files: List[UploadFile] | None = File(None),
-    file: UploadFile | None = File(None),
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(
         require_roles(*MANAGEMENT_ROLES)
@@ -2354,7 +2325,6 @@ async def preview_aircraft_import(
         row["action"] = action
 
     preview_id = str(uuid4())
-    ocr_info = ocr_infos[0] if len(uploads) == 1 and ocr_infos else None
     session = models.AircraftImportPreviewSession(
         preview_id=preview_id,
         import_type="aircraft",
@@ -2363,6 +2333,7 @@ async def preview_aircraft_import(
         summary={"new": new_count, "update": update_count, "invalid": invalid_count},
         ocr_info=ocr_info,
         formula_discrepancies=formula_discrepancies,
+        context=None,
         created_by_user_id=current_user.id,
     )
     db.add(session)
@@ -2376,6 +2347,7 @@ async def preview_aircraft_import(
             action=row["action"],
             suggested_template=row.get("suggested_template"),
             formula_proposals=row.get("formula_proposals"),
+            metadata=None,
         )
         for row in rows
     ]
@@ -2383,7 +2355,8 @@ async def preview_aircraft_import(
         db.bulk_save_objects(preview_objects)
     db.commit()
 
-    preview_page_size = 200
+    preview_page_size = _clamp_preview_limit(DEFAULT_PREVIEW_PAGE_SIZE)
+    background_tasks.add_task(_cleanup_expired_preview_sessions)
     return {
         "preview_id": preview_id,
         "total_rows": len(rows),
@@ -2403,16 +2376,19 @@ async def preview_aircraft_import(
 def list_aircraft_import_preview_rows(
     preview_id: str,
     offset: int = 0,
-    limit: int = 200,
+    limit: int = DEFAULT_PREVIEW_PAGE_SIZE,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(
         require_roles(*MANAGEMENT_ROLES)
     ),
 ):
+    start_time = time.perf_counter()
     session = db.query(models.AircraftImportPreviewSession).get(preview_id)
-    if not session:
+    if not session or session.import_type != "aircraft":
         raise HTTPException(status_code=404, detail="Preview not found")
 
+    limit = _clamp_preview_limit(limit)
+    offset = max(0, offset)
     rows = (
         db.query(models.AircraftImportPreviewRow)
         .filter(models.AircraftImportPreviewRow.preview_id == preview_id)
@@ -2420,6 +2396,15 @@ def list_aircraft_import_preview_rows(
         .offset(offset)
         .limit(limit)
         .all()
+    )
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    logger.info(
+        "Preview rows fetched: preview_id=%s offset=%s limit=%s count=%s in %.2fms",
+        preview_id,
+        offset,
+        limit,
+        len(rows),
+        elapsed_ms,
     )
     return {
         "preview_id": preview_id,
@@ -2518,6 +2503,18 @@ async def import_aircraft_file(
 
     if not rows_to_process:
         raise HTTPException(status_code=400, detail="No approved rows to import.")
+
+    if payload.preview_id and payload.rows:
+        override_map = {
+            row.row_number: row.model_dump(exclude={"row_number"})
+            for row in payload.rows
+            if row.row_number is not None
+        }
+        if override_map:
+            for row in rows_to_process:
+                row_idx = row.get("row_number")
+                if row_idx in override_map:
+                    row["data"] = override_map[row_idx]
 
     for row in rows_to_process:
         row_idx = row.get("row_number")
@@ -2759,8 +2756,8 @@ def reapply_import_snapshot(
 )
 async def preview_components_import(
     serial_number: str,
-    files: List[UploadFile] | None = File(None),
-    file: UploadFile | None = File(None),
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(
         require_roles(*MANAGEMENT_ROLES)
@@ -2995,14 +2992,109 @@ async def preview_components_import(
             }
         )
 
+    preview_id = str(uuid4())
+    session = models.AircraftImportPreviewSession(
+        preview_id=preview_id,
+        import_type="components",
+        total_rows=len(rows),
+        column_mapping=colmap,
+        summary={"new": new_count, "update": update_count, "invalid": invalid_count},
+        context={"serial_number": serial_number},
+        created_by_user_id=current_user.id,
+    )
+    db.add(session)
+    preview_objects = [
+        models.AircraftImportPreviewRow(
+            preview_id=preview_id,
+            row_number=row["row_number"],
+            data=row["data"],
+            errors=row["errors"],
+            warnings=row["warnings"],
+            action=row["action"],
+            metadata={
+                "existing_component": row.get("existing_component"),
+                "dedupe_suggestions": row.get("dedupe_suggestions"),
+            },
+        )
+        for row in rows
+    ]
+    if preview_objects:
+        db.bulk_save_objects(preview_objects)
+    db.commit()
+
+    preview_page_size = _clamp_preview_limit(DEFAULT_PREVIEW_PAGE_SIZE)
+    background_tasks.add_task(_cleanup_expired_preview_sessions)
     return {
-        "rows": rows,
+        "preview_id": preview_id,
+        "total_rows": len(rows),
+        "rows": rows[:preview_page_size],
         "column_mapping": colmap,
         "summary": {
             "new": new_count,
             "update": update_count,
             "invalid": invalid_count,
         },
+    }
+
+
+@router.get(
+    "/{serial_number}/components/import/preview/{preview_id}/rows",
+    tags=["aircraft"],
+    summary="Fetch staged component preview rows",
+)
+def list_component_import_preview_rows(
+    serial_number: str,
+    preview_id: str,
+    offset: int = 0,
+    limit: int = DEFAULT_PREVIEW_PAGE_SIZE,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(*MANAGEMENT_ROLES)
+    ),
+):
+    start_time = time.perf_counter()
+    session = db.query(models.AircraftImportPreviewSession).get(preview_id)
+    if not session or session.import_type != "components":
+        raise HTTPException(status_code=404, detail="Preview not found")
+    context_serial = (session.context or {}).get("serial_number")
+    if context_serial and context_serial != serial_number:
+        raise HTTPException(status_code=404, detail="Preview not found")
+
+    limit = _clamp_preview_limit(limit)
+    offset = max(0, offset)
+    rows = (
+        db.query(models.AircraftImportPreviewRow)
+        .filter(models.AircraftImportPreviewRow.preview_id == preview_id)
+        .order_by(models.AircraftImportPreviewRow.row_number.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    logger.info(
+        "Component preview rows fetched: preview_id=%s offset=%s limit=%s count=%s in %.2fms",
+        preview_id,
+        offset,
+        limit,
+        len(rows),
+        elapsed_ms,
+    )
+    return {
+        "preview_id": preview_id,
+        "total_rows": session.total_rows,
+        "rows": [
+            {
+                "row_number": row.row_number,
+                "data": row.data,
+                "errors": row.errors or [],
+                "warnings": row.warnings or [],
+                "action": row.action,
+                "existing_component": (row.metadata or {}).get("existing_component"),
+                "dedupe_suggestions": (row.metadata or {}).get("dedupe_suggestions")
+                or [],
+            }
+            for row in rows
+        ],
     }
 
 
@@ -3037,9 +3129,73 @@ async def confirm_components_import(
     skipped = 0
     skipped_rows: List[Dict[str, Any]] = []
 
-    for row in payload.rows:
-        row_idx = row.row_number
-        row_data = row.model_dump(exclude={"row_number"})
+    rows_to_process: List[Dict[str, Any]] = []
+    if payload.preview_id:
+        preview_session = db.query(models.AircraftImportPreviewSession).get(
+            payload.preview_id
+        )
+        if not preview_session or preview_session.import_type != "components":
+            raise HTTPException(status_code=404, detail="Preview not found")
+        context_serial = (preview_session.context or {}).get("serial_number")
+        if context_serial and context_serial != serial_number:
+            raise HTTPException(status_code=404, detail="Preview not found")
+        approved_row_numbers = set(payload.approved_row_numbers or [])
+        rejected_row_numbers = set(payload.rejected_row_numbers or [])
+        preview_query = (
+            db.query(models.AircraftImportPreviewRow)
+            .filter(models.AircraftImportPreviewRow.preview_id == payload.preview_id)
+        )
+        if approved_row_numbers:
+            preview_query = preview_query.filter(
+                or_(
+                    models.AircraftImportPreviewRow.errors == [],
+                    models.AircraftImportPreviewRow.row_number.in_(
+                        approved_row_numbers
+                    ),
+                )
+            )
+        else:
+            preview_query = preview_query.filter(
+                models.AircraftImportPreviewRow.errors == []
+            )
+        if rejected_row_numbers:
+            preview_query = preview_query.filter(
+                ~models.AircraftImportPreviewRow.row_number.in_(rejected_row_numbers)
+            )
+        preview_rows = preview_query.order_by(
+            models.AircraftImportPreviewRow.row_number.asc()
+        ).all()
+        rows_to_process = [
+            {"row_number": row.row_number, "data": row.data}
+            for row in preview_rows
+        ]
+    else:
+        rows_to_process = [
+            {
+                "row_number": row.row_number,
+                "data": row.model_dump(exclude={"row_number"}),
+            }
+            for row in payload.rows
+        ]
+
+    if not rows_to_process:
+        raise HTTPException(status_code=400, detail="No approved rows to import.")
+
+    if payload.preview_id and payload.rows:
+        override_map = {
+            row.row_number: row.model_dump(exclude={"row_number"})
+            for row in payload.rows
+            if row.row_number is not None
+        }
+        if override_map:
+            for row in rows_to_process:
+                row_idx = row.get("row_number")
+                if row_idx in override_map:
+                    row["data"] = override_map[row_idx]
+
+    for row in rows_to_process:
+        row_idx = row.get("row_number")
+        row_data = row.get("data") or {}
 
         for key, value in list(row_data.items()):
             if isinstance(value, str) and not value.strip():

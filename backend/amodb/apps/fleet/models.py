@@ -793,6 +793,7 @@ class AircraftImportPreviewSession(Base):
     summary = Column(JSON, nullable=True)
     ocr_info = Column(JSON, nullable=True)
     formula_discrepancies = Column(JSON, nullable=True)
+    context = Column(JSON, nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -831,6 +832,7 @@ class AircraftImportPreviewRow(Base):
     action = Column(String(16), nullable=False)
     suggested_template = Column(JSON, nullable=True)
     formula_proposals = Column(JSON, nullable=True)
+    metadata = Column(JSON, nullable=True)
 
 
 # ---------------------------------------------------------------------------
