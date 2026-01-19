@@ -10,8 +10,7 @@
 
 import { getToken, handleAuthFailure } from "./auth";
 
-const API_BASE =
-  (import.meta as any).env?.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "./config";
 
 export type QMSDocumentStatus = "DRAFT" | "ACTIVE" | "OBSOLETE";
 export type QMSAuditStatus = "PLANNED" | "IN_PROGRESS" | "CAP_OPEN" | "CLOSED";
@@ -125,7 +124,7 @@ function toQuery(params: Record<string, QueryVal>): string {
 
 async function fetchJson<T>(path: string): Promise<T> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
     method: "GET",
     headers: {
       Accept: "application/json",

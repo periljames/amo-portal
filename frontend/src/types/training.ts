@@ -29,6 +29,8 @@ export type TrainingStatusLabel =
   | "SCHEDULED_ONLY"
   | "NOT_DONE";
 
+export type TrainingNotificationSeverity = "INFO" | "ACTION_REQUIRED" | "WARNING";
+
 export interface TrainingCourseBase {
   course_id: string;            // e.g. "HF-REF"
   course_name: string;          // e.g. "Human Factors in Aviation (Refresher)"
@@ -236,6 +238,27 @@ export interface TrainingDeferralRequestRead extends TrainingDeferralRequestBase
 
   created_at?: string;
   updated_at?: string;
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATIONS
+// ---------------------------------------------------------------------------
+
+export interface TrainingNotificationRead {
+  id: string;
+  amo_id: string;
+  user_id: string;
+  title: string;
+  body?: string | null;
+  severity: TrainingNotificationSeverity;
+  link_path?: string | null;
+  dedupe_key?: string | null;
+  created_at: string;
+  read_at?: string | null;
+}
+
+export interface TrainingNotificationMarkRead {
+  read_at?: string | null;
 }
 
 // ---------------------------------------------------------------------------

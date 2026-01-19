@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from amodb.entitlements import require_module
 from amodb.database import get_db
 
 from . import models
@@ -42,7 +43,11 @@ from .service import (
     schedule_next_reminder,
 )
 
-router = APIRouter(prefix="/quality", tags=["Quality / QMS"])
+router = APIRouter(
+    prefix="/quality",
+    tags=["Quality / QMS"],
+    dependencies=[Depends(require_module("quality"))],
+)
 
 
 def get_actor() -> Optional[str]:

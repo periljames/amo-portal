@@ -10,23 +10,32 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import LoginPage from "./pages/LoginPage";
 import PasswordResetPage from "./pages/PasswordResetPage";
+import OnboardingPasswordPage from "./pages/OnboardingPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
+import EhmDashboardPage from "./pages/ehm/EhmDashboardPage";
+import EhmTrendsPage from "./pages/ehm/EhmTrendsPage";
+import EhmUploadsPage from "./pages/ehm/EhmUploadsPage";
 import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
+import ComponentImportPage from "./pages/ComponentImportPage";
+import AircraftDocumentsPage from "./pages/AircraftDocumentsPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminOverviewPage from "./pages/AdminOverviewPage";
 import AdminAmoManagementPage from "./pages/AdminAmoManagementPage";
-import AdminBillingPage from "./pages/AdminBillingPage";
 import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
 import PublicCarInvitePage from "./pages/PublicCarInvitePage";
 
-import { isAuthenticated } from "./services/auth";
+import { getCachedUser, isAuthenticated } from "./services/auth";
 
 type RequireAuthProps = {
+  children: React.ReactElement;
+};
+
+type RequireTenantAdminProps = {
   children: React.ReactElement;
 };
 
@@ -66,6 +75,47 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
     );
   }
 
+  const currentUser = getCachedUser();
+  if (currentUser?.must_change_password) {
+    const isOnboardingRoute = location.pathname.includes("/onboarding");
+    if (!isOnboardingRoute) {
+      const amoCode = inferAmoCodeFromPath(location.pathname) || "system";
+      return <Navigate to={`/maintenance/${amoCode}/onboarding`} replace />;
+    }
+  }
+
+  return children;
+};
+
+/**
+ * RequireTenantAdmin
+ * - Requires the user to be a superuser or AMO admin.
+ * - Falls back to the AMO overview (or login) when unauthorized.
+ */
+const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => {
+  const location = useLocation();
+  const amoCode = inferAmoCodeFromPath(location.pathname);
+  const currentUser = getCachedUser();
+  const isTenantAdmin = !!currentUser?.is_superuser || !!currentUser?.is_amo_admin;
+
+  if (!currentUser) {
+    const target = amoCode ? `/maintenance/${amoCode}/login` : "/login";
+    return (
+      <Navigate
+        to={target}
+        replace
+        state={{ from: location.pathname + location.search }}
+      />
+    );
+  }
+
+  if (!isTenantAdmin) {
+    const fallback = amoCode
+      ? `/maintenance/${amoCode}/admin/overview`
+      : "/login";
+    return <Navigate to={fallback} replace />;
+  }
+
   return children;
 };
 
@@ -80,7 +130,7 @@ export const AppRouter: React.FC = () => {
       {/* Root → login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
 
-      {/* Global login */}
+      {/* Platform login */}
       <Route path="/login" element={<LoginPage />} />
 
       {/* AMO-specific login, e.g. /maintenance/safarilink/login */}
@@ -159,7 +209,21 @@ export const AppRouter: React.FC = () => {
         path="/maintenance/:amoCode/admin/billing"
         element={
           <RequireAuth>
-            <AdminBillingPage />
+            <RequireTenantAdmin>
+              <SubscriptionManagementPage />
+            </RequireTenantAdmin>
+          </RequireAuth>
+        }
+      />
+
+      {/* Admin - usage throttling */}
+      <Route
+        path="/maintenance/:amoCode/admin/settings"
+        element={
+          <RequireAuth>
+            <RequireTenantAdmin>
+              <AdminUsageSettingsPage />
+            </RequireTenantAdmin>
           </RequireAuth>
         }
       />
@@ -174,12 +238,65 @@ export const AppRouter: React.FC = () => {
         }
       />
 
+      <Route
+        path="/maintenance/:amoCode/ehm"
+        element={
+          <RequireAuth>
+            <EhmDashboardPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/ehm/dashboard"
+        element={
+          <RequireAuth>
+            <EhmDashboardPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/ehm/trends"
+        element={
+          <RequireAuth>
+            <EhmTrendsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/ehm/uploads"
+        element={
+          <RequireAuth>
+            <EhmUploadsPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Upsell + pricing page */}
+      <Route
+        path="/maintenance/:amoCode/upsell"
+        element={
+          <RequireAuth>
+            <UpsellPage />
+          </RequireAuth>
+        }
+      />
+
       {/* Training status view, e.g. /maintenance/safarilink/planning/training */}
       <Route
         path="/maintenance/:amoCode/:department/training"
         element={
           <RequireAuth>
             <TrainingPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* User widgets settings */}
+      <Route
+        path="/maintenance/:amoCode/:department/settings/widgets"
+        element={
+          <RequireAuth>
+            <UserWidgetsPage />
           </RequireAuth>
         }
       />
@@ -200,6 +317,24 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <AircraftImportPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/component-import"
+        element={
+          <RequireAuth>
+            <ComponentImportPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Aircraft documents, e.g. /maintenance/safarilink/planning/aircraft-documents */}
+      <Route
+        path="/maintenance/:amoCode/:department/aircraft-documents"
+        element={
+          <RequireAuth>
+            <AircraftDocumentsPage />
           </RequireAuth>
         }
       />

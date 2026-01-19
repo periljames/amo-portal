@@ -11,7 +11,7 @@
 
 import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
 import { authHeaders, handleAuthFailure } from "./auth";
-import { API_BASE_URL } from "./config";
+import { getApiBaseUrl } from "./config";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
@@ -21,7 +21,7 @@ async function request<T>(
   body?: BodyInit,
   init: RequestInit = {}
 ): Promise<T> {
-  const url = `${API_BASE_URL}${path}`;
+  const url = `${getApiBaseUrl()}${path}`;
 
   const res = await fetch(url, {
     method,
@@ -102,11 +102,61 @@ export async function apiPost<T>(
   return request<T>("POST", path, bodyInit, { ...init, headers });
 }
 
+export async function apiPut<T>(
+  path: string,
+  body?: unknown,
+  init: RequestInit = {}
+): Promise<T> {
+  let bodyInit: BodyInit | undefined;
+
+  if (body === undefined || body === null) {
+    bodyInit = undefined;
+  } else if (typeof body === "string" || body instanceof FormData) {
+    bodyInit = body;
+  } else {
+    bodyInit = JSON.stringify(body);
+  }
+
+  const headers = new Headers(init.headers);
+  if (bodyInit !== undefined && !(bodyInit instanceof FormData)) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+  }
+
+  return request<T>("PUT", path, bodyInit, { ...init, headers });
+}
+
 export async function apiGet<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
   return request<T>("GET", path, undefined, init);
+}
+
+export async function apiDelete<T>(
+  path: string,
+  body?: unknown,
+  init: RequestInit = {}
+): Promise<T> {
+  let bodyInit: BodyInit | undefined;
+
+  if (body === undefined || body === null) {
+    bodyInit = undefined;
+  } else if (typeof body === "string" || body instanceof FormData) {
+    bodyInit = body;
+  } else {
+    bodyInit = JSON.stringify(body);
+  }
+
+  const headers = new Headers(init.headers);
+  if (bodyInit !== undefined && !(bodyInit instanceof FormData)) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+  }
+
+  return request<T>("DELETE", path, bodyInit, { ...init, headers });
 }
 
 // -----------------------------------------------------------------------------
@@ -146,7 +196,7 @@ export async function listCRS(
 }
 
 export function getCRSPdfUrl(crsId: number): string {
-  return `${API_BASE_URL}/crs/${crsId}/pdf`;
+  return `${getApiBaseUrl()}/crs/${crsId}/pdf`;
 }
 
 // -----------------------------------------------------------------------------
@@ -178,7 +228,7 @@ export async function fetchCRSTemplateMeta(): Promise<CRSTemplateMeta> {
 }
 
 export async function fetchCRSTemplatePdf(): Promise<Blob> {
-  const url = `${API_BASE_URL}/crs/template/pdf`;
+  const url = `${getApiBaseUrl()}/crs/template/pdf`;
 
   const res = await fetch(url, {
     method: "GET",

@@ -677,7 +677,9 @@ def upgrade() -> None:
                existing_type=sa.VARCHAR(length=20),
                type_=sa.Enum('OPEN', 'IN_PROGRESS', 'ON_HOLD', 'CLOSED', 'CANCELLED', name='work_order_status_enum', native_enum=False),
                existing_nullable=False)
-    op.drop_constraint(op.f('work_orders_wo_number_key'), 'work_orders', type_='unique')
+    op.execute(
+        "ALTER TABLE work_orders DROP CONSTRAINT IF EXISTS work_orders_wo_number_key"
+    )
     op.create_index(op.f('ix_work_orders_aircraft_serial_number'), 'work_orders', ['aircraft_serial_number'], unique=False)
     op.create_index('ix_work_orders_aircraft_status', 'work_orders', ['aircraft_serial_number', 'status'], unique=False)
     op.create_index(op.f('ix_work_orders_closed_date'), 'work_orders', ['closed_date'], unique=False)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,6 +15,22 @@ from amodb.security import get_current_active_user, require_admin, require_roles
 from . import models, schemas, services
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
+RESERVED_PLATFORM_SLUGS = {"system", "root"}
+AMO_ASSET_UPLOAD_DIR = Path(os.getenv("AMO_ASSET_UPLOAD_DIR", "uploads/amo_assets")).resolve()
+TRAINING_UPLOAD_DIR = Path(os.getenv("TRAINING_UPLOAD_DIR", "uploads/training")).resolve()
+AIRCRAFT_DOC_UPLOAD_DIR = Path(
+    os.getenv("AIRCRAFT_DOC_UPLOAD_DIR", "/tmp/amo_aircraft_documents")
+).resolve()
+AIRCRAFT_DOC_AMO_SUBDIR = "aircraft"
+
+
+def _ensure_amo_storage_dirs(amo_id: str) -> None:
+    for base in (AMO_ASSET_UPLOAD_DIR, TRAINING_UPLOAD_DIR, AIRCRAFT_DOC_UPLOAD_DIR):
+        base.mkdir(parents=True, exist_ok=True)
+
+    (AMO_ASSET_UPLOAD_DIR / amo_id).mkdir(parents=True, exist_ok=True)
+    (TRAINING_UPLOAD_DIR / amo_id).mkdir(parents=True, exist_ok=True)
+    (AIRCRAFT_DOC_UPLOAD_DIR / amo_id / AIRCRAFT_DOC_AMO_SUBDIR).mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +59,51 @@ def _require_superuser(current_user: models.User) -> models.User:
     return current_user
 
 
+def _parse_env_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _platform_settings_defaults() -> dict:
+    return {
+        "api_base_url": os.getenv("PLATFORM_API_BASE_URL"),
+        "acme_directory_url": os.getenv("ACME_DIRECTORY_URL"),
+        "acme_client": os.getenv("ACME_CLIENT"),
+        "certificate_status": os.getenv("ACME_CERT_STATUS"),
+        "certificate_issuer": os.getenv("ACME_CERT_ISSUER"),
+        "certificate_expires_at": _parse_env_datetime(
+            os.getenv("ACME_CERT_EXPIRES_AT")
+        ),
+        "last_renewed_at": _parse_env_datetime(os.getenv("ACME_CERT_RENEWED_AT")),
+        "notes": os.getenv("PLATFORM_NOTES"),
+    }
+
+
+def _get_or_create_platform_settings(db: Session) -> models.PlatformSettings:
+    settings = db.query(models.PlatformSettings).first()
+    if not settings:
+        settings = models.PlatformSettings(**_platform_settings_defaults())
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+        return settings
+
+    defaults = _platform_settings_defaults()
+    updated = False
+    for key, value in defaults.items():
+        if value is not None and getattr(settings, key) in (None, ""):
+            setattr(settings, key, value)
+            updated = True
+    if updated:
+        db.commit()
+        db.refresh(settings)
+    return settings
+
+
 @router.post(
     "/amos",
     response_model=schemas.AMORead,
@@ -60,11 +123,19 @@ def create_amo(
     """
     _require_superuser(current_user)
 
+    login_slug = payload.login_slug.strip().lower()
+
+    if login_slug in RESERVED_PLATFORM_SLUGS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Login slug is reserved for platform support.",
+        )
+
     existing = (
         db.query(models.AMO)
         .filter(
             (models.AMO.amo_code == payload.amo_code)
-            | (models.AMO.login_slug == payload.login_slug)
+            | (models.AMO.login_slug == login_slug)
         )
         .first()
     )
@@ -79,7 +150,7 @@ def create_amo(
         name=payload.name,
         icao_code=payload.icao_code,
         country=payload.country,
-        login_slug=payload.login_slug,
+        login_slug=login_slug,
         contact_email=payload.contact_email,
         contact_phone=payload.contact_phone,
         time_zone=payload.time_zone,
@@ -88,6 +159,7 @@ def create_amo(
     db.add(amo)
     db.commit()
     db.refresh(amo)
+    _ensure_amo_storage_dirs(amo.id)
     return amo
 
 
@@ -664,3 +736,41 @@ def grant_user_authorisation(
     db.commit()
     db.refresh(ua)
     return ua
+
+
+# ---------------------------------------------------------------------------
+# PLATFORM SETTINGS (SUPERUSER)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/platform-settings",
+    response_model=schemas.PlatformSettingsRead,
+    summary="Get platform settings (superuser only)",
+)
+def get_platform_settings(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    return _get_or_create_platform_settings(db)
+
+
+@router.put(
+    "/platform-settings",
+    response_model=schemas.PlatformSettingsRead,
+    summary="Update platform settings (superuser only)",
+)
+def update_platform_settings(
+    payload: schemas.PlatformSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    settings = _get_or_create_platform_settings(db)
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(settings, key, value)
+    db.commit()
+    db.refresh(settings)
+    return settings

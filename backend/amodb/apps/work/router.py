@@ -17,16 +17,22 @@ Role model (from security / AccountRole):
 
 from __future__ import annotations
 
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
+from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts.models import AccountRole, User  # type: ignore
+from amodb.apps.reliability import schemas as reliability_schemas
+from amodb.apps.reliability import services as reliability_services
 
 from . import models, schemas
+from amodb.apps.fleet import services as fleet_services
 
 # ---------------------------------------------------------------------------
 # Router
@@ -37,7 +43,7 @@ router = APIRouter(
     tags=["work_orders"],
     # All endpoints require an authenticated user; role-specific checks are
     # added per-endpoint for write operations.
-    dependencies=[Depends(get_current_active_user)],
+    dependencies=[Depends(require_module("work"))],
 )
 
 PLANNING_ROLES = {
@@ -51,6 +57,36 @@ ENGINEERING_ROLES = {
     AccountRole.CERTIFYING_TECHNICIAN,
     AccountRole.TECHNICIAN,
 }
+
+
+def _ensure_aircraft_documents_clear(db: Session, aircraft_serial_number: str) -> None:
+    """
+    Block work when mandatory aircraft documents (e.g., C of A) are due or missing evidence,
+    unless Quality has an active override.
+    """
+    blockers = fleet_services.get_blocking_documents(db, aircraft_serial_number)
+    if not blockers:
+        return
+
+    details = []
+    for doc, evaluation in blockers:
+        msg_parts = [
+            doc.document_type.value.replace("_", " ").title(),
+            evaluation.status.value,
+        ]
+        if evaluation.days_to_expiry is not None:
+            msg_parts.append(f"{evaluation.days_to_expiry} days to expiry")
+        if evaluation.missing_evidence:
+            msg_parts.append("evidence missing")
+        details.append(" - ".join(msg_parts))
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "Work is blocked until required aircraft documents are renewed and uploaded. "
+            f"Outstanding: {', '.join(details)}. Quality may override with a recorded reason."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +186,8 @@ def create_work_order(
             detail=f"Work order {payload.wo_number} already exists.",
         )
 
+    _ensure_aircraft_documents_clear(db, payload.aircraft_serial_number)
+
     wo = models.WorkOrder(
         wo_number=payload.wo_number,
         aircraft_serial_number=payload.aircraft_serial_number,
@@ -203,6 +241,15 @@ def create_work_order(
             )
             db.add(task)
 
+    if payload.is_scheduled:
+        account_services.record_usage(
+            db,
+            amo_id=current_user.amo_id,
+            meter_key=account_services.METER_KEY_SCHEDULED_JOBS,
+            quantity=1,
+            commit=False,
+        )
+
     db.commit()
     db.refresh(wo)
     return wo
@@ -235,6 +282,12 @@ def update_work_order(
         raise HTTPException(status_code=404, detail="Work order not found")
 
     data = payload.model_dump(exclude_unset=True)
+    new_status = data.get("status")
+    if new_status in {
+        models.WorkOrderStatusEnum.OPEN,
+        models.WorkOrderStatusEnum.IN_PROGRESS,
+    }:
+        _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number)
     # updated_at optimistic concurrency could be added here later if needed
     for field, value in data.items():
         setattr(wo, field, value)
@@ -343,6 +396,8 @@ def create_task(
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
 
+    _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number)
+
     is_planning = (
         current_user.is_superuser
         or current_user.role in PLANNING_ROLES
@@ -438,6 +493,13 @@ def update_task(
     is_engineering = current_user.role in ENGINEERING_ROLES
 
     data = payload.model_dump(exclude_unset=True)
+    part_movement_event_type = data.pop("part_movement_event_type", None)
+    part_movement_event_date = data.pop("part_movement_event_date", None)
+    part_movement_component_instance_id = data.pop("part_movement_component_instance_id", None)
+    part_movement_notes = data.pop("part_movement_notes", None)
+    removal_reason = data.pop("removal_reason", None)
+    hours_at_removal = data.pop("hours_at_removal", None)
+    cycles_at_removal = data.pop("cycles_at_removal", None)
 
     # Optional optimistic concurrency: if client sent last_known_updated_at,
     # check it against DB value.
@@ -447,6 +509,10 @@ def update_task(
             status_code=status.HTTP_409_CONFLICT,
             detail="Task card has been modified by another user.",
         )
+
+    incoming_status = data.get("status")
+    if incoming_status == models.TaskStatusEnum.IN_PROGRESS:
+        _ensure_aircraft_documents_clear(db, task.aircraft_serial_number)
 
     if is_planning:
         # Full update allowed
@@ -483,6 +549,45 @@ def update_task(
     db.add(task)
     db.commit()
     db.refresh(task)
+
+    if part_movement_event_type:
+        component_id = data.get("aircraft_component_id") or task.aircraft_component_id
+        if component_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="aircraft_component_id is required to record a part movement.",
+            )
+        movement_payload = reliability_schemas.PartMovementLedgerCreate(
+            aircraft_serial_number=task.aircraft_serial_number,
+            component_id=component_id,
+            component_instance_id=part_movement_component_instance_id,
+            work_order_id=task.work_order_id,
+            task_card_id=task.id,
+            event_type=part_movement_event_type,
+            event_date=part_movement_event_date or date.today(),
+            notes=part_movement_notes,
+        )
+        movement = reliability_services.create_part_movement(
+            db,
+            amo_id=current_user.amo_id,
+            data=movement_payload,
+        )
+        if part_movement_event_type == reliability_schemas.PartMovementTypeEnum.REMOVE:
+            removal_payload = reliability_schemas.RemovalEventCreate(
+                aircraft_serial_number=task.aircraft_serial_number,
+                component_id=component_id,
+                component_instance_id=part_movement_component_instance_id,
+                part_movement_id=movement.id,
+                removal_reason=removal_reason,
+                hours_at_removal=hours_at_removal,
+                cycles_at_removal=cycles_at_removal,
+            )
+            reliability_services.create_removal_event(
+                db,
+                amo_id=current_user.amo_id,
+                data=removal_payload,
+            )
+
     return task
 
 

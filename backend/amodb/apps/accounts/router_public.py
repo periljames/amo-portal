@@ -8,6 +8,7 @@ import urllib.request
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
+from pydantic import EmailStr
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -51,6 +52,25 @@ def _build_reset_link(*, amo_slug: str, token: str) -> str | None:
     base = RESET_LINK_BASE_URL.rstrip("/")
     query = urlencode({"token": token, "amo": amo_slug})
     return f"{base}/reset-password?{query}"
+
+
+def _dev_seed_login_enabled() -> bool:
+    return os.getenv("AMODB_DEV_SEED_LOGIN_ENABLED", "").lower() in {"1", "true", "yes"}
+
+
+def _require_dev_seed_token(request: Request) -> None:
+    expected = os.getenv("AMODB_DEV_SEED_TOKEN")
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Dev seed login is misconfigured.",
+        )
+    provided = request.headers.get("x-dev-seed-token")
+    if not provided or provided != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized.",
+        )
 
 
 def _maybe_send_email(
@@ -191,6 +211,116 @@ def login(
         amo=user.amo,
         department=user.department,
     )
+
+
+@router.post(
+    "/dev-seed-login",
+    response_model=schemas.Token,
+    include_in_schema=False,
+    summary="DEV ONLY: Login as the seeded superuser",
+)
+def dev_seed_login(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not _dev_seed_login_enabled():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
+
+    _require_dev_seed_token(request)
+
+    email = os.getenv("AMODB_SUPERUSER_EMAIL")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Seed login is not configured.",
+        )
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.email == email.lower().strip())
+        .first()
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Seed user not found.",
+        )
+
+    token, expires_in = services.issue_access_token_for_user(user)
+    return schemas.Token(
+        access_token=token,
+        expires_in=expires_in,
+        user=user,
+        amo=user.amo,
+        department=user.department,
+    )
+
+
+@router.get(
+    "/login-context",
+    response_model=schemas.LoginContextResponse,
+    summary="Resolve login context from email",
+)
+def login_context(
+    email: EmailStr,
+    db: Session = Depends(get_db),
+):
+    try:
+        user = services.resolve_login_context(db=db, email=email)
+    except services.LoginContextConflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Multiple AMO accounts share this email. Use your AMO portal link.",
+        )
+
+    if not user or not user.amo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active account found for this email.",
+        )
+
+    amo = user.amo
+    is_platform = bool(user.is_superuser) or amo.login_slug == "system"
+
+    return schemas.LoginContextResponse(
+        login_slug=amo.login_slug,
+        amo_code=amo.amo_code,
+        amo_name=amo.name,
+        is_platform=is_platform,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PASSWORD CHANGE (AUTHENTICATED)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/password-change",
+    response_model=schemas.UserRead,
+    summary="Change password for the current user",
+)
+def change_password(
+    payload: schemas.PasswordChangeRequest,
+    request: Request,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = services.change_password(
+            db,
+            user=current_user,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+            ip=_client_ip(request),
+            user_agent=_user_agent(request),
+        )
+    except services.AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc) or "Invalid current password.",
+        )
+    return user
 
 
 # ---------------------------------------------------------------------------

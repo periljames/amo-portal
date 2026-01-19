@@ -26,6 +26,8 @@ type AmoFormState = {
   timeZone: string;
 };
 
+const RESERVED_LOGIN_SLUGS = new Set(["system", "root"]);
+
 const AdminAmoManagementPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
@@ -135,16 +137,25 @@ const AdminAmoManagementPage: React.FC = () => {
     setAmoCreateError(null);
     setAmoCreateSuccess(null);
 
-    if (!amoForm.amoCode.trim() || !amoForm.name.trim() || !amoForm.loginSlug.trim()) {
+    const amoCodeValue = amoForm.amoCode.trim();
+    const nameValue = amoForm.name.trim();
+    const loginSlugValue = amoForm.loginSlug.trim().toLowerCase();
+
+    if (!amoCodeValue || !nameValue || !loginSlugValue) {
       setAmoCreateError("AMO code, name, and login slug are required.");
+      return;
+    }
+
+    if (RESERVED_LOGIN_SLUGS.has(loginSlugValue)) {
+      setAmoCreateError("Login slug is reserved for platform support.");
       return;
     }
 
     try {
       const created = await createAdminAmo({
-        amo_code: amoForm.amoCode.trim().toUpperCase(),
-        name: amoForm.name.trim(),
-        login_slug: amoForm.loginSlug.trim().toLowerCase(),
+        amo_code: amoCodeValue.toUpperCase(),
+        name: nameValue,
+        login_slug: loginSlugValue,
         icao_code: amoForm.icaoCode.trim() || undefined,
         country: amoForm.country.trim() || undefined,
         contact_email: amoForm.contactEmail.trim() || undefined,
@@ -192,10 +203,6 @@ const AdminAmoManagementPage: React.FC = () => {
     navigate(`/maintenance/${selectedAmo.login_slug}`, { replace: false });
   };
 
-  if (currentUser && !canAccessAdmin) {
-    return null;
-  }
-
   if (!isSuperuser) {
     return (
       <DepartmentLayout
@@ -227,7 +234,7 @@ const AdminAmoManagementPage: React.FC = () => {
       <header className="page-header">
         <h1 className="page-header__title">AMO Management</h1>
         <p className="page-header__subtitle">
-          Create AMOs, set active context, and jump into AMO dashboards.
+          Set the active AMO context or register a new AMO.
         </p>
       </header>
 
@@ -293,7 +300,7 @@ const AdminAmoManagementPage: React.FC = () => {
         <div className="card card--form" style={{ padding: 16 }}>
           <h3 style={{ marginTop: 0 }}>Create a new AMO</h3>
           <p style={{ marginTop: 0, opacity: 0.85 }}>
-            Register a new AMO and then create its first user.
+            Register a new AMO, then create its first admin user.
           </p>
 
           {amoCreateError && (
@@ -315,6 +322,7 @@ const AdminAmoManagementPage: React.FC = () => {
                 placeholder="e.g. SKYJET"
                 required
               />
+              <p className="form-hint">Short code used internally and on reports.</p>
             </div>
 
             <div className="form-row">
@@ -341,6 +349,10 @@ const AdminAmoManagementPage: React.FC = () => {
                 placeholder="skyjet"
                 required
               />
+              <p className="form-hint">
+                Used in the login URL:{" "}
+                <code>/maintenance/{amoForm.loginSlug || "your-amo"}/login</code>
+              </p>
             </div>
 
             <div className="form-row">

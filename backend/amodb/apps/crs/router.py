@@ -24,6 +24,48 @@ from .pdf_renderer import (
 
 router = APIRouter(prefix="/crs", tags=["crs"])
 
+
+def _get_amo_template_path(db: Session, amo_id: Optional[str]) -> Optional[Path]:
+    if not amo_id:
+        return None
+    asset = (
+        db.query(accounts_models.AMOAsset)
+        .filter(
+            accounts_models.AMOAsset.amo_id == amo_id,
+            accounts_models.AMOAsset.kind == accounts_models.AMOAssetKind.CRS_TEMPLATE,
+            accounts_models.AMOAsset.is_active.is_(True),
+        )
+        .order_by(accounts_models.AMOAsset.created_at.desc())
+        .first()
+    )
+    if not asset or not asset.storage_path:
+        return None
+    path = Path(asset.storage_path)
+    return path if path.exists() else None
+
+
+def _resolve_amo_id_for_crs(
+    db: Session,
+    crs: crs_models.CRS,
+) -> Optional[str]:
+    if crs.work_order and crs.work_order.amo_code:
+        amo = (
+            db.query(accounts_models.AMO)
+            .filter(accounts_models.AMO.amo_code == crs.work_order.amo_code)
+            .first()
+        )
+        if amo:
+            return amo.id
+    if crs.created_by_id:
+        user = (
+            db.query(accounts_models.User)
+            .filter(accounts_models.User.id == crs.created_by_id)
+            .first()
+        )
+        if user:
+            return user.amo_id
+    return None
+
 # --------------------------------------------------------------------------
 # CRS TEMPLATE ENDPOINTS (for UI overlay)
 # --------------------------------------------------------------------------
@@ -35,13 +77,18 @@ router = APIRouter(prefix="/crs", tags=["crs"])
     summary="Get blank CRS PDF template used for on-screen overlay",
     include_in_schema=False,
 )
-def get_crs_template_pdf():
+def get_crs_template_pdf(
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
     """
     Serve the *blank* CRS PDF template which the frontend uses
     to overlay interactive inputs for new CRS creation.
     """
     try:
-         template_path: Path = get_fillable_crs_template()
+        template_path = get_fillable_crs_template(
+            _get_amo_template_path(db, current_user.amo_id)
+        )
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -61,7 +108,10 @@ def get_crs_template_pdf():
     summary="Get CRS template field geometry metadata",
     include_in_schema=False,
 )
-def get_crs_template_meta():
+def get_crs_template_meta(
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
     """
     Serve JSON metadata that describes the page size and field geometry
     for the CRS template PDF.
@@ -69,7 +119,9 @@ def get_crs_template_meta():
     The frontend uses this to position input overlays on top of the PDF.
     """
     try:
-        meta_dict = get_crs_form_template_metadata()
+        meta_dict = get_crs_form_template_metadata(
+            _get_amo_template_path(db, current_user.amo_id)
+        )
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -503,14 +555,28 @@ def archive_crs(crs_id: int, db: Session = Depends(get_db)):
     summary="Download filled CRS PDF",
     include_in_schema=True,
 )
-def download_crs_pdf(crs_id: int):
+def download_crs_pdf(
+    crs_id: int,
+    db: Session = Depends(get_db),
+):
     """
     Generate a filled, multi-copy CRS PDF for this record and return it.
     """
-    try:
-        pdf_path: Path = create_crs_pdf(crs_id)
-    except ValueError:
+    crs = (
+        db.query(crs_models.CRS)
+        .filter(crs_models.CRS.id == crs_id)
+        .first()
+    )
+    if not crs:
         raise HTTPException(status_code=404, detail="CRS not found")
+
+    amo_id = _resolve_amo_id_for_crs(db, crs)
+    template_path = _get_amo_template_path(db, amo_id)
+
+    try:
+        pdf_path: Path = create_crs_pdf(crs_id, template_path=template_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
     return FileResponse(
         path=str(pdf_path),

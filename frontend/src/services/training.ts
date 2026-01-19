@@ -31,7 +31,8 @@
 //     Enforcement lives in backend _require_training_editor.
 
 import { apiGet, apiPost } from "./crs";
-import { authHeaders } from "./auth";
+import { authHeaders, handleAuthFailure } from "./auth";
+import { API_BASE_URL } from "./config";
 import type {
   TrainingCourseRead,
   TrainingCourseCreate,
@@ -48,7 +49,41 @@ import type {
   TrainingDeferralRequestCreate,
   TrainingDeferralRequestUpdate,
   TrainingStatusItem,
+  TrainingNotificationRead,
+  TrainingNotificationMarkRead,
 } from "../types/training";
+
+export type TrainingFileReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type TrainingFileRead = {
+  id: string;
+  amo_id: string;
+  owner_user_id: string;
+  kind: string;
+  course_id?: string | null;
+  event_id?: string | null;
+  record_id?: string | null;
+  deferral_request_id?: string | null;
+  original_filename: string;
+  content_type?: string | null;
+  size_bytes?: number | null;
+  sha256?: string | null;
+  storage_path: string;
+  review_status: TrainingFileReviewStatus;
+  reviewed_at?: string | null;
+  reviewed_by_user_id?: string | null;
+  review_comment?: string | null;
+  uploaded_by_user_id?: string | null;
+  uploaded_at: string;
+};
+
+export type TransferProgress = {
+  loadedBytes: number;
+  totalBytes?: number;
+  percent?: number;
+  megaBytesPerSecond: number;
+  megaBitsPerSecond: number;
+};
 
 // ---------------------------------------------------------------------------
 // COURSES
@@ -214,6 +249,83 @@ export async function updateTrainingEventParticipant(
 }
 
 // ---------------------------------------------------------------------------
+// TRAINING FILES (EVIDENCE DOWNLOADS)
+// ---------------------------------------------------------------------------
+
+function buildSpeed(
+  loadedBytes: number,
+  totalBytes: number | undefined,
+  startedAt: number
+): TransferProgress {
+  const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.001);
+  const megaBytesPerSecond = loadedBytes / (1024 * 1024) / elapsedSeconds;
+  const megaBitsPerSecond = megaBytesPerSecond * 8;
+  const percent = totalBytes ? Math.min((loadedBytes / totalBytes) * 100, 100) : undefined;
+  return {
+    loadedBytes,
+    totalBytes,
+    percent,
+    megaBytesPerSecond,
+    megaBitsPerSecond,
+  };
+}
+
+export async function listTrainingFiles(): Promise<TrainingFileRead[]> {
+  return apiGet<TrainingFileRead[]>("/training/files", {
+    headers: authHeaders(),
+  });
+}
+
+export async function uploadTrainingFile(payload: FormData): Promise<TrainingFileRead> {
+  return apiPost<TrainingFileRead>("/training/files/upload", payload, {
+    method: "POST",
+    headers: authHeaders(),
+  } as RequestInit);
+}
+
+export async function downloadTrainingFile(
+  fileId: string,
+  onProgress?: (progress: TransferProgress) => void
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const startedAt = performance.now();
+    xhr.open("GET", `${API_BASE_URL}/training/files/${encodeURIComponent(fileId)}/download`);
+    const headers = authHeaders();
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("progress", (event) => {
+      if (!onProgress) return;
+      const total = event.lengthComputable ? event.total : undefined;
+      onProgress(buildSpeed(event.loaded, total, startedAt));
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading training file."));
+    });
+
+    xhr.send();
+  });
+}
+
+// ---------------------------------------------------------------------------
  // TRAINING RECORDS
 // ---------------------------------------------------------------------------
 
@@ -287,6 +399,15 @@ export async function updateTrainingDeferralRequest(
   );
 }
 
+/**
+ * List deferral requests for the current user.
+ */
+export async function listMyTrainingDeferrals(): Promise<TrainingDeferralRequestRead[]> {
+  return apiGet<TrainingDeferralRequestRead[]>("/training/deferrals/me", {
+    headers: authHeaders(),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // STATUS VIEWS
 // ---------------------------------------------------------------------------
@@ -308,6 +429,54 @@ export async function getUserTrainingStatus(
 ): Promise<TrainingStatusItem[]> {
   return apiGet<TrainingStatusItem[]>(
     `/training/status/users/${encodeURIComponent(userId)}`,
+    {
+      headers: authHeaders(),
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATIONS
+// ---------------------------------------------------------------------------
+
+export interface ListTrainingNotificationsParams {
+  unread_only?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listTrainingNotifications(
+  params: ListTrainingNotificationsParams = {},
+): Promise<TrainingNotificationRead[]> {
+  const sp = new URLSearchParams();
+  if (params.unread_only) sp.set("unread_only", "true");
+  if (params.limit) sp.set("limit", String(params.limit));
+  if (params.offset) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  const path = qs ? `/training/notifications/me?${qs}` : "/training/notifications/me";
+  return apiGet<TrainingNotificationRead[]>(path, {
+    headers: authHeaders(),
+  });
+}
+
+export async function markTrainingNotificationRead(
+  notificationId: string,
+  payload: TrainingNotificationMarkRead,
+): Promise<TrainingNotificationRead> {
+  return apiPost<TrainingNotificationRead>(
+    `/training/notifications/${encodeURIComponent(notificationId)}/read`,
+    payload,
+    {
+      method: "PUT",
+      headers: authHeaders(),
+    } as RequestInit,
+  );
+}
+
+export async function markAllTrainingNotificationsRead(): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(
+    "/training/notifications/me/read-all",
+    {},
     {
       headers: authHeaders(),
     },
