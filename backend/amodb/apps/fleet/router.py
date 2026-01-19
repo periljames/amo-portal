@@ -3433,8 +3433,8 @@ def list_component_import_preview_rows(
                 "errors": row.errors or [],
                 "warnings": row.warnings or [],
                 "action": row.action,
-                "existing_component": (row.metadata_json or {}).get("existing_component"),
-                "dedupe_suggestions": (row.metadata_json or {}).get("dedupe_suggestions")
+                "existing_component": (row.row_metadata or {}).get("existing_component"),
+                "dedupe_suggestions": (row.row_metadata or {}).get("dedupe_suggestions")
                 or [],
             }
             for row in rows
