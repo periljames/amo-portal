@@ -414,6 +414,14 @@ class CAROut(BaseModel):
     invite_token: str
     reminder_interval_days: int
     next_reminder_at: Optional[datetime]
+    containment_action: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    preventive_action: Optional[str] = None
+    evidence_ref: Optional[str] = None
+    submitted_by_name: Optional[str] = None
+    submitted_by_email: Optional[str] = None
+    submitted_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -439,3 +447,22 @@ class CARInviteOut(BaseModel):
     invite_token: str
     invite_url: str
     next_reminder_at: Optional[datetime]
+    car_number: str
+    title: str
+    summary: str
+    priority: CARPriority
+    status: CARStatus
+    due_date: Optional[date]
+    target_closure_date: Optional[date]
+
+
+class CARInviteUpdate(BaseModel):
+    containment_action: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    preventive_action: Optional[str] = None
+    evidence_ref: Optional[str] = None
+    target_closure_date: Optional[date] = None
+    due_date: Optional[date] = None
+    submitted_by_name: Optional[str] = Field(default=None, max_length=255)
+    submitted_by_email: Optional[str] = Field(default=None, max_length=255)

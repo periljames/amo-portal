@@ -517,6 +517,15 @@ class CorrectiveActionRequest(Base):
     reminder_interval_days = Column(Integer, nullable=False, default=7)
     next_reminder_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
+    containment_action = Column(Text, nullable=True)
+    root_cause = Column(Text, nullable=True)
+    corrective_action = Column(Text, nullable=True)
+    preventive_action = Column(Text, nullable=True)
+    evidence_ref = Column(String(512), nullable=True)
+    submitted_by_name = Column(String(255), nullable=True)
+    submitted_by_email = Column(String(255), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
     due_date = Column(Date, nullable=True, index=True)
     target_closure_date = Column(Date, nullable=True, index=True)
     closed_at = Column(DateTime(timezone=True), nullable=True, index=True)

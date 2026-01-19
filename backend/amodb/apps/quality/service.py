@@ -229,4 +229,4 @@ def schedule_next_reminder(car: models.CorrectiveActionRequest, days: Optional[i
 
 def build_car_invite_link(car: models.CorrectiveActionRequest) -> str:
     base = os.getenv("PORTAL_FRONTEND_BASE_URL", "http://localhost:5173")
-    return f"{base}/qms/cars?invite={car.invite_token}&program={car.program.lower()}"
+    return f"{base}/car-invite?token={car.invite_token}"

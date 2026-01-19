@@ -17,6 +17,7 @@ from .schemas import (
     CARActionOut,
     CARCreate,
     CARInviteOut,
+    CARInviteUpdate,
     CAROut,
     CARUpdate,
     QMSDashboardOut,
@@ -571,7 +572,81 @@ def get_car_invite(car_id: UUID, db: Session = Depends(get_db)):
         "invite_token": car.invite_token,
         "invite_url": url,
         "next_reminder_at": car.next_reminder_at,
+        "car_number": car.car_number,
+        "title": car.title,
+        "summary": car.summary,
+        "priority": car.priority,
+        "status": car.status,
+        "due_date": car.due_date,
+        "target_closure_date": car.target_closure_date,
     }
+
+
+@router.get("/cars/invite/{invite_token}", response_model=CARInviteOut)
+def get_car_invite_by_token(invite_token: str, db: Session = Depends(get_db)):
+    car = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.invite_token == invite_token)
+        .first()
+    )
+    if not car:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    url = build_car_invite_link(car)
+    return {
+        "car_id": car.id,
+        "invite_token": car.invite_token,
+        "invite_url": url,
+        "next_reminder_at": car.next_reminder_at,
+        "car_number": car.car_number,
+        "title": car.title,
+        "summary": car.summary,
+        "priority": car.priority,
+        "status": car.status,
+        "due_date": car.due_date,
+        "target_closure_date": car.target_closure_date,
+    }
+
+
+@router.patch("/cars/invite/{invite_token}", response_model=CAROut)
+def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, db: Session = Depends(get_db)):
+    car = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.invite_token == invite_token)
+        .first()
+    )
+    if not car:
+        raise HTTPException(status_code=404, detail="Invite not found")
+
+    for field in (
+        "containment_action",
+        "root_cause",
+        "corrective_action",
+        "preventive_action",
+        "evidence_ref",
+        "target_closure_date",
+        "due_date",
+        "submitted_by_name",
+        "submitted_by_email",
+    ):
+        val = getattr(payload, field)
+        if val is not None:
+            setattr(car, field, val)
+
+    car.submitted_at = func.now()
+    if car.status in (models.CARStatus.OPEN, models.CARStatus.DRAFT):
+        car.status = models.CARStatus.IN_PROGRESS
+
+    add_car_action(
+        db=db,
+        car=car,
+        action_type=models.CARActionType.COMMENT,
+        message="Auditee submitted CAR response via invite link",
+        actor_user_id=None,
+    )
+
+    db.commit()
+    db.refresh(car)
+    return car
 
 
 @router.post("/cars/{car_id}/actions", response_model=CARActionOut, status_code=status.HTTP_201_CREATED)

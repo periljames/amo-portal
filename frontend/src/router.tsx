@@ -22,6 +22,7 @@ import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
+import PublicCarInvitePage from "./pages/PublicCarInvitePage";
 
 import { isAuthenticated } from "./services/auth";
 
@@ -87,6 +88,9 @@ export const AppRouter: React.FC = () => {
 
       {/* Password reset */}
       <Route path="/reset-password" element={<PasswordResetPage />} />
+
+      {/* CAR invite response page (external auditees) */}
+      <Route path="/car-invite" element={<PublicCarInvitePage />} />
 
       {/* If someone visits /maintenance/:amoCode directly, send them somewhere safe */}
       <Route
