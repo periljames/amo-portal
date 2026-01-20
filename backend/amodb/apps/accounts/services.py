@@ -2147,3 +2147,39 @@ def handle_webhook(
     db.add(event)
     db.commit()
     return event
+
+
+def seed_default_departments(db: Session, *, amo_id: str) -> List[models.Department]:
+    defaults = [
+        ("FINANCE", "Finance", "/finance"),
+        ("STORES", "Stores", "/stores"),
+        ("PROCUREMENT", "Procurement", "/procurement"),
+        ("QUALITY", "Quality", "/quality"),
+        ("MAINTENANCE_PLANNING", "Maintenance Planning", "/maintenance/planning"),
+        ("OPERATIONS", "Operations", "/operations"),
+    ]
+
+    existing = {
+        dept.code
+        for dept in db.query(models.Department)
+        .filter(models.Department.amo_id == amo_id)
+        .all()
+    }
+    created: List[models.Department] = []
+    sort_order = 10
+    for code, name, route in defaults:
+        if code in existing:
+            continue
+        dept = models.Department(
+            amo_id=amo_id,
+            code=code,
+            name=name,
+            default_route=route,
+            sort_order=sort_order,
+        )
+        sort_order += 10
+        db.add(dept)
+        created.append(dept)
+    if created:
+        db.flush()
+    return created

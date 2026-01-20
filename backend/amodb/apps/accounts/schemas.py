@@ -17,6 +17,7 @@ from .models import (
     LedgerEntryType,
     PaymentProvider,
     InvoiceStatus,
+    ModuleSubscriptionStatus,
 )
 
 # ---------------------------------------------------------------------------
@@ -448,6 +449,29 @@ class LicenseEntitlementCreate(BaseModel):
 class LicenseEntitlementRead(LicenseEntitlementCreate):
     id: str
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ModuleSubscriptionBase(BaseModel):
+    module_code: str
+    status: ModuleSubscriptionStatus
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    plan_code: Optional[str] = None
+    metadata_json: Optional[str] = None
+
+
+class ModuleSubscriptionCreate(ModuleSubscriptionBase):
+    amo_id: Optional[str] = None
+
+
+class ModuleSubscriptionRead(ModuleSubscriptionBase):
+    id: str
+    amo_id: str
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True

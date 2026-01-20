@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_roles
+from amodb.utils.identifiers import generate_uuid7
 from ...database import get_write_db
 from ..accounts import models as account_models
 from . import models as reliability_models
@@ -723,12 +724,31 @@ def create_part_movement(
     current_user: account_models.User = Depends(require_roles(*PART_MOVEMENT_ROLES)),
     db: Session = Depends(get_write_db),
 ):
-    movement = services.create_part_movement(
-        db,
-        amo_id=current_user.amo_id,
-        data=payload,
-        actor_user_id=current_user.id,
-    )
+    removal_tracking_id = None
+    if payload.event_type in {
+        schemas.PartMovementTypeEnum.REMOVE,
+        schemas.PartMovementTypeEnum.SWAP,
+    }:
+        removal_tracking_id = generate_uuid7()
+        movement, _removal = services.record_part_movement_with_removal(
+            db,
+            amo_id=current_user.amo_id,
+            data=payload,
+            removal_tracking_id=removal_tracking_id,
+            removal_reason=payload.reason_code,
+            hours_at_removal=None,
+            cycles_at_removal=None,
+            actor_user_id=current_user.id,
+            commit=False,
+        )
+    else:
+        movement = services.create_part_movement(
+            db,
+            amo_id=current_user.amo_id,
+            data=payload,
+            actor_user_id=current_user.id,
+            removal_tracking_id=removal_tracking_id,
+        )
     db.commit()
     db.refresh(movement)
     return movement

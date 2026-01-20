@@ -56,6 +56,13 @@ class AccountRole(str, enum.Enum):
     TECHNICIAN = "TECHNICIAN"
     STORES = "STORES"
     VIEW_ONLY = "VIEW_ONLY"
+    FINANCE_MANAGER = "FINANCE_MANAGER"
+    ACCOUNTS_OFFICER = "ACCOUNTS_OFFICER"
+    STORES_MANAGER = "STORES_MANAGER"
+    STOREKEEPER = "STOREKEEPER"
+    PROCUREMENT_OFFICER = "PROCUREMENT_OFFICER"
+    QUALITY_INSPECTOR = "QUALITY_INSPECTOR"
+    AUDITOR = "AUDITOR"
 
 
 class MaintenanceScope(str, enum.Enum):
@@ -1006,6 +1013,50 @@ class UsageMeter(Base):
 
     amo = relationship("AMO", lazy="joined")
     license = relationship("TenantLicense", back_populates="usage_meters", lazy="joined")
+
+
+class ModuleSubscriptionStatus(str, enum.Enum):
+    ENABLED = "ENABLED"
+    DISABLED = "DISABLED"
+    TRIAL = "TRIAL"
+    SUSPENDED = "SUSPENDED"
+
+
+class ModuleSubscription(Base):
+    """
+    Per-tenant module subscription state (feature gating).
+    """
+
+    __tablename__ = "module_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "module_code", name="uq_module_subscription"),
+        Index("ix_module_subscriptions_amo", "amo_id"),
+    )
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=generate_user_id,
+    )
+    amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    module_code = Column(String(64), nullable=False, index=True)
+    status = Column(
+        Enum(ModuleSubscriptionStatus, name="module_subscription_status_enum"),
+        nullable=False,
+        default=ModuleSubscriptionStatus.DISABLED,
+        index=True,
+    )
+    effective_from = Column(DateTime(timezone=True), nullable=True)
+    effective_to = Column(DateTime(timezone=True), nullable=True)
+    plan_code = Column(String(64), nullable=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def __repr__(self) -> str:
         return f"<UsageMeter amo={self.amo_id} key={self.meter_key} used={self.used_units}>"

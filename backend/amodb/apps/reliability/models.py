@@ -882,6 +882,13 @@ class PartMovementLedger(Base):
     )
     event_date = Column(Date, nullable=False, index=True)
     notes = Column(Text, nullable=True)
+    reason_code = Column(String(64), nullable=True)
+    created_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
