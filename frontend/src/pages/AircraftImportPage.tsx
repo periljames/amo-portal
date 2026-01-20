@@ -3135,6 +3135,8 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
 
           {(previewRows.length > 0 || previewTotalRows > 0) && (
             <div className="mt-6">
@@ -3165,7 +3167,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                 />
               </div>
             </div>
-          </div>
+          )}
         </section>
       )}
 

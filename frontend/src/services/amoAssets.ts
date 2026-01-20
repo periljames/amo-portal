@@ -13,6 +13,14 @@ export type AmoAssetRead = {
   crs_template_uploaded_at?: string | null;
 };
 
+export type TransferProgress = {
+  loadedBytes: number;
+  totalBytes?: number;
+  percent?: number;
+  megaBytesPerSecond: number;
+  megaBitsPerSecond: number;
+};
+
 function buildAuthHeader(): HeadersInit {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -23,49 +31,6 @@ function withAmoId(path: string, amoId?: string | null): string {
   const sp = new URLSearchParams({ amo_id: amoId });
   return `${path}?${sp.toString()}`;
 }
-
-export async function getAmoAssets(amoId?: string | null): Promise<AmoAssetRead> {
-  const res = await fetch(
-    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/me`, amoId),
-    {
-    method: "GET",
-    headers: authHeaders(),
-  });
-
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-
-  return (await res.json()) as AmoAssetRead;
-}
-
-export async function uploadAmoLogo(file: File, amoId?: string | null): Promise<AmoAssetRead> {
-  const form = new FormData();
-  form.append("file", file);
-
-  const res = await fetch(
-    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/logo`, amoId),
-    {
-    method: "POST",
-    headers: buildAuthHeader(),
-    body: form,
-  });
-
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
 
 function buildSpeed(
   loadedBytes: number,
@@ -85,21 +50,82 @@ function buildSpeed(
   };
 }
 
+export async function getAmoAssets(amoId?: string | null): Promise<AmoAssetRead> {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/me`, amoId),
+    {
+      method: "GET",
+      headers: authHeaders(),
+    }
+  );
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Request failed (${res.status})`);
+  }
+
+  return (await res.json()) as AmoAssetRead;
+}
+
 function uploadAmoAsset(
   file: File,
   kind: "logo" | "template",
   amoId?: string | null,
   onProgress?: (progress: TransferProgress) => void
 ): Promise<AmoAssetRead> {
-  const form = new FormData();
-  form.append("file", file);
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append("file", file);
 
-  const res = await fetch(
-    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/template`, amoId),
-    {
-    method: "POST",
-    headers: buildAuthHeader(),
-    body: form,
+    const xhr = new XMLHttpRequest();
+    const startedAt = performance.now();
+    xhr.open("POST", withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/${kind}`, amoId));
+    const headers = buildAuthHeader();
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+    xhr.responseType = "json";
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!onProgress) return;
+      const total = event.lengthComputable ? event.total : undefined;
+      onProgress(buildSpeed(event.loaded, total, startedAt));
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+
+      if (xhr.response && typeof xhr.response === "object") {
+        resolve(xhr.response as AmoAssetRead);
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(xhr.responseText) as AmoAssetRead);
+      } catch {
+        reject(new Error("Unexpected response from server."));
+      }
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while uploading asset."));
+    });
+
+    xhr.send(form);
   });
 }
 
@@ -124,10 +150,40 @@ export async function downloadAmoAsset(
   amoId?: string | null,
   onProgress?: (progress: TransferProgress) => void
 ): Promise<Blob> {
-  const res = await fetch(
-    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/${kind}`, amoId),
-    {
-    method: "GET",
-    headers: buildAuthHeader(),
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const startedAt = performance.now();
+    xhr.open("GET", withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/${kind}`, amoId));
+    const headers = buildAuthHeader();
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("progress", (event) => {
+      if (!onProgress) return;
+      const total = event.lengthComputable ? event.total : undefined;
+      onProgress(buildSpeed(event.loaded, total, startedAt));
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading asset."));
+    });
+
+    xhr.send();
   });
 }
