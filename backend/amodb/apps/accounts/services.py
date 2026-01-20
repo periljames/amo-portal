@@ -16,6 +16,7 @@ from jose import JWTError, jwt  # noqa: F401  (imported for future token use)
 from fastapi import HTTPException
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, joinedload, noload
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from amodb.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -86,6 +87,10 @@ class IdempotencyError(Exception):
     """Raised when an idempotency key is reused with conflicting payload."""
 
 
+class SchemaNotInitialized(Exception):
+    """Raised when required database tables are missing."""
+
+
 # ---------------------------------------------------------------------------
 # Normalisation helpers
 # ---------------------------------------------------------------------------
@@ -100,22 +105,37 @@ def _normalise_staff_code(value: str) -> str:
     return value.strip().upper()
 
 
+def _is_missing_table_error(exc: Exception) -> bool:
+    message = str(getattr(exc, "orig", exc)).lower()
+    return (
+        ("relation" in message and "does not exist" in message)
+        or "no such table" in message
+    )
+
+
 def resolve_login_context(db: Session, email: str) -> models.User | None:
     email_norm = _normalise_email(email)
-    users = (
-        db.query(models.User)
-        .outerjoin(models.AMO, models.User.amo_id == models.AMO.id)
-        .options(joinedload(models.User.amo))
-        .filter(
-            func.lower(models.User.email) == email_norm,
-            models.User.is_active.is_(True),
-            or_(
-                models.User.amo_id.is_(None),
-                models.AMO.is_active.is_(True),
-            ),
+    try:
+        users = (
+            db.query(models.User)
+            .outerjoin(models.AMO, models.User.amo_id == models.AMO.id)
+            .options(joinedload(models.User.amo))
+            .filter(
+                func.lower(models.User.email) == email_norm,
+                models.User.is_active.is_(True),
+                or_(
+                    models.User.amo_id.is_(None),
+                    models.AMO.is_active.is_(True),
+                ),
+            )
+            .all()
         )
-        .all()
-    )
+    except (OperationalError, ProgrammingError) as exc:
+        if _is_missing_table_error(exc):
+            raise SchemaNotInitialized(
+                "Database schema is missing required tables."
+            ) from exc
+        raise
 
     if not users:
         return None
