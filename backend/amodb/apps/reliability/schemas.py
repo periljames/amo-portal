@@ -560,6 +560,7 @@ class PartMovementLedgerCreate(BaseModel):
     event_type: PartMovementTypeEnum
     event_date: date
     notes: Optional[str] = None
+    reason_code: Optional[str] = None
     idempotency_key: Optional[str] = None
 
 
@@ -567,6 +568,7 @@ class PartMovementLedgerRead(PartMovementLedgerCreate):
     id: int
     amo_id: str
     created_at: datetime
+    created_by_user_id: Optional[str] = None
 
     class Config:
         from_attributes = True

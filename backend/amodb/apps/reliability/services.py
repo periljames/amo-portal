@@ -1131,6 +1131,12 @@ def create_part_movement(
     actor_user_id: Optional[str] = None,
     commit: bool = True,
 ) -> models.PartMovementLedger:
+    if data.event_type in {models.PartMovementTypeEnum.REMOVE, models.PartMovementTypeEnum.SWAP}:
+        if removal_tracking_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="removal_tracking_id is required for removal events.",
+            )
     payload = data.model_dump()
     safe_payload = {
         key: (value.isoformat() if isinstance(value, (DateType, DateTimeType)) else value)
@@ -1157,6 +1163,7 @@ def create_part_movement(
 
     movement = models.PartMovementLedger(
         amo_id=amo_id,
+        created_by_user_id=actor_user_id,
         **data.model_dump(),
     )
     db.add(movement)

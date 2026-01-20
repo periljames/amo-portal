@@ -11,6 +11,7 @@ from .security import JWT_ALGORITHM, SECRET_KEY
 
 from .apps.accounts.router_public import router as accounts_public_router
 from .apps.accounts.router_admin import router as accounts_admin_router
+from .apps.accounts.router_modules_admin import router as accounts_modules_router
 from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
 from .apps.fleet.router import router as fleet_router
 from .apps.work.router import router as work_router
@@ -18,6 +19,8 @@ from .apps.crs.router import router as crs_router
 from .apps.training.router import router as training_router
 from .apps.quality import router as quality_router  
 from .apps.reliability.router import router as reliability_router
+from .apps.inventory.router import router as inventory_router
+from .apps.finance.router import router as finance_router
 from .apps.audit.router import router as audit_router
 from .apps.accounts.router_billing import router as billing_router
 from .apps.bootstrap.router import router as bootstrap_router
@@ -96,6 +99,7 @@ def health():
 
 app.include_router(accounts_public_router)
 app.include_router(accounts_admin_router)
+app.include_router(accounts_modules_router)
 app.include_router(accounts_amo_assets_router)
 app.include_router(fleet_router)
 app.include_router(work_router)
@@ -103,6 +107,8 @@ app.include_router(crs_router)
 app.include_router(training_router)
 app.include_router(quality_router) 
 app.include_router(reliability_router)
+app.include_router(inventory_router)
+app.include_router(finance_router)
 app.include_router(billing_router)
 app.include_router(audit_router)
 app.include_router(bootstrap_router)
