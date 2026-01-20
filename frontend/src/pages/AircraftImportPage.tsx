@@ -3576,6 +3576,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                 .map(([key, value]) => `${key} → ${value}`)
                 .join(", ")}
             </div>
+          )}
           </div>
         </section>
       )}
