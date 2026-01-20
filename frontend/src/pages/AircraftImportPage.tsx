@@ -3531,7 +3531,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                 </div>
               </div>
             </div>
-          )}
+          </div>
 
           {(componentPreviewRows.length > 0 || componentPreviewTotalRows > 0) && (
             <div className="mt-6">
@@ -3576,7 +3576,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                 .map(([key, value]) => `${key} → ${value}`)
                 .join(", ")}
             </div>
-          </div>
+          )}
         </section>
       )}
 

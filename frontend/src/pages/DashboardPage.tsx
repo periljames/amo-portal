@@ -5,6 +5,10 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext, getCachedUser } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
+  listDocumentAlerts,
+  type AircraftDocument,
+} from "../services/fleet";
+import {
   qmsGetAuditorStats,
   qmsListNotifications,
   qmsMarkNotificationRead,
@@ -64,6 +68,7 @@ const DEFAULT_THROTTLE: ThrottleStore = {
 };
 
 const THROTTLE_STORAGE_KEY = "amo_calendar_throttle_settings";
+const DOC_ALERTS_BANNER_STORAGE_KEY = "amo_doc_alerts_banner_dismissed";
 
 function isAdminUser(u: any): boolean {
   if (!u) return false;
@@ -142,8 +147,15 @@ const DashboardPage: React.FC = () => {
 
   const currentUser = getCachedUser();
   const isAdmin = isAdminUser(currentUser);
+  const isSuperuser =
+    !!currentUser &&
+    (currentUser.is_superuser || currentUser.role === "SUPERUSER");
   const [notifications, setNotifications] = useState<QMSNotificationOut[]>([]);
   const [auditorStats, setAuditorStats] = useState<AuditorStatsOut | null>(null);
+  const [docAlerts, setDocAlerts] = useState<AircraftDocument[]>([]);
+  const [docAlertsLoading, setDocAlertsLoading] = useState(false);
+  const [docAlertsError, setDocAlertsError] = useState<string | null>(null);
+  const [docBannerDismissed, setDocBannerDismissed] = useState(false);
 
   // For normal users, this MUST be their assigned department (server-driven context).
   // We also fall back to cached user.department_id if you ever store codes there.
@@ -220,6 +232,20 @@ const DashboardPage: React.FC = () => {
     department === "production" ||
     department === "quality";
 
+  const blockingDocAlerts = useMemo(() => {
+    return docAlerts.filter(
+      (alert) => alert.is_blocking || alert.status === "OVERDUE" || alert.missing_evidence
+    );
+  }, [docAlerts]);
+
+  const blockingDocSignature = useMemo(() => {
+    if (blockingDocAlerts.length === 0) return "";
+    return blockingDocAlerts
+      .map((alert) => String(alert.id))
+      .sort()
+      .join("|");
+  }, [blockingDocAlerts]);
+
   const canManageUsers =
     !!currentUser &&
     (currentUser.is_superuser ||
@@ -237,6 +263,23 @@ const DashboardPage: React.FC = () => {
 
   const handleOpenQms = () => {
     navigate(`/maintenance/${amoSlug}/${department}/qms`);
+  };
+
+  const handleFixDocuments = () => {
+    navigate(`/maintenance/${amoSlug}/${department}/aircraft-documents`);
+  };
+
+  const handleHideDocBanner = () => {
+    if (!blockingDocSignature) return;
+    const stored = getLocalStorageJson<Record<string, string>>(
+      DOC_ALERTS_BANNER_STORAGE_KEY,
+      {}
+    );
+    setLocalStorageJson(DOC_ALERTS_BANNER_STORAGE_KEY, {
+      ...stored,
+      [amoSlug]: blockingDocSignature,
+    });
+    setDocBannerDismissed(true);
   };
 
   const loadNotifications = async () => {
@@ -264,6 +307,55 @@ const DashboardPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!shouldShowComplianceAlerts) {
+      setDocAlerts([]);
+      setDocAlertsLoading(false);
+      setDocAlertsError(null);
+      setDocBannerDismissed(false);
+      return;
+    }
+
+    let isMounted = true;
+    const loadAlerts = async () => {
+      setDocAlertsLoading(true);
+      setDocAlertsError(null);
+      try {
+        const data = await listDocumentAlerts({ due_within_days: 45 });
+        if (!isMounted) return;
+        setDocAlerts(data);
+      } catch (err: any) {
+        if (!isMounted) return;
+        setDocAlertsError(
+          err?.message || "Unable to load aircraft document alerts."
+        );
+      } finally {
+        if (isMounted) setDocAlertsLoading(false);
+      }
+    };
+
+    loadAlerts();
+    return () => {
+      isMounted = false;
+    };
+  }, [shouldShowComplianceAlerts]);
+
+  useEffect(() => {
+    if (!blockingDocSignature) {
+      setDocBannerDismissed(false);
+      return;
+    }
+    if (!isSuperuser) {
+      setDocBannerDismissed(false);
+      return;
+    }
+    const stored = getLocalStorageJson<Record<string, string>>(
+      DOC_ALERTS_BANNER_STORAGE_KEY,
+      {}
+    );
+    setDocBannerDismissed(stored[amoSlug] === blockingDocSignature);
+  }, [amoSlug, blockingDocSignature, isSuperuser]);
+
   const handleMarkRead = async (id: string) => {
     try {
       await qmsMarkNotificationRead(id);
@@ -284,6 +376,58 @@ const DashboardPage: React.FC = () => {
           <strong>{amoDisplay}</strong>.
         </p>
       </header>
+
+      {shouldShowComplianceAlerts &&
+        blockingDocAlerts.length > 0 &&
+        !docBannerDismissed && (
+          <section className="page-section">
+            <div className="info-banner info-banner--warning">
+              <div>
+                <strong>Aircraft document blockers detected</strong>
+                <p className="text-muted" style={{ margin: "4px 0 0" }}>
+                  Work on affected aircraft is blocked until overdue or missing
+                  evidence is resolved. Upload the latest compliance evidence to
+                  restore planning and quality workflows.
+                </p>
+                <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                  {blockingDocAlerts.slice(0, 3).map((alert) => (
+                    <li key={alert.id}>
+                      {alert.aircraft_serial_number} ·{" "}
+                      {alert.document_type.replace(/_/g, " ")} ·{" "}
+                      {alert.status.replace(/_/g, " ")}
+                      {alert.days_to_expiry !== null &&
+                        ` (${alert.days_to_expiry} days)`}
+                      {alert.missing_evidence && " · Evidence missing"}
+                    </li>
+                  ))}
+                  {blockingDocAlerts.length > 3 && (
+                    <li>
+                      +{blockingDocAlerts.length - 3} more blocking documents
+                    </li>
+                  )}
+                </ul>
+              </div>
+              <div className="page-section__actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleFixDocuments}
+                >
+                  Fix documents
+                </button>
+                {isSuperuser && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleHideDocBanner}
+                  >
+                    Hide
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
       {notifications.length > 0 && (
         <section className="page-section">

@@ -10,6 +10,7 @@ from amodb.apps.accounts.models import AccountRole, User
 from amodb.apps.audit import services as audit_services
 from amodb.apps.audit import schemas as audit_schemas
 from amodb.apps.crs import models as crs_models
+from amodb.apps.fleet import services as fleet_services
 from amodb.utils.identifiers import generate_uuid7
 
 from . import models, schemas
@@ -85,7 +86,7 @@ def _record_audit(
     before: Optional[dict],
     after: Optional[dict],
     correlation_id: Optional[str] = None,
-) -> None:
+    ) -> None:
     audit_services.create_audit_event(
         db,
         amo_id=amo_id,
@@ -97,6 +98,32 @@ def _record_audit(
             before_json=before,
             after_json=after,
             correlation_id=correlation_id,
+        ),
+    )
+
+
+def _ensure_aircraft_documents_clear(db: Session, aircraft_serial_number: str, amo_id: str) -> None:
+    blockers = fleet_services.get_blocking_documents(db, aircraft_serial_number, amo_id=amo_id)
+    if not blockers:
+        return
+
+    details = []
+    for doc, evaluation in blockers:
+        msg_parts = [
+            doc.document_type.value.replace("_", " ").title(),
+            evaluation.status.value,
+        ]
+        if evaluation.days_to_expiry is not None:
+            msg_parts.append(f"{evaluation.days_to_expiry} days to expiry")
+        if evaluation.missing_evidence:
+            msg_parts.append("evidence missing")
+        details.append(" - ".join(msg_parts))
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "Work is blocked until required aircraft documents are renewed and uploaded. "
+            f"Outstanding: {', '.join(details)}. Quality may override with a recorded reason."
         ),
     )
 
@@ -406,6 +433,8 @@ def update_task(
     new_status = data.get("status")
     if new_status:
         _ensure_valid_task_transition(task, new_status)
+        if new_status == models.TaskStatusEnum.IN_PROGRESS:
+            _ensure_aircraft_documents_clear(db, task.aircraft_serial_number, task.amo_id)
         if new_status == models.TaskStatusEnum.COMPLETED:
             _ensure_required_steps_executed(db, task)
 
@@ -439,6 +468,7 @@ def execute_task_step(
 ) -> models.TaskStepExecution:
     if task.status == models.TaskStatusEnum.PLANNED:
         _ensure_valid_task_transition(task, models.TaskStatusEnum.IN_PROGRESS)
+        _ensure_aircraft_documents_clear(db, task.aircraft_serial_number, task.amo_id)
         task.status = models.TaskStatusEnum.IN_PROGRESS
         if task.actual_start is None:
             task.actual_start = _utcnow()
