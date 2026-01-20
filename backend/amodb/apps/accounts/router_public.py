@@ -7,8 +7,15 @@ import os
 import urllib.request
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
-from pydantic import EmailStr
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -54,6 +61,16 @@ def _build_reset_link(*, amo_slug: str, token: str) -> str | None:
     base = RESET_LINK_BASE_URL.rstrip("/")
     query = urlencode({"token": token, "amo": amo_slug})
     return f"{base}/reset-password?{query}"
+
+
+def _validate_login_email(email: str) -> str:
+    value = email.strip()
+    if "@" not in value or value.startswith("@") or value.endswith("@"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid email address.",
+        )
+    return value
 
 
 def _dev_seed_login_enabled() -> bool:
@@ -264,11 +281,17 @@ def dev_seed_login(
     summary="Resolve login context from email",
 )
 def login_context(
-    email: EmailStr,
+    email: str = Query(..., min_length=3),
     db: Session = Depends(get_db),
 ):
+    email = _validate_login_email(email)
     try:
         user = services.resolve_login_context(db=db, email=email)
+    except services.SchemaNotInitialized:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database schema is not initialized. Run migrations and retry.",
+        )
     except services.LoginContextConflict:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
