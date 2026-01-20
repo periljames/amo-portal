@@ -28,6 +28,7 @@ import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
 import PublicCarInvitePage from "./pages/PublicCarInvitePage";
+import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
 
 import { getCachedUser, isAuthenticated } from "./services/auth";
 
