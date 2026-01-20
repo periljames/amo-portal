@@ -773,7 +773,7 @@ def list_removal_events(
 
 
 @router.get(
-    "/pull",
+    "/pull/sections",
     response_model=schemas.ReliabilityPullResponse,
 )
 def pull_reliability_events(

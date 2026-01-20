@@ -39,7 +39,6 @@ from amodb.apps.reliability import models as reliability_models
 from amodb.apps.work import models as work_models
 from amodb.apps.work import schemas as work_schemas
 from amodb.apps.work import services as work_services
-from amodb.apps.reliability import models as reliability_models
 from amodb.utils.identifiers import generate_uuid7
 from . import models, ocr as ocr_service, schemas, services
 
@@ -1361,6 +1360,23 @@ def create_defect_report(
         )
 
     db.add(defect)
+    db.flush()
+    audit_services.create_audit_event(
+        db,
+        amo_id=current_user.amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="DefectReport",
+            entity_id=str(defect.id),
+            action="create",
+            actor_user_id=current_user.id,
+            before_json=None,
+            after_json={
+                "aircraft_serial_number": defect.aircraft_serial_number,
+                "operator_event_id": defect.operator_event_id,
+                "work_order_id": defect.work_order_id,
+            },
+        ),
+    )
     db.commit()
     db.refresh(defect)
     return defect
