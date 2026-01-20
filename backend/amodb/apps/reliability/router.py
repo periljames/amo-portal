@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -9,7 +10,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from amodb.entitlements import require_module
-from amodb.security import get_current_active_user
+from amodb.security import get_current_active_user, require_roles
 from ...database import get_write_db
 from ..accounts import models as account_models
 from . import schemas, services
@@ -19,6 +20,17 @@ router = APIRouter(
     tags=["reliability"],
     dependencies=[Depends(require_module("reliability"))],
 )
+
+PART_MOVEMENT_ROLES = [
+    account_models.AccountRole.AMO_ADMIN,
+    account_models.AccountRole.PLANNING_ENGINEER,
+    account_models.AccountRole.PRODUCTION_ENGINEER,
+    account_models.AccountRole.CERTIFYING_ENGINEER,
+    account_models.AccountRole.CERTIFYING_TECHNICIAN,
+    account_models.AccountRole.TECHNICIAN,
+    account_models.AccountRole.STORES,
+    account_models.AccountRole.QUALITY_MANAGER,
+]
 
 
 @router.post(
@@ -122,6 +134,26 @@ def list_events(
     db: Session = Depends(get_write_db),
 ):
     return services.list_reliability_events(db, amo_id=current_user.amo_id)
+
+
+@router.get(
+    "/pull",
+    response_model=schemas.ReliabilityPullRead,
+)
+def pull_reliability_feed(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    limit: int = 500,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    return services.build_reliability_pull(
+        db,
+        amo_id=current_user.amo_id,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
 
 
 @router.get(
@@ -658,7 +690,12 @@ def create_component_instance(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_component_instance(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_component_instance(
+        db,
+        amo_id=current_user.amo_id,
+        data=payload,
+        actor_user_id=current_user.id,
+    )
 
 
 @router.get(
@@ -679,7 +716,7 @@ def list_component_instances(
 )
 def create_part_movement(
     payload: schemas.PartMovementLedgerCreate,
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_roles(*PART_MOVEMENT_ROLES)),
     db: Session = Depends(get_write_db),
 ):
     return services.create_part_movement(
@@ -708,10 +745,15 @@ def list_part_movements(
 )
 def create_removal_event(
     payload: schemas.RemovalEventCreate,
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(require_roles(*PART_MOVEMENT_ROLES)),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_removal_event(db, amo_id=current_user.amo_id, data=payload)
+    return services.create_removal_event(
+        db,
+        amo_id=current_user.amo_id,
+        data=payload,
+        actor_user_id=current_user.id,
+    )
 
 
 @router.get(

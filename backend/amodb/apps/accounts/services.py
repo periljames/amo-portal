@@ -1472,6 +1472,7 @@ def register_idempotency_key(
     scope: str,
     key: str,
     payload: dict,
+    commit: bool = True,
 ) -> models.IdempotencyKey:
     if not key:
         raise ValueError("idempotency key is required")
@@ -1496,7 +1497,10 @@ def register_idempotency_key(
         payload_hash=payload_hash,
     )
     db.add(idem)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return idem
 
 

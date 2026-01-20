@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -24,6 +24,7 @@ from .models import (
     ReliabilitySeverityEnum,
 )
 from ..accounts.models import AccountRole
+from ..fleet.models import DefectSourceEnum
 
 
 def _required_engine_metric_keys() -> set[str]:
@@ -690,3 +691,41 @@ class ControlChartConfigRead(ControlChartConfigCreate):
 
     class Config:
         from_attributes = True
+
+
+class ReliabilityUsageRead(BaseModel):
+    id: int
+    aircraft_serial_number: Optional[str] = None
+    date: date
+    block_hours: Optional[float] = None
+    cycles: Optional[float] = None
+    ttaf_after: Optional[float] = None
+    tca_after: Optional[float] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ReliabilityDefectRead(BaseModel):
+    id: int
+    aircraft_serial_number: Optional[str] = None
+    reported_by: Optional[str] = None
+    source: DefectSourceEnum
+    description: str
+    ata_chapter: Optional[str] = None
+    occurred_at: datetime
+    operator_event_id: Optional[str] = None
+    work_order_id: Optional[int] = None
+    task_card_id: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ReliabilityPullRead(BaseModel):
+    usage: List[ReliabilityUsageRead] = Field(default_factory=list)
+    defects: List[ReliabilityDefectRead] = Field(default_factory=list)
+    removals: List[RemovalEventRead] = Field(default_factory=list)
+    shop_visits: List[ShopVisitRead] = Field(default_factory=list)

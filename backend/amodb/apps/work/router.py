@@ -533,8 +533,6 @@ def update_task(
         )
 
     services.update_task(db, task=task, data=allowed_data, actor=current_user)
-    db.commit()
-    db.refresh(task)
 
     if part_movement_event_type:
         component_id = data.get("aircraft_component_id") or task.aircraft_component_id
@@ -566,8 +564,12 @@ def update_task(
             data=movement_payload,
             removal_tracking_id=removal_tracking_id,
             actor_user_id=current_user.id,
+            commit=False,
         )
-        if part_movement_event_type == reliability_schemas.PartMovementTypeEnum.REMOVE:
+        if part_movement_event_type in {
+            reliability_schemas.PartMovementTypeEnum.REMOVE,
+            reliability_schemas.PartMovementTypeEnum.SWAP,
+        }:
             removal_payload = reliability_schemas.RemovalEventCreate(
                 aircraft_serial_number=task.aircraft_serial_number,
                 component_id=component_id,
@@ -582,8 +584,12 @@ def update_task(
                 db,
                 amo_id=current_user.amo_id,
                 data=removal_payload,
+                actor_user_id=current_user.id,
+                commit=False,
             )
 
+    db.commit()
+    db.refresh(task)
     return task
 
 

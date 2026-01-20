@@ -396,6 +396,23 @@ def execute_task_step(
     payload: schemas.TaskStepExecutionCreate,
     actor: User,
 ) -> models.TaskStepExecution:
+    if task.status == models.TaskStatusEnum.PLANNED:
+        _ensure_valid_task_transition(task, models.TaskStatusEnum.IN_PROGRESS)
+        task.status = models.TaskStatusEnum.IN_PROGRESS
+        if task.actual_start is None:
+            task.actual_start = _utcnow()
+        task.updated_by_user_id = actor.id
+        db.add(task)
+        _record_audit(
+            db,
+            amo_id=amo_id,
+            entity_type="TaskCard",
+            entity_id=str(task.id),
+            action="auto_start",
+            actor_user_id=actor.id,
+            before={"status": models.TaskStatusEnum.PLANNED.value},
+            after={"status": models.TaskStatusEnum.IN_PROGRESS.value},
+        )
     execution = models.TaskStepExecution(
         amo_id=amo_id,
         task_step_id=step.id,
