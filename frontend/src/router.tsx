@@ -24,11 +24,14 @@ import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminOverviewPage from "./pages/AdminOverviewPage";
 import AdminAmoManagementPage from "./pages/AdminAmoManagementPage";
 import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
+import AdminUsageSettingsPage from "./pages/AdminUsageSettingsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
 import PublicCarInvitePage from "./pages/PublicCarInvitePage";
 import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
+import UpsellPage from "./pages/UpsellPage";
+import UserWidgetsPage from "./pages/UserWidgetsPage";
 
 import { getCachedUser, isAuthenticated } from "./services/auth";
 
