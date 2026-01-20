@@ -249,6 +249,8 @@ def apply_part_movement_configuration(
     )
     if not component:
         raise ValueError("Component not found for configuration update.")
+    if movement.aircraft_serial_number and movement.aircraft_serial_number != component.aircraft_serial_number:
+        raise ValueError("Component does not belong to the target aircraft.")
 
     existing_installed = (
         db.query(models.AircraftComponent)
@@ -260,6 +262,11 @@ def apply_part_movement_configuration(
         )
         .first()
     )
+    if movement.event_type.value == models.ConfigurationEventTypeEnum.REMOVE.value:
+        if not component.is_installed:
+            raise ValueError("Component is not installed and cannot be removed.")
+        if existing_installed and existing_installed.id != component.id:
+            raise ValueError("Removal must reference the installed component at that position.")
 
     from_part_number = None
     from_serial_number = None

@@ -17,6 +17,8 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
 from amodb.apps.accounts.models import RegulatoryAuthority
+from amodb.apps.work.models import TaskRoleOnTaskEnum, TaskCategoryEnum, TaskStatusEnum, WorkOrderStatusEnum, WorkOrderTypeEnum
+from amodb.apps.reliability.models import PartMovementTypeEnum
 from .models import (
     MaintenanceProgramCategoryEnum,
     AircraftDocumentStatus,
@@ -760,6 +762,8 @@ class DefectReportBase(BaseModel):
 class DefectReportCreate(DefectReportBase):
     create_work_order: bool = True
     idempotency_key: Optional[str] = None
+    task_steps: List["DefectTaskStepCreate"] = []
+    assignment: Optional["DefectTaskAssignmentCreate"] = None
 
 
 class DefectReportRead(DefectReportBase):
@@ -773,3 +777,72 @@ class DefectReportRead(DefectReportBase):
 
     class Config:
         from_attributes = True
+
+
+class DefectTaskStepCreate(BaseModel):
+    step_no: int
+    instruction: str
+    required: bool = True
+    measurement_type: Optional[str] = None
+    expected_range: Optional[dict] = None
+
+
+class DefectTaskAssignmentCreate(BaseModel):
+    user_id: str
+    role_on_task: TaskRoleOnTaskEnum = TaskRoleOnTaskEnum.LEAD
+
+
+# ---------------- MAINTENANCE HISTORY ----------------
+
+
+class MaintenanceHistorySignOff(BaseModel):
+    id: int
+    inspector_user_id: Optional[str] = None
+    signed_at: DateTimeType
+    signed_flag: bool = False
+    notes: Optional[str] = None
+
+
+class MaintenanceHistoryTask(BaseModel):
+    id: int
+    title: str
+    status: TaskStatusEnum
+    ata_chapter: Optional[str] = None
+    category: TaskCategoryEnum
+    operator_event_id: Optional[str] = None
+    inspector_signoffs: List[MaintenanceHistorySignOff] = []
+
+
+class MaintenanceHistoryPartMovement(BaseModel):
+    id: int
+    event_type: PartMovementTypeEnum
+    event_date: DateType
+    component_id: Optional[int] = None
+    component_instance_id: Optional[int] = None
+    part_number: Optional[str] = None
+    serial_number: Optional[str] = None
+    position: Optional[str] = None
+    removal_tracking_id: Optional[str] = None
+    notes: Optional[str] = None
+    task_card_id: Optional[int] = None
+
+
+class MaintenanceHistoryWorkOrder(BaseModel):
+    id: int
+    wo_number: str
+    status: WorkOrderStatusEnum
+    wo_type: WorkOrderTypeEnum
+    description: Optional[str] = None
+    open_date: Optional[DateType] = None
+    closed_date: Optional[DateType] = None
+    operator_event_id: Optional[str] = None
+    tasks: List[MaintenanceHistoryTask] = []
+    inspector_signoffs: List[MaintenanceHistorySignOff] = []
+    part_movements: List[MaintenanceHistoryPartMovement] = []
+
+
+class MaintenanceHistoryPage(BaseModel):
+    items: List[MaintenanceHistoryWorkOrder]
+    total: int
+    skip: int
+    limit: int

@@ -139,7 +139,7 @@ def _ensure_valid_work_order_transition(
             )
 
     if new_status == models.WorkOrderStatusEnum.CLOSED:
-        has_inspector = (
+        has_work_order_signoff = (
             db.query(models.InspectorSignOff)
             .filter(
                 models.InspectorSignOff.work_order_id == work_order.id,
@@ -148,7 +148,23 @@ def _ensure_valid_work_order_transition(
             .first()
             is not None
         )
-        if not has_inspector:
+        has_task_signoff = (
+            db.query(models.InspectorSignOff)
+            .join(models.TaskCard, models.InspectorSignOff.task_card_id == models.TaskCard.id)
+            .filter(
+                models.TaskCard.work_order_id == work_order.id,
+                models.InspectorSignOff.signed_flag.is_(True),
+            )
+            .first()
+            is not None
+        )
+        if not (has_work_order_signoff or has_task_signoff):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Inspection sign-off is required before closing the work order.",
+            )
+
+        if not has_work_order_signoff:
             uninspected_tasks = (
                 db.query(models.TaskCard)
                 .filter(
@@ -195,6 +211,29 @@ def _ensure_valid_task_transition(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Invalid task transition {task.status} -> {new_status}.",
+        )
+
+
+def _ensure_required_steps_executed(db: Session, task: models.TaskCard) -> None:
+    required_steps = (
+        db.query(models.TaskStep)
+        .filter(models.TaskStep.task_id == task.id, models.TaskStep.required_flag.is_(True))
+        .all()
+    )
+    if not required_steps:
+        return
+    required_step_ids = {step.id for step in required_steps}
+    executed_ids = {
+        exec.task_step_id
+        for exec in db.query(models.TaskStepExecution)
+        .filter(models.TaskStepExecution.task_id == task.id)
+        .all()
+    }
+    missing = required_step_ids - executed_ids
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="All required task steps must be executed before completion.",
         )
 
 
@@ -367,6 +406,8 @@ def update_task(
     new_status = data.get("status")
     if new_status:
         _ensure_valid_task_transition(task, new_status)
+        if new_status == models.TaskStatusEnum.COMPLETED:
+            _ensure_required_steps_executed(db, task)
 
     before = {"status": task.status.value}
     for field, value in data.items():
@@ -396,6 +437,28 @@ def execute_task_step(
     payload: schemas.TaskStepExecutionCreate,
     actor: User,
 ) -> models.TaskStepExecution:
+    if task.status == models.TaskStatusEnum.PLANNED:
+        _ensure_valid_task_transition(task, models.TaskStatusEnum.IN_PROGRESS)
+        task.status = models.TaskStatusEnum.IN_PROGRESS
+        if task.actual_start is None:
+            task.actual_start = _utcnow()
+        task.updated_by_user_id = actor.id
+        db.add(task)
+        _record_audit(
+            db,
+            amo_id=amo_id,
+            entity_type="TaskCard",
+            entity_id=str(task.id),
+            action="start",
+            actor_user_id=actor.id,
+            before=None,
+            after={"status": task.status.value},
+        )
+    elif task.status != models.TaskStatusEnum.IN_PROGRESS:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Task must be in progress before executing steps.",
+        )
     execution = models.TaskStepExecution(
         amo_id=amo_id,
         task_step_id=step.id,
@@ -484,6 +547,25 @@ def record_work_order_inspection(
     payload: schemas.InspectorSignOffCreate,
     actor: User,
 ) -> models.InspectorSignOff:
+    pending_tasks = (
+        db.query(models.TaskCard)
+        .filter(
+            models.TaskCard.work_order_id == work_order.id,
+            models.TaskCard.status.notin_(
+                [
+                    models.TaskStatusEnum.COMPLETED,
+                    models.TaskStatusEnum.INSPECTED,
+                    models.TaskStatusEnum.CLOSED,
+                ]
+            ),
+        )
+        .count()
+    )
+    if pending_tasks:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="All task cards must be completed before work order inspection.",
+        )
     signoff = models.InspectorSignOff(
         amo_id=amo_id,
         work_order_id=work_order.id,

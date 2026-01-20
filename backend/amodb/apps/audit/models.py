@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, JSON, String
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, JSON, String, desc
 
 from ...database import Base
 
@@ -21,6 +21,7 @@ class AuditEvent(Base):
         Index("ix_audit_events_amo_entity", "amo_id", "entity_type", "entity_id"),
         Index("ix_audit_events_amo_action", "amo_id", "action"),
         Index("ix_audit_events_amo_time", "amo_id", "occurred_at"),
+        Index("ix_audit_events_amo_time_desc", "amo_id", desc("occurred_at")),
     )
 
     id = Column(Integer, primary_key=True, index=True)

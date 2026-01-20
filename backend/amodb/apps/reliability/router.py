@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from amodb.entitlements import require_module
 from amodb.security import get_current_active_user
 from ...database import get_write_db
 from ..accounts import models as account_models
+from . import models as reliability_models
 from . import schemas, services
+from ..fleet import models as fleet_models
+from ..work import models as work_models
 
 router = APIRouter(
     prefix="/reliability",
@@ -682,12 +687,15 @@ def create_part_movement(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_part_movement(
+    movement = services.create_part_movement(
         db,
         amo_id=current_user.amo_id,
         data=payload,
         actor_user_id=current_user.id,
     )
+    db.commit()
+    db.refresh(movement)
+    return movement
 
 
 @router.get(
@@ -711,7 +719,10 @@ def create_removal_event(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.create_removal_event(db, amo_id=current_user.amo_id, data=payload)
+    removal = services.create_removal_event(db, amo_id=current_user.amo_id, data=payload)
+    db.commit()
+    db.refresh(removal)
+    return removal
 
 
 @router.get(
@@ -723,6 +734,133 @@ def list_removal_events(
     db: Session = Depends(get_write_db),
 ):
     return services.list_removal_events(db, amo_id=current_user.amo_id)
+
+
+@router.get(
+    "/pull",
+    response_model=schemas.ReliabilityPullResponse,
+)
+def pull_reliability_events(
+    aircraft_serial_number: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    skip: int = 0,
+    limit: int = 100,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    start_dt = None
+    end_dt = None
+    if start_date:
+        start_dt = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+    if end_date:
+        end_dt = datetime.combine(end_date, time.max, tzinfo=timezone.utc)
+
+    usage_query = db.query(fleet_models.AircraftUsage).filter(
+        fleet_models.AircraftUsage.amo_id == current_user.amo_id
+    )
+    if aircraft_serial_number:
+        usage_query = usage_query.filter(
+            fleet_models.AircraftUsage.aircraft_serial_number == aircraft_serial_number
+        )
+    if start_date:
+        usage_query = usage_query.filter(fleet_models.AircraftUsage.date >= start_date)
+    if end_date:
+        usage_query = usage_query.filter(fleet_models.AircraftUsage.date <= end_date)
+    usage_total = usage_query.with_entities(func.count()).scalar() or 0
+    usage_items = (
+        usage_query.order_by(fleet_models.AircraftUsage.date.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    removal_query = db.query(reliability_models.RemovalEvent).filter(
+        reliability_models.RemovalEvent.amo_id == current_user.amo_id
+    )
+    if aircraft_serial_number:
+        removal_query = removal_query.filter(
+            reliability_models.RemovalEvent.aircraft_serial_number == aircraft_serial_number
+        )
+    if start_dt:
+        removal_query = removal_query.filter(reliability_models.RemovalEvent.removed_at >= start_dt)
+    if end_dt:
+        removal_query = removal_query.filter(reliability_models.RemovalEvent.removed_at <= end_dt)
+    removal_total = removal_query.with_entities(func.count()).scalar() or 0
+    removal_items = (
+        removal_query.order_by(reliability_models.RemovalEvent.removed_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    defect_query = db.query(fleet_models.DefectReport).filter(
+        fleet_models.DefectReport.amo_id == current_user.amo_id
+    )
+    if aircraft_serial_number:
+        defect_query = defect_query.filter(
+            fleet_models.DefectReport.aircraft_serial_number == aircraft_serial_number
+        )
+    if start_dt:
+        defect_query = defect_query.filter(fleet_models.DefectReport.occurred_at >= start_dt)
+    if end_dt:
+        defect_query = defect_query.filter(fleet_models.DefectReport.occurred_at <= end_dt)
+    defect_total = defect_query.with_entities(func.count()).scalar() or 0
+    defect_items = (
+        defect_query.order_by(fleet_models.DefectReport.occurred_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    shop_visit_query = db.query(work_models.WorkOrder).filter(
+        work_models.WorkOrder.amo_id == current_user.amo_id,
+        work_models.WorkOrder.wo_type.in_(
+            [work_models.WorkOrderTypeEnum.BASE, work_models.WorkOrderTypeEnum.PERIODIC]
+        ),
+    )
+    if aircraft_serial_number:
+        shop_visit_query = shop_visit_query.filter(
+            work_models.WorkOrder.aircraft_serial_number == aircraft_serial_number
+        )
+    if start_date:
+        shop_visit_query = shop_visit_query.filter(work_models.WorkOrder.open_date >= start_date)
+    if end_date:
+        shop_visit_query = shop_visit_query.filter(work_models.WorkOrder.open_date <= end_date)
+    shop_visit_total = shop_visit_query.with_entities(func.count()).scalar() or 0
+    shop_visit_items = (
+        shop_visit_query.order_by(work_models.WorkOrder.open_date.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    return schemas.ReliabilityPullResponse(
+        usage=schemas.ReliabilityPullSectionUsage(
+            items=[schemas.ReliabilityUsageEvent.model_validate(item) for item in usage_items],
+            total=usage_total,
+            skip=skip,
+            limit=limit,
+        ),
+        removals=schemas.ReliabilityPullSectionRemoval(
+            items=[schemas.RemovalEventRead.model_validate(item) for item in removal_items],
+            total=removal_total,
+            skip=skip,
+            limit=limit,
+        ),
+        defects=schemas.ReliabilityPullSectionDefect(
+            items=[schemas.ReliabilityDefectEvent.model_validate(item) for item in defect_items],
+            total=defect_total,
+            skip=skip,
+            limit=limit,
+        ),
+        shop_visits=schemas.ReliabilityPullSectionShopVisit(
+            items=[schemas.ReliabilityShopVisitEvent.model_validate(item) for item in shop_visit_items],
+            total=shop_visit_total,
+            skip=skip,
+            limit=limit,
+        ),
+    )
 
 
 @router.post(
