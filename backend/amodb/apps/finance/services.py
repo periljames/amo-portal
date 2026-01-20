@@ -127,7 +127,7 @@ def _create_journal_entry(
     db.add(entry)
     db.flush()
     for line in lines:
-        line.journal_entry_id = entry.id
+        line.journal_entry = entry
         db.add(line)
 
     if post:
