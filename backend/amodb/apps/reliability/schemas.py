@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -24,6 +24,7 @@ from .models import (
     ReliabilitySeverityEnum,
 )
 from ..accounts.models import AccountRole
+from ..work.models import WorkOrderStatusEnum, WorkOrderTypeEnum
 
 
 def _required_engine_metric_keys() -> set[str]:
@@ -590,6 +591,80 @@ class RemovalEventRead(RemovalEventCreate):
 
     class Config:
         from_attributes = True
+
+
+class ReliabilityUsageEvent(BaseModel):
+    id: int
+    aircraft_serial_number: str
+    date: date
+    block_hours: float
+    cycles: float
+    ttaf_after: Optional[float] = None
+    tca_after: Optional[float] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ReliabilityDefectEvent(BaseModel):
+    id: int
+    aircraft_serial_number: Optional[str] = None
+    operator_event_id: str
+    ata_chapter: Optional[str] = None
+    description: str
+    occurred_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ReliabilityShopVisitEvent(BaseModel):
+    id: int
+    aircraft_serial_number: str
+    wo_number: str
+    status: WorkOrderStatusEnum
+    wo_type: WorkOrderTypeEnum
+    open_date: Optional[date] = None
+    closed_date: Optional[date] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReliabilityPullSectionUsage(BaseModel):
+    items: List[ReliabilityUsageEvent]
+    total: int
+    skip: int
+    limit: int
+
+
+class ReliabilityPullSectionRemoval(BaseModel):
+    items: List[RemovalEventRead]
+    total: int
+    skip: int
+    limit: int
+
+
+class ReliabilityPullSectionDefect(BaseModel):
+    items: List[ReliabilityDefectEvent]
+    total: int
+    skip: int
+    limit: int
+
+
+class ReliabilityPullSectionShopVisit(BaseModel):
+    items: List[ReliabilityShopVisitEvent]
+    total: int
+    skip: int
+    limit: int
+
+
+class ReliabilityPullResponse(BaseModel):
+    usage: ReliabilityPullSectionUsage
+    removals: ReliabilityPullSectionRemoval
+    defects: ReliabilityPullSectionDefect
+    shop_visits: ReliabilityPullSectionShopVisit
 
 
 class AircraftUtilizationDailyCreate(BaseModel):

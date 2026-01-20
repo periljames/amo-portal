@@ -215,6 +215,7 @@ def test_configuration_event_on_removal(db_session):
         removal_tracking_id=str(uuid.uuid4()),
         actor_user_id=user.id,
     )
+    db_session.commit()
     db_session.refresh(comp)
     assert movement.id is not None
     assert comp.is_installed is False
