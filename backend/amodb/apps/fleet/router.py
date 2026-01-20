@@ -1,6 +1,6 @@
 # backend/amodb/apps/fleet/router.py
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from io import BytesIO
 import importlib
 import logging
@@ -1072,12 +1072,12 @@ def list_configuration_history(
     _get_aircraft_or_404(db, serial_number, current_user.amo_id)
     limit = _clamp_history_limit(limit)
     start_dt = (
-        datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+        datetime.combine(start_date, dt_time.min, tzinfo=timezone.utc)
         if start_date
         else None
     )
     end_dt = (
-        datetime.combine(end_date, time.max, tzinfo=timezone.utc)
+        datetime.combine(end_date, dt_time.max, tzinfo=timezone.utc)
         if end_date
         else None
     )
