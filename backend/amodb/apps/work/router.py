@@ -571,6 +571,7 @@ def update_task(
                 hours_at_removal=hours_at_removal,
                 cycles_at_removal=cycles_at_removal,
                 actor_user_id=current_user.id,
+                commit=False,
             )
         else:
             reliability_services.create_part_movement(

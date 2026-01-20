@@ -1204,6 +1204,7 @@ def record_part_movement_with_removal(
     hours_at_removal: Optional[float],
     cycles_at_removal: Optional[float],
     actor_user_id: Optional[str],
+    commit: bool = True,
 ) -> tuple[models.PartMovementLedger, Optional[models.RemovalEvent]]:
     movement = create_part_movement(
         db,
@@ -1246,6 +1247,8 @@ def record_part_movement_with_removal(
                 actor_user_id=actor_user_id,
                 commit=False,
             )
+    if commit:
+        db.commit()
     return movement, removal_event
 
 
