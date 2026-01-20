@@ -12,6 +12,8 @@ from pydantic import EmailStr
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
+from amodb.apps.audit import services as audit_services
+from amodb.apps.audit import schemas as audit_schemas
 from amodb.security import get_current_active_user
 from . import models, schemas, services
 
@@ -534,5 +536,19 @@ def create_first_superuser(
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    audit_services.create_audit_event(
+        db,
+        amo_id=root_amo.id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="User",
+            entity_id=str(user.id),
+            action="bootstrap_create",
+            actor_user_id=user.id,
+            before_json=None,
+            after_json={"email": user.email, "role": user.role},
+        ),
+    )
+    db.commit()
 
     return user

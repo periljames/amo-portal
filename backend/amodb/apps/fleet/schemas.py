@@ -747,6 +747,14 @@ class AircraftConfigurationEventRead(BaseModel):
         from_attributes = True
 
 
+class MaintenanceHistoryRead(BaseModel):
+    aircraft_serial_number: str
+    work_orders: List[work_schemas.WorkOrderRead] = Field(default_factory=list)
+    task_signoffs: List[work_schemas.InspectorSignOffRead] = Field(default_factory=list)
+    work_order_signoffs: List[work_schemas.InspectorSignOffRead] = Field(default_factory=list)
+    part_movements: List[reliability_schemas.PartMovementLedgerRead] = Field(default_factory=list)
+
+
 # ---------------- DEFECT REPORTS ----------------
 
 

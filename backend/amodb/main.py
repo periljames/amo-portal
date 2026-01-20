@@ -11,6 +11,7 @@ from .security import JWT_ALGORITHM, SECRET_KEY
 
 from .apps.accounts.router_public import router as accounts_public_router
 from .apps.accounts.router_admin import router as accounts_admin_router
+from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
 from .apps.fleet.router import router as fleet_router
 from .apps.work.router import router as work_router
 from .apps.crs.router import router as crs_router
@@ -95,6 +96,7 @@ def health():
 
 app.include_router(accounts_public_router)
 app.include_router(accounts_admin_router)
+app.include_router(accounts_amo_assets_router)
 app.include_router(fleet_router)
 app.include_router(work_router)
 app.include_router(crs_router)

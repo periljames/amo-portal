@@ -532,23 +532,45 @@ def update_task(
             detail="Insufficient privileges to update task cards",
         )
 
-    try:
-        services.update_task(db, task=task, data=allowed_data, actor=current_user)
+    services.update_task(db, task=task, data=allowed_data, actor=current_user)
 
-        if part_movement_event_type:
-            component_id = data.get("aircraft_component_id") or task.aircraft_component_id
-            if component_id is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="aircraft_component_id is required to record a part movement.",
-                )
-            removal_tracking_id = None
-            if part_movement_event_type in {
-                reliability_schemas.PartMovementTypeEnum.REMOVE,
-                reliability_schemas.PartMovementTypeEnum.SWAP,
-            }:
-                removal_tracking_id = generate_uuid7()
-            movement_payload = reliability_schemas.PartMovementLedgerCreate(
+    if part_movement_event_type:
+        component_id = data.get("aircraft_component_id") or task.aircraft_component_id
+        if component_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="aircraft_component_id is required to record a part movement.",
+            )
+        removal_tracking_id = None
+        if part_movement_event_type in {
+            reliability_schemas.PartMovementTypeEnum.REMOVE,
+            reliability_schemas.PartMovementTypeEnum.SWAP,
+        }:
+            removal_tracking_id = generate_uuid7()
+        movement_payload = reliability_schemas.PartMovementLedgerCreate(
+            aircraft_serial_number=task.aircraft_serial_number,
+            component_id=component_id,
+            component_instance_id=part_movement_component_instance_id,
+            work_order_id=task.work_order_id,
+            task_card_id=task.id,
+            event_type=part_movement_event_type,
+            event_date=part_movement_event_date or date.today(),
+            notes=part_movement_notes,
+            idempotency_key=part_movement_idempotency_key,
+        )
+        movement = reliability_services.create_part_movement(
+            db,
+            amo_id=current_user.amo_id,
+            data=movement_payload,
+            removal_tracking_id=removal_tracking_id,
+            actor_user_id=current_user.id,
+            commit=False,
+        )
+        if part_movement_event_type in {
+            reliability_schemas.PartMovementTypeEnum.REMOVE,
+            reliability_schemas.PartMovementTypeEnum.SWAP,
+        }:
+            removal_payload = reliability_schemas.RemovalEventCreate(
                 aircraft_serial_number=task.aircraft_serial_number,
                 component_id=component_id,
                 component_instance_id=part_movement_component_instance_id,
@@ -567,14 +589,16 @@ def update_task(
                 removal_reason=removal_reason,
                 hours_at_removal=hours_at_removal,
                 cycles_at_removal=cycles_at_removal,
+            )
+            reliability_services.create_removal_event(
+                db,
+                amo_id=current_user.amo_id,
+                data=removal_payload,
                 actor_user_id=current_user.id,
+                commit=False,
             )
 
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
+    db.commit()
     db.refresh(task)
     return task
 

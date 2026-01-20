@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import importlib.util
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 from ..work.models import TaskCategoryEnum, TaskCard
 from ..fleet.models import AircraftUsage
+from ..fleet import models as fleet_models
 from ..accounts import models as account_models
 from ..quality.models import QMSAuditFinding
 from ..fleet import services as fleet_services
@@ -1080,12 +1081,29 @@ def create_component_instance(
     *,
     amo_id: str,
     data: schemas.ComponentInstanceCreate,
+    actor_user_id: Optional[str] = None,
 ) -> models.ComponentInstance:
     instance = models.ComponentInstance(
         amo_id=amo_id,
         **data.model_dump(),
     )
     db.add(instance)
+    db.flush()
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="ComponentInstance",
+            entity_id=str(instance.id),
+            action="create",
+            actor_user_id=actor_user_id,
+            before_json=None,
+            after_json={
+                "part_number": instance.part_number,
+                "serial_number": instance.serial_number,
+            },
+        ),
+    )
     db.commit()
     db.refresh(instance)
     return instance
@@ -1111,6 +1129,7 @@ def create_part_movement(
     data: schemas.PartMovementLedgerCreate,
     removal_tracking_id: Optional[str] = None,
     actor_user_id: Optional[str] = None,
+    commit: bool = True,
 ) -> models.PartMovementLedger:
     payload = data.model_dump()
     safe_payload = {
@@ -1133,6 +1152,7 @@ def create_part_movement(
             scope=f"part-movement:{amo_id}",
             key=data.idempotency_key,
             payload=safe_payload,
+            commit=commit,
         )
 
     movement = models.PartMovementLedger(
@@ -1237,6 +1257,8 @@ def create_removal_event(
     *,
     amo_id: str,
     data: schemas.RemovalEventCreate,
+    actor_user_id: Optional[str] = None,
+    commit: bool = True,
 ) -> models.RemovalEvent:
     removal_tracking_id = data.removal_tracking_id or generate_uuid7()
     removal = models.RemovalEvent(
@@ -1248,6 +1270,24 @@ def create_removal_event(
         removal.removed_at = func.now()
     db.add(removal)
     db.flush()
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="RemovalEvent",
+            entity_id=str(removal.id),
+            action="create",
+            actor_user_id=actor_user_id,
+            before_json=None,
+            after_json={
+                "component_id": removal.component_id,
+                "removal_tracking_id": removal.removal_tracking_id,
+            },
+        ),
+    )
+    if commit:
+        db.commit()
+        db.refresh(removal)
     return removal
 
 
@@ -1290,6 +1330,84 @@ def list_shop_visits(
         .filter(models.ShopVisit.amo_id == amo_id)
         .order_by(models.ShopVisit.created_at.desc())
         .all()
+    )
+
+
+def _clamp_pull_limit(limit: int) -> int:
+    return max(1, min(limit, 1000))
+
+
+def build_reliability_pull(
+    db: Session,
+    *,
+    amo_id: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    limit: int = 500,
+) -> schemas.ReliabilityPullRead:
+    limit = _clamp_pull_limit(limit)
+    start_dt = (
+        datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+        if start_date
+        else None
+    )
+    end_dt = (
+        datetime.combine(end_date, time.max, tzinfo=timezone.utc)
+        if end_date
+        else None
+    )
+
+    usage_query = db.query(AircraftUsage).filter(AircraftUsage.amo_id == amo_id)
+    if start_date:
+        usage_query = usage_query.filter(AircraftUsage.date >= start_date)
+    if end_date:
+        usage_query = usage_query.filter(AircraftUsage.date <= end_date)
+    usage = (
+        usage_query.order_by(AircraftUsage.date.desc())
+        .limit(limit)
+        .all()
+    )
+
+    defects_query = db.query(fleet_models.DefectReport).filter(
+        fleet_models.DefectReport.amo_id == amo_id
+    )
+    if start_dt:
+        defects_query = defects_query.filter(fleet_models.DefectReport.occurred_at >= start_dt)
+    if end_dt:
+        defects_query = defects_query.filter(fleet_models.DefectReport.occurred_at <= end_dt)
+    defects = (
+        defects_query.order_by(fleet_models.DefectReport.occurred_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    removals_query = db.query(models.RemovalEvent).filter(models.RemovalEvent.amo_id == amo_id)
+    if start_dt:
+        removals_query = removals_query.filter(models.RemovalEvent.removed_at >= start_dt)
+    if end_dt:
+        removals_query = removals_query.filter(models.RemovalEvent.removed_at <= end_dt)
+    removals = (
+        removals_query.order_by(models.RemovalEvent.removed_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    shop_query = db.query(models.ShopVisit).filter(models.ShopVisit.amo_id == amo_id)
+    if start_dt:
+        shop_query = shop_query.filter(models.ShopVisit.created_at >= start_dt)
+    if end_dt:
+        shop_query = shop_query.filter(models.ShopVisit.created_at <= end_dt)
+    shop_visits = (
+        shop_query.order_by(models.ShopVisit.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return schemas.ReliabilityPullRead(
+        usage=usage,
+        defects=defects,
+        removals=removals,
+        shop_visits=shop_visits,
     )
 
 

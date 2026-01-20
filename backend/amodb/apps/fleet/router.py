@@ -25,7 +25,7 @@ from fastapi import (
     Header,
 )
 from fastapi.responses import FileResponse
-from sqlalchemy import or_, func
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
 from ...database import WriteSessionLocal, get_db
@@ -33,6 +33,9 @@ from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
 from amodb.apps.accounts import services as account_services
 from amodb.apps.accounts import models as account_models
+from amodb.apps.audit import services as audit_services
+from amodb.apps.audit import schemas as audit_schemas
+from amodb.apps.reliability import models as reliability_models
 from amodb.apps.work import models as work_models
 from amodb.apps.work import schemas as work_schemas
 from amodb.apps.work import services as work_services
@@ -46,6 +49,15 @@ MANAGEMENT_ROLES = [
     "AMO_ADMIN",
     "PLANNING_ENGINEER",
     "PRODUCTION_ENGINEER",
+]
+
+# Roles allowed to ingest defect reports
+DEFECT_INTAKE_ROLES = MANAGEMENT_ROLES + [
+    "QUALITY_MANAGER",
+    "SAFETY_MANAGER",
+    "CERTIFYING_ENGINEER",
+    "CERTIFYING_TECHNICIAN",
+    "TECHNICIAN",
 ]
 
 # Include Quality for document management
@@ -175,10 +187,15 @@ logger = logging.getLogger(__name__)
 MAX_PREVIEW_PAGE_SIZE = int(os.getenv("PREVIEW_PAGE_SIZE_MAX", "500"))
 DEFAULT_PREVIEW_PAGE_SIZE = int(os.getenv("PREVIEW_PAGE_SIZE_DEFAULT", "200"))
 PREVIEW_SESSION_TTL_HOURS = int(os.getenv("PREVIEW_SESSION_TTL_HOURS", "24"))
+MAX_HISTORY_PAGE_SIZE = int(os.getenv("HISTORY_PAGE_SIZE_MAX", "500"))
 
 
 def _clamp_preview_limit(limit: int) -> int:
     return max(1, min(limit, MAX_PREVIEW_PAGE_SIZE))
+
+
+def _clamp_history_limit(limit: int) -> int:
+    return max(1, min(limit, MAX_HISTORY_PAGE_SIZE))
 
 
 def _cleanup_expired_preview_sessions() -> None:
@@ -302,6 +319,22 @@ def create_aircraft(
     db.add(ac)
     db.commit()
     db.refresh(ac)
+    audit_services.create_audit_event(
+        db,
+        amo_id=current_user.amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="Aircraft",
+            entity_id=str(ac.serial_number),
+            action="create",
+            actor_user_id=current_user.id,
+            before_json=None,
+            after_json={
+                "serial_number": ac.serial_number,
+                "registration": ac.registration,
+            },
+        ),
+    )
+    db.commit()
     return ac
 
 
@@ -1038,12 +1071,7 @@ def list_configuration_history(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _get_aircraft_or_404(db, serial_number, current_user.amo_id)
-    start_dt = None
-    end_dt = None
-    if start_date:
-        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
-    if end_date:
-        end_dt = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
+    limit = _clamp_history_limit(limit)
     query = db.query(models.AircraftConfigurationEvent).filter(
         models.AircraftConfigurationEvent.amo_id == current_user.amo_id,
         models.AircraftConfigurationEvent.aircraft_serial_number == serial_number,
@@ -1067,25 +1095,23 @@ def list_configuration_history(
 
 
 @router.get(
-    "/{serial_number}/configuration",
-    response_model=List[schemas.AircraftComponentRead],
+    "/components/{component_instance_id}/history",
+    response_model=List[schemas.AircraftConfigurationEventRead],
 )
-def list_current_configuration(
-    serial_number: str,
+def list_component_history(
+    component_instance_id: int,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    limit = _clamp_history_limit(limit)
+    query = db.query(models.AircraftConfigurationEvent).filter(
+        models.AircraftConfigurationEvent.amo_id == current_user.amo_id,
+        models.AircraftConfigurationEvent.component_instance_id == component_instance_id,
+    )
     return (
-        db.query(models.AircraftComponent)
-        .filter(
-            models.AircraftComponent.amo_id == current_user.amo_id,
-            models.AircraftComponent.aircraft_serial_number == serial_number,
-            models.AircraftComponent.is_installed.is_(True),
-        )
-        .order_by(models.AircraftComponent.position.asc())
+        query.order_by(models.AircraftConfigurationEvent.occurred_at.desc())
         .offset(skip)
         .limit(limit)
         .all()
@@ -1094,199 +1120,76 @@ def list_current_configuration(
 
 @router.get(
     "/{serial_number}/maintenance-history",
-    response_model=schemas.MaintenanceHistoryPage,
+    response_model=schemas.MaintenanceHistoryRead,
 )
 def list_maintenance_history(
     serial_number: str,
     skip: int = 0,
-    limit: int = 50,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    ata_chapter: Optional[str] = None,
-    status: Optional[work_models.WorkOrderStatusEnum] = None,
-    component_part_number: Optional[str] = None,
-    component_serial_number: Optional[str] = None,
-    operator_event_id: Optional[str] = None,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    limit = _clamp_history_limit(limit)
 
-    start_dt = None
-    end_dt = None
-    if start_date:
-        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
-    if end_date:
-        end_dt = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
-
-    base_query = db.query(work_models.WorkOrder).filter(
-        work_models.WorkOrder.amo_id == current_user.amo_id,
-        work_models.WorkOrder.aircraft_serial_number == serial_number,
-    )
-    if start_dt:
-        base_query = base_query.filter(work_models.WorkOrder.created_at >= start_dt)
-    if end_dt:
-        base_query = base_query.filter(work_models.WorkOrder.created_at <= end_dt)
-    if status:
-        base_query = base_query.filter(work_models.WorkOrder.status == status)
-    if operator_event_id:
-        base_query = base_query.filter(work_models.WorkOrder.operator_event_id == operator_event_id)
-
-    joined_task = False
-    if ata_chapter:
-        base_query = base_query.join(work_models.TaskCard)
-        joined_task = True
-        base_query = base_query.filter(work_models.TaskCard.ata_chapter == ata_chapter)
-
-    if component_part_number or component_serial_number:
-        if not joined_task:
-            base_query = base_query.join(work_models.TaskCard)
-            joined_task = True
-        base_query = base_query.join(
-            models.AircraftComponent,
-            work_models.TaskCard.aircraft_component_id == models.AircraftComponent.id,
-            isouter=True,
-        )
-        if component_part_number:
-            base_query = base_query.filter(models.AircraftComponent.part_number == component_part_number)
-        if component_serial_number:
-            base_query = base_query.filter(models.AircraftComponent.serial_number == component_serial_number)
-
-    total = (
-        base_query.with_entities(func.count(func.distinct(work_models.WorkOrder.id))).scalar()
-        or 0
-    )
     work_orders = (
-        base_query.options(
-            selectinload(work_models.WorkOrder.tasks).selectinload(
-                work_models.TaskCard.inspector_signoffs
-            ),
-            selectinload(work_models.WorkOrder.inspector_signoffs),
+        db.query(work_models.WorkOrder)
+        .options(selectinload(work_models.WorkOrder.tasks))
+        .filter(
+            work_models.WorkOrder.amo_id == current_user.amo_id,
+            work_models.WorkOrder.aircraft_serial_number == serial_number,
         )
-        .distinct(work_models.WorkOrder.id)
-        .order_by(work_models.WorkOrder.created_at.desc())
+        .order_by(
+            work_models.WorkOrder.open_date.desc().nullslast(),
+            work_models.WorkOrder.created_at.desc(),
+        )
         .offset(skip)
         .limit(limit)
         .all()
     )
 
-    work_order_ids = [wo.id for wo in work_orders]
-    part_movements = []
-    removal_tracking_map: dict[int, str] = {}
-    if work_order_ids:
-        part_movements = (
-            db.query(
-                reliability_models.PartMovementLedger,
-                models.AircraftComponent.part_number,
-                models.AircraftComponent.serial_number,
-                models.AircraftComponent.position,
-            )
-            .outerjoin(
-                models.AircraftComponent,
-                reliability_models.PartMovementLedger.component_id == models.AircraftComponent.id,
-            )
+    wo_ids = [wo.id for wo in work_orders]
+    task_ids = [task.id for wo in work_orders for task in wo.tasks]
+
+    signoffs: list[work_models.InspectorSignOff] = []
+    if wo_ids or task_ids:
+        filters = []
+        if wo_ids:
+            filters.append(work_models.InspectorSignOff.work_order_id.in_(wo_ids))
+        if task_ids:
+            filters.append(work_models.InspectorSignOff.task_card_id.in_(task_ids))
+        signoffs = (
+            db.query(work_models.InspectorSignOff)
             .filter(
-                reliability_models.PartMovementLedger.amo_id == current_user.amo_id,
-                reliability_models.PartMovementLedger.work_order_id.in_(work_order_ids),
+                work_models.InspectorSignOff.amo_id == current_user.amo_id,
+                or_(*filters),
             )
-            .order_by(reliability_models.PartMovementLedger.event_date.desc())
+            .order_by(work_models.InspectorSignOff.signed_at.desc())
             .all()
         )
-        movement_ids = [movement.id for movement, _, _, _ in part_movements]
-        if movement_ids:
-            removal_tracking_map = {
-                removal.part_movement_id: removal.removal_tracking_id
-                for removal in db.query(reliability_models.RemovalEvent)
-                .filter(reliability_models.RemovalEvent.part_movement_id.in_(movement_ids))
-                .all()
-                if removal.part_movement_id is not None
-            }
 
-    movements_by_work_order: dict[int, list[schemas.MaintenanceHistoryPartMovement]] = {}
-    for movement, part_number, serial_number, position in part_movements:
-        movements_by_work_order.setdefault(movement.work_order_id, []).append(
-            schemas.MaintenanceHistoryPartMovement(
-                id=movement.id,
-                event_type=movement.event_type,
-                event_date=movement.event_date,
-                component_id=movement.component_id,
-                component_instance_id=movement.component_instance_id,
-                part_number=part_number,
-                serial_number=serial_number,
-                position=position,
-                removal_tracking_id=removal_tracking_map.get(movement.id),
-                notes=movement.notes,
-                task_card_id=movement.task_card_id,
-            )
+    task_signoffs = [signoff for signoff in signoffs if signoff.task_card_id]
+    work_order_signoffs = [signoff for signoff in signoffs if signoff.work_order_id and not signoff.task_card_id]
+
+    part_movements = (
+        db.query(reliability_models.PartMovementLedger)
+        .filter(
+            reliability_models.PartMovementLedger.amo_id == current_user.amo_id,
+            reliability_models.PartMovementLedger.aircraft_serial_number == serial_number,
         )
-
-    items: list[schemas.MaintenanceHistoryWorkOrder] = []
-    for wo in work_orders:
-        tasks = [
-            schemas.MaintenanceHistoryTask(
-                id=task.id,
-                title=task.title,
-                status=task.status,
-                ata_chapter=task.ata_chapter,
-                category=task.category,
-                operator_event_id=task.operator_event_id,
-                inspector_signoffs=[
-                    schemas.MaintenanceHistorySignOff(
-                        id=signoff.id,
-                        inspector_user_id=signoff.inspector_user_id,
-                        signed_at=signoff.signed_at,
-                        signed_flag=signoff.signed_flag,
-                        notes=signoff.notes,
-                    )
-                    for signoff in task.inspector_signoffs
-                    if signoff.signed_flag
-                ],
-            )
-            for task in wo.tasks
-        ]
-        items.append(
-            schemas.MaintenanceHistoryWorkOrder(
-                id=wo.id,
-                wo_number=wo.wo_number,
-                status=wo.status,
-                wo_type=wo.wo_type,
-                description=wo.description,
-                open_date=wo.open_date,
-                closed_date=wo.closed_date,
-                operator_event_id=wo.operator_event_id,
-                tasks=tasks,
-                inspector_signoffs=[
-                    schemas.MaintenanceHistorySignOff(
-                        id=signoff.id,
-                        inspector_user_id=signoff.inspector_user_id,
-                        signed_at=signoff.signed_at,
-                        signed_flag=signoff.signed_flag,
-                        notes=signoff.notes,
-                    )
-                    for signoff in wo.inspector_signoffs
-                    if signoff.signed_flag
-                ],
-                part_movements=movements_by_work_order.get(wo.id, []),
-            )
-        )
-
-    return schemas.MaintenanceHistoryPage(items=items, total=total, skip=skip, limit=limit)
-
-
-@router.get(
-    "/components/{component_instance_id}/history",
-    response_model=List[schemas.AircraftConfigurationEventRead],
-)
-def list_component_history(
-    component_instance_id: int,
-    db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
-):
-    query = db.query(models.AircraftConfigurationEvent).filter(
-        models.AircraftConfigurationEvent.amo_id == current_user.amo_id,
-        models.AircraftConfigurationEvent.component_instance_id == component_instance_id,
+        .order_by(reliability_models.PartMovementLedger.event_date.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
     )
-    return query.order_by(models.AircraftConfigurationEvent.occurred_at.desc()).all()
+
+    return schemas.MaintenanceHistoryRead(
+        aircraft_serial_number=serial_number,
+        work_orders=work_orders,
+        task_signoffs=task_signoffs,
+        work_order_signoffs=work_order_signoffs,
+        part_movements=part_movements,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1303,7 +1206,9 @@ def create_defect_report(
     serial_number: str,
     payload: schemas.DefectReportCreate,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(
+        require_roles(*DEFECT_INTAKE_ROLES)
+    ),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     idem_key = payload.idempotency_key or idempotency_key

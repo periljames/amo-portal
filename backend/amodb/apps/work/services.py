@@ -449,15 +449,10 @@ def execute_task_step(
             amo_id=amo_id,
             entity_type="TaskCard",
             entity_id=str(task.id),
-            action="start",
+            action="auto_start",
             actor_user_id=actor.id,
-            before=None,
-            after={"status": task.status.value},
-        )
-    elif task.status != models.TaskStatusEnum.IN_PROGRESS:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Task must be in progress before executing steps.",
+            before={"status": models.TaskStatusEnum.PLANNED.value},
+            after={"status": models.TaskStatusEnum.IN_PROGRESS.value},
         )
     execution = models.TaskStepExecution(
         amo_id=amo_id,

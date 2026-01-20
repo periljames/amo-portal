@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
 
@@ -11,6 +12,8 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
+from amodb.apps.audit import services as audit_services
+from amodb.apps.audit import schemas as audit_schemas
 from amodb.security import get_current_active_user, require_admin, require_roles
 from . import models, schemas, services
 
@@ -160,6 +163,23 @@ def create_amo(
     db.commit()
     db.refresh(amo)
     _ensure_amo_storage_dirs(amo.id)
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo.id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="AMO",
+            entity_id=str(amo.id),
+            action="create",
+            actor_user_id=current_user.id,
+            before_json=None,
+            after_json={
+                "amo_code": amo.amo_code,
+                "login_slug": amo.login_slug,
+                "name": amo.name,
+            },
+        ),
+    )
+    db.commit()
     return amo
 
 
