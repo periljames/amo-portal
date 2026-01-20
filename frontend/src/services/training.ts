@@ -32,7 +32,7 @@
 
 import { apiGet, apiPost } from "./crs";
 import { authHeaders, handleAuthFailure } from "./auth";
-import { API_BASE_URL } from "./config";
+import { getApiBaseUrl } from "./config";
 import type {
   TrainingCourseRead,
   TrainingCourseCreate,
@@ -290,7 +290,11 @@ export async function downloadTrainingFile(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const startedAt = performance.now();
-    xhr.open("GET", `${API_BASE_URL}/training/files/${encodeURIComponent(fileId)}/download`);
+    const apiBaseUrl = getApiBaseUrl();
+    xhr.open(
+      "GET",
+      `${apiBaseUrl}/training/files/${encodeURIComponent(fileId)}/download`,
+    );
     const headers = authHeaders();
     Object.entries(headers).forEach(([key, value]) => {
       xhr.setRequestHeader(key, value);
