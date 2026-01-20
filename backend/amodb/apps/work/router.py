@@ -558,29 +558,10 @@ def update_task(
             notes=part_movement_notes,
             idempotency_key=part_movement_idempotency_key,
         )
-        movement = reliability_services.create_part_movement(
-            db,
-            amo_id=current_user.amo_id,
-            data=movement_payload,
-            removal_tracking_id=removal_tracking_id,
-            actor_user_id=current_user.id,
-            commit=False,
-        )
         if part_movement_event_type in {
             reliability_schemas.PartMovementTypeEnum.REMOVE,
             reliability_schemas.PartMovementTypeEnum.SWAP,
         }:
-            removal_payload = reliability_schemas.RemovalEventCreate(
-                aircraft_serial_number=task.aircraft_serial_number,
-                component_id=component_id,
-                component_instance_id=part_movement_component_instance_id,
-                work_order_id=task.work_order_id,
-                task_card_id=task.id,
-                event_type=part_movement_event_type,
-                event_date=part_movement_event_date or date.today(),
-                notes=part_movement_notes,
-                idempotency_key=part_movement_idempotency_key,
-            )
             reliability_services.record_part_movement_with_removal(
                 db,
                 amo_id=current_user.amo_id,
@@ -589,11 +570,14 @@ def update_task(
                 removal_reason=removal_reason,
                 hours_at_removal=hours_at_removal,
                 cycles_at_removal=cycles_at_removal,
+                actor_user_id=current_user.id,
             )
-            reliability_services.create_removal_event(
+        else:
+            reliability_services.create_part_movement(
                 db,
                 amo_id=current_user.amo_id,
-                data=removal_payload,
+                data=movement_payload,
+                removal_tracking_id=removal_tracking_id,
                 actor_user_id=current_user.id,
                 commit=False,
             )
