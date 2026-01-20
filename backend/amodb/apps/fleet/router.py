@@ -39,6 +39,7 @@ from amodb.apps.reliability import models as reliability_models
 from amodb.apps.work import models as work_models
 from amodb.apps.work import schemas as work_schemas
 from amodb.apps.work import services as work_services
+from amodb.apps.reliability import models as reliability_models
 from amodb.utils.identifiers import generate_uuid7
 from . import models, ocr as ocr_service, schemas, services
 
@@ -1075,10 +1076,10 @@ def list_configuration_history(
         models.AircraftConfigurationEvent.amo_id == current_user.amo_id,
         models.AircraftConfigurationEvent.aircraft_serial_number == serial_number,
     )
-    if start_date:
-        query = query.filter(models.AircraftConfigurationEvent.occurred_at >= start_date)
-    if end_date:
-        query = query.filter(models.AircraftConfigurationEvent.occurred_at <= end_date)
+    if start_dt:
+        query = query.filter(models.AircraftConfigurationEvent.occurred_at >= start_dt)
+    if end_dt:
+        query = query.filter(models.AircraftConfigurationEvent.occurred_at <= end_dt)
     if position:
         query = query.filter(models.AircraftConfigurationEvent.position == position)
     if part_number:
@@ -1266,6 +1267,17 @@ def create_defect_report(
             else work_models.WorkOrderStatusEnum.DRAFT
         )
         wo_number = f"DEF-{payload.occurred_at:%Y%m%d}-{operator_event_id[-6:]}"
+        steps_payload = []
+        for step in payload.task_steps or []:
+            steps_payload.append(
+                work_schemas.TaskStepCreate(
+                    step_no=step.step_no,
+                    instruction_text=step.instruction,
+                    required_flag=step.required,
+                    measurement_type=step.measurement_type,
+                    expected_range=step.expected_range,
+                )
+            )
         wo_payload = work_schemas.WorkOrderCreate(
             wo_number=wo_number,
             aircraft_serial_number=serial_number,
@@ -1284,6 +1296,7 @@ def create_defect_report(
                     priority=work_models.TaskPriorityEnum.MEDIUM,
                     ata_chapter=payload.ata_chapter,
                     operator_event_id=operator_event_id,
+                    steps=steps_payload,
                 )
             ],
         )
@@ -1302,6 +1315,40 @@ def create_defect_report(
         )
         if first_task:
             defect.task_card_id = first_task.id
+            if payload.assignment:
+                assignee = (
+                    db.query(account_models.User)
+                    .filter(
+                        account_models.User.id == payload.assignment.user_id,
+                        account_models.User.amo_id == current_user.amo_id,
+                    )
+                    .first()
+                )
+                if not assignee:
+                    raise HTTPException(status_code=404, detail="Assignee user not found.")
+                existing_assignment = (
+                    db.query(work_models.TaskAssignment)
+                    .filter(
+                        work_models.TaskAssignment.task_id == first_task.id,
+                        work_models.TaskAssignment.user_id == payload.assignment.user_id,
+                        work_models.TaskAssignment.role_on_task == payload.assignment.role_on_task,
+                    )
+                    .first()
+                )
+                if not existing_assignment:
+                    assignment = work_models.TaskAssignment(
+                        amo_id=current_user.amo_id,
+                        task_id=first_task.id,
+                        user_id=payload.assignment.user_id,
+                        role_on_task=payload.assignment.role_on_task,
+                        status=work_models.TaskAssignmentStatusEnum.ASSIGNED,
+                    )
+                    db.add(assignment)
+    elif payload.assignment:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="assignment requires create_work_order to be true.",
+        )
 
     db.add(defect)
     db.commit()

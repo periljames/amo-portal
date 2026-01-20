@@ -9,6 +9,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
+from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -1161,13 +1162,19 @@ def create_part_movement(
     db.add(movement)
     db.flush()
 
-    fleet_services.apply_part_movement_configuration(
-        db,
-        amo_id=amo_id,
-        movement=movement,
-        removal_tracking_id=removal_tracking_id,
-        actor_user_id=actor_user_id,
-    )
+    try:
+        fleet_services.apply_part_movement_configuration(
+            db,
+            amo_id=amo_id,
+            movement=movement,
+            removal_tracking_id=removal_tracking_id,
+            actor_user_id=actor_user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
 
     audit_services.create_audit_event(
         db,
@@ -1184,11 +1191,52 @@ def create_part_movement(
             },
         ),
     )
-
-    if commit:
-        db.commit()
-        db.refresh(movement)
     return movement
+
+
+def record_part_movement_with_removal(
+    db: Session,
+    *,
+    amo_id: str,
+    data: schemas.PartMovementLedgerCreate,
+    removal_tracking_id: Optional[str],
+    removal_reason: Optional[str],
+    hours_at_removal: Optional[float],
+    cycles_at_removal: Optional[float],
+    actor_user_id: Optional[str],
+) -> tuple[models.PartMovementLedger, Optional[models.RemovalEvent]]:
+    movement = create_part_movement(
+        db,
+        amo_id=amo_id,
+        data=data,
+        removal_tracking_id=removal_tracking_id,
+        actor_user_id=actor_user_id,
+    )
+    removal_event = None
+    if movement.event_type == models.PartMovementTypeEnum.REMOVE:
+        removal_event = (
+            db.query(models.RemovalEvent)
+            .filter(models.RemovalEvent.part_movement_id == movement.id)
+            .first()
+        )
+        if removal_event is None:
+            if removal_tracking_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="removal_tracking_id is required for removal events.",
+                )
+            removal_payload = schemas.RemovalEventCreate(
+                aircraft_serial_number=movement.aircraft_serial_number,
+                component_id=movement.component_id,
+                component_instance_id=movement.component_instance_id,
+                part_movement_id=movement.id,
+                removal_tracking_id=removal_tracking_id,
+                removal_reason=removal_reason,
+                hours_at_removal=hours_at_removal,
+                cycles_at_removal=cycles_at_removal,
+            )
+            removal_event = create_removal_event(db, amo_id=amo_id, data=removal_payload)
+    return movement, removal_event
 
 
 def list_part_movements(

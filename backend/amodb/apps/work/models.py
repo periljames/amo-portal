@@ -39,6 +39,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Enum as SAEnum,
+    desc,
 )
 from sqlalchemy.orm import relationship
 
@@ -163,6 +164,12 @@ class WorkOrder(Base):
         UniqueConstraint("amo_id", "wo_number", name="uq_work_orders_amo_number"),
         Index("ix_work_orders_amo_status", "amo_id", "status"),
         Index("ix_work_orders_amo_aircraft", "amo_id", "aircraft_serial_number"),
+        Index(
+            "ix_work_orders_amo_aircraft_created",
+            "amo_id",
+            "aircraft_serial_number",
+            desc("created_at"),
+        ),
         Index("ix_work_orders_aircraft_status", "aircraft_serial_number", "status"),
         Index("ix_work_orders_status_due", "status", "due_date"),
         Index("ix_work_orders_type_status", "wo_type", "status"),
@@ -298,6 +305,7 @@ class TaskCard(Base):
         Index("ix_task_cards_amo_status", "amo_id", "status"),
         Index("ix_task_cards_amo_aircraft", "amo_id", "aircraft_serial_number"),
         Index("ix_task_cards_workorder_status", "work_order_id", "status"),
+        Index("ix_task_cards_amo_workorder_status", "amo_id", "work_order_id", "status"),
         Index("ix_task_cards_aircraft_status", "aircraft_serial_number", "status"),
         Index("ix_task_cards_status_priority", "status", "priority"),
         Index("ix_task_cards_program_item", "program_item_id"),

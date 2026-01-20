@@ -645,6 +645,12 @@ class AircraftConfigurationEvent(Base):
         Index("ix_config_events_amo_aircraft_date", "amo_id", "aircraft_serial_number", "occurred_at"),
         Index("ix_config_events_amo_position_date", "amo_id", "position", "occurred_at"),
         Index("ix_config_events_removal_tracking", "amo_id", "removal_tracking_id"),
+        Index(
+            "ix_config_events_amo_aircraft_date_desc",
+            "amo_id",
+            "aircraft_serial_number",
+            text("occurred_at DESC"),
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)

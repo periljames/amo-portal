@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -846,6 +847,12 @@ class PartMovementLedger(Base):
     __table_args__ = (
         Index("ix_part_movement_aircraft_date", "aircraft_serial_number", "event_date"),
         Index("ix_part_movement_component", "component_id", "event_date"),
+        Index(
+            "ix_part_movement_amo_aircraft_date",
+            "amo_id",
+            "aircraft_serial_number",
+            text("event_date DESC"),
+        ),
         UniqueConstraint("amo_id", "idempotency_key", name="uq_part_movement_idempotency"),
     )
 
