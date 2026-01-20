@@ -350,7 +350,7 @@ def receive_inventory(
         payload=payload.model_dump(),
     )
 
-    condition = payload.condition or models.InventoryConditionEnum.QUARANTINE
+    condition = payload.condition or models.InventoryConditionEnum.SERVICEABLE
     entry = _create_ledger_entry(
         db,
         amo_id=amo_id,
