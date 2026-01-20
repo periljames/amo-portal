@@ -1211,9 +1211,13 @@ def record_part_movement_with_removal(
         data=data,
         removal_tracking_id=removal_tracking_id,
         actor_user_id=actor_user_id,
+        commit=False,
     )
     removal_event = None
-    if movement.event_type == models.PartMovementTypeEnum.REMOVE:
+    if movement.event_type in {
+        models.PartMovementTypeEnum.REMOVE,
+        models.PartMovementTypeEnum.SWAP,
+    }:
         removal_event = (
             db.query(models.RemovalEvent)
             .filter(models.RemovalEvent.part_movement_id == movement.id)
@@ -1235,7 +1239,13 @@ def record_part_movement_with_removal(
                 hours_at_removal=hours_at_removal,
                 cycles_at_removal=cycles_at_removal,
             )
-            removal_event = create_removal_event(db, amo_id=amo_id, data=removal_payload)
+            removal_event = create_removal_event(
+                db,
+                amo_id=amo_id,
+                data=removal_payload,
+                actor_user_id=actor_user_id,
+                commit=False,
+            )
     return movement, removal_event
 
 

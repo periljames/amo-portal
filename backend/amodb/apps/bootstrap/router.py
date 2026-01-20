@@ -10,6 +10,7 @@ from amodb.database import get_db
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import schemas as account_schemas
 from amodb.apps.accounts import services as account_services
+from amodb.security import require_roles
 from amodb.apps.audit import services as audit_services
 from amodb.apps.audit import schemas as audit_schemas
 from amodb.apps.fleet import models as fleet_models
@@ -52,6 +53,9 @@ def _resolve_amo(
 def bootstrap_amo(
     payload: schemas.BootstrapAMOCreate,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(account_models.AccountRole.SUPERUSER)
+    ),
 ):
     existing = (
         db.query(account_models.AMO)
@@ -114,8 +118,21 @@ def bootstrap_amo(
 def bootstrap_aircraft(
     payload: schemas.BootstrapAircraftCreate,
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(
+            account_models.AccountRole.SUPERUSER,
+            account_models.AccountRole.AMO_ADMIN,
+            account_models.AccountRole.PLANNING_ENGINEER,
+            account_models.AccountRole.PRODUCTION_ENGINEER,
+        )
+    ),
 ):
-    amo = _resolve_amo(db, amo_id=payload.amo_id, amo_code=payload.amo_code)
+    if current_user.is_superuser:
+        amo = _resolve_amo(db, amo_id=payload.amo_id, amo_code=payload.amo_code)
+    else:
+        if payload.amo_id and payload.amo_id != current_user.amo_id:
+            raise HTTPException(status_code=403, detail="Cross-tenant bootstrap not allowed.")
+        amo = _resolve_amo(db, amo_id=current_user.amo_id)
     existing = (
         db.query(fleet_models.Aircraft)
         .filter(
@@ -202,6 +219,14 @@ def bootstrap_baseline_components(
     serial_number: str,
     payload: List[schemas.BootstrapComponentCreate],
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(
+            account_models.AccountRole.SUPERUSER,
+            account_models.AccountRole.AMO_ADMIN,
+            account_models.AccountRole.PLANNING_ENGINEER,
+            account_models.AccountRole.PRODUCTION_ENGINEER,
+        )
+    ),
 ):
     aircraft = (
         db.query(fleet_models.Aircraft)
@@ -210,6 +235,8 @@ def bootstrap_baseline_components(
     )
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found.")
+    if not current_user.is_superuser and aircraft.amo_id != current_user.amo_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant bootstrap not allowed.")
 
     created_ids: List[int] = []
     skipped_ids: List[int] = []
@@ -317,6 +344,9 @@ def bootstrap_baseline_components(
 def bootstrap_users(
     payload: List[schemas.BootstrapUserCreate],
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(
+        require_roles(account_models.AccountRole.SUPERUSER, account_models.AccountRole.AMO_ADMIN)
+    ),
 ):
     if not payload:
         raise HTTPException(status_code=400, detail="At least one user is required.")
@@ -324,7 +354,12 @@ def bootstrap_users(
     skipped: List[str] = []
     touched_amos: set[str] = set()
     for user in payload:
-        amo = _resolve_amo(db, amo_id=user.amo_id, amo_code=user.amo_code)
+        if current_user.is_superuser:
+            amo = _resolve_amo(db, amo_id=user.amo_id, amo_code=user.amo_code)
+        else:
+            if user.amo_id and user.amo_id != current_user.amo_id:
+                raise HTTPException(status_code=403, detail="Cross-tenant bootstrap not allowed.")
+            amo = _resolve_amo(db, amo_id=current_user.amo_id)
         touched_amos.add(amo.id)
         existing = (
             db.query(account_models.User)
