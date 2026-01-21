@@ -49,7 +49,7 @@ def seed_templates(
 ):
     created = services.seed_default_templates(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         created_by_user_id=current_user.id,
     )
     return created
@@ -67,7 +67,7 @@ def create_trend(
 ):
     trend = services.compute_defect_trend(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         window_start=payload.window_start,
         window_end=payload.window_end,
         aircraft_serial_number=payload.aircraft_serial_number,
@@ -88,7 +88,7 @@ def upsert_recurring(
 ):
     instance = services.upsert_recurring_finding(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         data=payload,
     )
     return instance
@@ -106,7 +106,7 @@ def create_recommendation(
 ):
     return services.create_recommendation(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         data=payload,
         created_by_user_id=current_user.id,
     )
@@ -124,7 +124,7 @@ def create_event(
 ):
     return services.create_reliability_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         data=payload,
         created_by_user_id=current_user.id,
     )
@@ -154,7 +154,7 @@ def pull_reliability_feed(
 ):
     return services.build_reliability_pull(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         start_date=start_date,
         end_date=end_date,
         limit=limit,
@@ -190,7 +190,7 @@ def ingest_e_logbook_events(
     try:
         created = services.create_reliability_events_bulk(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=current_user.effective_amo_id,
             created_by_user_id=current_user.id,
             events=payload.events,
         )
@@ -308,7 +308,7 @@ def create_notification_rule(
 ):
     return services.create_notification_rule(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         data=payload,
         created_by_user_id=current_user.id,
     )
@@ -322,7 +322,7 @@ def list_notification_rules(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_notification_rules(db, amo_id=current_user.amo_id)
+    return services.list_notification_rules(db, amo_id=current_user.effective_amo_id)
 
 
 @router.get(
@@ -333,7 +333,7 @@ def list_my_notifications(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_notifications(db, amo_id=current_user.amo_id, user_id=current_user.id)
+    return services.list_notifications(db, amo_id=current_user.effective_amo_id, user_id=current_user.id)
 
 
 @router.post(
@@ -349,7 +349,7 @@ def mark_notification_read(
     try:
         return services.mark_notification_read(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=current_user.effective_amo_id,
             user_id=current_user.id,
             notification_id=notification_id,
             read=payload.read,
@@ -395,7 +395,7 @@ def create_fracas_case(
 ):
     return services.create_fracas_case(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         data=payload,
         created_by_user_id=current_user.id,
     )
@@ -1087,7 +1087,7 @@ def create_report(
 ):
     return services.generate_reliability_report(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         created_by_user_id=current_user.id,
         window_start=payload.window_start,
         window_end=payload.window_end,
