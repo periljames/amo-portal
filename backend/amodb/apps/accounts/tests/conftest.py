@@ -25,6 +25,7 @@ def db_session():
             models.AMOAsset.__table__,
             models.Department.__table__,
             models.User.__table__,
+            models.UserActiveContext.__table__,
             models.CatalogSKU.__table__,
             models.TenantLicense.__table__,
             models.LicenseEntitlement.__table__,

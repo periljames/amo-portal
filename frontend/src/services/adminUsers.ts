@@ -83,6 +83,7 @@ export interface AdminAmoRead {
   contact_email?: string | null;
   contact_phone?: string | null;
   time_zone?: string | null;
+  is_demo?: boolean;
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
@@ -97,6 +98,17 @@ export interface AdminAmoCreatePayload {
   contact_email?: string | null;
   contact_phone?: string | null;
   time_zone?: string | null;
+  is_demo?: boolean;
+}
+
+export type DataMode = "DEMO" | "REAL";
+
+export interface AdminContext {
+  user_id: string;
+  active_amo_id: string | null;
+  data_mode: DataMode;
+  last_real_amo_id: string | null;
+  updated_at: string;
 }
 
 /**
@@ -129,6 +141,23 @@ export function getActiveAmoId(): string | null {
 export function clearActiveAmoId() {
   localStorage.removeItem(LS_ACTIVE_AMO_ID);
   localStorage.removeItem(ACTIVE_AMO_ID_KEY_ALT);
+}
+
+export async function getAdminContext(): Promise<AdminContext> {
+  return apiGet<AdminContext>("/accounts/admin/context", {
+    headers: authHeaders(),
+  });
+}
+
+export async function setAdminContext(payload: {
+  active_amo_id?: string | null;
+  data_mode?: DataMode;
+}): Promise<AdminContext> {
+  return apiPost<AdminContext>(
+    "/accounts/admin/context",
+    JSON.stringify(payload),
+    { headers: authHeaders() }
+  );
 }
 
 type CreateOptions = {

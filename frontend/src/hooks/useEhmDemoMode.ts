@@ -1,12 +1,12 @@
 // src/hooks/useEhmDemoMode.ts
 import { useEffect, useState } from "react";
 import { getCachedUser } from "../services/auth";
-
-const DEMO_STORAGE_KEY = "ehm_demo_mode";
+import { getAdminContext, setAdminContext } from "../services/adminUsers";
 
 export function useEhmDemoMode() {
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [canToggleDemo, setCanToggleDemo] = useState(false);
+  const [activeAmoId, setActiveAmoId] = useState<string | null>(null);
 
   useEffect(() => {
     const user = getCachedUser();
@@ -16,14 +16,32 @@ export function useEhmDemoMode() {
       setIsDemoMode(false);
       return;
     }
-    const stored = window.localStorage.getItem(DEMO_STORAGE_KEY);
-    setIsDemoMode(stored === "true");
+    const loadContext = async () => {
+      try {
+        const ctx = await getAdminContext();
+        setIsDemoMode(ctx.data_mode === "DEMO");
+        setActiveAmoId(ctx.active_amo_id);
+      } catch {
+        setIsDemoMode(false);
+      }
+    };
+    loadContext();
   }, []);
 
   const setDemoMode = (next: boolean) => {
     if (!canToggleDemo) return;
-    setIsDemoMode(next);
-    window.localStorage.setItem(DEMO_STORAGE_KEY, String(next));
+    const dataMode = next ? "DEMO" : "REAL";
+    setAdminContext({
+      data_mode: dataMode,
+      active_amo_id: activeAmoId ?? undefined,
+    })
+      .then((ctx) => {
+        setIsDemoMode(ctx.data_mode === "DEMO");
+        setActiveAmoId(ctx.active_amo_id);
+      })
+      .catch(() => {
+        setIsDemoMode(false);
+      });
   };
 
   return {

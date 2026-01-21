@@ -34,6 +34,7 @@ from .models import (
     PaymentProvider,
     InvoiceStatus,
     WebhookStatus,
+    DataMode,
 )
 
 
@@ -89,6 +90,87 @@ class IdempotencyError(Exception):
 
 class SchemaNotInitialized(Exception):
     """Raised when required database tables are missing."""
+
+
+# ---------------------------------------------------------------------------
+# Superuser active context helpers
+# ---------------------------------------------------------------------------
+
+
+def get_user_active_context(db: Session, *, user_id: str) -> Optional[models.UserActiveContext]:
+    return (
+        db.query(models.UserActiveContext)
+        .filter(models.UserActiveContext.user_id == user_id)
+        .first()
+    )
+
+
+def get_or_create_user_active_context(
+    db: Session,
+    *,
+    user: models.User,
+) -> models.UserActiveContext:
+    context = get_user_active_context(db, user_id=user.id)
+    if context:
+        return context
+
+    amo = db.query(models.AMO).filter(models.AMO.id == user.amo_id).first()
+    data_mode = DataMode.DEMO if amo and amo.is_demo else DataMode.REAL
+    context = models.UserActiveContext(
+        user_id=user.id,
+        active_amo_id=user.amo_id,
+        data_mode=data_mode,
+        last_real_amo_id=None if data_mode == DataMode.REAL else user.amo_id,
+    )
+    db.add(context)
+    db.flush()
+    return context
+
+
+def set_user_active_context(
+    db: Session,
+    *,
+    user: models.User,
+    data_mode: Optional[DataMode] = None,
+    active_amo_id: Optional[str] = None,
+) -> models.UserActiveContext:
+    context = get_user_active_context(db, user_id=user.id)
+
+    target_amo_id = active_amo_id or (context.active_amo_id if context else None)
+    target_mode = data_mode or (context.data_mode if context else None)
+
+    if target_amo_id:
+        amo = db.query(models.AMO).filter(models.AMO.id == target_amo_id).first()
+        if not amo:
+            raise HTTPException(status_code=404, detail="AMO not found.")
+        if target_mode is None:
+            target_mode = DataMode.DEMO if amo.is_demo else DataMode.REAL
+        if target_mode == DataMode.DEMO and not amo.is_demo:
+            raise HTTPException(status_code=400, detail="Selected AMO is not a demo tenant.")
+        if target_mode == DataMode.REAL and amo.is_demo:
+            raise HTTPException(status_code=400, detail="Selected AMO is demo-only.")
+    else:
+        if target_mode == DataMode.DEMO:
+            raise HTTPException(status_code=400, detail="active_amo_id is required for DEMO mode.")
+        target_mode = target_mode or DataMode.REAL
+        target_amo_id = user.amo_id
+        amo = db.query(models.AMO).filter(models.AMO.id == target_amo_id).first()
+        if amo and amo.is_demo:
+            raise HTTPException(status_code=400, detail="Selected AMO is demo-only.")
+
+    if not context:
+        context = models.UserActiveContext(user_id=user.id)
+        db.add(context)
+
+    if target_mode == DataMode.DEMO and context.active_amo_id and context.data_mode == DataMode.REAL:
+        context.last_real_amo_id = context.active_amo_id
+    if target_mode == DataMode.REAL:
+        context.last_real_amo_id = target_amo_id
+
+    context.active_amo_id = target_amo_id
+    context.data_mode = target_mode
+    db.flush()
+    return context
 
 
 # ---------------------------------------------------------------------------

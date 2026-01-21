@@ -18,6 +18,7 @@ from .models import (
     PaymentProvider,
     InvoiceStatus,
     ModuleSubscriptionStatus,
+    DataMode,
 )
 
 # ---------------------------------------------------------------------------
@@ -34,6 +35,7 @@ class AMOBase(BaseModel):
     contact_email: Optional[EmailStr] = None
     contact_phone: Optional[str] = None
     time_zone: Optional[str] = None
+    is_demo: Optional[bool] = None
 
 
 class AMOCreate(AMOBase):
@@ -47,6 +49,7 @@ class AMOUpdate(BaseModel):
     contact_email: Optional[EmailStr] = None
     contact_phone: Optional[str] = None
     time_zone: Optional[str] = None
+    is_demo: Optional[bool] = None
     is_active: Optional[bool] = None
 
 
@@ -578,6 +581,22 @@ class InvoiceRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UserActiveContextRead(BaseModel):
+    user_id: str
+    active_amo_id: Optional[str] = None
+    data_mode: DataMode
+    last_real_amo_id: Optional[str] = None
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserActiveContextUpdate(BaseModel):
+    active_amo_id: Optional[str] = None
+    data_mode: Optional[DataMode] = None
 
 
 class TrialStartRequest(BaseModel):

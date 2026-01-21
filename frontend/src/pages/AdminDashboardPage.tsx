@@ -6,10 +6,12 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser, getContext } from "../services/auth";
 import {
   createAdminAmo,
+  getAdminContext,
   listAdminAmos,
   listAdminUsers,
+  setAdminContext,
 } from "../services/adminUsers";
-import type { AdminAmoRead, AdminUserRead } from "../services/adminUsers";
+import type { AdminAmoRead, AdminUserRead, DataMode } from "../services/adminUsers";
 import { LS_ACTIVE_AMO_ID } from "../services/adminUsers";
 
 type UrlParams = {
@@ -46,6 +48,11 @@ const AdminDashboardPage: React.FC = () => {
   const [amoCreateError, setAmoCreateError] = useState<string | null>(null);
   const [amoCreateSuccess, setAmoCreateSuccess] = useState<string | null>(null);
   const [lastCreatedAmoId, setLastCreatedAmoId] = useState<string | null>(null);
+  const [contextMode, setContextMode] = useState<DataMode>("REAL");
+  const [contextLoading, setContextLoading] = useState(false);
+  const [contextError, setContextError] = useState<string | null>(null);
+  const [lastRealAmoId, setLastRealAmoId] = useState<string | null>(null);
+  const contextInitRef = useRef(false);
 
   type AmoFormState = {
     amoCode: string;
@@ -144,6 +151,61 @@ const AdminDashboardPage: React.FC = () => {
     loadAmos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuperuser]);
+
+  useEffect(() => {
+    if (!isSuperuser || contextInitRef.current) return;
+    contextInitRef.current = true;
+    const loadContext = async () => {
+      setContextLoading(true);
+      setContextError(null);
+      try {
+        const ctx = await getAdminContext();
+        setContextMode(ctx.data_mode);
+        setLastRealAmoId(ctx.last_real_amo_id);
+        if (ctx.active_amo_id) {
+          setActiveAmoId(ctx.active_amo_id);
+          localStorage.setItem(LS_ACTIVE_AMO_ID, ctx.active_amo_id);
+        }
+      } catch (err: any) {
+        setContextError(err?.message || "Failed to load admin context.");
+      } finally {
+        setContextLoading(false);
+      }
+    };
+    loadContext();
+  }, [isSuperuser]);
+
+  useEffect(() => {
+    if (!isSuperuser || !amos.length) return;
+    if (activeAmoId && amos.some((a) => a.id === activeAmoId)) return;
+
+    const fallback =
+      (lastCreatedAmoId && amos.find((a) => a.id === lastCreatedAmoId)?.id) ||
+      (currentUser?.amo_id && amos.find((a) => a.id === currentUser.amo_id)?.id) ||
+      amos[0]?.id ||
+      null;
+
+    if (!fallback) return;
+
+    const fallbackAmo = amos.find((a) => a.id === fallback);
+    const fallbackMode: DataMode = fallbackAmo?.is_demo ? "DEMO" : "REAL";
+
+    setContextLoading(true);
+    setContextError(null);
+    setAdminContext({ active_amo_id: fallback, data_mode: fallbackMode })
+      .then((ctx) => {
+        setActiveAmoId(ctx.active_amo_id);
+        setContextMode(ctx.data_mode);
+        setLastRealAmoId(ctx.last_real_amo_id);
+        if (ctx.active_amo_id) {
+          localStorage.setItem(LS_ACTIVE_AMO_ID, ctx.active_amo_id);
+        }
+      })
+      .catch((err: any) => {
+        setContextError(err?.message || "Failed to update admin context.");
+      })
+      .finally(() => setContextLoading(false));
+  }, [isSuperuser, amos, activeAmoId, lastCreatedAmoId, currentUser?.amo_id]);
 
   const trimmedSearch = search.trim();
   const usersRequestKey = useMemo(
@@ -358,9 +420,68 @@ const AdminDashboardPage: React.FC = () => {
   const handleAmoChange = (nextAmoId: string) => {
     const v = (nextAmoId || "").trim();
     if (!v) return;
-    setActiveAmoId(v);
-    localStorage.setItem(LS_ACTIVE_AMO_ID, v);
-    setSkip(0);
+    const amo = amos.find((item) => item.id === v);
+    const nextMode: DataMode = amo?.is_demo ? "DEMO" : "REAL";
+    setContextLoading(true);
+    setContextError(null);
+    setAdminContext({ active_amo_id: v, data_mode: nextMode })
+      .then((ctx) => {
+        setActiveAmoId(ctx.active_amo_id);
+        setContextMode(ctx.data_mode);
+        setLastRealAmoId(ctx.last_real_amo_id);
+        if (ctx.active_amo_id) {
+          localStorage.setItem(LS_ACTIVE_AMO_ID, ctx.active_amo_id);
+        }
+        setSkip(0);
+      })
+      .catch((err: any) => {
+        setContextError(err?.message || "Failed to update admin context.");
+      })
+      .finally(() => setContextLoading(false));
+  };
+
+  const handleContextToggle = (nextIsDemo: boolean) => {
+    const targetMode: DataMode = nextIsDemo ? "DEMO" : "REAL";
+    let targetAmoId = activeAmoId;
+
+    if (targetMode === "DEMO") {
+      const demoAmo = amos.find((a) => a.is_demo);
+      targetAmoId = activeAmoId && amos.find((a) => a.id === activeAmoId)?.is_demo
+        ? activeAmoId
+        : demoAmo?.id || null;
+      if (!targetAmoId) {
+        setContextError("No demo AMO is available.");
+        return;
+      }
+    } else {
+      const realCandidate =
+        (lastRealAmoId && amos.find((a) => a.id === lastRealAmoId && !a.is_demo)?.id) ||
+        (activeAmoId && amos.find((a) => a.id === activeAmoId && !a.is_demo)?.id) ||
+        (currentUser?.amo_id && amos.find((a) => a.id === currentUser.amo_id)?.id) ||
+        amos.find((a) => !a.is_demo)?.id ||
+        null;
+      targetAmoId = realCandidate;
+      if (!targetAmoId) {
+        setContextError("No real AMO is available.");
+        return;
+      }
+    }
+
+    setContextLoading(true);
+    setContextError(null);
+    setAdminContext({ data_mode: targetMode, active_amo_id: targetAmoId })
+      .then((ctx) => {
+        setContextMode(ctx.data_mode);
+        setLastRealAmoId(ctx.last_real_amo_id);
+        setActiveAmoId(ctx.active_amo_id);
+        if (ctx.active_amo_id) {
+          localStorage.setItem(LS_ACTIVE_AMO_ID, ctx.active_amo_id);
+        }
+      })
+      .catch((err: any) => {
+        setContextError(err?.message || "Failed to update admin context.");
+      })
+      .finally(() => setContextLoading(false));
   };
 
   const handleAmoFormChange = (
@@ -474,11 +595,27 @@ const AdminDashboardPage: React.FC = () => {
               the AMO Management page.
             </p>
 
+            {contextLoading && <p>Loading context…</p>}
+            {contextError && <div className="alert alert-error">{contextError}</div>}
+
             {amoLoading && <p>Loading AMOs…</p>}
             {amoError && <div className="alert alert-error">{amoError}</div>}
 
             {!amoLoading && !amoError && (
               <div className="form-row">
+                <label htmlFor="demoToggle">Data Mode</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <input
+                    id="demoToggle"
+                    type="checkbox"
+                    checked={contextMode === "DEMO"}
+                    onChange={(e) => handleContextToggle(e.target.checked)}
+                  />
+                  <span>
+                    {contextMode === "DEMO" ? "Demo data" : "Real data"}
+                  </span>
+                </div>
+
                 <label htmlFor="amoSelect">Active AMO</label>
                 <select
                   id="amoSelect"

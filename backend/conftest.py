@@ -18,10 +18,13 @@ os.environ["AMODB_SKIP_MODEL_IMPORTS"] = "1"
 
 from amodb.database import Base  # noqa: E402
 from amodb.apps.accounts import models as account_models  # noqa: E402
+from amodb.apps.crs import models as crs_models  # noqa: E402
 from amodb.apps.fleet import models as fleet_models  # noqa: E402
 from amodb.apps.work import models as work_models  # noqa: E402
 from amodb.apps.reliability import models as reliability_models  # noqa: E402
 from amodb.apps.audit import models as audit_models  # noqa: E402
+from amodb.apps.integrations import models as integration_models  # noqa: E402
+from amodb.apps.maintenance_program import models as maintenance_program_models  # noqa: E402
 
 
 @pytest.fixture()
@@ -32,6 +35,8 @@ def db_session():
         tables=[
             account_models.AMO.__table__,
             account_models.User.__table__,
+            account_models.IdempotencyKey.__table__,
+            account_models.UserActiveContext.__table__,
             fleet_models.Aircraft.__table__,
             fleet_models.AircraftComponent.__table__,
             fleet_models.AircraftUsage.__table__,
@@ -44,10 +49,14 @@ def db_session():
             work_models.TaskStep.__table__,
             work_models.TaskStepExecution.__table__,
             work_models.InspectorSignOff.__table__,
-            reliability_models.ComponentInstance.__table__,
+            maintenance_program_models.AmpProgramItem.__table__,
+            maintenance_program_models.AmpAircraftProgramItem.__table__,
             reliability_models.PartMovementLedger.__table__,
             reliability_models.RemovalEvent.__table__,
             audit_models.AuditEvent.__table__,
+            integration_models.IntegrationConfig.__table__,
+            integration_models.IntegrationOutboundEvent.__table__,
+            integration_models.IntegrationInboundEvent.__table__,
         ],
     )
     TestingSession = sessionmaker(
