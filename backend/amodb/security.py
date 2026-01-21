@@ -23,6 +23,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHash
@@ -207,6 +208,7 @@ def get_current_user(
 
 def get_current_active_user(
     current_user: account_models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> account_models.User:
     """
     Ensure the current user is active.
@@ -218,6 +220,34 @@ def get_current_active_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user account",
         )
+    effective_amo_id = current_user.amo_id
+    if getattr(current_user, "is_superuser", False):
+        context = (
+            db.query(account_models.UserActiveContext)
+            .filter(account_models.UserActiveContext.user_id == current_user.id)
+            .first()
+        )
+        if context and context.active_amo_id:
+            effective_amo_id = context.active_amo_id
+            amo = (
+                db.query(account_models.AMO)
+                .filter(account_models.AMO.id == effective_amo_id)
+                .first()
+            )
+            if amo and context.data_mode:
+                if context.data_mode == account_models.DataMode.DEMO and not amo.is_demo:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Active AMO does not match DEMO mode.",
+                    )
+                if context.data_mode == account_models.DataMode.REAL and amo.is_demo:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Active AMO does not match REAL mode.",
+                    )
+
+    set_committed_value(current_user, "amo_id", effective_amo_id)
+    setattr(current_user, "effective_amo_id", effective_amo_id)
     return current_user
 
 

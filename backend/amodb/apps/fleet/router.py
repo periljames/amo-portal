@@ -285,7 +285,7 @@ def create_aircraft(
         db.query(models.Aircraft)
         .filter(
             models.Aircraft.serial_number == payload.serial_number,
-            models.Aircraft.amo_id == current_user.amo_id,
+            models.Aircraft.amo_id == current_user.effective_amo_id,
         )
         .first()
     )
@@ -300,7 +300,7 @@ def create_aircraft(
         db.query(models.Aircraft)
         .filter(
             models.Aircraft.registration == payload.registration,
-            models.Aircraft.amo_id == current_user.amo_id,
+            models.Aircraft.amo_id == current_user.effective_amo_id,
         )
         .first()
     )
@@ -313,14 +313,14 @@ def create_aircraft(
             ),
         )
 
-    ac = models.Aircraft(amo_id=current_user.amo_id, **data)
+    ac = models.Aircraft(amo_id=current_user.effective_amo_id, **data)
     _set_verification_status(ac, safety_confirmed)
     db.add(ac)
     db.commit()
     db.refresh(ac)
     audit_services.create_audit_event(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         data=audit_schemas.AuditEventCreate(
             entity_type="Aircraft",
             entity_id=str(ac.serial_number),
@@ -448,7 +448,7 @@ def list_aircraft_documents(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    _get_aircraft_or_404(db, serial_number, current_user.effective_amo_id)
     docs = (
         db.query(models.AircraftDocument)
         .join(models.Aircraft)
@@ -475,7 +475,7 @@ def create_aircraft_document(
         require_roles(*DOCUMENT_WRITE_ROLES)
     ),
 ):
-    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    _get_aircraft_or_404(db, serial_number, current_user.effective_amo_id)
     existing = (
         db.query(models.AircraftDocument)
         .join(models.Aircraft)
@@ -759,7 +759,7 @@ def get_aircraft_compliance_summary(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    _get_aircraft_or_404(db, serial_number, current_user.effective_amo_id)
     docs = (
         db.query(models.AircraftDocument)
         .join(models.Aircraft)
@@ -1484,7 +1484,7 @@ def create_usage_entry(
     ),
 ):
     # Ensure aircraft exists
-    _get_aircraft_or_404(db, serial_number, current_user.amo_id)
+    _get_aircraft_or_404(db, serial_number, current_user.effective_amo_id)
 
     safety_confirmed = bool(payload.safety_confirmed)
     data = payload.model_dump(exclude={"safety_confirmed"})
@@ -1500,7 +1500,7 @@ def create_usage_entry(
             models.AircraftUsage.aircraft_serial_number == serial_number,
             models.AircraftUsage.date == payload.date,
             models.AircraftUsage.techlog_no == payload.techlog_no,
-            models.AircraftUsage.amo_id == current_user.amo_id,
+            models.AircraftUsage.amo_id == current_user.effective_amo_id,
         )
         .first()
     )
@@ -1510,11 +1510,22 @@ def create_usage_entry(
             detail="Usage entry for this aircraft, date and techlog already exists.",
         )
 
-    previous_usage = services.get_previous_usage(db, serial_number, payload.date, amo_id=current_user.amo_id)
+    previous_usage = services.get_previous_usage(
+        db,
+        serial_number,
+        payload.date,
+        amo_id=current_user.effective_amo_id,
+    )
     services.apply_usage_calculations(data, previous_usage)
-    services.update_maintenance_remaining(db, serial_number, payload.date, data, amo_id=current_user.amo_id)
+    services.update_maintenance_remaining(
+        db,
+        serial_number,
+        payload.date,
+        data,
+        amo_id=current_user.effective_amo_id,
+    )
     usage = models.AircraftUsage(
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         aircraft_serial_number=serial_number,
         created_by_user_id=current_user.id,
         updated_by_user_id=current_user.id,

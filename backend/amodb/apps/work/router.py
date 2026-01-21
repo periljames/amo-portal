@@ -108,7 +108,7 @@ def list_work_orders(
     """
     List work orders with optional filters by aircraft, status and type.
     """
-    q = db.query(models.WorkOrder).filter(models.WorkOrder.amo_id == current_user.amo_id)
+    q = db.query(models.WorkOrder).filter(models.WorkOrder.amo_id == current_user.effective_amo_id)
 
     if aircraft_serial_number:
         q = q.filter(
@@ -135,7 +135,7 @@ def get_work_order(
         db.query(models.WorkOrder)
         .filter(
             models.WorkOrder.id == work_order_id,
-            models.WorkOrder.amo_id == current_user.amo_id,
+            models.WorkOrder.amo_id == current_user.effective_amo_id,
         )
         .first()
     )
@@ -154,7 +154,7 @@ def get_work_order_by_number(
         db.query(models.WorkOrder)
         .filter(
             models.WorkOrder.wo_number == wo_number,
-            models.WorkOrder.amo_id == current_user.amo_id,
+            models.WorkOrder.amo_id == current_user.effective_amo_id,
         )
         .first()
     )
@@ -189,7 +189,7 @@ def create_work_order(
         db.query(models.WorkOrder)
         .filter(
             models.WorkOrder.wo_number == payload.wo_number,
-            models.WorkOrder.amo_id == current_user.amo_id,
+            models.WorkOrder.amo_id == current_user.effective_amo_id,
         )
         .first()
     )
@@ -199,11 +199,11 @@ def create_work_order(
             detail=f"Work order {payload.wo_number} already exists.",
         )
 
-    _ensure_aircraft_documents_clear(db, payload.aircraft_serial_number, current_user.amo_id)
+    _ensure_aircraft_documents_clear(db, payload.aircraft_serial_number, current_user.effective_amo_id)
 
     wo = services.create_work_order(
         db,
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         payload=payload,
         actor=current_user,
     )
@@ -211,7 +211,7 @@ def create_work_order(
     if payload.is_scheduled:
         account_services.record_usage(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=current_user.effective_amo_id,
             meter_key=account_services.METER_KEY_SCHEDULED_JOBS,
             quantity=1,
             commit=False,
@@ -315,7 +315,7 @@ def list_tasks_for_work_order(
         db.query(models.TaskCard)
         .filter(
             models.TaskCard.work_order_id == work_order_id,
-            models.TaskCard.amo_id == current_user.amo_id,
+            models.TaskCard.amo_id == current_user.effective_amo_id,
         )
         .order_by(models.TaskCard.id.asc())
         .all()
@@ -333,7 +333,7 @@ def get_task(
         db.query(models.TaskCard)
         .filter(
             models.TaskCard.id == task_id,
-            models.TaskCard.amo_id == current_user.amo_id,
+            models.TaskCard.amo_id == current_user.effective_amo_id,
         )
         .first()
     )
@@ -365,14 +365,14 @@ def create_task(
         db.query(models.WorkOrder)
         .filter(
             models.WorkOrder.id == work_order_id,
-            models.WorkOrder.amo_id == current_user.amo_id,
+            models.WorkOrder.amo_id == current_user.effective_amo_id,
         )
         .first()
     )
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
 
-    _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number, current_user.amo_id)
+    _ensure_aircraft_documents_clear(db, wo.aircraft_serial_number, current_user.effective_amo_id)
 
     is_planning = (
         current_user.is_superuser
@@ -411,7 +411,7 @@ def create_task(
             category = models.TaskCategoryEnum.UNSCHEDULED
 
     task = models.TaskCard(
-        amo_id=current_user.amo_id,
+        amo_id=current_user.effective_amo_id,
         work_order_id=wo.id,
         aircraft_serial_number=wo.aircraft_serial_number,
         aircraft_component_id=payload.aircraft_component_id,
@@ -443,7 +443,7 @@ def create_task(
     if steps:
         services.create_task_steps(
             db,
-            amo_id=current_user.amo_id,
+            amo_id=current_user.effective_amo_id,
             task=task,
             steps=steps,
             actor=current_user,
@@ -471,7 +471,7 @@ def update_task(
         db.query(models.TaskCard)
         .filter(
             models.TaskCard.id == task_id,
-            models.TaskCard.amo_id == current_user.amo_id,
+            models.TaskCard.amo_id == current_user.effective_amo_id,
         )
         .first()
     )
@@ -493,6 +493,7 @@ def update_task(
     removal_reason = data.pop("removal_reason", None)
     hours_at_removal = data.pop("hours_at_removal", None)
     cycles_at_removal = data.pop("cycles_at_removal", None)
+    part_movement_reason_code = data.pop("part_movement_reason_code", None)
 
     # Optional optimistic concurrency: if client sent last_known_updated_at,
     # check it against DB value.
@@ -556,6 +557,7 @@ def update_task(
             event_type=part_movement_event_type,
             event_date=part_movement_event_date or date.today(),
             notes=part_movement_notes,
+            reason_code=part_movement_reason_code or removal_reason,
             idempotency_key=part_movement_idempotency_key,
         )
         if part_movement_event_type in {

@@ -1131,6 +1131,23 @@ def create_part_movement(
     actor_user_id: Optional[str] = None,
     commit: bool = True,
 ) -> models.PartMovementLedger:
+    if not actor_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="created_by_user_id is required for part movements.",
+        )
+    if data.event_type in {
+        models.PartMovementTypeEnum.ADJUST,
+        models.PartMovementTypeEnum.SCRAP,
+        models.PartMovementTypeEnum.REMOVE,
+        models.PartMovementTypeEnum.SWAP,
+        models.PartMovementTypeEnum.VENDOR_RETURN,
+    }:
+        if not data.reason_code or not data.reason_code.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="reason_code is required for ADJUST, SCRAP, REMOVE, SWAP, and VENDOR_RETURN movements.",
+            )
     if data.event_type in {models.PartMovementTypeEnum.REMOVE, models.PartMovementTypeEnum.SWAP}:
         if removal_tracking_id is None:
             raise HTTPException(
@@ -1242,6 +1259,7 @@ def record_part_movement_with_removal(
                 component_id=movement.component_id,
                 component_instance_id=movement.component_instance_id,
                 part_movement_id=movement.id,
+                event_type=movement.event_type,
                 removal_tracking_id=removal_tracking_id,
                 removal_reason=removal_reason,
                 hours_at_removal=hours_at_removal,
@@ -1280,10 +1298,20 @@ def create_removal_event(
     actor_user_id: Optional[str] = None,
     commit: bool = True,
 ) -> models.RemovalEvent:
-    removal_tracking_id = data.removal_tracking_id or generate_uuid7()
+    if not actor_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="created_by_user_id is required for removal events.",
+        )
+    if not data.removal_tracking_id or not data.removal_tracking_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="removal_tracking_id is required for removal events.",
+        )
     removal = models.RemovalEvent(
         amo_id=amo_id,
-        removal_tracking_id=removal_tracking_id,
+        created_by_user_id=actor_user_id,
+        removal_tracking_id=data.removal_tracking_id,
         **data.model_dump(exclude={"removal_tracking_id"}),
     )
     if data.removed_at is None:

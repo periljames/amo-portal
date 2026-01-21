@@ -15,6 +15,8 @@ from amodb.apps.finance import models as finance_models
 from amodb.apps.finance import services as finance_services
 from amodb.apps.finance import schemas as finance_schemas
 from amodb.apps.audit import models as audit_models
+from amodb.apps.inventory import models as inventory_models
+from amodb.apps.work import models as work_models
 
 
 @pytest.fixture()
@@ -36,6 +38,13 @@ def db_session():
             maintenance_models.AmpProgramItem.__table__,
             maintenance_models.AmpAircraftProgramItem.__table__,
             audit_models.AuditEvent.__table__,
+            inventory_models.InventoryPart.__table__,
+            inventory_models.InventoryLocation.__table__,
+            inventory_models.InventoryLot.__table__,
+            inventory_models.InventorySerial.__table__,
+            work_models.WorkOrder.__table__,
+            work_models.TaskCard.__table__,
+            inventory_models.InventoryMovementLedger.__table__,
             finance_models.Currency.__table__,
             finance_models.TaxCode.__table__,
             finance_models.Customer.__table__,

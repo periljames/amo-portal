@@ -309,6 +309,13 @@ class FRACASActionStatusEnum(str, Enum):
 
 
 class PartMovementTypeEnum(str, Enum):
+    RECEIVE = "RECEIVE"
+    ISSUE = "ISSUE"
+    TRANSFER = "TRANSFER"
+    RETURN = "RETURN"
+    ADJUST = "ADJUST"
+    SCRAP = "SCRAP"
+    VENDOR_RETURN = "VENDOR_RETURN"
     INSTALL = "INSTALL"
     REMOVE = "REMOVE"
     SWAP = "SWAP"
@@ -853,7 +860,14 @@ class PartMovementLedger(Base):
             "aircraft_serial_number",
             text("event_date DESC"),
         ),
+        Index("ix_part_movement_amo_event_date", "amo_id", "event_date"),
+        Index("ix_part_movement_amo_created", "amo_id", "created_at"),
         UniqueConstraint("amo_id", "idempotency_key", name="uq_part_movement_idempotency"),
+        CheckConstraint(
+            "(event_type NOT IN ('ADJUST', 'SCRAP', 'REMOVE', 'SWAP', 'VENDOR_RETURN')) "
+            "OR (reason_code IS NOT NULL AND length(trim(reason_code)) > 0)",
+            name="ck_part_movement_reason_code_required",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -885,8 +899,8 @@ class PartMovementLedger(Base):
     reason_code = Column(String(64), nullable=True)
     created_by_user_id = Column(
         String(36),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
         index=True,
     )
 
@@ -902,6 +916,12 @@ class RemovalEvent(Base):
 
     __table_args__ = (
         Index("ix_removal_events_component_date", "component_id", "removed_at"),
+        Index("ix_removal_events_amo_removed", "amo_id", "removed_at"),
+        Index("ix_removal_events_amo_created", "amo_id", "created_at"),
+        CheckConstraint(
+            "event_type IN ('REMOVE', 'SWAP')",
+            name="ck_removal_event_type_allowed",
+        ),
         UniqueConstraint("amo_id", "removal_tracking_id", name="uq_removal_tracking_id"),
     )
 
@@ -926,13 +946,20 @@ class RemovalEvent(Base):
         nullable=True,
         index=True,
     )
-    removal_tracking_id = Column(String(36), nullable=False, default=generate_uuid7, index=True)
+    event_type = Column(String(16), nullable=False, index=True)
+    removal_tracking_id = Column(String(36), nullable=False, index=True)
     removal_reason = Column(String(128), nullable=True, index=True)
     hours_at_removal = Column(Float, nullable=True)
     cycles_at_removal = Column(Float, nullable=True)
     removed_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
 
 
 class ShopVisit(Base):

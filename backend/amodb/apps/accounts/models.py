@@ -65,6 +65,11 @@ class AccountRole(str, enum.Enum):
     AUDITOR = "AUDITOR"
 
 
+class DataMode(str, enum.Enum):
+    DEMO = "DEMO"
+    REAL = "REAL"
+
+
 class MaintenanceScope(str, enum.Enum):
     """Rough mapping to Part-145 / Part-66 style scopes."""
 
@@ -117,6 +122,7 @@ class AMO(Base):
     contact_email = Column(String(255), nullable=True)
     contact_phone = Column(String(64), nullable=True)
     time_zone = Column(String(64), nullable=True)
+    is_demo = Column(Boolean, nullable=False, default=False, index=True)
 
     is_active = Column(Boolean, nullable=False, default=True, index=True)
 
@@ -455,6 +461,47 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role})>"
+
+
+class UserActiveContext(Base):
+    """
+    Persisted per-superuser AMO context + demo/real mode.
+    """
+
+    __tablename__ = "user_active_context"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_user_active_context_user"),
+        Index("ix_user_active_context_user", "user_id"),
+        Index("ix_user_active_context_amo", "active_amo_id"),
+        Index("ix_user_active_context_mode", "data_mode"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    active_amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    data_mode = Column(
+        Enum(DataMode, name="user_data_mode_enum"),
+        nullable=False,
+        default=DataMode.REAL,
+        index=True,
+    )
+    last_real_amo_id = Column(
+        String(36),
+        ForeignKey("amos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 # ---------------------------------------------------------------------------

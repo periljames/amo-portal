@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .models import (
     AlertComparatorEnum,
@@ -563,12 +563,27 @@ class PartMovementLedgerCreate(BaseModel):
     reason_code: Optional[str] = None
     idempotency_key: Optional[str] = None
 
+    @model_validator(mode="after")
+    def validate_reason_code(self) -> "PartMovementLedgerCreate":
+        if self.event_type in {
+            PartMovementTypeEnum.ADJUST,
+            PartMovementTypeEnum.SCRAP,
+            PartMovementTypeEnum.REMOVE,
+            PartMovementTypeEnum.SWAP,
+            PartMovementTypeEnum.VENDOR_RETURN,
+        }:
+            if not self.reason_code or not self.reason_code.strip():
+                raise ValueError(
+                    "reason_code is required for ADJUST, SCRAP, REMOVE, SWAP, and VENDOR_RETURN movements."
+                )
+        return self
+
 
 class PartMovementLedgerRead(PartMovementLedgerCreate):
     id: int
     amo_id: str
     created_at: datetime
-    created_by_user_id: Optional[str] = None
+    created_by_user_id: str
 
     class Config:
         from_attributes = True
@@ -579,17 +594,30 @@ class RemovalEventCreate(BaseModel):
     component_id: Optional[int] = None
     component_instance_id: Optional[int] = None
     part_movement_id: Optional[int] = None
+    event_type: PartMovementTypeEnum
     removal_tracking_id: Optional[str] = None
     removal_reason: Optional[str] = None
     hours_at_removal: Optional[float] = None
     cycles_at_removal: Optional[float] = None
     removed_at: Optional[datetime] = None
 
+    @model_validator(mode="after")
+    def validate_tracking_id(self) -> "RemovalEventCreate":
+        if self.event_type not in {
+            PartMovementTypeEnum.REMOVE,
+            PartMovementTypeEnum.SWAP,
+        }:
+            raise ValueError("removal events must use REMOVE or SWAP event_type.")
+        if not self.removal_tracking_id or not self.removal_tracking_id.strip():
+            raise ValueError("removal_tracking_id is required for REMOVE and SWAP events.")
+        return self
+
 
 class RemovalEventRead(RemovalEventCreate):
     id: int
     amo_id: str
     created_at: datetime
+    created_by_user_id: str
 
     class Config:
         from_attributes = True

@@ -107,6 +107,49 @@ def _get_or_create_platform_settings(db: Session) -> models.PlatformSettings:
     return settings
 
 
+# ---------------------------------------------------------------------------
+# SUPERUSER CONTEXT (DEMO / REAL)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/context",
+    response_model=schemas.UserActiveContextRead,
+    summary="Get the active demo/real context (superuser only)",
+)
+def get_admin_context(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    context = services.get_or_create_user_active_context(db, user=current_user)
+    db.commit()
+    db.refresh(context)
+    return context
+
+
+@router.post(
+    "/context",
+    response_model=schemas.UserActiveContextRead,
+    summary="Set the active demo/real context (superuser only)",
+)
+def set_admin_context(
+    payload: schemas.UserActiveContextUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    context = services.set_user_active_context(
+        db,
+        user=current_user,
+        data_mode=payload.data_mode,
+        active_amo_id=payload.active_amo_id,
+    )
+    db.commit()
+    db.refresh(context)
+    return context
+
+
 @router.post(
     "/amos",
     response_model=schemas.AMORead,
@@ -157,6 +200,7 @@ def create_amo(
         contact_email=payload.contact_email,
         contact_phone=payload.contact_phone,
         time_zone=payload.time_zone,
+        is_demo=bool(payload.is_demo),
         is_active=True,
     )
     db.add(amo)

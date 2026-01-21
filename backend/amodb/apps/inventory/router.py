@@ -46,7 +46,12 @@ def receive_inventory(
 ):
     if not payload.idempotency_key and idempotency_key:
         payload.idempotency_key = idempotency_key
-    entry = services.receive_inventory(db, amo_id=current_user.amo_id, payload=payload, actor_user_id=current_user.id)
+    entry = services.receive_inventory(
+        db,
+        amo_id=current_user.effective_amo_id,
+        payload=payload,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(entry)
     return entry

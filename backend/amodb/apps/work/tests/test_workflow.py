@@ -207,6 +207,7 @@ def test_configuration_event_on_removal(db_session):
         event_type=reliability_schemas.PartMovementTypeEnum.REMOVE,
         event_date=date.today(),
         notes="Removal",
+        reason_code="MAINT",
     )
     movement = reliability_services.create_part_movement(
         db_session,
