@@ -920,11 +920,7 @@ class RemovalEvent(Base):
         Index("ix_removal_events_amo_created", "amo_id", "created_at"),
         CheckConstraint(
             "event_type IN ('REMOVE', 'SWAP')",
-            name="removal_event_type_enum",
-        ),
-        CheckConstraint(
-            "(event_type NOT IN ('REMOVE', 'SWAP')) OR removal_tracking_id IS NOT NULL",
-            name="ck_removal_tracking_required",
+            name="ck_removal_event_type_allowed",
         ),
         UniqueConstraint("amo_id", "removal_tracking_id", name="uq_removal_tracking_id"),
     )
@@ -950,11 +946,7 @@ class RemovalEvent(Base):
         nullable=True,
         index=True,
     )
-    event_type = Column(
-        SAEnum(PartMovementTypeEnum, name="removal_event_type_enum", native_enum=False),
-        nullable=False,
-        index=True,
-    )
+    event_type = Column(String(16), nullable=False, index=True)
     removal_tracking_id = Column(String(36), nullable=False, index=True)
     removal_reason = Column(String(128), nullable=True, index=True)
     hours_at_removal = Column(Float, nullable=True)

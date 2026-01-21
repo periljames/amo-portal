@@ -1195,7 +1195,6 @@ def create_part_movement(
             actor_user_id=actor_user_id,
         )
     except ValueError as exc:
-        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
@@ -1231,54 +1230,50 @@ def record_part_movement_with_removal(
     actor_user_id: Optional[str],
     commit: bool = True,
 ) -> tuple[models.PartMovementLedger, Optional[models.RemovalEvent]]:
-    try:
-        movement = create_part_movement(
-            db,
-            amo_id=amo_id,
-            data=data,
-            removal_tracking_id=removal_tracking_id,
-            actor_user_id=actor_user_id,
-            commit=False,
+    movement = create_part_movement(
+        db,
+        amo_id=amo_id,
+        data=data,
+        removal_tracking_id=removal_tracking_id,
+        actor_user_id=actor_user_id,
+        commit=False,
+    )
+    removal_event = None
+    if movement.event_type in {
+        models.PartMovementTypeEnum.REMOVE,
+        models.PartMovementTypeEnum.SWAP,
+    }:
+        removal_event = (
+            db.query(models.RemovalEvent)
+            .filter(models.RemovalEvent.part_movement_id == movement.id)
+            .first()
         )
-        removal_event = None
-        if movement.event_type in {
-            models.PartMovementTypeEnum.REMOVE,
-            models.PartMovementTypeEnum.SWAP,
-        }:
-            removal_event = (
-                db.query(models.RemovalEvent)
-                .filter(models.RemovalEvent.part_movement_id == movement.id)
-                .first()
+        if removal_event is None:
+            if removal_tracking_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="removal_tracking_id is required for removal events.",
+                )
+            removal_payload = schemas.RemovalEventCreate(
+                aircraft_serial_number=movement.aircraft_serial_number,
+                component_id=movement.component_id,
+                component_instance_id=movement.component_instance_id,
+                part_movement_id=movement.id,
+                event_type=movement.event_type,
+                removal_tracking_id=removal_tracking_id,
+                removal_reason=removal_reason,
+                hours_at_removal=hours_at_removal,
+                cycles_at_removal=cycles_at_removal,
             )
-            if removal_event is None:
-                if removal_tracking_id is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="removal_tracking_id is required for removal events.",
-                    )
-                removal_payload = schemas.RemovalEventCreate(
-                    aircraft_serial_number=movement.aircraft_serial_number,
-                    component_id=movement.component_id,
-                    component_instance_id=movement.component_instance_id,
-                    part_movement_id=movement.id,
-                    event_type=movement.event_type,
-                    removal_tracking_id=removal_tracking_id,
-                    removal_reason=removal_reason,
-                    hours_at_removal=hours_at_removal,
-                    cycles_at_removal=cycles_at_removal,
-                )
-                removal_event = create_removal_event(
-                    db,
-                    amo_id=amo_id,
-                    data=removal_payload,
-                    actor_user_id=actor_user_id,
-                    commit=False,
-                )
-        if commit:
-            db.commit()
-    except Exception:
-        db.rollback()
-        raise
+            removal_event = create_removal_event(
+                db,
+                amo_id=amo_id,
+                data=removal_payload,
+                actor_user_id=actor_user_id,
+                commit=False,
+            )
+    if commit:
+        db.commit()
     return movement, removal_event
 
 

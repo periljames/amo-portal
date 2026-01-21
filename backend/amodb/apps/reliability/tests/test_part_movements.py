@@ -226,6 +226,7 @@ def test_atomic_write(db_session):
             removal_tracking_id="TRACK-FAIL",
             actor_user_id=user.id,
         )
+    db_session.rollback()
 
     remaining = (
         db_session.query(reliability_models.PartMovementLedger)

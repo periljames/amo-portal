@@ -6,6 +6,8 @@ Create Date: 2025-01-12 14:30:00.000000
 
 """
 from typing import Sequence, Union
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from alembic import op
 import sqlalchemy as sa
@@ -34,6 +36,38 @@ PART_MOVEMENT_TYPES = (
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    now = datetime.now(timezone.utc)
+
+    users_table = sa.table(
+        "users",
+        sa.column("id", sa.String),
+        sa.column("amo_id", sa.String),
+        sa.column("staff_code", sa.String),
+        sa.column("email", sa.String),
+        sa.column("first_name", sa.String),
+        sa.column("last_name", sa.String),
+        sa.column("full_name", sa.String),
+        sa.column("role", sa.String),
+        sa.column("is_active", sa.Boolean),
+        sa.column("is_superuser", sa.Boolean),
+        sa.column("is_amo_admin", sa.Boolean),
+        sa.column("is_system_account", sa.Boolean),
+        sa.column("hashed_password", sa.String),
+        sa.column("created_at", sa.DateTime),
+        sa.column("updated_at", sa.DateTime),
+    )
+    part_movement_table = sa.table(
+        "part_movement_ledger",
+        sa.column("amo_id", sa.String),
+        sa.column("created_by_user_id", sa.String),
+    )
+    removal_table = sa.table(
+        "removal_events",
+        sa.column("amo_id", sa.String),
+        sa.column("created_by_user_id", sa.String),
+    )
+
     op.add_column(
         "part_movement_ledger",
         sa.Column("created_by_user_id", sa.String(length=36), nullable=True),
@@ -46,19 +80,85 @@ def upgrade() -> None:
         ["id"],
         ondelete="RESTRICT",
     )
-    op.execute(
-        """
-        UPDATE part_movement_ledger
-        SET created_by_user_id = (
-            SELECT users.id
-            FROM users
-            WHERE users.amo_id = part_movement_ledger.amo_id
-            ORDER BY users.created_at
-            LIMIT 1
+
+    amo_ids = {
+        row[0]
+        for row in conn.execute(
+            sa.text(
+                "SELECT DISTINCT amo_id FROM part_movement_ledger WHERE created_by_user_id IS NULL"
+            )
         )
-        WHERE created_by_user_id IS NULL
-        """
-    )
+    } | {
+        row[0]
+        for row in conn.execute(
+            sa.text(
+                "SELECT DISTINCT amo_id FROM removal_events WHERE created_by_user_id IS NULL"
+            )
+        )
+    }
+
+    for amo_id in amo_ids:
+        if amo_id is None:
+            continue
+        user_id = conn.execute(
+            sa.select(users_table.c.id).where(users_table.c.amo_id == amo_id).limit(1)
+        ).scalar()
+        if user_id is None:
+            user_id = f"SYS-{uuid4()}"
+            staff_code = f"SYSTEM-{amo_id[:6]}".upper()
+            conn.execute(
+                users_table.insert().values(
+                    id=user_id,
+                    amo_id=amo_id,
+                    staff_code=staff_code,
+                    email=f"system+{amo_id}@amo.local",
+                    first_name="System",
+                    last_name="User",
+                    full_name="System User",
+                    role="TECHNICIAN",
+                    is_active=True,
+                    is_superuser=False,
+                    is_amo_admin=False,
+                    is_system_account=True,
+                    hashed_password="SYSTEM",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        conn.execute(
+            part_movement_table.update()
+            .where(
+                sa.and_(
+                    part_movement_table.c.amo_id == amo_id,
+                    part_movement_table.c.created_by_user_id.is_(None),
+                )
+            )
+            .values(created_by_user_id=user_id)
+        )
+        conn.execute(
+            removal_table.update()
+            .where(
+                sa.and_(
+                    removal_table.c.amo_id == amo_id,
+                    removal_table.c.created_by_user_id.is_(None),
+                )
+            )
+            .values(created_by_user_id=user_id)
+        )
+
+    remaining_part_movement = conn.execute(
+        sa.select(sa.func.count())
+        .select_from(part_movement_table)
+        .where(part_movement_table.c.created_by_user_id.is_(None))
+    ).scalar()
+    remaining_removal = conn.execute(
+        sa.select(sa.func.count())
+        .select_from(removal_table)
+        .where(removal_table.c.created_by_user_id.is_(None))
+    ).scalar()
+    if remaining_part_movement or remaining_removal:
+        raise RuntimeError("created_by_user_id backfill failed; NULLs remain.")
+
     op.alter_column("part_movement_ledger", "created_by_user_id", nullable=False)
 
     op.execute("ALTER TABLE part_movement_ledger DROP CONSTRAINT IF EXISTS part_movement_type_enum")
@@ -78,12 +178,7 @@ def upgrade() -> None:
 
     op.add_column(
         "removal_events",
-        sa.Column(
-            "event_type",
-            sa.Enum(*PART_MOVEMENT_TYPES, name="removal_event_type_enum", native_enum=False),
-            nullable=False,
-            server_default="REMOVE",
-        ),
+        sa.Column("event_type", sa.String(length=16), nullable=False, server_default="REMOVE"),
     )
     op.add_column(
         "removal_events",
@@ -97,30 +192,12 @@ def upgrade() -> None:
         ["id"],
         ondelete="RESTRICT",
     )
-    op.execute(
-        """
-        UPDATE removal_events
-        SET created_by_user_id = (
-            SELECT users.id
-            FROM users
-            WHERE users.amo_id = removal_events.amo_id
-            ORDER BY users.created_at
-            LIMIT 1
-        )
-        WHERE created_by_user_id IS NULL
-        """
-    )
     op.alter_column("removal_events", "created_by_user_id", nullable=False)
     op.alter_column("removal_events", "event_type", server_default=None)
     op.create_check_constraint(
-        "removal_event_type_enum",
+        "ck_removal_event_type_allowed",
         "removal_events",
         "event_type IN ('REMOVE', 'SWAP')",
-    )
-    op.create_check_constraint(
-        "ck_removal_tracking_required",
-        "removal_events",
-        "(event_type NOT IN ('REMOVE', 'SWAP')) OR removal_tracking_id IS NOT NULL",
     )
     op.create_index("ix_removal_events_amo_removed", "removal_events", ["amo_id", "removed_at"], unique=False)
     op.create_index("ix_removal_events_amo_created", "removal_events", ["amo_id", "created_at"], unique=False)
@@ -129,8 +206,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_removal_events_amo_created", table_name="removal_events")
     op.drop_index("ix_removal_events_amo_removed", table_name="removal_events")
-    op.drop_constraint("ck_removal_tracking_required", "removal_events", type_="check")
-    op.drop_constraint("removal_event_type_enum", "removal_events", type_="check")
+    op.drop_constraint("ck_removal_event_type_allowed", "removal_events", type_="check")
     op.drop_constraint(op.f("fk_removal_events_created_by_user_id_users"), "removal_events", type_="foreignkey")
     op.drop_column("removal_events", "created_by_user_id")
     op.drop_column("removal_events", "event_type")
