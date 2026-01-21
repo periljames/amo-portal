@@ -114,6 +114,7 @@ class TaskCardUpdate(BaseModel):
     part_movement_component_instance_id: Optional[int] = None
     part_movement_notes: Optional[str] = None
     part_movement_idempotency_key: Optional[str] = None
+    part_movement_reason_code: Optional[str] = None
     removal_reason: Optional[str] = None
     hours_at_removal: Optional[float] = None
     cycles_at_removal: Optional[float] = None

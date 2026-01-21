@@ -775,7 +775,12 @@ def create_removal_event(
     current_user: account_models.User = Depends(require_roles(*PART_MOVEMENT_ROLES)),
     db: Session = Depends(get_write_db),
 ):
-    removal = services.create_removal_event(db, amo_id=current_user.amo_id, data=payload)
+    removal = services.create_removal_event(
+        db,
+        amo_id=current_user.amo_id,
+        data=payload,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(removal)
     return removal

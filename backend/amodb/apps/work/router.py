@@ -493,6 +493,7 @@ def update_task(
     removal_reason = data.pop("removal_reason", None)
     hours_at_removal = data.pop("hours_at_removal", None)
     cycles_at_removal = data.pop("cycles_at_removal", None)
+    part_movement_reason_code = data.pop("part_movement_reason_code", None)
 
     # Optional optimistic concurrency: if client sent last_known_updated_at,
     # check it against DB value.
@@ -556,6 +557,7 @@ def update_task(
             event_type=part_movement_event_type,
             event_date=part_movement_event_date or date.today(),
             notes=part_movement_notes,
+            reason_code=part_movement_reason_code or removal_reason,
             idempotency_key=part_movement_idempotency_key,
         )
         if part_movement_event_type in {

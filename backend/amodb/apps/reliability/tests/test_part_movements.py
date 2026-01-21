@@ -7,12 +7,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from amodb.database import Base
 from amodb.apps.accounts import models as account_models
 from amodb.apps.crs import models as crs_models
 from amodb.apps.maintenance_program import models as maintenance_models
 from amodb.apps.fleet import models as fleet_models
+from amodb.apps.work import models as work_models
+from amodb.apps.audit import models as audit_models
 from amodb.apps.reliability import models as reliability_models
 from amodb.apps.reliability import schemas as reliability_schemas
 from amodb.apps.reliability import services as reliability_services
@@ -37,8 +40,16 @@ def db_session():
             maintenance_models.AmpAircraftProgramItem.__table__,
             fleet_models.Aircraft.__table__,
             fleet_models.AircraftComponent.__table__,
+            fleet_models.AircraftDocument.__table__,
+            fleet_models.AircraftUsage.__table__,
+            fleet_models.AircraftConfigurationEvent.__table__,
+            fleet_models.DefectReport.__table__,
+            fleet_models.MaintenanceProgramItem.__table__,
+            fleet_models.MaintenanceStatus.__table__,
+            work_models.WorkOrder.__table__,
             reliability_models.PartMovementLedger.__table__,
             reliability_models.RemovalEvent.__table__,
+            audit_models.AuditEvent.__table__,
         ],
     )
     TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
@@ -105,6 +116,7 @@ def test_removal_requires_tracking_id(db_session):
         event_type=reliability_schemas.PartMovementTypeEnum.REMOVE,
         event_date=date.today(),
         notes="Removal",
+        reason_code="MAINT",
     )
 
     with pytest.raises(HTTPException):
@@ -115,3 +127,109 @@ def test_removal_requires_tracking_id(db_session):
             removal_tracking_id=None,
             actor_user_id=user.id,
         )
+
+
+def test_reason_code_required_for_exception_movements(db_session):
+    amo = _create_amo(db_session)
+    user = _create_user(db_session, amo.id)
+
+    payload = reliability_schemas.PartMovementLedgerCreate.model_construct(
+        aircraft_serial_number=None,
+        component_id=None,
+        event_type=reliability_schemas.PartMovementTypeEnum.SCRAP,
+        event_date=date.today(),
+        notes="Scrap",
+        reason_code=None,
+    )
+
+    with pytest.raises(HTTPException):
+        reliability_services.create_part_movement(
+            db_session,
+            amo_id=amo.id,
+            data=payload,
+            removal_tracking_id=None,
+            actor_user_id=user.id,
+        )
+
+
+def test_removal_tracking_id_required_for_remove_swap(db_session):
+    with pytest.raises(ValidationError):
+        reliability_schemas.RemovalEventCreate(
+            event_type=reliability_schemas.PartMovementTypeEnum.REMOVE,
+            removal_tracking_id=None,
+        )
+
+
+def test_created_by_required(db_session):
+    amo = _create_amo(db_session)
+    user = _create_user(db_session, amo.id)
+
+    aircraft = fleet_models.Aircraft(
+        serial_number="SN-200",
+        registration="REG-200",
+        amo_id=amo.id,
+    )
+    component = fleet_models.AircraftComponent(
+        amo_id=amo.id,
+        aircraft_serial_number=aircraft.serial_number,
+        position="R ENG",
+        part_number="PN-200",
+        serial_number="SN-200",
+        is_installed=True,
+    )
+    db_session.add_all([aircraft, component])
+    db_session.commit()
+
+    movement_payload = reliability_schemas.PartMovementLedgerCreate(
+        aircraft_serial_number=aircraft.serial_number,
+        component_id=component.id,
+        event_type=reliability_schemas.PartMovementTypeEnum.REMOVE,
+        event_date=date.today(),
+        notes="Removal",
+        reason_code="MAINT",
+    )
+    movement, removal_event = reliability_services.record_part_movement_with_removal(
+        db_session,
+        amo_id=amo.id,
+        data=movement_payload,
+        removal_tracking_id="TRACK-200",
+        removal_reason="Test removal",
+        hours_at_removal=None,
+        cycles_at_removal=None,
+        actor_user_id=user.id,
+        commit=True,
+    )
+
+    assert movement.created_by_user_id == user.id
+    assert removal_event is not None
+    assert removal_event.created_by_user_id == user.id
+
+
+def test_atomic_write(db_session):
+    amo = _create_amo(db_session)
+    user = _create_user(db_session, amo.id)
+
+    payload = reliability_schemas.PartMovementLedgerCreate(
+        aircraft_serial_number="UNKNOWN",
+        component_id=9999,
+        event_type=reliability_schemas.PartMovementTypeEnum.REMOVE,
+        event_date=date.today(),
+        notes="Removal",
+        reason_code="MAINT",
+    )
+
+    with pytest.raises(HTTPException):
+        reliability_services.create_part_movement(
+            db_session,
+            amo_id=amo.id,
+            data=payload,
+            removal_tracking_id="TRACK-FAIL",
+            actor_user_id=user.id,
+        )
+
+    remaining = (
+        db_session.query(reliability_models.PartMovementLedger)
+        .filter(reliability_models.PartMovementLedger.amo_id == amo.id)
+        .all()
+    )
+    assert remaining == []
