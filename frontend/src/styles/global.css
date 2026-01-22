@@ -1261,6 +1261,116 @@ button,
   margin: 0 auto;
 }
 
+.page-layout--wide {
+  width: min(1400px, 100%);
+}
+
+.work-orders-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.work-orders-panel {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.work-orders-panel__title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.work-orders-panel__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.form-grid label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.form-grid input,
+.form-grid select,
+.form-grid textarea {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  padding: 8px 10px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tab-button {
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+}
+
+.tab-button.is-active {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.collapse-card {
+  border-radius: 16px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.collapse-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: var(--surface-elevated);
+}
+
+.collapse-body {
+  padding: 12px 14px;
+  border-top: 1px solid var(--panel-divider);
+  animation: fadeIn 180ms ease-out;
+}
+
+.collapse-summary {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 900px) {
+  .work-orders-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .card {
   padding: 14px;
   border-radius: 16px;

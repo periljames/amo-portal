@@ -7,6 +7,7 @@ import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
   listDocumentAlerts,
   type AircraftDocument,
+  type AircraftUsageSummary,
 } from "../services/fleet";
 import {
   qmsGetAuditorStats,
@@ -15,6 +16,7 @@ import {
   type AuditorStatsOut,
   type QMSNotificationOut,
 } from "../services/qms";
+import { DASHBOARD_WIDGETS, getWidgetStorageKey } from "../utils/dashboardWidgets";
 
 type DepartmentId =
   | "planning"
@@ -156,6 +158,25 @@ const DashboardPage: React.FC = () => {
   const [docAlertsLoading, setDocAlertsLoading] = useState(false);
   const [docAlertsError, setDocAlertsError] = useState<string | null>(null);
   const [docBannerDismissed, setDocBannerDismissed] = useState(false);
+  const [fleetCount] = useState(0);
+  const [fleetLoading] = useState(false);
+  const [fleetError] = useState<string | null>(null);
+  const [dueSummaries] = useState<AircraftUsageSummary[]>([]);
+  const [dueLoading] = useState(false);
+  const [dueError] = useState<string | null>(null);
+  const [calendarConnections, setCalendarConnections] = useState({
+    google: false,
+    outlook: false,
+  });
+  const [holidayCountry, setHolidayCountry] = useState("KE");
+  const [holidayYear, setHolidayYear] = useState(new Date().getFullYear());
+  const [holidayLoading] = useState(false);
+  const [holidayError] = useState<string | null>(null);
+  const [holidays] = useState<Holiday[]>([]);
+  const [leaveForm, setLeaveForm] = useState({ date: "", reason: "" });
+  const [leaveEntries, setLeaveEntries] = useState<LeaveEntry[]>([]);
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
+  const throttleStore = useMemo(() => getThrottleStore(), []);
 
   // For normal users, this MUST be their assigned department (server-driven context).
   // We also fall back to cached user.department_id if you ever store codes there.
@@ -280,6 +301,47 @@ const DashboardPage: React.FC = () => {
       [amoSlug]: blockingDocSignature,
     });
     setDocBannerDismissed(true);
+  };
+
+  const renderMetric = (
+    label: string,
+    value: number | string,
+    target = 0
+  ) => (
+    <div className="metric-card" key={label}>
+      <div className="metric-card__value">{value}</div>
+      <div className="metric-card__label">{label}</div>
+      <div className="metric-card__bar">
+        <span style={{ width: target ? `${Math.min(100, (Number(value) / target) * 100)}%` : "0%" }} />
+      </div>
+    </div>
+  );
+
+  const renderDueStatus = (summary: AircraftUsageSummary) => {
+    if (!summary.next_due_date) return "—";
+    return new Date(summary.next_due_date).toLocaleDateString();
+  };
+
+  const handleConnectCalendar = (provider: "google" | "outlook") => {
+    setCalendarConnections((prev) => ({ ...prev, [provider]: true }));
+  };
+
+  const handleDisconnectCalendar = (provider: "google" | "outlook") => {
+    setCalendarConnections((prev) => ({ ...prev, [provider]: false }));
+  };
+
+  const handleAddLeave = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!leaveForm.date) return;
+    setLeaveEntries((prev) => [
+      ...prev,
+      { id: `${leaveForm.date}-${Date.now()}`, date: leaveForm.date, reason: leaveForm.reason || "Leave" },
+    ]);
+    setLeaveForm({ date: "", reason: "" });
+  };
+
+  const handleRemoveLeave = (id: string) => {
+    setLeaveEntries((prev) => prev.filter((entry) => entry.id !== id));
   };
 
   const loadNotifications = async () => {

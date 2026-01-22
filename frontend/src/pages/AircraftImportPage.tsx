@@ -1,5 +1,6 @@
 // frontend/src/pages/AircraftImportPage.tsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type {
   CellValueChangedEvent,
   ColDef,
@@ -18,6 +19,8 @@ import {
 } from "../services/adminUsers";
 
 import { getApiBaseUrl } from "../services/config";
+
+const API_BASE = getApiBaseUrl();
 
 type AircraftRowData = {
   serial_number: string;
@@ -226,11 +229,6 @@ const FORMULA_TOLERANCE = 0.01;
 const normalizeValue = (value: unknown) =>
   value === null || value === undefined ? "" : `${value}`.trim();
 
-const toOptionalValue = (value: string) => {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-};
-
 const normalizeHeader = (value: string) =>
   value
     .trim()
@@ -305,6 +303,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [aircraftImportComplete, setAircraftImportComplete] = useState(false);
+  const [componentImportComplete, setComponentImportComplete] = useState(false);
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [previewRowOverrides, setPreviewRowOverrides] = useState<
     Record<number, PreviewRow>
@@ -371,6 +370,10 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
   >("client");
   const [componentPreviewGridApi, setComponentPreviewGridApi] =
     useState<any>(null);
+  const [manualAircraftDraft, setManualAircraftDraft] =
+    useState<ManualAircraftDraft>(emptyManualAircraftDraft);
+  const [manualComponentDraft, setManualComponentDraft] =
+    useState<ManualComponentDraft>(emptyManualComponentDraft);
   const [importBatchId, setImportBatchId] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<ImportSnapshot[]>([]);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(
@@ -893,7 +896,8 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
 
   useEffect(() => {
     if (previewMode === "server" && previewGridApi) {
-      previewGridApi.setDatasource(createPreviewDatasource());
+      const api = previewGridApi as any;
+      api.setDatasource?.(createPreviewDatasource());
     }
   }, [previewMode, previewGridApi, createPreviewDatasource]);
 
@@ -901,7 +905,8 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     (params: GridReadyEvent) => {
       setPreviewGridApi(params.api);
       if (previewMode === "server") {
-        params.api.setDatasource(createPreviewDatasource());
+        const api = params.api as any;
+        api.setDatasource?.(createPreviewDatasource());
       }
     },
     [previewMode, createPreviewDatasource]
@@ -949,7 +954,8 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
 
   useEffect(() => {
     if (componentPreviewMode === "server" && componentPreviewGridApi) {
-      componentPreviewGridApi.setDatasource(createComponentPreviewDatasource());
+      const api = componentPreviewGridApi as any;
+      api.setDatasource?.(createComponentPreviewDatasource());
     }
   }, [
     componentPreviewMode,
@@ -961,13 +967,14 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     (params: GridReadyEvent) => {
       setComponentPreviewGridApi(params.api);
       if (componentPreviewMode === "server") {
-        params.api.setDatasource(createComponentPreviewDatasource());
+        const api = params.api as any;
+        api.setDatasource?.(createComponentPreviewDatasource());
       }
     },
     [componentPreviewMode, createComponentPreviewDatasource]
   );
 
-  const submitComponentPreviewFile = async (file: File) => {
+  const submitComponentPreviewFile = async (uploads: File[]) => {
     if (!componentAircraftSerial.trim()) {
       setMessage("Enter the aircraft serial number for components.");
       return;
@@ -976,7 +983,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     setMessage(null);
 
     const formData = new FormData();
-    files.forEach((upload) => {
+    uploads.forEach((upload) => {
       formData.append("files", upload);
     });
 
@@ -1069,6 +1076,81 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
     }
     setComponentImportComplete(false);
     await submitComponentPreviewFile(componentsFiles);
+  };
+
+  const handleAddManualAircraftRow = () => {
+    const nextRowNumber = getNextRowNumber(previewRows);
+    const nextData: AircraftRowData = {
+      serial_number: manualAircraftDraft.serial_number,
+      registration: manualAircraftDraft.registration,
+      template: manualAircraftDraft.template || null,
+      make: manualAircraftDraft.make || null,
+      model: manualAircraftDraft.model || null,
+      home_base: manualAircraftDraft.home_base || null,
+      owner: manualAircraftDraft.owner || null,
+      aircraft_model_code: manualAircraftDraft.aircraft_model_code || null,
+      operator_code: manualAircraftDraft.operator_code || null,
+      supplier_code: manualAircraftDraft.supplier_code || null,
+      company_name: manualAircraftDraft.company_name || null,
+      internal_aircraft_identifier:
+        manualAircraftDraft.internal_aircraft_identifier || null,
+      status: manualAircraftDraft.status || null,
+      is_active:
+        manualAircraftDraft.is_active === ""
+          ? null
+          : manualAircraftDraft.is_active === "true",
+      last_log_date: manualAircraftDraft.last_log_date || null,
+      total_hours: manualAircraftDraft.total_hours || null,
+      total_cycles: manualAircraftDraft.total_cycles || null,
+    };
+    const errors = validateRow(nextData);
+    setPreviewRows((prev) => [
+      ...prev,
+      {
+        row_number: nextRowNumber,
+        data: nextData,
+        errors,
+        warnings: [],
+        action: "new",
+        approved: errors.length === 0,
+        original_data: { ...nextData },
+        proposed_fields: [],
+        user_overrides: [],
+      },
+    ]);
+    setManualAircraftDraft(emptyManualAircraftDraft);
+  };
+
+  const handleAddManualComponentRow = () => {
+    const nextRowNumber = getNextRowNumber(componentPreviewRows);
+    const nextData: ComponentRowData = {
+      position: manualComponentDraft.position,
+      ata: manualComponentDraft.ata || null,
+      part_number: manualComponentDraft.part_number || null,
+      serial_number: manualComponentDraft.serial_number || null,
+      description: manualComponentDraft.description || null,
+      installed_date: manualComponentDraft.installed_date || null,
+      installed_hours: manualComponentDraft.installed_hours || null,
+      installed_cycles: manualComponentDraft.installed_cycles || null,
+      current_hours: manualComponentDraft.current_hours || null,
+      current_cycles: manualComponentDraft.current_cycles || null,
+      notes: manualComponentDraft.notes || null,
+      manufacturer_code: manualComponentDraft.manufacturer_code || null,
+      operator_code: manualComponentDraft.operator_code || null,
+    };
+    const errors = validateComponentRow(nextData);
+    setComponentPreviewRows((prev) => [
+      ...prev,
+      {
+        row_number: nextRowNumber,
+        data: nextData,
+        errors,
+        warnings: [],
+        action: "new",
+        approved: errors.length === 0,
+      },
+    ]);
+    setManualComponentDraft(emptyManualComponentDraft);
   };
 
   const reparseOcrText = async () => {
@@ -1968,7 +2050,7 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                         {suggestion.source === "existing" ? "Existing" : "File"}{" "}
                         match for {suggestion.part_number}/
                         {suggestion.serial_number}:{" "}
-                        {suggestion.positions.join(", ")}
+                        {(suggestion.positions ?? []).join(", ")}
                       </div>
                     ))}
                   </div>
@@ -2444,6 +2526,12 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
       setSnapshotActionLoading(false);
     }
   };
+
+  void saveComponentTemplate;
+  void confirmImport;
+  void confirmComponentImport;
+  void handleUndoSnapshot;
+  void handleRedoSnapshot;
 
   return (
     <div className="page-layout">
@@ -2921,8 +3009,19 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                             {previewSummary.invalid}
                           </div>
                         </div>
+                        <div className="card card--info">
+                          <div className="import-summary__label">Approved</div>
+                          <div className="import-summary__value">{approvedCount}</div>
+                        </div>
                       </div>
                     )}
+
+                    <div className="form-hint" style={{ marginTop: 8 }}>
+                      {snapshotLoading
+                        ? "Loading snapshot history…"
+                        : `Snapshots available: ${snapshots.length}`}
+                      {snapshotActionLoading ? " • Updating snapshots…" : ""}
+                    </div>
 
                     {(previewRows.length > 0 || previewTotalRows > 0) && (
                       <div className="table-wrapper import-grid">
@@ -3222,7 +3321,8 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
                   disabled={
                     componentPreviewMode === "server" ||
                     !componentPreviewRows.length ||
-                    !componentSelectedTemplateId
+                    !componentSelectedTemplateId ||
+                    componentTemplateLoading
                   }
                   className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
                 >
@@ -3532,6 +3632,27 @@ const AircraftImportPage: React.FC<AircraftImportPageProps> = ({
               </div>
             </div>
           </div>
+
+          {componentSummary && (
+            <div className="import-summary-grid" style={{ marginBottom: 16 }}>
+              <div className="card card--success">
+                <div className="import-summary__label">New</div>
+                <div className="import-summary__value">{componentSummary.new}</div>
+              </div>
+              <div className="card card--info">
+                <div className="import-summary__label">Update</div>
+                <div className="import-summary__value">{componentSummary.update}</div>
+              </div>
+              <div className="card card--warning">
+                <div className="import-summary__label">Invalid</div>
+                <div className="import-summary__value">{componentSummary.invalid}</div>
+              </div>
+              <div className="card card--info">
+                <div className="import-summary__label">Approved</div>
+                <div className="import-summary__value">{componentApprovedCount}</div>
+              </div>
+            </div>
+          )}
 
           {(componentPreviewRows.length > 0 || componentPreviewTotalRows > 0) && (
             <div className="mt-6">

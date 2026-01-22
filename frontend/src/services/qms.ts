@@ -9,7 +9,6 @@
 //   - GET /quality/audits
 
 import { getToken, handleAuthFailure } from "./auth";
-
 import { getApiBaseUrl } from "./config";
 
 export type QMSDocumentStatus = "DRAFT" | "ACTIVE" | "OBSOLETE";
@@ -111,6 +110,8 @@ export interface CAROut {
 }
 
 type QueryVal = string | number | boolean | null | undefined;
+
+const API_BASE = getApiBaseUrl();
 
 function toQuery(params: Record<string, QueryVal>): string {
   const qs = new URLSearchParams();
