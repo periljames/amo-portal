@@ -1,9 +1,24 @@
 """harden part movement audit fields
 
 Revision ID: f8a1b2c3d4e6
-Revises: f7c8d9e0f1a2
+Revises: f7c8d9e0f1a2, e4b7d1a2c3f4
 Create Date: 2025-01-12 14:30:00.000000
 
+NOTE FOR FUTURE EDITS:
+- This migration assumes the reliability tables already exist:
+  - part_movement_ledger
+  - removal_events
+  Those tables are created in revision: 9c6a7d2e8f10_add_reliability_core_models.py
+- Because this project has multiple Alembic branches/heads, Alembic may try to run this
+  migration before the reliability branch unless we explicitly merge the heads.
+- If you add more migrations that touch these tables, always confirm the dependency graph
+  (alembic heads/history) so "CREATE TABLE" revisions run before "ALTER TABLE" revisions.
+
+PATCH NOTE (2026-01):
+- This migration creates a CHECK constraint that references part_movement_ledger.reason_code.
+  The original reliability table did not include reason_code, so the constraint would fail
+  with: psycopg2.errors.UndefinedColumn: column "reason_code" does not exist
+- Fix: add the reason_code column BEFORE creating the constraint, and drop it on downgrade.
 """
 from typing import Sequence, Union
 from datetime import datetime, timezone
@@ -15,8 +30,17 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "f8a1b2c3d4e6"
-down_revision: Union[str, Sequence[str], None] = "f7c8d9e0f1a2"
+
+# MERGE FIX:
+# This revision must run after BOTH branches:
+# - f7c8d9e0f1a2 (demo/integrations branch)
+# - e4b7d1a2c3f4 (workflow + reliability branch that already includes 9c6a7d2e8f10)
+down_revision: Union[str, Sequence[str], None] = ("f7c8d9e0f1a2", "e4b7d1a2c3f4")
+
 branch_labels: Union[str, Sequence[str], None] = None
+
+# IMPORTANT:
+# Do NOT use depends_on here. It caused KeyError during Alembic head maintenance.
 depends_on: Union[str, Sequence[str], None] = None
 
 
@@ -81,6 +105,17 @@ def upgrade() -> None:
         ondelete="RESTRICT",
     )
 
+    # PATCH: reason_code is referenced by ck_part_movement_reason_code_required below.
+    # Add it here to avoid failing when the CHECK constraint is created.
+    # Nullable is intentional: the CHECK constraint only requires it for specific event types.
+    op.add_column(
+        "part_movement_ledger",
+        sa.Column("reason_code", sa.String(length=64), nullable=True),
+    )
+
+    # NOTE:
+    # Do not query removal_events.created_by_user_id until after that column is added below.
+    # The earlier version of this migration tried to read it before the column existed.
     amo_ids = {
         row[0]
         for row in conn.execute(
@@ -88,7 +123,27 @@ def upgrade() -> None:
                 "SELECT DISTINCT amo_id FROM part_movement_ledger WHERE created_by_user_id IS NULL"
             )
         )
-    } | {
+    }
+
+    op.add_column(
+        "removal_events",
+        sa.Column("event_type", sa.String(length=16), nullable=False, server_default="REMOVE"),
+    )
+    op.add_column(
+        "removal_events",
+        sa.Column("created_by_user_id", sa.String(length=36), nullable=True),
+    )
+    op.create_foreign_key(
+        op.f("fk_removal_events_created_by_user_id_users"),
+        "removal_events",
+        "users",
+        ["created_by_user_id"],
+        ["id"],
+        ondelete="RESTRICT",
+    )
+
+    # Now it is safe to include removal_events in the amo_id set and backfill it.
+    amo_ids |= {
         row[0]
         for row in conn.execute(
             sa.text(
@@ -104,7 +159,8 @@ def upgrade() -> None:
             sa.select(users_table.c.id).where(users_table.c.amo_id == amo_id).limit(1)
         ).scalar()
         if user_id is None:
-            user_id = f"SYS-{uuid4()}"
+            # FIX: must fit VARCHAR(36). "SYS-" prefix would exceed length 36.
+            user_id = str(uuid4())
             staff_code = f"SYSTEM-{amo_id[:6]}".upper()
             conn.execute(
                 users_table.insert().values(
@@ -167,6 +223,10 @@ def upgrade() -> None:
         "part_movement_ledger",
         f"event_type IN {PART_MOVEMENT_TYPES}",
     )
+
+    # NOTE:
+    # This constraint enforces a non-empty reason_code ONLY for specific event types that
+    # require justification/audit trace (adjustments, scrap, removals, swaps, vendor returns).
     op.create_check_constraint(
         "ck_part_movement_reason_code_required",
         "part_movement_ledger",
@@ -176,22 +236,6 @@ def upgrade() -> None:
     op.create_index("ix_part_movement_amo_event_date", "part_movement_ledger", ["amo_id", "event_date"], unique=False)
     op.create_index("ix_part_movement_amo_created", "part_movement_ledger", ["amo_id", "created_at"], unique=False)
 
-    op.add_column(
-        "removal_events",
-        sa.Column("event_type", sa.String(length=16), nullable=False, server_default="REMOVE"),
-    )
-    op.add_column(
-        "removal_events",
-        sa.Column("created_by_user_id", sa.String(length=36), nullable=True),
-    )
-    op.create_foreign_key(
-        op.f("fk_removal_events_created_by_user_id_users"),
-        "removal_events",
-        "users",
-        ["created_by_user_id"],
-        ["id"],
-        ondelete="RESTRICT",
-    )
     op.alter_column("removal_events", "created_by_user_id", nullable=False)
     op.alter_column("removal_events", "event_type", server_default=None)
     op.create_check_constraint(
@@ -213,6 +257,8 @@ def downgrade() -> None:
 
     op.drop_index("ix_part_movement_amo_created", table_name="part_movement_ledger")
     op.drop_index("ix_part_movement_amo_event_date", table_name="part_movement_ledger")
+
+    # IMPORTANT: drop constraints that depend on columns BEFORE dropping columns.
     op.drop_constraint("ck_part_movement_reason_code_required", "part_movement_ledger", type_="check")
     op.drop_constraint("part_movement_type_enum", "part_movement_ledger", type_="check")
     op.create_check_constraint(
@@ -225,4 +271,8 @@ def downgrade() -> None:
         "part_movement_ledger",
         type_="foreignkey",
     )
+
+    # PATCH: reason_code was added in upgrade() to support the CHECK constraint above.
+    op.drop_column("part_movement_ledger", "reason_code")
+
     op.drop_column("part_movement_ledger", "created_by_user_id")

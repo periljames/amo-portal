@@ -199,7 +199,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["threshold_set_id"], ["reliability_threshold_sets.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
+
+    # IMPORTANT (2026-01): Do not create two different indexes with the same name.
+    # This migration already creates ix_reliability_alerts_status on (amo_id, status).
+    # Creating another index named ix_reliability_alerts_status on (status) will fail
+    # with: psycopg2.errors.DuplicateTable / relation already exists.
     op.create_index("ix_reliability_alerts_status", "reliability_alerts", ["amo_id", "status"], unique=False)
+
     op.create_index("ix_reliability_alerts_triggered", "reliability_alerts", ["triggered_at"], unique=False)
     op.create_index(op.f("ix_reliability_alerts_alert_code"), "reliability_alerts", ["alert_code"], unique=False)
     op.create_index(op.f("ix_reliability_alerts_amo_id"), "reliability_alerts", ["amo_id"], unique=False)
@@ -207,7 +213,10 @@ def upgrade() -> None:
     op.create_index(op.f("ix_reliability_alerts_kpi_id"), "reliability_alerts", ["kpi_id"], unique=False)
     op.create_index(op.f("ix_reliability_alerts_resolved_by_user_id"), "reliability_alerts", ["resolved_by_user_id"], unique=False)
     op.create_index(op.f("ix_reliability_alerts_severity"), "reliability_alerts", ["severity"], unique=False)
-    op.create_index(op.f("ix_reliability_alerts_status"), "reliability_alerts", ["status"], unique=False)
+
+    # Removed duplicate index creation:
+    # op.create_index(op.f("ix_reliability_alerts_status"), "reliability_alerts", ["status"], unique=False)
+
     op.create_index(op.f("ix_reliability_alerts_threshold_set_id"), "reliability_alerts", ["threshold_set_id"], unique=False)
     op.create_index(op.f("ix_reliability_alerts_triggered_at"), "reliability_alerts", ["triggered_at"], unique=False)
 
@@ -660,7 +669,6 @@ def downgrade() -> None:
 
     op.drop_index(op.f("ix_reliability_alerts_triggered_at"), table_name="reliability_alerts")
     op.drop_index(op.f("ix_reliability_alerts_threshold_set_id"), table_name="reliability_alerts")
-    op.drop_index(op.f("ix_reliability_alerts_status"), table_name="reliability_alerts")
     op.drop_index(op.f("ix_reliability_alerts_severity"), table_name="reliability_alerts")
     op.drop_index(op.f("ix_reliability_alerts_resolved_by_user_id"), table_name="reliability_alerts")
     op.drop_index(op.f("ix_reliability_alerts_kpi_id"), table_name="reliability_alerts")
@@ -668,7 +676,10 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_reliability_alerts_amo_id"), table_name="reliability_alerts")
     op.drop_index(op.f("ix_reliability_alerts_alert_code"), table_name="reliability_alerts")
     op.drop_index("ix_reliability_alerts_triggered", table_name="reliability_alerts")
+
+    # Only drop ix_reliability_alerts_status once (it was created once in upgrade).
     op.drop_index("ix_reliability_alerts_status", table_name="reliability_alerts")
+
     op.drop_table("reliability_alerts")
 
     op.drop_index(op.f("ix_reliability_threshold_sets_scope_value"), table_name="reliability_threshold_sets")
@@ -700,4 +711,3 @@ def downgrade() -> None:
     op.drop_index("ix_reliability_events_amo_type", table_name="reliability_events")
     op.drop_index("ix_reliability_events_aircraft_date", table_name="reliability_events")
     op.drop_table("reliability_events")
-
