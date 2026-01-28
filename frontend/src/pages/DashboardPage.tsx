@@ -49,7 +49,7 @@ type Holiday = {
 
 type LeaveEntry = {
   id: string;
-  date: string;
+  date: string; // YYYY-MM-DD
   reason: string;
 };
 
@@ -71,6 +71,45 @@ const DEFAULT_THROTTLE: ThrottleStore = {
 
 const THROTTLE_STORAGE_KEY = "amo_calendar_throttle_settings";
 const DOC_ALERTS_BANNER_STORAGE_KEY = "amo_doc_alerts_banner_dismissed";
+
+type CalendarProvider = "google" | "outlook";
+type CalendarConnections = Record<CalendarProvider, boolean>;
+
+type DueSummary = {
+  aircraft_serial_number: string;
+  next_due_task_code?: string | null;
+  due_date?: string | null; // ISO date
+  due_status?: string | null;
+  days_to_due?: number | null;
+};
+
+type DashboardWidget = {
+  id: string;
+  label: string;
+  description: string;
+  departments: DepartmentId[];
+};
+
+const DASHBOARD_WIDGETS: DashboardWidget[] = [
+  {
+    id: "work_orders",
+    label: "Work orders",
+    description: "Open work orders currently assigned to your department.",
+    departments: ["production", "engineering", "workshops"],
+  },
+  {
+    id: "open_findings",
+    label: "Open findings",
+    description: "Outstanding findings requiring follow-up.",
+    departments: ["quality", "safety"],
+  },
+  {
+    id: "upcoming_checks",
+    label: "Upcoming checks",
+    description: "Aircraft checks due soon in the planning window.",
+    departments: ["planning"],
+  },
+];
 
 function isAdminUser(u: any): boolean {
   if (!u) return false;
@@ -139,21 +178,95 @@ function buildMonthDays(month: Date): Date[] {
   return days;
 }
 
+function safeEnv(key: string): string {
+  try {
+    const v = (import.meta as any)?.env?.[key];
+    return typeof v === "string" ? v : "";
+  } catch {
+    return "";
+  }
+}
+
+function getWidgetStorageKey(amoSlug: string, userId: string, dept: string): string {
+  return `amo_widgets_${amoSlug}_${userId}_${dept}`;
+}
+
+function getLeaveStorageKey(amoSlug: string, userId: string): string {
+  return `amo_leave_${amoSlug}_${userId}`;
+}
+
+function getConnectionsStorageKey(amoSlug: string, userId: string): string {
+  return `amo_calendar_connections_${amoSlug}_${userId}`;
+}
+
+function renderMetric(label: string, value: number, max = 100): React.ReactElement {
+  const safeMax = Math.max(1, max);
+  const pct = Math.min(100, Math.max(0, (value / safeMax) * 100));
+  return (
+    <div className="metric-card">
+      <div className="metric-card__value">{value}</div>
+      <div className="metric-card__label">{label}</div>
+      <div className="metric-card__bar">
+        <span style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function renderDueStatus(summary: DueSummary): React.ReactElement {
+  if (!summary.due_date) return <span className="text-muted">—</span>;
+  const label = formatDate(summary.due_date);
+  const days =
+    typeof summary.days_to_due === "number" ? ` (${summary.days_to_due}d)` : "";
+  const status = (summary.due_status || "").toUpperCase();
+  const cls =
+    status === "OVERDUE"
+      ? "badge badge--danger"
+      : status === "DUE_SOON"
+      ? "badge badge--warning"
+      : "badge badge--neutral";
+  return <span className={cls}>{label + days}</span>;
+}
+
+function makeId(prefix = "ID"): string {
+  // Not cryptographic; stable enough for local-only UI ids
+  return `${prefix}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+}
+
+async function fetchPublicHolidays(year: number, country: string): Promise<Holiday[]> {
+  // Uses a public holiday provider. If it ever changes, this remains isolated here.
+  const url = `https://date.nager.at/api/v3/PublicHolidays/${year}/${country}`;
+  const res = await fetch(url, { method: "GET" });
+  if (!res.ok) throw new Error(`Holiday lookup failed (HTTP ${res.status})`);
+  const data = (await res.json()) as any[];
+  return (data || []).map((h) => ({
+    date: String(h.date),
+    localName: String(h.localName || h.name || ""),
+    name: String(h.name || h.localName || ""),
+  }));
+}
+
 const DashboardPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const navigate = useNavigate();
 
   const ctx = getContext();
 
-  const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
+  // IMPORTANT:
+  // - URL param "amoCode" is actually the AMO login slug in your routes (e.g. "root").
+  // - Auth context stores BOTH: amoCode (e.g. PLATFORM) and amoSlug (e.g. root).
+  // Prefer slug, then fall back to code.
+  const amoSlug = (params.amoCode ?? ctx.amoSlug ?? ctx.amoCode ?? "UNKNOWN").trim();
 
   const currentUser = getCachedUser();
   const isAdmin = isAdminUser(currentUser);
   const isSuperuser =
     !!currentUser &&
     (currentUser.is_superuser || currentUser.role === "SUPERUSER");
+
   const [notifications, setNotifications] = useState<QMSNotificationOut[]>([]);
   const [auditorStats, setAuditorStats] = useState<AuditorStatsOut | null>(null);
+
   const [docAlerts, setDocAlerts] = useState<AircraftDocument[]>([]);
   const [docAlertsLoading, setDocAlertsLoading] = useState(false);
   const [docAlertsError, setDocAlertsError] = useState<string | null>(null);
@@ -177,6 +290,51 @@ const DashboardPage: React.FC = () => {
   const [leaveEntries, setLeaveEntries] = useState<LeaveEntry[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const throttleStore = useMemo(() => getThrottleStore(), []);
+
+  // ---- FIX: define fleet state used by the metrics block (prevents fleetError undefined) ----
+  const [fleetLoading, setFleetLoading] = useState(false);
+  const [fleetError, setFleetError] = useState<string | null>(null);
+  const fleetCount = useMemo(() => {
+    // For a first-time setup you likely have 0 aircraft; keep safe.
+    // If doc alerts exist, approximate unique aircraft count from alerts.
+    const serials = new Set(
+      (docAlerts || [])
+        .map((a) => (a as any)?.aircraft_serial_number)
+        .filter((v) => typeof v === "string" && v.trim())
+        .map((v) => v.trim())
+    );
+    return serials.size;
+  }, [docAlerts]);
+
+  // ---- Planning due schedules (safe defaults; wire backend later) ----
+  const [dueSummaries, setDueSummaries] = useState<DueSummary[]>([]);
+  const [dueLoading, setDueLoading] = useState(false);
+  const [dueError, setDueError] = useState<string | null>(null);
+
+  // ---- Calendar / leave / holidays (local-first, stable) ----
+  const [throttleStore, setThrottleStore] = useState<ThrottleStore>(() => getThrottleStore());
+
+  const [calendarConnections, setCalendarConnections] = useState<CalendarConnections>({
+    google: false,
+    outlook: false,
+  });
+
+  const today = new Date();
+  const [holidayCountry, setHolidayCountry] = useState<string>("KE");
+  const [holidayYear, setHolidayYear] = useState<number>(today.getFullYear());
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [holidayLoading, setHolidayLoading] = useState(false);
+  const [holidayError, setHolidayError] = useState<string | null>(null);
+
+  const [leaveEntries, setLeaveEntries] = useState<LeaveEntry[]>([]);
+  const [leaveForm, setLeaveForm] = useState<{ date: string; reason: string }>({
+    date: "",
+    reason: "",
+  });
+
+  const [calendarMonth, setCalendarMonth] = useState<Date>(
+    new Date(today.getFullYear(), today.getMonth(), 1)
+  );
 
   // For normal users, this MUST be their assigned department (server-driven context).
   // We also fall back to cached user.department_id if you ever store codes there.
@@ -255,7 +413,10 @@ const DashboardPage: React.FC = () => {
 
   const blockingDocAlerts = useMemo(() => {
     return docAlerts.filter(
-      (alert) => alert.is_blocking || alert.status === "OVERDUE" || alert.missing_evidence
+      (alert) =>
+        alert.is_blocking ||
+        alert.status === "OVERDUE" ||
+        (alert as any).missing_evidence
     );
   }, [docAlerts]);
 
@@ -369,6 +530,37 @@ const DashboardPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fleet metrics are currently derived safely (no backend dependency).
+  // Keep hooks here so future API wiring is contained and doesn't break the page.
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      setFleetLoading(false);
+      setFleetError(null);
+      if (!mounted) return;
+    };
+    run();
+    return () => {
+      mounted = false;
+    };
+  }, [amoSlug]);
+
+  // Planning "due schedules" placeholder (safe). Wire to backend later if needed.
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      if (department !== "planning") return;
+      setDueLoading(false);
+      setDueError(null);
+      if (!mounted) return;
+      setDueSummaries([]);
+    };
+    run();
+    return () => {
+      mounted = false;
+    };
+  }, [department, amoSlug]);
+
   useEffect(() => {
     if (!shouldShowComplianceAlerts) {
       setDocAlerts([]);
@@ -427,6 +619,151 @@ const DashboardPage: React.FC = () => {
     }
   };
 
+  // ---- Calendar helpers ----
+  useEffect(() => {
+    // Load throttle store once, then keep local state in sync with storage updates you may add later.
+    setThrottleStore(getThrottleStore());
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const key = getConnectionsStorageKey(amoSlug, currentUser.id);
+    const stored = getLocalStorageJson<CalendarConnections>(key, {
+      google: false,
+      outlook: false,
+    });
+    setCalendarConnections(stored);
+  }, [amoSlug, currentUser?.id]);
+
+  const handleConnectCalendar = (provider: CalendarProvider) => {
+    const url =
+      provider === "google"
+        ? safeEnv("VITE_CALENDAR_GOOGLE_OAUTH_URL")
+        : safeEnv("VITE_CALENDAR_OUTLOOK_OAUTH_URL");
+
+    if (!url) {
+      alert(
+        `Calendar OAuth URL not configured. Set ${
+          provider === "google"
+            ? "VITE_CALENDAR_GOOGLE_OAUTH_URL"
+            : "VITE_CALENDAR_OUTLOOK_OAUTH_URL"
+        } in your frontend environment.`
+      );
+      return;
+    }
+
+    // Open OAuth flow (best-effort; your backend should handle callback)
+    window.open(url, "_blank", "noopener,noreferrer");
+
+    if (!currentUser?.id) return;
+    const next = { ...calendarConnections, [provider]: true };
+    setCalendarConnections(next);
+    setLocalStorageJson(getConnectionsStorageKey(amoSlug, currentUser.id), next);
+  };
+
+  const handleDisconnectCalendar = (provider: CalendarProvider) => {
+    if (!currentUser?.id) return;
+    const next = { ...calendarConnections, [provider]: false };
+    setCalendarConnections(next);
+    setLocalStorageJson(getConnectionsStorageKey(amoSlug, currentUser.id), next);
+  };
+
+  // Leave storage
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const key = getLeaveStorageKey(amoSlug, currentUser.id);
+    const stored = getLocalStorageJson<LeaveEntry[]>(key, []);
+    setLeaveEntries(
+      (stored || []).filter(
+        (e) => typeof e?.date === "string" && e.date.length >= 10
+      )
+    );
+  }, [amoSlug, currentUser?.id]);
+
+  const persistLeave = (entries: LeaveEntry[]) => {
+    if (!currentUser?.id) return;
+    const key = getLeaveStorageKey(amoSlug, currentUser.id);
+    setLocalStorageJson(key, entries);
+    setLeaveEntries(entries);
+  };
+
+  const handleAddLeave = (e: React.FormEvent) => {
+    e.preventDefault();
+    const date = (leaveForm.date || "").trim();
+    if (!date) return;
+
+    const reason = (leaveForm.reason || "").trim() || "Leave";
+    const exists = leaveEntries.some((x) => x.date === date);
+
+    const next = exists
+      ? leaveEntries.map((x) => (x.date === date ? { ...x, reason } : x))
+      : [...leaveEntries, { id: makeId("LV"), date, reason }];
+
+    // Keep ordered by date
+    next.sort((a, b) => a.date.localeCompare(b.date));
+    persistLeave(next);
+
+    setLeaveForm({ date: "", reason: "" });
+  };
+
+  const handleRemoveLeave = (id: string) => {
+    const next = leaveEntries.filter((x) => x.id !== id);
+    persistLeave(next);
+  };
+
+  // Holidays (cached)
+  useEffect(() => {
+    let mounted = true;
+
+    const run = async () => {
+      const country = (holidayCountry || "").trim().toUpperCase();
+      const year = Number(holidayYear);
+
+      if (!country || country.length !== 2 || !Number.isFinite(year) || year < 1970) {
+        setHolidayError("Enter a valid 2-letter country code and year.");
+        setHolidays([]);
+        return;
+      }
+
+      const cacheKey = `amo_public_holidays_${country}_${year}`;
+      setHolidayLoading(true);
+      setHolidayError(null);
+
+      try {
+        if (throttleStore.cacheHolidays) {
+          const cached = getLocalStorageJson<Holiday[] | null>(cacheKey, null);
+          if (cached && Array.isArray(cached) && cached.length > 0) {
+            if (!mounted) return;
+            setHolidays(cached);
+            setHolidayLoading(false);
+            return;
+          }
+        }
+
+        const data = await fetchPublicHolidays(year, country);
+        if (!mounted) return;
+        setHolidays(data);
+
+        if (throttleStore.cacheHolidays) {
+          setLocalStorageJson(cacheKey, data);
+        }
+      } catch (err: any) {
+        if (!mounted) return;
+        setHolidays([]);
+        setHolidayError(err?.message || "Unable to load public holidays.");
+      } finally {
+        if (mounted) setHolidayLoading(false);
+      }
+    };
+
+    // Only auto-fetch on planning dashboard (keeps noise down)
+    if (department === "planning") run();
+
+    return () => {
+      mounted = false;
+    };
+  }, [department, holidayCountry, holidayYear, throttleStore.cacheHolidays]);
+
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
       <header className="page-header">
@@ -452,12 +789,13 @@ const DashboardPage: React.FC = () => {
                   restore planning and quality workflows.
                 </p>
                 <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-                  {blockingDocAlerts.slice(0, 3).map((alert) => (
+                  {blockingDocAlerts.slice(0, 3).map((alert: any) => (
                     <li key={alert.id}>
                       {alert.aircraft_serial_number} ·{" "}
-                      {alert.document_type.replace(/_/g, " ")} ·{" "}
-                      {alert.status.replace(/_/g, " ")}
+                      {String(alert.document_type || "").replace(/_/g, " ")} ·{" "}
+                      {String(alert.status || "").replace(/_/g, " ")}
                       {alert.days_to_expiry !== null &&
+                        alert.days_to_expiry !== undefined &&
                         ` (${alert.days_to_expiry} days)`}
                       {alert.missing_evidence && " · Evidence missing"}
                     </li>
@@ -514,7 +852,14 @@ const DashboardPage: React.FC = () => {
                   }}
                 >
                   <div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                      }}
+                    >
                       <span
                         className={
                           note.severity === "ACTION_REQUIRED"
@@ -552,16 +897,29 @@ const DashboardPage: React.FC = () => {
             <div className="card-header">
               <h2>Auditor workload</h2>
               <p className="text-muted">
-                Summary of audits assigned to you across lead/observer/assistant roles.
+                Summary of audits assigned to you across lead/observer/assistant
+                roles.
               </p>
             </div>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <span className="badge badge--info">Total: {auditorStats.audits_total}</span>
-              <span className="badge badge--warning">Open: {auditorStats.audits_open}</span>
-              <span className="badge badge--success">Closed: {auditorStats.audits_closed}</span>
-              <span className="badge badge--neutral">Lead: {auditorStats.lead_audits}</span>
-              <span className="badge badge--neutral">Observer: {auditorStats.observer_audits}</span>
-              <span className="badge badge--neutral">Assistant: {auditorStats.assistant_audits}</span>
+              <span className="badge badge--info">
+                Total: {auditorStats.audits_total}
+              </span>
+              <span className="badge badge--warning">
+                Open: {auditorStats.audits_open}
+              </span>
+              <span className="badge badge--success">
+                Closed: {auditorStats.audits_closed}
+              </span>
+              <span className="badge badge--neutral">
+                Lead: {auditorStats.lead_audits}
+              </span>
+              <span className="badge badge--neutral">
+                Observer: {auditorStats.observer_audits}
+              </span>
+              <span className="badge badge--neutral">
+                Assistant: {auditorStats.assistant_audits}
+              </span>
             </div>
           </div>
         </section>
@@ -569,7 +927,9 @@ const DashboardPage: React.FC = () => {
 
       {isCRSDept && (
         <section className="page-section">
-          <h2 className="page-section__title">Certificates of Release to Service</h2>
+          <h2 className="page-section__title">
+            Certificates of Release to Service
+          </h2>
           <p className="page-section__body">
             Create, track, and download CRS forms for completed maintenance.
           </p>
@@ -645,7 +1005,6 @@ const DashboardPage: React.FC = () => {
         </section>
       )}
 
-
       {department === "planning" && (
         <section className="page-section">
           <h2 className="page-section__title">Upcoming maintenance due</h2>
@@ -685,13 +1044,18 @@ const DashboardPage: React.FC = () => {
 
       {department === "planning" && (
         <section className="page-section">
-          <h2 className="page-section__title">Planning calendar & leave management</h2>
+          <h2 className="page-section__title">
+            Planning calendar & leave management
+          </h2>
           <p className="page-section__body">
             Sync personal calendars, review public holidays, and mark leave days
             before assigning maintenance slots.
           </p>
 
-          <div className="page-section__grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+          <div
+            className="page-section__grid"
+            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}
+          >
             <div className="card">
               <h3 style={{ marginTop: 0 }}>Calendar connections</h3>
               <p className="text-muted">
@@ -719,7 +1083,9 @@ const DashboardPage: React.FC = () => {
                       : handleConnectCalendar("outlook")
                   }
                 >
-                  {calendarConnections.outlook ? "Disconnect Outlook" : "Connect Outlook"}
+                  {calendarConnections.outlook
+                    ? "Disconnect Outlook"
+                    : "Connect Outlook"}
                 </button>
               </div>
               {currentUser?.amo_id && (
@@ -773,6 +1139,9 @@ const DashboardPage: React.FC = () => {
                   ))}
                 </ul>
               )}
+              {!holidayLoading && !holidayError && holidays.length === 0 && (
+                <p className="text-muted">No holidays found for that selection.</p>
+              )}
             </div>
 
             <div className="card">
@@ -810,7 +1179,10 @@ const DashboardPage: React.FC = () => {
               ) : (
                 <ul style={{ margin: "8px 0 0", paddingLeft: 16 }}>
                   {leaveEntries.slice(0, 6).map((entry) => (
-                    <li key={entry.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <li
+                      key={entry.id}
+                      style={{ display: "flex", gap: 8, alignItems: "center" }}
+                    >
                       <span>
                         {formatDate(entry.date)} · {entry.reason}
                       </span>
@@ -927,7 +1299,9 @@ const DashboardPage: React.FC = () => {
               <button
                 type="button"
                 className="primary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/aircraft-import`)}
+                onClick={() =>
+                  navigate(`/maintenance/${amoSlug}/${department}/aircraft-import`)
+                }
               >
                 Configure fleet inputs
               </button>
@@ -935,7 +1309,9 @@ const DashboardPage: React.FC = () => {
                 type="button"
                 className="primary-chip-btn"
                 style={{ marginLeft: 8 }}
-                onClick={() => navigate(`/maintenance/${amoSlug}/${department}/component-import`)}
+                onClick={() =>
+                  navigate(`/maintenance/${amoSlug}/${department}/component-import`)
+                }
               >
                 Import components
               </button>
@@ -1017,10 +1393,10 @@ const DashboardPage: React.FC = () => {
                 </p>
               ) : (
                 <ul className="card-list">
-                  {docAlerts?.map((alert) => (
+                  {docAlerts?.map((alert: any) => (
                     <li className="card card--border" key={alert.id}>
                       <h3 className="card__title">
-                        {alert.document_type.replace(/_/g, " ")} ·{" "}
+                        {String(alert.document_type || "").replace(/_/g, " ")} ·{" "}
                         {alert.aircraft_serial_number}
                       </h3>
                       <p className="card__subtitle">
@@ -1029,7 +1405,8 @@ const DashboardPage: React.FC = () => {
                       <p className="card__body">
                         {alert.expires_on
                           ? `Expires on ${alert.expires_on}${
-                              alert.days_to_expiry !== null
+                              alert.days_to_expiry !== null &&
+                              alert.days_to_expiry !== undefined
                                 ? ` (${alert.days_to_expiry} days)`
                                 : ""
                             }`

@@ -25,6 +25,7 @@ from .models import (
 )
 from ..accounts.models import AccountRole
 from ..work.models import WorkOrderStatusEnum, WorkOrderTypeEnum
+from ..fleet.models import DefectSourceEnum
 
 
 def _required_engine_metric_keys() -> set[str]:
@@ -833,3 +834,8 @@ class ReliabilityPullRead(BaseModel):
     defects: List[ReliabilityDefectRead] = Field(default_factory=list)
     removals: List[RemovalEventRead] = Field(default_factory=list)
     shop_visits: List[ShopVisitRead] = Field(default_factory=list)
+
+
+# Ensure models are fully resolved for OpenAPI generation under Pydantic v2 + postponed annotations.
+ReliabilityDefectRead.model_rebuild()
+ReliabilityPullRead.model_rebuild()

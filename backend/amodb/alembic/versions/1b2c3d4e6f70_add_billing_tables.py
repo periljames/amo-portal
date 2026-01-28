@@ -8,6 +8,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -17,15 +18,77 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _ensure_pg_enum(enum_name: str, values: Sequence[str]) -> None:
+    """
+    Create a PostgreSQL ENUM type only if it does not already exist.
+
+    This avoids failures when:
+    - migrations were run before and the ENUM types remained
+    - tables were dropped but types were not
+    - Alembic/SQLAlchemy tries to recreate the ENUM during table creation
+    """
+    quoted_vals = ", ".join([f"'{v}'" for v in values])
+
+    op.execute(
+        sa.text(
+            f"""
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_type t
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE t.typname = '{enum_name}'
+          AND n.nspname = current_schema()
+    ) THEN
+        CREATE TYPE {enum_name} AS ENUM ({quoted_vals});
+    END IF;
+END $$;
+"""
+        )
+    )
+
+
+def _drop_pg_enum_safely(enum_name: str) -> None:
+    """
+    Drop a PostgreSQL ENUM type if it exists.
+    Do not fail downgrade if something still depends on it.
+    """
+    op.execute(
+        sa.text(
+            f"""
+DO $$
+BEGIN
+    EXECUTE 'DROP TYPE IF EXISTS {enum_name}';
+EXCEPTION
+    WHEN dependent_objects_still_exist THEN
+        -- If some other object still depends on the type, do not break downgrade.
+        NULL;
+END $$;
+"""
+        )
+    )
+
+
 def upgrade() -> None:
-    billing_term_enum = sa.Enum(
+    # --- Ensure enums exist (idempotent) ---
+    _ensure_pg_enum("billing_term_enum", ("MONTHLY", "ANNUAL", "BI_ANNUAL"))
+    _ensure_pg_enum("license_status_enum", ("TRIALING", "ACTIVE", "CANCELLED", "EXPIRED"))
+    _ensure_pg_enum(
+        "ledger_entry_type_enum", ("CHARGE", "REFUND", "ADJUSTMENT", "PAYMENT", "USAGE")
+    )
+    _ensure_pg_enum("payment_provider_enum", ("STRIPE", "OFFLINE", "MANUAL"))
+
+    # IMPORTANT:
+    # Use dialect ENUM + create_type=False so table creation does NOT attempt CREATE TYPE again.
+    billing_term_enum = postgresql.ENUM(
         "MONTHLY",
         "ANNUAL",
         "BI_ANNUAL",
         name="billing_term_enum",
         create_type=False,
     )
-    license_status_enum = sa.Enum(
+    license_status_enum = postgresql.ENUM(
         "TRIALING",
         "ACTIVE",
         "CANCELLED",
@@ -33,7 +96,7 @@ def upgrade() -> None:
         name="license_status_enum",
         create_type=False,
     )
-    ledger_entry_type_enum = sa.Enum(
+    ledger_entry_type_enum = postgresql.ENUM(
         "CHARGE",
         "REFUND",
         "ADJUSTMENT",
@@ -42,19 +105,13 @@ def upgrade() -> None:
         name="ledger_entry_type_enum",
         create_type=False,
     )
-    payment_provider_enum = sa.Enum(
+    payment_provider_enum = postgresql.ENUM(
         "STRIPE",
         "OFFLINE",
         "MANUAL",
         name="payment_provider_enum",
         create_type=False,
     )
-
-    bind = op.get_bind()
-    billing_term_enum.create(bind, checkfirst=True)
-    license_status_enum.create(bind, checkfirst=True)
-    ledger_entry_type_enum.create(bind, checkfirst=True)
-    payment_provider_enum.create(bind, checkfirst=True)
 
     op.create_table(
         "catalog_skus",
@@ -80,7 +137,10 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_catalog_skus_code"), "catalog_skus", ["code"], unique=True)
     op.create_index(
-        op.f("ix_catalog_skus_is_active"), "catalog_skus", ["is_active"], unique=False
+        op.f("ix_catalog_skus_is_active"),
+        "catalog_skus",
+        ["is_active"],
+        unique=False,
     )
     op.create_index(op.f("ix_catalog_skus_term"), "catalog_skus", ["term"], unique=False)
 
@@ -125,10 +185,16 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(
-        op.f("ix_tenant_licenses_status"), "tenant_licenses", ["status"], unique=False
+        op.f("ix_tenant_licenses_status"),
+        "tenant_licenses",
+        ["status"],
+        unique=False,
     )
     op.create_index(
-        op.f("ix_tenant_licenses_term"), "tenant_licenses", ["term"], unique=False
+        op.f("ix_tenant_licenses_term"),
+        "tenant_licenses",
+        ["term"],
+        unique=False,
     )
     op.create_index(
         "idx_tenant_licenses_status_term",
@@ -189,12 +255,24 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_usage_meters")),
         sa.UniqueConstraint("amo_id", "meter_key", name=op.f("uq_usage_meter_key")),
     )
-    op.create_index(op.f("ix_usage_meters_amo_id"), "usage_meters", ["amo_id"], False)
+    # FIX: Alembic expects unique as a keyword arg (not a positional arg).
     op.create_index(
-        op.f("ix_usage_meters_license_id"), "usage_meters", ["license_id"], False
+        op.f("ix_usage_meters_amo_id"),
+        "usage_meters",
+        ["amo_id"],
+        unique=False,
     )
     op.create_index(
-        op.f("ix_usage_meters_meter_key"), "usage_meters", ["meter_key"], False
+        op.f("ix_usage_meters_license_id"),
+        "usage_meters",
+        ["license_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_usage_meters_meter_key"),
+        "usage_meters",
+        ["meter_key"],
+        unique=False,
     )
 
     op.create_table(
@@ -228,18 +306,24 @@ def upgrade() -> None:
             name=op.f("uq_ledger_entry_idempotent"),
         ),
     )
-    op.create_index(op.f("ix_ledger_entries_amo_id"), "ledger_entries", ["amo_id"], False)
+    # FIX: unique must be keyword arg.
+    op.create_index(
+        op.f("ix_ledger_entries_amo_id"),
+        "ledger_entries",
+        ["amo_id"],
+        unique=False,
+    )
     op.create_index(
         op.f("ix_ledger_entries_entry_type"),
         "ledger_entries",
         ["entry_type"],
-        False,
+        unique=False,
     )
     op.create_index(
         op.f("ix_ledger_entries_license_id"),
         "ledger_entries",
         ["license_id"],
-        False,
+        unique=False,
     )
     op.create_index(
         "idx_ledger_entries_amo_recorded",
@@ -275,18 +359,24 @@ def upgrade() -> None:
             name=op.f("uq_payment_method_external_ref"),
         ),
     )
-    op.create_index(op.f("ix_payment_methods_amo_id"), "payment_methods", ["amo_id"], False)
+    # FIX: unique must be keyword arg.
+    op.create_index(
+        op.f("ix_payment_methods_amo_id"),
+        "payment_methods",
+        ["amo_id"],
+        unique=False,
+    )
     op.create_index(
         op.f("ix_payment_methods_is_default"),
         "payment_methods",
         ["is_default"],
-        False,
+        unique=False,
     )
     op.create_index(
         op.f("ix_payment_methods_provider"),
         "payment_methods",
         ["provider"],
-        False,
+        unique=False,
     )
 
 
@@ -325,36 +415,8 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_catalog_skus_code"), table_name="catalog_skus")
     op.drop_table("catalog_skus")
 
-    payment_provider_enum = sa.Enum(
-        "STRIPE",
-        "OFFLINE",
-        "MANUAL",
-        name="payment_provider_enum",
-    )
-    ledger_entry_type_enum = sa.Enum(
-        "CHARGE",
-        "REFUND",
-        "ADJUSTMENT",
-        "PAYMENT",
-        "USAGE",
-        name="ledger_entry_type_enum",
-    )
-    license_status_enum = sa.Enum(
-        "TRIALING",
-        "ACTIVE",
-        "CANCELLED",
-        "EXPIRED",
-        name="license_status_enum",
-    )
-    billing_term_enum = sa.Enum(
-        "MONTHLY",
-        "ANNUAL",
-        "BI_ANNUAL",
-        name="billing_term_enum",
-    )
-
-    bind = op.get_bind()
-    payment_provider_enum.drop(bind, checkfirst=True)
-    ledger_entry_type_enum.drop(bind, checkfirst=True)
-    license_status_enum.drop(bind, checkfirst=True)
-    billing_term_enum.drop(bind, checkfirst=True)
+    # Drop enums last, and do not fail downgrade if they still have dependencies.
+    _drop_pg_enum_safely("payment_provider_enum")
+    _drop_pg_enum_safely("ledger_entry_type_enum")
+    _drop_pg_enum_safely("license_status_enum")
+    _drop_pg_enum_safely("billing_term_enum")
