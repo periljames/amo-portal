@@ -1,12 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import type { ServerOptions } from 'node:https'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 const truthyValues = new Set(['1', 'true', 'yes', 'on'])
 
-const resolveHttpsConfig = (env: Record<string, string>) => {
+const resolveHttpsConfig = (env: Record<string, string>): ServerOptions | undefined => {
   const httpsFlag = env.VITE_HTTPS?.toLowerCase()
   if (!httpsFlag || !truthyValues.has(httpsFlag)) {
     return undefined
@@ -17,10 +18,10 @@ const resolveHttpsConfig = (env: Record<string, string>) => {
   const caPath = env.VITE_HTTPS_CA_PATH
 
   if (!keyPath && !certPath && !caPath) {
-    return true
+    return {}
   }
 
-  const httpsConfig: Record<string, Buffer> = {}
+  const httpsConfig: ServerOptions = {}
   if (keyPath) {
     httpsConfig.key = fs.readFileSync(path.resolve(keyPath))
   }

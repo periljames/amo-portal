@@ -329,6 +329,10 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/aircraft-documents");
   }, [location.pathname]);
 
+  const isWorkOrdersRoute = useMemo(() => {
+    return location.pathname.includes("/work-orders") || location.pathname.includes("/tasks/");
+  }, [location.pathname]);
+
   const isQmsRoute = useMemo(() => {
     return location.pathname.includes("/qms");
   }, [location.pathname]);
@@ -759,6 +763,20 @@ const DepartmentLayout: React.FC<Props> = ({
                 title="Aircraft Documents"
               >
                 <span className="sidebar__item-label">Aircraft Documents</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/planning/work-orders`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isWorkOrdersRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Work Orders"
+                title="Work Orders"
+              >
+                <span className="sidebar__item-label">Work Orders</span>
               </button>
             </>
           )}

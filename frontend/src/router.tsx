@@ -10,7 +10,6 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import LoginPage from "./pages/LoginPage";
 import PasswordResetPage from "./pages/PasswordResetPage";
-import OnboardingPasswordPage from "./pages/OnboardingPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
 import EhmDashboardPage from "./pages/ehm/EhmDashboardPage";
 import EhmTrendsPage from "./pages/ehm/EhmTrendsPage";
@@ -19,6 +18,10 @@ import CRSNewPage from "./pages/CRSNewPage";
 import AircraftImportPage from "./pages/AircraftImportPage";
 import ComponentImportPage from "./pages/ComponentImportPage";
 import AircraftDocumentsPage from "./pages/AircraftDocumentsPage";
+import WorkOrderSearchPage from "./pages/work/WorkOrderSearchPage";
+import WorkOrderDetailPage from "./pages/work/WorkOrderDetailPage";
+import TaskSummaryPage from "./pages/work/TaskSummaryPage";
+import TaskPrintPage from "./pages/work/TaskPrintPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminOverviewPage from "./pages/AdminOverviewPage";
@@ -238,6 +241,40 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <DashboardPage />
+          </RequireAuth>
+        }
+      />
+
+      {/* Work orders */}
+      <Route
+        path="/maintenance/:amoCode/:department/work-orders"
+        element={
+          <RequireAuth>
+            <WorkOrderSearchPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/work-orders/:id"
+        element={
+          <RequireAuth>
+            <WorkOrderDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/tasks/:taskId"
+        element={
+          <RequireAuth>
+            <TaskSummaryPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/tasks/:taskId/print"
+        element={
+          <RequireAuth>
+            <TaskPrintPage />
           </RequireAuth>
         }
       />

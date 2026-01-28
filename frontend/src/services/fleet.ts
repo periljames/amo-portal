@@ -101,6 +101,8 @@ export type TransferProgress = {
 
 type QueryVal = string | number | boolean | null | undefined;
 
+const API_BASE = getApiBaseUrl();
+
 function toQuery(params: Record<string, QueryVal>): string {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
