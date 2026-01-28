@@ -46,6 +46,7 @@ const TaskSummaryPage: React.FC = () => {
   const context = getContext();
   const resolvedAmoCode = amoCode || context.amoSlug || "system";
   const activeDepartment = (department || context.department || "planning").toLowerCase();
+  const basePath = `/maintenance/${resolvedAmoCode}/${activeDepartment}`;
   const id = Number(taskId);
   const [task, setTask] = useState<TaskCardRead | null>(null);
   const [workOrder, setWorkOrder] = useState<WorkOrderRead | null>(null);
@@ -97,7 +98,7 @@ const TaskSummaryPage: React.FC = () => {
 
   const handlePrint = () => {
     if (!task?.id) return;
-    window.open(`/tasks/${task.id}/print`, "_blank", "noopener");
+    window.open(`${basePath}/tasks/${task.id}/print`, "_blank", "noopener");
   };
 
   const handleEdit = async () => {

@@ -247,7 +247,7 @@ export const AppRouter: React.FC = () => {
 
       {/* Work orders */}
       <Route
-        path="/work-orders"
+        path="/maintenance/:amoCode/:department/work-orders"
         element={
           <RequireAuth>
             <WorkOrderSearchPage />
@@ -255,7 +255,7 @@ export const AppRouter: React.FC = () => {
         }
       />
       <Route
-        path="/work-orders/:id"
+        path="/maintenance/:amoCode/:department/work-orders/:id"
         element={
           <RequireAuth>
             <WorkOrderDetailPage />
@@ -263,7 +263,7 @@ export const AppRouter: React.FC = () => {
         }
       />
       <Route
-        path="/tasks/:taskId"
+        path="/maintenance/:amoCode/:department/tasks/:taskId"
         element={
           <RequireAuth>
             <TaskSummaryPage />
@@ -271,7 +271,7 @@ export const AppRouter: React.FC = () => {
         }
       />
       <Route
-        path="/tasks/:taskId/print"
+        path="/maintenance/:amoCode/:department/tasks/:taskId/print"
         element={
           <RequireAuth>
             <TaskPrintPage />

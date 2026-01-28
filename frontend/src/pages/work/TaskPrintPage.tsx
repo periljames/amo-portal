@@ -5,6 +5,8 @@ import { useParams } from "react-router-dom";
 import { getTask, type TaskCardRead } from "../../services/workOrders";
 
 type UrlParams = {
+  amoCode?: string;
+  department?: string;
   taskId?: string;
 };
 

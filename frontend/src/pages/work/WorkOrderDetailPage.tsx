@@ -29,6 +29,7 @@ const WorkOrderDetailPage: React.FC = () => {
   const workOrderId = Number(id);
   const resolvedAmoCode = amoCode || context.amoSlug || "system";
   const activeDepartment = (department || context.department || "planning").toLowerCase();
+  const basePath = `/maintenance/${resolvedAmoCode}/${activeDepartment}`;
 
   useEffect(() => {
     if (!workOrderId || Number.isNaN(workOrderId)) return;
@@ -54,7 +55,7 @@ const WorkOrderDetailPage: React.FC = () => {
 
   const openTask = (taskId?: number) => {
     if (!taskId) return;
-    navigate(`/tasks/${taskId}`);
+    navigate(`${basePath}/tasks/${taskId}`);
   };
 
   return (

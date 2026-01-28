@@ -62,6 +62,7 @@ const WorkOrderSearchPage: React.FC = () => {
 
   const resolvedAmoCode = amoCode || context.amoSlug || "system";
   const activeDepartment = (department || context.department || "planning").toLowerCase();
+  const basePath = `/maintenance/${resolvedAmoCode}/${activeDepartment}`;
   const filteredResults = useMemo(() => results, [results]);
 
   const fetchWorkOrders = async () => {
@@ -116,7 +117,7 @@ const WorkOrderSearchPage: React.FC = () => {
 
   const openWorkOrder = () => {
     if (!selected?.id) return;
-    navigate(`/work-orders/${selected.id}`);
+    navigate(`${basePath}/work-orders/${selected.id}`);
   };
 
   const stubAction = (label: string) => {
