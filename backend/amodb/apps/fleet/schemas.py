@@ -14,7 +14,7 @@ from datetime import date as DateType, datetime as DateTimeType
 import re
 from typing import Optional, List, Dict, Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ValidationInfo
 
 from amodb.apps.accounts.models import RegulatoryAuthority
 from amodb.apps.work.models import TaskRoleOnTaskEnum, TaskCategoryEnum, TaskStatusEnum, WorkOrderStatusEnum, WorkOrderTypeEnum
@@ -181,9 +181,9 @@ class AircraftDocumentBase(BaseModel):
     @field_validator("expires_on")
     @classmethod
     def validate_expiry_after_issue(
-        cls, value: Optional[DateType], values: Dict[str, Any]
+        cls, value: Optional[DateType], info: ValidationInfo
     ) -> Optional[DateType]:
-        issued_on = values.get("issued_on")
+        issued_on = info.data.get("issued_on") if info.data else None
         if value and issued_on and value < issued_on:
             raise ValueError("expires_on cannot be earlier than issued_on.")
         return value
@@ -205,9 +205,9 @@ class AircraftDocumentUpdate(BaseModel):
     @field_validator("expires_on")
     @classmethod
     def validate_expiry_after_issue(
-        cls, value: Optional[DateType], values: Dict[str, Any]
+        cls, value: Optional[DateType], info: ValidationInfo
     ) -> Optional[DateType]:
-        issued_on = values.get("issued_on")
+        issued_on = info.data.get("issued_on") if info.data else None
         if value and issued_on and value < issued_on:
             raise ValueError("expires_on cannot be earlier than issued_on.")
         return value
@@ -749,10 +749,10 @@ class AircraftConfigurationEventRead(BaseModel):
 
 class MaintenanceHistoryRead(BaseModel):
     aircraft_serial_number: str
-    work_orders: List[work_schemas.WorkOrderRead] = Field(default_factory=list)
-    task_signoffs: List[work_schemas.InspectorSignOffRead] = Field(default_factory=list)
-    work_order_signoffs: List[work_schemas.InspectorSignOffRead] = Field(default_factory=list)
-    part_movements: List[reliability_schemas.PartMovementLedgerRead] = Field(default_factory=list)
+    work_orders: List["MaintenanceHistoryWorkOrder"] = Field(default_factory=list)
+    task_signoffs: List["MaintenanceHistorySignOff"] = Field(default_factory=list)
+    work_order_signoffs: List["MaintenanceHistorySignOff"] = Field(default_factory=list)
+    part_movements: List["MaintenanceHistoryPartMovement"] = Field(default_factory=list)
 
 
 # ---------------- DEFECT REPORTS ----------------
@@ -854,3 +854,10 @@ class MaintenanceHistoryPage(BaseModel):
     total: int
     skip: int
     limit: int
+
+
+# --- Pydantic v2 forward-ref rebuild (required for OpenAPI generation) ---
+for _obj in list(globals().values()):
+    if isinstance(_obj, type) and issubclass(_obj, BaseModel) and _obj is not BaseModel:
+        _obj.model_rebuild()
+# ------------------------------------------------------------------------
