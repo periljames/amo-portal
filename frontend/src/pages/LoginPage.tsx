@@ -10,6 +10,7 @@ import {
   getCachedUser,
   getContext,
   getLoginContext,
+  getLastLoginIdentifier,
   type LoginContextResponse,
   fetchOnboardingStatus,
   type OnboardingStatus,
@@ -38,7 +39,9 @@ const LoginPage: React.FC = () => {
   const location = useLocation();
   const { amoCode } = useParams<{ amoCode?: string }>();
 
-  const [email, setEmail] = useState(import.meta.env.DEV ? "admin@amo.local" : "");
+  const cachedIdentifier = getLastLoginIdentifier();
+  const defaultIdentifier = import.meta.env.DEV && !amoCode ? "admin@amo.local" : "";
+  const [identifier, setIdentifier] = useState(cachedIdentifier || defaultIdentifier);
   const [password, setPassword] = useState(import.meta.env.DEV ? "ChangeMe123!" : "");
 
   const [loading, setLoading] = useState(false);
@@ -126,19 +129,19 @@ const LoginPage: React.FC = () => {
     e.preventDefault();
     setErrorMsg(null);
 
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      setErrorMsg("Please enter your work email.");
+    const trimmedIdentifier = identifier.trim();
+    if (!trimmedIdentifier) {
+      setErrorMsg("Please enter your work email or staff ID.");
       return;
     }
-    if (!emailRegex.test(trimmedEmail)) {
+    if (trimmedIdentifier.includes("@") && !emailRegex.test(trimmedIdentifier)) {
       setErrorMsg("Please enter a valid email address.");
       return;
     }
 
     try {
       setLoadingContext(true);
-      const context = await getLoginContext(trimmedEmail);
+      const context = await getLoginContext(trimmedIdentifier);
       setLoginContext(context);
       setStep("password");
     } catch (err: unknown) {
@@ -161,12 +164,12 @@ const LoginPage: React.FC = () => {
     e.preventDefault();
     setErrorMsg(null);
 
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail || !password) {
-      setErrorMsg("Please enter both email and password.");
+    const trimmedIdentifier = identifier.trim();
+    if (!trimmedIdentifier || !password) {
+      setErrorMsg("Please enter your email or staff ID and password.");
       return;
     }
-    if (!emailRegex.test(trimmedEmail)) {
+    if (trimmedIdentifier.includes("@") && !emailRegex.test(trimmedIdentifier)) {
       setErrorMsg("Please enter a valid email address.");
       return;
     }
@@ -193,7 +196,7 @@ const LoginPage: React.FC = () => {
       // - token
       // - server-provided AMO + department context
       // - cached user
-      const auth = await login(slugToUse, trimmedEmail, password);
+      const auth = await login(slugToUse, trimmedIdentifier, password);
 
       let onboardingStatus: OnboardingStatus | null = null;
       try {
@@ -284,8 +287,8 @@ const LoginPage: React.FC = () => {
   const subtitle = loginContext
     ? isPlatformLogin
       ? "Superusers only. Use your platform credentials."
-      : `Use your AMO work email and password for ${humanAmoLabel}.`
-    : "Enter your work email and we will route you to the right portal.";
+      : `Use your AMO work email or staff ID and password for ${humanAmoLabel}.`
+    : "Enter your work email or staff ID and we will route you to the right portal.";
 
   return (
     <AuthLayout title={title} subtitle={subtitle}>
@@ -297,14 +300,13 @@ const LoginPage: React.FC = () => {
         {errorMsg && <div className="auth-form__error">{errorMsg}</div>}
 
         <TextField
-          label="Work email"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          name="email"
+          label="Work email or staff ID"
+          type="text"
+          autoComplete="username"
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
+          name="identifier"
           required
-          disabled={step === "password"}
         />
 
         {step === "password" && (
@@ -339,7 +341,7 @@ const LoginPage: React.FC = () => {
             onClick={resetContext}
             disabled={loading}
           >
-            Use a different email
+            Use a different email or staff ID
           </button>
         )}
 
