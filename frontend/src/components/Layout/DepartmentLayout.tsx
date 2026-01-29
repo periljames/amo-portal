@@ -392,6 +392,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
   const idleCountdownIntervalRef = useRef<number | null>(null);
+  const lastActivityRef = useRef<number>(0);
   const pollingTimerRef = useRef<number | null>(null);
   const pollingRetriesRef = useRef(0);
   const pollingStoppedRef = useRef(false);
@@ -658,6 +659,9 @@ const DepartmentLayout: React.FC<Props> = ({
     ];
     const handleActivity = () => {
       if (logoutReason) return;
+      const now = Date.now();
+      if (now - lastActivityRef.current < 1000) return;
+      lastActivityRef.current = now;
       resetIdleTimers();
     };
 

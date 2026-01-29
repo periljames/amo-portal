@@ -45,6 +45,11 @@ const AdminAmoAssetsPage: React.FC = () => {
     kind: "logo" | "template";
     progress: TransferProgress;
   } | null>(null);
+  const [previewAsset, setPreviewAsset] = useState<{
+    kind: "logo" | "template";
+    url: string;
+    name: string;
+  } | null>(null);
   const [inactiveAssets, setInactiveAssets] = useState<AdminAssetRead[]>([]);
   const [inactiveAssetsError, setInactiveAssetsError] = useState<string | null>(
     null
@@ -154,6 +159,14 @@ const AdminAmoAssetsPage: React.FC = () => {
 
     loadAssets();
   }, [currentUser, canAccessAdmin, effectiveAmoId, isSuperuser]);
+
+  useEffect(() => {
+    return () => {
+      if (previewAsset?.url) {
+        window.URL.revokeObjectURL(previewAsset.url);
+      }
+    };
+  }, [previewAsset]);
 
   useEffect(() => {
     const loadInactiveAssets = async () => {
@@ -273,6 +286,37 @@ const AdminAmoAssetsPage: React.FC = () => {
     } finally {
       setDownloadProgress(null);
     }
+  };
+
+  const handlePreview = async (kind: "logo" | "template") => {
+    setError(null);
+    setDownloadProgress(null);
+    try {
+      const blob = await downloadAmoAsset(
+        kind,
+        isSuperuser ? effectiveAmoId : null,
+        (progress) => setDownloadProgress({ kind, progress })
+      );
+      const url = window.URL.createObjectURL(blob);
+      const name =
+        kind === "logo"
+          ? assets?.crs_logo_filename || "amo-logo"
+          : assets?.crs_template_filename || "crs-template.pdf";
+      setPreviewAsset((prev) => {
+        if (prev?.url) window.URL.revokeObjectURL(prev.url);
+        return { kind, url, name };
+      });
+    } catch (e: any) {
+      console.error("Failed to preview asset", e);
+      setError(e?.message || "Could not preview asset.");
+    }
+  };
+
+  const clearPreview = () => {
+    if (previewAsset?.url) {
+      window.URL.revokeObjectURL(previewAsset.url);
+    }
+    setPreviewAsset(null);
   };
 
   const formatSpeed = (progress: TransferProgress) => {
@@ -407,6 +451,15 @@ const AdminAmoAssetsPage: React.FC = () => {
                     size="sm"
                     variant="secondary"
                     disabled={!assets?.crs_logo_filename}
+                    onClick={() => handlePreview("logo")}
+                  >
+                    View logo
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={!assets?.crs_logo_filename}
                     onClick={() => handleDownload("logo")}
                   >
                     Download logo
@@ -446,6 +499,15 @@ const AdminAmoAssetsPage: React.FC = () => {
                     size="sm"
                     variant="secondary"
                     disabled={!assets?.crs_template_filename}
+                    onClick={() => handlePreview("template")}
+                  >
+                    View template
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={!assets?.crs_template_filename}
                     onClick={() => handleDownload("template")}
                   >
                     Download template
@@ -466,6 +528,46 @@ const AdminAmoAssetsPage: React.FC = () => {
                     <p style={{ marginTop: 6, opacity: 0.8 }}>
                       {formatSpeed(downloadProgress.progress)}
                     </p>
+                  </div>
+                </div>
+              )}
+              {previewAsset && (
+                <div className="form-row" style={{ marginBottom: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <strong>
+                      Previewing {previewAsset.kind === "logo" ? "Logo" : "Template"}:{" "}
+                      {previewAsset.name}
+                    </strong>
+                    <div style={{ marginTop: 10 }}>
+                      {previewAsset.kind === "logo" ? (
+                        <img
+                          src={previewAsset.url}
+                          alt="CRS logo preview"
+                          style={{
+                            maxWidth: "100%",
+                            maxHeight: 240,
+                            borderRadius: 8,
+                            border: "1px solid var(--panel-divider)",
+                          }}
+                        />
+                      ) : (
+                        <iframe
+                          src={previewAsset.url}
+                          title="CRS template preview"
+                          style={{
+                            width: "100%",
+                            height: 360,
+                            border: "1px solid var(--panel-divider)",
+                            borderRadius: 8,
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "flex-start" }}>
+                    <Button type="button" size="sm" variant="secondary" onClick={clearPreview}>
+                      Close preview
+                    </Button>
                   </div>
                 </div>
               )}
