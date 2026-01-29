@@ -13,6 +13,7 @@ from .apps.accounts.router_public import router as accounts_public_router
 from .apps.accounts.router_admin import router as accounts_admin_router
 from .apps.accounts.router_modules_admin import router as accounts_modules_router
 from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
+from .apps.accounts.router_onboarding import router as accounts_onboarding_router
 from .apps.fleet.router import router as fleet_router
 from .apps.work.router import router as work_router
 from .apps.crs.router import router as crs_router
@@ -51,7 +52,7 @@ def _allowed_origins() -> List[str]:
 
 app = FastAPI(title="AMO Portal API", version="1.0.0")
 cors_origins = _allowed_origins()
-allow_credentials = "*" not in cors_origins
+allow_credentials = False
 
 app.add_middleware(
     CORSMiddleware,
@@ -102,6 +103,7 @@ app.include_router(accounts_public_router)
 app.include_router(accounts_admin_router)
 app.include_router(accounts_modules_router)
 app.include_router(accounts_amo_assets_router)
+app.include_router(accounts_onboarding_router)
 app.include_router(fleet_router)
 app.include_router(work_router)
 app.include_router(crs_router)

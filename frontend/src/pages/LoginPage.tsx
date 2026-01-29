@@ -1,5 +1,5 @@
 // src/pages/LoginPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import AuthLayout from "../components/Layout/AuthLayout";
 import TextField from "../components/UI/TextField";
@@ -11,6 +11,8 @@ import {
   getContext,
   getLoginContext,
   type LoginContextResponse,
+  fetchOnboardingStatus,
+  type OnboardingStatus,
 } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 
@@ -53,6 +55,7 @@ const LoginPage: React.FC = () => {
       : null
   );
   const [step, setStep] = useState<LoginStep>(amoCode ? "password" : "identify");
+  const redirectedRef = useRef(false);
 
   const fromState = (location.state as { from?: string } | null)?.from;
 
@@ -66,37 +69,59 @@ const LoginPage: React.FC = () => {
     const token = getToken();
     if (!token) return;
 
-    const ctx = getContext();
-    const slug =
-      effectiveAmoSlug || ctx.amoSlug || amoCode || PLATFORM_SUPPORT_SLUG;
+    let active = true;
 
-    if (!slug) return;
-    const u = getCachedUser();
-    const admin = isAdminUser(u);
+    const run = async () => {
+      const ctx = getContext();
+      const slug =
+        effectiveAmoSlug || ctx.amoSlug || amoCode || PLATFORM_SUPPORT_SLUG;
 
-    if (u?.must_change_password) {
-      navigate(`/maintenance/${slug}/onboarding`, { replace: true });
-      return;
-    }
+      if (!slug || !active) return;
+      const u = getCachedUser();
+      const admin = isAdminUser(u);
 
-    // If router gave us a "from" location, respect it
-    if (fromState) {
-      navigate(fromState, { replace: true });
-      return;
-    }
+      let onboardingStatus: OnboardingStatus | null = null;
+      try {
+        onboardingStatus = await fetchOnboardingStatus();
+      } catch (err) {
+        console.warn("Onboarding status fetch failed:", err);
+      }
 
-    // Normal users MUST go to server-assigned department
-    const landingDept = admin ? (ctx.department || "admin") : (ctx.department || null);
+      if (
+        onboardingStatus &&
+        !onboardingStatus.is_complete &&
+        !redirectedRef.current
+      ) {
+        redirectedRef.current = true;
+        navigate(`/maintenance/${slug}/onboarding/setup`, { replace: true });
+        return;
+      }
 
-    if (!admin && !landingDept) {
-      // Stay on login and show a clean error
-      setErrorMsg(
-        "Your account is missing a department assignment. Please contact the AMO Administrator or Quality/IT."
-      );
-      return;
-    }
+      // If router gave us a "from" location, respect it
+      if (fromState) {
+        navigate(fromState, { replace: true });
+        return;
+      }
 
-    navigate(`/maintenance/${slug}/${landingDept}`, { replace: true });
+      // Normal users MUST go to server-assigned department
+      const landingDept = admin ? (ctx.department || "admin") : (ctx.department || null);
+
+      if (!admin && !landingDept) {
+        // Stay on login and show a clean error
+        setErrorMsg(
+          "Your account is missing a department assignment. Please contact the AMO Administrator or Quality/IT."
+        );
+        return;
+      }
+
+      navigate(`/maintenance/${slug}/${landingDept}`, { replace: true });
+    };
+
+    void run();
+
+    return () => {
+      active = false;
+    };
   }, [navigate, fromState, amoCode, effectiveAmoSlug]);
 
   const handleIdentify = async (e: React.FormEvent) => {
@@ -172,8 +197,20 @@ const LoginPage: React.FC = () => {
       // - cached user
       const auth = await login(slugToUse, trimmedEmail, password);
 
-      if (auth.user?.must_change_password) {
-        navigate(`/maintenance/${slugToUse}/onboarding`, { replace: true });
+      let onboardingStatus: OnboardingStatus | null = null;
+      try {
+        onboardingStatus = await fetchOnboardingStatus({ force: true });
+      } catch (err) {
+        console.warn("Onboarding status fetch failed:", err);
+      }
+
+      if (
+        onboardingStatus &&
+        !onboardingStatus.is_complete &&
+        !redirectedRef.current
+      ) {
+        redirectedRef.current = true;
+        navigate(`/maintenance/${slugToUse}/onboarding/setup`, { replace: true });
         return;
       }
 
