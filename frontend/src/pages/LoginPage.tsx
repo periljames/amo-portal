@@ -86,12 +86,10 @@ const LoginPage: React.FC = () => {
       } catch (err) {
         console.warn("Onboarding status fetch failed:", err);
       }
+      const requiresOnboarding =
+        onboardingStatus ? !onboardingStatus.is_complete : !!u?.must_change_password;
 
-      if (
-        onboardingStatus &&
-        !onboardingStatus.is_complete &&
-        !redirectedRef.current
-      ) {
+      if (requiresOnboarding && !redirectedRef.current) {
         redirectedRef.current = true;
         navigate(`/maintenance/${slug}/onboarding/setup`, { replace: true });
         return;
@@ -203,12 +201,10 @@ const LoginPage: React.FC = () => {
       } catch (err) {
         console.warn("Onboarding status fetch failed:", err);
       }
+      const requiresOnboarding =
+        onboardingStatus ? !onboardingStatus.is_complete : !!auth.user?.must_change_password;
 
-      if (
-        onboardingStatus &&
-        !onboardingStatus.is_complete &&
-        !redirectedRef.current
-      ) {
+      if (requiresOnboarding && !redirectedRef.current) {
         redirectedRef.current = true;
         navigate(`/maintenance/${slugToUse}/onboarding/setup`, { replace: true });
         return;

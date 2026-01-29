@@ -5,11 +5,13 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   createAdminUser,
   listAdminAmos,
+  listAdminDepartments,
   setActiveAmoId,
   LS_ACTIVE_AMO_ID,
 } from "../services/adminUsers";
 import type {
   AdminAmoRead,
+  AdminDepartmentRead,
   AdminUserCreatePayload,
   AccountRole,
 } from "../services/adminUsers";
@@ -78,6 +80,10 @@ const AdminUserNewPage: React.FC = () => {
     const stored = localStorage.getItem(LS_ACTIVE_AMO_ID);
     return stored && stored.trim() ? stored.trim() : "";
   });
+  const [departments, setDepartments] = useState<AdminDepartmentRead[]>([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(false);
+  const [departmentsError, setDepartmentsError] = useState<string | null>(null);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>("");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +126,12 @@ const AdminUserNewPage: React.FC = () => {
 
     if (isSuperuser && !selectedAmoId) {
       return "Select an AMO for this user.";
+    }
+    if (departments.length === 0) {
+      return "Create a department for this AMO before adding users.";
+    }
+    if (departments.length > 0 && !selectedDepartmentId) {
+      return "Select a department for this user.";
     }
 
     return null;
@@ -191,6 +203,34 @@ const AdminUserNewPage: React.FC = () => {
     loadAmos();
   }, [isSuperuser, selectedAmoId]);
 
+  React.useEffect(() => {
+    const loadDepartments = async () => {
+      setDepartmentsError(null);
+      if (!currentUser) return;
+      const targetAmoId = isSuperuser ? selectedAmoId : currentUser.amo_id;
+      if (!targetAmoId) {
+        setDepartments([]);
+        setSelectedDepartmentId("");
+        return;
+      }
+      setDepartmentsLoading(true);
+      try {
+        const data = await listAdminDepartments(targetAmoId);
+        setDepartments(data);
+        if (!selectedDepartmentId && data.length > 0) {
+          setSelectedDepartmentId(data[0].id);
+        }
+      } catch (err: any) {
+        console.error("Failed to load departments", err);
+        setDepartmentsError(err?.message || "Failed to load departments.");
+      } finally {
+        setDepartmentsLoading(false);
+      }
+    };
+
+    loadDepartments();
+  }, [currentUser, isSuperuser, selectedAmoId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -227,6 +267,7 @@ const AdminUserNewPage: React.FC = () => {
         phone: form.phone.trim() || undefined,
         password: form.password,
         amo_id: isSuperuser ? selectedAmoId || undefined : undefined,
+        department_id: selectedDepartmentId || undefined,
         // NOTE:
         // Do NOT force amo_id here. adminUsers.ts resolves it safely:
         // - SUPERUSER: can target selected/active AMO
@@ -298,6 +339,9 @@ const AdminUserNewPage: React.FC = () => {
           {error && <div className="alert alert-error">{error}</div>}
           {success && <div className="alert alert-success">{success}</div>}
           {amoError && <div className="alert alert-error">{amoError}</div>}
+          {departmentsError && (
+            <div className="alert alert-error">{departmentsError}</div>
+          )}
 
           {isSuperuser && (
             <div className="form-row">
@@ -310,6 +354,7 @@ const AdminUserNewPage: React.FC = () => {
                   const nextId = e.target.value;
                   setSelectedAmoId(nextId);
                   setActiveAmoId(nextId);
+                  setSelectedDepartmentId("");
                 }}
                 disabled={submitting || amoLoading}
                 required
@@ -328,6 +373,30 @@ const AdminUserNewPage: React.FC = () => {
               </p>
             </div>
           )}
+
+          <div className="form-row">
+            <label htmlFor="departmentId">Department</label>
+            <select
+              id="departmentId"
+              name="departmentId"
+              value={selectedDepartmentId}
+              onChange={(e) => setSelectedDepartmentId(e.target.value)}
+              disabled={submitting || departmentsLoading}
+              required={departments.length > 0}
+            >
+              <option value="" disabled>
+                {departmentsLoading ? "Loading departments..." : "Select a department"}
+              </option>
+              {departments.map((dept) => (
+                <option key={dept.id} value={dept.id}>
+                  {dept.name} ({dept.code})
+                </option>
+              ))}
+            </select>
+            <p className="form-hint">
+              Assign the default department so the user lands in the right dashboard.
+            </p>
+          </div>
 
           <div className="form-row">
             <label htmlFor="staffCode">Staff Code</label>

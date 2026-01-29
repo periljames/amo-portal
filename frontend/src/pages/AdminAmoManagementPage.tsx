@@ -1,6 +1,6 @@
 // src/pages/AdminAmoManagementPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
@@ -34,6 +34,7 @@ const RESERVED_LOGIN_SLUGS = new Set(["system", "root"]);
 const AdminAmoManagementPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const currentUser = useMemo(() => getCachedUser(), []);
   const isSuperuser = !!currentUser?.is_superuser;
@@ -118,6 +119,16 @@ const AdminAmoManagementPage: React.FC = () => {
     [amos, activeAmoId]
   );
 
+  const activeFilter = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("filter");
+  }, [location.search]);
+
+  const filteredAmos = useMemo(() => {
+    if (activeFilter !== "inactive") return amos;
+    return amos.filter((amo) => !amo.is_active);
+  }, [activeFilter, amos]);
+
   if (currentUser && !isSuperuser) {
     return null;
   }
@@ -127,6 +138,11 @@ const AdminAmoManagementPage: React.FC = () => {
     if (!v) return;
     setActiveAmoId(v);
     localStorage.setItem(LS_ACTIVE_AMO_ID, v);
+  };
+
+  const clearFilter = () => {
+    if (!amoCode) return;
+    navigate(`/maintenance/${amoCode}/admin/amos`, { replace: true });
   };
 
   const handleAmoFormChange = (
@@ -385,6 +401,14 @@ const AdminAmoManagementPage: React.FC = () => {
 
           {!amoLoading && !amoError && (
             <div className="table-wrapper">
+              {activeFilter === "inactive" && (
+                <div className="info-banner info-banner--warning" style={{ marginBottom: 12 }}>
+                  <span>Filter applied: Inactive AMOs</span>
+                  <button type="button" className="secondary-chip-btn" onClick={clearFilter}>
+                    Clear filter
+                  </button>
+                </div>
+              )}
               <table className="data-table">
                 <thead>
                   <tr>
@@ -394,12 +418,12 @@ const AdminAmoManagementPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {amos.length === 0 && (
+                  {filteredAmos.length === 0 && (
                     <tr>
                       <td colSpan={3}>No AMOs available.</td>
                     </tr>
                   )}
-                  {amos.map((amo) => (
+                  {filteredAmos.map((amo) => (
                     <tr key={amo.id}>
                       <td>
                         <strong>{amo.amo_code}</strong> — {amo.name}

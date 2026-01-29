@@ -1,11 +1,11 @@
 // src/pages/AdminAmoAssetsPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser, getContext } from "../services/auth";
-import { listAdminAmos, LS_ACTIVE_AMO_ID } from "../services/adminUsers";
-import type { AdminAmoRead } from "../services/adminUsers";
+import { listAdminAmos, listAdminAssets, LS_ACTIVE_AMO_ID } from "../services/adminUsers";
+import type { AdminAmoRead, AdminAssetRead } from "../services/adminUsers";
 import {
   downloadAmoAsset,
   getAmoAssets,
@@ -22,6 +22,7 @@ type UrlParams = {
 const AdminAmoAssetsPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
@@ -43,6 +44,10 @@ const AdminAmoAssetsPage: React.FC = () => {
     kind: "logo" | "template";
     progress: TransferProgress;
   } | null>(null);
+  const [inactiveAssets, setInactiveAssets] = useState<AdminAssetRead[]>([]);
+  const [inactiveAssetsError, setInactiveAssetsError] = useState<string | null>(
+    null
+  );
 
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const templateInputRef = useRef<HTMLInputElement | null>(null);
@@ -61,6 +66,11 @@ const AdminAmoAssetsPage: React.FC = () => {
     if (isSuperuser) return activeAmoId || currentUser.amo_id;
     return currentUser.amo_id;
   }, [currentUser?.amo_id, isSuperuser, activeAmoId]);
+
+  const activeFilter = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("filter");
+  }, [location.search]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -144,11 +154,40 @@ const AdminAmoAssetsPage: React.FC = () => {
     loadAssets();
   }, [currentUser, canAccessAdmin, effectiveAmoId, isSuperuser]);
 
+  useEffect(() => {
+    const loadInactiveAssets = async () => {
+      if (activeFilter !== "inactive") {
+        setInactiveAssets([]);
+        setInactiveAssetsError(null);
+        return;
+      }
+      if (!effectiveAmoId) return;
+      try {
+        const data = await listAdminAssets({
+          amo_id: effectiveAmoId,
+          only_active: false,
+        });
+        setInactiveAssets(data.filter((asset) => !asset.is_active));
+        setInactiveAssetsError(null);
+      } catch (err: any) {
+        console.error("Failed to load inactive assets", err);
+        setInactiveAssetsError(err?.message || "Could not load inactive assets.");
+      }
+    };
+
+    loadInactiveAssets();
+  }, [activeFilter, effectiveAmoId]);
+
   const handleAmoChange = (nextAmoId: string) => {
     const v = (nextAmoId || "").trim();
     if (!v) return;
     setActiveAmoId(v);
     localStorage.setItem(LS_ACTIVE_AMO_ID, v);
+  };
+
+  const clearFilter = () => {
+    if (!amoCode) return;
+    navigate(`/maintenance/${amoCode}/admin/amo-assets`, { replace: true });
   };
 
   const handleUploadLogo = async (files?: FileList | null) => {
@@ -270,6 +309,49 @@ const AdminAmoAssetsPage: React.FC = () => {
           )}
         </p>
       </header>
+
+      {activeFilter === "inactive" && (
+        <section className="page-section">
+          <div className="card card--form" style={{ padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <h3 style={{ marginTop: 0 }}>Inactive assets</h3>
+                <p style={{ marginTop: 4, opacity: 0.85 }}>
+                  Review assets marked inactive for this AMO.
+                </p>
+              </div>
+              <button type="button" className="secondary-chip-btn" onClick={clearFilter}>
+                Clear filter
+              </button>
+            </div>
+            {inactiveAssetsError && (
+              <div className="alert alert-error" style={{ marginTop: 12 }}>
+                {inactiveAssetsError}
+              </div>
+            )}
+            {!inactiveAssetsError && inactiveAssets.length === 0 && (
+              <p className="page-section__body">No inactive assets found.</p>
+            )}
+            {!inactiveAssetsError && inactiveAssets.length > 0 && (
+              <ul className="admin-overview__activity-list">
+                {inactiveAssets.map((asset) => (
+                  <li key={asset.id}>
+                    <div>
+                      <strong>{asset.name || asset.kind}</strong>
+                      <p>{asset.original_filename || "Unnamed asset"}</p>
+                    </div>
+                    <span className="text-muted">
+                      {asset.updated_at
+                        ? new Date(asset.updated_at).toLocaleString()
+                        : "—"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
 
       {isSuperuser && (
         <section className="page-section">

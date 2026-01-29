@@ -605,6 +605,46 @@ button,
   overflow: hidden;
 }
 
+.sidebar__badge {
+  margin-left: auto;
+  min-width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+.sidebar__badge--dot {
+  padding: 0;
+  width: 8px;
+  height: 8px;
+}
+
+.sidebar__badge--count {
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+}
+
+.sidebar__badge--critical {
+  background: rgba(248, 113, 113, 0.9);
+  color: #0f172a;
+}
+
+.sidebar__badge--warning {
+  background: rgba(234, 179, 8, 0.9);
+  color: #0f172a;
+}
+
+.sidebar__badge--info {
+  background: rgba(59, 130, 246, 0.85);
+  color: #0f172a;
+}
+
 .sidebar__footer {
   margin-top: 10px;
   display: flex;
@@ -1251,6 +1291,189 @@ button,
   width: 0%;
   background: linear-gradient(90deg, rgba(34, 197, 94, 0.85), rgba(56, 189, 248, 0.85));
   transition: width 200ms ease-out;
+}
+
+/* Admin overview */
+
+.admin-overview__header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-overview__header-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.admin-overview__subtitle {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+}
+
+.admin-overview__status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.admin-overview__updated {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.admin-overview__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.admin-overview__details {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.admin-overview__details ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.admin-overview__grid {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-overview__panel {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-overview__panel--compact {
+  min-height: 180px;
+}
+
+.admin-overview__panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-overview__panel-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.admin-overview__panel-header span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.admin-overview__issue-list,
+.admin-overview__activity-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-overview__issue-list li,
+.admin-overview__activity-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-soft);
+}
+
+.admin-overview__issue-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-overview__issue-main p {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.admin-overview__issue-count {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.admin-overview__activity-list p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.severity-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.severity-dot--critical {
+  background: rgba(248, 113, 113, 0.9);
+}
+
+.severity-dot--warning {
+  background: rgba(234, 179, 8, 0.9);
+}
+
+.severity-dot--info {
+  background: rgba(59, 130, 246, 0.9);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.status-pill--healthy {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #bbf7d0;
+}
+
+.status-pill--degraded {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: rgba(234, 179, 8, 0.45);
+  color: #fde68a;
+}
+
+.status-pill--down {
+  background: rgba(248, 113, 113, 0.18);
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fecaca;
 }
 
 .page-layout {

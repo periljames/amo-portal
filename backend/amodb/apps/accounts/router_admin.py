@@ -9,11 +9,12 @@ from uuid import uuid4
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
 from amodb.apps.audit import services as audit_services
+from amodb.apps.audit import models as audit_models
 from amodb.apps.audit import schemas as audit_schemas
 from amodb.security import get_current_active_user, require_admin, require_roles
 from . import models, schemas, services
@@ -376,7 +377,8 @@ def extend_amo_trial(
 
     now = datetime.now(timezone.utc)
     extend_delta = timedelta(days=payload.extend_days)
-    base = license.trial_ends_at or license.current_period_end or now
+    existing_end = license.trial_ends_at or license.current_period_end
+    base = existing_end if existing_end and existing_end > now else now
     license.trial_ends_at = base + extend_delta
     license.current_period_end = license.trial_ends_at
     license.trial_grace_expires_at = None
@@ -813,6 +815,214 @@ def deactivate_user_admin(
     db.add(user)
     db.commit()
     return
+
+
+# ---------------------------------------------------------------------------
+# ADMIN OVERVIEW SUMMARY
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/overview-summary",
+    response_model=schemas.OverviewSummary,
+    summary="Overview summary for admin dashboard (AMO admin or superuser)",
+)
+def get_overview_summary(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    is_superuser = current_user.is_superuser
+    amo_scope = None if is_superuser else current_user.amo_id
+    now = datetime.now(timezone.utc)
+    errors: List[str] = []
+
+    def scoped(query, model_field):
+        if amo_scope is None:
+            return query
+        return query.filter(model_field == amo_scope)
+
+    def safe_count(query, label: str) -> Optional[int]:
+        try:
+            return query.scalar() or 0
+        except Exception:
+            errors.append(label)
+            return None
+
+    users_missing_department = safe_count(
+        scoped(
+            db.query(func.count(models.User.id)).filter(
+                models.User.department_id.is_(None)
+            ),
+            models.User.amo_id,
+        ),
+        "users_missing_department",
+    )
+    inactive_users = safe_count(
+        scoped(
+            db.query(func.count(models.User.id)).filter(
+                models.User.is_active.is_(False)
+            ),
+            models.User.amo_id,
+        ),
+        "inactive_users",
+    )
+    inactive_assets = safe_count(
+        scoped(
+            db.query(func.count(models.AMOAsset.id)).filter(
+                models.AMOAsset.is_active.is_(False)
+            ),
+            models.AMOAsset.amo_id,
+        ),
+        "inactive_assets",
+    )
+    inactive_amos = None
+    if is_superuser:
+        inactive_amos = safe_count(
+            db.query(func.count(models.AMO.id)).filter(
+                models.AMO.is_active.is_(False)
+            ),
+            "inactive_amos",
+        )
+
+    badges: dict[str, schemas.OverviewBadge] = {}
+    issues: List[schemas.OverviewIssue] = []
+
+    def badge(
+        key: str,
+        count: Optional[int],
+        severity: str,
+        route: str,
+        available: bool = True,
+    ) -> None:
+        badges[key] = schemas.OverviewBadge(
+            count=count,
+            severity=severity,
+            route=route,
+            available=available,
+        )
+
+    def issue(
+        key: str,
+        label: str,
+        count: Optional[int],
+        severity: str,
+        route: str,
+    ) -> None:
+        if count is None or count == 0:
+            return
+        issues.append(
+            schemas.OverviewIssue(
+                key=key,
+                label=label,
+                count=count,
+                severity=severity,
+                route=route,
+            )
+        )
+
+    users_attention = (
+        (users_missing_department or 0) + (inactive_users or 0)
+        if users_missing_department is not None and inactive_users is not None
+        else None
+    )
+    users_available = users_missing_department is not None and inactive_users is not None
+    badge(
+        "users",
+        users_attention,
+        "warning" if (users_attention or 0) > 0 else "info",
+        "/admin/users?filter=attention",
+        available=users_available,
+    )
+    badge(
+        "assets",
+        inactive_assets,
+        "warning" if (inactive_assets or 0) > 0 else "info",
+        "/admin/amo-assets?filter=inactive",
+        available=inactive_assets is not None,
+    )
+    if is_superuser:
+        badge(
+            "amos",
+            inactive_amos,
+            "warning" if (inactive_amos or 0) > 0 else "info",
+            "/admin/amos?filter=inactive",
+            available=inactive_amos is not None,
+        )
+
+    badge(
+        "billing",
+        None,
+        "info",
+        "/admin/billing?filter=issues",
+        available=False,
+    )
+
+    issue(
+        "users_missing_department",
+        "Users missing department",
+        users_missing_department,
+        "warning",
+        "/admin/users?filter=missing_department",
+    )
+    issue(
+        "inactive_users",
+        "Inactive users",
+        inactive_users,
+        "warning",
+        "/admin/users?filter=inactive",
+    )
+    if is_superuser:
+        issue(
+            "inactive_amos",
+            "Inactive AMOs",
+            inactive_amos,
+            "warning",
+            "/admin/amos?filter=inactive",
+        )
+    issue(
+        "inactive_assets",
+        "Inactive assets",
+        inactive_assets,
+        "warning",
+        "/admin/amo-assets?filter=inactive",
+    )
+
+    recent_activity: List[schemas.OverviewActivity] = []
+    recent_activity_available = True
+    try:
+        query = db.query(audit_models.AuditEvent)
+        if amo_scope is not None:
+            query = query.filter(audit_models.AuditEvent.amo_id == amo_scope)
+        events = query.order_by(audit_models.AuditEvent.occurred_at.desc()).limit(5).all()
+        for event in events:
+            recent_activity.append(
+                schemas.OverviewActivity(
+                    occurred_at=event.occurred_at,
+                    action=event.action,
+                    entity_type=event.entity_type,
+                    actor_user_id=event.actor_user_id,
+                )
+            )
+    except Exception:
+        recent_activity_available = False
+        errors.append("recent_activity")
+
+    system_status = "healthy"
+    if errors:
+        system_status = "degraded"
+
+    return schemas.OverviewSummary(
+        system=schemas.OverviewSystemStatus(
+            status=system_status,
+            last_checked_at=now,
+            refresh_paused=False,
+            errors=errors,
+        ),
+        badges=badges,
+        issues=issues,
+        recent_activity=recent_activity,
+        recent_activity_available=recent_activity_available,
+    )
 
 
 # ---------------------------------------------------------------------------

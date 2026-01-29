@@ -7,6 +7,7 @@ import { fetchSubscription } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
 import { getCachedUser, logout, onSessionEvent } from "../../services/auth";
 import { listDocumentAlerts } from "../../services/fleet";
+import { fetchOverviewSummary, type OverviewSummary } from "../../services/adminOverview";
 import { qmsListNotifications } from "../../services/qms";
 import {
   listTrainingNotifications,
@@ -19,6 +20,7 @@ type Props = {
   amoCode: string;
   activeDepartment: string;
   children: React.ReactNode;
+  showPollingErrorBanner?: boolean;
 };
 
 type DepartmentId =
@@ -120,6 +122,7 @@ const DepartmentLayout: React.FC<Props> = ({
   amoCode,
   activeDepartment,
   children,
+  showPollingErrorBanner = true,
 }) => {
   const theme = useTimeOfDayTheme();
   const [collapsed, setCollapsed] = useState(false);
@@ -138,6 +141,8 @@ const DepartmentLayout: React.FC<Props> = ({
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [pollingError, setPollingError] = useState<string | null>(null);
+  const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(null);
+  const [overviewSummaryUnavailable, setOverviewSummaryUnavailable] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -174,6 +179,17 @@ const DepartmentLayout: React.FC<Props> = ({
       return true;
     });
   }, [isAdminArea, isSuperuser, isTenantAdmin]);
+
+  const adminBadgeMap = useMemo(() => {
+    const badges = overviewSummary?.badges || {};
+    return {
+      "admin-amos": badges.amos,
+      "admin-users": badges.users,
+      "admin-assets": badges.assets,
+      "admin-billing": badges.billing,
+      "admin-settings": badges.usage,
+    } as Record<string, OverviewSummary["badges"][string] | undefined>;
+  }, [overviewSummary?.badges]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -236,12 +252,17 @@ const DepartmentLayout: React.FC<Props> = ({
     navigate(targetPath);
   };
 
-  const handleAdminNav = (navId: AdminNavId) => {
+  const handleAdminNav = (navId: AdminNavId, overrideRoute?: string) => {
     if (subscription?.is_read_only && navId !== "admin-billing") {
       navigate(`/maintenance/${amoCode}/admin/billing?lockout=1`, {
         replace: true,
         state: { from: location.pathname + location.search },
       });
+      return;
+    }
+
+    if (overrideRoute) {
+      navigate(`/maintenance/${amoCode}${overrideRoute}`);
       return;
     }
 
@@ -401,6 +422,19 @@ const DepartmentLayout: React.FC<Props> = ({
     }
   }, []);
 
+  const refreshOverviewSummary = useCallback(async () => {
+    if (!isAdminUser(currentUser)) return;
+    try {
+      const data = await fetchOverviewSummary();
+      setOverviewSummary(data);
+      setOverviewSummaryUnavailable(false);
+    } catch (err) {
+      console.error("Failed to refresh overview summary", err);
+      setOverviewSummary(null);
+      setOverviewSummaryUnavailable(true);
+    }
+  }, [currentUser]);
+
   const refreshUnreadNotifications = useCallback(async () => {
     if (!currentUser) return;
     const trainingPromise = listTrainingNotifications({
@@ -454,6 +488,7 @@ const DepartmentLayout: React.FC<Props> = ({
       try {
         await refreshSubscription();
         await refreshUnreadNotifications();
+        await refreshOverviewSummary();
         pollingRetriesRef.current = 0;
         pollingStoppedRef.current = false;
         setPollingError(null);
@@ -795,16 +830,31 @@ const DepartmentLayout: React.FC<Props> = ({
         <nav className="sidebar__nav">
           {visibleAdminNav.map((nav) => {
             const isActive = nav.id === activeDepartment;
+            const badge = adminBadgeMap[nav.id];
+            const hasCount = badge?.available && (badge?.count ?? 0) > 0;
+            const showBadge =
+              hasCount || (!!badge && !badge.available) || overviewSummaryUnavailable;
+            const badgeSeverity = badge?.severity || "info";
+            const badgeRoute = hasCount || !badge?.available ? badge?.route : undefined;
             return (
               <button
                 key={nav.id}
                 type="button"
-                onClick={() => handleAdminNav(nav.id)}
+                onClick={() => handleAdminNav(nav.id, badgeRoute)}
                 className={
                   "sidebar__item" + (isActive ? " sidebar__item--active" : "")
                 }
               >
                 <span className="sidebar__item-label">{nav.label}</span>
+                {nav.id !== "admin-overview" && showBadge && (
+                  <span
+                    className={`sidebar__badge sidebar__badge--${badgeSeverity} ${
+                      hasCount ? "sidebar__badge--count" : "sidebar__badge--dot"
+                    }`}
+                  >
+                    {hasCount ? badge?.count : ""}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1170,8 +1220,8 @@ const DepartmentLayout: React.FC<Props> = ({
           </div>
         </header>
 
-        {pollingError && (
-          <div className="alert alert-error" role="alert" style={{ margin: "12px 0" }}>
+        {showPollingErrorBanner && pollingError && (
+          <div className="info-banner info-banner--warning" role="status" style={{ margin: "12px 0" }}>
             <div
               style={{
                 display: "flex",

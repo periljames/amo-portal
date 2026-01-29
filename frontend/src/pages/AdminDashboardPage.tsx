@@ -1,6 +1,6 @@
 // src/pages/AdminDashboardPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser, getContext } from "../services/auth";
@@ -25,6 +25,7 @@ const RESERVED_LOGIN_SLUGS = new Set(["system", "root"]);
 const AdminDashboardPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
@@ -210,6 +211,10 @@ const AdminDashboardPage: React.FC = () => {
   }, [isSuperuser, amos, activeAmoId, lastCreatedAmoId, currentUser?.amo_id]);
 
   const trimmedSearch = search.trim();
+  const activeFilter = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("filter");
+  }, [location.search]);
   const usersRequestKey = useMemo(
     () =>
       JSON.stringify({
@@ -324,8 +329,27 @@ const AdminDashboardPage: React.FC = () => {
     navigate(target);
   };
 
+  const clearFilter = () => {
+    if (!amoCode) return;
+    navigate(`/maintenance/${amoCode}/admin/users`, { replace: true });
+  };
+
+  const filteredUsers = useMemo(() => {
+    if (!activeFilter) return users;
+    switch (activeFilter) {
+      case "missing_department":
+        return users.filter((u) => !u.department_id);
+      case "inactive":
+        return users.filter((u) => !u.is_active);
+      case "attention":
+        return users.filter((u) => !u.department_id || !u.is_active);
+      default:
+        return users;
+    }
+  }, [activeFilter, users]);
+
   const exportUsersCsv = () => {
-    const rows = users.map((u) => ({
+    const rows = filteredUsers.map((u) => ({
       staff_code: u.staff_code ?? "",
       name: u.full_name ?? "",
       email: u.email ?? "",
@@ -367,7 +391,7 @@ const AdminDashboardPage: React.FC = () => {
     const win = window.open("", "_blank", "width=980,height=720");
     if (!win) return;
 
-    const rows = users
+    const rows = filteredUsers
       .map(
         (u) => `
           <tr>
@@ -880,6 +904,21 @@ const AdminDashboardPage: React.FC = () => {
 
         {!loading && !error && (
           <div className="table-wrapper">
+            {activeFilter && (
+              <div className="info-banner info-banner--warning" style={{ marginBottom: 12 }}>
+                <span>
+                  Filter applied:{" "}
+                  {activeFilter === "missing_department"
+                    ? "Users missing department"
+                    : activeFilter === "inactive"
+                      ? "Inactive users"
+                      : "Users requiring attention"}
+                </span>
+                <button type="button" className="secondary-chip-btn" onClick={clearFilter}>
+                  Clear filter
+                </button>
+              </div>
+            )}
             <table className="data-table">
               <thead>
                 <tr>
@@ -893,12 +932,12 @@ const AdminDashboardPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {users.length === 0 && (
+                {filteredUsers.length === 0 && (
                   <tr>
                     <td colSpan={7}>No users found for this AMO.</td>
                   </tr>
                 )}
-                {users.map((u) => (
+                {filteredUsers.map((u) => (
                   <tr key={u.id}>
                     <td>{u.staff_code}</td>
                     <td>{u.full_name}</td>

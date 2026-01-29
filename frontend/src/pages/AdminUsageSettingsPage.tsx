@@ -1,6 +1,6 @@
 // src/pages/AdminUsageSettingsPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
@@ -46,6 +46,7 @@ const STORAGE_KEY = "amo_calendar_throttle_settings";
 const AdminUsageSettingsPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const location = useLocation();
   const currentUser = useMemo(() => getCachedUser(), []);
   const isSuperuser = !!currentUser?.is_superuser;
   const isAmoAdmin = !!currentUser?.is_amo_admin;
@@ -78,6 +79,10 @@ const AdminUsageSettingsPage: React.FC = () => {
   const [apiBaseMessage, setApiBaseMessage] = useState<string | null>(null);
   const [healthStatus, setHealthStatus] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
+  const activeFilter = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("filter");
+  }, [location.search]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -254,6 +259,21 @@ const AdminUsageSettingsPage: React.FC = () => {
           within free-tier limits.
         </p>
       </header>
+
+      {activeFilter && (
+        <div className="info-banner info-banner--warning" style={{ margin: "12px 0" }}>
+          <span>Filter applied: {activeFilter.replace(/_/g, " ")}</span>
+          <button
+            type="button"
+            className="secondary-chip-btn"
+            onClick={() =>
+              navigate(`/maintenance/${amoCode}/admin/settings`, { replace: true })
+            }
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="card card--error">

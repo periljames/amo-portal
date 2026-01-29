@@ -1,6 +1,6 @@
 // src/pages/AdminBillingPage.tsx
 import React, { useEffect, useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
@@ -12,6 +12,7 @@ type UrlParams = {
 const AdminBillingPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const currentUser = useMemo(() => getCachedUser(), []);
   const isSuperuser = !!currentUser?.is_superuser;
@@ -31,6 +32,8 @@ const AdminBillingPage: React.FC = () => {
     return null;
   }
 
+  const activeFilter = new URLSearchParams(location.search).get("filter");
+
   return (
     <DepartmentLayout
       amoCode={amoCode ?? "UNKNOWN"}
@@ -44,6 +47,18 @@ const AdminBillingPage: React.FC = () => {
       </header>
 
       <section className="page-section page-layout">
+        {activeFilter && (
+          <div className="info-banner info-banner--warning">
+            <span>Filter applied: {activeFilter.replace(/_/g, \" \")}</span>
+            <button
+              type="button"
+              className="secondary-chip-btn"
+              onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`, { replace: true })}
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
         <div className="card card--form">
           <h3 style={{ marginTop: 0 }}>Billing controls</h3>
           <p className="page-section__body">

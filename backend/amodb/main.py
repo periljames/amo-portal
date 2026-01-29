@@ -52,7 +52,11 @@ def _allowed_origins() -> List[str]:
 
 app = FastAPI(title="AMO Portal API", version="1.0.0")
 cors_origins = _allowed_origins()
-allow_credentials = False
+allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 app.add_middleware(
     CORSMiddleware,
