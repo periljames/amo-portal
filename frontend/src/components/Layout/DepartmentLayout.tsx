@@ -1,5 +1,5 @@
 // src/components/Layout/DepartmentLayout.tsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
@@ -127,7 +127,13 @@ const DepartmentLayout: React.FC<Props> = ({
 }) => {
   const theme = useTimeOfDayTheme();
   const [collapsed, setCollapsed] = useState(false);
-  const [colorScheme, setColorScheme] = useState<ColorScheme>("dark");
+  const [colorScheme, setColorScheme] = useState<ColorScheme>(() => {
+    if (typeof window === "undefined") return "dark";
+    const stored = window.localStorage.getItem("amo_color_scheme") as
+      | ColorScheme
+      | null;
+    return stored === "light" || stored === "dark" ? stored : "dark";
+  });
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<TrainingNotificationRead[]>([]);
@@ -199,21 +205,7 @@ const DepartmentLayout: React.FC<Props> = ({
     document.body.dataset.theme = theme;
   }, [theme]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof document === "undefined") return;
-
-    const stored = window.localStorage.getItem("amo_color_scheme") as
-      | ColorScheme
-      | null;
-
-    const initial: ColorScheme =
-      stored === "light" || stored === "dark" ? stored : "dark";
-
-    setColorScheme(initial);
-    document.body.dataset.colorScheme = initial;
-  }, []);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof document === "undefined" || typeof window === "undefined") return;
     document.body.dataset.colorScheme = colorScheme;
     window.localStorage.setItem("amo_color_scheme", colorScheme);
