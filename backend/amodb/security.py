@@ -16,6 +16,7 @@ This module is intentionally focused and aligned with the new accounts app:
 from __future__ import annotations
 
 import os
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import Optional, Callable, Union, Set
 
@@ -56,6 +57,12 @@ except ValueError:
 # Used by FastAPI’s OAuth2 docs / OpenAPI
 # This is the logical endpoint that issues tokens.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+# Current actor id for request-scoped access in routers.
+CURRENT_ACTOR_ID: ContextVar[Optional[str]] = ContextVar(
+    "current_actor_id",
+    default=None,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +227,7 @@ def get_current_active_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user account",
         )
+    CURRENT_ACTOR_ID.set(str(current_user.id))
     effective_amo_id = current_user.amo_id
     if getattr(current_user, "is_superuser", False):
         context = (
@@ -281,6 +289,10 @@ def require_admin(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Insufficient privileges",
     )
+
+
+def get_current_actor_id() -> Optional[str]:
+    return CURRENT_ACTOR_ID.get()
 
 
 # ---------------------------------------------------------------------------
