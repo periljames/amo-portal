@@ -7,7 +7,6 @@ import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
   listDocumentAlerts,
   type AircraftDocument,
-  type AircraftUsageSummary,
 } from "../services/fleet";
 import {
   qmsGetAuditorStats,
@@ -83,34 +82,6 @@ type DueSummary = {
   days_to_due?: number | null;
 };
 
-type DashboardWidget = {
-  id: string;
-  label: string;
-  description: string;
-  departments: DepartmentId[];
-};
-
-const DASHBOARD_WIDGETS: DashboardWidget[] = [
-  {
-    id: "work_orders",
-    label: "Work orders",
-    description: "Open work orders currently assigned to your department.",
-    departments: ["production", "engineering", "workshops"],
-  },
-  {
-    id: "open_findings",
-    label: "Open findings",
-    description: "Outstanding findings requiring follow-up.",
-    departments: ["quality", "safety"],
-  },
-  {
-    id: "upcoming_checks",
-    label: "Upcoming checks",
-    description: "Aircraft checks due soon in the planning window.",
-    departments: ["planning"],
-  },
-];
-
 function isAdminUser(u: any): boolean {
   if (!u) return false;
   return (
@@ -185,10 +156,6 @@ function safeEnv(key: string): string {
   } catch {
     return "";
   }
-}
-
-function getWidgetStorageKey(amoSlug: string, userId: string, dept: string): string {
-  return `amo_widgets_${amoSlug}_${userId}_${dept}`;
 }
 
 function getLeaveStorageKey(amoSlug: string, userId: string): string {
@@ -271,25 +238,6 @@ const DashboardPage: React.FC = () => {
   const [docAlertsLoading, setDocAlertsLoading] = useState(false);
   const [docAlertsError, setDocAlertsError] = useState<string | null>(null);
   const [docBannerDismissed, setDocBannerDismissed] = useState(false);
-  const [fleetCount] = useState(0);
-  const [fleetLoading] = useState(false);
-  const [fleetError] = useState<string | null>(null);
-  const [dueSummaries] = useState<AircraftUsageSummary[]>([]);
-  const [dueLoading] = useState(false);
-  const [dueError] = useState<string | null>(null);
-  const [calendarConnections, setCalendarConnections] = useState({
-    google: false,
-    outlook: false,
-  });
-  const [holidayCountry, setHolidayCountry] = useState("KE");
-  const [holidayYear, setHolidayYear] = useState(new Date().getFullYear());
-  const [holidayLoading] = useState(false);
-  const [holidayError] = useState<string | null>(null);
-  const [holidays] = useState<Holiday[]>([]);
-  const [leaveForm, setLeaveForm] = useState({ date: "", reason: "" });
-  const [leaveEntries, setLeaveEntries] = useState<LeaveEntry[]>([]);
-  const [calendarMonth, setCalendarMonth] = useState(new Date());
-  const throttleStore = useMemo(() => getThrottleStore(), []);
 
   // ---- FIX: define fleet state used by the metrics block (prevents fleetError undefined) ----
   const [fleetLoading, setFleetLoading] = useState(false);
@@ -477,11 +425,6 @@ const DashboardPage: React.FC = () => {
       </div>
     </div>
   );
-
-  const renderDueStatus = (summary: AircraftUsageSummary) => {
-    if (!summary.next_due_date) return "—";
-    return new Date(summary.next_due_date).toLocaleDateString();
-  };
 
   const handleConnectCalendar = (provider: "google" | "outlook") => {
     setCalendarConnections((prev) => ({ ...prev, [provider]: true }));

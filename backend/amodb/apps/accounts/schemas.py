@@ -229,6 +229,11 @@ class UserRead(UserBase):
         from_attributes = True
 
 
+class OnboardingStatusRead(BaseModel):
+    is_complete: bool
+    missing: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # BOOTSTRAP: FIRST SUPERUSER PAYLOAD
 # ---------------------------------------------------------------------------

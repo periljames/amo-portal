@@ -14,6 +14,7 @@ const AMO_SLUG_KEY = "amo_slug";
 const DEPT_KEY = "amo_department";
 const USER_KEY = "amo_current_user";
 const SESSION_EVENT_KEY = "amo_session_event";
+const ONBOARDING_STATUS_KEY = "amo_onboarding_status";
 
 // Shared with adminUsers.ts enhancements (kept as a plain key to avoid circular imports)
 const ACTIVE_AMO_ID_KEY = "amodb_active_amo_id";
@@ -110,6 +111,11 @@ export type SessionEventDetail = {
   reason?: string;
 };
 
+export type OnboardingStatus = {
+  is_complete: boolean;
+  missing: string[];
+};
+
 export type PasswordResetResponse = {
   message: string;
   reset_link?: string | null;
@@ -182,6 +188,31 @@ export function getCachedUser(): PortalUser | null {
 
 export function clearCachedUser(): void {
   localStorage.removeItem(USER_KEY);
+}
+
+export function cacheOnboardingStatus(status: OnboardingStatus | null): void {
+  if (typeof sessionStorage === "undefined") return;
+  if (!status) {
+    sessionStorage.removeItem(ONBOARDING_STATUS_KEY);
+    return;
+  }
+  sessionStorage.setItem(ONBOARDING_STATUS_KEY, JSON.stringify(status));
+}
+
+export function getCachedOnboardingStatus(): OnboardingStatus | null {
+  if (typeof sessionStorage === "undefined") return null;
+  const raw = sessionStorage.getItem(ONBOARDING_STATUS_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as OnboardingStatus;
+  } catch {
+    return null;
+  }
+}
+
+export function clearOnboardingStatus(): void {
+  if (typeof sessionStorage === "undefined") return;
+  sessionStorage.removeItem(ONBOARDING_STATUS_KEY);
 }
 
 export function isAuthenticated(): boolean {
@@ -440,7 +471,35 @@ export async function changePassword(
 
   const user = (await res.json()) as PortalUser;
   cacheCurrentUser(user);
+  cacheOnboardingStatus({ is_complete: true, missing: [] });
   return user;
+}
+
+export async function fetchOnboardingStatus(options?: {
+  force?: boolean;
+}): Promise<OnboardingStatus> {
+  const cached = getCachedOnboardingStatus();
+  if (cached && !options?.force) {
+    return cached;
+  }
+
+  const res = await fetch(`${getApiBaseUrl()}/accounts/onboarding/status`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (!res.ok) {
+    throw new Error(await readErrorMessage(res));
+  }
+
+  const status = (await res.json()) as OnboardingStatus;
+  cacheOnboardingStatus(status);
+  return status;
 }
 
 /**
@@ -451,6 +510,7 @@ export function logout(): void {
   clearContext();
   clearCachedUser();
   clearActiveAmoId();
+  clearOnboardingStatus();
 }
 
 export function emitSessionEvent(detail: SessionEventDetail): void {
