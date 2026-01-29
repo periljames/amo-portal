@@ -344,7 +344,7 @@ const AdminAmoAssetsPage: React.FC = () => {
       amoCode={amoCode ?? "UNKNOWN"}
       activeDepartment="admin-assets"
     >
-      <div className="admin-page">
+      <div className="admin-page admin-amo-assets">
         <PageHeader
           title="CRS Assets Setup"
           subtitle={
@@ -435,17 +435,17 @@ const AdminAmoAssetsPage: React.FC = () => {
 
           {!loading && (
             <>
-              <div className="form-row" style={{ marginBottom: 12 }}>
-                <div style={{ flex: 1 }}>
+              <div className="asset-row">
+                <div className="asset-info">
                   <strong>CRS Logo</strong>
-                  <p style={{ marginTop: 6 }}>{logoStatus}</p>
+                  <p>{logoStatus}</p>
                   {assets?.crs_logo_uploaded_at && (
-                    <p style={{ marginTop: 4, opacity: 0.75 }}>
+                    <p className="asset-meta">
                       Uploaded at {new Date(assets.crs_logo_uploaded_at).toLocaleString()}
                     </p>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div className="asset-actions">
                   <Button
                     type="button"
                     size="sm"
@@ -467,33 +467,31 @@ const AdminAmoAssetsPage: React.FC = () => {
                 </div>
               </div>
               {downloadProgress?.kind === "logo" && (
-                <div className="form-row" style={{ marginBottom: 12 }}>
-                  <div style={{ flex: 1 }}>
+                <div className="asset-progress">
+                  <div>
                     <strong>Logo download</strong>
                     {downloadProgress.progress.percent !== undefined && (
                       <progress
                         value={downloadProgress.progress.percent}
                         max={100}
-                        style={{ width: "100%", height: 10, marginTop: 6 }}
+                        className="asset-progress__bar"
                       />
                     )}
-                    <p style={{ marginTop: 6, opacity: 0.8 }}>
-                      {formatSpeed(downloadProgress.progress)}
-                    </p>
+                    <p className="asset-meta">{formatSpeed(downloadProgress.progress)}</p>
                   </div>
                 </div>
               )}
-              <div className="form-row" style={{ marginBottom: 12 }}>
-                <div style={{ flex: 1 }}>
+              <div className="asset-row">
+                <div className="asset-info">
                   <strong>CRS Template</strong>
-                  <p style={{ marginTop: 6 }}>{templateStatus}</p>
+                  <p>{templateStatus}</p>
                   {assets?.crs_template_uploaded_at && (
-                    <p style={{ marginTop: 4, opacity: 0.75 }}>
+                    <p className="asset-meta">
                       Uploaded at {new Date(assets.crs_template_uploaded_at).toLocaleString()}
                     </p>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div className="asset-actions">
                   <Button
                     type="button"
                     size="sm"
@@ -515,56 +513,44 @@ const AdminAmoAssetsPage: React.FC = () => {
                 </div>
               </div>
               {downloadProgress?.kind === "template" && (
-                <div className="form-row" style={{ marginBottom: 12 }}>
-                  <div style={{ flex: 1 }}>
+                <div className="asset-progress">
+                  <div>
                     <strong>Template download</strong>
                     {downloadProgress.progress.percent !== undefined && (
                       <progress
                         value={downloadProgress.progress.percent}
                         max={100}
-                        style={{ width: "100%", height: 10, marginTop: 6 }}
+                        className="asset-progress__bar"
                       />
                     )}
-                    <p style={{ marginTop: 6, opacity: 0.8 }}>
-                      {formatSpeed(downloadProgress.progress)}
-                    </p>
+                    <p className="asset-meta">{formatSpeed(downloadProgress.progress)}</p>
                   </div>
                 </div>
               )}
               {previewAsset && (
-                <div className="form-row" style={{ marginBottom: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <strong>
+                <div className="asset-preview">
+                  <div className="asset-preview__body">
+                    <strong className="asset-preview__title">
                       Previewing {previewAsset.kind === "logo" ? "Logo" : "Template"}:{" "}
                       {previewAsset.name}
                     </strong>
-                    <div style={{ marginTop: 10 }}>
+                    <div className="asset-preview__frame">
                       {previewAsset.kind === "logo" ? (
                         <img
                           src={previewAsset.url}
                           alt="CRS logo preview"
-                          style={{
-                            maxWidth: "100%",
-                            maxHeight: 240,
-                            borderRadius: 8,
-                            border: "1px solid var(--panel-divider)",
-                          }}
+                          className="asset-preview__image"
                         />
                       ) : (
                         <iframe
                           src={previewAsset.url}
                           title="CRS template preview"
-                          style={{
-                            width: "100%",
-                            height: 360,
-                            border: "1px solid var(--panel-divider)",
-                            borderRadius: 8,
-                          }}
+                          className="asset-preview__document"
                         />
                       )}
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "flex-start" }}>
+                  <div className="asset-preview__actions">
                     <Button type="button" size="sm" variant="secondary" onClick={clearPreview}>
                       Close preview
                     </Button>
@@ -576,8 +562,7 @@ const AdminAmoAssetsPage: React.FC = () => {
         </Panel>
 
         <Panel title="Upload assets">
-
-          <div className="form-row" style={{ alignItems: "center" }}>
+          <div className="form-row asset-upload-row">
             <label htmlFor="logoUpload">CRS Logo (.png, .jpg, .svg)</label>
             <input
               id="logoUpload"
@@ -590,7 +575,7 @@ const AdminAmoAssetsPage: React.FC = () => {
             />
             {uploadingLogo && <span>Uploading…</span>}
             {selectedLogoFiles.length > 0 && !uploadingLogo && (
-              <p className="form-hint">
+              <p className="form-hint asset-hint">
                 Selected {selectedLogoFiles.length} file
                 {selectedLogoFiles.length === 1 ? "" : "s"}:{" "}
                 {selectedLogoFiles.map((file) => file.name).join(", ")}. Only
@@ -599,24 +584,22 @@ const AdminAmoAssetsPage: React.FC = () => {
             )}
           </div>
           {uploadingLogo && logoUploadProgress && (
-            <div className="form-row" style={{ marginBottom: 12 }}>
-              <div style={{ flex: 1 }}>
+            <div className="asset-progress">
+              <div>
                 <strong>Logo upload</strong>
                 {logoUploadProgress.percent !== undefined && (
                   <progress
                     value={logoUploadProgress.percent}
                     max={100}
-                    style={{ width: "100%", height: 10, marginTop: 6 }}
+                    className="asset-progress__bar"
                   />
                 )}
-                <p style={{ marginTop: 6, opacity: 0.8 }}>
-                  {formatSpeed(logoUploadProgress)}
-                </p>
+                <p className="asset-meta">{formatSpeed(logoUploadProgress)}</p>
               </div>
             </div>
           )}
 
-          <div className="form-row" style={{ alignItems: "center" }}>
+          <div className="form-row asset-upload-row">
             <label htmlFor="templateUpload">CRS Template (.pdf)</label>
             <input
               id="templateUpload"
@@ -629,7 +612,7 @@ const AdminAmoAssetsPage: React.FC = () => {
             />
             {uploadingTemplate && <span>Uploading…</span>}
             {selectedTemplateFiles.length > 0 && !uploadingTemplate && (
-              <p className="form-hint">
+              <p className="form-hint asset-hint">
                 Selected {selectedTemplateFiles.length} file
                 {selectedTemplateFiles.length === 1 ? "" : "s"}:{" "}
                 {selectedTemplateFiles.map((file) => file.name).join(", ")}. Only
@@ -638,19 +621,17 @@ const AdminAmoAssetsPage: React.FC = () => {
             )}
           </div>
           {uploadingTemplate && templateUploadProgress && (
-            <div className="form-row" style={{ marginBottom: 12 }}>
-              <div style={{ flex: 1 }}>
+            <div className="asset-progress">
+              <div>
                 <strong>Template upload</strong>
                 {templateUploadProgress.percent !== undefined && (
                   <progress
                     value={templateUploadProgress.percent}
                     max={100}
-                    style={{ width: "100%", height: 10, marginTop: 6 }}
+                    className="asset-progress__bar"
                   />
                 )}
-                <p style={{ marginTop: 6, opacity: 0.8 }}>
-                  {formatSpeed(templateUploadProgress)}
-                </p>
+                <p className="asset-meta">{formatSpeed(templateUploadProgress)}</p>
               </div>
             </div>
           )}
