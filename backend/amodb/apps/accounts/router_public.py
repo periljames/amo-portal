@@ -63,9 +63,14 @@ def _build_reset_link(*, amo_slug: str, token: str) -> str | None:
     return f"{base}/reset-password?{query}"
 
 
-def _validate_login_email(email: str) -> str:
-    value = email.strip()
-    if "@" not in value or value.startswith("@") or value.endswith("@"):
+def _validate_login_identifier(identifier: str) -> str:
+    value = identifier.strip()
+    if not value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Identifier is required.",
+        )
+    if "@" in value and (value.startswith("@") or value.endswith("@")):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invalid email address.",
@@ -181,7 +186,7 @@ def _maybe_send_whatsapp(
 @router.post(
     "/login",
     response_model=schemas.Token,
-    summary="Login with AMO slug, email and password",
+    summary="Login with AMO slug, email or staff code and password",
 )
 def login(
     payload: schemas.LoginRequest,
@@ -192,7 +197,8 @@ def login(
     Normal login:
 
     - `amo_slug` = AMO login slug (e.g. `maintenance.safa03`)
-    - `email`    = user email
+    - `email`    = user email (optional if staff code is used)
+    - `staff_code` = user staff ID (optional if email is used)
     - `password` = user password
 
     Special case for global superuser:
@@ -200,6 +206,11 @@ def login(
       (SUPERUSER) can log in even if their AMO is the ROOT AMO.
     """
     payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
+    if not payload.email and not payload.staff_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Email or staff code is required.",
+        )
 
     try:
         user = services.authenticate_user(
@@ -278,30 +289,33 @@ def dev_seed_login(
 @router.get(
     "/login-context",
     response_model=schemas.LoginContextResponse,
-    summary="Resolve login context from email",
+    summary="Resolve login context from email or staff code",
 )
 def login_context(
-    email: str = Query(..., min_length=3),
+    identifier: str | None = Query(None, min_length=1),
+    email: str | None = Query(None, min_length=3),
+    staff_code: str | None = Query(None, min_length=2),
     db: Session = Depends(get_db),
 ):
-    email = _validate_login_email(email)
+    resolved = identifier or email or staff_code or ""
+    identifier_value = _validate_login_identifier(resolved)
     try:
-        user = services.resolve_login_context(db=db, email=email)
+        user = services.resolve_login_context(db=db, identifier=identifier_value)
     except services.SchemaNotInitialized:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database schema is not initialized. Run migrations and retry.",
         )
-    except services.LoginContextConflict:
+    except services.LoginContextConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Multiple AMO accounts share this email. Use your AMO portal link.",
+            detail=str(exc),
         )
 
     if not user or not user.amo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No active account found for this email.",
+            detail="No active account found for this identifier.",
         )
 
     amo = user.amo

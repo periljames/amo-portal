@@ -15,6 +15,7 @@ const DEPT_KEY = "amo_department";
 const USER_KEY = "amo_current_user";
 const SESSION_EVENT_KEY = "amo_session_event";
 const ONBOARDING_STATUS_KEY = "amo_onboarding_status";
+const LAST_LOGIN_IDENTIFIER_KEY = "amo_last_login_identifier";
 
 // Shared with adminUsers.ts enhancements (kept as a plain key to avoid circular imports)
 const ACTIVE_AMO_ID_KEY = "amodb_active_amo_id";
@@ -176,6 +177,16 @@ export function cacheCurrentUser(user: PortalUser): void {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
+export function saveLastLoginIdentifier(identifier: string): void {
+  const trimmed = identifier.trim();
+  if (!trimmed) return;
+  localStorage.setItem(LAST_LOGIN_IDENTIFIER_KEY, trimmed);
+}
+
+export function getLastLoginIdentifier(): string {
+  return localStorage.getItem(LAST_LOGIN_IDENTIFIER_KEY) || "";
+}
+
 export function getCachedUser(): PortalUser | null {
   const raw = localStorage.getItem(USER_KEY);
   if (!raw) return null;
@@ -292,10 +303,10 @@ function resolveAmoSlug(input: string | null | undefined): string {
 // -----------------------------------------------------------------------------
 
 /**
- * Login with AMO slug + email + password.
+ * Login with AMO slug + identifier (email or staff code) + password.
  *
  * Backend: POST /auth/login (router_public.py)
- * Body: { amo_slug, email, password }
+ * Body: { amo_slug, email?, staff_code?, password }
  *
  * Enhancements:
  * - If amoSlug is blank, defaults to "system" (platform support login).
@@ -308,12 +319,15 @@ function resolveAmoSlug(input: string | null | undefined): string {
  */
 export async function login(
   amoSlug: string,
-  email: string,
+  identifier: string,
   password: string
 ): Promise<LoginResponse> {
+  const trimmedIdentifier = identifier.trim();
+  const isEmail = trimmedIdentifier.includes("@");
   const payload = {
     amo_slug: resolveAmoSlug(amoSlug), // MUST match AMO.login_slug; blank => "system"
-    email: email.trim(),
+    email: isEmail ? trimmedIdentifier : undefined,
+    staff_code: isEmail ? undefined : trimmedIdentifier,
     password,
   };
 
@@ -349,18 +363,20 @@ export async function login(
     cacheCurrentUser(data.user);
   }
 
+  saveLastLoginIdentifier(trimmedIdentifier);
+
   return data;
 }
 
 /**
- * Resolve login context for a given email.
+ * Resolve login context for a given email or staff code.
  *
- * Backend: GET /auth/login-context?email=...
+ * Backend: GET /auth/login-context?identifier=...
  */
 export async function getLoginContext(
-  email: string
+  identifier: string
 ): Promise<LoginContextResponse> {
-  const query = new URLSearchParams({ email: email.trim() }).toString();
+  const query = new URLSearchParams({ identifier: identifier.trim() }).toString();
   const res = await fetch(`${getApiBaseUrl()}/auth/login-context?${query}`);
 
   if (!res.ok) {
