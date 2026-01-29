@@ -382,6 +382,10 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/ehm/uploads");
   }, [location.pathname]);
 
+  const shouldPoll = useMemo(() => {
+    return !location.pathname.includes("/admin");
+  }, [location.pathname]);
+
   const lockedEventRef = useRef<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
@@ -511,12 +515,12 @@ const DepartmentLayout: React.FC<Props> = ({
   pollingRunnerRef.current = runPolling;
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !shouldPoll) return;
     runPolling("initial");
     return () => {
       clearPollingTimer();
     };
-  }, [clearPollingTimer, currentUser, runPolling]);
+  }, [clearPollingTimer, currentUser, runPolling, shouldPoll]);
 
   const refreshNotifications = useCallback(
     async (opts?: { unreadOnly?: boolean }) => {
