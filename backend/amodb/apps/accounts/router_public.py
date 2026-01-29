@@ -206,6 +206,12 @@ def login(
       (SUPERUSER) can log in even if their AMO is the ROOT AMO.
     """
     payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
+    if payload.identifier and not payload.email and not payload.staff_code:
+        identifier = payload.identifier.strip()
+        if "@" in identifier:
+            payload.email = identifier
+        else:
+            payload.staff_code = identifier
     if not payload.email and not payload.staff_code:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

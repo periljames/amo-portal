@@ -365,6 +365,7 @@ class TokenData(BaseModel):
 
 class LoginRequest(BaseModel):
     amo_slug: str = Field(..., description="AMO login slug, e.g. 'maintenance.safa03'")
+    identifier: Optional[str] = None
     email: Optional[EmailStr] = None
     staff_code: Optional[str] = None
     password: str
