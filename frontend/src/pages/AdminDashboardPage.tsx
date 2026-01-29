@@ -16,12 +16,18 @@ import {
   createAdminAmo,
   getAdminContext,
   listAdminAmos,
+  listAdminDepartments,
   listAdminUsers,
   deactivateAdminUser,
   updateAdminUser,
   setAdminContext,
 } from "../services/adminUsers";
-import type { AdminAmoRead, AdminUserRead, DataMode } from "../services/adminUsers";
+import type {
+  AdminAmoRead,
+  AdminDepartmentRead,
+  AdminUserRead,
+  DataMode,
+} from "../services/adminUsers";
 import { LS_ACTIVE_AMO_ID } from "../services/adminUsers";
 
 type UrlParams = {
@@ -45,6 +51,10 @@ const AdminDashboardPage: React.FC = () => {
   const [users, setUsers] = useState<AdminUserRead[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [departments, setDepartments] = useState<AdminDepartmentRead[]>([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(false);
+  const [departmentsError, setDepartmentsError] = useState<string | null>(null);
+  const [departmentSelections, setDepartmentSelections] = useState<Record<string, string>>({});
   const lastUsersRequestKey = useRef<string | null>(null);
   const lastUsersFetchAt = useRef<number>(0);
   const usersRequestRef = useRef<{
@@ -102,6 +112,33 @@ const AdminDashboardPage: React.FC = () => {
     if (isSuperuser) return activeAmoId || currentUser.amo_id;
     return currentUser.amo_id;
   }, [currentUser?.amo_id, isSuperuser, activeAmoId]);
+
+  const departmentMap = useMemo(() => {
+    return new Map(departments.map((dept) => [dept.id, dept]));
+  }, [departments]);
+
+  useEffect(() => {
+    if (!effectiveAmoId) return;
+    let active = true;
+    const loadDepartments = async () => {
+      setDepartmentsLoading(true);
+      setDepartmentsError(null);
+      try {
+        const data = await listAdminDepartments(effectiveAmoId);
+        if (!active) return;
+        setDepartments(data);
+      } catch (err: any) {
+        if (!active) return;
+        setDepartmentsError(err?.message || "Failed to load departments.");
+      } finally {
+        if (active) setDepartmentsLoading(false);
+      }
+    };
+    loadDepartments();
+    return () => {
+      active = false;
+    };
+  }, [effectiveAmoId]);
 
   // If user is not admin, redirect to THEIR department, not planning
   useEffect(() => {
@@ -471,6 +508,31 @@ const AdminDashboardPage: React.FC = () => {
       );
     } catch (err: any) {
       setError(err?.message || "Failed to update user status.");
+    }
+  };
+
+  const handleAssignDepartment = async (user: AdminUserRead) => {
+    const selectedDepartmentId = departmentSelections[user.id];
+    if (!selectedDepartmentId) {
+      setError("Select a department before assigning.");
+      return;
+    }
+
+    try {
+      setError(null);
+      const updated = await updateAdminUser(user.id, {
+        department_id: selectedDepartmentId,
+      });
+      setUsers((prev) =>
+        prev.map((item) => (item.id === user.id ? updated : item))
+      );
+      setDepartmentSelections((prev) => {
+        const next = { ...prev };
+        delete next[user.id];
+        return next;
+      });
+    } catch (err: any) {
+      setError(err?.message || "Failed to assign department.");
     }
   };
 
@@ -912,6 +974,11 @@ const AdminDashboardPage: React.FC = () => {
             <span>{error}</span>
           </InlineAlert>
         )}
+        {departmentsError && (
+          <InlineAlert tone="danger" title="Department Error">
+            <span>{departmentsError}</span>
+          </InlineAlert>
+        )}
 
         {!loading && !error && (
           <>
@@ -960,18 +1027,50 @@ const AdminDashboardPage: React.FC = () => {
                     <td>{u.full_name}</td>
                     <td>{u.email}</td>
                     <td>{u.role}</td>
-                    <td>{u.department_id ?? "—"}</td>
+                    <td>{departmentMap.get(u.department_id ?? "")?.name ?? "—"}</td>
                     <td>{u.is_active ? "Active" : "Inactive"}</td>
                     <td>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {!u.department_id && (
+                          <>
+                            <select
+                              className="input input--compact"
+                              aria-label={`Assign department for ${u.full_name}`}
+                              value={departmentSelections[u.id] || ""}
+                              onChange={(e) =>
+                                setDepartmentSelections((prev) => ({
+                                  ...prev,
+                                  [u.id]: e.target.value,
+                                }))
+                              }
+                              disabled={departmentsLoading}
+                            >
+                              <option value="">Select department</option>
+                              {departments.map((dept) => (
+                                <option key={dept.id} value={dept.id}>
+                                  {dept.name}
+                                </option>
+                              ))}
+                            </select>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => handleAssignDepartment(u)}
+                              disabled={departmentsLoading}
+                            >
+                              Assign dept
+                            </Button>
+                          </>
+                        )}
                         <Button
                           type="button"
                           size="sm"
-                          variant="ghost"
+                          variant={u.is_active ? "danger" : "ghost"}
                           onClick={() => handleToggleUser(u)}
                           title={u.is_active ? "Deactivate user" : "Reactivate user"}
                         >
-                          {u.is_active ? "🛑 Deactivate" : "✅ Reactivate"}
+                          {u.is_active ? "🗑️ Deactivate" : "✅ Reactivate"}
                         </Button>
                       </div>
                     </td>

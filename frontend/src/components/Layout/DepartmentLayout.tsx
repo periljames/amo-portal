@@ -382,12 +382,17 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/ehm/uploads");
   }, [location.pathname]);
 
+  const shouldPoll = useMemo(() => {
+    return !location.pathname.includes("/admin");
+  }, [location.pathname]);
+
   const lockedEventRef = useRef<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
   const idleCountdownIntervalRef = useRef<number | null>(null);
+  const lastActivityRef = useRef<number>(0);
   const pollingTimerRef = useRef<number | null>(null);
   const pollingRetriesRef = useRef(0);
   const pollingStoppedRef = useRef(false);
@@ -511,12 +516,12 @@ const DepartmentLayout: React.FC<Props> = ({
   pollingRunnerRef.current = runPolling;
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !shouldPoll) return;
     runPolling("initial");
     return () => {
       clearPollingTimer();
     };
-  }, [clearPollingTimer, currentUser, runPolling]);
+  }, [clearPollingTimer, currentUser, runPolling, shouldPoll]);
 
   const refreshNotifications = useCallback(
     async (opts?: { unreadOnly?: boolean }) => {
@@ -654,6 +659,9 @@ const DepartmentLayout: React.FC<Props> = ({
     ];
     const handleActivity = () => {
       if (logoutReason) return;
+      const now = Date.now();
+      if (now - lastActivityRef.current < 1000) return;
+      lastActivityRef.current = now;
       resetIdleTimers();
     };
 
