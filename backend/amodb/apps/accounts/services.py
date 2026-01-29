@@ -195,15 +195,23 @@ def _is_missing_table_error(exc: Exception) -> bool:
     )
 
 
-def resolve_login_context(db: Session, email: str) -> models.User | None:
-    email_norm = _normalise_email(email)
+def resolve_login_context(db: Session, identifier: str) -> models.User | None:
+    identifier = identifier.strip()
+    if "@" in identifier:
+        email_norm = _normalise_email(identifier)
+        query_filter = func.lower(models.User.email) == email_norm
+        conflict_message = "Multiple AMO accounts share this email."
+    else:
+        staff_code = _normalise_staff_code(identifier)
+        query_filter = models.User.staff_code == staff_code
+        conflict_message = "Multiple AMO accounts share this staff code."
     try:
         users = (
             db.query(models.User)
             .outerjoin(models.AMO, models.User.amo_id == models.AMO.id)
             .options(joinedload(models.User.amo))
             .filter(
-                func.lower(models.User.email) == email_norm,
+                query_filter,
                 models.User.is_active.is_(True),
                 or_(
                     models.User.amo_id.is_(None),
@@ -224,9 +232,7 @@ def resolve_login_context(db: Session, email: str) -> models.User | None:
 
     amo_ids = {u.amo_id for u in users if u.amo_id}
     if len(amo_ids) > 1:
-        raise LoginContextConflict(
-            "Multiple AMO accounts share this email."
-        )
+        raise LoginContextConflict(conflict_message)
 
     superuser = next((u for u in users if u.is_superuser), None)
     return superuser or users[0]
@@ -779,7 +785,8 @@ def authenticate_user(
     Returns a user on success, or None on failure (lockout, bad credentials).
     System/service accounts are not allowed to authenticate via this flow.
     """
-    email = _normalise_email(login_req.email)
+    email = _normalise_email(login_req.email) if login_req.email else None
+    staff_code = _normalise_staff_code(login_req.staff_code) if login_req.staff_code else None
     amo_slug_raw = (login_req.amo_slug or "").strip()
     amo_slug = amo_slug_raw.lower()
 
@@ -790,6 +797,18 @@ def authenticate_user(
     # Global superuser login (system owner)
     # -----------------------------------------------------------------------
     if amo_slug in {"", "system", "root"}:
+        if not email:
+            _log_security_event(
+                db,
+                user=None,
+                amo=None,
+                event_type="LOGIN_FAILED",
+                description="Superuser login attempted without email.",
+                ip=ip,
+                user_agent=user_agent,
+            )
+            return None
+
         user = get_global_superuser_by_email(db, email=email)
 
         if not user:
@@ -808,17 +827,26 @@ def authenticate_user(
         # -------------------------------------------------------------------
         # Normal AMO-scoped login
         # -------------------------------------------------------------------
-        user = get_user_for_login(
-            db=db,
-            amo_slug=amo_slug_raw,
-            email=email,
-        )
+        if staff_code:
+            amo = _find_amo_by_slug_or_code(db, amo_slug_raw)
+            if amo:
+                user = get_active_user_by_staff_code(
+                    db=db,
+                    amo_id=amo.id,
+                    staff_code=staff_code,
+                )
+        elif email:
+            user = get_user_for_login(
+                db=db,
+                amo_slug=amo_slug_raw,
+                email=email,
+            )
 
         if user:
             amo = user.amo
         else:
             # If AMO exists, log a generic failed login.
-            amo = _find_amo_by_slug_or_code(db, amo_slug_raw)
+            amo = amo or _find_amo_by_slug_or_code(db, amo_slug_raw)
             _log_security_event(
                 db,
                 user=None,
