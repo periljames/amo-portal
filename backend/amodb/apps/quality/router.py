@@ -10,7 +10,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from amodb.entitlements import require_module
-from amodb.security import get_current_actor_id
+from amodb.security import get_current_actor_id, get_current_active_user
+from amodb.apps.accounts import models as account_models
 from amodb.database import get_db
 
 from . import models
@@ -751,8 +752,11 @@ def get_auditor_stats(user_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/notifications/me", response_model=List[QMSNotificationOut])
-def list_my_notifications(db: Session = Depends(get_db)):
-    user_id = get_actor()
+def list_my_notifications(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    user_id = get_actor() or str(current_user.id)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
     notes = (
@@ -767,8 +771,12 @@ def list_my_notifications(db: Session = Depends(get_db)):
 
 
 @router.post("/notifications/{notification_id}/read", response_model=QMSNotificationOut)
-def mark_notification_read(notification_id: UUID, db: Session = Depends(get_db)):
-    user_id = get_actor()
+def mark_notification_read(
+    notification_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    user_id = get_actor() or str(current_user.id)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
     note = (
