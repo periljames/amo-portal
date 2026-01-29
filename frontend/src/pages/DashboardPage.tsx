@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { getContext, getCachedUser } from "../services/auth";
+import { getContext, getCachedUser, normalizeDepartmentCode } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
   listDocumentAlerts,
@@ -271,19 +271,13 @@ const DashboardPage: React.FC = () => {
   );
 
   // For normal users, this MUST be their assigned department (server-driven context).
-  // We also fall back to cached user.department_id if you ever store codes there.
   const assignedDept = useMemo(() => {
-    const ctxDept = (ctx.department || "").trim();
-    if (ctxDept) return ctxDept;
-
-    const userDept = (currentUser?.department_id || "").trim();
-    if (userDept) return userDept;
-
-    return null;
-  }, [ctx.department, currentUser?.department_id]);
+    return normalizeDepartmentCode(ctx.department);
+  }, [ctx.department]);
 
   const requestedDeptRaw = (params.department || "").trim();
-  const requestedDept: string | null = requestedDeptRaw ? requestedDeptRaw : null;
+  const requestedDept: string | null =
+    requestedDeptRaw ? normalizeDepartmentCode(requestedDeptRaw) : null;
 
   // ✅ Guard: normal users can ONLY access their assigned department.
   useEffect(() => {
@@ -326,13 +320,13 @@ const DashboardPage: React.FC = () => {
   // Effective department for rendering
   const department: DepartmentId = useMemo(() => {
     if (isAdmin) {
-      const d = requestedDept || ctx.department || "planning";
+      const d = requestedDept || assignedDept || "planning";
       return (isDepartmentId(d) ? d : "planning") as DepartmentId;
     }
 
     const d = assignedDept || "planning";
     return (isDepartmentId(d) ? d : "planning") as DepartmentId;
-  }, [isAdmin, requestedDept, ctx.department, assignedDept]);
+  }, [isAdmin, requestedDept, assignedDept]);
 
   const amoDisplay =
     amoSlug !== "UNKNOWN" ? decodeAmoCertFromUrl(amoSlug) : "AMO";
