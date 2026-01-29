@@ -53,6 +53,10 @@ class AMOUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class TrialExtendRequest(BaseModel):
+    extend_days: int = Field(..., ge=1, le=3650)
+
+
 class AMORead(AMOBase):
     id: str
     is_active: bool

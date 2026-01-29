@@ -9,6 +9,8 @@ import {
   getAdminContext,
   listAdminAmos,
   listAdminUsers,
+  deactivateAdminUser,
+  updateAdminUser,
   setAdminContext,
 } from "../services/adminUsers";
 import type { AdminAmoRead, AdminUserRead, DataMode } from "../services/adminUsers";
@@ -415,6 +417,29 @@ const AdminDashboardPage: React.FC = () => {
     win.document.close();
     win.focus();
     win.print();
+  };
+
+  const handleToggleUser = async (user: AdminUserRead) => {
+    const nextActive = !user.is_active;
+    const label = nextActive ? "reactivate" : "deactivate";
+    const ok = window.confirm(
+      `Are you sure you want to ${label} ${user.full_name}?`
+    );
+    if (!ok) return;
+    try {
+      if (!nextActive) {
+        await deactivateAdminUser(user.id);
+      } else {
+        await updateAdminUser(user.id, { is_active: true });
+      }
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === user.id ? { ...u, is_active: nextActive } : u
+        )
+      );
+    } catch (err: any) {
+      setError(err?.message || "Failed to update user status.");
+    }
   };
 
   const handleAmoChange = (nextAmoId: string) => {
@@ -864,12 +889,13 @@ const AdminDashboardPage: React.FC = () => {
                   <th>Role</th>
                   <th>Department</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={6}>No users found for this AMO.</td>
+                    <td colSpan={7}>No users found for this AMO.</td>
                   </tr>
                 )}
                 {users.map((u) => (
@@ -880,6 +906,18 @@ const AdminDashboardPage: React.FC = () => {
                     <td>{u.role}</td>
                     <td>{u.department_id ?? "—"}</td>
                     <td>{u.is_active ? "Active" : "Inactive"}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="secondary-chip-btn"
+                          onClick={() => handleToggleUser(u)}
+                          title={u.is_active ? "Deactivate user" : "Reactivate user"}
+                        >
+                          {u.is_active ? "🛑 Deactivate" : "✅ Reactivate"}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

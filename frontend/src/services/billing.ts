@@ -42,6 +42,9 @@ export async function fetchSubscription(): Promise<Subscription | null> {
     if (message.includes("404")) {
       return null;
     }
+    if (message.includes("No active subscription")) {
+      return null;
+    }
     throw err;
   }
 }
