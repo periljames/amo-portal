@@ -68,6 +68,7 @@ type ColorScheme = "dark" | "light";
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const IDLE_WARNING_MS = 3 * 60 * 1000;
 const POLLING_INTERVAL_MS = 60000;
+const ADMIN_OVERVIEW_POLLING_INTERVAL_MS = 15 * 60 * 1000;
 const POLLING_RETRY_DELAYS_MS = [1000, 3000, 10000];
 const MAX_POLLING_RETRIES = POLLING_RETRY_DELAYS_MS.length;
 
@@ -382,9 +383,19 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/ehm/uploads");
   }, [location.pathname]);
 
-  const shouldPoll = useMemo(() => {
-    return !location.pathname.includes("/admin");
+  const isAdminOverviewRoute = useMemo(() => {
+    return location.pathname.includes("/admin/overview");
   }, [location.pathname]);
+
+  const shouldPoll = useMemo(() => {
+    return !location.pathname.includes("/admin") || isAdminOverviewRoute;
+  }, [location.pathname, isAdminOverviewRoute]);
+
+  const pollingIntervalMs = useMemo(() => {
+    return isAdminOverviewRoute
+      ? ADMIN_OVERVIEW_POLLING_INTERVAL_MS
+      : POLLING_INTERVAL_MS;
+  }, [isAdminOverviewRoute]);
 
   const lockedEventRef = useRef<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
@@ -480,9 +491,9 @@ const DepartmentLayout: React.FC<Props> = ({
       setPollingError(message);
       pollingTimerRef.current = window.setTimeout(() => {
         pollingRunnerRef.current?.("interval");
-      }, POLLING_INTERVAL_MS);
+      }, pollingIntervalMs);
     },
-    [clearPollingTimer, isPollingFatal]
+    [clearPollingTimer, isPollingFatal, pollingIntervalMs]
   );
 
   const runPolling = useCallback(
@@ -502,7 +513,7 @@ const DepartmentLayout: React.FC<Props> = ({
         if (reason !== "manual") {
           pollingTimerRef.current = window.setTimeout(() => {
             pollingRunnerRef.current?.("interval");
-          }, POLLING_INTERVAL_MS);
+          }, pollingIntervalMs);
         }
       } catch (err: unknown) {
         handlePollingFailure(err);
@@ -510,7 +521,14 @@ const DepartmentLayout: React.FC<Props> = ({
         pollingInFlightRef.current = false;
       }
     },
-    [clearPollingTimer, currentUser, handlePollingFailure, refreshSubscription, refreshUnreadNotifications]
+    [
+      clearPollingTimer,
+      currentUser,
+      handlePollingFailure,
+      pollingIntervalMs,
+      refreshSubscription,
+      refreshUnreadNotifications,
+    ]
   );
 
   pollingRunnerRef.current = runPolling;
