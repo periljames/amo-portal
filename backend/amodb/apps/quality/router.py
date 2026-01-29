@@ -10,6 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from amodb.entitlements import require_module
+from amodb.security import get_current_actor_id
 from amodb.database import get_db
 
 from . import models
@@ -55,7 +56,7 @@ def get_actor() -> Optional[str]:
     Replace with your JWT dependency.
     Return a stable user id string (e.g., UUID or int as str).
     """
-    return None
+    return get_current_actor_id()
 
 
 def _notify_user(db: Session, user_id: Optional[str], message: str, severity=models.QMSNotificationSeverity):
