@@ -6,7 +6,10 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
 import {
   createAdminAmo,
+  deactivateAdminAmo,
+  extendAmoTrial,
   listAdminAmos,
+  updateAdminAmo,
   LS_ACTIVE_AMO_ID,
 } from "../services/adminUsers";
 import type { AdminAmoRead } from "../services/adminUsers";
@@ -46,6 +49,8 @@ const AdminAmoManagementPage: React.FC = () => {
 
   const [amoCreateError, setAmoCreateError] = useState<string | null>(null);
   const [amoCreateSuccess, setAmoCreateSuccess] = useState<string | null>(null);
+  const [amoActionError, setAmoActionError] = useState<string | null>(null);
+  const [amoActionSuccess, setAmoActionSuccess] = useState<string | null>(null);
   const [lastCreatedAmoId, setLastCreatedAmoId] = useState<string | null>(null);
   const [amoForm, setAmoForm] = useState<AmoFormState>({
     amoCode: "",
@@ -203,6 +208,70 @@ const AdminAmoManagementPage: React.FC = () => {
     navigate(`/maintenance/${selectedAmo.login_slug}`, { replace: false });
   };
 
+  const refreshAmos = async () => {
+    setAmoActionError(null);
+    setAmoActionSuccess(null);
+    setAmoLoading(true);
+    try {
+      const data = await listAdminAmos();
+      setAmos(data);
+    } catch (err: any) {
+      setAmoActionError(err?.message || "Failed to refresh AMOs.");
+    } finally {
+      setAmoLoading(false);
+    }
+  };
+
+  const handleEditAmo = async (amo: AdminAmoRead) => {
+    const name = window.prompt("Update AMO name:", amo.name || "");
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setAmoActionError("AMO name cannot be empty.");
+      return;
+    }
+    try {
+      await updateAdminAmo(amo.id, { name: trimmed });
+      setAmoActionSuccess(`Updated AMO ${amo.amo_code}.`);
+      await refreshAmos();
+    } catch (err: any) {
+      setAmoActionError(err?.message || "Failed to update AMO.");
+    }
+  };
+
+  const handleDeactivateAmo = async (amo: AdminAmoRead) => {
+    const ok = window.confirm(
+      `Deactivate AMO ${amo.amo_code}? Users will lose access until reactivated.`
+    );
+    if (!ok) return;
+    try {
+      await deactivateAdminAmo(amo.id);
+      setAmoActionSuccess(`Deactivated AMO ${amo.amo_code}.`);
+      await refreshAmos();
+    } catch (err: any) {
+      setAmoActionError(err?.message || "Failed to deactivate AMO.");
+    }
+  };
+
+  const handleExtendTrial = async (amo: AdminAmoRead) => {
+    const raw = window.prompt(
+      `Extend trial for ${amo.amo_code} by how many days?`,
+      "30"
+    );
+    if (raw === null) return;
+    const days = Number(raw);
+    if (!Number.isFinite(days) || days <= 0) {
+      setAmoActionError("Enter a valid number of days.");
+      return;
+    }
+    try {
+      await extendAmoTrial(amo.id, { extend_days: Math.round(days) });
+      setAmoActionSuccess(`Extended trial for ${amo.amo_code} by ${days} days.`);
+    } catch (err: any) {
+      setAmoActionError(err?.message || "Failed to extend trial.");
+    }
+  };
+
   if (!isSuperuser) {
     return (
       <DepartmentLayout
@@ -276,6 +345,17 @@ const AdminAmoManagementPage: React.FC = () => {
             </div>
           )}
 
+          {amoActionError && (
+            <div className="alert alert-error" style={{ marginTop: 12 }}>
+              {amoActionError}
+            </div>
+          )}
+          {amoActionSuccess && (
+            <div className="alert alert-success" style={{ marginTop: 12 }}>
+              {amoActionSuccess}
+            </div>
+          )}
+
           <div className="form-actions">
             <button
               type="button"
@@ -293,6 +373,72 @@ const AdminAmoManagementPage: React.FC = () => {
               Create first user
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="page-section">
+        <div className="card card--form" style={{ padding: 16 }}>
+          <h3 style={{ marginTop: 0 }}>AMO Actions</h3>
+          <p style={{ marginTop: 0, opacity: 0.85 }}>
+            Edit AMO details, extend trial windows, or deactivate access.
+          </p>
+
+          {!amoLoading && !amoError && (
+            <div className="table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>AMO</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {amos.length === 0 && (
+                    <tr>
+                      <td colSpan={3}>No AMOs available.</td>
+                    </tr>
+                  )}
+                  {amos.map((amo) => (
+                    <tr key={amo.id}>
+                      <td>
+                        <strong>{amo.amo_code}</strong> — {amo.name}
+                      </td>
+                      <td>{amo.is_active ? "Active" : "Inactive"}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => handleEditAmo(amo)}
+                            title="Edit AMO"
+                          >
+                            ✏️ Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => handleExtendTrial(amo)}
+                            title="Extend trial"
+                          >
+                            ⏳ Extend trial
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => handleDeactivateAmo(amo)}
+                            title="Deactivate AMO"
+                          >
+                            🗑️ Deactivate
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </section>
 

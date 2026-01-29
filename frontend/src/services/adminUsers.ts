@@ -8,6 +8,7 @@
 //   can call these endpoints.
 
 import { apiPost, apiGet } from "./crs";
+import { apiDelete, apiPut } from "./crs";
 import { authHeaders, getCachedUser } from "./auth";
 import type { AccountRole, RegulatoryAuthority } from "./auth";
 
@@ -69,6 +70,22 @@ export interface AdminUserRead {
   updated_at: string;
 }
 
+export interface AdminUserUpdatePayload {
+  first_name?: string | null;
+  last_name?: string | null;
+  full_name?: string | null;
+  role?: AccountRole;
+  position_title?: string | null;
+  phone?: string | null;
+  department_id?: string | null;
+  regulatory_authority?: RegulatoryAuthority | null;
+  licence_number?: string | null;
+  licence_state_or_country?: string | null;
+  licence_expires_on?: string | null;
+  is_active?: boolean;
+  is_amo_admin?: boolean;
+}
+
 /**
  * AMO type returned by GET /accounts/admin/amos (SUPERUSER only).
  * (Matches backend AMORead shape.)
@@ -99,6 +116,21 @@ export interface AdminAmoCreatePayload {
   contact_phone?: string | null;
   time_zone?: string | null;
   is_demo?: boolean;
+}
+
+export interface AdminAmoUpdatePayload {
+  name?: string | null;
+  icao_code?: string | null;
+  country?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  time_zone?: string | null;
+  is_demo?: boolean;
+  is_active?: boolean;
+}
+
+export interface TrialExtendPayload {
+  extend_days: number;
 }
 
 export type DataMode = "DEMO" | "REAL";
@@ -325,6 +357,51 @@ export async function createAdminAmo(
   payload: AdminAmoCreatePayload
 ): Promise<AdminAmoRead> {
   return apiPost<AdminAmoRead>("/accounts/admin/amos", JSON.stringify(payload), {
+    headers: authHeaders(),
+  });
+}
+
+export async function updateAdminAmo(
+  amoId: string,
+  payload: AdminAmoUpdatePayload
+): Promise<AdminAmoRead> {
+  return apiPut<AdminAmoRead>(
+    `/accounts/admin/amos/${encodeURIComponent(amoId)}`,
+    JSON.stringify(payload),
+    { headers: authHeaders() }
+  );
+}
+
+export async function deactivateAdminAmo(amoId: string): Promise<void> {
+  await apiDelete<void>(`/accounts/admin/amos/${encodeURIComponent(amoId)}`, undefined, {
+    headers: authHeaders(),
+  });
+}
+
+export async function extendAmoTrial(
+  amoId: string,
+  payload: TrialExtendPayload
+): Promise<unknown> {
+  return apiPost<unknown>(
+    `/accounts/admin/amos/${encodeURIComponent(amoId)}/trial-extend`,
+    JSON.stringify(payload),
+    { headers: authHeaders() }
+  );
+}
+
+export async function updateAdminUser(
+  userId: string,
+  payload: AdminUserUpdatePayload
+): Promise<AdminUserRead> {
+  return apiPut<AdminUserRead>(
+    `/accounts/admin/users/${encodeURIComponent(userId)}`,
+    JSON.stringify(payload),
+    { headers: authHeaders() }
+  );
+}
+
+export async function deactivateAdminUser(userId: string): Promise<void> {
+  await apiDelete<void>(`/accounts/admin/users/${encodeURIComponent(userId)}`, undefined, {
     headers: authHeaders(),
   });
 }

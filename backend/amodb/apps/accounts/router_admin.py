@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -207,6 +208,35 @@ def create_amo(
     db.commit()
     db.refresh(amo)
     _ensure_amo_storage_dirs(amo.id)
+
+    try:
+        default_sku = os.getenv("AMODB_DEFAULT_TRIAL_SKU", "").strip()
+        if not default_sku:
+            skus = services.list_catalog_skus(db, include_inactive=False)
+            if not skus:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No active SKU available to start a subscription trial.",
+                )
+            default_sku = skus[0].code
+
+        services.start_trial(
+            db,
+            amo_id=amo.id,
+            sku_code=default_sku,
+            idempotency_key=f"amo-create-{amo.id}-{uuid4().hex}",
+        )
+    except HTTPException:
+        db.delete(amo)
+        db.commit()
+        raise
+    except ValueError as exc:
+        db.delete(amo)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     audit_services.create_audit_event(
         db,
         amo_id=amo.id,
@@ -243,6 +273,136 @@ def list_amos(
     """
     _require_superuser(current_user)
     return db.query(models.AMO).order_by(models.AMO.amo_code.asc()).all()
+
+
+@router.put(
+    "/amos/{amo_id}",
+    response_model=schemas.AMORead,
+    summary="Update an AMO (platform superuser only)",
+)
+def update_amo(
+    amo_id: str,
+    payload: schemas.AMOUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    amo = db.query(models.AMO).filter(models.AMO.id == amo_id).first()
+    if not amo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AMO not found.")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(amo, field, value)
+    db.add(amo)
+    db.commit()
+    db.refresh(amo)
+
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo.id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="AMO",
+            entity_id=str(amo.id),
+            action="update",
+            actor_user_id=current_user.id,
+            before_json=None,
+            after_json=update_data,
+        ),
+    )
+    db.commit()
+    return amo
+
+
+@router.delete(
+    "/amos/{amo_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Deactivate an AMO (platform superuser only)",
+)
+def deactivate_amo(
+    amo_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    amo = db.query(models.AMO).filter(models.AMO.id == amo_id).first()
+    if not amo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AMO not found.")
+    amo.is_active = False
+    db.add(amo)
+    db.commit()
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo.id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="AMO",
+            entity_id=str(amo.id),
+            action="deactivate",
+            actor_user_id=current_user.id,
+            before_json=None,
+            after_json={"is_active": False},
+        ),
+    )
+    db.commit()
+    return
+
+
+@router.post(
+    "/amos/{amo_id}/trial-extend",
+    response_model=schemas.SubscriptionRead,
+    summary="Extend AMO trial period (platform superuser only)",
+)
+def extend_amo_trial(
+    amo_id: str,
+    payload: schemas.TrialExtendRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    license = services.get_current_subscription(db, amo_id=amo_id)
+    if not license:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active or trialing subscription found for this AMO.",
+        )
+    if license.status not in (
+        models.LicenseStatus.TRIALING,
+        models.LicenseStatus.EXPIRED,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only trial or expired subscriptions can be extended.",
+        )
+
+    now = datetime.now(timezone.utc)
+    extend_delta = timedelta(days=payload.extend_days)
+    base = license.trial_ends_at or license.current_period_end or now
+    license.trial_ends_at = base + extend_delta
+    license.current_period_end = license.trial_ends_at
+    license.trial_grace_expires_at = None
+    license.status = models.LicenseStatus.TRIALING
+    license.is_read_only = False
+    if not license.trial_started_at:
+        license.trial_started_at = now
+
+    db.add(license)
+    db.commit()
+    db.refresh(license)
+
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo_id,
+        data=audit_schemas.AuditEventCreate(
+            entity_type="TenantLicense",
+            entity_id=str(license.id),
+            action="trial_extend",
+            actor_user_id=current_user.id,
+            before_json=None,
+            after_json={"extend_days": payload.extend_days},
+        ),
+    )
+    db.commit()
+    return license
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +784,35 @@ def update_user_admin(
     # NOTE: services.update_user() should also enforce what fields are allowed.
     user = services.update_user(db, user, payload)
     return user
+
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Deactivate user (scoped to current AMO for admins; any AMO for superuser)",
+)
+def deactivate_user_admin(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    q = db.query(models.User).filter(models.User.id == user_id)
+    if not current_user.is_superuser:
+        q = q.filter(models.User.amo_id == current_user.amo_id)
+
+    user = q.first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found or not in your AMO.",
+        )
+
+    user.is_active = False
+    user.deactivated_at = datetime.now(timezone.utc)
+    user.deactivated_reason = "deactivated_by_admin"
+    db.add(user)
+    db.commit()
+    return
 
 
 # ---------------------------------------------------------------------------
