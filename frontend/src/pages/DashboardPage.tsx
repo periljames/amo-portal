@@ -426,28 +426,6 @@ const DashboardPage: React.FC = () => {
     </div>
   );
 
-  const handleConnectCalendar = (provider: "google" | "outlook") => {
-    setCalendarConnections((prev) => ({ ...prev, [provider]: true }));
-  };
-
-  const handleDisconnectCalendar = (provider: "google" | "outlook") => {
-    setCalendarConnections((prev) => ({ ...prev, [provider]: false }));
-  };
-
-  const handleAddLeave = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!leaveForm.date) return;
-    setLeaveEntries((prev) => [
-      ...prev,
-      { id: `${leaveForm.date}-${Date.now()}`, date: leaveForm.date, reason: leaveForm.reason || "Leave" },
-    ]);
-    setLeaveForm({ date: "", reason: "" });
-  };
-
-  const handleRemoveLeave = (id: string) => {
-    setLeaveEntries((prev) => prev.filter((entry) => entry.id !== id));
-  };
-
   const loadNotifications = async () => {
     try {
       const data = await qmsListNotifications();
