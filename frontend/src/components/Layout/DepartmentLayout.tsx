@@ -1,11 +1,13 @@
 // src/components/Layout/DepartmentLayout.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
 import { fetchSubscription } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
 import { getCachedUser, logout, onSessionEvent } from "../../services/auth";
+import { listDocumentAlerts } from "../../services/fleet";
+import { qmsListNotifications } from "../../services/qms";
 import {
   listTrainingNotifications,
   markAllTrainingNotificationsRead,
@@ -63,6 +65,9 @@ type ColorScheme = "dark" | "light";
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const IDLE_WARNING_MS = 3 * 60 * 1000;
+const POLLING_INTERVAL_MS = 60000;
+const POLLING_RETRY_DELAYS_MS = [1000, 3000, 10000];
+const MAX_POLLING_RETRIES = POLLING_RETRY_DELAYS_MS.length;
 
 function isDepartmentId(v: string): v is DepartmentId {
   return DEPARTMENTS.some((d) => d.id === v);
@@ -132,6 +137,7 @@ const DepartmentLayout: React.FC<Props> = ({
   );
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [pollingError, setPollingError] = useState<string | null>(null);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -359,64 +365,158 @@ const DepartmentLayout: React.FC<Props> = ({
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
   const idleCountdownIntervalRef = useRef<number | null>(null);
+  const pollingTimerRef = useRef<number | null>(null);
+  const pollingRetriesRef = useRef(0);
+  const pollingStoppedRef = useRef(false);
+  const pollingInFlightRef = useRef(false);
+  const pollingRunnerRef = useRef<(reason: "initial" | "retry" | "manual" | "interval") => void>();
 
-  useEffect(() => {
-    let active = true;
-    fetchSubscription()
-      .then((sub) => {
-        if (!active) return;
-        setSubscription(sub);
-        setSubscriptionError(null);
-      })
-      .catch((err: any) => {
-        if (!active) return;
-        setSubscription(null);
-        setSubscriptionError(err?.message || "Unable to load subscription status.");
-      });
-
-    return () => {
-      active = false;
-    };
+  const clearPollingTimer = useCallback(() => {
+    if (pollingTimerRef.current) {
+      window.clearTimeout(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
   }, []);
 
-  const refreshNotifications = async (opts?: { unreadOnly?: boolean }) => {
-    if (!currentUser) return;
-    const unreadOnly = opts?.unreadOnly ?? false;
-    if (!unreadOnly) {
-      setNotificationsLoading(true);
-      setNotificationsError(null);
-    }
+  const isPollingFatal = useCallback((err: unknown): boolean => {
+    if (err instanceof TypeError) return true;
+    const message = err instanceof Error ? err.message : String(err);
+    return (
+      message.includes("500") ||
+      message.includes("Failed to fetch") ||
+      message.includes("NetworkError") ||
+      message.toLowerCase().includes("cors")
+    );
+  }, []);
+
+  const refreshSubscription = useCallback(async () => {
     try {
-      const data = await listTrainingNotifications({
-        unread_only: unreadOnly,
-        limit: 100,
-      });
-      if (unreadOnly) {
-        setUnreadNotifications(data.length);
-      } else {
-        setNotifications(data);
-        setUnreadNotifications(data.filter((n) => !n.read_at).length);
-      }
+      const sub = await fetchSubscription();
+      setSubscription(sub);
+      setSubscriptionError(null);
     } catch (err: any) {
-      if (!unreadOnly) {
-        setNotificationsError(err?.message || "Failed to load notifications.");
-      }
-    } finally {
-      if (!unreadOnly) setNotificationsLoading(false);
+      setSubscription(null);
+      setSubscriptionError(err?.message || "Unable to load subscription status.");
+      throw err;
     }
-  };
+  }, []);
+
+  const refreshUnreadNotifications = useCallback(async () => {
+    if (!currentUser) return;
+    const trainingPromise = listTrainingNotifications({
+      unread_only: true,
+      limit: 100,
+    }).then((data) => {
+      setUnreadNotifications(data.length);
+    });
+    await Promise.all([trainingPromise, qmsListNotifications(), listDocumentAlerts()]);
+  }, [currentUser]);
+
+  const handlePollingFailure = useCallback(
+    (err: unknown) => {
+      clearPollingTimer();
+      const message = err instanceof Error ? err.message : "Unable to refresh data.";
+      if (isPollingFatal(err)) {
+        const attempt = pollingRetriesRef.current;
+        if (attempt < MAX_POLLING_RETRIES) {
+          const delay = POLLING_RETRY_DELAYS_MS[attempt];
+          pollingRetriesRef.current += 1;
+          setPollingError(
+            `Live data refresh failed. Retrying in ${Math.round(delay / 1000)}s.`
+          );
+          pollingTimerRef.current = window.setTimeout(() => {
+            pollingRunnerRef.current?.("retry");
+          }, delay);
+          return;
+        }
+        pollingStoppedRef.current = true;
+        setPollingError(
+          "Live data refresh paused after repeated errors. Retry when the backend is available."
+        );
+        return;
+      }
+
+      setPollingError(message);
+      pollingTimerRef.current = window.setTimeout(() => {
+        pollingRunnerRef.current?.("interval");
+      }, POLLING_INTERVAL_MS);
+    },
+    [clearPollingTimer, isPollingFatal]
+  );
+
+  const runPolling = useCallback(
+    async (reason: "initial" | "retry" | "manual" | "interval") => {
+      if (!currentUser) return;
+      if (pollingStoppedRef.current && reason !== "manual") return;
+      if (pollingInFlightRef.current) return;
+      pollingInFlightRef.current = true;
+      clearPollingTimer();
+      try {
+        await refreshSubscription();
+        await refreshUnreadNotifications();
+        pollingRetriesRef.current = 0;
+        pollingStoppedRef.current = false;
+        setPollingError(null);
+        if (reason !== "manual") {
+          pollingTimerRef.current = window.setTimeout(() => {
+            pollingRunnerRef.current?.("interval");
+          }, POLLING_INTERVAL_MS);
+        }
+      } catch (err: unknown) {
+        handlePollingFailure(err);
+      } finally {
+        pollingInFlightRef.current = false;
+      }
+    },
+    [clearPollingTimer, currentUser, handlePollingFailure, refreshSubscription, refreshUnreadNotifications]
+  );
+
+  pollingRunnerRef.current = runPolling;
 
   useEffect(() => {
-    refreshNotifications({ unreadOnly: true });
-    const timer = window.setInterval(() => refreshNotifications({ unreadOnly: true }), 60000);
-    return () => window.clearInterval(timer);
-  }, [currentUser]);
+    if (!currentUser) return;
+    runPolling("initial");
+    return () => {
+      clearPollingTimer();
+    };
+  }, [clearPollingTimer, currentUser, runPolling]);
+
+  const refreshNotifications = useCallback(
+    async (opts?: { unreadOnly?: boolean }) => {
+      if (!currentUser) return;
+      const unreadOnly = opts?.unreadOnly ?? false;
+      if (!unreadOnly) {
+        setNotificationsLoading(true);
+        setNotificationsError(null);
+      }
+      try {
+        const data = await listTrainingNotifications({
+          unread_only: unreadOnly,
+          limit: 100,
+        });
+        if (unreadOnly) {
+          setUnreadNotifications(data.length);
+        } else {
+          setNotifications(data);
+          setUnreadNotifications(data.filter((n) => !n.read_at).length);
+        }
+      } catch (err: any) {
+        if (!unreadOnly) {
+          setNotificationsError(err?.message || "Failed to load notifications.");
+        }
+        handlePollingFailure(err);
+      } finally {
+        if (!unreadOnly) setNotificationsLoading(false);
+      }
+    },
+    [currentUser, handlePollingFailure]
+  );
 
   useEffect(() => {
     if (notificationsOpen) {
       refreshNotifications();
     }
-  }, [notificationsOpen]);
+  }, [notificationsOpen, refreshNotifications]);
 
   useEffect(() => {
     if (!notificationsOpen) return;
@@ -664,6 +764,13 @@ const DepartmentLayout: React.FC<Props> = ({
     const code = (amoCode || "").trim();
     const target = code ? `/maintenance/${code}/login` : "/login";
     navigate(target, { replace: true, state: { from: returnPath } });
+  };
+
+  const handlePollingRetry = () => {
+    pollingStoppedRef.current = false;
+    pollingRetriesRef.current = 0;
+    setPollingError(null);
+    runPolling("manual");
   };
 
   return (
@@ -1062,6 +1169,24 @@ const DepartmentLayout: React.FC<Props> = ({
             </div>
           </div>
         </header>
+
+        {pollingError && (
+          <div className="alert alert-error" role="alert" style={{ margin: "12px 0" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <span>{pollingError}</span>
+              <button type="button" className="secondary-chip-btn" onClick={handlePollingRetry}>
+                Retry refresh
+              </button>
+            </div>
+          </div>
+        )}
 
         {isTrialing && subscription?.trial_ends_at && (
           <div className="info-banner info-banner--soft" style={{ margin: "12px 16px 0" }}>

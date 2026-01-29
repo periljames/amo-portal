@@ -5,7 +5,7 @@
 //   CRS pages, aircraft import, QMS dashboard, and admin user management.
 // - Uses RequireAuth wrapper to redirect unauthenticated users back to login.
 
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import LoginPage from "./pages/LoginPage";
@@ -35,8 +35,15 @@ import PublicCarInvitePage from "./pages/PublicCarInvitePage";
 import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
 import UpsellPage from "./pages/UpsellPage";
 import UserWidgetsPage from "./pages/UserWidgetsPage";
+import OnboardingPasswordPage from "./pages/OnboardingPasswordPage";
 
-import { getCachedUser, isAuthenticated } from "./services/auth";
+import {
+  fetchOnboardingStatus,
+  getCachedOnboardingStatus,
+  getCachedUser,
+  isAuthenticated,
+  type OnboardingStatus,
+} from "./services/auth";
 
 type RequireAuthProps = {
   children: React.ReactElement;
@@ -68,8 +75,35 @@ function inferAmoCodeFromPath(pathname: string): string | null {
  */
 const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
   const location = useLocation();
+  const redirectedRef = useRef(false);
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(
+    getCachedOnboardingStatus()
+  );
+  const [onboardingChecked, setOnboardingChecked] = useState(
+    !!getCachedOnboardingStatus()
+  );
+  const isAuthed = isAuthenticated();
+  const isOnboardingRoute = location.pathname.includes("/onboarding");
 
-  if (!isAuthenticated()) {
+  useEffect(() => {
+    if (!isAuthed || onboardingChecked) return;
+    let active = true;
+    fetchOnboardingStatus()
+      .then((status) => {
+        if (!active) return;
+        setOnboardingStatus(status);
+        setOnboardingChecked(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setOnboardingChecked(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAuthed, onboardingChecked]);
+
+  if (!isAuthed) {
     const amoCode = inferAmoCodeFromPath(location.pathname);
     const target = amoCode ? `/maintenance/${amoCode}/login` : "/login";
 
@@ -82,13 +116,19 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
     );
   }
 
-  const currentUser = getCachedUser();
-  if (currentUser?.must_change_password) {
-    const isOnboardingRoute = location.pathname.includes("/onboarding");
-    if (!isOnboardingRoute) {
-      const amoCode = inferAmoCodeFromPath(location.pathname) || "system";
-      return <Navigate to={`/maintenance/${amoCode}/onboarding`} replace />;
-    }
+  if (!onboardingChecked && !isOnboardingRoute) {
+    return null;
+  }
+
+  if (
+    onboardingStatus &&
+    !onboardingStatus.is_complete &&
+    !isOnboardingRoute &&
+    !redirectedRef.current
+  ) {
+    redirectedRef.current = true;
+    const amoCode = inferAmoCodeFromPath(location.pathname) || "system";
+    return <Navigate to={`/maintenance/${amoCode}/onboarding/setup`} replace />;
   }
 
   return children;
@@ -231,6 +271,20 @@ export const AppRouter: React.FC = () => {
             <RequireTenantAdmin>
               <AdminUsageSettingsPage />
             </RequireTenantAdmin>
+          </RequireAuth>
+        }
+      />
+
+      {/* Onboarding / password setup */}
+      <Route
+        path="/maintenance/:amoCode/onboarding"
+        element={<Navigate to="setup" replace />}
+      />
+      <Route
+        path="/maintenance/:amoCode/onboarding/setup"
+        element={
+          <RequireAuth>
+            <OnboardingPasswordPage />
           </RequireAuth>
         }
       />
