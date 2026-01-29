@@ -1469,6 +1469,12 @@ button,
   color: var(--text-secondary);
 }
 
+.admin-btn--danger {
+  background: rgba(248, 113, 113, 0.16);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
 .admin-btn:hover {
   filter: brightness(1.05);
 }
