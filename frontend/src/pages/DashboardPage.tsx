@@ -166,20 +166,6 @@ function getConnectionsStorageKey(amoSlug: string, userId: string): string {
   return `amo_calendar_connections_${amoSlug}_${userId}`;
 }
 
-function renderMetric(label: string, value: number, max = 100): React.ReactElement {
-  const safeMax = Math.max(1, max);
-  const pct = Math.min(100, Math.max(0, (value / safeMax) * 100));
-  return (
-    <div className="metric-card">
-      <div className="metric-card__value">{value}</div>
-      <div className="metric-card__label">{label}</div>
-      <div className="metric-card__bar">
-        <span style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
 function renderDueStatus(summary: DueSummary): React.ReactElement {
   if (!summary.due_date) return <span className="text-muted">—</span>;
   const label = formatDate(summary.due_date);
