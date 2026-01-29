@@ -441,9 +441,21 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
     _validate_password_strength(data.password)
     hashed = get_password_hash(data.password)
 
+    department_id = (data.department_id or "").strip() or None
+    if department_id:
+        dept = (
+            db.query(models.Department)
+            .filter(models.Department.id == department_id)
+            .first()
+        )
+        if not dept:
+            raise ValueError("Department not found.")
+        if dept.amo_id != data.amo_id:
+            raise ValueError("Department does not belong to the selected AMO.")
+
     user = models.User(
         amo_id=data.amo_id,
-        department_id=data.department_id,
+        department_id=department_id,
         staff_code=staff_code,
         email=email,
         first_name=first_name,
@@ -496,8 +508,19 @@ def update_user(
         user.position_title = data.position_title
     if data.phone is not None:
         user.phone = data.phone
-    if data.department_id is not None:
-        user.department_id = data.department_id
+    if "department_id" in data.model_fields_set:
+        department_id = (data.department_id or "").strip() or None
+        if department_id:
+            dept = (
+                db.query(models.Department)
+                .filter(models.Department.id == department_id)
+                .first()
+            )
+            if not dept:
+                raise ValueError("Department not found.")
+            if dept.amo_id != user.amo_id:
+                raise ValueError("Department does not belong to the user's AMO.")
+        user.department_id = department_id
 
     # Regulatory
     if data.regulatory_authority is not None:
