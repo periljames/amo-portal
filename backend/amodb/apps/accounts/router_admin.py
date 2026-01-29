@@ -920,12 +920,19 @@ def get_overview_summary(
             )
         )
 
-    users_attention = (
-        (users_missing_department or 0) + (inactive_users or 0)
-        if users_missing_department is not None and inactive_users is not None
-        else None
+    users_attention = safe_count(
+        scoped(
+            db.query(func.count(func.distinct(models.User.id))).filter(
+                or_(
+                    models.User.department_id.is_(None),
+                    models.User.is_active.is_(False),
+                )
+            ),
+            models.User.amo_id,
+        ),
+        "users_attention",
     )
-    users_available = users_missing_department is not None and inactive_users is not None
+    users_available = users_attention is not None
     badge(
         "users",
         users_attention,
