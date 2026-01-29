@@ -5,15 +5,18 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   createAdminUser,
   listAdminAmos,
+  listAdminDepartments,
   setActiveAmoId,
   LS_ACTIVE_AMO_ID,
 } from "../services/adminUsers";
 import type {
   AdminAmoRead,
+  AdminDepartmentRead,
   AdminUserCreatePayload,
   AccountRole,
 } from "../services/adminUsers";
 import { getCachedUser, getContext } from "../services/auth";
+import { Button, InlineAlert, PageHeader, Panel } from "../components/UI/Admin";
 
 type UrlParams = {
   amoCode?: string;
@@ -78,6 +81,10 @@ const AdminUserNewPage: React.FC = () => {
     const stored = localStorage.getItem(LS_ACTIVE_AMO_ID);
     return stored && stored.trim() ? stored.trim() : "";
   });
+  const [departments, setDepartments] = useState<AdminDepartmentRead[]>([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(false);
+  const [departmentsError, setDepartmentsError] = useState<string | null>(null);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>("");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +127,12 @@ const AdminUserNewPage: React.FC = () => {
 
     if (isSuperuser && !selectedAmoId) {
       return "Select an AMO for this user.";
+    }
+    if (departments.length === 0) {
+      return "Create a department for this AMO before adding users.";
+    }
+    if (departments.length > 0 && !selectedDepartmentId) {
+      return "Select a department for this user.";
     }
 
     return null;
@@ -191,6 +204,34 @@ const AdminUserNewPage: React.FC = () => {
     loadAmos();
   }, [isSuperuser, selectedAmoId]);
 
+  React.useEffect(() => {
+    const loadDepartments = async () => {
+      setDepartmentsError(null);
+      if (!currentUser) return;
+      const targetAmoId = isSuperuser ? selectedAmoId : currentUser.amo_id;
+      if (!targetAmoId) {
+        setDepartments([]);
+        setSelectedDepartmentId("");
+        return;
+      }
+      setDepartmentsLoading(true);
+      try {
+        const data = await listAdminDepartments(targetAmoId);
+        setDepartments(data);
+        if (!selectedDepartmentId && data.length > 0) {
+          setSelectedDepartmentId(data[0].id);
+        }
+      } catch (err: any) {
+        console.error("Failed to load departments", err);
+        setDepartmentsError(err?.message || "Failed to load departments.");
+      } finally {
+        setDepartmentsLoading(false);
+      }
+    };
+
+    loadDepartments();
+  }, [currentUser, isSuperuser, selectedAmoId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -227,6 +268,7 @@ const AdminUserNewPage: React.FC = () => {
         phone: form.phone.trim() || undefined,
         password: form.password,
         amo_id: isSuperuser ? selectedAmoId || undefined : undefined,
+        department_id: selectedDepartmentId || undefined,
         // NOTE:
         // Do NOT force amo_id here. adminUsers.ts resolves it safely:
         // - SUPERUSER: can target selected/active AMO
@@ -255,49 +297,60 @@ const AdminUserNewPage: React.FC = () => {
 
   if (!currentUser) {
     return (
-      <div className="page-root">
-        <div className="card card--form">
-          <h1>Create User</h1>
-          <p>You are not signed in. Please sign in again.</p>
-          <button className="btn btn-primary" onClick={() => navigate("/login")}>
-            Go to login
-          </button>
-        </div>
+      <div className="page-root admin-page">
+        <PageHeader title="Create User" />
+        <Panel>
+          <p className="admin-muted">You are not signed in. Please sign in again.</p>
+          <Button onClick={() => navigate("/login")}>Go to login</Button>
+        </Panel>
       </div>
     );
   }
 
   if (!isAdmin) {
     return (
-      <div className="page-root">
-        <div className="card card--form">
-          <h1>Access denied</h1>
-          <p>
+      <div className="page-root admin-page">
+        <PageHeader title="Access denied" />
+        <Panel>
+          <p className="admin-muted">
             You do not have permission to create users. Please contact the AMO
             Administrator or Quality/IT support.
           </p>
-          <button className="btn btn-primary" onClick={() => navigate(backTarget)}>
-            Back
-          </button>
-        </div>
+          <Button onClick={() => navigate(backTarget)}>Back</Button>
+        </Panel>
       </div>
     );
   }
 
   return (
-    <div className="page-root">
-      <div className="page-header">
-        <h1>{pageTitle}</h1>
-        <p className="page-subtitle">
-          Create an AMO user and assign their role and temporary password.
-        </p>
-      </div>
+    <div className="page-root admin-page">
+      <PageHeader
+        title={pageTitle}
+        subtitle="Create an AMO user and assign their role and temporary password."
+      />
 
-      <div className="card card--form">
+      <Panel>
         <form onSubmit={handleSubmit} className="form-grid">
-          {error && <div className="alert alert-error">{error}</div>}
-          {success && <div className="alert alert-success">{success}</div>}
-          {amoError && <div className="alert alert-error">{amoError}</div>}
+          {error && (
+            <InlineAlert tone="danger" title="Error">
+              <span>{error}</span>
+            </InlineAlert>
+          )}
+          {success && (
+            <InlineAlert tone="success" title="Success">
+              <span>{success}</span>
+            </InlineAlert>
+          )}
+          {amoError && (
+            <InlineAlert tone="danger" title="Error">
+              <span>{amoError}</span>
+            </InlineAlert>
+          )}
+          {departmentsError && (
+            <InlineAlert tone="danger" title="Error">
+              <span>{departmentsError}</span>
+            </InlineAlert>
+          )}
 
           {isSuperuser && (
             <div className="form-row">
@@ -310,6 +363,7 @@ const AdminUserNewPage: React.FC = () => {
                   const nextId = e.target.value;
                   setSelectedAmoId(nextId);
                   setActiveAmoId(nextId);
+                  setSelectedDepartmentId("");
                 }}
                 disabled={submitting || amoLoading}
                 required
@@ -328,6 +382,30 @@ const AdminUserNewPage: React.FC = () => {
               </p>
             </div>
           )}
+
+          <div className="form-row">
+            <label htmlFor="departmentId">Department</label>
+            <select
+              id="departmentId"
+              name="departmentId"
+              value={selectedDepartmentId}
+              onChange={(e) => setSelectedDepartmentId(e.target.value)}
+              disabled={submitting || departmentsLoading}
+              required={departments.length > 0}
+            >
+              <option value="" disabled>
+                {departmentsLoading ? "Loading departments..." : "Select a department"}
+              </option>
+              {departments.map((dept) => (
+                <option key={dept.id} value={dept.id}>
+                  {dept.name} ({dept.code})
+                </option>
+              ))}
+            </select>
+            <p className="form-hint">
+              Assign the default department so the user lands in the right dashboard.
+            </p>
+          </div>
 
           <div className="form-row">
             <label htmlFor="staffCode">Staff Code</label>
@@ -462,30 +540,33 @@ const AdminUserNewPage: React.FC = () => {
 
           <div className="form-row">
             <div className="form-actions form-actions--inline">
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                size="sm"
+                variant="secondary"
                 onClick={generateSecurePassword}
                 disabled={submitting}
               >
                 Generate secure password
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                size="sm"
+                variant="secondary"
                 onClick={() => setShowPassword((prev) => !prev)}
                 disabled={submitting}
               >
                 {showPassword ? "Hide password" : "Show password"}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                size="sm"
+                variant="secondary"
                 onClick={copyPassword}
                 disabled={submitting || !form.password}
               >
                 Copy password
-              </button>
+              </Button>
             </div>
             <p className="form-hint">
               Passwords must be at least 12 characters and include upper/lower
@@ -495,25 +576,21 @@ const AdminUserNewPage: React.FC = () => {
           </div>
 
           <div className="form-actions">
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               onClick={() => navigate(backTarget)}
               disabled={submitting}
             >
               Cancel
-            </button>
+            </Button>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={submitting}
-            >
+            <Button type="submit" disabled={submitting}>
               {submitting ? "Creating..." : "Create User"}
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
+      </Panel>
     </div>
   );
 };

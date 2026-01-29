@@ -1,12 +1,54 @@
 // src/pages/AdminOverviewPage.tsx
-import React, { useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  InlineAlert,
+  PageHeader,
+  Panel,
+  StatusPill,
+} from "../components/UI/Admin";
 import { getCachedUser, getContext } from "../services/auth";
+import {
+  fetchOverviewSummary,
+  type OverviewIssue,
+  type OverviewSummary,
+} from "../services/adminOverview";
 
 type UrlParams = {
   amoCode?: string;
+};
+
+type RefreshReason = "initial" | "retry" | "manual" | "interval";
+
+const POLL_INTERVAL_MS = 60_000;
+const MAX_RETRIES = 3;
+
+const STATUS_LABELS: Record<
+  "healthy" | "degraded" | "down" | "paused" | "unknown",
+  string
+> = {
+  healthy: "Healthy",
+  degraded: "Degraded",
+  down: "Down",
+  paused: "Paused",
+  unknown: "Unknown",
+};
+
+const formatRelativeTime = (value?: string | null): string => {
+  if (!value) return "Unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unavailable";
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
 const AdminOverviewPage: React.FC = () => {
@@ -19,9 +61,20 @@ const AdminOverviewPage: React.FC = () => {
   const isSuperuser = !!currentUser?.is_superuser;
   const isAmoAdmin = !!currentUser?.is_amo_admin;
   const canAccessAdmin = isSuperuser || isAmoAdmin;
-  const canManageAmos = isSuperuser;
-  const canAccessBilling = isSuperuser;
-  const canAccessSettings = isSuperuser || isAmoAdmin;
+
+  const [summary, setSummary] = useState<OverviewSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [lastSuccessAt, setLastSuccessAt] = useState<string | null>(null);
+  const [activityExpanded, setActivityExpanded] = useState(false);
+
+  const pollingTimerRef = useRef<number | null>(null);
+  const pollingRetriesRef = useRef(0);
+  const pollingStoppedRef = useRef(false);
+  const pollingInFlightRef = useRef(false);
+  const pollingRunnerRef = useRef<(reason: RefreshReason) => void>();
 
   useEffect(() => {
     if (!currentUser) return;
@@ -45,137 +98,279 @@ const AdminOverviewPage: React.FC = () => {
     return null;
   }
 
+  const clearPollingTimer = () => {
+    if (pollingTimerRef.current) {
+      window.clearTimeout(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+  };
+
+  const handlePollingFailure = useCallback((message: string) => {
+    const attempt = pollingRetriesRef.current;
+    if (attempt < MAX_RETRIES) {
+      const delay = Math.min(30_000, 3_000 * Math.pow(2, attempt));
+      pollingRetriesRef.current += 1;
+      setRefreshError(
+        `Refresh failed. Retrying in ${Math.round(delay / 1000)}s.`
+      );
+      pollingTimerRef.current = window.setTimeout(() => {
+        pollingRunnerRef.current?.("retry");
+      }, delay);
+      return;
+    }
+    pollingStoppedRef.current = true;
+    setRefreshError("Refresh paused after repeated errors.");
+  }, []);
+
+  const runPolling = useCallback(
+    async (reason: RefreshReason) => {
+      if (pollingStoppedRef.current && reason !== "manual") return;
+      if (pollingInFlightRef.current) return;
+      pollingInFlightRef.current = true;
+      clearPollingTimer();
+      const isInitial = lastSuccessAt === null;
+      if (isInitial) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+
+      try {
+        const data = await fetchOverviewSummary();
+        setSummary(data);
+        setRefreshError(null);
+        pollingRetriesRef.current = 0;
+        pollingStoppedRef.current = false;
+        setLastSuccessAt(data.system.last_checked_at);
+        if (!pollingStoppedRef.current) {
+          pollingTimerRef.current = window.setTimeout(() => {
+            pollingRunnerRef.current?.("interval");
+          }, POLL_INTERVAL_MS);
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Unable to refresh overview.";
+        handlePollingFailure(message);
+      } finally {
+        pollingInFlightRef.current = false;
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [handlePollingFailure, lastSuccessAt]
+  );
+
+  pollingRunnerRef.current = runPolling;
+
+  useEffect(() => {
+    if (!canAccessAdmin) return;
+    runPolling("initial");
+    return () => {
+      clearPollingTimer();
+    };
+  }, [canAccessAdmin, runPolling]);
+
+  const handleRetry = () => {
+    pollingStoppedRef.current = false;
+    pollingRetriesRef.current = 0;
+    runPolling("manual");
+  };
+
+  const rawStatus = summary?.system.status || (refreshError ? "down" : "degraded");
+  const statusTone: "healthy" | "degraded" | "down" | "unknown" =
+    rawStatus === "healthy" || rawStatus === "degraded" || rawStatus === "down"
+      ? rawStatus
+      : "unknown";
+  const statusLabel = STATUS_LABELS[statusTone];
+  const lastUpdatedLabel = summary?.system.last_checked_at
+    ? formatRelativeTime(summary.system.last_checked_at)
+    : "Unavailable";
+  const refreshStateLabel = loading
+    ? "Loading…"
+    : refreshing
+      ? "Refreshing…"
+      : refreshError || summary?.system.refresh_paused
+        ? "Refresh paused"
+        : "Auto-refreshing";
+  const showRetry =
+    statusTone !== "healthy" || !!refreshError || summary?.system.refresh_paused;
+  const detailsTone =
+    statusTone === "down"
+      ? "danger"
+      : statusTone === "degraded"
+        ? "warning"
+        : "info";
+
+  const issues = useMemo(() => {
+    const list = summary?.issues ?? [];
+    return list.slice(0, 6);
+  }, [summary?.issues]);
+
+  const resolveIssueRoute = (issue: OverviewIssue) => {
+    if (!amoCode) return issue.route;
+    return `/maintenance/${amoCode}${issue.route}`;
+  };
+
+  const issueEmptyState = statusTone === "down"
+    ? "Backend unavailable—cannot compute issues."
+    : "No urgent actions right now.";
+  const activityItems = summary?.recent_activity ?? [];
+  const activityList = activityExpanded
+    ? activityItems
+    : activityItems.slice(0, 5);
+
   return (
     <DepartmentLayout
       amoCode={amoCode ?? "UNKNOWN"}
       activeDepartment="admin-overview"
+      showPollingErrorBanner={false}
     >
-      <header className="page-header">
-        <h1 className="page-header__title">System Admin Overview</h1>
-        <p className="page-header__subtitle">
-          A clean workspace to monitor, support, and control AMOs across the
-          platform.
-        </p>
-      </header>
+      <div className="admin-page admin-overview">
+        <PageHeader
+          title="Overview"
+          subtitle="Status and next steps for the AMO admin console."
+        />
 
-      <section className="page-section page-layout">
-        <div className="page-section__grid">
-          {canManageAmos && (
-            <div className="card card--info">
-              <div className="card-header">
-                <strong>AMO Management</strong>
-              </div>
-              <p className="page-section__body">
-                Register new AMOs, set active AMO context, and jump into an AMO
-                dashboard.
-              </p>
-              <div className="page-section__actions" style={{ marginTop: 12 }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}
-                >
-                  Manage AMOs
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="card card--success">
-            <div className="card-header">
-              <strong>User Management</strong>
-            </div>
-            <p className="page-section__body">
-              Create the first user for a new AMO, manage roles, and keep access
-              in sync.
-            </p>
-            <div className="page-section__actions" style={{ marginTop: 12 }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => navigate(`/maintenance/${amoCode}/admin/users`)}
-              >
-                Manage Users
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/admin/users/new`)
-                }
-              >
-                Create User
-              </button>
-            </div>
+        <div className="admin-overview__statusbar">
+          <div className="admin-overview__status-left">
+            <StatusPill status={statusTone} label={`System ${statusLabel}`} />
+            <span className="admin-overview__meta">Last updated {lastUpdatedLabel}</span>
+            <span className="admin-overview__meta">{refreshStateLabel}</span>
           </div>
-
-          <div className="card card--warning">
-            <div className="card-header">
-              <strong>AMO Assets</strong>
-            </div>
-            <p className="page-section__body">
-              Manage logos, CRS templates, and AMO-specific assets for
-              documentation.
-            </p>
-            <div className="page-section__actions" style={{ marginTop: 12 }}>
-              <button
+          <div className="admin-overview__status-actions">
+            {showRetry && (
+              <Button
                 type="button"
-                className="btn btn-primary"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/admin/amo-assets`)
-                }
+                size="sm"
+                variant="secondary"
+                onClick={handleRetry}
+                disabled={refreshing}
               >
-                Manage Assets
-              </button>
-            </div>
+                Retry
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setDetailsOpen((prev) => !prev)}
+            >
+              Details <span className="admin-overview__chevron">{detailsOpen ? "▴" : "▾"}</span>
+            </Button>
           </div>
-
-          {canAccessBilling && (
-            <div className="card">
-              <div className="card-header">
-                <strong>Billing & Usage</strong>
-              </div>
-              <p className="page-section__body">
-                Track usage, subscriptions, and billing activity across all AMOs.
-              </p>
-              <div className="page-section__actions" style={{ marginTop: 12 }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() =>
-                    navigate(`/maintenance/${amoCode}/admin/billing`)
-                  }
-                >
-                  View Billing
-                </button>
-              </div>
-            </div>
-          )}
-
-          {canAccessSettings && (
-            <div className="card">
-              <div className="card-header">
-                <strong>Usage throttling</strong>
-              </div>
-              <p className="page-section__body">
-                Adjust calendar sync budgets per AMO or per user to stay within
-                free-tier limits.
-              </p>
-              <div className="page-section__actions" style={{ marginTop: 12 }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() =>
-                    navigate(`/maintenance/${amoCode}/admin/settings`)
-                  }
-                >
-                  Manage throttling
-                </button>
-              </div>
-            </div>
-          )}
         </div>
-      </section>
+
+        {detailsOpen && (
+          <InlineAlert
+            tone={detailsTone}
+            title={`System ${statusLabel}`}
+            className="admin-overview__details"
+            actions={
+              refreshError ? (
+                <Button size="sm" variant="secondary" onClick={handleRetry}>
+                  Retry now
+                </Button>
+              ) : null
+            }
+          >
+            <span>
+              Last success: {lastSuccessAt ? formatRelativeTime(lastSuccessAt) : "Unavailable"}
+            </span>
+            {refreshError ? <span>{refreshError}</span> : null}
+            {summary?.system.errors?.length ? (
+              <ul className="admin-overview__error-list">
+                {summary.system.errors.map((err) => (
+                  <li key={err}>{err}</li>
+                ))}
+              </ul>
+            ) : (
+              <span>No errors reported.</span>
+            )}
+          </InlineAlert>
+        )}
+
+        <div className="admin-overview__grid">
+          <Panel
+            title="Needs attention"
+            actions={<span className="admin-muted">{loading ? "Loading…" : `${issues.length} items`}</span>}
+          >
+            {issues.length === 0 ? (
+              <EmptyState title={issueEmptyState} />
+            ) : (
+              <ul className="admin-list">
+                {issues.map((issue) => (
+                  <li key={issue.key}>
+                    <button
+                      type="button"
+                      className="admin-list__row"
+                      onClick={() => navigate(resolveIssueRoute(issue))}
+                    >
+                      <div className="admin-list__row-main">
+                        <span className={`severity-dot severity-dot--${issue.severity}`} />
+                        <span>{issue.label}</span>
+                      </div>
+                      <div className="admin-list__row-meta">
+                        <Badge
+                          tone={
+                            issue.severity === "critical"
+                              ? "danger"
+                              : issue.severity === "warning"
+                                ? "warning"
+                                : "info"
+                          }
+                          size="sm"
+                        >
+                          {issue.count ?? "—"}
+                        </Badge>
+                        <span className="admin-overview__chevron">›</span>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel
+            title="Recent activity"
+            actions={
+              summary?.recent_activity_available && activityItems.length > 5 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setActivityExpanded((prev) => !prev)}
+                >
+                  {activityExpanded ? "Collapse" : "View all"}
+                </Button>
+              ) : null
+            }
+            compact
+          >
+            {!summary?.recent_activity_available ? (
+              <span className="admin-muted">Audit feed unavailable.</span>
+            ) : activityList.length ? (
+              <ul className="admin-list">
+                {activityList.map((event, index) => (
+                  <li key={`${event.action}-${index}`}>
+                    <div className="admin-list__row admin-overview__activity-row">
+                      <div>
+                        <strong>{event.action}</strong>
+                        <div className="admin-muted">
+                          {event.entity_type} • {formatRelativeTime(event.occurred_at || null)}
+                        </div>
+                      </div>
+                      <span className="admin-muted">{event.actor_user_id || "System"}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="admin-muted">No recent activity recorded.</span>
+            )}
+          </Panel>
+        </div>
+      </div>
     </DepartmentLayout>
   );
 };

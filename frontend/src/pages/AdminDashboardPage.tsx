@@ -1,8 +1,16 @@
 // src/pages/AdminDashboardPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import {
+  Button,
+  EmptyState,
+  InlineAlert,
+  PageHeader,
+  Panel,
+  Table,
+} from "../components/UI/Admin";
 import { getCachedUser, getContext } from "../services/auth";
 import {
   createAdminAmo,
@@ -25,6 +33,7 @@ const RESERVED_LOGIN_SLUGS = new Set(["system", "root"]);
 const AdminDashboardPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
@@ -210,6 +219,10 @@ const AdminDashboardPage: React.FC = () => {
   }, [isSuperuser, amos, activeAmoId, lastCreatedAmoId, currentUser?.amo_id]);
 
   const trimmedSearch = search.trim();
+  const activeFilter = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("filter");
+  }, [location.search]);
   const usersRequestKey = useMemo(
     () =>
       JSON.stringify({
@@ -324,8 +337,27 @@ const AdminDashboardPage: React.FC = () => {
     navigate(target);
   };
 
+  const clearFilter = () => {
+    if (!amoCode) return;
+    navigate(`/maintenance/${amoCode}/admin/users`, { replace: true });
+  };
+
+  const filteredUsers = useMemo(() => {
+    if (!activeFilter) return users;
+    switch (activeFilter) {
+      case "missing_department":
+        return users.filter((u) => !u.department_id);
+      case "inactive":
+        return users.filter((u) => !u.is_active);
+      case "attention":
+        return users.filter((u) => !u.department_id || !u.is_active);
+      default:
+        return users;
+    }
+  }, [activeFilter, users]);
+
   const exportUsersCsv = () => {
-    const rows = users.map((u) => ({
+    const rows = filteredUsers.map((u) => ({
       staff_code: u.staff_code ?? "",
       name: u.full_name ?? "",
       email: u.email ?? "",
@@ -367,7 +399,7 @@ const AdminDashboardPage: React.FC = () => {
     const win = window.open("", "_blank", "width=980,height=720");
     if (!win) return;
 
-    const rows = users
+    const rows = filteredUsers
       .map(
         (u) => `
           <tr>
@@ -598,33 +630,34 @@ const AdminDashboardPage: React.FC = () => {
       amoCode={amoCode ?? "UNKNOWN"}
       activeDepartment="admin-users"
     >
-      <header className="page-header">
-        <h1 className="page-header__title">User Management</h1>
-        <p className="page-header__subtitle">
-          Manage AMO users, roles and access.
-          {currentUser && (
-            <>
-              {" "}
-              Signed in as <strong>{currentUser.full_name}</strong>.
-            </>
-          )}
-        </p>
-      </header>
+      <div className="admin-page">
+        <PageHeader
+          title="User Management"
+          subtitle={
+            currentUser
+              ? `Manage AMO users, roles and access. Signed in as ${currentUser.full_name}.`
+              : "Manage AMO users, roles and access."
+          }
+        />
 
-      {isSuperuser && (
-        <section className="page-section">
-          <div className="card card--form" style={{ padding: 16 }}>
-            <h3 style={{ marginTop: 0, marginBottom: 8 }}>AMO Context</h3>
-            <p style={{ marginTop: 0, opacity: 0.85 }}>
-              Select which AMO you are managing. Need to create a new AMO? Use
-              the AMO Management page.
-            </p>
-
+        {isSuperuser && (
+          <Panel
+            title="AMO Context"
+            subtitle="Select which AMO you are managing. Need to create a new AMO? Use the AMO Management page."
+          >
             {contextLoading && <p>Loading context…</p>}
-            {contextError && <div className="alert alert-error">{contextError}</div>}
+            {contextError && (
+              <InlineAlert tone="danger" title="Error">
+                <span>{contextError}</span>
+              </InlineAlert>
+            )}
 
             {amoLoading && <p>Loading AMOs…</p>}
-            {amoError && <div className="alert alert-error">{amoError}</div>}
+            {amoError && (
+              <InlineAlert tone="danger" title="Error">
+                <span>{amoError}</span>
+              </InlineAlert>
+            )}
 
             {!amoLoading && !amoError && (
               <div className="form-row">
@@ -671,10 +704,14 @@ const AdminDashboardPage: React.FC = () => {
             </p>
 
             {amoCreateError && (
-              <div className="alert alert-error">{amoCreateError}</div>
+              <InlineAlert tone="danger" title="Error">
+                <span>{amoCreateError}</span>
+              </InlineAlert>
             )}
             {amoCreateSuccess && (
-              <div className="alert alert-success">{amoCreateSuccess}</div>
+              <InlineAlert tone="success" title="Success">
+                <span>{amoCreateSuccess}</span>
+              </InlineAlert>
             )}
 
             <form onSubmit={handleCreateAmo} className="form-grid">
@@ -779,69 +816,61 @@ const AdminDashboardPage: React.FC = () => {
               </div>
 
               <div className="form-actions">
-                <button type="submit" className="btn btn-primary">
-                  Create AMO
-                </button>
-                <button
+                <Button type="submit">Create AMO</Button>
+                <Button
                   type="button"
-                  className="btn btn-secondary"
+                  variant="secondary"
                   onClick={handleNewUser}
                   disabled={!lastCreatedAmoId}
                 >
                   Create first user
-                </button>
+                </Button>
               </div>
             </form>
-          </div>
-        </section>
-      )}
+          </Panel>
+        )}
 
-      <section className="page-section">
-        <div
-          className="page-section__actions"
-          style={{ gap: 12, display: "flex", alignItems: "center" }}
-        >
-          <button
-            type="button"
-            className="primary-chip-btn"
-            onClick={handleNewUser}
-          >
-            + Create user
-          </button>
-          {isSuperuser && (
-            <button
-              type="button"
-              className="secondary-chip-btn"
-              onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}
-            >
-              Manage AMOs
-            </button>
+        <Panel
+          title="Users"
+          actions={(
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button type="button" size="sm" onClick={handleNewUser}>
+                + Create user
+              </Button>
+              {isSuperuser && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}
+                >
+                  Manage AMOs
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={exportUsersCsv}
+                disabled={users.length === 0}
+              >
+                Export CSV
+              </Button>
+            </div>
           )}
-          <button
+        >
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+          <Button
             type="button"
-            className="secondary-chip-btn"
-            onClick={exportUsersCsv}
-            disabled={users.length === 0}
-          >
-            Export CSV
-          </button>
-          <button
-            type="button"
-            className="secondary-chip-btn"
+            size="sm"
+            variant="secondary"
             onClick={exportUsersPdf}
             disabled={users.length === 0}
           >
             Export PDF
-          </button>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginLeft: "auto",
-            }}
-          >
+          </Button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
             <input
               type="text"
               value={search}
@@ -851,36 +880,61 @@ const AdminDashboardPage: React.FC = () => {
               }}
               placeholder="Search name, email, staff code…"
               className="input"
-              style={{ minWidth: 280 }}
+              style={{ minWidth: 240 }}
             />
             {skip > 0 && (
-              <button
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                size="sm"
+                variant="secondary"
                 onClick={() => setSkip(Math.max(0, skip - limit))}
                 disabled={loading}
               >
                 Prev
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="button"
-              className="btn btn-secondary"
+              size="sm"
+              variant="secondary"
               onClick={() => setSkip(skip + limit)}
               disabled={loading || users.length < limit}
               title={users.length < limit ? "No more results" : "Next page"}
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
 
         {loading && <p>Loading users…</p>}
-        {error && <div className="alert alert-error">{error}</div>}
+        {error && (
+          <InlineAlert tone="danger" title="Error">
+            <span>{error}</span>
+          </InlineAlert>
+        )}
 
         {!loading && !error && (
-          <div className="table-wrapper">
-            <table className="data-table">
+          <>
+            {activeFilter && (
+              <InlineAlert
+                tone="warning"
+                title="Filter applied"
+                actions={(
+                  <Button type="button" size="sm" variant="secondary" onClick={clearFilter}>
+                    Clear filter
+                  </Button>
+                )}
+              >
+                <span>
+                  {activeFilter === "missing_department"
+                    ? "Users missing department"
+                    : activeFilter === "inactive"
+                      ? "Inactive users"
+                      : "Users requiring attention"}
+                </span>
+              </InlineAlert>
+            )}
+            <Table>
               <thead>
                 <tr>
                   <th>Staff code</th>
@@ -893,12 +947,14 @@ const AdminDashboardPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {users.length === 0 && (
+                {filteredUsers.length === 0 && (
                   <tr>
-                    <td colSpan={7}>No users found for this AMO.</td>
+                    <td colSpan={7}>
+                      <EmptyState title="No users found for this AMO." />
+                    </td>
                   </tr>
                 )}
-                {users.map((u) => (
+                {filteredUsers.map((u) => (
                   <tr key={u.id}>
                     <td>{u.staff_code}</td>
                     <td>{u.full_name}</td>
@@ -908,38 +964,35 @@ const AdminDashboardPage: React.FC = () => {
                     <td>{u.is_active ? "Active" : "Inactive"}</td>
                     <td>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button
+                        <Button
                           type="button"
-                          className="secondary-chip-btn"
+                          size="sm"
+                          variant="ghost"
                           onClick={() => handleToggleUser(u)}
                           title={u.is_active ? "Deactivate user" : "Reactivate user"}
                         >
                           {u.is_active ? "🛑 Deactivate" : "✅ Reactivate"}
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
+            </Table>
+          </>
         )}
-      </section>
+      </Panel>
 
-      <section className="page-section">
-        <h2 className="page-section__title">CRS Asset Setup</h2>
-        <p className="page-section__body">
-          Upload AMO-specific CRS templates and branding assets used in PDF
-          generation.
-        </p>
-        <button
-          type="button"
-          className="primary-chip-btn"
-          onClick={handleManageAssets}
-        >
-          Manage CRS assets
-        </button>
-      </section>
+      <Panel
+        title="CRS Asset Setup"
+        subtitle="Upload AMO-specific CRS templates and branding assets used in PDF generation."
+        actions={(
+          <Button type="button" size="sm" onClick={handleManageAssets}>
+            Manage CRS assets
+          </Button>
+        )}
+      />
+    </div>
     </DepartmentLayout>
   );
 };

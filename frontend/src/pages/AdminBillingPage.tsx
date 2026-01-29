@@ -1,8 +1,9 @@
 // src/pages/AdminBillingPage.tsx
 import React, { useEffect, useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { Button, InlineAlert, PageHeader, Panel } from "../components/UI/Admin";
 import { getCachedUser } from "../services/auth";
 
 type UrlParams = {
@@ -12,6 +13,7 @@ type UrlParams = {
 const AdminBillingPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const currentUser = useMemo(() => getCachedUser(), []);
   const isSuperuser = !!currentUser?.is_superuser;
@@ -31,32 +33,50 @@ const AdminBillingPage: React.FC = () => {
     return null;
   }
 
+  const activeFilter = new URLSearchParams(location.search).get("filter");
+
   return (
     <DepartmentLayout
       amoCode={amoCode ?? "UNKNOWN"}
       activeDepartment="admin-billing"
     >
-      <header className="page-header">
-        <h1 className="page-header__title">Billing & Usage</h1>
-        <p className="page-header__subtitle">
-          Track usage, plan allocation, and invoicing across AMOs.
-        </p>
-      </header>
+      <div className="admin-page">
+        <PageHeader
+          title="Billing & Usage"
+          subtitle="Track usage, plan allocation, and invoicing across AMOs."
+        />
 
-      <section className="page-section page-layout">
-        <div className="card card--form">
-          <h3 style={{ marginTop: 0 }}>Billing controls</h3>
-          <p className="page-section__body">
+        {activeFilter && (
+          <InlineAlert
+            tone="warning"
+            title="Filter applied"
+            actions={(
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`, { replace: true })}
+              >
+                Clear filter
+              </Button>
+            )}
+          >
+            <span>{activeFilter.replace(/_/g, " ")}</span>
+          </InlineAlert>
+        )}
+
+        <Panel title="Billing controls">
+          <p className="admin-muted">
             Billing metrics and plan management will appear here. Configure your
             billing integrations to unlock usage reporting and invoicing.
           </p>
-          <ul>
+          <ul className="admin-muted" style={{ margin: 0, paddingLeft: 18 }}>
             <li>Usage per AMO (active users, assets, training sessions)</li>
             <li>Plan tiers and entitlement limits</li>
             <li>Invoices, credits, and payment status</li>
           </ul>
-        </div>
-      </section>
+        </Panel>
+      </div>
     </DepartmentLayout>
   );
 };

@@ -28,22 +28,33 @@ export async function fetchCatalog(): Promise<CatalogSKU[]> {
   });
 }
 
+type SubscriptionFetchResult = {
+  subscription: Subscription | null;
+  subscriptionMissing: boolean;
+};
+
 export async function fetchSubscription(): Promise<Subscription | null> {
+  const { subscription } = await fetchSubscriptionStatus();
+  return subscription;
+}
+
+export async function fetchSubscriptionStatus(): Promise<SubscriptionFetchResult> {
   try {
-    return await apiGet<Subscription>("/billing/subscription", {
+    const subscription = await apiGet<Subscription>("/billing/subscription", {
       headers: authHeaders(),
     });
+    return { subscription, subscriptionMissing: false };
   } catch (err: any) {
     const message = err?.message || "";
     if (message.includes("401")) {
       handleAuthFailure("expired");
-      return null;
+      return { subscription: null, subscriptionMissing: false };
     }
     if (message.includes("404")) {
-      return null;
+      return { subscription: null, subscriptionMissing: true };
     }
     if (message.includes("No active subscription")) {
-      return null;
+      return { subscription: null, subscriptionMissing: true };
     }
     throw err;
   }

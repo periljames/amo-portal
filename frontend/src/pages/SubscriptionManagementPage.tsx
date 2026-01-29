@@ -9,7 +9,7 @@ import {
   fetchEntitlements,
   fetchInvoices,
   fetchPaymentMethods,
-  fetchSubscription,
+  fetchSubscriptionStatus,
   fetchUsageMeters,
   purchaseSubscription,
   removePaymentMethod,
@@ -146,19 +146,22 @@ const SubscriptionManagementPage: React.FC = () => {
     try {
       const [
         catalogData,
-        subscriptionData,
+        subscriptionResult,
         entitlementsData,
         metersData,
         paymentData,
-        invoiceData,
       ] = await Promise.all([
         fetchCatalog(),
-        fetchSubscription(),
+        fetchSubscriptionStatus(),
         fetchEntitlements(),
         fetchUsageMeters(),
         fetchPaymentMethods(),
-        fetchInvoices(),
       ]);
+
+      const subscriptionData = subscriptionResult.subscription;
+      const shouldFetchInvoices =
+        !!subscriptionData && !subscriptionResult.subscriptionMissing;
+      const invoiceData = shouldFetchInvoices ? await fetchInvoices() : [];
 
       setCatalog(catalogData);
       setSubscription(subscriptionData);

@@ -1,8 +1,9 @@
 // src/pages/AdminAmoManagementPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { Button, InlineAlert, PageHeader, Panel, Table } from "../components/UI/Admin";
 import { getCachedUser } from "../services/auth";
 import {
   createAdminAmo,
@@ -34,6 +35,7 @@ const RESERVED_LOGIN_SLUGS = new Set(["system", "root"]);
 const AdminAmoManagementPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const currentUser = useMemo(() => getCachedUser(), []);
   const isSuperuser = !!currentUser?.is_superuser;
@@ -118,6 +120,16 @@ const AdminAmoManagementPage: React.FC = () => {
     [amos, activeAmoId]
   );
 
+  const activeFilter = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("filter");
+  }, [location.search]);
+
+  const filteredAmos = useMemo(() => {
+    if (activeFilter !== "inactive") return amos;
+    return amos.filter((amo) => !amo.is_active);
+  }, [activeFilter, amos]);
+
   if (currentUser && !isSuperuser) {
     return null;
   }
@@ -127,6 +139,11 @@ const AdminAmoManagementPage: React.FC = () => {
     if (!v) return;
     setActiveAmoId(v);
     localStorage.setItem(LS_ACTIVE_AMO_ID, v);
+  };
+
+  const clearFilter = () => {
+    if (!amoCode) return;
+    navigate(`/maintenance/${amoCode}/admin/amos`, { replace: true });
   };
 
   const handleAmoFormChange = (
@@ -278,18 +295,19 @@ const AdminAmoManagementPage: React.FC = () => {
         amoCode={amoCode ?? "UNKNOWN"}
         activeDepartment="admin-amos"
       >
-        <header className="page-header">
-          <h1 className="page-header__title">AMO Management</h1>
-        </header>
-        <div className="card card--form">
-          <p>You do not have permission to manage AMOs.</p>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => navigate(`/maintenance/${amoCode}/admin/overview`)}
-          >
-            Back to overview
-          </button>
+        <div className="admin-page">
+          <PageHeader title="AMO Management" />
+          <Panel>
+            <p className="admin-muted">You do not have permission to manage AMOs.</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => navigate(`/maintenance/${amoCode}/admin/overview`)}
+            >
+              Back to overview
+            </Button>
+          </Panel>
         </div>
       </DepartmentLayout>
     );
@@ -300,23 +318,22 @@ const AdminAmoManagementPage: React.FC = () => {
       amoCode={amoCode ?? "UNKNOWN"}
       activeDepartment="admin-amos"
     >
-      <header className="page-header">
-        <h1 className="page-header__title">AMO Management</h1>
-        <p className="page-header__subtitle">
-          Set the active AMO context or register a new AMO.
-        </p>
-      </header>
+      <div className="admin-page">
+        <PageHeader
+          title="AMO Management"
+          subtitle="Set the active AMO context or register a new AMO."
+        />
 
-      <section className="page-section">
-        <div className="card card--form" style={{ padding: 16 }}>
-          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Active AMO Context</h3>
-          <p style={{ marginTop: 0, opacity: 0.85 }}>
-            Choose an AMO to manage users, assets, and navigate into the AMO
-            dashboard.
-          </p>
-
+        <Panel
+          title="Active AMO Context"
+          subtitle="Choose an AMO to manage users, assets, and navigate into the AMO dashboard."
+        >
           {amoLoading && <p>Loading AMOs…</p>}
-          {amoError && <div className="alert alert-error">{amoError}</div>}
+          {amoError && (
+            <InlineAlert tone="danger" title="Error">
+              <span>{amoError}</span>
+            </InlineAlert>
+          )}
 
           {!amoLoading && !amoError && (
             <div className="form-row">
@@ -346,46 +363,54 @@ const AdminAmoManagementPage: React.FC = () => {
           )}
 
           {amoActionError && (
-            <div className="alert alert-error" style={{ marginTop: 12 }}>
-              {amoActionError}
-            </div>
+            <InlineAlert tone="danger" title="Action failed">
+              <span>{amoActionError}</span>
+            </InlineAlert>
           )}
           {amoActionSuccess && (
-            <div className="alert alert-success" style={{ marginTop: 12 }}>
-              {amoActionSuccess}
-            </div>
+            <InlineAlert tone="success" title="Success">
+              <span>{amoActionSuccess}</span>
+            </InlineAlert>
           )}
 
           <div className="form-actions">
-            <button
+            <Button
               type="button"
-              className="btn btn-primary"
               onClick={handleOpenAmoDashboard}
               disabled={!selectedAmo?.login_slug}
             >
               Open AMO dashboard
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn btn-secondary"
+              variant="secondary"
               onClick={() => navigate(`/maintenance/${amoCode}/admin/users/new`)}
             >
               Create first user
-            </button>
+            </Button>
           </div>
-        </div>
-      </section>
+        </Panel>
 
-      <section className="page-section">
-        <div className="card card--form" style={{ padding: 16 }}>
-          <h3 style={{ marginTop: 0 }}>AMO Actions</h3>
-          <p style={{ marginTop: 0, opacity: 0.85 }}>
-            Edit AMO details, extend trial windows, or deactivate access.
-          </p>
-
+        <Panel
+          title="AMO Actions"
+          subtitle="Edit AMO details, extend trial windows, or deactivate access."
+        >
           {!amoLoading && !amoError && (
             <div className="table-wrapper">
-              <table className="data-table">
+              {activeFilter === "inactive" && (
+                <InlineAlert
+                  tone="warning"
+                  title="Filter applied"
+                  actions={(
+                    <Button type="button" size="sm" variant="secondary" onClick={clearFilter}>
+                      Clear filter
+                    </Button>
+                  )}
+                >
+                  <span>Inactive AMOs</span>
+                </InlineAlert>
+              )}
+              <Table>
                 <thead>
                   <tr>
                     <th>AMO</th>
@@ -394,12 +419,12 @@ const AdminAmoManagementPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {amos.length === 0 && (
+                  {filteredAmos.length === 0 && (
                     <tr>
                       <td colSpan={3}>No AMOs available.</td>
                     </tr>
                   )}
-                  {amos.map((amo) => (
+                  {filteredAmos.map((amo) => (
                     <tr key={amo.id}>
                       <td>
                         <strong>{amo.amo_code}</strong> — {amo.name}
@@ -407,53 +432,53 @@ const AdminAmoManagementPage: React.FC = () => {
                       <td>{amo.is_active ? "Active" : "Inactive"}</td>
                       <td>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <button
+                          <Button
                             type="button"
-                            className="secondary-chip-btn"
+                            size="sm"
+                            variant="ghost"
                             onClick={() => handleEditAmo(amo)}
-                            title="Edit AMO"
                           >
                             ✏️ Edit
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
-                            className="secondary-chip-btn"
+                            size="sm"
+                            variant="ghost"
                             onClick={() => handleExtendTrial(amo)}
-                            title="Extend trial"
                           >
                             ⏳ Extend trial
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
-                            className="secondary-chip-btn"
+                            size="sm"
+                            variant="ghost"
                             onClick={() => handleDeactivateAmo(amo)}
-                            title="Deactivate AMO"
                           >
                             🗑️ Deactivate
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             </div>
           )}
-        </div>
-      </section>
+        </Panel>
 
-      <section className="page-section">
-        <div className="card card--form" style={{ padding: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Create a new AMO</h3>
-          <p style={{ marginTop: 0, opacity: 0.85 }}>
-            Register a new AMO, then create its first admin user.
-          </p>
-
+        <Panel
+          title="Create a new AMO"
+          subtitle="Register a new AMO, then create its first admin user."
+        >
           {amoCreateError && (
-            <div className="alert alert-error">{amoCreateError}</div>
+            <InlineAlert tone="danger" title="Error">
+              <span>{amoCreateError}</span>
+            </InlineAlert>
           )}
           {amoCreateSuccess && (
-            <div className="alert alert-success">{amoCreateSuccess}</div>
+            <InlineAlert tone="success" title="Success">
+              <span>{amoCreateSuccess}</span>
+            </InlineAlert>
           )}
 
           <form onSubmit={handleCreateAmo} className="form-grid">
@@ -558,21 +583,19 @@ const AdminAmoManagementPage: React.FC = () => {
             </div>
 
             <div className="form-actions">
-              <button type="submit" className="btn btn-primary">
-                Create AMO
-              </button>
-              <button
+              <Button type="submit">Create AMO</Button>
+              <Button
                 type="button"
-                className="btn btn-secondary"
+                variant="secondary"
                 onClick={() => navigate(`/maintenance/${amoCode}/admin/users/new`)}
                 disabled={!lastCreatedAmoId}
               >
                 Create first user
-              </button>
+              </Button>
             </div>
           </form>
-        </div>
-      </section>
+        </Panel>
+      </div>
     </DepartmentLayout>
   );
 };

@@ -106,6 +106,35 @@ export interface AdminAmoRead {
   updated_at?: string;
 }
 
+export interface AdminDepartmentRead {
+  id: string;
+  amo_id: string;
+  code: string;
+  name: string;
+  default_route?: string | null;
+  sort_order?: number | null;
+  is_active: boolean;
+}
+
+export type AdminAssetKind = "CRS_LOGO" | "CRS_TEMPLATE" | "OTHER";
+
+export interface AdminAssetRead {
+  id: string;
+  amo_id: string;
+  kind: AdminAssetKind;
+  name?: string | null;
+  description?: string | null;
+  original_filename?: string | null;
+  storage_path?: string | null;
+  content_type?: string | null;
+  size_bytes?: number | null;
+  sha256?: string | null;
+  is_active: boolean;
+  uploaded_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdminAmoCreatePayload {
   amo_code: string;
   name: string;
@@ -345,6 +374,44 @@ export async function listAdminUsers(
  */
 export async function listAdminAmos(): Promise<AdminAmoRead[]> {
   return apiGet<AdminAmoRead[]>("/accounts/admin/amos", {
+    headers: authHeaders(),
+  });
+}
+
+export async function listAdminDepartments(amoId?: string): Promise<AdminDepartmentRead[]> {
+  const sp = new URLSearchParams();
+  if (amoId && amoId.trim()) {
+    sp.set("amo_id", amoId.trim());
+  }
+  const qs = sp.toString();
+  const path = qs ? `/accounts/admin/departments?${qs}` : "/accounts/admin/departments";
+  return apiGet<AdminDepartmentRead[]>(path, {
+    headers: authHeaders(),
+  });
+}
+
+type AssetListParams = {
+  amo_id?: string;
+  kind?: AdminAssetKind;
+  only_active?: boolean;
+};
+
+export async function listAdminAssets(
+  params: AssetListParams = {}
+): Promise<AdminAssetRead[]> {
+  const sp = new URLSearchParams();
+  if (params.amo_id && params.amo_id.trim()) {
+    sp.set("amo_id", params.amo_id.trim());
+  }
+  if (params.kind) {
+    sp.set("kind", params.kind);
+  }
+  if (typeof params.only_active === "boolean") {
+    sp.set("only_active", String(params.only_active));
+  }
+  const qs = sp.toString();
+  const path = qs ? `/accounts/admin/assets?${qs}` : "/accounts/admin/assets";
+  return apiGet<AdminAssetRead[]>(path, {
     headers: authHeaders(),
   });
 }

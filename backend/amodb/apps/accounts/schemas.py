@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, date
-from typing import Any, Optional, Literal
+from typing import Any, Optional, Literal, List
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -681,3 +681,45 @@ class PlatformSettingsRead(PlatformSettingsBase):
 
     class Config:
         from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# ADMIN OVERVIEW SUMMARY
+# ---------------------------------------------------------------------------
+
+
+class OverviewSystemStatus(BaseModel):
+    status: str
+    last_checked_at: datetime
+    refresh_paused: bool = False
+    errors: List[str] = Field(default_factory=list)
+
+
+class OverviewBadge(BaseModel):
+    count: Optional[int] = None
+    severity: str = "info"
+    route: str
+    available: bool = True
+
+
+class OverviewIssue(BaseModel):
+    key: str
+    label: str
+    count: Optional[int] = None
+    severity: str
+    route: str
+
+
+class OverviewActivity(BaseModel):
+    occurred_at: Optional[datetime] = None
+    action: str
+    entity_type: str
+    actor_user_id: Optional[str] = None
+
+
+class OverviewSummary(BaseModel):
+    system: OverviewSystemStatus
+    badges: dict[str, OverviewBadge]
+    issues: List[OverviewIssue]
+    recent_activity: List[OverviewActivity] = []
+    recent_activity_available: bool = True
