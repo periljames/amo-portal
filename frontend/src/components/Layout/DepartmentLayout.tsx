@@ -191,6 +191,8 @@ const DepartmentLayout: React.FC<Props> = ({
     } as Record<string, OverviewSummary["badges"][string] | undefined>;
   }, [overviewSummary?.badges]);
 
+  const overviewSummaryDown = overviewSummary?.system.status === "down";
+
   useEffect(() => {
     if (typeof document === "undefined") return;
     document.body.dataset.theme = theme;
@@ -831,11 +833,12 @@ const DepartmentLayout: React.FC<Props> = ({
           {visibleAdminNav.map((nav) => {
             const isActive = nav.id === activeDepartment;
             const badge = adminBadgeMap[nav.id];
-            const hasCount = badge?.available && (badge?.count ?? 0) > 0;
-            const showBadge =
-              hasCount || (!!badge && !badge.available) || overviewSummaryUnavailable;
+            const badgeUnavailable =
+              overviewSummaryUnavailable || overviewSummaryDown || badge?.available === false;
+            const hasCount = !!badge?.available && !badgeUnavailable && (badge?.count ?? 0) > 0;
+            const showBadge = hasCount || badgeUnavailable;
             const badgeSeverity = badge?.severity || "info";
-            const badgeRoute = hasCount || !badge?.available ? badge?.route : undefined;
+            const badgeRoute = hasCount || badgeUnavailable ? badge?.route : undefined;
             return (
               <button
                 key={nav.id}
@@ -1022,23 +1025,6 @@ const DepartmentLayout: React.FC<Props> = ({
           )}
         </nav>
 
-        <div className="sidebar__footer">
-          <button
-            type="button"
-            className="sidebar__theme-toggle"
-            onClick={toggleColorScheme}
-          >
-            {colorScheme === "dark" ? "🌞 Light mode" : "🌙 Dark mode"}
-          </button>
-
-          <button
-            type="button"
-            className="sidebar__logout-btn"
-            onClick={handleLogout}
-          >
-            Sign out
-          </button>
-        </div>
       </aside>
 
       <main className="app-shell__main">

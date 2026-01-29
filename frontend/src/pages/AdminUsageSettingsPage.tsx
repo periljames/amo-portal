@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { Button, InlineAlert, PageHeader, Panel, Table } from "../components/UI/Admin";
 import { getCachedUser } from "../services/auth";
 import { getApiBaseUrl, normaliseBaseUrl, setApiBaseRuntime } from "../services/config";
 import {
@@ -252,42 +253,43 @@ const AdminUsageSettingsPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoCode ?? "UNKNOWN"} activeDepartment="admin-settings">
-      <header className="page-header">
-        <h1 className="page-header__title">Usage throttling & calendar settings</h1>
-        <p className="page-header__subtitle">
-          Control calendar sync budgets per AMO and per user to keep Google/Outlook usage
-          within free-tier limits.
-        </p>
-      </header>
+      <div className="admin-page">
+        <PageHeader
+          title="Usage throttling & calendar settings"
+          subtitle="Control calendar sync budgets per AMO and per user to keep Google/Outlook usage within free-tier limits."
+        />
 
-      {activeFilter && (
-        <div className="info-banner info-banner--warning" style={{ margin: "12px 0" }}>
-          <span>Filter applied: {activeFilter.replace(/_/g, " ")}</span>
-          <button
-            type="button"
-            className="secondary-chip-btn"
-            onClick={() =>
-              navigate(`/maintenance/${amoCode}/admin/settings`, { replace: true })
-            }
+        {activeFilter && (
+          <InlineAlert
+            tone="warning"
+            title="Filter applied"
+            actions={(
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/admin/settings`, { replace: true })
+                }
+              >
+                Clear filter
+              </Button>
+            )}
           >
-            Clear filter
-          </button>
-        </div>
-      )}
+            <span>{activeFilter.replace(/_/g, " ")}</span>
+          </InlineAlert>
+        )}
 
-      {error && (
-        <div className="card card--error">
-          <p>{error}</p>
-        </div>
-      )}
+        {error && (
+          <InlineAlert tone="danger" title="Error">
+            <span>{error}</span>
+          </InlineAlert>
+        )}
 
-      <section className="page-section">
-        <div className="card card--form">
-          <h3 style={{ marginTop: 0 }}>AMO scope</h3>
-          <p className="text-muted">
-            Superusers can throttle any AMO; AMO admins can tune only their own AMO.
-          </p>
-
+        <Panel
+          title="AMO scope"
+          subtitle="Superusers can throttle any AMO; AMO admins can tune only their own AMO."
+        >
           {isSuperuser && (
             <div className="form-row">
               <label htmlFor="amoSelect">Active AMO</label>
@@ -342,16 +344,12 @@ const AdminUsageSettingsPage: React.FC = () => {
               <option value="disabled">Disabled</option>
             </select>
           </label>
-        </div>
-      </section>
+        </Panel>
 
-      <section className="page-section">
-        <div className="card card--form">
-          <h3 style={{ marginTop: 0 }}>Per-user throttling</h3>
-          <p className="text-muted">
-            Apply per-user budgets to keep heavy calendar usage under control.
-          </p>
-
+        <Panel
+          title="Per-user throttling"
+          subtitle="Apply per-user budgets to keep heavy calendar usage under control."
+        >
           {loading && <p className="text-muted">Loading users…</p>}
 
           {!loading && users.length === 0 && (
@@ -360,7 +358,7 @@ const AdminUsageSettingsPage: React.FC = () => {
 
           {users.length > 0 && (
             <div className="table-responsive">
-              <table className="table table-compact">
+              <Table className="table-compact">
                 <thead>
                   <tr>
                     <th>User</th>
@@ -395,21 +393,16 @@ const AdminUsageSettingsPage: React.FC = () => {
                     );
                   })}
                 </tbody>
-              </table>
+              </Table>
             </div>
           )}
-        </div>
-      </section>
+        </Panel>
 
-      {isSuperuser && (
-        <section className="page-section">
-          <div className="card card--form">
-            <h3 style={{ marginTop: 0 }}>HTTPS & connectivity diagnostics</h3>
-            <p className="text-muted">
-              Configure the API base URL used by the portal and run a health check. Settings are
-              stored server-side for all sessions.
-            </p>
-
+        {isSuperuser && (
+          <Panel
+            title="HTTPS & connectivity diagnostics"
+            subtitle="Configure the API base URL used by the portal and run a health check. Settings are stored server-side for all sessions."
+          >
             <div className="form-row">
               <label htmlFor="apiBaseUrl">API base URL (HTTPS)</label>
               <input
@@ -425,20 +418,20 @@ const AdminUsageSettingsPage: React.FC = () => {
             </div>
 
             <div className="form-row" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <button type="button" className="btn" onClick={handleSaveApiBase}>
+              <Button type="button" onClick={handleSaveApiBase}>
                 Save override
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={handleClearApiBase}>
+              </Button>
+              <Button type="button" variant="secondary" onClick={handleClearApiBase}>
                 Clear override
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="btn btn-outline"
+                variant="secondary"
                 onClick={runHealthCheck}
                 disabled={healthLoading}
               >
                 {healthLoading ? "Running..." : "Run health check"}
-              </button>
+              </Button>
             </div>
 
             {apiBaseMessage && (
@@ -448,12 +441,12 @@ const AdminUsageSettingsPage: React.FC = () => {
             )}
 
             {healthStatus && (
-              <div className="card card--info" style={{ marginTop: 12 }}>
-                <strong>Health check:</strong> {healthStatus}
-              </div>
+              <InlineAlert tone="info" title="Health check">
+                <span>{healthStatus}</span>
+              </InlineAlert>
             )}
 
-            <div className="card" style={{ marginTop: 16 }}>
+            <div className="admin-panel" style={{ marginTop: 16 }}>
               <h4 style={{ marginTop: 0 }}>ACME / Let’s Encrypt status</h4>
               {platformLoading && <p className="text-muted">Loading status…</p>}
               {!platformLoading && (
@@ -485,9 +478,9 @@ const AdminUsageSettingsPage: React.FC = () => {
                 </dl>
               )}
             </div>
-          </div>
-        </section>
-      )}
+          </Panel>
+        )}
+      </div>
     </DepartmentLayout>
   );
 };

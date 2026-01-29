@@ -3,6 +3,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  InlineAlert,
+  PageHeader,
+  Panel,
+  StatusPill,
+} from "../components/UI/Admin";
 import { getCachedUser, getContext } from "../services/auth";
 import {
   fetchOverviewSummary,
@@ -19,10 +28,15 @@ type RefreshReason = "initial" | "retry" | "manual" | "interval";
 const POLL_INTERVAL_MS = 60_000;
 const MAX_RETRIES = 3;
 
-const STATUS_LABELS: Record<"healthy" | "degraded" | "down", string> = {
+const STATUS_LABELS: Record<
+  "healthy" | "degraded" | "down" | "paused" | "unknown",
+  string
+> = {
   healthy: "Healthy",
   degraded: "Degraded",
   down: "Down",
+  paused: "Paused",
+  unknown: "Unknown",
 };
 
 const formatRelativeTime = (value?: string | null): string => {
@@ -54,6 +68,7 @@ const AdminOverviewPage: React.FC = () => {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [lastSuccessAt, setLastSuccessAt] = useState<string | null>(null);
+  const [activityExpanded, setActivityExpanded] = useState(false);
 
   const pollingTimerRef = useRef<number | null>(null);
   const pollingRetriesRef = useRef(0);
@@ -161,11 +176,30 @@ const AdminOverviewPage: React.FC = () => {
     runPolling("manual");
   };
 
-  const status = summary?.system.status || (refreshError ? "down" : "degraded");
-  const statusLabel = STATUS_LABELS[status];
+  const rawStatus = summary?.system.status || (refreshError ? "down" : "degraded");
+  const statusTone: "healthy" | "degraded" | "down" | "unknown" =
+    rawStatus === "healthy" || rawStatus === "degraded" || rawStatus === "down"
+      ? rawStatus
+      : "unknown";
+  const statusLabel = STATUS_LABELS[statusTone];
   const lastUpdatedLabel = summary?.system.last_checked_at
     ? formatRelativeTime(summary.system.last_checked_at)
     : "Unavailable";
+  const refreshStateLabel = loading
+    ? "Loading…"
+    : refreshing
+      ? "Refreshing…"
+      : refreshError || summary?.system.refresh_paused
+        ? "Refresh paused"
+        : "Auto-refreshing";
+  const showRetry =
+    statusTone !== "healthy" || !!refreshError || summary?.system.refresh_paused;
+  const detailsTone =
+    statusTone === "down"
+      ? "danger"
+      : statusTone === "degraded"
+        ? "warning"
+        : "info";
 
   const issues = useMemo(() => {
     const list = summary?.issues ?? [];
@@ -177,128 +211,166 @@ const AdminOverviewPage: React.FC = () => {
     return `/maintenance/${amoCode}${issue.route}`;
   };
 
+  const issueEmptyState = statusTone === "down"
+    ? "Backend unavailable—cannot compute issues."
+    : "No urgent actions right now.";
+  const activityItems = summary?.recent_activity ?? [];
+  const activityList = activityExpanded
+    ? activityItems
+    : activityItems.slice(0, 5);
+
   return (
     <DepartmentLayout
       amoCode={amoCode ?? "UNKNOWN"}
       activeDepartment="admin-overview"
       showPollingErrorBanner={false}
     >
-      <header className="page-header admin-overview__header">
-        <div className="admin-overview__header-row">
-          <div>
-            <h1 className="page-header__title">Overview</h1>
-            <p className="admin-overview__subtitle">
-              Status and next steps for the AMO admin console.
-            </p>
+      <div className="admin-page admin-overview">
+        <PageHeader
+          title="Overview"
+          subtitle="Status and next steps for the AMO admin console."
+        />
+
+        <div className="admin-overview__statusbar">
+          <div className="admin-overview__status-left">
+            <StatusPill status={statusTone} label={`System ${statusLabel}`} />
+            <span className="admin-overview__meta">Last updated {lastUpdatedLabel}</span>
+            <span className="admin-overview__meta">{refreshStateLabel}</span>
           </div>
-          <div className="admin-overview__status">
-            <span className={`status-pill status-pill--${status}`}>{statusLabel}</span>
-            <span className="admin-overview__updated">
-              Last updated: {lastUpdatedLabel}
-            </span>
-          </div>
-        </div>
-        <div className="admin-overview__actions">
-          {refreshError && (
-            <button
+          <div className="admin-overview__status-actions">
+            {showRetry && (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={handleRetry}
+                disabled={refreshing}
+              >
+                Retry
+              </Button>
+            )}
+            <Button
               type="button"
-              className="btn btn-secondary"
-              onClick={handleRetry}
-              disabled={refreshing}
+              size="sm"
+              variant="ghost"
+              onClick={() => setDetailsOpen((prev) => !prev)}
             >
-              Retry
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setDetailsOpen((prev) => !prev)}
-          >
-            {detailsOpen ? "Hide details" : "Details"}
-          </button>
+              Details <span className="admin-overview__chevron">{detailsOpen ? "▴" : "▾"}</span>
+            </Button>
+          </div>
         </div>
+
         {detailsOpen && (
-          <div className="admin-overview__details">
-            <p>
-              <strong>Status:</strong> {statusLabel}
-            </p>
-            <p>
-              <strong>Last success:</strong> {lastSuccessAt ? formatRelativeTime(lastSuccessAt) : "Unavailable"}
-            </p>
+          <InlineAlert
+            tone={detailsTone}
+            title={`System ${statusLabel}`}
+            className="admin-overview__details"
+            actions={
+              refreshError ? (
+                <Button size="sm" variant="secondary" onClick={handleRetry}>
+                  Retry now
+                </Button>
+              ) : null
+            }
+          >
+            <span>
+              Last success: {lastSuccessAt ? formatRelativeTime(lastSuccessAt) : "Unavailable"}
+            </span>
+            {refreshError ? <span>{refreshError}</span> : null}
             {summary?.system.errors?.length ? (
-              <ul>
+              <ul className="admin-overview__error-list">
                 {summary.system.errors.map((err) => (
                   <li key={err}>{err}</li>
                 ))}
               </ul>
             ) : (
-              <p>No errors reported.</p>
+              <span>No errors reported.</span>
             )}
-          </div>
+          </InlineAlert>
         )}
-      </header>
 
-      <section className="page-section admin-overview__grid">
-        <div className="admin-overview__panel">
-          <div className="admin-overview__panel-header">
-            <h2>Needs attention</h2>
-            {loading ? <span>Loading…</span> : <span>{issues.length} items</span>}
-          </div>
-          {issues.length === 0 ? (
-            <p className="page-section__body">No urgent actions right now.</p>
-          ) : (
-            <ul className="admin-overview__issue-list">
-              {issues.map((issue) => (
-                <li key={issue.key}>
-                  <div className="admin-overview__issue-main">
-                    <span
-                      className={`severity-dot severity-dot--${issue.severity}`}
-                    />
-                    <div>
-                      <p>{issue.label}</p>
-                      <span className="admin-overview__issue-count">
-                        {issue.count ?? "—"}
-                      </span>
+        <div className="admin-overview__grid">
+          <Panel
+            title="Needs attention"
+            actions={<span className="admin-muted">{loading ? "Loading…" : `${issues.length} items`}</span>}
+          >
+            {issues.length === 0 ? (
+              <EmptyState title={issueEmptyState} />
+            ) : (
+              <ul className="admin-list">
+                {issues.map((issue) => (
+                  <li key={issue.key}>
+                    <button
+                      type="button"
+                      className="admin-list__row"
+                      onClick={() => navigate(resolveIssueRoute(issue))}
+                    >
+                      <div className="admin-list__row-main">
+                        <span className={`severity-dot severity-dot--${issue.severity}`} />
+                        <span>{issue.label}</span>
+                      </div>
+                      <div className="admin-list__row-meta">
+                        <Badge
+                          tone={
+                            issue.severity === "critical"
+                              ? "danger"
+                              : issue.severity === "warning"
+                                ? "warning"
+                                : "info"
+                          }
+                          size="sm"
+                        >
+                          {issue.count ?? "—"}
+                        </Badge>
+                        <span className="admin-overview__chevron">›</span>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel
+            title="Recent activity"
+            actions={
+              summary?.recent_activity_available && activityItems.length > 5 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setActivityExpanded((prev) => !prev)}
+                >
+                  {activityExpanded ? "Collapse" : "View all"}
+                </Button>
+              ) : null
+            }
+            compact
+          >
+            {!summary?.recent_activity_available ? (
+              <span className="admin-muted">Audit feed unavailable.</span>
+            ) : activityList.length ? (
+              <ul className="admin-list">
+                {activityList.map((event, index) => (
+                  <li key={`${event.action}-${index}`}>
+                    <div className="admin-list__row admin-overview__activity-row">
+                      <div>
+                        <strong>{event.action}</strong>
+                        <div className="admin-muted">
+                          {event.entity_type} • {formatRelativeTime(event.occurred_at || null)}
+                        </div>
+                      </div>
+                      <span className="admin-muted">{event.actor_user_id || "System"}</span>
                     </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => navigate(resolveIssueRoute(issue))}
-                  >
-                    Review
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="admin-muted">No recent activity recorded.</span>
+            )}
+          </Panel>
         </div>
-
-        <div className="admin-overview__panel admin-overview__panel--compact">
-          <div className="admin-overview__panel-header">
-            <h2>Recent activity</h2>
-          </div>
-          {!summary?.recent_activity_available ? (
-            <p className="page-section__body">Audit feed unavailable.</p>
-          ) : summary?.recent_activity.length ? (
-            <ul className="admin-overview__activity-list">
-              {summary.recent_activity.slice(0, 5).map((event, index) => (
-                <li key={`${event.action}-${index}`}>
-                  <div>
-                    <strong>{event.action}</strong>
-                    <p>
-                      {event.entity_type} • {formatRelativeTime(event.occurred_at || null)}
-                    </p>
-                  </div>
-                  <span className="text-muted">{event.actor_user_id || "System"}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="page-section__body">No recent activity recorded.</p>
-          )}
-        </div>
-      </section>
+      </div>
     </DepartmentLayout>
   );
 };

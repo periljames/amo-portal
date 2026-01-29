@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { Button, InlineAlert, PageHeader, Panel } from "../components/UI/Admin";
 import { getCachedUser, getContext } from "../services/auth";
 import { listAdminAmos, listAdminAssets, LS_ACTIVE_AMO_ID } from "../services/adminUsers";
 import type { AdminAmoRead, AdminAssetRead } from "../services/adminUsers";
@@ -292,76 +293,73 @@ const AdminAmoAssetsPage: React.FC = () => {
   const templateStatus = assets?.crs_template_filename
     ? `Uploaded: ${assets.crs_template_filename}`
     : "No template uploaded";
+  const userDisplayName = currentUser?.full_name || currentUser?.email;
 
   return (
     <DepartmentLayout
       amoCode={amoCode ?? "UNKNOWN"}
       activeDepartment="admin-assets"
     >
-      <header className="page-header">
-        <h1 className="page-header__title">CRS Assets Setup</h1>
-        <p className="page-header__subtitle">
-          Upload AMO-specific branding and CRS templates.
-          {currentUser && (
-            <>
-              {" "}Signed in as <strong>{currentUser.full_name}</strong>.
-            </>
-          )}
-        </p>
-      </header>
+      <div className="admin-page">
+        <PageHeader
+          title="CRS Assets Setup"
+          subtitle={
+            userDisplayName
+              ? `Upload AMO-specific branding and CRS templates. Signed in as ${userDisplayName}.`
+              : "Upload AMO-specific branding and CRS templates."
+          }
+        />
 
-      {activeFilter === "inactive" && (
-        <section className="page-section">
-          <div className="card card--form" style={{ padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <h3 style={{ marginTop: 0 }}>Inactive assets</h3>
-                <p style={{ marginTop: 4, opacity: 0.85 }}>
-                  Review assets marked inactive for this AMO.
-                </p>
-              </div>
-              <button type="button" className="secondary-chip-btn" onClick={clearFilter}>
+        {activeFilter === "inactive" && (
+          <Panel
+            title="Inactive assets"
+            subtitle="Review assets marked inactive for this AMO."
+            actions={(
+              <Button type="button" size="sm" variant="secondary" onClick={clearFilter}>
                 Clear filter
-              </button>
-            </div>
+              </Button>
+            )}
+          >
             {inactiveAssetsError && (
-              <div className="alert alert-error" style={{ marginTop: 12 }}>
-                {inactiveAssetsError}
-              </div>
+              <InlineAlert tone="danger" title="Error">
+                <span>{inactiveAssetsError}</span>
+              </InlineAlert>
             )}
             {!inactiveAssetsError && inactiveAssets.length === 0 && (
-              <p className="page-section__body">No inactive assets found.</p>
+              <p className="admin-muted">No inactive assets found.</p>
             )}
             {!inactiveAssetsError && inactiveAssets.length > 0 && (
-              <ul className="admin-overview__activity-list">
+              <ul className="admin-list">
                 {inactiveAssets.map((asset) => (
                   <li key={asset.id}>
-                    <div>
-                      <strong>{asset.name || asset.kind}</strong>
-                      <p>{asset.original_filename || "Unnamed asset"}</p>
+                    <div className="admin-list__row admin-overview__activity-row">
+                      <div>
+                        <strong>{asset.name || asset.kind}</strong>
+                        <div className="admin-muted">
+                          {asset.original_filename || "Unnamed asset"}
+                        </div>
+                      </div>
+                      <span className="admin-muted">
+                        {asset.updated_at
+                          ? new Date(asset.updated_at).toLocaleString()
+                          : "—"}
+                      </span>
                     </div>
-                    <span className="text-muted">
-                      {asset.updated_at
-                        ? new Date(asset.updated_at).toLocaleString()
-                        : "—"}
-                    </span>
                   </li>
                 ))}
               </ul>
             )}
-          </div>
-        </section>
-      )}
+          </Panel>
+        )}
 
-      {isSuperuser && (
-        <section className="page-section">
-          <div className="card card--form" style={{ padding: 16 }}>
-            <h3 style={{ marginTop: 0, marginBottom: 8 }}>
-              Support mode (SUPERUSER)
-            </h3>
-
+        {isSuperuser && (
+          <Panel title="Support mode (SUPERUSER)">
             {amoLoading && <p>Loading AMOs…</p>}
-            {amoError && <div className="alert alert-error">{amoError}</div>}
+            {amoError && (
+              <InlineAlert tone="danger" title="Error">
+                <span>{amoError}</span>
+              </InlineAlert>
+            )}
 
             {!amoLoading && !amoError && (
               <div className="form-row">
@@ -380,100 +378,102 @@ const AdminAmoAssetsPage: React.FC = () => {
                 </select>
               </div>
             )}
-          </div>
-        </section>
-      )}
-
-      <section className="page-section">
-        {loading && <p>Loading assets…</p>}
-        {error && <div className="alert alert-error">{error}</div>}
-
-        {!loading && (
-          <div className="card card--form" style={{ padding: 16 }}>
-            <h2 style={{ marginTop: 0 }}>Current configuration</h2>
-            <div className="form-row" style={{ marginBottom: 12 }}>
-              <div style={{ flex: 1 }}>
-                <strong>CRS Logo</strong>
-                <p style={{ marginTop: 6 }}>{logoStatus}</p>
-                {assets?.crs_logo_uploaded_at && (
-                  <p style={{ marginTop: 4, opacity: 0.75 }}>
-                    Uploaded at {new Date(assets.crs_logo_uploaded_at).toLocaleString()}
-                  </p>
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={!assets?.crs_logo_filename}
-                  onClick={() => handleDownload("logo")}
-                >
-                  Download logo
-                </button>
-              </div>
-            </div>
-            {downloadProgress?.kind === "logo" && (
-              <div className="form-row" style={{ marginBottom: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <strong>Logo download</strong>
-                  {downloadProgress.progress.percent !== undefined && (
-                    <progress
-                      value={downloadProgress.progress.percent}
-                      max={100}
-                      style={{ width: "100%", height: 10, marginTop: 6 }}
-                    />
-                  )}
-                  <p style={{ marginTop: 6, opacity: 0.8 }}>
-                    {formatSpeed(downloadProgress.progress)}
-                  </p>
-                </div>
-              </div>
-            )}
-            <div className="form-row" style={{ marginBottom: 12 }}>
-              <div style={{ flex: 1 }}>
-                <strong>CRS Template</strong>
-                <p style={{ marginTop: 6 }}>{templateStatus}</p>
-                {assets?.crs_template_uploaded_at && (
-                  <p style={{ marginTop: 4, opacity: 0.75 }}>
-                    Uploaded at {new Date(assets.crs_template_uploaded_at).toLocaleString()}
-                  </p>
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={!assets?.crs_template_filename}
-                  onClick={() => handleDownload("template")}
-                >
-                  Download template
-                </button>
-              </div>
-            </div>
-            {downloadProgress?.kind === "template" && (
-              <div className="form-row" style={{ marginBottom: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <strong>Template download</strong>
-                  {downloadProgress.progress.percent !== undefined && (
-                    <progress
-                      value={downloadProgress.progress.percent}
-                      max={100}
-                      style={{ width: "100%", height: 10, marginTop: 6 }}
-                    />
-                  )}
-                  <p style={{ marginTop: 6, opacity: 0.8 }}>
-                    {formatSpeed(downloadProgress.progress)}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
+          </Panel>
         )}
-      </section>
 
-      <section className="page-section">
-        <div className="card card--form" style={{ padding: 16 }}>
-          <h2 style={{ marginTop: 0 }}>Upload assets</h2>
+        <Panel title="Current configuration">
+          {loading && <p>Loading assets…</p>}
+          {error && (
+            <InlineAlert tone="danger" title="Error">
+              <span>{error}</span>
+            </InlineAlert>
+          )}
+
+          {!loading && (
+            <>
+              <div className="form-row" style={{ marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <strong>CRS Logo</strong>
+                  <p style={{ marginTop: 6 }}>{logoStatus}</p>
+                  {assets?.crs_logo_uploaded_at && (
+                    <p style={{ marginTop: 4, opacity: 0.75 }}>
+                      Uploaded at {new Date(assets.crs_logo_uploaded_at).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={!assets?.crs_logo_filename}
+                    onClick={() => handleDownload("logo")}
+                  >
+                    Download logo
+                  </Button>
+                </div>
+              </div>
+              {downloadProgress?.kind === "logo" && (
+                <div className="form-row" style={{ marginBottom: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <strong>Logo download</strong>
+                    {downloadProgress.progress.percent !== undefined && (
+                      <progress
+                        value={downloadProgress.progress.percent}
+                        max={100}
+                        style={{ width: "100%", height: 10, marginTop: 6 }}
+                      />
+                    )}
+                    <p style={{ marginTop: 6, opacity: 0.8 }}>
+                      {formatSpeed(downloadProgress.progress)}
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div className="form-row" style={{ marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <strong>CRS Template</strong>
+                  <p style={{ marginTop: 6 }}>{templateStatus}</p>
+                  {assets?.crs_template_uploaded_at && (
+                    <p style={{ marginTop: 4, opacity: 0.75 }}>
+                      Uploaded at {new Date(assets.crs_template_uploaded_at).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={!assets?.crs_template_filename}
+                    onClick={() => handleDownload("template")}
+                  >
+                    Download template
+                  </Button>
+                </div>
+              </div>
+              {downloadProgress?.kind === "template" && (
+                <div className="form-row" style={{ marginBottom: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <strong>Template download</strong>
+                    {downloadProgress.progress.percent !== undefined && (
+                      <progress
+                        value={downloadProgress.progress.percent}
+                        max={100}
+                        style={{ width: "100%", height: 10, marginTop: 6 }}
+                      />
+                    )}
+                    <p style={{ marginTop: 6, opacity: 0.8 }}>
+                      {formatSpeed(downloadProgress.progress)}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </Panel>
+
+        <Panel title="Upload assets">
 
           <div className="form-row" style={{ alignItems: "center" }}>
             <label htmlFor="logoUpload">CRS Logo (.png, .jpg, .svg)</label>
@@ -552,8 +552,8 @@ const AdminAmoAssetsPage: React.FC = () => {
               </div>
             </div>
           )}
-        </div>
-      </section>
+        </Panel>
+      </div>
     </DepartmentLayout>
   );
 };
