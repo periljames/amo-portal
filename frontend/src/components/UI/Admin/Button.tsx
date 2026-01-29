@@ -1,7 +1,7 @@
 import React from "react";
 import { clsx } from "clsx";
 
-export type AdminButtonVariant = "primary" | "secondary" | "ghost";
+export type AdminButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type AdminButtonSize = "sm" | "md";
 
 export interface AdminButtonProps
