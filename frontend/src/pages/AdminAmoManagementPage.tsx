@@ -119,6 +119,10 @@ const AdminAmoManagementPage: React.FC = () => {
     () => amos.find((a) => a.id === activeAmoId) || null,
     [amos, activeAmoId]
   );
+  const inactiveAmos = useMemo(
+    () => amos.filter((amo) => !amo.is_active).length,
+    [amos]
+  );
 
   const activeFilter = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -336,6 +340,23 @@ const AdminAmoManagementPage: React.FC = () => {
             </Button>
           }
         />
+
+        <div className="admin-summary-strip">
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Total AMOs</span>
+            <span className="admin-summary-item__value">{amos.length}</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Inactive AMOs</span>
+            <span className="admin-summary-item__value">{inactiveAmos}</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Active context</span>
+            <span className="admin-summary-item__value">
+              {selectedAmo?.amo_code || "Unset"}
+            </span>
+          </div>
+        </div>
 
         <div className="admin-page__grid">
           <Panel

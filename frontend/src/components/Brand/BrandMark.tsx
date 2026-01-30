@@ -53,9 +53,9 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
           role="img"
           aria-label={`${displayName} mark`}
         >
-          <rect x="4" y="4" width="56" height="56" rx="14" />
+          <circle cx="32" cy="32" r="28" />
           <path
-            d="M18 44V20c0-1.7 1.3-3 3-3h12c6.6 0 12 5.4 12 12s-5.4 12-12 12H18z"
+            d="M20 42V22c0-1.7 1.3-3 3-3h10c6.6 0 12 5.4 12 12s-5.4 12-12 12H20z"
             opacity="0.08"
           />
           <text x="32" y="38" textAnchor="middle">

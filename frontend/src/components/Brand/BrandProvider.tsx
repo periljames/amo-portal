@@ -17,7 +17,7 @@ type BrandProviderProps = {
 };
 
 const DEFAULT_BRAND: BrandTheme = {
-  name: "AMO Portal",
+  name: "Safarilink",
   accent: "#22c55e",
   accentSoft: "rgba(34, 197, 94, 0.1)",
   accentSecondary: "#16a34a",

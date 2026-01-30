@@ -337,6 +337,8 @@ const AdminAmoAssetsPage: React.FC = () => {
   const templateStatus = assets?.crs_template_filename
     ? `Uploaded: ${assets.crs_template_filename}`
     : "No template uploaded";
+  const logoStateLabel = assets?.crs_logo_filename ? "Uploaded" : "Missing";
+  const templateStateLabel = assets?.crs_template_filename ? "Uploaded" : "Missing";
   const userDisplayName = currentUser?.full_name || currentUser?.email;
 
   return (
@@ -353,6 +355,21 @@ const AdminAmoAssetsPage: React.FC = () => {
               : "Upload AMO-specific branding and CRS templates."
           }
         />
+
+        <div className="admin-summary-strip">
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Logo</span>
+            <span className="admin-summary-item__value">{logoStateLabel}</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Template</span>
+            <span className="admin-summary-item__value">{templateStateLabel}</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Inactive assets</span>
+            <span className="admin-summary-item__value">{inactiveAssets.length}</span>
+          </div>
+        </div>
 
         <div className="admin-page__grid">
           <div className="admin-page__main">

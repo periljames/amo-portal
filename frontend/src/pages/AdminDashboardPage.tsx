@@ -393,6 +393,15 @@ const AdminDashboardPage: React.FC = () => {
     }
   }, [activeFilter, users]);
 
+  const inactiveUsers = useMemo(
+    () => users.filter((u) => !u.is_active).length,
+    [users]
+  );
+  const missingDeptUsers = useMemo(
+    () => users.filter((u) => !u.department_id).length,
+    [users]
+  );
+
   const exportUsersCsv = () => {
     const rows = filteredUsers.map((u) => ({
       staff_code: u.staff_code ?? "",
@@ -892,10 +901,173 @@ const AdminDashboardPage: React.FC = () => {
           </Panel>
         )}
 
-        <Panel
-          title="Users"
-          actions={(
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="admin-summary-strip">
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Total users</span>
+            <span className="admin-summary-item__value">{users.length}</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Inactive</span>
+            <span className="admin-summary-item__value">{inactiveUsers}</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Missing department</span>
+            <span className="admin-summary-item__value">{missingDeptUsers}</span>
+          </div>
+        </div>
+
+        <div className="admin-page__grid">
+          <div className="admin-page__main">
+            <Panel title="Users">
+              <div className="admin-table-toolbar">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setSkip(0);
+                  }}
+                  placeholder="Search name, email, staff code…"
+                  className="input"
+                />
+                <div className="admin-table-toolbar__actions">
+                  {skip > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setSkip(Math.max(0, skip - limit))}
+                      disabled={loading}
+                    >
+                      Prev
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setSkip(skip + limit)}
+                    disabled={loading || users.length < limit}
+                    title={users.length < limit ? "No more results" : "Next page"}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+
+              {loading && <p>Loading users…</p>}
+              {error && (
+                <InlineAlert tone="danger" title="Error">
+                  <span>{error}</span>
+                </InlineAlert>
+              )}
+              {departmentsError && (
+                <InlineAlert tone="danger" title="Department Error">
+                  <span>{departmentsError}</span>
+                </InlineAlert>
+              )}
+
+              {!loading && !error && (
+                <>
+                  {activeFilter && (
+                    <div className="admin-filter-banner">
+                      <span>
+                        Filtered:{" "}
+                        {activeFilter === "missing_department"
+                          ? "Users missing department"
+                          : activeFilter === "inactive"
+                            ? "Inactive users"
+                            : "Users requiring attention"}
+                      </span>
+                      <Button type="button" size="sm" variant="ghost" onClick={clearFilter}>
+                        Clear filter
+                      </Button>
+                    </div>
+                  )}
+                  <Table>
+                    <thead>
+                      <tr>
+                        <th>Staff code</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Department</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsers.length === 0 && (
+                        <tr>
+                          <td colSpan={7}>
+                            <EmptyState title="No users found for this AMO." />
+                          </td>
+                        </tr>
+                      )}
+                      {filteredUsers.map((u) => (
+                        <tr key={u.id}>
+                          <td>{u.staff_code}</td>
+                          <td>{u.full_name}</td>
+                          <td>{u.email}</td>
+                          <td>{u.role}</td>
+                          <td>{departmentMap.get(u.department_id ?? "")?.name ?? "—"}</td>
+                          <td>{u.is_active ? "Active" : "Inactive"}</td>
+                          <td>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              {!u.department_id && (
+                                <>
+                                  <select
+                                    className="input input--compact"
+                                    aria-label={`Assign department for ${u.full_name}`}
+                                    value={departmentSelections[u.id] || ""}
+                                    onChange={(e) =>
+                                      setDepartmentSelections((prev) => ({
+                                        ...prev,
+                                        [u.id]: e.target.value,
+                                      }))
+                                    }
+                                    disabled={departmentsLoading}
+                                  >
+                                    <option value="">Select department</option>
+                                    {departments.map((dept) => (
+                                      <option key={dept.id} value={dept.id}>
+                                        {dept.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => handleAssignDepartment(u)}
+                                    disabled={departmentsLoading}
+                                  >
+                                    Assign dept
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={u.is_active ? "danger" : "ghost"}
+                                onClick={() => handleToggleUser(u)}
+                                title={u.is_active ? "Deactivate user" : "Reactivate user"}
+                              >
+                                {u.is_active ? "🗑️ Deactivate" : "✅ Reactivate"}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </>
+              )}
+            </Panel>
+          </div>
+
+          <div className="admin-page__side">
+            <Panel title="User actions" compact>
               <Button type="button" size="sm" onClick={handleNewUser}>
                 + Create user
               </Button>
@@ -918,175 +1090,28 @@ const AdminDashboardPage: React.FC = () => {
               >
                 Export CSV
               </Button>
-            </div>
-          )}
-        >
-
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={exportUsersPdf}
-            disabled={users.length === 0}
-          >
-            Export PDF
-          </Button>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setSkip(0);
-              }}
-              placeholder="Search name, email, staff code…"
-              className="input"
-              style={{ minWidth: 240 }}
-            />
-            {skip > 0 && (
               <Button
                 type="button"
                 size="sm"
                 variant="secondary"
-                onClick={() => setSkip(Math.max(0, skip - limit))}
-                disabled={loading}
+                onClick={exportUsersPdf}
+                disabled={users.length === 0}
               >
-                Prev
+                Export PDF
               </Button>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => setSkip(skip + limit)}
-              disabled={loading || users.length < limit}
-              title={users.length < limit ? "No more results" : "Next page"}
-            >
-              Next
-            </Button>
+            </Panel>
+
+            <Panel
+              title="CRS Asset Setup"
+              subtitle="Upload AMO-specific CRS templates and branding assets used in PDF generation."
+              actions={(
+                <Button type="button" size="sm" onClick={handleManageAssets}>
+                  Manage CRS assets
+                </Button>
+              )}
+            />
           </div>
         </div>
-
-        {loading && <p>Loading users…</p>}
-        {error && (
-          <InlineAlert tone="danger" title="Error">
-            <span>{error}</span>
-          </InlineAlert>
-        )}
-        {departmentsError && (
-          <InlineAlert tone="danger" title="Department Error">
-            <span>{departmentsError}</span>
-          </InlineAlert>
-        )}
-
-        {!loading && !error && (
-          <>
-            {activeFilter && (
-              <div className="admin-filter-banner">
-                <span>
-                  Filtered:{" "}
-                  {activeFilter === "missing_department"
-                    ? "Users missing department"
-                    : activeFilter === "inactive"
-                      ? "Inactive users"
-                      : "Users requiring attention"}
-                </span>
-                <Button type="button" size="sm" variant="ghost" onClick={clearFilter}>
-                  Clear filter
-                </Button>
-              </div>
-            )}
-            <Table>
-              <thead>
-                <tr>
-                  <th>Staff code</th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Department</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredUsers.length === 0 && (
-                  <tr>
-                    <td colSpan={7}>
-                      <EmptyState title="No users found for this AMO." />
-                    </td>
-                  </tr>
-                )}
-                {filteredUsers.map((u) => (
-                  <tr key={u.id}>
-                    <td>{u.staff_code}</td>
-                    <td>{u.full_name}</td>
-                    <td>{u.email}</td>
-                    <td>{u.role}</td>
-                    <td>{departmentMap.get(u.department_id ?? "")?.name ?? "—"}</td>
-                    <td>{u.is_active ? "Active" : "Inactive"}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {!u.department_id && (
-                          <>
-                            <select
-                              className="input input--compact"
-                              aria-label={`Assign department for ${u.full_name}`}
-                              value={departmentSelections[u.id] || ""}
-                              onChange={(e) =>
-                                setDepartmentSelections((prev) => ({
-                                  ...prev,
-                                  [u.id]: e.target.value,
-                                }))
-                              }
-                              disabled={departmentsLoading}
-                            >
-                              <option value="">Select department</option>
-                              {departments.map((dept) => (
-                                <option key={dept.id} value={dept.id}>
-                                  {dept.name}
-                                </option>
-                              ))}
-                            </select>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => handleAssignDepartment(u)}
-                              disabled={departmentsLoading}
-                            >
-                              Assign dept
-                            </Button>
-                          </>
-                        )}
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={u.is_active ? "danger" : "ghost"}
-                          onClick={() => handleToggleUser(u)}
-                          title={u.is_active ? "Deactivate user" : "Reactivate user"}
-                        >
-                          {u.is_active ? "🗑️ Deactivate" : "✅ Reactivate"}
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </>
-        )}
-      </Panel>
-
-      <Panel
-        title="CRS Asset Setup"
-        subtitle="Upload AMO-specific CRS templates and branding assets used in PDF generation."
-        actions={(
-          <Button type="button" size="sm" onClick={handleManageAssets}>
-            Manage CRS assets
-          </Button>
-        )}
-      />
     </div>
     </DepartmentLayout>
   );
