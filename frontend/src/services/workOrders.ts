@@ -32,6 +32,8 @@ export type TaskOriginType = "SCHEDULED" | "NON_ROUTINE" | string;
 
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | string;
 
+export type TaskCategory = "SCHEDULED" | "UNSCHEDULED" | "DEFECT" | string;
+
 export interface WorkOrderRead {
   id: number;
   wo_number?: string;
@@ -53,6 +55,24 @@ export interface WorkOrderRead {
   updated_at?: string;
 }
 
+export interface WorkOrderCreatePayload {
+  wo_number: string;
+  aircraft_serial_number: string;
+  description?: string | null;
+  check_type?: string | null;
+  wo_type?: WorkOrderType;
+  status?: WorkOrderStatus;
+  is_scheduled?: boolean;
+  due_date?: string | null;
+  open_date?: string | null;
+  closed_date?: string | null;
+  closure_reason?: string | null;
+  closure_notes?: string | null;
+  originating_org?: string | null;
+  work_package_ref?: string | null;
+  operator_event_id?: string | null;
+}
+
 export interface TaskCardRead {
   id: number;
   work_order_id?: number;
@@ -60,7 +80,7 @@ export interface TaskCardRead {
   title?: string;
   description?: string | null;
   status?: TaskStatus;
-  category?: string;
+  category?: TaskCategory;
   origin_type?: TaskOriginType;
   priority?: TaskPriority;
   ata_chapter?: string | null;
@@ -75,6 +95,21 @@ export interface TaskCardRead {
   hf_notes?: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface TaskCreatePayload {
+  title: string;
+  description?: string | null;
+  category?: TaskCategory;
+  origin_type?: TaskOriginType;
+  priority?: TaskPriority;
+  ata_chapter?: string | null;
+  task_code?: string | null;
+  zone?: string | null;
+  access_panel?: string | null;
+  planned_start?: string | null;
+  planned_end?: string | null;
+  estimated_manhours?: number | null;
 }
 
 export interface TaskUpdatePayload {
@@ -163,6 +198,12 @@ export async function listWorkOrders(params?: {
   return fetchJson<WorkOrderRead[]>(`/work-orders${toQuery(params ?? {})}`);
 }
 
+export async function createWorkOrder(
+  payload: WorkOrderCreatePayload
+): Promise<WorkOrderRead> {
+  return sendJson<WorkOrderRead>("/work-orders", "POST", payload);
+}
+
 export async function getWorkOrder(id: number): Promise<WorkOrderRead> {
   return fetchJson<WorkOrderRead>(`/work-orders/${id}`);
 }
@@ -173,6 +214,13 @@ export async function getWorkOrderByNumber(woNumber: string): Promise<WorkOrderR
 
 export async function listTasksForWorkOrder(workOrderId: number): Promise<TaskCardRead[]> {
   return fetchJson<TaskCardRead[]>(`/work-orders/${workOrderId}/tasks`);
+}
+
+export async function createTask(
+  workOrderId: number,
+  payload: TaskCreatePayload
+): Promise<TaskCardRead> {
+  return sendJson<TaskCardRead>(`/work-orders/${workOrderId}/tasks`, "POST", payload);
 }
 
 export async function getTask(taskId: number): Promise<TaskCardRead> {
