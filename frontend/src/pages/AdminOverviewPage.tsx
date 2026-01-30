@@ -6,7 +6,6 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import {
   Badge,
   Button,
-  EmptyState,
   PageHeader,
   Panel,
   StatusPill,
@@ -196,18 +195,35 @@ const AdminOverviewPage: React.FC = () => {
     return list.slice(0, 6);
   }, [summary?.issues]);
 
+  const issueCtaLabel = (issue: OverviewIssue) => {
+    if (issue.severity === "critical") return "Resolve";
+    if (issue.severity === "warning") return "Review";
+    return "Approve";
+  };
+
   const resolveIssueRoute = (issue: OverviewIssue) => {
     if (!amoCode) return issue.route;
     return `/maintenance/${amoCode}${issue.route}`;
   };
 
-  const issueEmptyState = statusTone === "down"
-    ? "Backend unavailable—cannot compute issues."
-    : "No urgent actions right now.";
   const activityItems = summary?.recent_activity ?? [];
   const activityList = activityExpanded
     ? activityItems
     : activityItems.slice(0, 5);
+  const indicatorItems = [
+    {
+      label: "Needs attention",
+      value: loading ? "—" : issues.length,
+    },
+    {
+      label: "Recent activity",
+      value: summary?.recent_activity_available ? activityItems.length : "—",
+    },
+    {
+      label: "Last check",
+      value: lastUpdatedLabel,
+    },
+  ];
 
   return (
     <DepartmentLayout
@@ -218,50 +234,62 @@ const AdminOverviewPage: React.FC = () => {
       <div className="admin-page admin-overview">
         <PageHeader
           title="Overview"
-          subtitle="Status and next steps for the AMO admin console."
+          subtitle="System status and the next actions that need attention."
+          actions={
+            <div className="admin-overview__header-actions">
+              <StatusPill status={statusTone} label={`System ${statusLabel}`} />
+              {showRetry ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleRetry}
+                  disabled={refreshing}
+                >
+                  Retry refresh
+                </Button>
+              ) : null}
+            </div>
+          }
         />
 
-        <div className="admin-overview__statusbar">
-          <div className="admin-overview__status-left">
-            <StatusPill status={statusTone} label={`System ${statusLabel}`} />
-            <span className="admin-overview__meta">Last updated {lastUpdatedLabel}</span>
-            <span className="admin-overview__meta">{refreshStateLabel}</span>
-          </div>
-          <div className="admin-overview__status-actions">
-            {showRetry && (
-              <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={handleRetry}
-                disabled={refreshing}
-              >
-                Retry
-              </button>
-            )}
-          </div>
+        <div className="admin-overview__subline">
+          <span className="admin-overview__meta">{refreshStateLabel}</span>
+          <span className="admin-overview__meta">
+            Last updated {lastUpdatedLabel}
+          </span>
         </div>
 
-        <div className="admin-overview__grid">
+        <div className="admin-overview__indicators">
+          {indicatorItems.map((item) => (
+            <div key={item.label} className="admin-overview__indicator">
+              <span className="admin-overview__indicator-label">{item.label}</span>
+              <span className="admin-overview__indicator-value">{item.value}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="admin-overview__grid admin-overview__grid--balanced">
           <Panel
             title="Needs attention"
             actions={<span className="admin-muted">{loading ? "Loading…" : `${issues.length} items`}</span>}
           >
             {issues.length === 0 ? (
-              <EmptyState title={issueEmptyState} />
+              <span className="admin-muted">
+                {statusTone === "down"
+                  ? "Backend unavailable—cannot compute issues."
+                  : "No urgent actions right now."}
+              </span>
             ) : (
               <ul className="admin-list">
                 {issues.map((issue) => (
                   <li key={issue.key}>
-                    <button
-                      type="button"
-                      className="admin-list__row"
-                      onClick={() => navigate(resolveIssueRoute(issue))}
-                    >
-                      <div className="admin-list__row-main">
+                    <div className="admin-list__row admin-overview__queue-row">
+                      <div className="admin-list__row-main admin-overview__queue-main">
                         <span className={`severity-dot severity-dot--${issue.severity}`} />
-                        <span>{issue.label}</span>
+                        <span className="admin-overview__queue-label">{issue.label}</span>
                       </div>
-                      <div className="admin-list__row-meta">
+                      <div className="admin-list__row-meta admin-overview__queue-actions">
                         <Badge
                           tone={
                             issue.severity === "critical"
@@ -274,9 +302,16 @@ const AdminOverviewPage: React.FC = () => {
                         >
                           {issue.count ?? "—"}
                         </Badge>
-                        <span className="admin-overview__chevron">›</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => navigate(resolveIssueRoute(issue))}
+                        >
+                          {issueCtaLabel(issue)}
+                        </Button>
                       </div>
-                    </button>
+                    </div>
                   </li>
                 ))}
               </ul>

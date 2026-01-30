@@ -1841,23 +1841,20 @@ button,
   gap: 12px;
 }
 
-.admin-overview__statusbar {
-  display: flex;
+.admin-overview__header-actions {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--panel-divider);
-  background: var(--surface);
 }
 
-.admin-overview__status-left {
+.admin-overview__subline {
   display: flex;
-  align-items: center;
-  gap: 12px;
   flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: -4px;
 }
 
 .admin-overview__meta {
@@ -1865,19 +1862,31 @@ button,
   color: var(--text-secondary);
 }
 
-.admin-overview__status-actions {
+.admin-overview__indicators {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.admin-overview__indicator {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-divider);
+  background: var(--surface);
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.admin-overview__details {
-  margin-top: -4px;
+.admin-overview__indicator-label {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
-.admin-overview__error-list {
-  margin: 6px 0 0;
-  padding-left: 18px;
+.admin-overview__indicator-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .admin-overview__grid {
@@ -1886,13 +1895,36 @@ button,
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+.admin-overview__grid--balanced {
+  align-items: start;
+}
+
 .admin-overview__activity-row {
   cursor: default;
 }
 
-.admin-overview__chevron {
-  font-size: 14px;
-  color: var(--text-muted);
+.admin-overview__queue-row {
+  gap: 10px;
+  align-items: center;
+  cursor: default;
+}
+
+.admin-overview__queue-main {
+  gap: 10px;
+}
+
+.admin-overview__queue-label {
+  font-weight: 500;
+}
+
+.admin-overview__queue-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-overview__queue-row:hover {
+  border-color: var(--panel-divider);
 }
 
 .severity-dot {
