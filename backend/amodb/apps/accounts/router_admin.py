@@ -8,7 +8,8 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 
@@ -22,11 +23,16 @@ from . import models, schemas, services
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
 RESERVED_PLATFORM_SLUGS = {"system", "root"}
 AMO_ASSET_UPLOAD_DIR = Path(os.getenv("AMO_ASSET_UPLOAD_DIR", "uploads/amo_assets")).resolve()
+PLATFORM_ASSET_UPLOAD_DIR = Path(
+    os.getenv("PLATFORM_ASSET_UPLOAD_DIR", "uploads/platform_assets")
+).resolve()
 TRAINING_UPLOAD_DIR = Path(os.getenv("TRAINING_UPLOAD_DIR", "uploads/training")).resolve()
 AIRCRAFT_DOC_UPLOAD_DIR = Path(
     os.getenv("AIRCRAFT_DOC_UPLOAD_DIR", "/tmp/amo_aircraft_documents")
 ).resolve()
 AIRCRAFT_DOC_AMO_SUBDIR = "aircraft"
+
+ALLOWED_PLATFORM_LOGO_EXTS = {".png", ".jpg", ".jpeg", ".svg"}
 
 
 def _ensure_amo_storage_dirs(amo_id: str) -> None:
@@ -76,6 +82,11 @@ def _parse_env_datetime(value: Optional[str]) -> Optional[datetime]:
 def _platform_settings_defaults() -> dict:
     return {
         "api_base_url": os.getenv("PLATFORM_API_BASE_URL"),
+        "platform_name": os.getenv("PLATFORM_BRAND_NAME", "AMO Portal"),
+        "platform_tagline": os.getenv("PLATFORM_BRAND_TAGLINE"),
+        "brand_accent": os.getenv("PLATFORM_BRAND_ACCENT"),
+        "brand_accent_soft": os.getenv("PLATFORM_BRAND_ACCENT_SOFT"),
+        "brand_accent_secondary": os.getenv("PLATFORM_BRAND_ACCENT_SECONDARY"),
         "acme_directory_url": os.getenv("ACME_DIRECTORY_URL"),
         "acme_client": os.getenv("ACME_CLIENT"),
         "certificate_status": os.getenv("ACME_CERT_STATUS"),
@@ -107,6 +118,40 @@ def _get_or_create_platform_settings(db: Session) -> models.PlatformSettings:
         db.commit()
         db.refresh(settings)
     return settings
+
+
+def _ensure_platform_storage_dir() -> None:
+    PLATFORM_ASSET_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_safe_platform_path(path: Path) -> Path:
+    resolved = path.resolve()
+    if not str(resolved).startswith(str(PLATFORM_ASSET_UPLOAD_DIR)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid platform asset path.",
+        )
+    return resolved
+
+
+def _save_platform_upload(*, file: UploadFile, dest_path: Path) -> None:
+    with dest_path.open("wb") as out:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+
+
+def _delete_platform_asset(path: Optional[str]) -> None:
+    if not path:
+        return
+    try:
+        p = Path(path)
+        if p.exists():
+            p.unlink()
+    except Exception:
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -784,7 +829,13 @@ def update_user_admin(
             )
 
     # NOTE: services.update_user() should also enforce what fields are allowed.
-    user = services.update_user(db, user, payload)
+    try:
+        user = services.update_user(db, user, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
     return user
 
 
@@ -1244,3 +1295,76 @@ def update_platform_settings(
     db.commit()
     db.refresh(settings)
     return settings
+
+
+@router.post(
+    "/platform-assets/logo",
+    response_model=schemas.PlatformSettingsRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload platform logo (superuser only)",
+)
+def upload_platform_logo(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    _ensure_platform_storage_dir()
+
+    filename = file.filename or "platform-logo"
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_PLATFORM_LOGO_EXTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Logo must be one of: .png, .jpg, .jpeg, .svg",
+        )
+
+    settings = _get_or_create_platform_settings(db)
+    asset_id = uuid4().hex
+    dest_path = _ensure_safe_platform_path(
+        PLATFORM_ASSET_UPLOAD_DIR / f"platform_logo_{asset_id}{ext}"
+    )
+
+    _save_platform_upload(file=file, dest_path=dest_path)
+
+    if settings.platform_logo_path:
+        _delete_platform_asset(settings.platform_logo_path)
+
+    settings.platform_logo_path = str(dest_path)
+    settings.platform_logo_filename = filename
+    settings.platform_logo_content_type = file.content_type
+    settings.platform_logo_uploaded_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+@router.get(
+    "/platform-assets/logo",
+    response_class=FileResponse,
+    summary="Download platform logo (superuser only)",
+)
+def download_platform_logo(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    settings = _get_or_create_platform_settings(db)
+    if not settings.platform_logo_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No platform logo configured.",
+        )
+
+    path = _ensure_safe_platform_path(Path(settings.platform_logo_path))
+    if not path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Platform logo asset not found.",
+        )
+
+    return FileResponse(
+        path=str(path),
+        media_type=settings.platform_logo_content_type or "application/octet-stream",
+        filename=settings.platform_logo_filename or path.name,
+    )

@@ -7,6 +7,7 @@
  */
 
 import { getApiBaseUrl } from "./config";
+import { clearBrandContext, setBrandContext } from "./branding";
 
 const TOKEN_KEY = "amo_portal_token";
 const AMO_KEY = "amo_code";
@@ -19,6 +20,12 @@ const LAST_LOGIN_IDENTIFIER_KEY = "amo_last_login_identifier";
 
 // Shared with adminUsers.ts enhancements (kept as a plain key to avoid circular imports)
 const ACTIVE_AMO_ID_KEY = "amodb_active_amo_id";
+
+export function normalizeDepartmentCode(value?: string | null): string | null {
+  const v = (value || "").trim();
+  if (!v) return null;
+  return v.toLowerCase();
+}
 
 /**
  * These mirror the backend enums in accounts.models.
@@ -151,7 +158,8 @@ export function setContext(
   if (amoSlug) localStorage.setItem(AMO_SLUG_KEY, amoSlug);
   else localStorage.removeItem(AMO_SLUG_KEY);
 
-  if (departmentCode) localStorage.setItem(DEPT_KEY, departmentCode);
+  const normalizedDepartment = normalizeDepartmentCode(departmentCode);
+  if (normalizedDepartment) localStorage.setItem(DEPT_KEY, normalizedDepartment);
   else localStorage.removeItem(DEPT_KEY);
 }
 
@@ -160,10 +168,11 @@ export function getContext(): {
   amoSlug: string | null;
   department: string | null;
 } {
+  const department = normalizeDepartmentCode(localStorage.getItem(DEPT_KEY));
   return {
     amoCode: localStorage.getItem(AMO_KEY),
     amoSlug: localStorage.getItem(AMO_SLUG_KEY),
-    department: localStorage.getItem(DEPT_KEY),
+    department,
   };
 }
 
@@ -352,11 +361,15 @@ export async function login(
       data.department ? data.department.code : null,
       data.amo.login_slug
     );
+    setBrandContext({
+      name: data.amo.name,
+    });
     // Track currently active AMO id (useful later for SUPERUSER support workflows)
     setActiveAmoId(data.amo.id);
   } else {
     clearContext();
     clearActiveAmoId();
+    clearBrandContext();
   }
 
   if (data.user) {
@@ -526,6 +539,7 @@ export function logout(): void {
   clearContext();
   clearCachedUser();
   clearActiveAmoId();
+  clearBrandContext();
   clearOnboardingStatus();
 }
 

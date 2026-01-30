@@ -187,3 +187,29 @@ export async function downloadAmoAsset(
     xhr.send();
   });
 }
+
+export async function fetchAmoLogoBlob(amoId?: string | null): Promise<Blob | null> {
+  const res = await fetch(
+    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/logo`, amoId),
+    {
+      method: "GET",
+      headers: authHeaders(),
+    }
+  );
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (res.status === 404) {
+    return null;
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Request failed (${res.status})`);
+  }
+
+  return await res.blob();
+}
