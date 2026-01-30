@@ -966,6 +966,25 @@ const DepartmentLayout: React.FC<Props> = ({
             </>
           )}
 
+          {!isAdminArea &&
+            (activeDepartment === "production" ||
+              activeDepartment === "engineering") && (
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/maintenance/${amoCode}/${activeDepartment}/work-orders`)
+                }
+                className={
+                  "sidebar__item" +
+                  (isWorkOrdersRoute ? " sidebar__item--active" : "")
+                }
+                aria-label="Work Orders"
+                title="Work Orders"
+              >
+                <span className="sidebar__item-label">Work Orders</span>
+              </button>
+            )}
+
           {!isAdminArea && (
             <button
               type="button"

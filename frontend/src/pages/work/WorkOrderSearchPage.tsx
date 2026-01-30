@@ -5,8 +5,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { getContext } from "../../services/auth";
 import {
+  createWorkOrder,
   getWorkOrderByNumber,
   listWorkOrders,
+  type WorkOrderCreatePayload,
   type WorkOrderRead,
   type WorkOrderStatus,
   type WorkOrderType,
@@ -26,6 +28,18 @@ type Filters = {
   dateTo: string;
 };
 
+type CreateForm = {
+  woNumber: string;
+  aircraftSerial: string;
+  description: string;
+  checkType: string;
+  woType: WorkOrderType | "";
+  status: WorkOrderStatus | "";
+  isScheduled: boolean;
+  dueDate: string;
+  openDate: string;
+};
+
 const DEFAULT_FILTERS: Filters = {
   woNumber: "",
   aircraftSerial: "",
@@ -33,6 +47,18 @@ const DEFAULT_FILTERS: Filters = {
   type: "",
   dateFrom: "",
   dateTo: "",
+};
+
+const DEFAULT_CREATE_FORM: CreateForm = {
+  woNumber: "",
+  aircraftSerial: "",
+  description: "",
+  checkType: "",
+  woType: "PERIODIC",
+  status: "DRAFT",
+  isScheduled: true,
+  dueDate: "",
+  openDate: "",
 };
 
 const STATUS_OPTIONS: Array<{ value: WorkOrderStatus; label: string }> = [
@@ -54,9 +80,11 @@ const WorkOrderSearchPage: React.FC = () => {
   const context = getContext();
   const navigate = useNavigate();
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [createForm, setCreateForm] = useState<CreateForm>(DEFAULT_CREATE_FORM);
   const [results, setResults] = useState<WorkOrderRead[]>([]);
   const [selected, setSelected] = useState<WorkOrderRead | null>(null);
   const [loading, setLoading] = useState(false);
+  const [createLoading, setCreateLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -103,9 +131,58 @@ const WorkOrderSearchPage: React.FC = () => {
     setFilters((prev) => ({ ...prev, [key]: e.target.value }));
   };
 
+  const handleCreateChange =
+    (key: keyof CreateForm) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      const value =
+        e.target.type === "checkbox"
+          ? (e.target as HTMLInputElement).checked
+          : e.target.value;
+      setCreateForm((prev) => ({ ...prev, [key]: value as CreateForm[typeof key] }));
+    };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     fetchWorkOrders();
+  };
+
+  const handleCreateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const payload: WorkOrderCreatePayload = {
+        wo_number: createForm.woNumber.trim(),
+        aircraft_serial_number: createForm.aircraftSerial.trim(),
+        description: createForm.description.trim() || null,
+        check_type: createForm.checkType.trim() || null,
+        wo_type: createForm.woType || "PERIODIC",
+        status: createForm.status || "DRAFT",
+        is_scheduled: createForm.isScheduled,
+        due_date: createForm.dueDate || null,
+        open_date: createForm.openDate || null,
+      };
+
+      if (!payload.wo_number || !payload.aircraft_serial_number) {
+        setError("WO number and aircraft serial are required.");
+        return;
+      }
+
+      const created = await createWorkOrder(payload);
+      setNotice(`Work order ${created.wo_number || payload.wo_number} created.`);
+      setCreateForm(DEFAULT_CREATE_FORM);
+      setSelected(created);
+      setResults((prev) => {
+        const exists = prev.some((item) => item.id === created.id);
+        return exists ? prev : [created, ...prev];
+      });
+    } catch (e: any) {
+      console.error("Failed to create work order", e);
+      setError(e?.message || "Could not create work order.");
+    } finally {
+      setCreateLoading(false);
+    }
   };
 
   const handleClear = () => {
@@ -193,6 +270,89 @@ const WorkOrderSearchPage: React.FC = () => {
               </button>
               <button type="button" className="btn btn-secondary" onClick={handleClear}>
                 Clear
+              </button>
+            </div>
+          </form>
+
+          <form className="work-orders-panel" onSubmit={handleCreateSubmit}>
+            <h2 className="work-orders-panel__title">Create work order</h2>
+            <div className="form-grid">
+              <label>
+                WO Number
+                <input
+                  type="text"
+                  value={createForm.woNumber}
+                  onChange={handleCreateChange("woNumber")}
+                  placeholder="WO-1234"
+                />
+              </label>
+              <label>
+                Aircraft Serial
+                <input
+                  type="text"
+                  value={createForm.aircraftSerial}
+                  onChange={handleCreateChange("aircraftSerial")}
+                  placeholder="Aircraft serial"
+                />
+              </label>
+              <label>
+                Description
+                <input
+                  type="text"
+                  value={createForm.description}
+                  onChange={handleCreateChange("description")}
+                  placeholder="Brief scope"
+                />
+              </label>
+              <label>
+                Check Type
+                <input
+                  type="text"
+                  value={createForm.checkType}
+                  onChange={handleCreateChange("checkType")}
+                  placeholder="A, C, 200HR"
+                />
+              </label>
+              <label>
+                Work Order Type
+                <select value={createForm.woType} onChange={handleCreateChange("woType")}>
+                  {TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Status
+                <select value={createForm.status} onChange={handleCreateChange("status")}>
+                  {STATUS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Due Date
+                <input type="date" value={createForm.dueDate} onChange={handleCreateChange("dueDate")} />
+              </label>
+              <label>
+                Open Date
+                <input type="date" value={createForm.openDate} onChange={handleCreateChange("openDate")} />
+              </label>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={createForm.isScheduled}
+                  onChange={handleCreateChange("isScheduled")}
+                />
+                Scheduled work order
+              </label>
+            </div>
+            <div className="page-section__actions">
+              <button type="submit" className="btn btn-primary" disabled={createLoading}>
+                {createLoading ? "Creating…" : "Create work order"}
               </button>
             </div>
           </form>

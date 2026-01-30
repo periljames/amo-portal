@@ -2405,7 +2405,7 @@ button,
 
 .work-orders-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 280px) minmax(220px, 280px) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -2474,6 +2474,17 @@ button,
   border-color: var(--accent-primary);
   color: var(--text-primary);
   background: rgba(56, 189, 248, 0.15);
+}
+
+.btn-small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .collapse-card {
