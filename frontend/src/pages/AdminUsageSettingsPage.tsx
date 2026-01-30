@@ -358,31 +358,49 @@ const AdminUsageSettingsPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoCode ?? "UNKNOWN"} activeDepartment="admin-settings">
-      <div className="admin-page">
+      <div className="admin-page admin-usage-settings">
         <PageHeader
           title="Platform settings & diagnostics"
           subtitle="Manage branding, connectivity checks, and operational throttles from one place."
         />
 
+        <div className="admin-summary-strip">
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Active AMO</span>
+            <span className="admin-summary-item__value">
+              {selectedAmoId ? "Selected" : "Unset"}
+            </span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Users loaded</span>
+            <span className="admin-summary-item__value">{users.length}</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">AMO throttle</span>
+            <span className="admin-summary-item__value">{amoThrottle}%</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Branding</span>
+            <span className="admin-summary-item__value">
+              {platformSettings?.platform_logo_filename ? "Logo set" : "Default"}
+            </span>
+          </div>
+        </div>
+
         {activeFilter && (
-          <InlineAlert
-            tone="warning"
-            title="Filter applied"
-            actions={(
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/admin/settings`, { replace: true })
-                }
-              >
-                Clear filter
-              </Button>
-            )}
-          >
+          <div className="admin-filter-banner">
             <span>{activeFilter.replace(/_/g, " ")}</span>
-          </InlineAlert>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                navigate(`/maintenance/${amoCode}/admin/settings`, { replace: true })
+              }
+            >
+              Clear filter
+            </Button>
+          </div>
         )}
 
         {error && (
@@ -391,333 +409,391 @@ const AdminUsageSettingsPage: React.FC = () => {
           </InlineAlert>
         )}
 
-        {isSuperuser && (
-          <Panel
-            title="Platform branding"
-            subtitle="Update the platform name, tagline, colors, and logo used across the portal."
-          >
-            <div className="form-row">
-              <label htmlFor="platformName">Platform name</label>
-              <input
-                id="platformName"
-                type="text"
-                value={brandingDraft.platform_name}
-                onChange={(e) =>
-                  setBrandingDraft((prev) => ({ ...prev, platform_name: e.target.value }))
-                }
-              />
-            </div>
-            <div className="form-row">
-              <label htmlFor="platformTagline">Footer tagline</label>
-              <input
-                id="platformTagline"
-                type="text"
-                placeholder="Trusted maintenance management for modern AMOs."
-                value={brandingDraft.platform_tagline}
-                onChange={(e) =>
-                  setBrandingDraft((prev) => ({ ...prev, platform_tagline: e.target.value }))
-                }
-              />
-            </div>
-            <div className="form-row" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-              <div>
-                <label htmlFor="brandAccent">Brand accent</label>
-                <input
-                  id="brandAccent"
-                  type="color"
-                  value={brandingDraft.brand_accent || "#2563eb"}
-                  onChange={(e) =>
-                    setBrandingDraft((prev) => ({ ...prev, brand_accent: e.target.value }))
-                  }
-                />
-              </div>
-              <div>
-                <label htmlFor="brandAccentSecondary">Secondary accent</label>
-                <input
-                  id="brandAccentSecondary"
-                  type="color"
-                  value={brandingDraft.brand_accent_secondary || "#1d4ed8"}
-                  onChange={(e) =>
-                    setBrandingDraft((prev) => ({
-                      ...prev,
-                      brand_accent_secondary: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="form-row">
-              <label htmlFor="brandAccentSoft">Accent soft (rgba)</label>
-              <input
-                id="brandAccentSoft"
-                type="text"
-                placeholder="rgba(37, 99, 235, 0.12)"
-                value={brandingDraft.brand_accent_soft}
-                onChange={(e) =>
-                  setBrandingDraft((prev) => ({
-                    ...prev,
-                    brand_accent_soft: e.target.value,
-                  }))
-                }
-              />
-              <p className="text-muted" style={{ margin: 0 }}>
-                Used for subtle highlights and focus rings.
-              </p>
-            </div>
-            <div className="form-row">
-              <label htmlFor="platformLogo">Platform logo (.png, .jpg, .svg)</label>
-              <input
-                id="platformLogo"
-                type="file"
-                accept=".png,.jpg,.jpeg,.svg"
-                onChange={(e) => handlePlatformLogoUpload(e.target.files)}
-              />
-              {platformSettings?.platform_logo_filename && (
-                <p className="text-muted" style={{ margin: 0 }}>
-                  Current logo: {platformSettings.platform_logo_filename}
-                </p>
-              )}
-              {platformLogoUrl && (
-                <img
-                  src={platformLogoUrl}
-                  alt="Platform logo preview"
-                  style={{
-                    maxWidth: 220,
-                    borderRadius: 10,
-                    border: "1px solid var(--panel-divider)",
-                  }}
-                />
-              )}
-            </div>
-            <div className="form-row" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <Button type="button" onClick={handleSaveBranding} disabled={brandingSaving}>
-                {brandingSaving ? "Saving..." : "Save branding"}
-              </Button>
-              {brandingMessage && <span className="text-muted">{brandingMessage}</span>}
-            </div>
-          </Panel>
-        )}
+        <div className="admin-page__grid">
+          <div className="admin-page__main">
+            <Panel
+              title="Per-user throttling"
+              subtitle="Apply per-user budgets to keep heavy calendar usage under control."
+            >
+              {loading && <p className="text-muted">Loading users…</p>}
 
-        <Panel
-          title="AMO scope"
-          subtitle="Superusers can throttle any AMO; AMO admins can tune only their own AMO."
-        >
-          {isSuperuser && (
-            <div className="form-row">
-              <label htmlFor="amoSelect">Active AMO</label>
-              <select
-                id="amoSelect"
-                value={selectedAmoId ?? ""}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setSelectedAmoId(next);
-                  localStorage.setItem(LS_ACTIVE_AMO_ID, next);
-                }}
-                disabled={amos.length === 0}
+              {!loading && users.length === 0 && (
+                <p className="text-muted">No users found for this AMO.</p>
+              )}
+
+              {users.length > 0 && (
+                <div className="table-responsive">
+                  <Table className="table-compact">
+                    <thead>
+                      <tr>
+                        <th>User</th>
+                        <th>Role</th>
+                        <th>Throttle</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.map((user) => {
+                        const userThrottle =
+                          store.amo[selectedAmoId ?? ""]?.perUser[user.id] ?? amoThrottle;
+                        return (
+                          <tr key={user.id}>
+                            <td>
+                              {user.full_name || `${user.first_name} ${user.last_name}`} ·{" "}
+                              {user.email}
+                            </td>
+                            <td>{user.role}</td>
+                            <td style={{ minWidth: 220 }}>
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                value={userThrottle}
+                                onChange={(e) =>
+                                  updateUserThrottle(user.id, Number(e.target.value))
+                                }
+                              />
+                              <span style={{ marginLeft: 8 }}>{userThrottle}%</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </Table>
+                </div>
+              )}
+            </Panel>
+
+            {isSuperuser && (
+              <Panel
+                title="Platform branding"
+                subtitle="Update the platform name, tagline, colors, and logo."
               >
-                {amos.map((amo) => (
-                  <option key={amo.id} value={amo.id}>
-                    {amo.amo_code} — {amo.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+                <details className="admin-disclosure" open={!!brandingMessage}>
+                  <summary>Brand settings</summary>
+                  <div className="admin-disclosure__content">
+                    <div className="form-row">
+                      <label htmlFor="platformName">Platform name</label>
+                      <input
+                        id="platformName"
+                        type="text"
+                        value={brandingDraft.platform_name}
+                        onChange={(e) =>
+                          setBrandingDraft((prev) => ({
+                            ...prev,
+                            platform_name: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label htmlFor="platformTagline">Footer tagline</label>
+                      <input
+                        id="platformTagline"
+                        type="text"
+                        placeholder="Trusted maintenance management for modern AMOs."
+                        value={brandingDraft.platform_tagline}
+                        onChange={(e) =>
+                          setBrandingDraft((prev) => ({
+                            ...prev,
+                            platform_tagline: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div
+                      className="form-row"
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                        gap: 12,
+                      }}
+                    >
+                      <div>
+                        <label htmlFor="brandAccent">Brand accent</label>
+                        <input
+                          id="brandAccent"
+                          type="color"
+                          value={brandingDraft.brand_accent || "#2563eb"}
+                          onChange={(e) =>
+                            setBrandingDraft((prev) => ({
+                              ...prev,
+                              brand_accent: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="brandAccentSecondary">Secondary accent</label>
+                        <input
+                          id="brandAccentSecondary"
+                          type="color"
+                          value={brandingDraft.brand_accent_secondary || "#1d4ed8"}
+                          onChange={(e) =>
+                            setBrandingDraft((prev) => ({
+                              ...prev,
+                              brand_accent_secondary: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <label htmlFor="brandAccentSoft">Accent soft (rgba)</label>
+                      <input
+                        id="brandAccentSoft"
+                        type="text"
+                        placeholder="rgba(37, 99, 235, 0.12)"
+                        value={brandingDraft.brand_accent_soft}
+                        onChange={(e) =>
+                          setBrandingDraft((prev) => ({
+                            ...prev,
+                            brand_accent_soft: e.target.value,
+                          }))
+                        }
+                      />
+                      <p className="text-muted" style={{ margin: 0 }}>
+                        Used for subtle highlights and focus rings.
+                      </p>
+                    </div>
+                    <div className="form-row">
+                      <label htmlFor="platformLogo">Platform logo (.png, .jpg, .svg)</label>
+                      <input
+                        id="platformLogo"
+                        type="file"
+                        accept=".png,.jpg,.jpeg,.svg"
+                        onChange={(e) => handlePlatformLogoUpload(e.target.files)}
+                      />
+                      {platformSettings?.platform_logo_filename && (
+                        <p className="text-muted" style={{ margin: 0 }}>
+                          Current logo: {platformSettings.platform_logo_filename}
+                        </p>
+                      )}
+                      {platformLogoUrl && (
+                        <img
+                          src={platformLogoUrl}
+                          alt="Platform logo preview"
+                          style={{
+                            maxWidth: 220,
+                            borderRadius: 10,
+                            border: "1px solid var(--panel-divider)",
+                          }}
+                        />
+                      )}
+                    </div>
+                    <div
+                      className="form-row"
+                      style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
+                    >
+                      <Button
+                        type="button"
+                        onClick={handleSaveBranding}
+                        disabled={brandingSaving}
+                      >
+                        {brandingSaving ? "Saving..." : "Save branding"}
+                      </Button>
+                      {brandingMessage && (
+                        <span className="text-muted">{brandingMessage}</span>
+                      )}
+                    </div>
+                  </div>
+                </details>
+              </Panel>
+            )}
 
-          <div className="form-row" style={{ marginTop: 12 }}>
-            <label className="form-control range-control">
-              <span>AMO calendar sync budget</span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={amoThrottle}
-                onChange={(e) => updateAmoThrottle(Number(e.target.value))}
-              />
-              <strong>{amoThrottle}%</strong>
-            </label>
-            <p className="text-muted" style={{ margin: 0 }}>
-              Lower values reduce sync frequency and prioritize cached data.
-            </p>
+            {isSuperuser && (
+              <Panel
+                title="HTTPS & connectivity diagnostics"
+                subtitle="Configure the API base URL and run a health check."
+              >
+                <details className="admin-disclosure">
+                  <summary>Diagnostics</summary>
+                  <div className="admin-disclosure__content">
+                    <div className="form-row">
+                      <label htmlFor="apiBaseUrl">API base URL (HTTPS)</label>
+                      <input
+                        id="apiBaseUrl"
+                        type="url"
+                        placeholder="https://api.example.com"
+                        value={apiBaseDraft}
+                        onChange={(e) => setApiBaseDraft(e.target.value)}
+                      />
+                      <p className="text-muted" style={{ marginTop: 6 }}>
+                        Current default: <strong>{getApiBaseUrl()}</strong>
+                      </p>
+                    </div>
+
+                    <div
+                      className="form-row"
+                      style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
+                    >
+                      <Button type="button" onClick={handleSaveApiBase}>
+                        Save override
+                      </Button>
+                      <Button type="button" variant="secondary" onClick={handleClearApiBase}>
+                        Clear override
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          window.open("https://www.speedtest.net/", "_blank", "noopener")
+                        }
+                      >
+                        Run Ookla speed test
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={runHealthCheck}
+                        disabled={healthLoading}
+                      >
+                        {healthLoading ? "Running..." : "Run health check"}
+                      </Button>
+                    </div>
+
+                    {apiBaseMessage && (
+                      <p className="text-muted" style={{ marginTop: 8 }}>
+                        {apiBaseMessage}
+                      </p>
+                    )}
+
+                    {healthStatus && (
+                      <InlineAlert tone="info" title="Health check">
+                        <span>{healthStatus}</span>
+                      </InlineAlert>
+                    )}
+
+                    <div className="admin-panel" style={{ marginTop: 16 }}>
+                      <h4 style={{ marginTop: 0 }}>ACME / Let’s Encrypt status</h4>
+                      {platformLoading && <p className="text-muted">Loading status…</p>}
+                      {!platformLoading && (
+                        <dl style={{ display: "grid", gap: 8, margin: 0 }}>
+                          <div>
+                            <dt>ACME client</dt>
+                            <dd>{platformSettings?.acme_client || "Not set"}</dd>
+                          </div>
+                          <div>
+                            <dt>Directory URL</dt>
+                            <dd>{platformSettings?.acme_directory_url || "Not set"}</dd>
+                          </div>
+                          <div>
+                            <dt>Certificate status</dt>
+                            <dd>{platformSettings?.certificate_status || "Not set"}</dd>
+                          </div>
+                          <div>
+                            <dt>Issuer</dt>
+                            <dd>{platformSettings?.certificate_issuer || "Not set"}</dd>
+                          </div>
+                          <div>
+                            <dt>Expires at</dt>
+                            <dd>{formatTimestamp(platformSettings?.certificate_expires_at)}</dd>
+                          </div>
+                          <div>
+                            <dt>Last renewed</dt>
+                            <dd>{formatTimestamp(platformSettings?.last_renewed_at)}</dd>
+                          </div>
+                        </dl>
+                      )}
+                    </div>
+                  </div>
+                </details>
+              </Panel>
+            )}
           </div>
 
-          <label className="form-control" style={{ marginTop: 12 }}>
-            <span>Use holiday cache (24h)</span>
-            <select
-              value={store.cacheHolidays ? "enabled" : "disabled"}
-              onChange={(e) =>
-                setStore((prev) => ({
-                  ...prev,
-                  cacheHolidays: e.target.value === "enabled",
-                }))
-              }
+          <div className="admin-page__side">
+            <Panel
+              title="AMO scope"
+              subtitle="Superusers can throttle any AMO; AMO admins can tune only their own."
             >
-              <option value="enabled">Enabled</option>
-              <option value="disabled">Disabled</option>
-            </select>
-          </label>
-        </Panel>
-
-        {isSuperuser && (
-          <Panel
-            title="Setup shortcuts"
-            subtitle="Jump directly to AMO setup, user provisioning, and asset templates."
-          >
-            <div className="page-section__actions">
-              <Button type="button" variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}>
-                AMO Management
-              </Button>
-              <Button type="button" variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/admin/users`)}>
-                User Management
-              </Button>
-              <Button type="button" variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/admin/amo-assets`)}>
-                AMO Assets & Templates
-              </Button>
-            </div>
-          </Panel>
-        )}
-
-        <Panel
-          title="Per-user throttling"
-          subtitle="Apply per-user budgets to keep heavy calendar usage under control."
-        >
-          {loading && <p className="text-muted">Loading users…</p>}
-
-          {!loading && users.length === 0 && (
-            <p className="text-muted">No users found for this AMO.</p>
-          )}
-
-          {users.length > 0 && (
-            <div className="table-responsive">
-              <Table className="table-compact">
-                <thead>
-                  <tr>
-                    <th>User</th>
-                    <th>Role</th>
-                    <th>Throttle</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((user) => {
-                    const userThrottle =
-                      store.amo[selectedAmoId ?? ""]?.perUser[user.id] ?? amoThrottle;
-                    return (
-                      <tr key={user.id}>
-                        <td>
-                          {user.full_name || `${user.first_name} ${user.last_name}`} ·{" "}
-                          {user.email}
-                        </td>
-                        <td>{user.role}</td>
-                        <td style={{ minWidth: 220 }}>
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            value={userThrottle}
-                            onChange={(e) =>
-                              updateUserThrottle(user.id, Number(e.target.value))
-                            }
-                          />
-                          <span style={{ marginLeft: 8 }}>{userThrottle}%</span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </Table>
-            </div>
-          )}
-        </Panel>
-
-        {isSuperuser && (
-          <Panel
-            title="HTTPS & connectivity diagnostics"
-            subtitle="Configure the API base URL used by the portal and run a health check. Settings are stored server-side for all sessions."
-          >
-            <div className="form-row">
-              <label htmlFor="apiBaseUrl">API base URL (HTTPS)</label>
-              <input
-                id="apiBaseUrl"
-                type="url"
-                placeholder="https://api.example.com"
-                value={apiBaseDraft}
-                onChange={(e) => setApiBaseDraft(e.target.value)}
-              />
-              <p className="text-muted" style={{ marginTop: 6 }}>
-                Current default: <strong>{getApiBaseUrl()}</strong>
-              </p>
-            </div>
-
-            <div className="form-row" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <Button type="button" onClick={handleSaveApiBase}>
-                Save override
-              </Button>
-              <Button type="button" variant="secondary" onClick={handleClearApiBase}>
-                Clear override
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => window.open("https://www.speedtest.net/", "_blank", "noopener")}
-              >
-                Run Ookla speed test
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={runHealthCheck}
-                disabled={healthLoading}
-              >
-                {healthLoading ? "Running..." : "Run health check"}
-              </Button>
-            </div>
-
-            {apiBaseMessage && (
-              <p className="text-muted" style={{ marginTop: 8 }}>
-                {apiBaseMessage}
-              </p>
-            )}
-
-            {healthStatus && (
-              <InlineAlert tone="info" title="Health check">
-                <span>{healthStatus}</span>
-              </InlineAlert>
-            )}
-
-            <div className="admin-panel" style={{ marginTop: 16 }}>
-              <h4 style={{ marginTop: 0 }}>ACME / Let’s Encrypt status</h4>
-              {platformLoading && <p className="text-muted">Loading status…</p>}
-              {!platformLoading && (
-                <dl style={{ display: "grid", gap: 8, margin: 0 }}>
-                  <div>
-                    <dt>ACME client</dt>
-                    <dd>{platformSettings?.acme_client || "Not set"}</dd>
-                  </div>
-                  <div>
-                    <dt>Directory URL</dt>
-                    <dd>{platformSettings?.acme_directory_url || "Not set"}</dd>
-                  </div>
-                  <div>
-                    <dt>Certificate status</dt>
-                    <dd>{platformSettings?.certificate_status || "Not set"}</dd>
-                  </div>
-                  <div>
-                    <dt>Issuer</dt>
-                    <dd>{platformSettings?.certificate_issuer || "Not set"}</dd>
-                  </div>
-                  <div>
-                    <dt>Expires at</dt>
-                    <dd>{formatTimestamp(platformSettings?.certificate_expires_at)}</dd>
-                  </div>
-                  <div>
-                    <dt>Last renewed</dt>
-                    <dd>{formatTimestamp(platformSettings?.last_renewed_at)}</dd>
-                  </div>
-                </dl>
+              {isSuperuser && (
+                <div className="form-row">
+                  <label htmlFor="amoSelect">Active AMO</label>
+                  <select
+                    id="amoSelect"
+                    value={selectedAmoId ?? ""}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setSelectedAmoId(next);
+                      localStorage.setItem(LS_ACTIVE_AMO_ID, next);
+                    }}
+                    disabled={amos.length === 0}
+                  >
+                    {amos.map((amo) => (
+                      <option key={amo.id} value={amo.id}>
+                        {amo.amo_code} — {amo.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
-            </div>
-          </Panel>
-        )}
+
+              <div className="form-row" style={{ marginTop: 12 }}>
+                <label className="form-control range-control">
+                  <span>AMO calendar sync budget</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={amoThrottle}
+                    onChange={(e) => updateAmoThrottle(Number(e.target.value))}
+                  />
+                  <strong>{amoThrottle}%</strong>
+                </label>
+                <p className="text-muted" style={{ margin: 0 }}>
+                  Lower values reduce sync frequency and prioritize cached data.
+                </p>
+              </div>
+
+              <label className="form-control" style={{ marginTop: 12 }}>
+                <span>Use holiday cache (24h)</span>
+                <select
+                  value={store.cacheHolidays ? "enabled" : "disabled"}
+                  onChange={(e) =>
+                    setStore((prev) => ({
+                      ...prev,
+                      cacheHolidays: e.target.value === "enabled",
+                    }))
+                  }
+                >
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+            </Panel>
+
+            {isSuperuser && (
+              <Panel
+                title="Setup shortcuts"
+                subtitle="Jump directly to AMO setup and provisioning."
+              >
+                <div className="page-section__actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => navigate(`/maintenance/${amoCode}/admin/amos`)}
+                  >
+                    AMO Management
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => navigate(`/maintenance/${amoCode}/admin/users`)}
+                  >
+                    User Management
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => navigate(`/maintenance/${amoCode}/admin/amo-assets`)}
+                  >
+                    AMO Assets & Templates
+                  </Button>
+                </div>
+              </Panel>
+            )}
+          </div>
+        </div>
       </div>
     </DepartmentLayout>
   );

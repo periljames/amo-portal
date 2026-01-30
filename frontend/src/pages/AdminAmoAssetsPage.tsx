@@ -337,6 +337,8 @@ const AdminAmoAssetsPage: React.FC = () => {
   const templateStatus = assets?.crs_template_filename
     ? `Uploaded: ${assets.crs_template_filename}`
     : "No template uploaded";
+  const logoStateLabel = assets?.crs_logo_filename ? "Uploaded" : "Missing";
+  const templateStateLabel = assets?.crs_template_filename ? "Uploaded" : "Missing";
   const userDisplayName = currentUser?.full_name || currentUser?.email;
 
   return (
@@ -354,288 +356,309 @@ const AdminAmoAssetsPage: React.FC = () => {
           }
         />
 
-        {activeFilter === "inactive" && (
-          <Panel
-            title="Inactive assets"
-            subtitle="Review assets marked inactive for this AMO."
-            actions={(
-              <Button type="button" size="sm" variant="secondary" onClick={clearFilter}>
-                Clear filter
-              </Button>
-            )}
-          >
-            {inactiveAssetsError && (
-              <InlineAlert tone="danger" title="Error">
-                <span>{inactiveAssetsError}</span>
-              </InlineAlert>
-            )}
-            {!inactiveAssetsError && inactiveAssets.length === 0 && (
-              <p className="admin-muted">No inactive assets found.</p>
-            )}
-            {!inactiveAssetsError && inactiveAssets.length > 0 && (
-              <ul className="admin-list">
-                {inactiveAssets.map((asset) => (
-                  <li key={asset.id}>
-                    <div className="admin-list__row admin-overview__activity-row">
-                      <div>
-                        <strong>{asset.name || asset.kind}</strong>
-                        <div className="admin-muted">
-                          {asset.original_filename || "Unnamed asset"}
-                        </div>
-                      </div>
-                      <span className="admin-muted">
-                        {asset.updated_at
-                          ? new Date(asset.updated_at).toLocaleString()
-                          : "—"}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
-        )}
+        <div className="admin-summary-strip">
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Logo</span>
+            <span className="admin-summary-item__value">{logoStateLabel}</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Template</span>
+            <span className="admin-summary-item__value">{templateStateLabel}</span>
+          </div>
+          <div className="admin-summary-item">
+            <span className="admin-summary-item__label">Inactive assets</span>
+            <span className="admin-summary-item__value">{inactiveAssets.length}</span>
+          </div>
+        </div>
 
-        {isSuperuser && (
-          <Panel title="Support mode (SUPERUSER)">
-            {amoLoading && <p>Loading AMOs…</p>}
-            {amoError && (
-              <InlineAlert tone="danger" title="Error">
-                <span>{amoError}</span>
-              </InlineAlert>
-            )}
-
-            {!amoLoading && !amoError && (
-              <div className="form-row">
-                <label htmlFor="amoSelect">Active AMO</label>
-                <select
-                  id="amoSelect"
-                  value={effectiveAmoId ?? ""}
-                  onChange={(e) => handleAmoChange(e.target.value)}
-                  disabled={amos.length === 0}
-                >
-                  {amos.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.amo_code} — {a.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </Panel>
-        )}
-
-        <Panel title="Current configuration">
-          {loading && <p>Loading assets…</p>}
-          {error && (
-            <InlineAlert tone="danger" title="Error">
-              <span>{error}</span>
-            </InlineAlert>
-          )}
-
-          {!loading && (
-            <>
-              <div className="asset-row">
-                <div className="asset-info">
-                  <strong>CRS Logo</strong>
-                  <p>{logoStatus}</p>
-                  {assets?.crs_logo_uploaded_at && (
-                    <p className="asset-meta">
-                      Uploaded at {new Date(assets.crs_logo_uploaded_at).toLocaleString()}
-                    </p>
-                  )}
-                </div>
-                <div className="asset-actions">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={!assets?.crs_logo_filename}
-                    onClick={() => handlePreview("logo")}
-                  >
-                    View logo
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={!assets?.crs_logo_filename}
-                    onClick={() => handleDownload("logo")}
-                  >
-                    Download logo
-                  </Button>
-                </div>
-              </div>
-              {downloadProgress?.kind === "logo" && (
-                <div className="asset-progress">
-                  <div>
-                    <strong>Logo download</strong>
-                    {downloadProgress.progress.percent !== undefined && (
-                      <progress
-                        value={downloadProgress.progress.percent}
-                        max={100}
-                        className="asset-progress__bar"
-                      />
-                    )}
-                    <p className="asset-meta">{formatSpeed(downloadProgress.progress)}</p>
-                  </div>
-                </div>
+        <div className="admin-page__grid">
+          <div className="admin-page__main">
+            <Panel title="Current configuration">
+              {loading && <p>Loading assets…</p>}
+              {error && (
+                <InlineAlert tone="danger" title="Error">
+                  <span>{error}</span>
+                </InlineAlert>
               )}
-              <div className="asset-row">
-                <div className="asset-info">
-                  <strong>CRS Template</strong>
-                  <p>{templateStatus}</p>
-                  {assets?.crs_template_uploaded_at && (
-                    <p className="asset-meta">
-                      Uploaded at {new Date(assets.crs_template_uploaded_at).toLocaleString()}
-                    </p>
-                  )}
-                </div>
-                <div className="asset-actions">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={!assets?.crs_template_filename}
-                    onClick={() => handlePreview("template")}
-                  >
-                    View template
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={!assets?.crs_template_filename}
-                    onClick={() => handleDownload("template")}
-                  >
-                    Download template
-                  </Button>
-                </div>
-              </div>
-              {downloadProgress?.kind === "template" && (
-                <div className="asset-progress">
-                  <div>
-                    <strong>Template download</strong>
-                    {downloadProgress.progress.percent !== undefined && (
-                      <progress
-                        value={downloadProgress.progress.percent}
-                        max={100}
-                        className="asset-progress__bar"
-                      />
-                    )}
-                    <p className="asset-meta">{formatSpeed(downloadProgress.progress)}</p>
-                  </div>
-                </div>
-              )}
-              {previewAsset && (
-                <div className="asset-preview">
-                  <div className="asset-preview__body">
-                    <strong className="asset-preview__title">
-                      Previewing {previewAsset.kind === "logo" ? "Logo" : "Template"}:{" "}
-                      {previewAsset.name}
-                    </strong>
-                    <div className="asset-preview__frame">
-                      {previewAsset.kind === "logo" ? (
-                        <img
-                          src={previewAsset.url}
-                          alt="CRS logo preview"
-                          className="asset-preview__image"
-                        />
-                      ) : (
-                        <iframe
-                          src={previewAsset.url}
-                          title="CRS template preview"
-                          className="asset-preview__document"
-                        />
+
+              {!loading && (
+                <>
+                  <div className="asset-row">
+                    <div className="asset-info">
+                      <strong>CRS Logo</strong>
+                      <p>{logoStatus}</p>
+                      {assets?.crs_logo_uploaded_at && (
+                        <p className="asset-meta">
+                          Uploaded at {new Date(assets.crs_logo_uploaded_at).toLocaleString()}
+                        </p>
                       )}
                     </div>
+                    <div className="asset-actions">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={!assets?.crs_logo_filename}
+                        onClick={() => handlePreview("logo")}
+                      >
+                        View logo
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={!assets?.crs_logo_filename}
+                        onClick={() => handleDownload("logo")}
+                      >
+                        Download logo
+                      </Button>
+                    </div>
                   </div>
-                  <div className="asset-preview__actions">
-                    <Button type="button" size="sm" variant="secondary" onClick={clearPreview}>
-                      Close preview
-                    </Button>
+                  {downloadProgress?.kind === "logo" && (
+                    <div className="asset-progress">
+                      <div>
+                        <strong>Logo download</strong>
+                        {downloadProgress.progress.percent !== undefined && (
+                          <progress
+                            value={downloadProgress.progress.percent}
+                            max={100}
+                            className="asset-progress__bar"
+                          />
+                        )}
+                        <p className="asset-meta">{formatSpeed(downloadProgress.progress)}</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="asset-row">
+                    <div className="asset-info">
+                      <strong>CRS Template</strong>
+                      <p>{templateStatus}</p>
+                      {assets?.crs_template_uploaded_at && (
+                        <p className="asset-meta">
+                          Uploaded at {new Date(assets.crs_template_uploaded_at).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    <div className="asset-actions">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={!assets?.crs_template_filename}
+                        onClick={() => handlePreview("template")}
+                      >
+                        View template
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={!assets?.crs_template_filename}
+                        onClick={() => handleDownload("template")}
+                      >
+                        Download template
+                      </Button>
+                    </div>
+                  </div>
+                  {downloadProgress?.kind === "template" && (
+                    <div className="asset-progress">
+                      <div>
+                        <strong>Template download</strong>
+                        {downloadProgress.progress.percent !== undefined && (
+                          <progress
+                            value={downloadProgress.progress.percent}
+                            max={100}
+                            className="asset-progress__bar"
+                          />
+                        )}
+                        <p className="asset-meta">{formatSpeed(downloadProgress.progress)}</p>
+                      </div>
+                    </div>
+                  )}
+                  {previewAsset && (
+                    <div className="asset-preview">
+                      <div className="asset-preview__body">
+                        <strong className="asset-preview__title">
+                          Previewing {previewAsset.kind === "logo" ? "Logo" : "Template"}:{" "}
+                          {previewAsset.name}
+                        </strong>
+                        <div className="asset-preview__frame">
+                          {previewAsset.kind === "logo" ? (
+                            <img
+                              src={previewAsset.url}
+                              alt="CRS logo preview"
+                              className="asset-preview__image"
+                            />
+                          ) : (
+                            <iframe
+                              src={previewAsset.url}
+                              title="CRS template preview"
+                              className="asset-preview__document"
+                            />
+                          )}
+                        </div>
+                      </div>
+                      <div className="asset-preview__actions">
+                        <Button type="button" size="sm" variant="secondary" onClick={clearPreview}>
+                          Close preview
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </Panel>
+
+            <Panel title="Upload assets">
+              <div className="form-row asset-upload-row">
+                <label htmlFor="logoUpload">CRS Logo (.png, .jpg, .svg)</label>
+                <input
+                  id="logoUpload"
+                  type="file"
+                  multiple
+                  accept=".png,.jpg,.jpeg,.svg"
+                  onChange={(e) => handleUploadLogo(e.target.files)}
+                  disabled={uploadingLogo}
+                  ref={logoInputRef}
+                />
+                {uploadingLogo && <span>Uploading…</span>}
+                {selectedLogoFiles.length > 0 && !uploadingLogo && (
+                  <p className="form-hint asset-hint">
+                    Selected {selectedLogoFiles.length} file
+                    {selectedLogoFiles.length === 1 ? "" : "s"}:{" "}
+                    {selectedLogoFiles.map((file) => file.name).join(", ")}. Only
+                    the most recent upload is kept.
+                  </p>
+                )}
+              </div>
+              {uploadingLogo && logoUploadProgress && (
+                <div className="asset-progress">
+                  <div>
+                    <strong>Logo upload</strong>
+                    {logoUploadProgress.percent !== undefined && (
+                      <progress
+                        value={logoUploadProgress.percent}
+                        max={100}
+                        className="asset-progress__bar"
+                      />
+                    )}
+                    <p className="asset-meta">{formatSpeed(logoUploadProgress)}</p>
                   </div>
                 </div>
               )}
-            </>
-          )}
-        </Panel>
 
-        <Panel title="Upload assets">
-          <div className="form-row asset-upload-row">
-            <label htmlFor="logoUpload">CRS Logo (.png, .jpg, .svg)</label>
-            <input
-              id="logoUpload"
-              type="file"
-              multiple
-              accept=".png,.jpg,.jpeg,.svg"
-              onChange={(e) => handleUploadLogo(e.target.files)}
-              disabled={uploadingLogo}
-              ref={logoInputRef}
-            />
-            {uploadingLogo && <span>Uploading…</span>}
-            {selectedLogoFiles.length > 0 && !uploadingLogo && (
-              <p className="form-hint asset-hint">
-                Selected {selectedLogoFiles.length} file
-                {selectedLogoFiles.length === 1 ? "" : "s"}:{" "}
-                {selectedLogoFiles.map((file) => file.name).join(", ")}. Only
-                the most recent upload is kept.
-              </p>
+              <div className="form-row asset-upload-row">
+                <label htmlFor="templateUpload">CRS Template (.pdf)</label>
+                <input
+                  id="templateUpload"
+                  type="file"
+                  multiple
+                  accept="application/pdf"
+                  onChange={(e) => handleUploadTemplate(e.target.files)}
+                  disabled={uploadingTemplate}
+                  ref={templateInputRef}
+                />
+                {uploadingTemplate && <span>Uploading…</span>}
+                {selectedTemplateFiles.length > 0 && !uploadingTemplate && (
+                  <p className="form-hint asset-hint">
+                    Selected {selectedTemplateFiles.length} file
+                    {selectedTemplateFiles.length === 1 ? "" : "s"}:{" "}
+                    {selectedTemplateFiles.map((file) => file.name).join(", ")}. Only
+                    the most recent upload is kept.
+                  </p>
+                )}
+              </div>
+              {uploadingTemplate && templateUploadProgress && (
+                <div className="asset-progress">
+                  <div>
+                    <strong>Template upload</strong>
+                    {templateUploadProgress.percent !== undefined && (
+                      <progress
+                        value={templateUploadProgress.percent}
+                        max={100}
+                        className="asset-progress__bar"
+                      />
+                    )}
+                    <p className="asset-meta">{formatSpeed(templateUploadProgress)}</p>
+                  </div>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          <div className="admin-page__side">
+            {activeFilter === "inactive" && (
+              <Panel
+                title="Filtered assets"
+                subtitle="Inactive assets for this AMO."
+                actions={(
+                  <Button type="button" size="sm" variant="secondary" onClick={clearFilter}>
+                    Clear filter
+                  </Button>
+                )}
+              >
+                {inactiveAssetsError && (
+                  <InlineAlert tone="danger" title="Error">
+                    <span>{inactiveAssetsError}</span>
+                  </InlineAlert>
+                )}
+                {!inactiveAssetsError && inactiveAssets.length === 0 && (
+                  <p className="admin-muted">No inactive assets found.</p>
+                )}
+                {!inactiveAssetsError && inactiveAssets.length > 0 && (
+                  <ul className="admin-list">
+                    {inactiveAssets.map((asset) => (
+                      <li key={asset.id}>
+                        <div className="admin-list__row admin-overview__activity-row">
+                          <div>
+                            <strong>{asset.name || asset.kind}</strong>
+                            <div className="admin-muted">
+                              {asset.original_filename || "Unnamed asset"}
+                            </div>
+                          </div>
+                          <span className="admin-muted">
+                            {asset.updated_at
+                              ? new Date(asset.updated_at).toLocaleString()
+                              : "—"}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+            )}
+
+            {isSuperuser && (
+              <Panel title="Support mode (SUPERUSER)">
+                {amoLoading && <p>Loading AMOs…</p>}
+                {amoError && (
+                  <InlineAlert tone="danger" title="Error">
+                    <span>{amoError}</span>
+                  </InlineAlert>
+                )}
+
+                {!amoLoading && !amoError && (
+                  <div className="form-row">
+                    <label htmlFor="amoSelect">Active AMO</label>
+                    <select
+                      id="amoSelect"
+                      value={effectiveAmoId ?? ""}
+                      onChange={(e) => handleAmoChange(e.target.value)}
+                      disabled={amos.length === 0}
+                    >
+                      {amos.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.amo_code} — {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </Panel>
             )}
           </div>
-          {uploadingLogo && logoUploadProgress && (
-            <div className="asset-progress">
-              <div>
-                <strong>Logo upload</strong>
-                {logoUploadProgress.percent !== undefined && (
-                  <progress
-                    value={logoUploadProgress.percent}
-                    max={100}
-                    className="asset-progress__bar"
-                  />
-                )}
-                <p className="asset-meta">{formatSpeed(logoUploadProgress)}</p>
-              </div>
-            </div>
-          )}
-
-          <div className="form-row asset-upload-row">
-            <label htmlFor="templateUpload">CRS Template (.pdf)</label>
-            <input
-              id="templateUpload"
-              type="file"
-              multiple
-              accept="application/pdf"
-              onChange={(e) => handleUploadTemplate(e.target.files)}
-              disabled={uploadingTemplate}
-              ref={templateInputRef}
-            />
-            {uploadingTemplate && <span>Uploading…</span>}
-            {selectedTemplateFiles.length > 0 && !uploadingTemplate && (
-              <p className="form-hint asset-hint">
-                Selected {selectedTemplateFiles.length} file
-                {selectedTemplateFiles.length === 1 ? "" : "s"}:{" "}
-                {selectedTemplateFiles.map((file) => file.name).join(", ")}. Only
-                the most recent upload is kept.
-              </p>
-            )}
-          </div>
-          {uploadingTemplate && templateUploadProgress && (
-            <div className="asset-progress">
-              <div>
-                <strong>Template upload</strong>
-                {templateUploadProgress.percent !== undefined && (
-                  <progress
-                    value={templateUploadProgress.percent}
-                    max={100}
-                    className="asset-progress__bar"
-                  />
-                )}
-                <p className="asset-meta">{formatSpeed(templateUploadProgress)}</p>
-              </div>
-            </div>
-          )}
-        </Panel>
+        </div>
       </div>
     </DepartmentLayout>
   );
