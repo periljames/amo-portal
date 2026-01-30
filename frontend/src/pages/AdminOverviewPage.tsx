@@ -3,13 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import {
-  Badge,
-  Button,
-  PageHeader,
-  Panel,
-  StatusPill,
-} from "../components/UI/Admin";
+import { Badge, Button, PageHeader, Panel, StatusPill } from "../components/UI/Admin";
 import { getCachedUser, getContext } from "../services/auth";
 import {
   fetchOverviewSummary,
@@ -195,12 +189,6 @@ const AdminOverviewPage: React.FC = () => {
     return list.slice(0, 6);
   }, [summary?.issues]);
 
-  const issueCtaLabel = (issue: OverviewIssue) => {
-    if (issue.severity === "critical") return "Resolve";
-    if (issue.severity === "warning") return "Review";
-    return "Approve";
-  };
-
   const resolveIssueRoute = (issue: OverviewIssue) => {
     if (!amoCode) return issue.route;
     return `/maintenance/${amoCode}${issue.route}`;
@@ -210,20 +198,7 @@ const AdminOverviewPage: React.FC = () => {
   const activityList = activityExpanded
     ? activityItems
     : activityItems.slice(0, 5);
-  const indicatorItems = [
-    {
-      label: "Needs attention",
-      value: loading ? "—" : issues.length,
-    },
-    {
-      label: "Recent activity",
-      value: summary?.recent_activity_available ? activityItems.length : "—",
-    },
-    {
-      label: "Last check",
-      value: lastUpdatedLabel,
-    },
-  ];
+  const attentionItems = issues.slice(0, 3);
 
   return (
     <DepartmentLayout
@@ -238,51 +213,41 @@ const AdminOverviewPage: React.FC = () => {
           actions={
             <div className="admin-overview__header-actions">
               <StatusPill status={statusTone} label={`System ${statusLabel}`} />
-              {showRetry ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={handleRetry}
-                  disabled={refreshing}
-                >
-                  Retry refresh
-                </Button>
-              ) : null}
+              <button
+                type="button"
+                className="admin-icon-btn"
+                onClick={handleRetry}
+                disabled={refreshing}
+                aria-label="Retry refresh"
+                title={showRetry ? "Retry refresh" : "Refresh status"}
+              >
+                ↻
+              </button>
+              <a className="admin-link" href="#system-status">
+                Details
+              </a>
             </div>
           }
         />
 
-        <div className="admin-overview__subline">
-          <span className="admin-overview__meta">{refreshStateLabel}</span>
-          <span className="admin-overview__meta">
-            Last updated {lastUpdatedLabel}
-          </span>
-        </div>
-
-        <div className="admin-overview__indicators">
-          {indicatorItems.map((item) => (
-            <div key={item.label} className="admin-overview__indicator">
-              <span className="admin-overview__indicator-label">{item.label}</span>
-              <span className="admin-overview__indicator-value">{item.value}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="admin-overview__grid admin-overview__grid--balanced">
+        <div className="admin-overview__grid admin-overview__grid--summary">
           <Panel
             title="Needs attention"
-            actions={<span className="admin-muted">{loading ? "Loading…" : `${issues.length} items`}</span>}
+            actions={
+              <span className="admin-muted">
+                {loading ? "Loading…" : `${issues.length} items`}
+              </span>
+            }
           >
-            {issues.length === 0 ? (
+            {attentionItems.length === 0 ? (
               <span className="admin-muted">
                 {statusTone === "down"
                   ? "Backend unavailable—cannot compute issues."
                   : "No urgent actions right now."}
               </span>
             ) : (
-              <ul className="admin-list">
-                {issues.map((issue) => (
+              <ul className="admin-list admin-overview__attention-list">
+                {attentionItems.map((issue) => (
                   <li key={issue.key}>
                     <div className="admin-list__row admin-overview__queue-row">
                       <div className="admin-list__row-main admin-overview__queue-main">
@@ -302,14 +267,13 @@ const AdminOverviewPage: React.FC = () => {
                         >
                           {issue.count ?? "—"}
                         </Badge>
-                        <Button
+                        <button
                           type="button"
-                          size="sm"
-                          variant="secondary"
+                          className="admin-link-btn"
                           onClick={() => navigate(resolveIssueRoute(issue))}
                         >
-                          {issueCtaLabel(issue)}
-                        </Button>
+                          Go to module
+                        </button>
                       </div>
                     </div>
                   </li>
@@ -355,6 +319,27 @@ const AdminOverviewPage: React.FC = () => {
             ) : (
               <span className="admin-muted">No recent activity recorded.</span>
             )}
+          </Panel>
+
+          <Panel title="System status" compact>
+            <dl className="admin-overview__status-list" id="system-status">
+              <div>
+                <dt>Status</dt>
+                <dd>{statusLabel}</dd>
+              </div>
+              <div>
+                <dt>Last check</dt>
+                <dd>{lastUpdatedLabel}</dd>
+              </div>
+              <div>
+                <dt>Refresh</dt>
+                <dd>{refreshStateLabel}</dd>
+              </div>
+              <div>
+                <dt>Queue</dt>
+                <dd>{loading ? "—" : `${issues.length} items`}</dd>
+              </div>
+            </dl>
           </Panel>
         </div>
       </div>

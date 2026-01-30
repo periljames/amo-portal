@@ -1,7 +1,7 @@
 // src/components/Layout/AuthLayout.tsx
 import React from "react";
 import { BrandContext } from "../Brand/BrandContext";
-import { BrandMark } from "../Brand/BrandMark";
+import { BrandHeader } from "../Brand/BrandHeader";
 import { BrandProvider } from "../Brand/BrandProvider";
 
 interface AuthLayoutProps {
@@ -20,15 +20,11 @@ const AuthLayout: React.FC<AuthLayoutProps> = ({
   return (
     <BrandProvider nameOverride={brandName} preferStoredName={false}>
       <BrandContext.Consumer>
-        {(brand) => (
+        {() => (
           <div className="auth-layout">
             <div className="auth-layout__card" role="main">
               <div className="auth-layout__brand">
-                <BrandMark size={48} />
-                <div>
-                  <div className="auth-layout__brand-name">{brand.name}</div>
-                  <div className="auth-layout__brand-subtitle">AMO Portal</div>
-                </div>
+                <BrandHeader variant="auth" />
               </div>
 
               <h1 className="auth-layout__title">{title}</h1>

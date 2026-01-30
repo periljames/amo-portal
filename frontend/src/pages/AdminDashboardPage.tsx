@@ -983,23 +983,19 @@ const AdminDashboardPage: React.FC = () => {
         {!loading && !error && (
           <>
             {activeFilter && (
-              <InlineAlert
-                tone="warning"
-                title="Filter applied"
-                actions={(
-                  <Button type="button" size="sm" variant="secondary" onClick={clearFilter}>
-                    Clear filter
-                  </Button>
-                )}
-              >
+              <div className="admin-filter-banner">
                 <span>
+                  Filtered:{" "}
                   {activeFilter === "missing_department"
                     ? "Users missing department"
                     : activeFilter === "inactive"
                       ? "Inactive users"
                       : "Users requiring attention"}
                 </span>
-              </InlineAlert>
+                <Button type="button" size="sm" variant="ghost" onClick={clearFilter}>
+                  Clear filter
+                </Button>
+              </div>
             )}
             <Table>
               <thead>

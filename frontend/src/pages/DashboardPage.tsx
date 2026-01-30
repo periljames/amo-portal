@@ -265,6 +265,9 @@ const DashboardPage: React.FC = () => {
     date: "",
     reason: "",
   });
+  const [planningSideTab, setPlanningSideTab] = useState<
+    "actions" | "calendar" | "leave"
+  >("actions");
 
   const [calendarMonth, setCalendarMonth] = useState<Date>(
     new Date(today.getFullYear(), today.getMonth(), 1)
@@ -907,296 +910,15 @@ const DashboardPage: React.FC = () => {
       )}
 
       {department === "planning" && (
-        <section className="page-section">
-          <h2 className="page-section__title">Upcoming maintenance due</h2>
-          {dueError && <p className="error-text">{dueError}</p>}
-          {dueLoading && <p className="text-muted">Loading due schedules…</p>}
-          {!dueLoading && (
-            <div className="table-responsive">
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>Aircraft</th>
-                    <th>Next task</th>
-                    <th>Due</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dueSummaries.map((summary) => (
-                    <tr key={summary.aircraft_serial_number}>
-                      <td>{summary.aircraft_serial_number}</td>
-                      <td>{summary.next_due_task_code || "—"}</td>
-                      <td>{renderDueStatus(summary)}</td>
-                    </tr>
-                  ))}
-                  {dueSummaries.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="text-muted">
-                        No due data yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      )}
-
-      {department === "planning" && (
-        <section className="page-section">
-          <h2 className="page-section__title">
-            Planning calendar & leave management
-          </h2>
-          <p className="page-section__body">
-            Sync personal calendars, review public holidays, and mark leave days
-            before assigning maintenance slots.
-          </p>
-
-          <div
-            className="page-section__grid"
-            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}
-          >
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Calendar connections</h3>
-              <p className="text-muted">
-                Connect personal calendars to surface planned time off and reduce
-                scheduling conflicts.
-              </p>
-              <div className="page-section__actions">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() =>
-                    calendarConnections.google
-                      ? handleDisconnectCalendar("google")
-                      : handleConnectCalendar("google")
-                  }
-                >
-                  {calendarConnections.google ? "Disconnect Google" : "Connect Google"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() =>
-                    calendarConnections.outlook
-                      ? handleDisconnectCalendar("outlook")
-                      : handleConnectCalendar("outlook")
-                  }
-                >
-                  {calendarConnections.outlook
-                    ? "Disconnect Outlook"
-                    : "Connect Outlook"}
-                </button>
-              </div>
-              {currentUser?.amo_id && (
-                <p className="text-muted" style={{ marginTop: 12 }}>
-                  Throttle budget:{" "}
-                  <strong>
-                    {throttleStore.amo[currentUser.amo_id]?.perUser[currentUser.id] ??
-                      throttleStore.amo[currentUser.amo_id]?.limit ??
-                      70}
-                    %
-                  </strong>
-                  . Adjust in Admin → Usage Throttling.
-                </p>
-              )}
-              <p className="text-muted" style={{ marginTop: 12 }}>
-                OAuth URLs are configured by
-                <code style={{ marginLeft: 4 }}>VITE_CALENDAR_GOOGLE_OAUTH_URL</code>{" "}
-                and <code>VITE_CALENDAR_OUTLOOK_OAUTH_URL</code>.
+        <section className="planning-overview">
+          <div className="planning-overview__header">
+            <div>
+              <h2 className="page-section__title">Planning control</h2>
+              <p className="page-section__body">
+                Maintain upcoming schedules, team availability, and planning inputs.
               </p>
             </div>
-
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Public holidays</h3>
-              <div className="form-row" style={{ gap: 8 }}>
-                <label className="form-control">
-                  <span>Country code</span>
-                  <input
-                    value={holidayCountry}
-                    onChange={(e) => setHolidayCountry(e.target.value.toUpperCase())}
-                    maxLength={2}
-                    placeholder="KE"
-                  />
-                </label>
-                <label className="form-control">
-                  <span>Year</span>
-                  <input
-                    type="number"
-                    value={holidayYear}
-                    onChange={(e) => setHolidayYear(Number(e.target.value))}
-                  />
-                </label>
-              </div>
-              {holidayLoading && <p className="text-muted">Loading holidays…</p>}
-              {holidayError && <p className="error-text">{holidayError}</p>}
-              {!holidayLoading && holidays.length > 0 && (
-                <ul style={{ margin: "8px 0 0", paddingLeft: 16 }}>
-                  {holidays.slice(0, 6).map((holiday) => (
-                    <li key={`${holiday.date}-${holiday.name}`}>
-                      {formatDate(holiday.date)} · {holiday.localName}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {!holidayLoading && !holidayError && holidays.length === 0 && (
-                <p className="text-muted">No holidays found for that selection.</p>
-              )}
-            </div>
-
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Leave planner</h3>
-              <form onSubmit={handleAddLeave} className="form-row" style={{ gap: 8 }}>
-                <label className="form-control">
-                  <span>Date</span>
-                  <input
-                    type="date"
-                    value={leaveForm.date}
-                    onChange={(e) =>
-                      setLeaveForm((prev) => ({ ...prev, date: e.target.value }))
-                    }
-                    required
-                  />
-                </label>
-                <label className="form-control">
-                  <span>Reason</span>
-                  <input
-                    value={leaveForm.reason}
-                    onChange={(e) =>
-                      setLeaveForm((prev) => ({ ...prev, reason: e.target.value }))
-                    }
-                    placeholder="Annual leave"
-                  />
-                </label>
-                <div style={{ alignSelf: "end" }}>
-                  <button type="submit" className="btn btn-primary">
-                    Add leave
-                  </button>
-                </div>
-              </form>
-              {leaveEntries.length === 0 ? (
-                <p className="text-muted">No leave days scheduled yet.</p>
-              ) : (
-                <ul style={{ margin: "8px 0 0", paddingLeft: 16 }}>
-                  {leaveEntries.slice(0, 6).map((entry) => (
-                    <li
-                      key={entry.id}
-                      style={{ display: "flex", gap: 8, alignItems: "center" }}
-                    >
-                      <span>
-                        {formatDate(entry.date)} · {entry.reason}
-                      </span>
-                      <button
-                        type="button"
-                        className="secondary-chip-btn"
-                        onClick={() => handleRemoveLeave(entry.id)}
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-
-          <div className="card" style={{ marginTop: 12 }}>
-            <div className="card-header">
-              <h3>Month view</h3>
-              <div className="page-section__actions">
-                <button
-                  type="button"
-                  className="secondary-chip-btn"
-                  onClick={() =>
-                    setCalendarMonth(
-                      new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1)
-                    )
-                  }
-                >
-                  ‹ Prev
-                </button>
-                <button
-                  type="button"
-                  className="secondary-chip-btn"
-                  onClick={() =>
-                    setCalendarMonth(
-                      new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)
-                    )
-                  }
-                >
-                  Next ›
-                </button>
-              </div>
-            </div>
-
-            <div
-              className="calendar-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-                gap: 6,
-                fontSize: 12,
-              }}
-            >
-              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-                <div key={label} className="text-muted">
-                  {label}
-                </div>
-              ))}
-              {buildMonthDays(calendarMonth).map((day) => {
-                const iso = day.toISOString().slice(0, 10);
-                const isCurrentMonth = day.getMonth() === calendarMonth.getMonth();
-                const leave = leaveEntries.find((entry) => entry.date === iso);
-                const holiday = holidays.find((entry) => entry.date === iso);
-                return (
-                  <div
-                    key={iso}
-                    style={{
-                      padding: 8,
-                      borderRadius: 10,
-                      border: "1px solid rgba(148, 163, 184, 0.2)",
-                      background: isCurrentMonth ? "var(--surface)" : "var(--surface-soft)",
-                      opacity: isCurrentMonth ? 1 : 0.5,
-                      minHeight: 60,
-                    }}
-                  >
-                    <div style={{ fontWeight: 600 }}>{day.getDate()}</div>
-                    {holiday && (
-                      <div className="badge badge--warning" style={{ marginTop: 4 }}>
-                        {holiday.localName}
-                      </div>
-                    )}
-                    {leave && (
-                      <div className="badge badge--info" style={{ marginTop: 4 }}>
-                        {leave.reason}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {department === "planning" && (
-        <section className="page-section">
-          <h2 className="page-section__title">Fleet & inventory readiness</h2>
-          <p className="page-section__body">
-            Track fleet utilization, third-party aircraft intake, and inventory
-            posture to support MRO planning.
-          </p>
-          <div
-            className="page-section__grid"
-            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}
-          >
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Fleet utilisation</h3>
-              <p className="text-muted">
-                Monitor aircraft availability, utilization hours, and upcoming
-                checks to protect slot planning.
-              </p>
+            <div className="planning-overview__actions">
               <button
                 type="button"
                 className="primary-chip-btn"
@@ -1204,12 +926,11 @@ const DashboardPage: React.FC = () => {
                   navigate(`/maintenance/${amoSlug}/${department}/aircraft-import`)
                 }
               >
-                Configure fleet inputs
+                Setup aircraft
               </button>
               <button
                 type="button"
-                className="primary-chip-btn"
-                style={{ marginLeft: 8 }}
+                className="text-link"
                 onClick={() =>
                   navigate(`/maintenance/${amoSlug}/${department}/component-import`)
                 }
@@ -1217,25 +938,353 @@ const DashboardPage: React.FC = () => {
                 Import components
               </button>
             </div>
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Inventory health</h3>
-              <p className="text-muted">
-                Ensure rotable and consumable inventory lines are aligned to the
-                upcoming maintenance plan.
-              </p>
-              <p className="text-muted" style={{ marginTop: 8 }}>
-                Hook into procurement and stores data feeds to activate this panel.
-              </p>
+          </div>
+
+          <div className="planning-overview__kpis">
+            <div className="mini-kpi">
+              <span className="mini-kpi__label">Due schedules</span>
+              <span className="mini-kpi__value">{dueSummaries.length}</span>
             </div>
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Third-party aircraft</h3>
-              <p className="text-muted">
-                Capture AOG or third-party maintenance arrivals and reserve bay
-                capacity.
-              </p>
-              <p className="text-muted" style={{ marginTop: 8 }}>
-                Add third-party aircraft details once intake workflows are enabled.
-              </p>
+            <div className="mini-kpi">
+              <span className="mini-kpi__label">Due in 7 days</span>
+              <span className="mini-kpi__value">
+                {dueSummaries.filter((s) => (s.days_to_due ?? 999) <= 7).length}
+              </span>
+            </div>
+            <div className="mini-kpi">
+              <span className="mini-kpi__label">Leave days</span>
+              <span className="mini-kpi__value">{leaveEntries.length}</span>
+            </div>
+            <div className="mini-kpi">
+              <span className="mini-kpi__label">Holiday entries</span>
+              <span className="mini-kpi__value">{holidays.length}</span>
+            </div>
+          </div>
+
+          <div className="planning-overview__grid">
+            <div className="planning-overview__main">
+              <div className="card planning-panel">
+                <div className="planning-panel__header">
+                  <h3>Upcoming maintenance due</h3>
+                  {dueError && <span className="error-text">{dueError}</span>}
+                </div>
+                {dueLoading && <p className="text-muted">Loading due schedules…</p>}
+                {!dueLoading && (
+                  <div className="table-responsive">
+                    <table className="table table-compact">
+                      <thead>
+                        <tr>
+                          <th>Aircraft</th>
+                          <th>Next task</th>
+                          <th>Due</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dueSummaries.map((summary) => (
+                          <tr key={summary.aircraft_serial_number}>
+                            <td>{summary.aircraft_serial_number}</td>
+                            <td>{summary.next_due_task_code || "—"}</td>
+                            <td>{renderDueStatus(summary)}</td>
+                          </tr>
+                        ))}
+                        {dueSummaries.length === 0 && (
+                          <tr>
+                            <td colSpan={3} className="text-muted">
+                              No due data yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <details className="planning-disclosure">
+                <summary>Month view calendar</summary>
+                <div className="planning-disclosure__content">
+                  <div className="planning-month-header">
+                    <h4>{calendarMonth.toLocaleString("en-US", { month: "long", year: "numeric" })}</h4>
+                    <div className="planning-month-actions">
+                      <button
+                        type="button"
+                        className="secondary-chip-btn"
+                        onClick={() =>
+                          setCalendarMonth(
+                            new Date(
+                              calendarMonth.getFullYear(),
+                              calendarMonth.getMonth() - 1,
+                              1
+                            )
+                          )
+                        }
+                      >
+                        ‹ Prev
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-chip-btn"
+                        onClick={() =>
+                          setCalendarMonth(
+                            new Date(
+                              calendarMonth.getFullYear(),
+                              calendarMonth.getMonth() + 1,
+                              1
+                            )
+                          )
+                        }
+                      >
+                        Next ›
+                      </button>
+                    </div>
+                  </div>
+                  <div className="planning-calendar-grid">
+                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
+                      <div key={label} className="text-muted">
+                        {label}
+                      </div>
+                    ))}
+                    {buildMonthDays(calendarMonth).map((day) => {
+                      const iso = day.toISOString().slice(0, 10);
+                      const isCurrentMonth = day.getMonth() === calendarMonth.getMonth();
+                      const leave = leaveEntries.find((entry) => entry.date === iso);
+                      const holiday = holidays.find((entry) => entry.date === iso);
+                      return (
+                        <div
+                          key={iso}
+                          className={`planning-calendar-day${
+                            isCurrentMonth ? "" : " planning-calendar-day--muted"
+                          }`}
+                        >
+                          <div className="planning-calendar-day__date">{day.getDate()}</div>
+                          {holiday && (
+                            <div className="badge badge--warning" style={{ marginTop: 4 }}>
+                              {holiday.localName}
+                            </div>
+                          )}
+                          {leave && (
+                            <div className="badge badge--info" style={{ marginTop: 4 }}>
+                              {leave.reason}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <div className="planning-overview__side">
+              <div className="card planning-panel">
+                <div className="planning-panel__tabs">
+                  <button
+                    type="button"
+                    className={`planning-tab${planningSideTab === "actions" ? " planning-tab--active" : ""}`}
+                    onClick={() => setPlanningSideTab("actions")}
+                  >
+                    Quick actions
+                  </button>
+                  <button
+                    type="button"
+                    className={`planning-tab${planningSideTab === "calendar" ? " planning-tab--active" : ""}`}
+                    onClick={() => setPlanningSideTab("calendar")}
+                  >
+                    Calendar
+                  </button>
+                  <button
+                    type="button"
+                    className={`planning-tab${planningSideTab === "leave" ? " planning-tab--active" : ""}`}
+                    onClick={() => setPlanningSideTab("leave")}
+                  >
+                    Leave
+                  </button>
+                </div>
+
+                {planningSideTab === "actions" && (
+                  <div className="planning-panel__body">
+                    <p className="text-muted">
+                      Keep the planning backlog current and route updates to the right teams.
+                    </p>
+                    <div className="planning-action-list">
+                      <button
+                        type="button"
+                        className="secondary-chip-btn"
+                        onClick={() =>
+                          navigate(`/maintenance/${amoSlug}/${department}/aircraft-documents`)
+                        }
+                      >
+                        Review aircraft docs
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-chip-btn"
+                        onClick={() =>
+                          navigate(`/maintenance/${amoSlug}/${department}/work-orders`)
+                        }
+                      >
+                        View work orders
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-chip-btn"
+                        onClick={() =>
+                          navigate(`/maintenance/${amoSlug}/${department}/component-import`)
+                        }
+                      >
+                        Import components
+                      </button>
+                    </div>
+                    <details className="planning-disclosure planning-disclosure--compact">
+                      <summary>Planning context</summary>
+                      <div className="planning-disclosure__content">
+                        <p className="text-muted">
+                          Fleet utilization, inventory readiness, and third-party intake views
+                          activate once integrations are enabled.
+                        </p>
+                      </div>
+                    </details>
+                  </div>
+                )}
+
+                {planningSideTab === "calendar" && (
+                  <div className="planning-panel__body">
+                    <div className="planning-field">
+                      <span className="planning-field__label">Calendar connections</span>
+                      <div className="planning-inline-actions">
+                        <button
+                          type="button"
+                          className="secondary-chip-btn"
+                          onClick={() =>
+                            calendarConnections.google
+                              ? handleDisconnectCalendar("google")
+                              : handleConnectCalendar("google")
+                          }
+                        >
+                          {calendarConnections.google ? "Disconnect Google" : "Connect Google"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-chip-btn"
+                          onClick={() =>
+                            calendarConnections.outlook
+                              ? handleDisconnectCalendar("outlook")
+                              : handleConnectCalendar("outlook")
+                          }
+                        >
+                          {calendarConnections.outlook
+                            ? "Disconnect Outlook"
+                            : "Connect Outlook"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="planning-field">
+                      <span className="planning-field__label">Public holidays</span>
+                      <div className="form-row" style={{ gap: 8 }}>
+                        <label className="form-control">
+                          <span>Country</span>
+                          <input
+                            value={holidayCountry}
+                            onChange={(e) =>
+                              setHolidayCountry(e.target.value.toUpperCase())
+                            }
+                            maxLength={2}
+                            placeholder="KE"
+                          />
+                        </label>
+                        <label className="form-control">
+                          <span>Year</span>
+                          <input
+                            type="number"
+                            value={holidayYear}
+                            onChange={(e) => setHolidayYear(Number(e.target.value))}
+                          />
+                        </label>
+                      </div>
+                      {holidayLoading && <p className="text-muted">Loading holidays…</p>}
+                      {holidayError && <p className="error-text">{holidayError}</p>}
+                      {!holidayLoading && holidays.length > 0 && (
+                        <ul className="planning-list">
+                          {holidays.slice(0, 5).map((holiday) => (
+                            <li key={`${holiday.date}-${holiday.name}`}>
+                              {formatDate(holiday.date)} · {holiday.localName}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {!holidayLoading && !holidayError && holidays.length === 0 && (
+                        <p className="text-muted">No holidays found for that selection.</p>
+                      )}
+                    </div>
+                    {currentUser?.amo_id && (
+                      <p className="text-muted">
+                        Throttle budget:{" "}
+                        <strong>
+                          {throttleStore.amo[currentUser.amo_id]?.perUser[currentUser.id] ??
+                            throttleStore.amo[currentUser.amo_id]?.limit ??
+                            70}
+                          %
+                        </strong>{" "}
+                        · Adjust in Admin → Usage Throttling.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {planningSideTab === "leave" && (
+                  <div className="planning-panel__body">
+                    <form onSubmit={handleAddLeave} className="form-row" style={{ gap: 8 }}>
+                      <label className="form-control">
+                        <span>Date</span>
+                        <input
+                          type="date"
+                          value={leaveForm.date}
+                          onChange={(e) =>
+                            setLeaveForm((prev) => ({ ...prev, date: e.target.value }))
+                          }
+                          required
+                        />
+                      </label>
+                      <label className="form-control">
+                        <span>Reason</span>
+                        <input
+                          value={leaveForm.reason}
+                          onChange={(e) =>
+                            setLeaveForm((prev) => ({ ...prev, reason: e.target.value }))
+                          }
+                          placeholder="Annual leave"
+                        />
+                      </label>
+                      <div style={{ alignSelf: "end" }}>
+                        <button type="submit" className="primary-chip-btn">
+                          Add leave
+                        </button>
+                      </div>
+                    </form>
+                    {leaveEntries.length === 0 ? (
+                      <p className="text-muted">No leave days scheduled yet.</p>
+                    ) : (
+                      <ul className="planning-list">
+                        {leaveEntries.slice(0, 6).map((entry) => (
+                          <li key={entry.id}>
+                            <span>
+                              {formatDate(entry.date)} · {entry.reason}
+                            </span>
+                            <button
+                              type="button"
+                              className="text-link"
+                              onClick={() => handleRemoveLeave(entry.id)}
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </section>

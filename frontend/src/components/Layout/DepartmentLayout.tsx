@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { BrandContext } from "../Brand/BrandContext";
-import { BrandMark } from "../Brand/BrandMark";
+import { BrandHeader } from "../Brand/BrandHeader";
 import { BrandProvider } from "../Brand/BrandProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
@@ -842,13 +842,7 @@ const DepartmentLayout: React.FC<Props> = ({
           <div className={shellClassName}>
             <aside className="app-shell__sidebar">
               <div className="sidebar__header">
-                <div className="sidebar__brand">
-                  <BrandMark size={36} />
-                  <div className="sidebar__brand-text">
-                    <span className="sidebar__brand-name">{brand.name}</span>
-                    <span className="sidebar__brand-subtitle">AMO Portal</span>
-                  </div>
-                </div>
+                <BrandHeader variant="sidebar" />
 
                 <button
                   type="button"
@@ -1061,9 +1055,12 @@ const DepartmentLayout: React.FC<Props> = ({
             <main className="app-shell__main">
         <header className="app-shell__topbar">
           <div className="app-shell__topbar-title">
-            <div className="app-shell__topbar-heading">{deptLabel}</div>
-            <div className="app-shell__topbar-subtitle">
-              {amoLabel} · Daily operations workspace
+            <BrandHeader variant="topbar" />
+            <div className="app-shell__topbar-context">
+              <div className="app-shell__topbar-heading">{deptLabel}</div>
+              <div className="app-shell__topbar-subtitle">
+                {amoLabel} · Daily operations workspace
+              </div>
             </div>
           </div>
 

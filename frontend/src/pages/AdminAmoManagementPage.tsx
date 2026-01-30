@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { Button, InlineAlert, PageHeader, Panel, Table } from "../components/UI/Admin";
+import { Badge, Button, InlineAlert, PageHeader, Panel, Table } from "../components/UI/Admin";
 import { getCachedUser } from "../services/auth";
 import {
   createAdminAmo,
@@ -318,98 +318,52 @@ const AdminAmoManagementPage: React.FC = () => {
       amoCode={amoCode ?? "UNKNOWN"}
       activeDepartment="admin-amos"
     >
-      <div className="admin-page">
+      <div className="admin-page admin-amo-management">
         <PageHeader
           title="AMO Management"
-          subtitle="Set the active AMO context or register a new AMO."
+          subtitle="Set the AMO context and resolve account-level access."
+          actions={
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                const target = document.getElementById("create-amo");
+                target?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              New AMO
+            </Button>
+          }
         />
 
-        <Panel
-          title="Active AMO Context"
-          subtitle="Choose an AMO to manage users, assets, and navigate into the AMO dashboard."
-        >
-          {amoLoading && <p>Loading AMOs…</p>}
-          {amoError && (
-            <InlineAlert tone="danger" title="Error">
-              <span>{amoError}</span>
-            </InlineAlert>
-          )}
-
-          {!amoLoading && !amoError && (
-            <div className="form-row">
-              <label htmlFor="amoSelect">Active AMO</label>
-              <select
-                id="amoSelect"
-                value={activeAmoId ?? ""}
-                onChange={(e) => handleAmoChange(e.target.value)}
-                disabled={amos.length === 0}
-              >
-                {amos.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.amo_code} — {a.name}
-                  </option>
-                ))}
-              </select>
-
-              {selectedAmo && (
-                <p style={{ marginTop: 8, marginBottom: 0, opacity: 0.85 }}>
-                  Active AMO:{" "}
-                  <strong>
-                    {selectedAmo.amo_code} — {selectedAmo.name}
-                  </strong>
-                </p>
-              )}
-            </div>
-          )}
-
-          {amoActionError && (
-            <InlineAlert tone="danger" title="Action failed">
-              <span>{amoActionError}</span>
-            </InlineAlert>
-          )}
-          {amoActionSuccess && (
-            <InlineAlert tone="success" title="Success">
-              <span>{amoActionSuccess}</span>
-            </InlineAlert>
-          )}
-
-          <div className="form-actions">
-            <Button
-              type="button"
-              onClick={handleOpenAmoDashboard}
-              disabled={!selectedAmo?.login_slug}
-            >
-              Open AMO dashboard
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => navigate(`/maintenance/${amoCode}/admin/users/new`)}
-            >
-              Create first user
-            </Button>
-          </div>
-        </Panel>
-
-        <Panel
-          title="AMO Actions"
-          subtitle="Edit AMO details, extend trial windows, or deactivate access."
-        >
-          {!amoLoading && !amoError && (
-            <div className="table-wrapper">
-              {activeFilter === "inactive" && (
-                <InlineAlert
-                  tone="warning"
-                  title="Filter applied"
-                  actions={(
-                    <Button type="button" size="sm" variant="secondary" onClick={clearFilter}>
-                      Clear filter
-                    </Button>
-                  )}
+        <div className="admin-page__grid">
+          <Panel
+            title="AMO directory"
+            subtitle="Review AMOs that require attention, then take the next action."
+          >
+            {!amoLoading && !amoError && activeFilter === "inactive" && (
+              <div className="admin-filter-banner">
+                <span>Filtered: Inactive AMOs</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={clearFilter}
                 >
-                  <span>Inactive AMOs</span>
-                </InlineAlert>
-              )}
+                  Clear filter
+                </Button>
+              </div>
+            )}
+
+            {amoLoading && <p>Loading AMOs…</p>}
+            {amoError && (
+              <InlineAlert tone="danger" title="Error">
+                <span>{amoError}</span>
+              </InlineAlert>
+            )}
+
+            {!amoLoading && !amoError && (
               <Table>
                 <thead>
                   <tr>
@@ -429,16 +383,20 @@ const AdminAmoManagementPage: React.FC = () => {
                       <td>
                         <strong>{amo.amo_code}</strong> — {amo.name}
                       </td>
-                      <td>{amo.is_active ? "Active" : "Inactive"}</td>
                       <td>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <Badge tone={amo.is_active ? "success" : "warning"} size="sm">
+                          {amo.is_active ? "Active" : "Inactive"}
+                        </Badge>
+                      </td>
+                      <td>
+                        <div className="admin-row-actions">
                           <Button
                             type="button"
                             size="sm"
                             variant="ghost"
                             onClick={() => handleEditAmo(amo)}
                           >
-                            ✏️ Edit
+                            Edit
                           </Button>
                           <Button
                             type="button"
@@ -446,7 +404,7 @@ const AdminAmoManagementPage: React.FC = () => {
                             variant="ghost"
                             onClick={() => handleExtendTrial(amo)}
                           >
-                            ⏳ Extend trial
+                            Extend trial
                           </Button>
                           <Button
                             type="button"
@@ -454,7 +412,7 @@ const AdminAmoManagementPage: React.FC = () => {
                             variant="ghost"
                             onClick={() => handleDeactivateAmo(amo)}
                           >
-                            🗑️ Deactivate
+                            Deactivate
                           </Button>
                         </div>
                       </td>
@@ -462,139 +420,215 @@ const AdminAmoManagementPage: React.FC = () => {
                   ))}
                 </tbody>
               </Table>
-            </div>
-          )}
-        </Panel>
+            )}
+          </Panel>
 
-        <Panel
-          title="Create a new AMO"
-          subtitle="Register a new AMO, then create its first admin user."
-        >
-          {amoCreateError && (
-            <InlineAlert tone="danger" title="Error">
-              <span>{amoCreateError}</span>
-            </InlineAlert>
-          )}
-          {amoCreateSuccess && (
-            <InlineAlert tone="success" title="Success">
-              <span>{amoCreateSuccess}</span>
-            </InlineAlert>
-          )}
+          <div className="admin-page__side">
+            <Panel
+              title="Active AMO context"
+              subtitle="Use this AMO to open dashboards and manage assets."
+            >
+              {amoLoading && <p>Loading AMOs…</p>}
+              {amoError && (
+                <InlineAlert tone="danger" title="Error">
+                  <span>{amoError}</span>
+                </InlineAlert>
+              )}
 
-          <form onSubmit={handleCreateAmo} className="form-grid">
-            <div className="form-row">
-              <label htmlFor="amoCode">AMO Code</label>
-              <input
-                id="amoCode"
-                name="amoCode"
-                type="text"
-                value={amoForm.amoCode}
-                onChange={handleAmoFormChange}
-                placeholder="e.g. SKYJET"
-                required
-              />
-              <p className="form-hint">Short code used internally and on reports.</p>
-            </div>
+              {!amoLoading && !amoError && (
+                <div className="form-row">
+                  <label htmlFor="amoSelect">Active AMO</label>
+                  <select
+                    id="amoSelect"
+                    value={activeAmoId ?? ""}
+                    onChange={(e) => handleAmoChange(e.target.value)}
+                    disabled={amos.length === 0}
+                  >
+                    {amos.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.amo_code} — {a.name}
+                      </option>
+                    ))}
+                  </select>
 
-            <div className="form-row">
-              <label htmlFor="amoName">AMO Name</label>
-              <input
-                id="amoName"
-                name="name"
-                type="text"
-                value={amoForm.name}
-                onChange={handleAmoFormChange}
-                placeholder="SkyJet Maintenance"
-                required
-              />
-            </div>
+                  {selectedAmo && (
+                    <p style={{ marginTop: 8, marginBottom: 0, opacity: 0.85 }}>
+                      Active AMO:{" "}
+                      <strong>
+                        {selectedAmo.amo_code} — {selectedAmo.name}
+                      </strong>
+                    </p>
+                  )}
+                </div>
+              )}
 
-            <div className="form-row">
-              <label htmlFor="loginSlug">Login Slug</label>
-              <input
-                id="loginSlug"
-                name="loginSlug"
-                type="text"
-                value={amoForm.loginSlug}
-                onChange={handleAmoFormChange}
-                placeholder="skyjet"
-                required
-              />
-              <p className="form-hint">
-                Used in the login URL:{" "}
-                <code>/maintenance/{amoForm.loginSlug || "your-amo"}/login</code>
-              </p>
-            </div>
+              {amoActionError && (
+                <InlineAlert tone="danger" title="Action failed">
+                  <span>{amoActionError}</span>
+                </InlineAlert>
+              )}
+              {amoActionSuccess && (
+                <InlineAlert tone="success" title="Success">
+                  <span>{amoActionSuccess}</span>
+                </InlineAlert>
+              )}
 
-            <div className="form-row">
-              <label htmlFor="icaoCode">ICAO Code</label>
-              <input
-                id="icaoCode"
-                name="icaoCode"
-                type="text"
-                value={amoForm.icaoCode}
-                onChange={handleAmoFormChange}
-              />
-            </div>
+              <div className="form-actions">
+                <Button
+                  type="button"
+                  onClick={handleOpenAmoDashboard}
+                  disabled={!selectedAmo?.login_slug}
+                >
+                  Open AMO dashboard
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => navigate(`/maintenance/${amoCode}/admin/users/new`)}
+                >
+                  Create first user
+                </Button>
+              </div>
+            </Panel>
 
-            <div className="form-row">
-              <label htmlFor="country">Country</label>
-              <input
-                id="country"
-                name="country"
-                type="text"
-                value={amoForm.country}
-                onChange={handleAmoFormChange}
-              />
-            </div>
+            <Panel
+              title="Create AMO"
+              subtitle="Register a new AMO when onboarding a new operator."
+            >
+              <details className="admin-disclosure" id="create-amo" open={!!amoCreateError}>
+                <summary>New AMO form</summary>
+                <div className="admin-disclosure__content">
+                  {amoCreateError && (
+                    <InlineAlert tone="danger" title="Error">
+                      <span>{amoCreateError}</span>
+                    </InlineAlert>
+                  )}
+                  {amoCreateSuccess && (
+                    <InlineAlert tone="success" title="Success">
+                      <span>{amoCreateSuccess}</span>
+                    </InlineAlert>
+                  )}
 
-            <div className="form-row">
-              <label htmlFor="contactEmail">Contact Email</label>
-              <input
-                id="contactEmail"
-                name="contactEmail"
-                type="email"
-                value={amoForm.contactEmail}
-                onChange={handleAmoFormChange}
-              />
-            </div>
+                  <form onSubmit={handleCreateAmo} className="form-grid">
+                    <div className="form-row">
+                      <label htmlFor="amoCode">AMO Code</label>
+                      <input
+                        id="amoCode"
+                        name="amoCode"
+                        type="text"
+                        value={amoForm.amoCode}
+                        onChange={handleAmoFormChange}
+                        placeholder="e.g. SKYJET"
+                        required
+                      />
+                      <p className="form-hint">
+                        Short code used internally and on reports.
+                      </p>
+                    </div>
 
-            <div className="form-row">
-              <label htmlFor="contactPhone">Contact Phone</label>
-              <input
-                id="contactPhone"
-                name="contactPhone"
-                type="tel"
-                value={amoForm.contactPhone}
-                onChange={handleAmoFormChange}
-              />
-            </div>
+                    <div className="form-row">
+                      <label htmlFor="amoName">AMO Name</label>
+                      <input
+                        id="amoName"
+                        name="name"
+                        type="text"
+                        value={amoForm.name}
+                        onChange={handleAmoFormChange}
+                        placeholder="SkyJet Maintenance"
+                        required
+                      />
+                    </div>
 
-            <div className="form-row">
-              <label htmlFor="timeZone">Time Zone</label>
-              <input
-                id="timeZone"
-                name="timeZone"
-                type="text"
-                value={amoForm.timeZone}
-                onChange={handleAmoFormChange}
-                placeholder="Africa/Nairobi"
-              />
-            </div>
+                    <div className="form-row">
+                      <label htmlFor="loginSlug">Login Slug</label>
+                      <input
+                        id="loginSlug"
+                        name="loginSlug"
+                        type="text"
+                        value={amoForm.loginSlug}
+                        onChange={handleAmoFormChange}
+                        placeholder="skyjet"
+                        required
+                      />
+                      <p className="form-hint">
+                        Used in the login URL:{" "}
+                        <code>/maintenance/{amoForm.loginSlug || "your-amo"}/login</code>
+                      </p>
+                    </div>
 
-            <div className="form-actions">
-              <Button type="submit">Create AMO</Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => navigate(`/maintenance/${amoCode}/admin/users/new`)}
-                disabled={!lastCreatedAmoId}
-              >
-                Create first user
-              </Button>
-            </div>
-          </form>
-        </Panel>
+                    <div className="form-row">
+                      <label htmlFor="icaoCode">ICAO Code</label>
+                      <input
+                        id="icaoCode"
+                        name="icaoCode"
+                        type="text"
+                        value={amoForm.icaoCode}
+                        onChange={handleAmoFormChange}
+                      />
+                    </div>
+
+                    <div className="form-row">
+                      <label htmlFor="country">Country</label>
+                      <input
+                        id="country"
+                        name="country"
+                        type="text"
+                        value={amoForm.country}
+                        onChange={handleAmoFormChange}
+                      />
+                    </div>
+
+                    <div className="form-row">
+                      <label htmlFor="contactEmail">Contact Email</label>
+                      <input
+                        id="contactEmail"
+                        name="contactEmail"
+                        type="email"
+                        value={amoForm.contactEmail}
+                        onChange={handleAmoFormChange}
+                      />
+                    </div>
+
+                    <div className="form-row">
+                      <label htmlFor="contactPhone">Contact Phone</label>
+                      <input
+                        id="contactPhone"
+                        name="contactPhone"
+                        type="tel"
+                        value={amoForm.contactPhone}
+                        onChange={handleAmoFormChange}
+                      />
+                    </div>
+
+                    <div className="form-row">
+                      <label htmlFor="timeZone">Time Zone</label>
+                      <input
+                        id="timeZone"
+                        name="timeZone"
+                        type="text"
+                        value={amoForm.timeZone}
+                        onChange={handleAmoFormChange}
+                        placeholder="Africa/Nairobi"
+                      />
+                    </div>
+
+                    <div className="form-actions">
+                      <Button type="submit">Create AMO</Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => navigate(`/maintenance/${amoCode}/admin/users/new`)}
+                        disabled={!lastCreatedAmoId}
+                      >
+                        Create first user
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+              </details>
+            </Panel>
+          </div>
+        </div>
       </div>
     </DepartmentLayout>
   );
