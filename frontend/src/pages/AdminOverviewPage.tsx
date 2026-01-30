@@ -7,7 +7,6 @@ import {
   Badge,
   Button,
   EmptyState,
-  InlineAlert,
   PageHeader,
   Panel,
   StatusPill,
@@ -66,8 +65,6 @@ const AdminOverviewPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [lastSuccessAt, setLastSuccessAt] = useState<string | null>(null);
   const [activityExpanded, setActivityExpanded] = useState(false);
 
   const pollingTimerRef = useRef<number | null>(null);
@@ -128,7 +125,7 @@ const AdminOverviewPage: React.FC = () => {
       if (pollingInFlightRef.current) return;
       pollingInFlightRef.current = true;
       clearPollingTimer();
-      const isInitial = lastSuccessAt === null;
+      const isInitial = summary === null;
       if (isInitial) {
         setLoading(true);
       } else {
@@ -141,7 +138,6 @@ const AdminOverviewPage: React.FC = () => {
         setRefreshError(null);
         pollingRetriesRef.current = 0;
         pollingStoppedRef.current = false;
-        setLastSuccessAt(data.system.last_checked_at);
         if (!pollingStoppedRef.current) {
           pollingTimerRef.current = window.setTimeout(() => {
             pollingRunnerRef.current?.("interval");
@@ -157,7 +153,7 @@ const AdminOverviewPage: React.FC = () => {
         setRefreshing(false);
       }
     },
-    [handlePollingFailure, lastSuccessAt]
+    [handlePollingFailure, summary]
   );
 
   pollingRunnerRef.current = runPolling;
@@ -194,12 +190,6 @@ const AdminOverviewPage: React.FC = () => {
         : "Auto-refreshing";
   const showRetry =
     statusTone !== "healthy" || !!refreshError || summary?.system.refresh_paused;
-  const detailsTone =
-    statusTone === "down"
-      ? "danger"
-      : statusTone === "degraded"
-        ? "warning"
-        : "info";
 
   const issues = useMemo(() => {
     const list = summary?.issues ?? [];
@@ -239,55 +229,17 @@ const AdminOverviewPage: React.FC = () => {
           </div>
           <div className="admin-overview__status-actions">
             {showRetry && (
-              <Button
+              <button
                 type="button"
-                size="sm"
-                variant="secondary"
+                className="secondary-chip-btn"
                 onClick={handleRetry}
                 disabled={refreshing}
               >
                 Retry
-              </Button>
+              </button>
             )}
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => setDetailsOpen((prev) => !prev)}
-            >
-              Details <span className="admin-overview__chevron">{detailsOpen ? "▴" : "▾"}</span>
-            </Button>
           </div>
         </div>
-
-        {detailsOpen && (
-          <InlineAlert
-            tone={detailsTone}
-            title={`System ${statusLabel}`}
-            className="admin-overview__details"
-            actions={
-              refreshError ? (
-                <Button size="sm" variant="secondary" onClick={handleRetry}>
-                  Retry now
-                </Button>
-              ) : null
-            }
-          >
-            <span>
-              Last success: {lastSuccessAt ? formatRelativeTime(lastSuccessAt) : "Unavailable"}
-            </span>
-            {refreshError ? <span>{refreshError}</span> : null}
-            {summary?.system.errors?.length ? (
-              <ul className="admin-overview__error-list">
-                {summary.system.errors.map((err) => (
-                  <li key={err}>{err}</li>
-                ))}
-              </ul>
-            ) : (
-              <span>No errors reported.</span>
-            )}
-          </InlineAlert>
-        )}
 
         <div className="admin-overview__grid">
           <Panel

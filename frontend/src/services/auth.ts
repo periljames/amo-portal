@@ -7,6 +7,7 @@
  */
 
 import { getApiBaseUrl } from "./config";
+import { clearBrandContext, setBrandContext } from "./branding";
 
 const TOKEN_KEY = "amo_portal_token";
 const AMO_KEY = "amo_code";
@@ -360,11 +361,15 @@ export async function login(
       data.department ? data.department.code : null,
       data.amo.login_slug
     );
+    setBrandContext({
+      name: data.amo.name,
+    });
     // Track currently active AMO id (useful later for SUPERUSER support workflows)
     setActiveAmoId(data.amo.id);
   } else {
     clearContext();
     clearActiveAmoId();
+    clearBrandContext();
   }
 
   if (data.user) {
@@ -534,6 +539,7 @@ export function logout(): void {
   clearContext();
   clearCachedUser();
   clearActiveAmoId();
+  clearBrandContext();
   clearOnboardingStatus();
 }
 

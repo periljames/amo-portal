@@ -12,6 +12,7 @@ import {
   type PasswordResetDeliveryMethod,
   type PasswordResetResponse,
 } from "../services/auth";
+import { decodeAmoCertFromUrl } from "../utils/amo";
 
 const PasswordResetPage: React.FC = () => {
   const navigate = useNavigate();
@@ -111,6 +112,8 @@ const PasswordResetPage: React.FC = () => {
     navigate(target, { replace: true });
   };
 
+  const brandName = amoSlug ? decodeAmoCertFromUrl(amoSlug) : null;
+
   return (
     <AuthLayout
       title={isConfirmMode ? "Reset your password" : "Forgot your password?"}
@@ -119,6 +122,7 @@ const PasswordResetPage: React.FC = () => {
           ? "Create a new secure password to regain access."
           : "Enter your work email to receive a reset link."
       }
+      brandName={brandName}
     >
       <form className="auth-form" onSubmit={isConfirmMode ? handleConfirm : handleRequest}>
         {errorMsg && <div className="auth-form__error">{errorMsg}</div>}

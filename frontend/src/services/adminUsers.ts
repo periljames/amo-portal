@@ -11,6 +11,7 @@ import { apiPost, apiGet } from "./crs";
 import { apiDelete, apiPut } from "./crs";
 import { authHeaders, getCachedUser } from "./auth";
 import type { AccountRole, RegulatoryAuthority } from "./auth";
+import { BRANDING_EVENT } from "./branding";
 
 // Re-export these so pages can `import type { AccountRole } from "../services/adminUsers";`
 export type { AccountRole, RegulatoryAuthority };
@@ -189,6 +190,9 @@ export function setActiveAmoId(amoId: string) {
   localStorage.setItem(LS_ACTIVE_AMO_ID, v);
   // keep alt key in sync if it exists in your app already
   localStorage.setItem(ACTIVE_AMO_ID_KEY_ALT, v);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(BRANDING_EVENT));
+  }
 }
 
 export function getActiveAmoId(): string | null {
@@ -202,6 +206,9 @@ export function getActiveAmoId(): string | null {
 export function clearActiveAmoId() {
   localStorage.removeItem(LS_ACTIVE_AMO_ID);
   localStorage.removeItem(ACTIVE_AMO_ID_KEY_ALT);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(BRANDING_EVENT));
+  }
 }
 
 export async function getAdminContext(): Promise<AdminContext> {

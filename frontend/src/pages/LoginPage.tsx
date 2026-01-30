@@ -290,8 +290,12 @@ const LoginPage: React.FC = () => {
       : `Use your AMO work email or staff ID and password for ${humanAmoLabel}.`
     : "Enter your work email or staff ID and we will route you to the right portal.";
 
+  const brandName =
+    loginContext?.amo_name ||
+    (amoSlugForLabel ? decodeAmoCertFromUrl(amoSlugForLabel) : null);
+
   return (
-    <AuthLayout title={title} subtitle={subtitle}>
+    <AuthLayout title={title} subtitle={subtitle} brandName={brandName}>
       <form
         className="auth-form"
         onSubmit={step === "identify" ? handleIdentify : handleSubmit}

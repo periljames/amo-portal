@@ -1427,6 +1427,15 @@ class PlatformSettings(Base):
 
     id = Column(Integer, primary_key=True, default=1)
     api_base_url = Column(String(255), nullable=True)
+    platform_name = Column(String(255), nullable=True)
+    platform_tagline = Column(String(255), nullable=True)
+    brand_accent = Column(String(32), nullable=True)
+    brand_accent_soft = Column(String(64), nullable=True)
+    brand_accent_secondary = Column(String(32), nullable=True)
+    platform_logo_path = Column(String(512), nullable=True)
+    platform_logo_filename = Column(String(255), nullable=True)
+    platform_logo_content_type = Column(String(128), nullable=True)
+    platform_logo_uploaded_at = Column(DateTime(timezone=True), nullable=True)
 
     acme_directory_url = Column(String(255), nullable=True)
     acme_client = Column(String(128), nullable=True)

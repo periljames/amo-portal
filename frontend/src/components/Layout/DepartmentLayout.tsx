@@ -1,6 +1,9 @@
 // src/components/Layout/DepartmentLayout.tsx
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { BrandContext } from "../Brand/BrandContext";
+import { BrandMark } from "../Brand/BrandMark";
+import { BrandProvider } from "../Brand/BrandProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
 import { fetchSubscription } from "../../services/billing";
@@ -829,23 +832,33 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   return (
-    <div className={shellClassName}>
-      <aside className="app-shell__sidebar">
-        <div className="sidebar__header">
-          <div className="sidebar__title">
-            <span className="sidebar__app">AMO PORTAL</span>
-            <span className="sidebar__amo">{amoLabel}</span>
-          </div>
+    <BrandProvider
+      nameOverride={amoLabel}
+      preferStoredName={isAdminArea && isSuperuser}
+      logoSource={isAdminArea && isSuperuser ? "platform" : "amo"}
+    >
+      <BrandContext.Consumer>
+        {(brand) => (
+          <div className={shellClassName}>
+            <aside className="app-shell__sidebar">
+              <div className="sidebar__header">
+                <div className="sidebar__brand">
+                  <BrandMark size={36} />
+                  <div className="sidebar__brand-text">
+                    <span className="sidebar__brand-name">{brand.name}</span>
+                    <span className="sidebar__brand-subtitle">AMO Portal</span>
+                  </div>
+                </div>
 
-          <button
-            type="button"
-            className="sidebar__collapse-btn"
-            onClick={() => setCollapsed((c) => !c)}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? "›" : "‹"}
-          </button>
-        </div>
+                <button
+                  type="button"
+                  className="sidebar__collapse-btn"
+                  onClick={() => setCollapsed((c) => !c)}
+                  aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                >
+                  {collapsed ? "›" : "‹"}
+                </button>
+              </div>
 
         <nav className="sidebar__nav">
           {visibleAdminNav.map((nav) => {
@@ -1043,9 +1056,9 @@ const DepartmentLayout: React.FC<Props> = ({
           )}
         </nav>
 
-      </aside>
+            </aside>
 
-      <main className="app-shell__main">
+            <main className="app-shell__main">
         <header className="app-shell__topbar">
           <div className="app-shell__topbar-title">
             <div className="app-shell__topbar-heading">{deptLabel}</div>
@@ -1314,52 +1327,55 @@ const DepartmentLayout: React.FC<Props> = ({
         <div className="app-shell__main-inner">{children}</div>
 
         <footer className="app-shell__footer">
-          <span>© {currentYear} AMO Portal.</span>
-          <span>All rights reserved.</span>
+          <span>© {currentYear} {brand.name}.</span>
+          <span>{brand.tagline || "All rights reserved."}</span>
         </footer>
       </main>
 
-      {(idleWarningOpen || logoutReason) && (
-        <div className="session-timeout-overlay" role="dialog" aria-live="polite">
-          <div className="session-timeout-card">
-            {idleWarningOpen && !logoutReason && (
-              <>
-                <h2>Inactivity warning</h2>
-                <p>
-                  You will be logged out in{" "}
-                  <strong>{formattedCountdown}</strong> due to inactivity.
-                </p>
-                <p>Please click below to stay signed in.</p>
-                <div className="session-timeout-actions">
-                  <button className="btn btn-secondary" onClick={handleIdleLogout}>
-                    Log out now
-                  </button>
-                  <button className="btn btn-primary" onClick={handleStaySignedIn}>
-                    Stay signed in
-                  </button>
-                </div>
-              </>
-            )}
+            {(idleWarningOpen || logoutReason) && (
+              <div className="session-timeout-overlay" role="dialog" aria-live="polite">
+                <div className="session-timeout-card">
+                  {idleWarningOpen && !logoutReason && (
+                    <>
+                      <h2>Inactivity warning</h2>
+                      <p>
+                        You will be logged out in{" "}
+                        <strong>{formattedCountdown}</strong> due to inactivity.
+                      </p>
+                      <p>Please click below to stay signed in.</p>
+                      <div className="session-timeout-actions">
+                        <button className="btn btn-secondary" onClick={handleIdleLogout}>
+                          Log out now
+                        </button>
+                        <button className="btn btn-primary" onClick={handleStaySignedIn}>
+                          Stay signed in
+                        </button>
+                      </div>
+                    </>
+                  )}
 
-            {logoutReason && (
-              <>
-                <h2>Session ended</h2>
-                <p>
-                  {logoutReason === "idle"
-                    ? "You have been logged out due to inactivity."
-                    : "Your session has expired. Please log in again."}
-                </p>
-                <div className="session-timeout-actions">
-                  <button className="btn btn-primary" onClick={handleResumeLogin}>
-                    Log in
-                  </button>
+                  {logoutReason && (
+                    <>
+                      <h2>Session ended</h2>
+                      <p>
+                        {logoutReason === "idle"
+                          ? "You have been logged out due to inactivity."
+                          : "Your session has expired. Please log in again."}
+                      </p>
+                      <div className="session-timeout-actions">
+                        <button className="btn btn-primary" onClick={handleResumeLogin}>
+                          Log in
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
-              </>
+              </div>
             )}
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </BrandContext.Consumer>
+    </BrandProvider>
   );
 };
 

@@ -663,6 +663,14 @@ class SecurityEventRead(BaseModel):
 
 class PlatformSettingsBase(BaseModel):
     api_base_url: Optional[str] = None
+    platform_name: Optional[str] = None
+    platform_tagline: Optional[str] = None
+    brand_accent: Optional[str] = None
+    brand_accent_soft: Optional[str] = None
+    brand_accent_secondary: Optional[str] = None
+    platform_logo_filename: Optional[str] = None
+    platform_logo_content_type: Optional[str] = None
+    platform_logo_uploaded_at: Optional[datetime] = None
     acme_directory_url: Optional[str] = None
     acme_client: Optional[str] = None
     certificate_status: Optional[str] = None
