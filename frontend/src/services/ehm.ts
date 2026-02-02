@@ -116,6 +116,40 @@ export async function listEhmLogs(params?: {
   return fetchJson<EhmLog[]>(`/reliability/ehm/logs${query}`);
 }
 
+export async function previewEhmLog(file: File): Promise<{
+  aircraft_serial_number?: string | null;
+  engine_position?: string | null;
+  engine_serial_number?: string | null;
+  decode_offset?: number | null;
+}> {
+  const token = getToken();
+  const form = new FormData();
+  form.append("file", file);
+
+  const res = await fetch(`${API_BASE}/reliability/ehm/logs/preview`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: form,
+    credentials: "include",
+  });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Preview failed (${res.status})`);
+  }
+  return (await res.json()) as {
+    aircraft_serial_number?: string | null;
+    engine_position?: string | null;
+    engine_serial_number?: string | null;
+    decode_offset?: number | null;
+  };
+}
+
 export async function uploadEhmLog(payload: {
   file: File;
   aircraft_serial_number: string;

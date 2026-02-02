@@ -26,6 +26,13 @@ HEADER_RE = re.compile(
 
 KEY_VALUE_RE = re.compile(r"^\s*(?P<key>[^:=]+?)\s*[:=]\s*(?P<value>.+?)\s*$")
 
+AIRCRAFT_RE = re.compile(r"(aircraft|tail|registration|a/c)\s*[:=]\s*(?P<value>[A-Za-z0-9\\-]+)", re.IGNORECASE)
+ENGINE_POS_RE = re.compile(r"(engine\s*pos|engine\s*position|eng\s*pos)\s*[:=]\s*(?P<value>[A-Za-z0-9\\-]+)", re.IGNORECASE)
+ENGINE_SERIAL_RE = re.compile(
+    r"(engine\s*serial|engine\s*sn|esn|serial\s*number)\s*[:=]\s*(?P<value>[A-Za-z0-9\\-]+)",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class ParsedRecordResult:
@@ -131,6 +138,32 @@ def parse_ehm_records(text: str) -> list[ParsedRecordResult]:
     return records
 
 
+def extract_identifiers(text: str) -> dict:
+    aircraft = None
+    engine_position = None
+    engine_serial = None
+    for line in text.splitlines():
+        if aircraft is None:
+            match = AIRCRAFT_RE.search(line)
+            if match:
+                aircraft = match.group("value").strip()
+        if engine_position is None:
+            match = ENGINE_POS_RE.search(line)
+            if match:
+                engine_position = match.group("value").strip()
+        if engine_serial is None:
+            match = ENGINE_SERIAL_RE.search(line)
+            if match:
+                engine_serial = match.group("value").strip()
+        if aircraft and engine_position and engine_serial:
+            break
+    return {
+        "aircraft_serial_number": aircraft,
+        "engine_position": engine_position,
+        "engine_serial_number": engine_serial,
+    }
+
+
 def _parse_unit_time(raw: Optional[str]) -> Optional[datetime]:
     if not raw:
         return None
@@ -164,10 +197,12 @@ def _parse_log(db: Session, log: models.EhmRawLog) -> None:
     try:
         data = Path(log.storage_path).read_bytes()
         text, offset = decode_ehm_payload(data)
+        identifiers = extract_identifiers(text)
         records = parse_ehm_records(text)
         db.query(models.EhmParsedRecord).filter(models.EhmParsedRecord.raw_log_id == log.id).delete()
         log.raw_text = text
         log.decode_offset = offset
+        log.unit_identifiers = identifiers
         log.parse_status = models.EhmParseStatusEnum.PARSED
         log.parse_version = EHM_PARSE_VERSION
         log.parse_error = None
@@ -200,6 +235,7 @@ def ensure_raw_text(db: Session, log: models.EhmRawLog) -> str:
         return log.raw_text
     data = Path(log.storage_path).read_bytes()
     text, offset = decode_ehm_payload(data)
+    log.unit_identifiers = extract_identifiers(text)
     log.raw_text = text
     log.decode_offset = offset
     db.commit()

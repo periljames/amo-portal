@@ -566,6 +566,13 @@ class EhmLogIngestResult(BaseModel):
     deduplicated: bool = False
 
 
+class EhmLogPreviewRead(BaseModel):
+    aircraft_serial_number: Optional[str] = None
+    engine_position: Optional[str] = None
+    engine_serial_number: Optional[str] = None
+    decode_offset: Optional[int] = None
+
+
 class EhmParsedRecordRead(BaseModel):
     id: str
     raw_log_id: str

@@ -129,3 +129,15 @@ def test_snapshot_data_quality_flags_faults():
         assert snapshot["faults"]
     finally:
         session.close()
+
+
+def test_extract_identifiers():
+    sample = """Aircraft: AC-123
+Engine Position: LH
+Engine Serial: ESN-987
+AutoTrend[0] Data at [03/10/2025 12:30:45.12]:
+"""
+    identifiers = ehm_services.extract_identifiers(sample)
+    assert identifiers["aircraft_serial_number"] == "AC-123"
+    assert identifiers["engine_position"] == "LH"
+    assert identifiers["engine_serial_number"] == "ESN-987"

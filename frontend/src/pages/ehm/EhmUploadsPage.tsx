@@ -6,6 +6,7 @@ import { demoTrendUploads } from "../../demo/ehmDemoData";
 import { useEhmDemoMode } from "../../hooks/useEhmDemoMode";
 import {
   listEhmLogs,
+  previewEhmLog,
   uploadEhmLog,
   type EhmLog,
 } from "../../services/ehm";
@@ -31,6 +32,7 @@ const EhmUploadsPage: React.FC = () => {
   const [source, setSource] = useState("");
   const [notes, setNotes] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [autoFilled, setAutoFilled] = useState(false);
 
   const { isDemoMode, canToggleDemo, setDemoMode } = useEhmDemoMode();
 
@@ -171,6 +173,7 @@ const EhmUploadsPage: React.FC = () => {
                 return;
               }
               setUploading(true);
+              setAutoFilled(false);
               uploadEhmLog({
                 file,
                 aircraft_serial_number: aircraftSerial.trim(),
@@ -189,7 +192,7 @@ const EhmUploadsPage: React.FC = () => {
                 .catch((err) => {
                   setUploadError(err?.message || "Upload failed.");
                 })
-                .finally(() => setUploading(false));
+              .finally(() => setUploading(false));
             }}
           >
             {uploading ? "Uploading…" : "Upload EHM log"}
@@ -254,9 +257,42 @@ const EhmUploadsPage: React.FC = () => {
               <input
                 type="file"
                 accept=".log"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => {
+                  const selected = event.target.files?.[0] ?? null;
+                  setFile(selected);
+                  setUploadError(null);
+                  setUploadSuccess(null);
+                  if (!selected || isDemoMode) {
+                    setAutoFilled(false);
+                    return;
+                  }
+                  previewEhmLog(selected)
+                    .then((preview) => {
+                      let didFill = false;
+                      if (!aircraftSerial && preview.aircraft_serial_number) {
+                        setAircraftSerial(preview.aircraft_serial_number);
+                        didFill = true;
+                      }
+                      if (!enginePosition && preview.engine_position) {
+                        setEnginePosition(preview.engine_position);
+                        didFill = true;
+                      }
+                      if (!engineSerial && preview.engine_serial_number) {
+                        setEngineSerial(preview.engine_serial_number);
+                        didFill = true;
+                      }
+                      setAutoFilled(didFill);
+                    })
+                    .catch((err) => {
+                      setAutoFilled(false);
+                      setUploadError(err?.message || "Unable to extract log metadata.");
+                    });
+                }}
               />
             </label>
+            {autoFilled && (
+              <span className="ehm-muted">Auto-filled from log header. Please confirm.</span>
+            )}
             <label className="ehm-control">
               Search
               <input

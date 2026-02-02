@@ -1277,6 +1277,53 @@ def upload_ehm_log(
     return schemas.EhmLogIngestResult(log=log, deduplicated=False)
 
 
+@router.post(
+    "/ehm/logs/preview",
+    response_model=schemas.EhmLogPreviewRead,
+)
+def preview_ehm_log(
+    file: UploadFile = File(...),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    filename = file.filename or "ehm.log"
+    ext = Path(filename).suffix.lower()
+    if ext not in EHM_ALLOWED_EXTS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload must be a .log file.")
+    if file.content_type and file.content_type not in EHM_ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported content type for EHM log.",
+        )
+
+    total = 0
+    chunks: list[bytes] = []
+    while True:
+        chunk = file.file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if EHM_MAX_UPLOAD_BYTES and total > EHM_MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Upload exceeds maximum file size.",
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
+
+    try:
+        text, offset = ehm_services.decode_ehm_payload(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    identifiers = ehm_services.extract_identifiers(text)
+    return schemas.EhmLogPreviewRead(
+        aircraft_serial_number=identifiers.get("aircraft_serial_number"),
+        engine_position=identifiers.get("engine_position"),
+        engine_serial_number=identifiers.get("engine_serial_number"),
+        decode_offset=offset,
+    )
+
+
 @router.get(
     "/ehm/logs",
     response_model=List[schemas.EhmLogRead],
