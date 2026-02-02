@@ -170,6 +170,13 @@
   flex-wrap: wrap;
 }
 
+.ehm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
 .ehm-chart__actions {
   display: flex;
   gap: 8px;
@@ -204,6 +211,42 @@
   gap: 12px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.ehm-surface__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .app-shell__sidebar,
+  .app-shell__topbar,
+  .app-shell__footer,
+  .ehm-toolbar,
+  .ehm-actions {
+    display: none !important;
+  }
+
+  .app-shell__main {
+    padding: 0;
+  }
+
+  .ehm-chart__canvas {
+    height: auto;
+    min-height: 420px;
+    border: 1px solid #e2e8f0;
+  }
 }
 
 .ehm-marker-list {
