@@ -11,6 +11,7 @@ from .models import (
     AlertComparatorEnum,
     ControlChartMethodEnum,
     EngineTrendStatusEnum,
+    EhmParseStatusEnum,
     FRACASActionStatusEnum,
     FRACASActionTypeEnum,
     FRACASStatusEnum,
@@ -531,6 +532,77 @@ class OilConsumptionRateRead(OilConsumptionRateCreate):
 
     class Config:
         from_attributes = True
+
+
+class EhmLogRead(BaseModel):
+    id: str
+    amo_id: str
+    aircraft_serial_number: Optional[str] = None
+    engine_position: str
+    engine_serial_number: Optional[str] = None
+    source: Optional[str] = None
+    notes: Optional[str] = None
+    original_filename: Optional[str] = None
+    content_type: Optional[str] = None
+    storage_path: str
+    size_bytes: int
+    sha256_hash: str
+    decode_offset: Optional[int] = None
+    unit_identifiers: Optional[dict] = None
+    parse_status: EhmParseStatusEnum
+    parse_version: Optional[str] = None
+    parse_error: Optional[str] = None
+    parsed_at: Optional[datetime] = None
+    parsed_record_count: int = 0
+    created_at: datetime
+    uploaded_by_user_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EhmLogIngestResult(BaseModel):
+    log: EhmLogRead
+    deduplicated: bool = False
+
+
+class EhmParsedRecordRead(BaseModel):
+    id: str
+    raw_log_id: str
+    record_type: str
+    record_index: Optional[int] = None
+    unit_time: Optional[datetime] = None
+    unit_time_raw: Optional[str] = None
+    payload_json: Optional[dict] = None
+    raw_text: Optional[str] = None
+    parse_version: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EhmSnapshotDataQuality(BaseModel):
+    status: str
+    reasons: List[str] = Field(default_factory=list)
+
+
+class EhmSnapshotIdentity(BaseModel):
+    aircraft_serial_number: str
+    engine_position: str
+    unit_time_start: Optional[datetime] = None
+    unit_time_end: Optional[datetime] = None
+
+
+class EhmSnapshotRead(BaseModel):
+    identity: EhmSnapshotIdentity
+    data_quality: EhmSnapshotDataQuality
+    latest_trend: Optional[dict] = None
+    engine_runs: List[dict] = Field(default_factory=list)
+    faults: List[dict] = Field(default_factory=list)
+    sensor_failures: List[dict] = Field(default_factory=list)
+    derived_interpretation: dict
+    evidence: dict
 
 
 class ComponentInstanceCreate(BaseModel):
