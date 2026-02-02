@@ -1,8 +1,8 @@
 // src/services/ehm.ts
 import { getToken, handleAuthFailure } from "./auth";
+import { getApiBaseUrl } from "./config";
 
-const API_BASE =
-  (import.meta as any).env?.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const API_BASE = getApiBaseUrl();
 
 type QueryVal = string | number | boolean | null | undefined;
 
@@ -85,6 +85,113 @@ export type EngineSnapshot = {
   flight_leg?: string | null;
   data_source?: string | null;
 };
+
+export type EhmLog = {
+  id: string;
+  aircraft_serial_number: string | null;
+  engine_position: string;
+  engine_serial_number: string | null;
+  source: string | null;
+  notes: string | null;
+  original_filename: string | null;
+  content_type: string | null;
+  storage_path: string;
+  size_bytes: number;
+  sha256_hash: string;
+  parse_status: string;
+  parse_error: string | null;
+  parsed_at: string | null;
+  parsed_record_count: number;
+  created_at: string;
+};
+
+export async function listEhmLogs(params?: {
+  aircraft_serial_number?: string;
+  engine_position?: string;
+  parse_status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<EhmLog[]> {
+  const query = toQuery(params ?? {});
+  return fetchJson<EhmLog[]>(`/reliability/ehm/logs${query}`);
+}
+
+export async function previewEhmLog(file: File): Promise<{
+  aircraft_serial_number?: string | null;
+  engine_position?: string | null;
+  engine_serial_number?: string | null;
+  decode_offset?: number | null;
+}> {
+  const token = getToken();
+  const form = new FormData();
+  form.append("file", file);
+
+  const res = await fetch(`${API_BASE}/reliability/ehm/logs/preview`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: form,
+    credentials: "include",
+  });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Preview failed (${res.status})`);
+  }
+  return (await res.json()) as {
+    aircraft_serial_number?: string | null;
+    engine_position?: string | null;
+    engine_serial_number?: string | null;
+    decode_offset?: number | null;
+  };
+}
+
+export async function uploadEhmLog(payload: {
+  file: File;
+  aircraft_serial_number: string;
+  engine_position: string;
+  engine_serial_number?: string | null;
+  source?: string | null;
+  notes?: string | null;
+}): Promise<EhmLog> {
+  const token = getToken();
+  const form = new FormData();
+  form.append("file", payload.file);
+  form.append("aircraft_serial_number", payload.aircraft_serial_number);
+  form.append("engine_position", payload.engine_position);
+  if (payload.engine_serial_number) {
+    form.append("engine_serial_number", payload.engine_serial_number);
+  }
+  if (payload.source) {
+    form.append("source", payload.source);
+  }
+  if (payload.notes) {
+    form.append("notes", payload.notes);
+  }
+
+  const res = await fetch(`${API_BASE}/reliability/ehm/logs/upload`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: form,
+    credentials: "include",
+  });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Upload failed (${res.status})`);
+  }
+  const data = (await res.json()) as { log: EhmLog };
+  return data.log;
+}
 
 export async function listEngineTrendStatus(): Promise<EngineTrendStatus[]> {
   return fetchJson<EngineTrendStatus[]>("/reliability/engine-trends/fleet-status");

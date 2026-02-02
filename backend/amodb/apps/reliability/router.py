@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 from datetime import date, datetime, time, timezone
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -15,6 +18,7 @@ from amodb.security import get_current_active_user, require_roles
 from amodb.utils.identifiers import generate_uuid7
 from ...database import get_write_db
 from ..accounts import models as account_models
+from . import ehm as ehm_services
 from . import models as reliability_models
 from . import schemas, services
 from ..fleet import models as fleet_models
@@ -26,6 +30,28 @@ router = APIRouter(
     dependencies=[Depends(require_module("reliability"))],
 )
 
+MAX_EHM_PAGE_SIZE = 500
+
+
+def _normalize_ehm_pagination(limit: int, offset: int) -> tuple[int, int]:
+    if limit <= 0:
+        limit = 100
+    if limit > MAX_EHM_PAGE_SIZE:
+        limit = MAX_EHM_PAGE_SIZE
+    if offset < 0:
+        offset = 0
+    return limit, offset
+
+
+def _ensure_ehm_upload_path(path: Path) -> Path:
+    resolved = path.resolve()
+    if not str(resolved).startswith(str(EHM_UPLOAD_DIR)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid EHM log upload path.",
+        )
+    return resolved
+
 PART_MOVEMENT_ROLES = [
     account_models.AccountRole.AMO_ADMIN,
     account_models.AccountRole.PLANNING_ENGINEER,
@@ -36,6 +62,15 @@ PART_MOVEMENT_ROLES = [
     account_models.AccountRole.STORES,
     account_models.AccountRole.QUALITY_MANAGER,
 ]
+
+EHM_UPLOAD_DIR = Path(os.getenv("EHM_LOG_UPLOAD_DIR", "uploads/ehm")).resolve()
+EHM_MAX_UPLOAD_BYTES = int(os.getenv("EHM_LOG_MAX_UPLOAD_BYTES", "52428800"))
+EHM_ALLOWED_EXTS = {".log"}
+EHM_ALLOWED_CONTENT_TYPES = {
+    "application/octet-stream",
+    "application/x-ehm-log",
+    "text/plain",
+}
 
 
 @router.post(
@@ -1136,3 +1171,305 @@ def download_report(
     if not report.file_ref:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Report is not ready.")
     return FileResponse(report.file_ref, filename=f"reliability_report_{report.id}.pdf")
+
+
+@router.post(
+    "/ehm/logs/upload",
+    response_model=schemas.EhmLogIngestResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_ehm_log(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    aircraft_serial_number: Optional[str] = Form(None),
+    tail: Optional[str] = Form(None),
+    aircraft_id: Optional[str] = Form(None),
+    engine_position: str = Form(...),
+    engine_serial_number: Optional[str] = Form(None),
+    source: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    aircraft_serial_number = aircraft_serial_number or tail or aircraft_id
+    if not aircraft_serial_number:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Aircraft identifier is required.")
+
+    filename = file.filename or "ehm.log"
+    ext = Path(filename).suffix.lower()
+    if ext not in EHM_ALLOWED_EXTS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload must be a .log file.")
+
+    if file.content_type and file.content_type not in EHM_ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported content type for EHM log.",
+        )
+
+    amo_id = current_user.effective_amo_id
+    log_id = generate_uuid7()
+
+    EHM_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    log_root = _ensure_ehm_upload_path(EHM_UPLOAD_DIR / amo_id / "ehm")
+    log_root.mkdir(parents=True, exist_ok=True)
+    asset_dir = _ensure_ehm_upload_path(log_root / aircraft_serial_number)
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    engine_dir = _ensure_ehm_upload_path(asset_dir / engine_position)
+    engine_dir.mkdir(parents=True, exist_ok=True)
+
+    temp_path = _ensure_ehm_upload_path(engine_dir / f"{log_id}.upload")
+    total = 0
+    digest = hashlib.sha256()
+    with temp_path.open("wb") as out:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if EHM_MAX_UPLOAD_BYTES and total > EHM_MAX_UPLOAD_BYTES:
+                temp_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Upload exceeds maximum file size.",
+                )
+            digest.update(chunk)
+            out.write(chunk)
+
+    sha256_hash = digest.hexdigest()
+    existing = (
+        db.query(reliability_models.EhmRawLog)
+        .filter(
+            reliability_models.EhmRawLog.amo_id == amo_id,
+            reliability_models.EhmRawLog.sha256_hash == sha256_hash,
+            reliability_models.EhmRawLog.aircraft_serial_number == aircraft_serial_number,
+            reliability_models.EhmRawLog.engine_position == engine_position,
+        )
+        .first()
+    )
+    if existing:
+        temp_path.unlink(missing_ok=True)
+        return schemas.EhmLogIngestResult(log=existing, deduplicated=True)
+
+    final_path = _ensure_ehm_upload_path(engine_dir / f"{log_id}{ext}")
+    temp_path.replace(final_path)
+
+    log = reliability_models.EhmRawLog(
+        id=log_id,
+        amo_id=amo_id,
+        aircraft_serial_number=aircraft_serial_number,
+        engine_position=engine_position,
+        engine_serial_number=engine_serial_number,
+        source=source,
+        notes=notes,
+        original_filename=filename,
+        content_type=file.content_type,
+        storage_path=str(final_path),
+        size_bytes=total,
+        sha256_hash=sha256_hash,
+        parse_status=reliability_models.EhmParseStatusEnum.PENDING,
+        uploaded_by_user_id=current_user.id,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    background_tasks.add_task(ehm_services.parse_log_in_background, log.id)
+    return schemas.EhmLogIngestResult(log=log, deduplicated=False)
+
+
+@router.post(
+    "/ehm/logs/preview",
+    response_model=schemas.EhmLogPreviewRead,
+)
+def preview_ehm_log(
+    file: UploadFile = File(...),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    filename = file.filename or "ehm.log"
+    ext = Path(filename).suffix.lower()
+    if ext not in EHM_ALLOWED_EXTS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload must be a .log file.")
+    if file.content_type and file.content_type not in EHM_ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported content type for EHM log.",
+        )
+
+    total = 0
+    chunks: list[bytes] = []
+    while True:
+        chunk = file.file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if EHM_MAX_UPLOAD_BYTES and total > EHM_MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Upload exceeds maximum file size.",
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
+
+    try:
+        text, offset = ehm_services.decode_ehm_payload(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    identifiers = ehm_services.extract_identifiers(text)
+    return schemas.EhmLogPreviewRead(
+        aircraft_serial_number=identifiers.get("aircraft_serial_number"),
+        engine_position=identifiers.get("engine_position"),
+        engine_serial_number=identifiers.get("engine_serial_number"),
+        decode_offset=offset,
+    )
+
+
+@router.get(
+    "/ehm/logs",
+    response_model=List[schemas.EhmLogRead],
+)
+def list_ehm_logs(
+    aircraft_serial_number: Optional[str] = None,
+    engine_position: Optional[str] = None,
+    parse_status: Optional[reliability_models.EhmParseStatusEnum] = None,
+    from_: Optional[datetime] = Query(None, alias="from"),
+    to: Optional[datetime] = Query(None, alias="to"),
+    limit: int = 100,
+    offset: int = 0,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    limit, offset = _normalize_ehm_pagination(limit, offset)
+    query = db.query(reliability_models.EhmRawLog).filter(
+        reliability_models.EhmRawLog.amo_id == current_user.effective_amo_id
+    )
+    if aircraft_serial_number:
+        query = query.filter(reliability_models.EhmRawLog.aircraft_serial_number == aircraft_serial_number)
+    if engine_position:
+        query = query.filter(reliability_models.EhmRawLog.engine_position == engine_position)
+    if parse_status:
+        query = query.filter(reliability_models.EhmRawLog.parse_status == parse_status)
+    if from_:
+        query = query.filter(reliability_models.EhmRawLog.created_at >= from_)
+    if to:
+        query = query.filter(reliability_models.EhmRawLog.created_at <= to)
+    return query.order_by(reliability_models.EhmRawLog.created_at.desc()).offset(offset).limit(limit).all()
+
+
+@router.get(
+    "/ehm/logs/{log_id}",
+    response_model=schemas.EhmLogRead,
+)
+def get_ehm_log(
+    log_id: str,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    log = (
+        db.query(reliability_models.EhmRawLog)
+        .filter(
+            reliability_models.EhmRawLog.id == log_id,
+            reliability_models.EhmRawLog.amo_id == current_user.effective_amo_id,
+        )
+        .first()
+    )
+    if not log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EHM log not found.")
+    return log
+
+
+@router.get(
+    "/ehm/logs/{log_id}/raw-text",
+)
+def get_ehm_raw_text(
+    log_id: str,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    log = (
+        db.query(reliability_models.EhmRawLog)
+        .filter(
+            reliability_models.EhmRawLog.id == log_id,
+            reliability_models.EhmRawLog.amo_id == current_user.effective_amo_id,
+        )
+        .first()
+    )
+    if not log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EHM log not found.")
+
+    try:
+        text = ehm_services.ensure_raw_text(db, log)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    def _iter_text(chunk_size: int = 4096):
+        for idx in range(0, len(text), chunk_size):
+            yield text[idx : idx + chunk_size]
+
+    return StreamingResponse(_iter_text(), media_type="text/plain")
+
+
+@router.get(
+    "/ehm/logs/{log_id}/records",
+    response_model=List[schemas.EhmParsedRecordRead],
+)
+def list_ehm_records(
+    log_id: str,
+    record_type: Optional[str] = None,
+    from_: Optional[datetime] = Query(None, alias="from"),
+    to: Optional[datetime] = Query(None, alias="to"),
+    limit: int = 200,
+    offset: int = 0,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    limit, offset = _normalize_ehm_pagination(limit, offset)
+    log = (
+        db.query(reliability_models.EhmRawLog)
+        .filter(
+            reliability_models.EhmRawLog.id == log_id,
+            reliability_models.EhmRawLog.amo_id == current_user.effective_amo_id,
+        )
+        .first()
+    )
+    if not log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="EHM log not found.")
+    if log.parse_status != reliability_models.EhmParseStatusEnum.PARSED:
+        ehm_services.parse_log_now(db, log)
+
+    query = db.query(reliability_models.EhmParsedRecord).filter(
+        reliability_models.EhmParsedRecord.raw_log_id == log_id,
+        reliability_models.EhmParsedRecord.amo_id == current_user.effective_amo_id,
+    )
+    if record_type:
+        query = query.filter(reliability_models.EhmParsedRecord.record_type == record_type)
+    if from_:
+        query = query.filter(reliability_models.EhmParsedRecord.unit_time >= from_)
+    if to:
+        query = query.filter(reliability_models.EhmParsedRecord.unit_time <= to)
+    return query.order_by(reliability_models.EhmParsedRecord.unit_time.asc().nulls_last()).offset(offset).limit(limit).all()
+
+
+@router.get(
+    "/ehm/assets/{asset_id}/snapshot",
+    response_model=schemas.EhmSnapshotRead,
+)
+def get_ehm_snapshot(
+    asset_id: str,
+    engine_position: str,
+    at: Optional[datetime] = None,
+    from_: Optional[datetime] = Query(None, alias="from"),
+    to: Optional[datetime] = Query(None, alias="to"),
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    window_start, window_end = ehm_services.build_snapshot_window(at, from_, to)
+    snapshot = ehm_services.build_snapshot(
+        db,
+        amo_id=current_user.effective_amo_id,
+        aircraft_serial_number=asset_id,
+        engine_position=engine_position,
+        window_start=window_start,
+        window_end=window_end,
+    )
+    return snapshot
