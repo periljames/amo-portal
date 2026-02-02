@@ -170,6 +170,13 @@
   flex-wrap: wrap;
 }
 
+.ehm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
 .ehm-chart__actions {
   display: flex;
   gap: 8px;
@@ -177,18 +184,19 @@
 }
 
 .ehm-chart__canvas {
-  height: 320px;
+  height: 360px;
   border-radius: 12px;
-  border: 1px dashed rgba(15, 23, 42, 0.2);
-  background: #fff;
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 8px;
 }
 
 .ehm-chart__placeholder {
   text-align: center;
-  color: #475569;
+  color: var(--text-secondary);
 }
 
 .ehm-chart__footer {
@@ -202,7 +210,43 @@
   display: flex;
   gap: 12px;
   font-size: 12px;
-  color: #475569;
+  color: var(--text-secondary);
+}
+
+.ehm-surface__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .app-shell__sidebar,
+  .app-shell__topbar,
+  .app-shell__footer,
+  .ehm-toolbar,
+  .ehm-actions {
+    display: none !important;
+  }
+
+  .app-shell__main {
+    padding: 0;
+  }
+
+  .ehm-chart__canvas {
+    height: auto;
+    min-height: 420px;
+    border: 1px solid #e2e8f0;
+  }
 }
 
 .ehm-marker-list {

@@ -131,7 +131,7 @@ const ReliabilityReportsPage: React.FC = () => {
   return (
     <DepartmentLayout
       amoCode={amoCode ?? "UNKNOWN"}
-      activeDepartment="quality"
+      activeDepartment="reliability"
     >
       <header className="page-header">
         <h1 className="page-header__title">Reliability Reports</h1>

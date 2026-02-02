@@ -30,9 +30,9 @@ type DepartmentId =
   | "planning"
   | "production"
   | "quality"
+  | "reliability"
   | "safety"
   | "stores"
-  | "ehm"
   | "engineering"
   | "workshops"
   | "admin";
@@ -49,9 +49,9 @@ const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
   { id: "planning", label: "Planning" },
   { id: "production", label: "Production" },
   { id: "quality", label: "Quality & Compliance" },
+  { id: "reliability", label: "Reliability" },
   { id: "safety", label: "Safety Management" },
   { id: "stores", label: "Procurement & Stores" },
-  { id: "ehm", label: "Engine Health" },
   { id: "engineering", label: "Engineering" },
   { id: "workshops", label: "Workshops" },
   { id: "admin", label: "System Admin" },
@@ -363,7 +363,7 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [location.pathname]);
 
   const isReliabilityRoute = useMemo(() => {
-    return location.pathname.includes("/reliability-reports");
+    return location.pathname.includes("/reliability");
   }, [location.pathname]);
 
   const isEhmDashboardRoute = useMemo(() => {
@@ -1013,11 +1013,14 @@ const DepartmentLayout: React.FC<Props> = ({
               >
                 <span className="sidebar__item-label">QMS Overview</span>
               </button>
+            </>
+          )}
+
+          {!isAdminArea && activeDepartment === "reliability" && (
+            <>
               <button
                 type="button"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/quality/reliability-reports`)
-                }
+                onClick={() => navigate(`/maintenance/${amoCode}/reliability`)}
                 className={
                   "sidebar__item" +
                   (isReliabilityRoute ? " sidebar__item--active" : "")
@@ -1027,21 +1030,16 @@ const DepartmentLayout: React.FC<Props> = ({
               >
                 <span className="sidebar__item-label">Reliability Reports</span>
               </button>
-            </>
-          )}
-
-          {!isAdminArea && activeDepartment === "ehm" && (
-            <>
               <button
                 type="button"
                 onClick={() => navigate(`/maintenance/${amoCode}/ehm/dashboard`)}
                 className={
                   "sidebar__item" + (isEhmDashboardRoute ? " sidebar__item--active" : "")
                 }
-                aria-label="EHM Dashboard"
-                title="EHM Dashboard"
+                aria-label="Engine Health Monitoring dashboard"
+                title="Engine Health Monitoring dashboard"
               >
-                <span className="sidebar__item-label">Dashboard</span>
+                <span className="sidebar__item-label">EHM Dashboard</span>
               </button>
               <button
                 type="button"
@@ -1049,10 +1047,10 @@ const DepartmentLayout: React.FC<Props> = ({
                 className={
                   "sidebar__item" + (isEhmTrendsRoute ? " sidebar__item--active" : "")
                 }
-                aria-label="EHM Trends"
-                title="EHM Trends"
+                aria-label="Engine Health Monitoring trends"
+                title="Engine Health Monitoring trends"
               >
-                <span className="sidebar__item-label">Trend Graphs</span>
+                <span className="sidebar__item-label">EHM Trends</span>
               </button>
               <button
                 type="button"
@@ -1060,10 +1058,10 @@ const DepartmentLayout: React.FC<Props> = ({
                 className={
                   "sidebar__item" + (isEhmUploadsRoute ? " sidebar__item--active" : "")
                 }
-                aria-label="EHM Uploads"
-                title="EHM Uploads"
+                aria-label="Engine Health Monitoring uploads"
+                title="Engine Health Monitoring uploads"
               >
-                <span className="sidebar__item-label">Uploads</span>
+                <span className="sidebar__item-label">EHM Uploads</span>
               </button>
             </>
           )}

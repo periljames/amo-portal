@@ -1,5 +1,7 @@
 // src/pages/ehm/EhmTrendsPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import Plot from "react-plotly.js";
+import Plotly from "plotly.js-dist-min";
 import { useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { useEhmDemoMode } from "../../hooks/useEhmDemoMode";
@@ -25,6 +27,9 @@ const EhmTrendsPage: React.FC = () => {
   const [series, setSeries] = useState<EngineTrendSeries | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [focusDate, setFocusDate] = useState<string | null>(null);
+  const [exportFormat, setExportFormat] = useState("png");
+  const chartRef = useRef<HTMLDivElement | null>(null);
 
   const { isDemoMode, canToggleDemo, setDemoMode } = useEhmDemoMode();
 
@@ -85,9 +90,118 @@ const EhmTrendsPage: React.FC = () => {
   }, [isDemoMode, selectedEngineId, metricFilter, metricKey]);
 
   const demoSeries = useMemo(() => demoTrendSeries[metricFilter] ?? null, [metricFilter]);
+  const activeSeries = isDemoMode ? demoSeries : series;
+
+  const chartData = useMemo(() => {
+    if (!activeSeries) return null;
+    const points = activeSeries.points ?? [];
+    const dates = points.map((point) => point.date);
+    const rawValues = points.map((point) => point.raw);
+    const correctedValues = points.map((point) => point.corrected);
+    const baselineValues =
+      activeSeries.baseline !== null ? points.map(() => activeSeries.baseline) : [];
+    const controlValues =
+      activeSeries.control_limit !== null ? points.map(() => activeSeries.control_limit) : [];
+    const eventDates = (activeSeries.events ?? []).map((event) => event.date);
+    const eventLabels = (activeSeries.events ?? []).map(
+      (event) => event.description || event.event_type
+    );
+
+    return {
+      dates,
+      rawValues,
+      correctedValues,
+      baselineValues,
+      controlValues,
+      eventDates,
+      eventLabels,
+    };
+  }, [activeSeries]);
+
+  const chartLayout = useMemo(() => {
+    const shapes = focusDate
+      ? [
+          {
+            type: "line",
+            x0: focusDate,
+            x1: focusDate,
+            y0: 0,
+            y1: 1,
+            xref: "x",
+            yref: "paper",
+            line: { color: "#f97316", width: 2, dash: "dot" },
+          },
+        ]
+      : [];
+    return {
+      autosize: true,
+      height: 360,
+      margin: { l: 48, r: 20, t: 18, b: 40 },
+      paper_bgcolor: "transparent",
+      plot_bgcolor: "transparent",
+      font: { color: "var(--text-primary)" },
+      xaxis: {
+        title: "Date",
+        type: "date",
+        gridcolor: "rgba(148, 163, 184, 0.2)",
+        zerolinecolor: "rgba(148, 163, 184, 0.3)",
+      },
+      yaxis: {
+        title: metricFilter,
+        gridcolor: "rgba(148, 163, 184, 0.2)",
+        zerolinecolor: "rgba(148, 163, 184, 0.3)",
+      },
+      hovermode: "x unified",
+      showlegend: true,
+      legend: { orientation: "h", x: 0, y: -0.2 },
+      shapes,
+    };
+  }, [metricFilter, focusDate]);
+
+  const chartConfig = useMemo(
+    () => ({
+      responsive: true,
+      displaylogo: false,
+      scrollZoom: true,
+      modeBarButtonsToAdd: ["drawline", "eraseshape", "zoomIn2d", "zoomOut2d", "autoScale2d"],
+      toImageButtonOptions: {
+        format: exportFormat,
+        filename: "engine-trend",
+        scale: 3,
+      },
+    }),
+    [exportFormat]
+  );
+
+  const spikeRows = useMemo(() => {
+    if (!activeSeries) return [];
+    return activeSeries.points.filter((point) => {
+      if (point.status && /shift|spike/i.test(point.status)) return true;
+      if (point.delta === null || point.delta === undefined) return false;
+      return Math.abs(point.delta) >= 0.5;
+    });
+  }, [activeSeries]);
+
+  const handleExport = async () => {
+    if (!chartRef.current) return;
+    try {
+      const url = await Plotly.toImage(chartRef.current, {
+        format: exportFormat,
+        height: 900,
+        width: 1400,
+        scale: 2,
+      });
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `engine-trend.${exportFormat}`;
+      link.click();
+    } catch (err) {
+      console.error("Unable to export chart", err);
+    }
+  };
 
   return (
-    <DepartmentLayout amoCode={amoSlug} activeDepartment="ehm">
+    <DepartmentLayout amoCode={amoSlug} activeDepartment="reliability">
       <header className="ehm-hero ehm-hero--compact">
         <div>
           <p className="ehm-eyebrow">Engine Health Monitoring</p>
@@ -107,15 +221,25 @@ const EhmTrendsPage: React.FC = () => {
               Demo mode
             </label>
           )}
-          <button className="btn btn-secondary" type="button">
-            Download PNG
-          </button>
-          <button className="btn btn-secondary" type="button">
-            Print Hi-Res
-          </button>
-          <button className="btn" type="button">
-            Open zoom view
-          </button>
+          <div className="ehm-actions">
+            <label className="ehm-control">
+              Export format
+              <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value)}>
+                <option value="png">PNG (hi-res)</option>
+                <option value="svg">SVG</option>
+                <option value="jpeg">JPEG</option>
+              </select>
+            </label>
+            <button className="btn btn-secondary" type="button" onClick={handleExport}>
+              Download chart
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={() => window.print()}>
+              Print A4
+            </button>
+          </div>
+          <div className="ehm-muted">
+            Hover to inspect values. Use the toolbar to zoom, pan, lock, and export.
+          </div>
         </div>
       </header>
 
@@ -184,41 +308,105 @@ const EhmTrendsPage: React.FC = () => {
               <span className="badge badge--success">Trend Normal</span>
               <span className="ehm-muted"> · Metric: {metricFilter}</span>
             </div>
-            <div className="ehm-chart__actions">
-              <button className="btn btn-secondary" type="button">
-                Zoom
-              </button>
-              <button className="btn btn-secondary" type="button">
-                Download
-              </button>
-              <button className="btn btn-secondary" type="button">
-                Print
-              </button>
+            <div className="ehm-chart__actions ehm-muted">
+              Hover to inspect values. Use the chart toolbar to zoom, pan, and export.
             </div>
           </div>
           <div className="ehm-chart__canvas">
-            <div className="ehm-chart__placeholder">
-              {isDemoMode && demoSeries && (
-                <>
-                  <p>Trend points: {demoSeries.points.length}</p>
-                  <p className="ehm-muted">Overlay: {overlay}</p>
-                </>
-              )}
-              {!isDemoMode && loading && <p>Loading trend series…</p>}
-              {!isDemoMode && !loading && error && <p className="ehm-muted">{error}</p>}
-              {!isDemoMode && !loading && !error && series && (
-                <>
-                  <p>Trend points: {series.points.length}</p>
-                  <p className="ehm-muted">Overlay: {overlay}</p>
-                </>
-              )}
-              {!isDemoMode && !loading && !error && !series && (
-                <>
-                  <p>Interactive chart placeholder · White background for export</p>
-                  <p className="ehm-muted">Overlay: {overlay}</p>
-                </>
-              )}
-            </div>
+            {loading && !isDemoMode && (
+              <div className="ehm-chart__placeholder">
+                <p>Loading trend series…</p>
+              </div>
+            )}
+            {!loading && error && (
+              <div className="ehm-chart__placeholder">
+                <p className="ehm-muted">{error}</p>
+              </div>
+            )}
+            {!loading && !error && chartData && (
+              <Plot
+                data={[
+                  {
+                    x: chartData.dates,
+                    y: chartData.rawValues,
+                    type: "scatter",
+                    mode: "lines+markers",
+                    name: "Raw",
+                    line: { color: "#38bdf8", width: 2 },
+                    marker: { size: 4 },
+                  },
+                  {
+                    x: chartData.dates,
+                    y: chartData.correctedValues,
+                    type: "scatter",
+                    mode: "lines+markers",
+                    name: "Corrected",
+                    line: { color: "#a78bfa", width: 2 },
+                    marker: { size: 4 },
+                  },
+                  ...(chartData.baselineValues.length
+                    ? [
+                        {
+                          x: chartData.dates,
+                          y: chartData.baselineValues,
+                          type: "scatter",
+                          mode: "lines",
+                          name: "Baseline",
+                          line: { color: "#22c55e", width: 2, dash: "dash" },
+                        },
+                      ]
+                    : []),
+                  ...(chartData.controlValues.length
+                    ? [
+                        {
+                          x: chartData.dates,
+                          y: chartData.controlValues,
+                          type: "scatter",
+                          mode: "lines",
+                          name: "Control limit",
+                          line: { color: "#f97316", width: 2, dash: "dot" },
+                        },
+                      ]
+                    : []),
+                  ...(chartData.eventDates.length
+                    ? [
+                        {
+                          x: chartData.eventDates,
+                          y: chartData.eventDates.map(() =>
+                            Math.max(
+                              ...chartData.rawValues.map((value) => value ?? 0),
+                              ...chartData.correctedValues.map((value) => value ?? 0),
+                              0
+                            )
+                          ),
+                          type: "scatter",
+                          mode: "markers",
+                          name: "Events",
+                          marker: { size: 8, color: "#facc15", symbol: "diamond" },
+                          text: chartData.eventLabels,
+                          hovertemplate: "%{text}<br>%{x}<extra></extra>",
+                        },
+                      ]
+                    : []),
+                ]}
+                layout={chartLayout}
+                config={chartConfig}
+                style={{ width: "100%", height: "100%" }}
+                useResizeHandler
+                onInitialized={(_, graphDiv) => {
+                  chartRef.current = graphDiv as HTMLDivElement;
+                }}
+                onUpdate={(_, graphDiv) => {
+                  chartRef.current = graphDiv as HTMLDivElement;
+                }}
+              />
+            )}
+            {!loading && !error && !chartData && (
+              <div className="ehm-chart__placeholder">
+                <p>No trend series available yet.</p>
+                <p className="ehm-muted">Overlay: {overlay}</p>
+              </div>
+            )}
           </div>
           <div className="ehm-chart__footer">
             <div>
@@ -236,6 +424,57 @@ const EhmTrendsPage: React.FC = () => {
               <span>Corrected</span>
               <span>Baseline</span>
             </div>
+          </div>
+        </div>
+        <div className="ehm-surface__section">
+          <div className="ehm-surface__header">
+            <div>
+              <h3>Trend shifts & spikes</h3>
+              <p className="ehm-muted">
+                Click a row to focus the chart on the exact point that shifted.
+              </p>
+            </div>
+          </div>
+          <div className="ehm-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Raw</th>
+                  <th>Corrected</th>
+                  <th>Delta</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {spikeRows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="ehm-muted">
+                      No spikes detected. Trend shifts will appear here as they occur.
+                    </td>
+                  </tr>
+                )}
+                {spikeRows.map((point) => (
+                  <tr key={point.date}>
+                    <td>{point.date}</td>
+                    <td>{point.raw ?? "—"}</td>
+                    <td>{point.corrected ?? "—"}</td>
+                    <td>{point.delta ?? "—"}</td>
+                    <td>{point.status ?? "Observed"}</td>
+                    <td>
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        onClick={() => setFocusDate(point.date)}
+                      >
+                        Focus
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </section>

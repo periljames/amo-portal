@@ -1040,7 +1040,7 @@ const DashboardPage: React.FC = () => {
                   </div>
                   <div className="planning-calendar-grid">
                     {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => (
-                      <div key={label} className="text-muted">
+                      <div key={label} className="planning-calendar-weekday">
                         {label}
                       </div>
                     ))}
@@ -1057,16 +1057,18 @@ const DashboardPage: React.FC = () => {
                           }`}
                         >
                           <div className="planning-calendar-day__date">{day.getDate()}</div>
-                          {holiday && (
-                            <div className="badge badge--warning" style={{ marginTop: 4 }}>
-                              {holiday.localName}
-                            </div>
-                          )}
-                          {leave && (
-                            <div className="badge badge--info" style={{ marginTop: 4 }}>
-                              {leave.reason}
-                            </div>
-                          )}
+                          <div className="planning-calendar-day__badges">
+                            {holiday && (
+                              <div className="badge planning-calendar-badge planning-calendar-badge--holiday">
+                                {holiday.localName}
+                              </div>
+                            )}
+                            {leave && (
+                              <div className="badge planning-calendar-badge planning-calendar-badge--leave">
+                                {leave.reason}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })}

@@ -130,7 +130,7 @@ const EhmUploadsPage: React.FC = () => {
   }, [search, statusFilter, activeUploads]);
 
   return (
-    <DepartmentLayout amoCode={amoSlug} activeDepartment="ehm">
+    <DepartmentLayout amoCode={amoSlug} activeDepartment="reliability">
       <header className="ehm-hero ehm-hero--compact">
         <div>
           <p className="ehm-eyebrow">Engine Health Monitoring</p>

@@ -110,7 +110,7 @@ const EhmDashboardPage: React.FC = () => {
         .length;
 
   return (
-    <DepartmentLayout amoCode={amoSlug} activeDepartment="ehm">
+    <DepartmentLayout amoCode={amoSlug} activeDepartment="reliability">
       <header className="ehm-hero">
         <div>
           <p className="ehm-eyebrow">Engine Health Monitoring</p>
