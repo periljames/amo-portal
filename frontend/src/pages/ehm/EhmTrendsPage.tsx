@@ -1,5 +1,6 @@
 // src/pages/ehm/EhmTrendsPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
+import Plot from "react-plotly.js";
 import { useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { useEhmDemoMode } from "../../hooks/useEhmDemoMode";
@@ -85,9 +86,77 @@ const EhmTrendsPage: React.FC = () => {
   }, [isDemoMode, selectedEngineId, metricFilter, metricKey]);
 
   const demoSeries = useMemo(() => demoTrendSeries[metricFilter] ?? null, [metricFilter]);
+  const activeSeries = isDemoMode ? demoSeries : series;
+
+  const chartData = useMemo(() => {
+    if (!activeSeries) return null;
+    const points = activeSeries.points ?? [];
+    const dates = points.map((point) => point.date);
+    const rawValues = points.map((point) => point.raw);
+    const correctedValues = points.map((point) => point.corrected);
+    const baselineValues =
+      activeSeries.baseline !== null ? points.map(() => activeSeries.baseline) : [];
+    const controlValues =
+      activeSeries.control_limit !== null ? points.map(() => activeSeries.control_limit) : [];
+    const eventDates = (activeSeries.events ?? []).map((event) => event.date);
+    const eventLabels = (activeSeries.events ?? []).map(
+      (event) => event.description || event.event_type
+    );
+
+    return {
+      dates,
+      rawValues,
+      correctedValues,
+      baselineValues,
+      controlValues,
+      eventDates,
+      eventLabels,
+    };
+  }, [activeSeries]);
+
+  const chartLayout = useMemo(
+    () => ({
+      autosize: true,
+      height: 360,
+      margin: { l: 48, r: 20, t: 18, b: 40 },
+      paper_bgcolor: "transparent",
+      plot_bgcolor: "transparent",
+      font: { color: "var(--text-primary)" },
+      xaxis: {
+        title: "Date",
+        type: "date",
+        gridcolor: "rgba(148, 163, 184, 0.2)",
+        zerolinecolor: "rgba(148, 163, 184, 0.3)",
+      },
+      yaxis: {
+        title: metricFilter,
+        gridcolor: "rgba(148, 163, 184, 0.2)",
+        zerolinecolor: "rgba(148, 163, 184, 0.3)",
+      },
+      hovermode: "x unified",
+      showlegend: true,
+      legend: { orientation: "h", x: 0, y: -0.2 },
+    }),
+    [metricFilter]
+  );
+
+  const chartConfig = useMemo(
+    () => ({
+      responsive: true,
+      displaylogo: false,
+      scrollZoom: true,
+      modeBarButtonsToAdd: ["drawline", "eraseshape"],
+      toImageButtonOptions: {
+        format: "png",
+        filename: "engine-trend",
+        scale: 2,
+      },
+    }),
+    []
+  );
 
   return (
-    <DepartmentLayout amoCode={amoSlug} activeDepartment="ehm">
+    <DepartmentLayout amoCode={amoSlug} activeDepartment="reliability">
       <header className="ehm-hero ehm-hero--compact">
         <div>
           <p className="ehm-eyebrow">Engine Health Monitoring</p>
@@ -107,15 +176,9 @@ const EhmTrendsPage: React.FC = () => {
               Demo mode
             </label>
           )}
-          <button className="btn btn-secondary" type="button">
-            Download PNG
-          </button>
-          <button className="btn btn-secondary" type="button">
-            Print Hi-Res
-          </button>
-          <button className="btn" type="button">
-            Open zoom view
-          </button>
+          <div className="ehm-muted">
+            Use the chart toolbar to zoom, pan, download, and inspect values.
+          </div>
         </div>
       </header>
 
@@ -184,41 +247,99 @@ const EhmTrendsPage: React.FC = () => {
               <span className="badge badge--success">Trend Normal</span>
               <span className="ehm-muted"> · Metric: {metricFilter}</span>
             </div>
-            <div className="ehm-chart__actions">
-              <button className="btn btn-secondary" type="button">
-                Zoom
-              </button>
-              <button className="btn btn-secondary" type="button">
-                Download
-              </button>
-              <button className="btn btn-secondary" type="button">
-                Print
-              </button>
+            <div className="ehm-chart__actions ehm-muted">
+              Hover to inspect values. Use the chart toolbar to zoom, pan, and export.
             </div>
           </div>
           <div className="ehm-chart__canvas">
-            <div className="ehm-chart__placeholder">
-              {isDemoMode && demoSeries && (
-                <>
-                  <p>Trend points: {demoSeries.points.length}</p>
-                  <p className="ehm-muted">Overlay: {overlay}</p>
-                </>
-              )}
-              {!isDemoMode && loading && <p>Loading trend series…</p>}
-              {!isDemoMode && !loading && error && <p className="ehm-muted">{error}</p>}
-              {!isDemoMode && !loading && !error && series && (
-                <>
-                  <p>Trend points: {series.points.length}</p>
-                  <p className="ehm-muted">Overlay: {overlay}</p>
-                </>
-              )}
-              {!isDemoMode && !loading && !error && !series && (
-                <>
-                  <p>Interactive chart placeholder · White background for export</p>
-                  <p className="ehm-muted">Overlay: {overlay}</p>
-                </>
-              )}
-            </div>
+            {loading && !isDemoMode && (
+              <div className="ehm-chart__placeholder">
+                <p>Loading trend series…</p>
+              </div>
+            )}
+            {!loading && error && (
+              <div className="ehm-chart__placeholder">
+                <p className="ehm-muted">{error}</p>
+              </div>
+            )}
+            {!loading && !error && chartData && (
+              <Plot
+                data={[
+                  {
+                    x: chartData.dates,
+                    y: chartData.rawValues,
+                    type: "scatter",
+                    mode: "lines+markers",
+                    name: "Raw",
+                    line: { color: "#38bdf8", width: 2 },
+                    marker: { size: 4 },
+                  },
+                  {
+                    x: chartData.dates,
+                    y: chartData.correctedValues,
+                    type: "scatter",
+                    mode: "lines+markers",
+                    name: "Corrected",
+                    line: { color: "#a78bfa", width: 2 },
+                    marker: { size: 4 },
+                  },
+                  ...(chartData.baselineValues.length
+                    ? [
+                        {
+                          x: chartData.dates,
+                          y: chartData.baselineValues,
+                          type: "scatter",
+                          mode: "lines",
+                          name: "Baseline",
+                          line: { color: "#22c55e", width: 2, dash: "dash" },
+                        },
+                      ]
+                    : []),
+                  ...(chartData.controlValues.length
+                    ? [
+                        {
+                          x: chartData.dates,
+                          y: chartData.controlValues,
+                          type: "scatter",
+                          mode: "lines",
+                          name: "Control limit",
+                          line: { color: "#f97316", width: 2, dash: "dot" },
+                        },
+                      ]
+                    : []),
+                  ...(chartData.eventDates.length
+                    ? [
+                        {
+                          x: chartData.eventDates,
+                          y: chartData.eventDates.map(() =>
+                            Math.max(
+                              ...chartData.rawValues.map((value) => value ?? 0),
+                              ...chartData.correctedValues.map((value) => value ?? 0),
+                              0
+                            )
+                          ),
+                          type: "scatter",
+                          mode: "markers",
+                          name: "Events",
+                          marker: { size: 8, color: "#facc15", symbol: "diamond" },
+                          text: chartData.eventLabels,
+                          hovertemplate: "%{text}<br>%{x}<extra></extra>",
+                        },
+                      ]
+                    : []),
+                ]}
+                layout={chartLayout}
+                config={chartConfig}
+                style={{ width: "100%", height: "100%" }}
+                useResizeHandler
+              />
+            )}
+            {!loading && !error && !chartData && (
+              <div className="ehm-chart__placeholder">
+                <p>No trend series available yet.</p>
+                <p className="ehm-muted">Overlay: {overlay}</p>
+              </div>
+            )}
           </div>
           <div className="ehm-chart__footer">
             <div>

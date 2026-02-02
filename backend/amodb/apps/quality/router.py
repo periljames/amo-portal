@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from amodb.entitlements import require_module
 from amodb.security import get_current_actor_id, get_current_active_user
@@ -759,14 +760,19 @@ def list_my_notifications(
     user_id = get_actor() or str(current_user.id)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    notes = (
-        db.query(models.QMSNotification)
-        .filter(models.QMSNotification.user_id == user_id)
-        .filter(models.QMSNotification.read_at.is_(None))
-        .order_by(models.QMSNotification.created_at.desc())
-        .limit(20)
-        .all()
-    )
+    try:
+        notes = (
+            db.query(models.QMSNotification)
+            .filter(models.QMSNotification.user_id == user_id)
+            .filter(models.QMSNotification.read_at.is_(None))
+            .order_by(models.QMSNotification.created_at.desc())
+            .limit(20)
+            .all()
+        )
+    except (OperationalError, ProgrammingError) as exc:
+        if _is_missing_table_error(exc):
+            return []
+        raise
     return notes
 
 
@@ -779,17 +785,30 @@ def mark_notification_read(
     user_id = get_actor() or str(current_user.id)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    note = (
-        db.query(models.QMSNotification)
-        .filter(models.QMSNotification.id == notification_id, models.QMSNotification.user_id == user_id)
-        .first()
-    )
+    try:
+        note = (
+            db.query(models.QMSNotification)
+            .filter(models.QMSNotification.id == notification_id, models.QMSNotification.user_id == user_id)
+            .first()
+        )
+    except (OperationalError, ProgrammingError) as exc:
+        if _is_missing_table_error(exc):
+            raise HTTPException(
+                status_code=503,
+                detail="Notifications are not available because the database schema is missing.",
+            ) from exc
+        raise
     if not note:
         raise HTTPException(status_code=404, detail="Notification not found")
     note.read_at = func.now()
     db.commit()
     db.refresh(note)
     return note
+
+
+def _is_missing_table_error(exc: Exception) -> bool:
+    message = str(getattr(exc, "orig", exc)).lower()
+    return ("relation" in message and "does not exist" in message) or "no such table" in message
 
 
 @router.post("/cars/{car_id}/actions", response_model=CARActionOut, status_code=status.HTTP_201_CREATED)

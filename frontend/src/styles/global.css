@@ -2321,12 +2321,22 @@ button,
   font-size: 12px;
 }
 
+.planning-calendar-weekday {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 4px 6px;
+}
+
 .planning-calendar-day {
   padding: 8px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--panel-divider);
   background: var(--surface);
   min-height: 60px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
 }
 
 .planning-calendar-day--muted {
@@ -2336,6 +2346,49 @@ button,
 
 .planning-calendar-day__date {
   font-weight: 600;
+  color: var(--text-primary);
+}
+
+.planning-calendar-day__badges {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.planning-calendar-badge {
+  width: 100%;
+  justify-content: flex-start;
+  border-radius: 10px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+}
+
+.planning-calendar-badge--holiday {
+  background: rgba(234, 179, 8, 0.18);
+  border-color: rgba(234, 179, 8, 0.45);
+}
+
+.planning-calendar-badge--leave {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+body[data-color-scheme="light"] .planning-calendar-day {
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+body[data-color-scheme="light"] .planning-calendar-badge--holiday {
+  background: rgba(251, 191, 36, 0.2);
+  border-color: rgba(217, 119, 6, 0.35);
+}
+
+body[data-color-scheme="light"] .planning-calendar-badge--leave {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(37, 99, 235, 0.35);
 }
 
 @media (max-width: 1100px) {
