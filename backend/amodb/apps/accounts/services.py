@@ -1779,6 +1779,54 @@ def list_catalog_skus(
     return query.order_by(models.CatalogSKU.amount_cents.asc()).all()
 
 
+def create_catalog_sku(
+    db: Session,
+    *,
+    data: schemas.CatalogSKUCreate,
+    actor_user_id: Optional[str] = None,
+) -> models.CatalogSKU:
+    code = data.code.strip().upper()
+    if not code:
+        raise ValueError("SKU code is required.")
+
+    existing = (
+        db.query(models.CatalogSKU)
+        .filter(models.CatalogSKU.code == code)
+        .first()
+    )
+    if existing:
+        raise ValueError("SKU code already exists.")
+
+    sku = models.CatalogSKU(
+        code=code,
+        name=data.name.strip(),
+        description=data.description,
+        term=data.term,
+        trial_days=data.trial_days,
+        amount_cents=data.amount_cents,
+        currency=data.currency,
+        is_active=data.is_active,
+    )
+    db.add(sku)
+    db.commit()
+    db.refresh(sku)
+
+    _log_billing_audit(
+        db,
+        amo_id=None,
+        event="CATALOG_SKU_CREATED",
+        details={
+            "sku": sku.code,
+            "name": sku.name,
+            "term": sku.term.value if hasattr(sku.term, "value") else sku.term,
+            "amount_cents": sku.amount_cents,
+            "currency": sku.currency,
+            "actor_user_id": actor_user_id,
+        },
+    )
+    return sku
+
+
 def _price_for_sku(db: Session, sku_code: str) -> models.CatalogSKU:
     sku = (
         db.query(models.CatalogSKU)

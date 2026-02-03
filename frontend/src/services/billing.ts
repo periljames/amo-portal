@@ -28,6 +28,25 @@ export async function fetchCatalog(): Promise<CatalogSKU[]> {
   });
 }
 
+export type CatalogSkuCreatePayload = {
+  code: string;
+  name: string;
+  description?: string | null;
+  term: CatalogSKU["term"];
+  trial_days: number;
+  amount_cents: number;
+  currency: string;
+  is_active: boolean;
+};
+
+export async function createCatalogSku(
+  payload: CatalogSkuCreatePayload
+): Promise<CatalogSKU> {
+  return apiPost<CatalogSKU>("/billing/catalog", payload, {
+    headers: authHeaders(),
+  });
+}
+
 type SubscriptionFetchResult = {
   subscription: Subscription | null;
   subscriptionMissing: boolean;

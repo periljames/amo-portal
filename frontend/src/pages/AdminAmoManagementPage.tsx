@@ -185,40 +185,10 @@ const AdminAmoManagementPage: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!selectedAmo) {
-      setAmoProfile({
-        name: "",
-        icaoCode: "",
-        country: "",
-        contactEmail: "",
-        contactPhone: "",
-        timeZone: "",
-        isDemo: false,
-        isActive: true,
-      });
-      return;
-    }
-    setAmoProfile({
-      name: selectedAmo.name || "",
-      icaoCode: selectedAmo.icao_code || "",
-      country: selectedAmo.country || "",
-      contactEmail: selectedAmo.contact_email || "",
-      contactPhone: selectedAmo.contact_phone || "",
-      timeZone: selectedAmo.time_zone || "",
-      isDemo: !!selectedAmo.is_demo,
-      isActive: !!selectedAmo.is_active,
-    });
-  }, [selectedAmo]);
-
-  useEffect(() => {
     if (!isSuperuser) return;
     if (!activeAmoId) return;
     syncAdminContext(activeAmoId);
   }, [activeAmoId, isSuperuser]);
-
-  useEffect(() => {
-    loadTrialData(selectedAmo);
-  }, [selectedAmo]);
 
   if (currentUser && !isSuperuser) {
     return null;
@@ -437,39 +407,9 @@ const AdminAmoManagementPage: React.FC = () => {
     }
   };
 
-  const handleProfileSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedAmo) {
-      setAmoActionError("Select an AMO to edit.");
-      return;
-    }
-    setAmoProfileSaving(true);
-    setAmoActionError(null);
-    setAmoActionSuccess(null);
-    try {
-      await updateAdminAmo(selectedAmo.id, {
-        name: amoProfile.name.trim() || null,
-        icao_code: amoProfile.icaoCode.trim() || null,
-        country: amoProfile.country.trim() || null,
-        contact_email: amoProfile.contactEmail.trim() || null,
-        contact_phone: amoProfile.contactPhone.trim() || null,
-        time_zone: amoProfile.timeZone.trim() || null,
-        is_demo: amoProfile.isDemo,
-        is_active: amoProfile.isActive,
-      });
-      setAmoActionSuccess(`Updated AMO ${selectedAmo.amo_code}.`);
-      await refreshAmos();
-    } catch (err: any) {
-      setAmoActionError(err?.message || "Failed to update AMO profile.");
-    } finally {
-      setAmoProfileSaving(false);
-    }
-  };
-
   const handleOpenAmoProfile = (amo: AdminAmoRead) => {
     handleAmoChange(amo.id);
-    const target = document.getElementById("amo-profile");
-    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    navigate(`/maintenance/${amoCode}/admin/amo-profile`);
   };
 
   const handleReactivateAmo = async (amo: AdminAmoRead) => {
@@ -730,184 +670,18 @@ const AdminAmoManagementPage: React.FC = () => {
 
             <Panel
               title="AMO profile"
-              subtitle="Update profile details, activation, and demo state for the selected AMO."
+              subtitle="Open the dedicated profile page to manage tenant details and trials."
             >
               {!selectedAmo && (
-                <p className="admin-muted">Select an AMO to view its profile.</p>
+                <p className="admin-muted">Select an AMO to manage its profile.</p>
               )}
               {selectedAmo && (
-                <>
-                  <form
-                    id="amo-profile"
-                    className="form-grid"
-                    onSubmit={handleProfileSubmit}
-                  >
-                    <div className="form-row">
-                      <label>AMO code</label>
-                      <input type="text" value={selectedAmo.amo_code} disabled />
-                    </div>
-                    <div className="form-row">
-                      <label>Login slug</label>
-                      <input type="text" value={selectedAmo.login_slug} disabled />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="profileName">AMO Name</label>
-                      <input
-                        id="profileName"
-                        name="name"
-                        type="text"
-                        value={amoProfile.name}
-                        onChange={handleProfileChange}
-                        required
-                      />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="profileIcao">ICAO Code</label>
-                      <input
-                        id="profileIcao"
-                        name="icaoCode"
-                        type="text"
-                        value={amoProfile.icaoCode}
-                        onChange={handleProfileChange}
-                      />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="profileCountry">Country</label>
-                      <input
-                        id="profileCountry"
-                        name="country"
-                        type="text"
-                        value={amoProfile.country}
-                        onChange={handleProfileChange}
-                      />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="profileEmail">Contact Email</label>
-                      <input
-                        id="profileEmail"
-                        name="contactEmail"
-                        type="email"
-                        value={amoProfile.contactEmail}
-                        onChange={handleProfileChange}
-                      />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="profilePhone">Contact Phone</label>
-                      <input
-                        id="profilePhone"
-                        name="contactPhone"
-                        type="tel"
-                        value={amoProfile.contactPhone}
-                        onChange={handleProfileChange}
-                      />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="profileTimeZone">Time Zone</label>
-                      <input
-                        id="profileTimeZone"
-                        name="timeZone"
-                        type="text"
-                        value={amoProfile.timeZone}
-                        onChange={handleProfileChange}
-                        placeholder="Africa/Nairobi"
-                      />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="profileDemo">
-                        <input
-                          id="profileDemo"
-                          name="isDemo"
-                          type="checkbox"
-                          checked={amoProfile.isDemo}
-                          onChange={handleProfileChange}
-                        />
-                        <span style={{ marginLeft: 8 }}>Demo tenant</span>
-                      </label>
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="profileActive">
-                        <input
-                          id="profileActive"
-                          name="isActive"
-                          type="checkbox"
-                          checked={amoProfile.isActive}
-                          onChange={handleProfileChange}
-                        />
-                        <span style={{ marginLeft: 8 }}>Active tenant</span>
-                      </label>
-                    </div>
-                    <div className="form-actions">
-                      <Button type="submit" disabled={amoProfileSaving}>
-                        {amoProfileSaving ? "Saving..." : "Save profile"}
-                      </Button>
-                    </div>
-                  </form>
-
-                  <div className="form-grid" style={{ marginTop: 16 }}>
-                    <div className="form-row">
-                      <label>Subscription status</label>
-                      <input
-                        type="text"
-                        value={
-                          trialSubscription
-                            ? `${trialSubscription.status} · ${trialSubscription.term}`
-                            : "No active subscription"
-                        }
-                        disabled
-                      />
-                    </div>
-                    <div className="form-row">
-                      <label htmlFor="trialSku">Trial plan</label>
-                      <select
-                        id="trialSku"
-                        value={trialSkuCode}
-                        onChange={(e) => setTrialSkuCode(e.target.value)}
-                        disabled={trialLoading || trialCatalog.length === 0}
-                      >
-                        {trialCatalog.length === 0 && (
-                          <option value="">No active plans</option>
-                        )}
-                        {trialCatalog.map((sku) => (
-                          <option key={sku.id} value={sku.code}>
-                            {sku.name} · {sku.term} · {sku.trial_days}d trial
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {trialError && (
-                      <InlineAlert tone="danger" title="Trial activation failed">
-                        <span>{trialError}</span>
-                      </InlineAlert>
-                    )}
-                    {trialSuccess && (
-                      <InlineAlert tone="success" title="Trial activated">
-                        <span>{trialSuccess}</span>
-                      </InlineAlert>
-                    )}
-                    <div className="form-actions">
-                      <Button
-                        type="button"
-                        onClick={handleStartTrial}
-                        disabled={
-                          trialLoading ||
-                          !trialSkuCode ||
-                          trialSubscription?.status === "ACTIVE" ||
-                          trialSubscription?.status === "TRIALING"
-                        }
-                      >
-                        {trialLoading ? "Starting..." : "Start trial"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => loadTrialData(selectedAmo)}
-                        disabled={trialLoading}
-                      >
-                        Refresh status
-                      </Button>
-                    </div>
-                  </div>
-                </>
+                <Button
+                  type="button"
+                  onClick={() => handleOpenAmoProfile(selectedAmo)}
+                >
+                  Open profile page
+                </Button>
               )}
             </Panel>
 
