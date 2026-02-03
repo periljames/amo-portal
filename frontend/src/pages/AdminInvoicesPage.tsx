@@ -133,13 +133,22 @@ const AdminInvoicesPage: React.FC = () => {
   };
 
   const handleDownloadInvoice = async (invoice: Invoice) => {
-    const blob = await fetchInvoiceDocument(invoice.id, "pdf");
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `invoice-${invoice.id}.pdf`;
-    link.click();
-    URL.revokeObjectURL(url);
+    setError(null);
+    let url: string | null = null;
+    try {
+      const blob = await fetchInvoiceDocument(invoice.id, "pdf");
+      url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `invoice-${invoice.id}.pdf`;
+      link.click();
+    } catch (err: any) {
+      setError(err?.message || "Unable to download invoice.");
+    } finally {
+      if (url) {
+        URL.revokeObjectURL(url);
+      }
+    }
   };
 
   return (

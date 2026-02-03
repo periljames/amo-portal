@@ -148,6 +148,9 @@ export async function fetchInvoiceDocument(
   const response = await fetch(getInvoiceDocumentUrl(invoiceId, format), {
     headers: authHeaders(),
   });
+  if (response.status === 401) {
+    handleAuthFailure("expired");
+  }
   if (!response.ok) {
     throw new Error("Failed to download invoice document.");
   }

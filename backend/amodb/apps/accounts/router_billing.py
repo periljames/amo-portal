@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 from fastapi.responses import HTMLResponse, Response
@@ -25,6 +25,10 @@ def _require_user(current_user=Depends(get_current_active_user)):
 
 def _render_invoice_html(invoice: models.BillingInvoice) -> str:
     description = html.escape(invoice.description or "Invoice")
+    status = html.escape(str(invoice.status))
+    issued_at = html.escape(invoice.issued_at.isoformat() if invoice.issued_at else "—")
+    currency = html.escape(invoice.currency)
+    amount = f"{invoice.amount_cents / 100:.2f}"
     return f"""
 <!doctype html>
 <html>
@@ -45,11 +49,11 @@ def _render_invoice_html(invoice: models.BillingInvoice) -> str:
       <div class="row">
         <div>
           <h2>Invoice</h2>
-          <div class="muted">ID: {invoice.id}</div>
+          <div class="muted">ID: {html.escape(str(invoice.id))}</div>
         </div>
         <div>
-          <div>Status: {invoice.status}</div>
-          <div>Issued: {invoice.issued_at}</div>
+          <div>Status: {status}</div>
+          <div>Issued: {issued_at}</div>
         </div>
       </div>
       <table>
@@ -62,7 +66,7 @@ def _render_invoice_html(invoice: models.BillingInvoice) -> str:
         <tbody>
           <tr>
             <td>{description}</td>
-            <td>{invoice.amount_cents / 100:.2f} {invoice.currency}</td>
+            <td>{amount} {currency}</td>
           </tr>
         </tbody>
       </table>
@@ -77,10 +81,11 @@ def _render_invoice_pdf(invoice: models.BillingInvoice) -> bytes:
     def _escape(text: str) -> str:
         return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
+    issued_at = invoice.issued_at.isoformat() if invoice.issued_at else "—"
     lines = [
         _escape(f"Invoice {invoice.id}"),
         _escape(f"Status: {invoice.status}"),
-        _escape(f"Issued: {invoice.issued_at}"),
+        _escape(f"Issued: {issued_at}"),
         _escape(f"Amount: {invoice.amount_cents / 100:.2f} {invoice.currency}"),
         _escape(f"Description: {invoice.description or 'Invoice'}"),
     ]
@@ -94,7 +99,11 @@ def _render_invoice_pdf(invoice: models.BillingInvoice) -> bytes:
         "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj"
     )
     objects.append("4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj")
-    objects.append(f"5 0 obj << /Length {len(content)} >> stream {content} endstream endobj")
+    content_bytes = content.encode("utf-8")
+    objects.append(
+        f"5 0 obj << /Length {len(content_bytes)} >> stream {content_bytes.decode('utf-8')} "
+        "endstream endobj"
+    )
 
     offsets = []
     pdf = BytesIO()
@@ -171,28 +180,6 @@ def update_catalog(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@router.post(
-    "/catalog",
-    response_model=schemas.CatalogSKURead,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_catalog(
-    payload: schemas.CatalogSKUCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(_require_user),
-):
-    if not getattr(current_user, "is_superuser", False):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser required.")
-    try:
-        return services.create_catalog_sku(
-            db,
-            data=payload,
-            actor_user_id=current_user.id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
 @router.get("/entitlements", response_model=list[schemas.ResolvedEntitlement])
 def list_entitlements(
     db: Session = Depends(get_db),
@@ -248,7 +235,7 @@ def get_invoice_detail(
 @router.get("/invoices/{invoice_id}/document")
 def get_invoice_document(
     invoice_id: str,
-    format: str = "html",
+    format: Literal["html", "pdf"] = "html",
     db: Session = Depends(get_db),
     current_user=Depends(_require_user),
 ):

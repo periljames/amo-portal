@@ -60,7 +60,11 @@ const AdminInvoiceDetailPage: React.FC = () => {
 
   useEffect(() => {
     const loadInvoice = async () => {
-      if (!invoiceId) return;
+      if (!invoiceId) {
+        setLoading(false);
+        setError("Invoice not found.");
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
@@ -74,6 +78,26 @@ const AdminInvoiceDetailPage: React.FC = () => {
     };
     loadInvoice();
   }, [invoiceId]);
+
+  const handleDownload = async (format: "html" | "pdf") => {
+    if (!invoice) return;
+    setError(null);
+    let url: string | null = null;
+    try {
+      const blob = await fetchInvoiceDocument(invoice.id, format);
+      url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `invoice-${invoice.id}.${format}`;
+      link.click();
+    } catch (err: any) {
+      setError(err?.message || "Unable to download invoice document.");
+    } finally {
+      if (url) {
+        URL.revokeObjectURL(url);
+      }
+    }
+  };
 
   if (currentUser && !isTenantAdmin) {
     return null;
@@ -173,35 +197,16 @@ const AdminInvoiceDetailPage: React.FC = () => {
           <Panel title="Documents">
             {!loading && invoice && (
               <div className="form-actions">
-                  <Button
-                    type="button"
-                    onClick={async () => {
-                      const blob = await fetchInvoiceDocument(invoice.id, "html");
-                      const url = URL.createObjectURL(blob);
-                      const link = document.createElement("a");
-                      link.href = url;
-                      link.download = `invoice-${invoice.id}.html`;
-                      link.click();
-                      URL.revokeObjectURL(url);
-                    }}
-                  >
-                    Download HTML
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={async () => {
-                      const blob = await fetchInvoiceDocument(invoice.id, "pdf");
-                      const url = URL.createObjectURL(blob);
-                      const link = document.createElement("a");
-                      link.href = url;
-                      link.download = `invoice-${invoice.id}.pdf`;
-                      link.click();
-                      URL.revokeObjectURL(url);
-                    }}
-                  >
-                    Download PDF
-                  </Button>
+                <Button type="button" onClick={() => handleDownload("html")}>
+                  Download HTML
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => handleDownload("pdf")}
+                >
+                  Download PDF
+                </Button>
               </div>
             )}
           </Panel>
