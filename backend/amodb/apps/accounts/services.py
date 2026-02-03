@@ -1768,6 +1768,21 @@ def list_payment_methods(
     )
 
 
+def list_billing_audit_logs(
+    db: Session,
+    *,
+    amo_id: Optional[str] = None,
+    event_type: Optional[str] = None,
+    limit: int = 50,
+) -> List[models.BillingAuditLog]:
+    query = db.query(models.BillingAuditLog)
+    if amo_id:
+        query = query.filter(models.BillingAuditLog.amo_id == amo_id)
+    if event_type:
+        query = query.filter(models.BillingAuditLog.event_type == event_type)
+    return query.order_by(models.BillingAuditLog.created_at.desc()).limit(limit).all()
+
+
 def list_catalog_skus(
     db: Session,
     *,
@@ -1777,6 +1792,117 @@ def list_catalog_skus(
     if not include_inactive:
         query = query.filter(models.CatalogSKU.is_active.is_(True))
     return query.order_by(models.CatalogSKU.amount_cents.asc()).all()
+
+
+def create_catalog_sku(
+    db: Session,
+    *,
+    data: schemas.CatalogSKUCreate,
+    actor_user_id: Optional[str] = None,
+) -> models.CatalogSKU:
+    code = data.code.strip().upper()
+    if not code:
+        raise ValueError("SKU code is required.")
+    if (
+        data.min_usage_limit is not None
+        and data.max_usage_limit is not None
+        and data.min_usage_limit > data.max_usage_limit
+    ):
+        raise ValueError("Minimum usage limit cannot exceed maximum usage limit.")
+
+    existing = (
+        db.query(models.CatalogSKU)
+        .filter(models.CatalogSKU.code == code)
+        .first()
+    )
+    if existing:
+        raise ValueError("SKU code already exists.")
+
+    sku = models.CatalogSKU(
+        code=code,
+        name=data.name.strip(),
+        description=data.description,
+        term=data.term,
+        trial_days=data.trial_days,
+        amount_cents=data.amount_cents,
+        currency=data.currency,
+        min_usage_limit=data.min_usage_limit,
+        max_usage_limit=data.max_usage_limit,
+        is_active=data.is_active,
+    )
+    db.add(sku)
+    db.commit()
+    db.refresh(sku)
+
+    _log_billing_audit(
+        db,
+        amo_id=None,
+        event="CATALOG_SKU_CREATED",
+        details={
+            "sku": sku.code,
+            "name": sku.name,
+            "term": sku.term.value if hasattr(sku.term, "value") else sku.term,
+            "amount_cents": sku.amount_cents,
+            "currency": sku.currency,
+            "actor_user_id": actor_user_id,
+        },
+    )
+    return sku
+
+
+def update_catalog_sku(
+    db: Session,
+    *,
+    sku_id: str,
+    data: schemas.CatalogSKUUpdate,
+    actor_user_id: Optional[str] = None,
+) -> models.CatalogSKU:
+    sku = db.query(models.CatalogSKU).filter(models.CatalogSKU.id == sku_id).first()
+    if not sku:
+        raise ValueError("SKU not found.")
+
+    update_data = data.model_dump(exclude_unset=True)
+    if "code" in update_data and update_data["code"] is not None:
+        next_code = update_data["code"].strip().upper()
+        if not next_code:
+            raise ValueError("SKU code is required.")
+        existing = (
+            db.query(models.CatalogSKU)
+            .filter(models.CatalogSKU.code == next_code, models.CatalogSKU.id != sku_id)
+            .first()
+        )
+        if existing:
+            raise ValueError("SKU code already exists.")
+        update_data["code"] = next_code
+    if "name" in update_data and update_data["name"] is not None:
+        update_data["name"] = update_data["name"].strip()
+    min_limit = update_data.get("min_usage_limit", sku.min_usage_limit)
+    max_limit = update_data.get("max_usage_limit", sku.max_usage_limit)
+    if (
+        min_limit is not None
+        and max_limit is not None
+        and min_limit > max_limit
+    ):
+        raise ValueError("Minimum usage limit cannot exceed maximum usage limit.")
+
+    for field, value in update_data.items():
+        setattr(sku, field, value)
+
+    db.add(sku)
+    db.commit()
+    db.refresh(sku)
+
+    _log_billing_audit(
+        db,
+        amo_id=None,
+        event="CATALOG_SKU_UPDATED",
+        details={
+            "sku": sku.code,
+            "actor_user_id": actor_user_id,
+            "fields": list(update_data.keys()),
+        },
+    )
+    return sku
 
 
 def _price_for_sku(db: Session, sku_code: str) -> models.CatalogSKU:
@@ -1800,6 +1926,18 @@ def start_trial(
     sku_code: str,
     idempotency_key: str,
 ) -> models.TenantLicense:
+    now = datetime.now(timezone.utc)
+    recent_trial = (
+        db.query(models.BillingAuditLog)
+        .filter(
+            models.BillingAuditLog.amo_id == amo_id,
+            models.BillingAuditLog.event_type == "TRIAL_STARTED",
+            models.BillingAuditLog.created_at >= now - timedelta(hours=24),
+        )
+        .first()
+    )
+    if recent_trial:
+        raise ValueError("Trial activation recently performed. Please wait before retrying.")
     sku = _price_for_sku(db, sku_code)
     register_idempotency_key(
         db,
@@ -1821,7 +1959,6 @@ def start_trial(
     if prior_trial:
         raise ValueError("Trial for this SKU already consumed for this tenant.")
 
-    now = datetime.now(timezone.utc)
     trial_end = now + timedelta(days=sku.trial_days or 0)
     license = models.TenantLicense(
         amo_id=amo_id,
