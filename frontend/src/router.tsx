@@ -27,8 +27,10 @@ import AdminUserNewPage from "./pages/AdminUserNewPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminOverviewPage from "./pages/AdminOverviewPage";
 import AdminAmoManagementPage from "./pages/AdminAmoManagementPage";
+import AdminAmoProfilePage from "./pages/AdminAmoProfilePage";
 import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import AdminUsageSettingsPage from "./pages/AdminUsageSettingsPage";
+import AdminInvoicesPage from "./pages/AdminInvoicesPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
@@ -221,6 +223,14 @@ export const AppRouter: React.FC = () => {
           </RequireAuth>
         }
       />
+      <Route
+        path="/maintenance/:amoCode/admin/amo-profile"
+        element={
+          <RequireAuth>
+            <AdminAmoProfilePage />
+          </RequireAuth>
+        }
+      />
 
       {/* Admin - users */}
       <Route
@@ -259,6 +269,16 @@ export const AppRouter: React.FC = () => {
           <RequireAuth>
             <RequireTenantAdmin>
               <SubscriptionManagementPage />
+            </RequireTenantAdmin>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/admin/invoices"
+        element={
+          <RequireAuth>
+            <RequireTenantAdmin>
+              <AdminInvoicesPage />
             </RequireTenantAdmin>
           </RequireAuth>
         }

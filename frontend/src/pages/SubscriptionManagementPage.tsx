@@ -5,6 +5,7 @@ import { getCachedUser } from "../services/auth";
 import {
   addPaymentMethod,
   cancelSubscription,
+  createCatalogSku,
   fetchCatalog,
   fetchEntitlements,
   fetchInvoices,
@@ -115,6 +116,19 @@ const SubscriptionManagementPage: React.FC = () => {
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<
     string | undefined
   >(undefined);
+  const [planForm, setPlanForm] = useState({
+    code: "",
+    name: "",
+    description: "",
+    term: "MONTHLY" as CatalogSKU["term"],
+    trialDays: 14,
+    amountDollars: 0,
+    currency: "USD",
+    isActive: true,
+  });
+  const [planSaving, setPlanSaving] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [planSuccess, setPlanSuccess] = useState<string | null>(null);
 
   const [paymentForm, setPaymentForm] = useState<PaymentFormState>({
     provider: "STRIPE",
@@ -186,6 +200,59 @@ const SubscriptionManagementPage: React.FC = () => {
       setError(err?.message || "Unable to load billing data.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePlanChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const { name, value, type, checked } = e.target;
+    setPlanForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
+  const handleCreatePlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser?.is_superuser) {
+      setPlanError("Only superusers can create plans.");
+      return;
+    }
+    setPlanSaving(true);
+    setPlanError(null);
+    setPlanSuccess(null);
+    try {
+      const amountCents = Math.max(
+        0,
+        Math.round(Number(planForm.amountDollars) * 100)
+      );
+      const created = await createCatalogSku({
+        code: planForm.code.trim().toUpperCase(),
+        name: planForm.name.trim(),
+        description: planForm.description.trim() || undefined,
+        term: planForm.term,
+        trial_days: Math.max(0, Math.round(Number(planForm.trialDays))),
+        amount_cents: amountCents,
+        currency: planForm.currency.trim().toUpperCase(),
+        is_active: planForm.isActive,
+      });
+      setPlanSuccess(`Plan ${created.code} created.`);
+      setPlanForm((prev) => ({
+        ...prev,
+        code: "",
+        name: "",
+        description: "",
+        trialDays: 14,
+        amountDollars: 0,
+        currency: created.currency || "USD",
+        isActive: true,
+      }));
+      await loadBillingData();
+    } catch (err: any) {
+      setPlanError(err?.message || "Failed to create plan.");
+    } finally {
+      setPlanSaving(false);
     }
   };
 
@@ -492,6 +559,14 @@ const SubscriptionManagementPage: React.FC = () => {
           Manage plan changes, entitlements, payment methods, and compliance-friendly
           billing records.
         </p>
+        <div className="page-section__actions">
+          <button
+            className="btn btn-secondary"
+            onClick={() => navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin/invoices`)}
+          >
+            View invoices
+          </button>
+        </div>
       </header>
 
       <div className="page-layout">
@@ -884,6 +959,130 @@ const SubscriptionManagementPage: React.FC = () => {
               </table>
             </div>
           </div>
+
+          {currentUser?.is_superuser && (
+            <div className="card card--form">
+              <div className="card-header">
+                <div>
+                  <h3 style={{ margin: 0 }}>Plan catalog</h3>
+                  <p className="text-muted" style={{ margin: 0 }}>
+                    Create a custom plan for bespoke agreements. Plans created here are
+                    immediately available for trials and purchases.
+                  </p>
+                </div>
+              </div>
+              {planError && (
+                <div className="card card--error">
+                  <strong>Plan error:</strong> {planError}
+                </div>
+              )}
+              {planSuccess && (
+                <div className="card card--success">
+                  <strong>Plan created:</strong> {planSuccess}
+                </div>
+              )}
+              <form className="form-grid" onSubmit={handleCreatePlan}>
+                <div className="form-row">
+                  <label htmlFor="planCode">Plan code</label>
+                  <input
+                    id="planCode"
+                    name="code"
+                    type="text"
+                    value={planForm.code}
+                    onChange={handlePlanChange}
+                    placeholder="CUSTOM-PLAN"
+                    required
+                  />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="planName">Plan name</label>
+                  <input
+                    id="planName"
+                    name="name"
+                    type="text"
+                    value={planForm.name}
+                    onChange={handlePlanChange}
+                    placeholder="Custom enterprise plan"
+                    required
+                  />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="planDescription">Description</label>
+                  <input
+                    id="planDescription"
+                    name="description"
+                    type="text"
+                    value={planForm.description}
+                    onChange={handlePlanChange}
+                    placeholder="Short description for admins"
+                  />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="planTerm">Billing term</label>
+                  <select
+                    id="planTerm"
+                    name="term"
+                    value={planForm.term}
+                    onChange={handlePlanChange}
+                  >
+                    <option value="MONTHLY">Monthly</option>
+                    <option value="ANNUAL">Annual</option>
+                    <option value="BI_ANNUAL">Bi-annual</option>
+                  </select>
+                </div>
+                <div className="form-row">
+                  <label htmlFor="planTrialDays">Trial days</label>
+                  <input
+                    id="planTrialDays"
+                    name="trialDays"
+                    type="number"
+                    min={0}
+                    value={planForm.trialDays}
+                    onChange={handlePlanChange}
+                  />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="planAmount">Amount</label>
+                  <input
+                    id="planAmount"
+                    name="amountDollars"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={planForm.amountDollars}
+                    onChange={handlePlanChange}
+                  />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="planCurrency">Currency</label>
+                  <input
+                    id="planCurrency"
+                    name="currency"
+                    type="text"
+                    value={planForm.currency}
+                    onChange={handlePlanChange}
+                  />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="planActive">
+                    <input
+                      id="planActive"
+                      name="isActive"
+                      type="checkbox"
+                      checked={planForm.isActive}
+                      onChange={handlePlanChange}
+                    />
+                    <span style={{ marginLeft: 8 }}>Active plan</span>
+                  </label>
+                </div>
+                <div className="form-actions">
+                  <button className="btn btn-primary" type="submit" disabled={planSaving}>
+                    {planSaving ? "Creating..." : "Create plan"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
         </section>
       </div>
 
