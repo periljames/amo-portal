@@ -31,6 +31,7 @@ import AdminAmoProfilePage from "./pages/AdminAmoProfilePage";
 import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import AdminUsageSettingsPage from "./pages/AdminUsageSettingsPage";
 import AdminInvoicesPage from "./pages/AdminInvoicesPage";
+import AdminInvoiceDetailPage from "./pages/AdminInvoiceDetailPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QualityCarsPage from "./pages/QualityCarsPage";
@@ -279,6 +280,16 @@ export const AppRouter: React.FC = () => {
           <RequireAuth>
             <RequireTenantAdmin>
               <AdminInvoicesPage />
+            </RequireTenantAdmin>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/admin/invoices/:invoiceId"
+        element={
+          <RequireAuth>
+            <RequireTenantAdmin>
+              <AdminInvoiceDetailPage />
             </RequireTenantAdmin>
           </RequireAuth>
         }

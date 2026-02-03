@@ -869,6 +869,8 @@ class CatalogSKU(Base):
 
     amount_cents = Column(Integer, nullable=False, doc="Price in the smallest currency unit.")
     currency = Column(String(8), nullable=False, default="USD")
+    min_usage_limit = Column(Integer, nullable=True)
+    max_usage_limit = Column(Integer, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
 
     created_at = Column(
