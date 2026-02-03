@@ -171,6 +171,28 @@ def update_catalog(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@router.post(
+    "/catalog",
+    response_model=schemas.CatalogSKURead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_catalog(
+    payload: schemas.CatalogSKUCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(_require_user),
+):
+    if not getattr(current_user, "is_superuser", False):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser required.")
+    try:
+        return services.create_catalog_sku(
+            db,
+            data=payload,
+            actor_user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.get("/entitlements", response_model=list[schemas.ResolvedEntitlement])
 def list_entitlements(
     db: Session = Depends(get_db),
