@@ -4,7 +4,7 @@
 // - Usage meters, entitlements, invoices, payment methods
 // - Purchase + cancellation helpers (idempotent)
 
-import { apiDelete, apiGet, apiPost } from "./crs";
+import { apiDelete, apiGet, apiPost, apiPut } from "./crs";
 import { authHeaders, handleAuthFailure } from "./auth";
 import type {
   CatalogSKU,
@@ -13,6 +13,8 @@ import type {
   UsageMeter,
   PaymentMethod,
   Invoice,
+  BillingAuditLog,
+  InvoiceDetail,
 } from "../types/billing";
 
 const makeIdempotencyKey = (): string => {
@@ -22,8 +24,9 @@ const makeIdempotencyKey = (): string => {
   return `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-export async function fetchCatalog(): Promise<CatalogSKU[]> {
-  return apiGet<CatalogSKU[]>("/billing/catalog", {
+export async function fetchCatalog(includeInactive = false): Promise<CatalogSKU[]> {
+  const qs = includeInactive ? "?include_inactive=true" : "";
+  return apiGet<CatalogSKU[]>(`/billing/catalog${qs}`, {
     headers: authHeaders(),
   });
 }
@@ -36,6 +39,8 @@ export type CatalogSkuCreatePayload = {
   trial_days: number;
   amount_cents: number;
   currency: string;
+  min_usage_limit?: number | null;
+  max_usage_limit?: number | null;
   is_active: boolean;
 };
 
@@ -45,6 +50,19 @@ export async function createCatalogSku(
   return apiPost<CatalogSKU>("/billing/catalog", payload, {
     headers: authHeaders(),
   });
+}
+
+export type CatalogSkuUpdatePayload = Partial<CatalogSkuCreatePayload>;
+
+export async function updateCatalogSku(
+  skuId: string,
+  payload: CatalogSkuUpdatePayload
+): Promise<CatalogSKU> {
+  return apiPut<CatalogSKU>(
+    `/billing/catalog/${encodeURIComponent(skuId)}`,
+    payload,
+    { headers: authHeaders() }
+  );
 }
 
 type SubscriptionFetchResult = {
@@ -91,10 +109,49 @@ export async function fetchUsageMeters(): Promise<UsageMeter[]> {
   });
 }
 
+export async function fetchBillingAuditLogs(params: {
+  amo_id?: string;
+  event_type?: string;
+  limit?: number;
+}): Promise<BillingAuditLog[]> {
+  const query = new URLSearchParams();
+  if (params.amo_id) query.set("amo_id", params.amo_id);
+  if (params.event_type) query.set("event_type", params.event_type);
+  if (params.limit) query.set("limit", params.limit.toString());
+  const qs = query.toString();
+  const url = qs ? `/billing/audit?${qs}` : "/billing/audit";
+  return apiGet<BillingAuditLog[]>(url, {
+    headers: authHeaders(),
+  });
+}
+
 export async function fetchInvoices(): Promise<Invoice[]> {
   return apiGet<Invoice[]>("/billing/invoices", {
     headers: authHeaders(),
   });
+}
+
+export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceDetail> {
+  return apiGet<InvoiceDetail>(`/billing/invoices/${encodeURIComponent(invoiceId)}`, {
+    headers: authHeaders(),
+  });
+}
+
+export function getInvoiceDocumentUrl(invoiceId: string, format: "html" | "pdf") {
+  return `/billing/invoices/${encodeURIComponent(invoiceId)}/document?format=${format}`;
+}
+
+export async function fetchInvoiceDocument(
+  invoiceId: string,
+  format: "html" | "pdf"
+): Promise<Blob> {
+  const response = await fetch(getInvoiceDocumentUrl(invoiceId, format), {
+    headers: authHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to download invoice document.");
+  }
+  return response.blob();
 }
 
 export async function fetchPaymentMethods(): Promise<PaymentMethod[]> {

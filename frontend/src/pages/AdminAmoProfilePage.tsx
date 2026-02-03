@@ -13,11 +13,12 @@ import {
 } from "../services/adminUsers";
 import {
   fetchCatalog,
+  fetchBillingAuditLogs,
   fetchSubscriptionStatus,
   startTrial,
 } from "../services/billing";
 import type { AdminAmoRead } from "../services/adminUsers";
-import type { CatalogSKU, Subscription } from "../types/billing";
+import type { BillingAuditLog, CatalogSKU, Subscription } from "../types/billing";
 
 type UrlParams = {
   amoCode?: string;
@@ -59,6 +60,7 @@ const AdminAmoProfilePage: React.FC = () => {
   const [trialCatalog, setTrialCatalog] = useState<CatalogSKU[]>([]);
   const [trialSubscription, setTrialSubscription] = useState<Subscription | null>(null);
   const [trialSkuCode, setTrialSkuCode] = useState<string>("");
+  const [trialAuditLogs, setTrialAuditLogs] = useState<BillingAuditLog[]>([]);
 
   const [amoProfile, setAmoProfile] = useState<AmoProfileState>({
     name: "",
@@ -186,7 +188,7 @@ const AdminAmoProfilePage: React.FC = () => {
       try {
         await syncAdminContext(selectedAmo.id);
         const [catalog, subscriptionResult] = await Promise.all([
-          fetchCatalog(),
+          fetchCatalog(true),
           fetchSubscriptionStatus(),
         ]);
         const activeSkus = catalog.filter((sku) => sku.is_active);
@@ -207,6 +209,27 @@ const AdminAmoProfilePage: React.FC = () => {
     };
 
     loadTrialData();
+  }, [selectedAmo]);
+
+  useEffect(() => {
+    const loadAudit = async () => {
+      if (!selectedAmo) {
+        setTrialAuditLogs([]);
+        return;
+      }
+      try {
+        await syncAdminContext(selectedAmo.id);
+        const logs = await fetchBillingAuditLogs({
+          amo_id: selectedAmo.id,
+          event_type: "TRIAL_STARTED",
+          limit: 10,
+        });
+        setTrialAuditLogs(logs);
+      } catch (err: any) {
+        console.error("Failed to load trial audit logs", err);
+      }
+    };
+    loadAudit();
   }, [selectedAmo]);
 
   if (currentUser && !isSuperuser) {
@@ -551,6 +574,22 @@ const AdminAmoProfilePage: React.FC = () => {
                   </div>
                 </div>
               </>
+            )}
+          </Panel>
+
+          <Panel title="Trial audit log">
+            {trialAuditLogs.length === 0 && (
+              <p className="text-muted">No trial activations logged yet.</p>
+            )}
+            {trialAuditLogs.length > 0 && (
+              <ul style={{ margin: 0, paddingLeft: 16 }}>
+                {trialAuditLogs.map((log) => (
+                  <li key={log.id}>
+                    <strong>{log.event_type}</strong>{" "}
+                    <span className="text-muted">{log.created_at}</span>
+                  </li>
+                ))}
+              </ul>
             )}
           </Panel>
         </div>

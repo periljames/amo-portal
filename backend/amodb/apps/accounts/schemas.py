@@ -412,11 +412,26 @@ class CatalogSKUBase(BaseModel):
     trial_days: int = Field(0, ge=0)
     amount_cents: int = Field(..., ge=0, description="Price in the smallest currency unit.")
     currency: str = "USD"
+    min_usage_limit: Optional[int] = Field(None, ge=0)
+    max_usage_limit: Optional[int] = Field(None, ge=0)
     is_active: bool = True
 
 
 class CatalogSKUCreate(CatalogSKUBase):
     pass
+
+
+class CatalogSKUUpdate(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    term: Optional[BillingTerm] = None
+    trial_days: Optional[int] = Field(None, ge=0)
+    amount_cents: Optional[int] = Field(None, ge=0)
+    currency: Optional[str] = None
+    min_usage_limit: Optional[int] = Field(None, ge=0)
+    max_usage_limit: Optional[int] = Field(None, ge=0)
+    is_active: Optional[bool] = None
 
 
 class CatalogSKURead(CatalogSKUBase):
@@ -631,6 +646,21 @@ class CancelSubscriptionRequest(BaseModel):
 class AuditEventCreate(BaseModel):
     event_type: str = Field(min_length=1, max_length=128)
     details: Optional[dict[str, Any]] = None
+
+
+class BillingAuditLogRead(BaseModel):
+    id: str
+    amo_id: Optional[str]
+    event_type: str
+    details: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class InvoiceDetailRead(InvoiceRead):
+    ledger_entry: Optional[LedgerEntryRead] = None
 
 
 class PaymentMethodMutationRequest(BaseModel):

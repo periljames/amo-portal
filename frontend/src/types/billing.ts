@@ -17,6 +17,8 @@ export type CatalogSKU = {
   trial_days: number;
   amount_cents: number;
   currency: string;
+  min_usage_limit?: number | null;
+  max_usage_limit?: number | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -85,4 +87,29 @@ export type Invoice = {
   paid_at?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type LedgerEntry = {
+  id: string;
+  amo_id: string;
+  license_id?: string | null;
+  amount_cents: number;
+  currency: string;
+  entry_type: string;
+  description?: string | null;
+  idempotency_key: string;
+  recorded_at: string;
+  created_at: string;
+};
+
+export type InvoiceDetail = Invoice & {
+  ledger_entry?: LedgerEntry | null;
+};
+
+export type BillingAuditLog = {
+  id: string;
+  amo_id?: string | null;
+  event_type: string;
+  details?: string | null;
+  created_at: string;
 };

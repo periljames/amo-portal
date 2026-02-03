@@ -15,6 +15,7 @@ import {
   purchaseSubscription,
   removePaymentMethod,
   startTrial,
+  updateCatalogSku,
 } from "../services/billing";
 import type {
   CatalogSKU,
@@ -124,11 +125,24 @@ const SubscriptionManagementPage: React.FC = () => {
     trialDays: 14,
     amountDollars: 0,
     currency: "USD",
+    minUsageLimit: "",
+    maxUsageLimit: "",
     isActive: true,
   });
   const [planSaving, setPlanSaving] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planSuccess, setPlanSuccess] = useState<string | null>(null);
+  const [planEdit, setPlanEdit] = useState<CatalogSKU | null>(null);
+  const [planEditForm, setPlanEditForm] = useState({
+    name: "",
+    description: "",
+    trialDays: "",
+    amountDollars: "",
+    currency: "",
+    minUsageLimit: "",
+    maxUsageLimit: "",
+    isActive: true,
+  });
 
   const [paymentForm, setPaymentForm] = useState<PaymentFormState>({
     provider: "STRIPE",
@@ -165,7 +179,7 @@ const SubscriptionManagementPage: React.FC = () => {
         metersData,
         paymentData,
       ] = await Promise.all([
-        fetchCatalog(),
+        fetchCatalog(!!currentUser?.is_superuser),
         fetchSubscriptionStatus(),
         fetchEntitlements(),
         fetchUsageMeters(),
@@ -213,6 +227,16 @@ const SubscriptionManagementPage: React.FC = () => {
     }));
   };
 
+  const handlePlanEditChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const { name, value, type, checked } = e.target;
+    setPlanEditForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
   const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser?.is_superuser) {
@@ -227,6 +251,10 @@ const SubscriptionManagementPage: React.FC = () => {
         0,
         Math.round(Number(planForm.amountDollars) * 100)
       );
+      const minUsage =
+        planForm.minUsageLimit === "" ? undefined : Number(planForm.minUsageLimit);
+      const maxUsage =
+        planForm.maxUsageLimit === "" ? undefined : Number(planForm.maxUsageLimit);
       const created = await createCatalogSku({
         code: planForm.code.trim().toUpperCase(),
         name: planForm.name.trim(),
@@ -235,6 +263,8 @@ const SubscriptionManagementPage: React.FC = () => {
         trial_days: Math.max(0, Math.round(Number(planForm.trialDays))),
         amount_cents: amountCents,
         currency: planForm.currency.trim().toUpperCase(),
+        min_usage_limit: Number.isFinite(minUsage) ? minUsage : undefined,
+        max_usage_limit: Number.isFinite(maxUsage) ? maxUsage : undefined,
         is_active: planForm.isActive,
       });
       setPlanSuccess(`Plan ${created.code} created.`);
@@ -246,11 +276,70 @@ const SubscriptionManagementPage: React.FC = () => {
         trialDays: 14,
         amountDollars: 0,
         currency: created.currency || "USD",
+        minUsageLimit: "",
+        maxUsageLimit: "",
         isActive: true,
       }));
       await loadBillingData();
     } catch (err: any) {
       setPlanError(err?.message || "Failed to create plan.");
+    } finally {
+      setPlanSaving(false);
+    }
+  };
+
+  const handleSelectPlan = (sku: CatalogSKU) => {
+    setPlanEdit(sku);
+    setPlanEditForm({
+      name: sku.name,
+      description: sku.description || "",
+      trialDays: sku.trial_days?.toString() ?? "",
+      amountDollars: (sku.amount_cents / 100).toFixed(2),
+      currency: sku.currency || "USD",
+      minUsageLimit:
+        sku.min_usage_limit === null || sku.min_usage_limit === undefined
+          ? ""
+          : sku.min_usage_limit.toString(),
+      maxUsageLimit:
+        sku.max_usage_limit === null || sku.max_usage_limit === undefined
+          ? ""
+          : sku.max_usage_limit.toString(),
+      isActive: sku.is_active,
+    });
+    setPlanError(null);
+    setPlanSuccess(null);
+  };
+
+  const handleUpdatePlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!planEdit) return;
+    setPlanSaving(true);
+    setPlanError(null);
+    setPlanSuccess(null);
+    try {
+      const amountCents = Math.max(
+        0,
+        Math.round(Number(planEditForm.amountDollars) * 100)
+      );
+      const minUsage =
+        planEditForm.minUsageLimit === "" ? undefined : Number(planEditForm.minUsageLimit);
+      const maxUsage =
+        planEditForm.maxUsageLimit === "" ? undefined : Number(planEditForm.maxUsageLimit);
+      const updated = await updateCatalogSku(planEdit.id, {
+        name: planEditForm.name.trim(),
+        description: planEditForm.description.trim() || undefined,
+        trial_days: Math.max(0, Math.round(Number(planEditForm.trialDays))),
+        amount_cents: amountCents,
+        currency: planEditForm.currency.trim().toUpperCase(),
+        min_usage_limit: Number.isFinite(minUsage) ? minUsage : undefined,
+        max_usage_limit: Number.isFinite(maxUsage) ? maxUsage : undefined,
+        is_active: planEditForm.isActive,
+      });
+      setPlanSuccess(`Plan ${updated.code} updated.`);
+      await loadBillingData();
+      setPlanEdit(updated);
+    } catch (err: any) {
+      setPlanError(err?.message || "Failed to update plan.");
     } finally {
       setPlanSaving(false);
     }
@@ -1054,6 +1143,28 @@ const SubscriptionManagementPage: React.FC = () => {
                   />
                 </div>
                 <div className="form-row">
+                  <label htmlFor="planMinUsage">Min usage limit</label>
+                  <input
+                    id="planMinUsage"
+                    name="minUsageLimit"
+                    type="number"
+                    min={0}
+                    value={planForm.minUsageLimit}
+                    onChange={handlePlanChange}
+                  />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="planMaxUsage">Max usage limit</label>
+                  <input
+                    id="planMaxUsage"
+                    name="maxUsageLimit"
+                    type="number"
+                    min={0}
+                    value={planForm.maxUsageLimit}
+                    onChange={handlePlanChange}
+                  />
+                </div>
+                <div className="form-row">
                   <label htmlFor="planCurrency">Currency</label>
                   <input
                     id="planCurrency"
@@ -1081,6 +1192,155 @@ const SubscriptionManagementPage: React.FC = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+          {currentUser?.is_superuser && (
+            <div className="card">
+              <div className="card-header">
+                <div>
+                  <h3 style={{ margin: 0 }}>Plan management</h3>
+                  <p className="text-muted" style={{ margin: 0 }}>
+                    Edit or deactivate plans without leaving the billing screen.
+                  </p>
+                </div>
+              </div>
+              {catalog.length === 0 && (
+                <p className="text-muted">No plans available.</p>
+              )}
+              {catalog.length > 0 && (
+                <div className="table-responsive">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Code</th>
+                        <th>Name</th>
+                        <th>Term</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {catalog.map((sku) => (
+                        <tr key={sku.id}>
+                          <td>{sku.code}</td>
+                          <td>{sku.name}</td>
+                          <td>{sku.term}</td>
+                          <td>{sku.is_active ? "Active" : "Inactive"}</td>
+                          <td>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => handleSelectPlan(sku)}
+                            >
+                              Edit
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {planEdit && (
+                <form className="form-grid" onSubmit={handleUpdatePlan}>
+                  <div className="form-row">
+                    <label>Plan code</label>
+                    <input type="text" value={planEdit.code} disabled />
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="editPlanName">Plan name</label>
+                    <input
+                      id="editPlanName"
+                      name="name"
+                      type="text"
+                      value={planEditForm.name}
+                      onChange={handlePlanEditChange}
+                      required
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="editPlanDescription">Description</label>
+                    <input
+                      id="editPlanDescription"
+                      name="description"
+                      type="text"
+                      value={planEditForm.description}
+                      onChange={handlePlanEditChange}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="editPlanTrial">Trial days</label>
+                    <input
+                      id="editPlanTrial"
+                      name="trialDays"
+                      type="number"
+                      min={0}
+                      value={planEditForm.trialDays}
+                      onChange={handlePlanEditChange}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="editPlanAmount">Amount</label>
+                    <input
+                      id="editPlanAmount"
+                      name="amountDollars"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={planEditForm.amountDollars}
+                      onChange={handlePlanEditChange}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="editPlanCurrency">Currency</label>
+                    <input
+                      id="editPlanCurrency"
+                      name="currency"
+                      type="text"
+                      value={planEditForm.currency}
+                      onChange={handlePlanEditChange}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="editPlanMinUsage">Min usage limit</label>
+                    <input
+                      id="editPlanMinUsage"
+                      name="minUsageLimit"
+                      type="number"
+                      min={0}
+                      value={planEditForm.minUsageLimit}
+                      onChange={handlePlanEditChange}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="editPlanMaxUsage">Max usage limit</label>
+                    <input
+                      id="editPlanMaxUsage"
+                      name="maxUsageLimit"
+                      type="number"
+                      min={0}
+                      value={planEditForm.maxUsageLimit}
+                      onChange={handlePlanEditChange}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label htmlFor="editPlanActive">
+                      <input
+                        id="editPlanActive"
+                        name="isActive"
+                        type="checkbox"
+                        checked={planEditForm.isActive}
+                        onChange={handlePlanEditChange}
+                      />
+                      <span style={{ marginLeft: 8 }}>Active plan</span>
+                    </label>
+                  </div>
+                  <div className="form-actions">
+                    <button className="btn btn-primary" type="submit" disabled={planSaving}>
+                      {planSaving ? "Saving..." : "Save changes"}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           )}
         </section>

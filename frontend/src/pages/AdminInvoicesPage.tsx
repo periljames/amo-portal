@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { Button, InlineAlert, PageHeader, Panel, Table } from "../components/UI/Admin";
 import { getCachedUser } from "../services/auth";
-import { fetchInvoices } from "../services/billing";
+import { fetchInvoiceDocument, fetchInvoices } from "../services/billing";
 import {
   listAdminAmos,
   setAdminContext,
@@ -132,18 +132,12 @@ const AdminInvoicesPage: React.FC = () => {
     window.print();
   };
 
-  const handleDownloadInvoice = (invoice: Invoice) => {
-    const payload = {
-      ...invoice,
-      amount_formatted: formatMoney(invoice.amount_cents, invoice.currency),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
+  const handleDownloadInvoice = async (invoice: Invoice) => {
+    const blob = await fetchInvoiceDocument(invoice.id, "pdf");
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `invoice-${invoice.id}.json`;
+    link.download = `invoice-${invoice.id}.pdf`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -233,14 +227,28 @@ const AdminInvoicesPage: React.FC = () => {
                       <td>{formatMoney(invoice.amount_cents, invoice.currency)}</td>
                       <td>{formatDateTime(invoice.issued_at)}</td>
                       <td>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => handleDownloadInvoice(invoice)}
-                        >
-                          Download
-                        </Button>
+                        <div className="page-section__actions">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              navigate(
+                                `/maintenance/${amoCode}/admin/invoices/${invoice.id}`
+                              )
+                            }
+                          >
+                            View
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleDownloadInvoice(invoice)}
+                          >
+                            PDF
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
