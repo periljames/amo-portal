@@ -10,6 +10,8 @@ import {
   deactivateAdminAmo,
   extendAmoTrial,
   listAdminAmos,
+  setAdminContext,
+  setActiveAmoId as storeActiveAmoId,
   updateAdminAmo,
   LS_ACTIVE_AMO_ID,
 } from "../services/adminUsers";
@@ -100,7 +102,7 @@ const AdminAmoManagementPage: React.FC = () => {
           const fallback = preferred || data[0]?.id || null;
 
           if (fallback) {
-            localStorage.setItem(LS_ACTIVE_AMO_ID, fallback);
+            storeActiveAmoId(fallback);
             setActiveAmoId(fallback);
           }
         }
@@ -134,15 +136,36 @@ const AdminAmoManagementPage: React.FC = () => {
     return amos.filter((amo) => !amo.is_active);
   }, [activeFilter, amos]);
 
+  const syncAdminContext = async (amoId: string) => {
+    if (!isSuperuser) return;
+    try {
+      await setAdminContext({ active_amo_id: amoId });
+    } catch (err: any) {
+      console.error("Failed to set admin context", err);
+      setAmoActionError(
+        err?.response?.data?.detail ||
+          err?.message ||
+          "Failed to update the active AMO context."
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (!isSuperuser) return;
+    if (!activeAmoId) return;
+    syncAdminContext(activeAmoId);
+  }, [activeAmoId, isSuperuser]);
+
   if (currentUser && !isSuperuser) {
     return null;
   }
 
-  const handleAmoChange = (nextAmoId: string) => {
+  const handleAmoChange = async (nextAmoId: string) => {
     const v = (nextAmoId || "").trim();
     if (!v) return;
     setActiveAmoId(v);
-    localStorage.setItem(LS_ACTIVE_AMO_ID, v);
+    storeActiveAmoId(v);
+    await syncAdminContext(v);
   };
 
   const clearFilter = () => {
@@ -205,7 +228,8 @@ const AdminAmoManagementPage: React.FC = () => {
       );
       setLastCreatedAmoId(created.id);
       setActiveAmoId(created.id);
-      localStorage.setItem(LS_ACTIVE_AMO_ID, created.id);
+      storeActiveAmoId(created.id);
+      await syncAdminContext(created.id);
 
       const data = await listAdminAmos();
       setAmos(data);
@@ -243,23 +267,6 @@ const AdminAmoManagementPage: React.FC = () => {
     }
   };
 
-  const handleEditAmo = async (amo: AdminAmoRead) => {
-    const name = window.prompt("Update AMO name:", amo.name || "");
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setAmoActionError("AMO name cannot be empty.");
-      return;
-    }
-    try {
-      await updateAdminAmo(amo.id, { name: trimmed });
-      setAmoActionSuccess(`Updated AMO ${amo.amo_code}.`);
-      await refreshAmos();
-    } catch (err: any) {
-      setAmoActionError(err?.message || "Failed to update AMO.");
-    }
-  };
-
   const handleDeactivateAmo = async (amo: AdminAmoRead) => {
     const ok = window.confirm(
       `Deactivate AMO ${amo.amo_code}? Users will lose access until reactivated.`
@@ -291,6 +298,29 @@ const AdminAmoManagementPage: React.FC = () => {
     } catch (err: any) {
       setAmoActionError(err?.message || "Failed to extend trial.");
     }
+  };
+
+  const handleOpenAmoProfile = (amo: AdminAmoRead) => {
+    handleAmoChange(amo.id);
+    navigate(`/maintenance/${amoCode}/admin/amo-profile`);
+  };
+
+  const handleReactivateAmo = async (amo: AdminAmoRead) => {
+    const ok = window.confirm(`Reactivate AMO ${amo.amo_code}?`);
+    if (!ok) return;
+    try {
+      await updateAdminAmo(amo.id, { is_active: true });
+      setAmoActionSuccess(`Reactivated AMO ${amo.amo_code}.`);
+      await refreshAmos();
+    } catch (err: any) {
+      setAmoActionError(err?.message || "Failed to reactivate AMO.");
+    }
+  };
+
+  const handleOpenBilling = async () => {
+    if (!selectedAmo?.login_slug) return;
+    await syncAdminContext(selectedAmo.id);
+    navigate(`/maintenance/${selectedAmo.login_slug}/admin/billing`);
   };
 
   if (!isSuperuser) {
@@ -415,9 +445,9 @@ const AdminAmoManagementPage: React.FC = () => {
                             type="button"
                             size="sm"
                             variant="ghost"
-                            onClick={() => handleEditAmo(amo)}
+                            onClick={() => handleOpenAmoProfile(amo)}
                           >
-                            Edit
+                            Profile
                           </Button>
                           <Button
                             type="button"
@@ -427,14 +457,25 @@ const AdminAmoManagementPage: React.FC = () => {
                           >
                             Extend trial
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleDeactivateAmo(amo)}
-                          >
-                            Deactivate
-                          </Button>
+                          {amo.is_active ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleDeactivateAmo(amo)}
+                            >
+                              Deactivate
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleReactivateAmo(amo)}
+                            >
+                              Reactivate
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -505,11 +546,36 @@ const AdminAmoManagementPage: React.FC = () => {
                 <Button
                   type="button"
                   variant="secondary"
+                  onClick={handleOpenBilling}
+                  disabled={!selectedAmo?.login_slug}
+                >
+                  Manage subscription
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
                   onClick={() => navigate(`/maintenance/${amoCode}/admin/users/new`)}
                 >
                   Create first user
                 </Button>
               </div>
+            </Panel>
+
+            <Panel
+              title="AMO profile"
+              subtitle="Open the dedicated profile page to manage tenant details and trials."
+            >
+              {!selectedAmo && (
+                <p className="admin-muted">Select an AMO to manage its profile.</p>
+              )}
+              {selectedAmo && (
+                <Button
+                  type="button"
+                  onClick={() => handleOpenAmoProfile(selectedAmo)}
+                >
+                  Open profile page
+                </Button>
+              )}
             </Panel>
 
             <Panel
