@@ -11,6 +11,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    JSON,
     Enum as SAEnum,
     Float,
     ForeignKey,
@@ -339,6 +340,12 @@ class ControlChartMethodEnum(str, Enum):
 class EngineTrendStatusEnum(str, Enum):
     NORMAL = "Trend Normal"
     SHIFT = "Trend Shift"
+
+
+class EhmParseStatusEnum(str, Enum):
+    PENDING = "PENDING"
+    PARSED = "PARSED"
+    FAILED = "FAILED"
 
 
 class ReliabilityEvent(Base):
@@ -817,6 +824,100 @@ class OilConsumptionRate(Base):
     rate_qt_per_hour = Column(Float, nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class EhmRawLog(Base):
+    """
+    Raw EHM/ECTM log payloads stored for reprocessing.
+    """
+
+    __tablename__ = "ehm_raw_logs"
+
+    __table_args__ = (
+        Index("ix_ehm_logs_amo_aircraft", "amo_id", "aircraft_serial_number"),
+        Index("ix_ehm_logs_engine", "amo_id", "engine_position"),
+        Index("ix_ehm_logs_created", "created_at"),
+        UniqueConstraint(
+            "amo_id",
+            "sha256_hash",
+            "aircraft_serial_number",
+            "engine_position",
+            name="uq_ehm_log_dedupe",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid7)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    aircraft_serial_number = Column(
+        String(50),
+        ForeignKey("aircraft.serial_number", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    engine_position = Column(String(32), nullable=False, index=True)
+    engine_serial_number = Column(String(64), nullable=True, index=True)
+
+    source = Column(String(64), nullable=True)
+    notes = Column(Text, nullable=True)
+    original_filename = Column(String(255), nullable=True)
+    content_type = Column(String(128), nullable=True)
+    storage_path = Column(Text, nullable=False)
+    size_bytes = Column(Integer, nullable=False, default=0)
+    sha256_hash = Column(String(64), nullable=False, index=True)
+    decode_offset = Column(Integer, nullable=True)
+    raw_text = Column(Text, nullable=True)
+    unit_identifiers = Column(JSON, nullable=True)
+
+    parse_status = Column(
+        SAEnum(EhmParseStatusEnum, name="ehm_parse_status_enum", native_enum=False),
+        nullable=False,
+        default=EhmParseStatusEnum.PENDING,
+        index=True,
+    )
+    parse_version = Column(String(32), nullable=True)
+    parse_error = Column(Text, nullable=True)
+    parsed_at = Column(DateTime(timezone=True), nullable=True)
+    parsed_record_count = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    uploaded_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    parsed_records = relationship(
+        "EhmParsedRecord",
+        back_populates="raw_log",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+
+class EhmParsedRecord(Base):
+    """
+    Parsed EHM log records extracted from the decompressed payload.
+    """
+
+    __tablename__ = "ehm_parsed_records"
+
+    __table_args__ = (
+        Index("ix_ehm_records_log", "raw_log_id"),
+        Index("ix_ehm_records_type_time", "record_type", "unit_time"),
+        Index("ix_ehm_records_amo_time", "amo_id", "unit_time"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid7)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    raw_log_id = Column(String(36), ForeignKey("ehm_raw_logs.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    record_type = Column(String(64), nullable=False, index=True)
+    record_index = Column(Integer, nullable=True)
+    unit_time = Column(DateTime(timezone=True), nullable=True, index=True)
+    unit_time_raw = Column(String(64), nullable=True)
+    payload_json = Column(JSON, nullable=True)
+    raw_text = Column(Text, nullable=True)
+    parse_version = Column(String(32), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    raw_log = relationship("EhmRawLog", back_populates="parsed_records", lazy="joined")
 
 
 class ComponentInstance(Base):

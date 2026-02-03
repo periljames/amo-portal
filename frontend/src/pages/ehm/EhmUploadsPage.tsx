@@ -5,10 +5,10 @@ import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { demoTrendUploads } from "../../demo/ehmDemoData";
 import { useEhmDemoMode } from "../../hooks/useEhmDemoMode";
 import {
-  listEngineSnapshots,
-  listEngineTrendStatus,
-  type EngineSnapshot,
-  type EngineTrendStatus,
+  listEhmLogs,
+  previewEhmLog,
+  uploadEhmLog,
+  type EhmLog,
 } from "../../services/ehm";
 import { decodeAmoCertFromUrl } from "../../utils/amo";
 import "../../styles/ehm.css";
@@ -20,10 +20,19 @@ const EhmUploadsPage: React.FC = () => {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [snapshots, setSnapshots] = useState<EngineSnapshot[]>([]);
-  const [statusRows, setStatusRows] = useState<EngineTrendStatus[]>([]);
+  const [logs, setLogs] = useState<EhmLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const [aircraftSerial, setAircraftSerial] = useState("");
+  const [enginePosition, setEnginePosition] = useState("");
+  const [engineSerial, setEngineSerial] = useState("");
+  const [source, setSource] = useState("");
+  const [notes, setNotes] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [autoFilled, setAutoFilled] = useState(false);
 
   const { isDemoMode, canToggleDemo, setDemoMode } = useEhmDemoMode();
 
@@ -31,15 +40,13 @@ const EhmUploadsPage: React.FC = () => {
     if (isDemoMode) return;
     setLoading(true);
     setError(null);
-    Promise.all([listEngineSnapshots(), listEngineTrendStatus()])
-      .then(([snapshotRows, statusData]) => {
-        setSnapshots(snapshotRows);
-        setStatusRows(statusData);
+    listEhmLogs({ limit: 50 })
+      .then((rows) => {
+        setLogs(rows);
       })
       .catch((err) => {
         setError(err?.message || "Unable to load uploads.");
-        setSnapshots([]);
-        setStatusRows([]);
+        setLogs([]);
       })
       .finally(() => setLoading(false));
   }, [isDemoMode]);
@@ -47,36 +54,36 @@ const EhmUploadsPage: React.FC = () => {
   const uploads = useMemo(() => demoTrendUploads, []);
 
   const liveUploads = useMemo(() => {
-    const statusMap = new Map(
-      statusRows.map((row) => [
-        `${row.aircraft_serial_number}-${row.engine_position}-${row.engine_serial_number ?? ""}`,
-        row,
-      ])
-    );
-
-    return [...snapshots]
-      .sort((a, b) => (b.flight_date || "").localeCompare(a.flight_date || ""))
+    return [...logs]
+      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
       .slice(0, 10)
-      .map((snapshot) => {
-        const key = `${snapshot.aircraft_serial_number}-${snapshot.engine_position}-${snapshot.engine_serial_number ?? ""}`;
-        const status = statusMap.get(key);
-        return {
-          id: snapshot.id,
-          aircraft: snapshot.aircraft_serial_number,
-          registration: "—",
-          enginePosition: snapshot.engine_position,
-          engineSerial: snapshot.engine_serial_number ?? "—",
-          uploadedAt: snapshot.flight_date,
-          lastTrend: status?.last_trend_date ?? snapshot.flight_date,
-          trendStatus: status?.current_status ?? "Trend Normal",
-          reviewStatus: status?.last_review_date ? "Reviewed" : "Pending",
-          source: snapshot.data_source ?? "API",
-          points: 1,
-        };
-      });
-  }, [snapshots, statusRows]);
+      .map((log) => ({
+        id: log.id,
+        aircraft: log.aircraft_serial_number ?? "—",
+        registration: "—",
+        enginePosition: log.engine_position,
+        engineSerial: log.engine_serial_number ?? "—",
+        uploadedAt: log.created_at,
+        parseStatus: log.parse_status,
+        records: log.parsed_record_count,
+        source: log.source ?? "EHM",
+      }));
+  }, [logs]);
 
-  const activeUploads = isDemoMode ? uploads : liveUploads;
+  const activeUploads = useMemo(() => {
+    if (!isDemoMode) return liveUploads;
+    return uploads.map((upload) => ({
+      id: upload.id,
+      aircraft: upload.aircraft,
+      registration: upload.registration,
+      enginePosition: upload.enginePosition,
+      engineSerial: upload.engineSerial,
+      uploadedAt: upload.uploadedAt,
+      parseStatus: upload.trendStatus === "Trend Shift" ? "FAILED" : "PARSED",
+      records: upload.points,
+      source: upload.source,
+    }));
+  }, [isDemoMode, liveUploads, uploads]);
 
   const handleDownloadCsv = () => {
     if (!isDemoMode) {
@@ -124,7 +131,7 @@ const EhmUploadsPage: React.FC = () => {
         upload.registration.toLowerCase().includes(query) ||
         upload.engineSerial.toLowerCase().includes(query);
       const matchesStatus =
-        statusFilter === "all" || upload.trendStatus.toLowerCase().includes(statusFilter);
+        statusFilter === "all" || upload.parseStatus.toLowerCase().includes(statusFilter);
       return matchesQuery && matchesStatus;
     });
   }, [search, statusFilter, activeUploads]);
@@ -150,11 +157,45 @@ const EhmUploadsPage: React.FC = () => {
               Demo mode
             </label>
           )}
-          <button className="btn" type="button">
-            Upload trend file
-          </button>
-          <button className="btn btn-secondary" type="button">
-            Queue review
+          <button
+            className="btn"
+            type="button"
+            disabled={uploading}
+            onClick={() => {
+              setUploadError(null);
+              setUploadSuccess(null);
+              if (!file) {
+                setUploadError("Select a .log file to upload.");
+                return;
+              }
+              if (!aircraftSerial.trim() || !enginePosition.trim()) {
+                setUploadError("Aircraft serial and engine position are required.");
+                return;
+              }
+              setUploading(true);
+              setAutoFilled(false);
+              uploadEhmLog({
+                file,
+                aircraft_serial_number: aircraftSerial.trim(),
+                engine_position: enginePosition.trim(),
+                engine_serial_number: engineSerial.trim() || null,
+                source: source.trim() || null,
+                notes: notes.trim() || null,
+              })
+                .then(() => {
+                  setUploadSuccess("Upload queued for parsing.");
+                  setFile(null);
+                  setNotes("");
+                  return listEhmLogs({ limit: 50 });
+                })
+                .then((rows) => setLogs(rows))
+                .catch((err) => {
+                  setUploadError(err?.message || "Upload failed.");
+                })
+              .finally(() => setUploading(false));
+            }}
+          >
+            {uploading ? "Uploading…" : "Upload EHM log"}
           </button>
         </div>
       </header>
@@ -166,6 +207,92 @@ const EhmUploadsPage: React.FC = () => {
             <p className="ehm-muted">Showing latest 10 snapshot batches.</p>
           </div>
           <div className="ehm-toolbar">
+            <label className="ehm-control">
+              Aircraft
+              <input
+                type="text"
+                placeholder="Aircraft serial"
+                value={aircraftSerial}
+                onChange={(event) => setAircraftSerial(event.target.value)}
+              />
+            </label>
+            <label className="ehm-control">
+              Engine position
+              <input
+                type="text"
+                placeholder="LH / RH"
+                value={enginePosition}
+                onChange={(event) => setEnginePosition(event.target.value)}
+              />
+            </label>
+            <label className="ehm-control">
+              Engine serial
+              <input
+                type="text"
+                placeholder="Optional serial"
+                value={engineSerial}
+                onChange={(event) => setEngineSerial(event.target.value)}
+              />
+            </label>
+            <label className="ehm-control">
+              Source
+              <input
+                type="text"
+                placeholder="Source system"
+                value={source}
+                onChange={(event) => setSource(event.target.value)}
+              />
+            </label>
+            <label className="ehm-control">
+              Notes
+              <input
+                type="text"
+                placeholder="Optional notes"
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+              />
+            </label>
+            <label className="ehm-control">
+              Log file
+              <input
+                type="file"
+                accept=".log"
+                onChange={(event) => {
+                  const selected = event.target.files?.[0] ?? null;
+                  setFile(selected);
+                  setUploadError(null);
+                  setUploadSuccess(null);
+                  if (!selected || isDemoMode) {
+                    setAutoFilled(false);
+                    return;
+                  }
+                  previewEhmLog(selected)
+                    .then((preview) => {
+                      let didFill = false;
+                      if (!aircraftSerial && preview.aircraft_serial_number) {
+                        setAircraftSerial(preview.aircraft_serial_number);
+                        didFill = true;
+                      }
+                      if (!enginePosition && preview.engine_position) {
+                        setEnginePosition(preview.engine_position);
+                        didFill = true;
+                      }
+                      if (!engineSerial && preview.engine_serial_number) {
+                        setEngineSerial(preview.engine_serial_number);
+                        didFill = true;
+                      }
+                      setAutoFilled(didFill);
+                    })
+                    .catch((err) => {
+                      setAutoFilled(false);
+                      setUploadError(err?.message || "Unable to extract log metadata.");
+                    });
+                }}
+              />
+            </label>
+            {autoFilled && (
+              <span className="ehm-muted">Auto-filled from log header. Please confirm.</span>
+            )}
             <label className="ehm-control">
               Search
               <input
@@ -182,8 +309,9 @@ const EhmUploadsPage: React.FC = () => {
                 onChange={(event) => setStatusFilter(event.target.value)}
               >
                 <option value="all">All</option>
-                <option value="normal">Trend Normal</option>
-                <option value="shift">Trend Shift</option>
+                <option value="parsed">Parsed</option>
+                <option value="pending">Pending</option>
+                <option value="failed">Failed</option>
               </select>
             </label>
             <button
@@ -204,48 +332,58 @@ const EhmUploadsPage: React.FC = () => {
                 <th>Reg</th>
                 <th>Engine</th>
                 <th>Serial</th>
-                <th>Points</th>
+                <th>Records</th>
                 <th>Last upload</th>
-                <th>Last trend</th>
                 <th>Status</th>
-                <th>Review</th>
                 <th>Source</th>
               </tr>
             </thead>
             <tbody>
+              {uploadSuccess && (
+                <tr>
+                  <td colSpan={9} className="ehm-muted">
+                    {uploadSuccess}
+                  </td>
+                </tr>
+              )}
+              {uploadError && (
+                <tr>
+                  <td colSpan={9} className="ehm-muted">
+                    {uploadError}
+                  </td>
+                </tr>
+              )}
               {loading && (
                 <tr>
-                  <td colSpan={10} className="ehm-muted">
+                  <td colSpan={9} className="ehm-muted">
                     Loading uploads…
                   </td>
                 </tr>
               )}
               {error && (
                 <tr>
-                  <td colSpan={10} className="ehm-muted">
+                  <td colSpan={9} className="ehm-muted">
                     {error}
                   </td>
                 </tr>
               )}
               {filteredUploads.map((upload) => {
                 const statusClass =
-                  upload.trendStatus === "Trend Shift" ? "badge--danger" : "badge--success";
-                const reviewClass =
-                  upload.reviewStatus === "Pending" ? "badge--warning" : "badge--success";
+                  upload.parseStatus === "FAILED"
+                    ? "badge--danger"
+                    : upload.parseStatus === "PARSED"
+                    ? "badge--success"
+                    : "badge--warning";
                 return (
                   <tr key={upload.id}>
                     <td>{upload.aircraft}</td>
                     <td>{upload.registration}</td>
                     <td>{upload.enginePosition}</td>
                     <td>{upload.engineSerial}</td>
-                    <td>{upload.points}</td>
+                    <td>{upload.records}</td>
                     <td>{upload.uploadedAt}</td>
-                    <td>{upload.lastTrend}</td>
                     <td>
-                      <span className={`badge ${statusClass}`}>{upload.trendStatus}</span>
-                    </td>
-                    <td>
-                      <span className={`badge ${reviewClass}`}>{upload.reviewStatus}</span>
+                      <span className={`badge ${statusClass}`}>{upload.parseStatus}</span>
                     </td>
                     <td>{upload.source}</td>
                   </tr>
@@ -253,7 +391,7 @@ const EhmUploadsPage: React.FC = () => {
               })}
               {!loading && !error && filteredUploads.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="ehm-muted">
+                  <td colSpan={9} className="ehm-muted">
                     No uploads match your filters.
                   </td>
                 </tr>
