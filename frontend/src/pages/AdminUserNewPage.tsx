@@ -27,6 +27,7 @@ const DEFAULT_ROLE: AccountRole = "AMO_ADMIN";
 const ROLE_OPTIONS: Array<{ value: AccountRole; label: string }> = [
   { value: "AMO_ADMIN", label: "AMO Admin" },
   { value: "QUALITY_MANAGER", label: "Quality Manager" },
+  { value: "AUDITOR", label: "Auditor" },
   { value: "SAFETY_MANAGER", label: "Safety Manager" },
   { value: "PLANNING_ENGINEER", label: "Planning Engineer" },
   { value: "PRODUCTION_ENGINEER", label: "Production Engineer" },
