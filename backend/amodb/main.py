@@ -47,11 +47,16 @@ def _allowed_origins() -> List[str]:
         "http://127.0.0.1:5173",
         "http://localhost:5173",
         "http://localhost:4173",
+        "http://100.117.215.109:5173",
+        "https://100.117.215.109:5173",
     ]
 
 
 app = FastAPI(title="AMO Portal API", version="1.0.0")
 cors_origins = _allowed_origins()
+cors_origin_regex = (os.getenv("CORS_ALLOWED_ORIGIN_REGEX") or "").strip()
+if not cors_origin_regex:
+    cors_origin_regex = r"https?://.*\.ts\.net(?::\d+)?"
 allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() in (
     "1",
     "true",
@@ -61,6 +66,7 @@ allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() in (
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],

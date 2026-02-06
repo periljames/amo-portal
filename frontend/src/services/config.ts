@@ -14,9 +14,17 @@ export function setApiBaseRuntime(value: string | null) {
 }
 
 export function getApiBaseUrl(): string {
-  return normaliseBaseUrl(
-    apiBaseRuntimeOverride ??
-      import.meta.env.VITE_API_BASE_URL ??
-      "http://127.0.0.1:8000"
-  );
+  if (apiBaseRuntimeOverride) {
+    return normaliseBaseUrl(apiBaseRuntimeOverride);
+  }
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return normaliseBaseUrl(import.meta.env.VITE_API_BASE_URL);
+  }
+  if (typeof window !== "undefined") {
+    const { protocol, hostname } = window.location;
+    if (hostname && !["localhost", "127.0.0.1"].includes(hostname)) {
+      return normaliseBaseUrl(`${protocol}//${hostname}:8000`);
+    }
+  }
+  return "http://127.0.0.1:8000";
 }

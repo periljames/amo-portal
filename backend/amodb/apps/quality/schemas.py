@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from amodb.apps.accounts.models import AccountRole
 from .enums import (
     CARActionType,
     CARPriority,
@@ -452,6 +453,17 @@ class CARActionOut(BaseModel):
     message: str
     actor_user_id: Optional[str]
     created_at: datetime
+
+
+class CARAssigneeOut(BaseModel):
+    id: str
+    full_name: str
+    email: Optional[str] = None
+    staff_code: Optional[str] = None
+    role: AccountRole
+    department_id: Optional[str] = None
+    department_code: Optional[str] = None
+    department_name: Optional[str] = None
 
 
 class CARInviteOut(BaseModel):

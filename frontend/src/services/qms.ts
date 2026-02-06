@@ -146,7 +146,11 @@ async function fetchJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function sendJson<T>(path: string, method: "POST" | "PATCH", body: unknown): Promise<T> {
+async function sendJson<T>(
+  path: string,
+  method: "POST" | "PATCH" | "DELETE",
+  body: unknown
+): Promise<T> {
   const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
     method,
@@ -167,6 +171,9 @@ async function sendJson<T>(path: string, method: "POST" | "PATCH", body: unknown
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+  }
+  if (res.status === 204) {
+    return undefined as T;
   }
   return (await res.json()) as T;
 }
@@ -216,6 +223,26 @@ export async function qmsListCars(params?: {
   return fetchJson<CAROut[]>(`/quality/cars${toQuery(params ?? {})}`);
 }
 
+export type CARAssignee = {
+  id: string;
+  full_name: string;
+  email?: string | null;
+  staff_code?: string | null;
+  role: string;
+  department_id?: string | null;
+  department_code?: string | null;
+  department_name?: string | null;
+};
+
+export async function qmsListCarAssignees(params?: {
+  department_id?: string;
+  search?: string;
+}): Promise<CARAssignee[]> {
+  return fetchJson<CARAssignee[]>(
+    `/quality/cars/assignees${toQuery(params ?? {})}`
+  );
+}
+
 export async function qmsCreateCar(payload: {
   program: CARProgram;
   title: string;
@@ -227,6 +254,26 @@ export async function qmsCreateCar(payload: {
   finding_id?: string | null;
 }): Promise<CAROut> {
   return sendJson<CAROut>("/quality/cars", "POST", payload);
+}
+
+export async function qmsUpdateCar(
+  carId: string,
+  payload: {
+    title?: string;
+    summary?: string;
+    priority?: CARPriority;
+    status?: CARStatus;
+    due_date?: string | null;
+    target_closure_date?: string | null;
+    assigned_to_user_id?: string | null;
+    reminder_interval_days?: number | null;
+  }
+): Promise<CAROut> {
+  return sendJson<CAROut>(`/quality/cars/${carId}`, "PATCH", payload);
+}
+
+export async function qmsDeleteCar(carId: string): Promise<void> {
+  await sendJson(`/quality/cars/${carId}`, "DELETE", {});
 }
 
 export async function qmsGetCarInvite(carId: string): Promise<{

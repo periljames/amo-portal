@@ -34,6 +34,13 @@ import AdminInvoicesPage from "./pages/AdminInvoicesPage";
 import AdminInvoiceDetailPage from "./pages/AdminInvoiceDetailPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
+import QMSDocumentsPage from "./pages/QMSDocumentsPage";
+import QMSAuditsPage from "./pages/QMSAuditsPage";
+import QMSChangeControlPage from "./pages/QMSChangeControlPage";
+import QMSTrainingPage from "./pages/QMSTrainingPage";
+import QMSTrainingUserPage from "./pages/QMSTrainingUserPage";
+import QMSEventsPage from "./pages/QMSEventsPage";
+import QMSKpisPage from "./pages/QMSKpisPage";
 import QualityCarsPage from "./pages/QualityCarsPage";
 import PublicCarInvitePage from "./pages/PublicCarInvitePage";
 import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
@@ -493,10 +500,73 @@ export const AppRouter: React.FC = () => {
       />
 
       <Route
+        path="/maintenance/:amoCode/:department/qms/documents"
+        element={
+          <RequireAuth>
+            <QMSDocumentsPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/audits"
+        element={
+          <RequireAuth>
+            <QMSAuditsPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/change-control"
+        element={
+          <RequireAuth>
+            <QMSChangeControlPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
         path="/maintenance/:amoCode/:department/qms/cars"
         element={
           <RequireAuth>
             <QualityCarsPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/training"
+        element={
+          <RequireAuth>
+            <QMSTrainingPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/training/:userId"
+        element={
+          <RequireAuth>
+            <QMSTrainingUserPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/events"
+        element={
+          <RequireAuth>
+            <QMSEventsPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/kpis"
+        element={
+          <RequireAuth>
+            <QMSKpisPage />
           </RequireAuth>
         }
       />

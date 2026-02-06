@@ -35,6 +35,7 @@ export type AccountRole =
   | "SUPERUSER"
   | "AMO_ADMIN"
   | "QUALITY_MANAGER"
+  | "AUDITOR"
   | "SAFETY_MANAGER"
   | "PLANNING_ENGINEER"
   | "PRODUCTION_ENGINEER"
