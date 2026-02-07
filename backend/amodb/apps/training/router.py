@@ -27,6 +27,7 @@ from ...database import get_db
 from ...entitlements import require_module
 from ...security import get_current_active_user
 from ..accounts import models as accounts_models
+from ..audit import services as audit_services
 from ..accounts import services as account_services
 from . import models as training_models
 from . import schemas as training_schemas
@@ -175,6 +176,16 @@ def _audit(
     Best-effort audit log. Never blocks the main action if logging fails.
     """
     try:
+        audit_services.log_event(
+            db,
+            amo_id=amo_id,
+            actor_user_id=actor_user_id,
+            entity_type=entity_type,
+            entity_id=str(entity_id) if entity_id else "unknown",
+            action=action,
+            after=details,
+            metadata={"module": "training"},
+        )
         log = training_models.TrainingAuditLog(
             amo_id=amo_id,
             actor_user_id=actor_user_id,

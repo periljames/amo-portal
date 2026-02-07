@@ -470,6 +470,21 @@ def create_fracas_case(
     if data.opened_at is None:
         case.opened_at = func.now()
     db.add(case)
+    db.flush()
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=created_by_user_id,
+        entity_type="fracas_case",
+        entity_id=str(case.id),
+        action="create",
+        after={
+            "title": case.title,
+            "status": case.status.value,
+            "severity": case.severity.value if case.severity else None,
+        },
+        metadata={"module": "reliability"},
+    )
     db.commit()
     db.refresh(case)
     return case
@@ -495,6 +510,17 @@ def approve_fracas_case(
     if approval_notes:
         case.corrective_action_summary = approval_notes
     db.add(case)
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=approved_by_user_id,
+        entity_type="fracas_case",
+        entity_id=str(case.id),
+        action="approve",
+        after={"approved_at": str(case.approved_at)},
+        metadata={"module": "reliability"},
+        critical=True,
+    )
     db.commit()
     db.refresh(case)
     return case
@@ -525,6 +551,21 @@ def verify_fracas_case(
         if status == models.FRACASStatusEnum.CLOSED:
             case.closed_at = func.now()
     db.add(case)
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=verified_by_user_id,
+        entity_type="fracas_case",
+        entity_id=str(case.id),
+        action="verify" if status != models.FRACASStatusEnum.CLOSED else "close",
+        after={
+            "status": case.status.value,
+            "verified_at": str(case.verified_at),
+            "closed_at": str(case.closed_at) if case.closed_at else None,
+        },
+        metadata={"module": "reliability"},
+        critical=status == models.FRACASStatusEnum.CLOSED,
+    )
     db.commit()
     db.refresh(case)
     return case
@@ -560,6 +601,20 @@ def create_fracas_action(
         **data.model_dump(),
     )
     db.add(action)
+    db.flush()
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=None,
+        entity_type="fracas_action",
+        entity_id=str(action.id),
+        action="create",
+        after={
+            "fracas_case_id": action.fracas_case_id,
+            "status": action.status.value,
+        },
+        metadata={"module": "reliability"},
+    )
     db.commit()
     db.refresh(action)
     return action
@@ -587,6 +642,20 @@ def verify_fracas_action(
         action.effectiveness_notes = effectiveness_notes
     action.status = models.FRACASActionStatusEnum.VERIFIED
     db.add(action)
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=verified_by_user_id,
+        entity_type="fracas_action",
+        entity_id=str(action.id),
+        action="verify",
+        after={
+            "status": action.status.value,
+            "verified_at": str(action.verified_at),
+        },
+        metadata={"module": "reliability"},
+        critical=True,
+    )
     db.commit()
     db.refresh(action)
     return action

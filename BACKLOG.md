@@ -4,7 +4,7 @@
 
 ## P0 — Compliance-Critical
 
-### 1) Audit Log Foundation (immutable event log)
+### [x] 1) Audit Log Foundation (immutable event log)
 **Goal**: Provide immutable event logging across QMS/MPM records.
 
 **Acceptance Criteria**
