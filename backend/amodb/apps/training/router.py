@@ -20,16 +20,18 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...entitlements import require_module
 from ...security import get_current_active_user
 from ..accounts import models as accounts_models
+from ..audit import services as audit_services
 from ..accounts import services as account_services
 from . import models as training_models
 from . import schemas as training_schemas
+from ..workflow import apply_transition, TransitionError
 
 router = APIRouter(
     prefix="/training",
@@ -175,6 +177,16 @@ def _audit(
     Best-effort audit log. Never blocks the main action if logging fails.
     """
     try:
+        audit_services.log_event(
+            db,
+            amo_id=amo_id,
+            actor_user_id=actor_user_id,
+            entity_type=entity_type,
+            entity_id=str(entity_id) if entity_id else "unknown",
+            action=action,
+            after=details,
+            metadata={"module": "training"},
+        )
         log = training_models.TrainingAuditLog(
             amo_id=amo_id,
             actor_user_id=actor_user_id,
@@ -986,6 +998,29 @@ def update_event(
         details={"changes": data},
     )
 
+    if "status" in data and data["status"] != old_status:
+        try:
+            apply_transition(
+                db,
+                actor_user_id=current_user.id,
+                entity_type="training_event",
+                entity_id=event.id,
+                from_state=old_status.value,
+                to_state=event.status.value,
+                before_obj={
+                    "status": old_status.value,
+                    "amo_id": current_user.amo_id,
+                },
+                after_obj={
+                    "status": event.status.value,
+                    "starts_on": str(event.starts_on),
+                    "amo_id": current_user.amo_id,
+                },
+                critical=False,
+            )
+        except TransitionError as exc:
+            return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
+
     # If key scheduling attributes changed, notify participants
     key_changed = False
     if "starts_on" in data and data["starts_on"] != old_starts_on:
@@ -1152,6 +1187,7 @@ def update_event_participant(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training event participant not found.")
 
     data = payload.model_dump(exclude_unset=True)
+    before_status = participant.status
 
     # Attendance governance: if status is being set to ATTENDED/NO_SHOW, stamp who/when
     if "status" in data and data["status"] in (
@@ -1165,6 +1201,30 @@ def update_event_participant(
 
     for field, value in data.items():
         setattr(participant, field, value)
+
+    if "status" in data and data["status"] != before_status:
+        try:
+            apply_transition(
+                db,
+                actor_user_id=current_user.id,
+                entity_type="training_event_participant",
+                entity_id=participant.id,
+                from_state=before_status.value,
+                to_state=participant.status.value,
+                before_obj={
+                    "status": before_status.value,
+                    "amo_id": current_user.amo_id,
+                },
+                after_obj={
+                    "status": participant.status.value,
+                    "attendance_marked_at": str(participant.attendance_marked_at) if participant.attendance_marked_at else None,
+                    "attendance_marked_by_user_id": participant.attendance_marked_by_user_id,
+                    "amo_id": current_user.amo_id,
+                },
+                critical=False,
+            )
+        except TransitionError as exc:
+            return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
 
     _audit(
         db,
