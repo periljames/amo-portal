@@ -8,7 +8,7 @@ from typing import Optional, List
 from uuid import UUID
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -17,6 +17,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 from amodb.entitlements import require_module
 from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
+from amodb.apps.audit import services as audit_services
 from amodb.database import get_db
 
 from . import models
@@ -63,6 +64,14 @@ router = APIRouter(
 CAR_ATTACHMENT_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "car_attachments"
 CAR_ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
 MAX_CAR_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+
+def _audit_metadata(request: Request) -> dict:
+    return {
+        "ip": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+        "module": "quality",
+    }
 
 
 def _serialize_attachment(invite_token: str, attachment: models.CARAttachment) -> CARAttachmentOut:
@@ -178,7 +187,12 @@ def qms_dashboard(
 # Documents
 # -----------------------------
 @router.post("/qms/documents", response_model=QMSDocumentOut, status_code=status.HTTP_201_CREATED)
-def create_document(payload: QMSDocumentCreate, db: Session = Depends(get_db)):
+def create_document(
+    payload: QMSDocumentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     doc = models.QMSDocument(
         domain=payload.domain,
         doc_type=payload.doc_type,
@@ -190,6 +204,18 @@ def create_document(payload: QMSDocumentCreate, db: Session = Depends(get_db)):
         updated_by_user_id=get_actor(),
     )
     db.add(doc)
+    db.flush()
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_document",
+        entity_id=str(doc.id),
+        action="create",
+        after={"doc_code": doc.doc_code, "title": doc.title, "status": doc.status.value},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(doc)
     return doc
@@ -227,10 +253,17 @@ def get_document(doc_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.patch("/qms/documents/{doc_id}", response_model=QMSDocumentOut)
-def update_document(doc_id: UUID, payload: QMSDocumentUpdate, db: Session = Depends(get_db)):
+def update_document(
+    doc_id: UUID,
+    payload: QMSDocumentUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    before = {"status": doc.status.value, "title": doc.title, "doc_code": doc.doc_code}
 
     if payload.title is not None:
         doc.title = payload.title.strip()
@@ -242,13 +275,31 @@ def update_document(doc_id: UUID, payload: QMSDocumentUpdate, db: Session = Depe
         doc.status = payload.status
 
     doc.updated_by_user_id = get_actor()
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_document",
+        entity_id=str(doc.id),
+        action="update",
+        before=before,
+        after={"status": doc.status.value, "title": doc.title},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(doc)
     return doc
 
 
 @router.post("/qms/documents/{doc_id}/revisions", response_model=QMSDocumentRevisionOut, status_code=status.HTTP_201_CREATED)
-def add_revision(doc_id: UUID, payload: QMSDocumentRevisionCreate, db: Session = Depends(get_db)):
+def add_revision(
+    doc_id: UUID,
+    payload: QMSDocumentRevisionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -273,6 +324,18 @@ def add_revision(doc_id: UUID, payload: QMSDocumentRevisionCreate, db: Session =
         created_by_user_id=get_actor(),
     )
     db.add(rev)
+    db.flush()
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_document_revision",
+        entity_id=str(rev.id),
+        action="create",
+        after={"doc_id": str(doc.id), "issue_no": rev.issue_no, "rev_no": rev.rev_no},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(rev)
     return rev
@@ -289,7 +352,14 @@ def list_revisions(doc_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/qms/documents/{doc_id}/publish/{revision_id}", response_model=QMSDocumentOut)
-def publish_revision(doc_id: UUID, revision_id: UUID, payload: QMSPublishRevision, db: Session = Depends(get_db)):
+def publish_revision(
+    doc_id: UUID,
+    revision_id: UUID,
+    payload: QMSPublishRevision,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -309,13 +379,35 @@ def publish_revision(doc_id: UUID, revision_id: UUID, payload: QMSPublishRevisio
     doc.status = models.QMSDocStatus.ACTIVE
     doc.updated_by_user_id = get_actor()
 
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_document",
+        entity_id=str(doc.id),
+        action="publish",
+        before={"status": models.QMSDocStatus.DRAFT.value},
+        after={
+            "status": doc.status.value,
+            "current_issue_no": doc.current_issue_no,
+            "current_rev_no": doc.current_rev_no,
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=True,
+    )
     db.commit()
     db.refresh(doc)
     return doc
 
 
 @router.post("/qms/distributions", response_model=QMSDistributionOut, status_code=status.HTTP_201_CREATED)
-def create_distribution(payload: QMSDistributionCreate, db: Session = Depends(get_db)):
+def create_distribution(
+    payload: QMSDistributionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == payload.document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -330,6 +422,23 @@ def create_distribution(payload: QMSDistributionCreate, db: Session = Depends(ge
         requires_ack=payload.requires_ack,
     )
     db.add(dist)
+    db.flush()
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_document_distribution",
+        entity_id=str(dist.id),
+        action="create",
+        after={
+            "document_id": str(dist.document_id),
+            "revision_id": str(dist.revision_id) if dist.revision_id else None,
+            "holder_label": dist.holder_label,
+            "requires_ack": dist.requires_ack,
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(dist)
     return dist
@@ -356,7 +465,12 @@ def list_distributions(
 
 
 @router.post("/qms/distributions/{dist_id}/ack", response_model=QMSDistributionOut)
-def acknowledge_distribution(dist_id: UUID, db: Session = Depends(get_db)):
+def acknowledge_distribution(
+    dist_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     dist = db.query(models.QMSDocumentDistribution).filter(models.QMSDocumentDistribution.id == dist_id).first()
     if not dist:
         raise HTTPException(status_code=404, detail="Distribution record not found")
@@ -367,6 +481,17 @@ def acknowledge_distribution(dist_id: UUID, db: Session = Depends(get_db)):
 
     dist.acked_at = func.now()
     dist.acked_by_user_id = get_actor()
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_document_distribution",
+        entity_id=str(dist.id),
+        action="acknowledge",
+        after={"acked_at": str(dist.acked_at)},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(dist)
     return dist
@@ -427,7 +552,12 @@ def update_change_request(cr_id: UUID, payload: QMSChangeRequestUpdate, db: Sess
 # Audits / Findings / CAP
 # -----------------------------
 @router.post("/audits", response_model=QMSAuditOut, status_code=status.HTTP_201_CREATED)
-def create_audit(payload: QMSAuditCreate, db: Session = Depends(get_db)):
+def create_audit(
+    payload: QMSAuditCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     audit = models.QMSAudit(
         domain=payload.domain,
         kind=payload.kind,
@@ -445,6 +575,18 @@ def create_audit(payload: QMSAuditCreate, db: Session = Depends(get_db)):
         created_by_user_id=get_actor(),
     )
     db.add(audit)
+    db.flush()
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit",
+        entity_id=str(audit.id),
+        action="create",
+        after={"audit_ref": audit.audit_ref, "status": audit.status.value, "title": audit.title},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(audit)
     return audit
@@ -465,10 +607,17 @@ def list_audits(
 
 
 @router.patch("/audits/{audit_id}", response_model=QMSAuditOut)
-def update_audit(audit_id: UUID, payload: QMSAuditUpdate, db: Session = Depends(get_db)):
+def update_audit(
+    audit_id: UUID,
+    payload: QMSAuditUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
     if not audit:
         raise HTTPException(status_code=404, detail="Audit not found")
+    before = {"status": audit.status.value, "title": audit.title}
 
     for field in (
         "status", "scope", "criteria", "auditee", "auditee_email",
@@ -491,13 +640,32 @@ def update_audit(audit_id: UUID, payload: QMSAuditUpdate, db: Session = Depends(
         note_msg = f"Audit {audit.audit_ref} closed. Please send closure pack to {audit.auditee_email or 'auditee'}."
         _notify_user(db, audit.lead_auditor_user_id, note_msg, models.QMSNotificationSeverity.INFO)
 
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit",
+        entity_id=str(audit.id),
+        action="close" if payload.status == QMSAuditStatus.CLOSED else "update",
+        before=before,
+        after={"status": audit.status.value, "title": audit.title},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=payload.status == QMSAuditStatus.CLOSED,
+    )
     db.commit()
     db.refresh(audit)
     return audit
 
 
 @router.post("/audits/{audit_id}/findings", response_model=QMSFindingOut, status_code=status.HTTP_201_CREATED)
-def add_finding(audit_id: UUID, payload: QMSFindingCreate, db: Session = Depends(get_db)):
+def add_finding(
+    audit_id: UUID,
+    payload: QMSFindingCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
     if not audit:
         raise HTTPException(status_code=404, detail="Audit not found")
@@ -521,6 +689,23 @@ def add_finding(audit_id: UUID, payload: QMSFindingCreate, db: Session = Depends
         target_close_date=target_close_date,
     )
     db.add(finding)
+    db.flush()
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_finding",
+        entity_id=str(finding.id),
+        action="create",
+        after={
+            "audit_id": str(audit.id),
+            "severity": finding.severity.value,
+            "level": finding.level.value,
+            "target_close_date": str(finding.target_close_date),
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(finding)
 
@@ -542,8 +727,43 @@ def list_findings(audit_id: UUID, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/findings/{finding_id}/close", response_model=QMSFindingOut)
+def close_finding(
+    finding_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    if not finding.closed_at:
+        finding.closed_at = func.now()
+        audit_services.log_event(
+            db,
+            amo_id=current_user.amo_id,
+            actor_user_id=current_user.id,
+            entity_type="qms_finding",
+            entity_id=str(finding.id),
+            action="close",
+            after={"closed_at": str(finding.closed_at)},
+            correlation_id=str(uuid.uuid4()),
+            metadata=_audit_metadata(request),
+            critical=True,
+        )
+        db.commit()
+        db.refresh(finding)
+    return finding
+
+
 @router.put("/findings/{finding_id}/cap", response_model=QMSCAPOut)
-def upsert_cap(finding_id: UUID, payload: QMSCAPUpsert, db: Session = Depends(get_db)):
+def upsert_cap(
+    finding_id: UUID,
+    payload: QMSCAPUpsert,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
@@ -553,6 +773,7 @@ def upsert_cap(finding_id: UUID, payload: QMSCAPUpsert, db: Session = Depends(ge
         cap = models.QMSCorrectiveAction(finding_id=finding_id)
         db.add(cap)
 
+    before = {"status": cap.status.value if cap.status else None}
     for field in (
         "root_cause", "containment_action", "corrective_action", "preventive_action",
         "responsible_user_id", "due_date", "evidence_ref", "status",
@@ -574,6 +795,18 @@ def upsert_cap(finding_id: UUID, payload: QMSCAPUpsert, db: Session = Depends(ge
             ):
                 _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.WARNING)
 
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_cap",
+        entity_id=str(cap.id),
+        action="update",
+        before=before,
+        after={"status": cap.status.value, "finding_id": str(finding_id)},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(cap)
     return cap
@@ -587,6 +820,7 @@ def upsert_cap(finding_id: UUID, payload: QMSCAPUpsert, db: Session = Depends(ge
 @router.post("/cars", response_model=CAROut, status_code=status.HTTP_201_CREATED)
 def create_car_request(
     payload: CARCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -603,6 +837,17 @@ def create_car_request(
             due_date=payload.due_date,
             target_closure_date=payload.target_closure_date,
             finding_id=payload.finding_id,
+        )
+        audit_services.log_event(
+            db,
+            amo_id=current_user.amo_id,
+            actor_user_id=current_user.id,
+            entity_type="qms_car",
+            entity_id=str(car.id),
+            action="create",
+            after={"car_number": car.car_number, "status": car.status.value},
+            correlation_id=str(uuid.uuid4()),
+            metadata=_audit_metadata(request),
         )
         db.commit()
         db.refresh(car)
@@ -682,12 +927,14 @@ def list_car_assignees(
 def update_car(
     car_id: UUID,
     payload: CARUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
+    before = {"status": car.status.value, "title": car.title}
     is_assignee = current_user.id == car.assigned_to_user_id
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=is_assignee)
 
@@ -760,6 +1007,19 @@ def update_car(
             actor_user_id=get_actor(),
         )
 
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_car",
+        entity_id=str(car.id),
+        action="update",
+        before=before,
+        after={"status": car.status.value},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=changed_status and car.status in (models.CARStatus.CLOSED, models.CARStatus.CANCELLED),
+    )
     db.commit()
     db.refresh(car)
     return car
@@ -768,12 +1028,24 @@ def update_car(
 @router.delete("/cars/{car_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_car(
     car_id: UUID,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_car",
+        entity_id=str(car.id),
+        action="delete",
+        before={"status": car.status.value, "car_number": car.car_number},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     _require_car_write_access(db, current_user, car.finding_id, car=car)
     db.delete(car)
     db.commit()
@@ -783,6 +1055,7 @@ def delete_car(
 @router.get("/cars/{car_id}/print", response_class=FileResponse)
 def print_car_form(
     car_id: UUID,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -818,6 +1091,20 @@ def print_car_form(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_car",
+        entity_id=str(car.id),
+        action="export",
+        after={"format": "pdf", "car_number": car.car_number},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=True,
+    )
+    db.commit()
+
     return FileResponse(
         path=file_path,
         filename=f"{car.car_number}.pdf",
@@ -826,7 +1113,12 @@ def print_car_form(
 
 
 @router.post("/cars/{car_id}/escalate", response_model=CAROut)
-def escalate_car(car_id: UUID, db: Session = Depends(get_db)):
+def escalate_car(
+    car_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
@@ -840,13 +1132,31 @@ def escalate_car(car_id: UUID, db: Session = Depends(get_db)):
         message="Escalated due to inactivity or overdue status",
         actor_user_id=get_actor(),
     )
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_car",
+        entity_id=str(car.id),
+        action="escalate",
+        after={"status": car.status.value, "escalated_at": str(car.escalated_at)},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=True,
+    )
     db.commit()
     db.refresh(car)
     return car
 
 
 @router.post("/cars/{car_id}/reminders", response_model=CAROut)
-def reschedule_car_reminder(car_id: UUID, reminder_interval_days: int = 7, db: Session = Depends(get_db)):
+def reschedule_car_reminder(
+    car_id: UUID,
+    request: Request,
+    reminder_interval_days: int = 7,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
@@ -859,6 +1169,20 @@ def reschedule_car_reminder(car_id: UUID, reminder_interval_days: int = 7, db: S
         action_type=models.CARActionType.REMINDER,
         message=f"Reminder window set to every {reminder_interval_days} days",
         actor_user_id=get_actor(),
+    )
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_car",
+        entity_id=str(car.id),
+        action="update_reminder",
+        after={
+            "reminder_interval_days": car.reminder_interval_days,
+            "next_reminder_at": str(car.next_reminder_at),
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
     )
     db.commit()
     db.refresh(car)
@@ -1085,6 +1409,7 @@ def download_car_invite_attachment(
 def review_car_response(
     car_id: UUID,
     payload: CARReviewUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -1135,6 +1460,17 @@ def review_car_response(
     if note_msg:
         _notify_user(db, car.assigned_to_user_id, note_msg, models.QMSNotificationSeverity.ACTION_REQUIRED)
 
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_car",
+        entity_id=str(car.id),
+        action="review",
+        after={"status": car.status.value},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
     db.commit()
     db.refresh(car)
     return car
@@ -1238,7 +1574,13 @@ def _is_missing_table_error(exc: Exception) -> bool:
 
 
 @router.post("/cars/{car_id}/actions", response_model=CARActionOut, status_code=status.HTTP_201_CREATED)
-def add_car_action_log(car_id: UUID, payload: CARActionCreate, db: Session = Depends(get_db)):
+def add_car_action_log(
+    car_id: UUID,
+    payload: CARActionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
@@ -1249,6 +1591,17 @@ def add_car_action_log(car_id: UUID, payload: CARActionCreate, db: Session = Dep
         action_type=payload.action_type,
         message=payload.message.strip(),
         actor_user_id=get_actor(),
+    )
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_car",
+        entity_id=str(car.id),
+        action="comment",
+        after={"action_type": payload.action_type.value, "message": payload.message.strip()},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
     )
     db.commit()
     db.refresh(log)
