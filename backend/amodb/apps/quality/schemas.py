@@ -495,6 +495,12 @@ class CARInviteUpdate(BaseModel):
     submitted_by_email: Optional[str] = Field(default=None, max_length=255)
 
 
+class CARReviewUpdate(BaseModel):
+    root_cause_status: Optional[str] = None
+    cap_status: Optional[str] = None
+    message: Optional[str] = None
+
+
 class CARAttachmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

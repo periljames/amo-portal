@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import sys
+from collections import defaultdict
 from logging.config import fileConfig
 
 from alembic import context
+from alembic.script import ScriptDirectory
 from sqlalchemy import pool  # kept for compatibility with typical alembic templates
 
 # ---------------------------------------------------------------------------
@@ -122,11 +124,27 @@ def run_migrations_offline() -> None:
 # ONLINE MIGRATIONS
 # ---------------------------------------------------------------------------
 
+def _assert_no_duplicate_revisions() -> None:
+    script = ScriptDirectory.from_config(config)
+    revisions: dict[str, list[str]] = defaultdict(list)
+    for revision in script.walk_revisions():
+        revisions[revision.revision].append(revision.path)
+    duplicates = {rev: paths for rev, paths in revisions.items() if len(paths) > 1}
+    if duplicates:
+        details = "\n".join(
+            f"- {rev}: {', '.join(paths)}" for rev, paths in sorted(duplicates.items())
+        )
+        raise RuntimeError(
+            "Duplicate Alembic revision IDs detected. Remove or rename the extra migration file(s):\n"
+            f"{details}"
+        )
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
     Here we use the same write_engine as the application.
     """
+    _assert_no_duplicate_revisions()
     connectable = write_engine
 
     with connectable.connect() as connection:

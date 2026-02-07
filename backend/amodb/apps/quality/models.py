@@ -40,6 +40,7 @@ from ...database import Base
 
 from .enums import (
     CARActionType,
+    CARResponseStatus,
     CARPriority,
     CARProgram,
     CARStatus,
@@ -578,6 +579,13 @@ class CorrectiveActionRequest(Base):
         passive_deletes=True,
         lazy="selectin",
     )
+    responses = relationship(
+        "CARResponse",
+        back_populates="car",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
     attachments = relationship(
         "CARAttachment",
         back_populates="car",
@@ -628,6 +636,37 @@ class CARActionLog(Base):
 
     def __repr__(self) -> str:
         return f"<CARAction car={self.car_id} type={self.action_type}>"
+
+
+class CARResponse(Base):
+    __tablename__ = "quality_car_responses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    car_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("quality_cars.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    containment_action = Column(Text, nullable=True)
+    root_cause = Column(Text, nullable=True)
+    corrective_action = Column(Text, nullable=True)
+    preventive_action = Column(Text, nullable=True)
+    evidence_ref = Column(String(512), nullable=True)
+    submitted_by_name = Column(String(255), nullable=True)
+    submitted_by_email = Column(String(255), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    status = Column(
+        SAEnum(CARResponseStatus, name="quality_car_response_status", native_enum=False),
+        nullable=False,
+        default=CARResponseStatus.SUBMITTED,
+        index=True,
+    )
+
+    car = relationship("CorrectiveActionRequest", back_populates="responses", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<CARResponse id={self.id} car={self.car_id} status={self.status}>"
 
 
 class CARAttachment(Base):

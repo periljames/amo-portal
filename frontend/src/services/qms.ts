@@ -139,6 +139,11 @@ async function fetchJson<T>(path: string): Promise<T> {
     throw new Error("Session expired. Please sign in again.");
   }
 
+  if (res.status === 503) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || "Service unavailable. Please retry or contact support.");
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
@@ -166,6 +171,11 @@ async function sendJson<T>(
   if (res.status === 401) {
     handleAuthFailure("expired");
     throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (res.status === 503) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || "Service unavailable. Please retry or contact support.");
   }
 
   if (!res.ok) {
