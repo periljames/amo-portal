@@ -23,8 +23,8 @@ export function getApiBaseUrl(): string {
   if (typeof window !== "undefined") {
     const { protocol, hostname } = window.location;
     if (hostname && !["localhost", "127.0.0.1"].includes(hostname)) {
-      return normaliseBaseUrl(`${protocol}//${hostname}:8000`);
+      return normaliseBaseUrl(`${protocol}//${hostname}:8080`);
     }
   }
-  return "http://127.0.0.1:8000";
+  return "http://127.0.0.1:8080";
 }
