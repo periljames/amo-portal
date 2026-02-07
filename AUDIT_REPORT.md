@@ -51,19 +51,23 @@
 
 Below, each requirement is marked as **Present** only if explicit code exists.
 
+### Update: Workflow Gating Implemented (P0 #2)
+- Workflow transitions now enforce required-field gating for document publish approvals, audit closure (all findings closed), finding closure (evidence + verification), CAPA closure (actions + evidence + verification), FRACAS verify/approve, and training event/participant status transitions. 
+- Transition attempts that fail requirements return structured 400 errors with missing fields and log to the immutable audit_events timeline.
+
 ### Document Control
 - **State machine / lifecycle**: **Present** (`QMSDocStatus` in `QMSDocument`).
 - **Due dates and escalation**: **Missing** (no reminder/escalation jobs).
-- **Required fields gating**: **Missing** (no checks to prevent publish/close without required fields).
-- **Immutable audit trail**: **Missing** (no audit event log attached to doc changes).
+- **Required fields gating**: **Present** (publish requires approval metadata).
+- **Immutable audit trail**: **Partial** (transition events logged).
 - **Attachment/evidence support**: **Partial** (`current_file_ref` only; no upload service).
 - **Exportable evidence pack**: **Missing**.
 
 ### Audit Program / Findings / CAPA
 - **State machine / lifecycle**: **Present** (audit status; CAP status; CAR status).
 - **Due dates and escalation**: **Partial** (finding target dates; CAR reminders, but no scheduling service).
-- **Required fields gating**: **Missing** (no evidence/verification gating on close).
-- **Immutable audit trail**: **Missing** (no audit event log on audit/finding/CAPA changes).
+- **Required fields gating**: **Present** (audit/finding/CAPA close gates).
+- **Immutable audit trail**: **Partial** (transition events logged; other actions not yet covered).
 - **Attachment/evidence support**: **Partial** (CAR attachments only).
 - **Exportable evidence pack**: **Missing** (only CAR PDF).
 
@@ -71,15 +75,15 @@ Below, each requirement is marked as **Present** only if explicit code exists.
 - **State machine / lifecycle**: **Present** (FRACAS statuses).
 - **Due dates and escalation**: **Partial** (action due dates, no escalation service).
 - **Required fields gating**: **Missing**.
-- **Immutable audit trail**: **Missing**.
+- **Immutable audit trail**: **Partial** (transition events logged).
 - **Attachment/evidence support**: **Missing**.
 - **Exportable evidence pack**: **Missing**.
 
 ### Training
 - **State machine / lifecycle**: **Present** (training event/participant statuses).
 - **Due dates and escalation**: **Partial** (recurrence, no automated escalation jobs).
-- **Required fields gating**: **Partial** (some review status fields, but no enforcement on close).
-- **Immutable audit trail**: **Missing**.
+- **Required fields gating**: **Partial** (attendance status requires verification stamps).
+- **Immutable audit trail**: **Partial** (transition events logged; other actions not yet covered).
 - **Attachment/evidence support**: **Partial** (training files exist but no export pack).
 - **Exportable evidence pack**: **Missing**.
 
@@ -96,8 +100,8 @@ Below, each requirement is marked as **Present** only if explicit code exists.
 ## 4) Missing Items and Risks
 
 ### Compliance-critical (P0)
-- No generic **audit trail** for QMS records (documents, audits, findings, CAPA, training, inventory, FRACAS).
-- No **workflow engine** enforcing state transitions and required-field gating.
+- **Audit trail** now logs workflow transitions for QMS/FRACAS/training; coverage remains partial for non-transition actions.
+- **Workflow engine** now enforces state transitions and required-field gating for key QMS/FRACAS/training flows.
 - No **task engine** for due dates/escalation across QMS/MPM workflows.
 - No **notification/email service** or outbound email log for compliance evidence.
 - Missing **evidence pack** exports for audits, findings, CAPA, occurrences, training, calibration, stores.

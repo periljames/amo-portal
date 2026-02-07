@@ -13,7 +13,7 @@
 - Audit log is read-only in the UI; no delete/update endpoints.
 - Tests: unit tests for log creation; integration tests verifying audit events on key flows.
 
-### 2) Workflow Engine (generic state + transition guards)
+### [x] 2) Workflow Engine (generic state + transition guards)
 **Goal**: Enforce lifecycle rules and required-field gating.
 
 **Acceptance Criteria**

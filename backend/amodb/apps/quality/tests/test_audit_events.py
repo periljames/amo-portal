@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from starlette.requests import Request
@@ -69,6 +69,8 @@ def test_publish_revision_logs_audit_event(db_session):
         rev_no=0,
         issued_date=date.today(),
         file_ref="file.pdf",
+        approved_by_authority=True,
+        authority_ref="CAA-APP-1",
     )
     db_session.add(rev)
     db_session.commit()
@@ -89,7 +91,7 @@ def test_publish_revision_logs_audit_event(db_session):
 
     event = (
         db_session.query(audit_models.AuditEvent)
-        .filter(audit_models.AuditEvent.entity_type == "qms_document", audit_models.AuditEvent.action == "publish")
+        .filter(audit_models.AuditEvent.entity_type == "qms_document", audit_models.AuditEvent.action == "transition")
         .first()
     )
     assert event is not None
@@ -119,6 +121,9 @@ def test_close_finding_logs_audit_event(db_session):
         description="Finding",
         severity=quality_models.QMSFindingSeverity.MINOR,
         level=quality_models.FindingLevel.LEVEL_3,
+        objective_evidence="Evidence attached",
+        verified_at=datetime.utcnow(),
+        verified_by_user_id=user.id,
     )
     db_session.add(finding)
     db_session.commit()
@@ -132,7 +137,7 @@ def test_close_finding_logs_audit_event(db_session):
 
     event = (
         db_session.query(audit_models.AuditEvent)
-        .filter(audit_models.AuditEvent.entity_type == "qms_finding", audit_models.AuditEvent.action == "close")
+        .filter(audit_models.AuditEvent.entity_type == "qms_finding", audit_models.AuditEvent.action == "transition")
         .first()
     )
     assert event is not None

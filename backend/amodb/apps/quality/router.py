@@ -9,7 +9,7 @@ from uuid import UUID
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError, ProgrammingError
@@ -40,7 +40,7 @@ from .schemas import (
     QMSDistributionCreate, QMSDistributionOut,
     QMSChangeRequestCreate, QMSChangeRequestUpdate, QMSChangeRequestOut,
     QMSAuditCreate, QMSAuditUpdate, QMSAuditOut,
-    QMSFindingCreate, QMSFindingOut,
+    QMSFindingCreate, QMSFindingOut, QMSFindingVerify,
     QMSCAPUpsert, QMSCAPOut,
 )
 from .enums import CARStatus, QMSDomain, QMSAuditStatus
@@ -54,6 +54,7 @@ from .service import (
     normalize_finding_level,
     schedule_next_reminder,
 )
+from ..workflow import apply_transition, TransitionError
 
 router = APIRouter(
     prefix="/quality",
@@ -321,6 +322,8 @@ def add_revision(
         file_ref=payload.file_ref,
         approved_by_authority=payload.approved_by_authority,
         authority_ref=payload.authority_ref,
+        approved_by_user_id=payload.approved_by_user_id,
+        approved_at=payload.approved_at,
         created_by_user_id=get_actor(),
     )
     db.add(rev)
@@ -372,6 +375,7 @@ def publish_revision(
     if not rev:
         raise HTTPException(status_code=404, detail="Revision not found")
 
+    before_status = doc.status.value
     doc.current_issue_no = rev.issue_no
     doc.current_rev_no = rev.rev_no
     doc.effective_date = payload.effective_date
@@ -379,23 +383,33 @@ def publish_revision(
     doc.status = models.QMSDocStatus.ACTIVE
     doc.updated_by_user_id = get_actor()
 
-    audit_services.log_event(
-        db,
-        amo_id=current_user.amo_id,
-        actor_user_id=current_user.id,
-        entity_type="qms_document",
-        entity_id=str(doc.id),
-        action="publish",
-        before={"status": models.QMSDocStatus.DRAFT.value},
-        after={
-            "status": doc.status.value,
-            "current_issue_no": doc.current_issue_no,
-            "current_rev_no": doc.current_rev_no,
-        },
-        correlation_id=str(uuid.uuid4()),
-        metadata=_audit_metadata(request),
-        critical=True,
-    )
+    try:
+        apply_transition(
+            db,
+            actor_user_id=current_user.id,
+            entity_type="qms_document",
+            entity_id=str(doc.id),
+            from_state=before_status,
+            to_state=doc.status.value,
+            before_obj={
+                "status": before_status,
+                "amo_id": current_user.amo_id,
+            },
+            after_obj={
+                "status": doc.status.value,
+                "current_issue_no": doc.current_issue_no,
+                "current_rev_no": doc.current_rev_no,
+                "approved_by_authority": rev.approved_by_authority,
+                "authority_ref": rev.authority_ref,
+                "approved_by_user_id": rev.approved_by_user_id,
+                "approved_at": str(rev.approved_at) if rev.approved_at else None,
+                "amo_id": current_user.amo_id,
+            },
+            correlation_id=str(uuid.uuid4()),
+            critical=True,
+        )
+    except TransitionError as exc:
+        return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
     db.commit()
     db.refresh(doc)
     return doc
@@ -617,7 +631,8 @@ def update_audit(
     audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
     if not audit:
         raise HTTPException(status_code=404, detail="Audit not found")
-    before = {"status": audit.status.value, "title": audit.title}
+    before_status = audit.status.value
+    before = {"status": before_status, "title": audit.title}
 
     for field in (
         "status", "scope", "criteria", "auditee", "auditee_email",
@@ -631,8 +646,8 @@ def update_audit(
         if val is not None:
             setattr(audit, field, val)
 
-    # If closing, set retention_until = +5 years
-    if payload.status == QMSAuditStatus.CLOSED:
+    # If closing, set retention_until = +5 years (if not already set)
+    if payload.status == QMSAuditStatus.CLOSED and audit.retention_until is None:
         if audit.actual_end:
             audit.retention_until = date(audit.actual_end.year + 5, audit.actual_end.month, audit.actual_end.day)
         elif audit.planned_end:
@@ -640,19 +655,45 @@ def update_audit(
         note_msg = f"Audit {audit.audit_ref} closed. Please send closure pack to {audit.auditee_email or 'auditee'}."
         _notify_user(db, audit.lead_auditor_user_id, note_msg, models.QMSNotificationSeverity.INFO)
 
-    audit_services.log_event(
-        db,
-        amo_id=current_user.amo_id,
-        actor_user_id=current_user.id,
-        entity_type="qms_audit",
-        entity_id=str(audit.id),
-        action="close" if payload.status == QMSAuditStatus.CLOSED else "update",
-        before=before,
-        after={"status": audit.status.value, "title": audit.title},
-        correlation_id=str(uuid.uuid4()),
-        metadata=_audit_metadata(request),
-        critical=payload.status == QMSAuditStatus.CLOSED,
-    )
+    if payload.status is not None and payload.status.value != before_status:
+        try:
+            apply_transition(
+                db,
+                actor_user_id=current_user.id,
+                entity_type="qms_audit",
+                entity_id=str(audit.id),
+                from_state=before_status,
+                to_state=payload.status.value,
+                before_obj={
+                    "status": before_status,
+                    "audit_id": str(audit.id),
+                    "amo_id": current_user.amo_id,
+                },
+                after_obj={
+                    "status": payload.status.value,
+                    "audit_id": str(audit.id),
+                    "title": audit.title,
+                    "retention_until": str(audit.retention_until) if audit.retention_until else None,
+                    "amo_id": current_user.amo_id,
+                },
+                correlation_id=str(uuid.uuid4()),
+                critical=payload.status == QMSAuditStatus.CLOSED,
+            )
+        except TransitionError as exc:
+            return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
+    else:
+        audit_services.log_event(
+            db,
+            amo_id=current_user.amo_id,
+            actor_user_id=current_user.id,
+            entity_type="qms_audit",
+            entity_id=str(audit.id),
+            action="update",
+            before=before,
+            after={"status": audit.status.value, "title": audit.title},
+            correlation_id=str(uuid.uuid4()),
+            metadata=_audit_metadata(request),
+        )
     db.commit()
     db.refresh(audit)
     return audit
@@ -738,21 +779,73 @@ def close_finding(
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
     if not finding.closed_at:
+        before_state = "OPEN"
         finding.closed_at = func.now()
-        audit_services.log_event(
-            db,
-            amo_id=current_user.amo_id,
-            actor_user_id=current_user.id,
-            entity_type="qms_finding",
-            entity_id=str(finding.id),
-            action="close",
-            after={"closed_at": str(finding.closed_at)},
-            correlation_id=str(uuid.uuid4()),
-            metadata=_audit_metadata(request),
-            critical=True,
-        )
+        try:
+            apply_transition(
+                db,
+                actor_user_id=current_user.id,
+                entity_type="qms_finding",
+                entity_id=str(finding.id),
+                from_state=before_state,
+                to_state="CLOSED",
+                before_obj={
+                    "status": before_state,
+                    "amo_id": current_user.amo_id,
+                },
+                after_obj={
+                    "status": "CLOSED",
+                    "closed_at": str(finding.closed_at),
+                    "objective_evidence": finding.objective_evidence,
+                    "verified_at": str(finding.verified_at) if finding.verified_at else None,
+                    "amo_id": current_user.amo_id,
+                },
+                correlation_id=str(uuid.uuid4()),
+                critical=True,
+            )
+        except TransitionError as exc:
+            return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
         db.commit()
         db.refresh(finding)
+    return finding
+
+
+@router.post("/findings/{finding_id}/verify", response_model=QMSFindingOut)
+def verify_finding(
+    finding_id: UUID,
+    payload: QMSFindingVerify,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+
+    if payload.objective_evidence is not None:
+        finding.objective_evidence = payload.objective_evidence
+
+    finding.verified_at = payload.verified_at or func.now()
+    finding.verified_by_user_id = get_actor()
+
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_finding",
+        entity_id=str(finding.id),
+        action="verify",
+        after={
+            "verified_at": str(finding.verified_at),
+            "verified_by_user_id": finding.verified_by_user_id,
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=True,
+    )
+
+    db.commit()
+    db.refresh(finding)
     return finding
 
 
@@ -773,10 +866,11 @@ def upsert_cap(
         cap = models.QMSCorrectiveAction(finding_id=finding_id)
         db.add(cap)
 
-    before = {"status": cap.status.value if cap.status else None}
+    before_status = cap.status.value if cap.status else None
+    before = {"status": before_status}
     for field in (
         "root_cause", "containment_action", "corrective_action", "preventive_action",
-        "responsible_user_id", "due_date", "evidence_ref", "status",
+        "responsible_user_id", "due_date", "evidence_ref", "verified_at", "verified_by_user_id", "status",
     ):
         val = getattr(payload, field)
         if val is not None:
@@ -795,18 +889,45 @@ def upsert_cap(
             ):
                 _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.WARNING)
 
-    audit_services.log_event(
-        db,
-        amo_id=current_user.amo_id,
-        actor_user_id=current_user.id,
-        entity_type="qms_cap",
-        entity_id=str(cap.id),
-        action="update",
-        before=before,
-        after={"status": cap.status.value, "finding_id": str(finding_id)},
-        correlation_id=str(uuid.uuid4()),
-        metadata=_audit_metadata(request),
-    )
+    if payload.status is not None and payload.status.value != before.get("status"):
+        try:
+            apply_transition(
+                db,
+                actor_user_id=current_user.id,
+                entity_type="qms_cap",
+                entity_id=str(cap.id),
+                from_state=before_status or models.QMSCAPStatus.OPEN.value,
+                to_state=payload.status.value,
+                before_obj={
+                    "status": before_status,
+                    "amo_id": current_user.amo_id,
+                },
+                after_obj={
+                    "status": payload.status.value,
+                    "containment_action": cap.containment_action,
+                    "corrective_action": cap.corrective_action,
+                    "evidence_ref": cap.evidence_ref,
+                    "verified_at": str(cap.verified_at) if cap.verified_at else None,
+                    "amo_id": current_user.amo_id,
+                },
+                correlation_id=str(uuid.uuid4()),
+                critical=payload.status == models.QMSCAPStatus.CLOSED,
+            )
+        except TransitionError as exc:
+            return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
+    else:
+        audit_services.log_event(
+            db,
+            amo_id=current_user.amo_id,
+            actor_user_id=current_user.id,
+            entity_type="qms_cap",
+            entity_id=str(cap.id),
+            action="update",
+            before=before,
+            after={"status": cap.status.value, "finding_id": str(finding_id)},
+            correlation_id=str(uuid.uuid4()),
+            metadata=_audit_metadata(request),
+        )
     db.commit()
     db.refresh(cap)
     return cap

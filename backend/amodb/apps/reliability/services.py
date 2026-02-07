@@ -14,6 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import models, schemas
+from ..workflow import apply_transition
 from ..work.models import TaskCategoryEnum, TaskCard
 from ..fleet.models import AircraftUsage
 from ..fleet import models as fleet_models
@@ -510,15 +511,22 @@ def approve_fracas_case(
     if approval_notes:
         case.corrective_action_summary = approval_notes
     db.add(case)
-    audit_services.log_event(
+    apply_transition(
         db,
-        amo_id=amo_id,
         actor_user_id=approved_by_user_id,
         entity_type="fracas_case",
         entity_id=str(case.id),
-        action="approve",
-        after={"approved_at": str(case.approved_at)},
-        metadata={"module": "reliability"},
+        from_state=case.status.value,
+        to_state=case.status.value,
+        before_obj={
+            "status": case.status.value,
+            "amo_id": amo_id,
+        },
+        after_obj={
+            "status": case.status.value,
+            "approved_at": str(case.approved_at),
+            "amo_id": amo_id,
+        },
         critical=True,
     )
     db.commit()
@@ -546,24 +554,29 @@ def verify_fracas_case(
     case.verified_by_user_id = verified_by_user_id
     if verification_notes:
         case.verification_notes = verification_notes
+    before_status = case.status.value
     if status:
         case.status = status
         if status == models.FRACASStatusEnum.CLOSED:
             case.closed_at = func.now()
     db.add(case)
-    audit_services.log_event(
+    apply_transition(
         db,
-        amo_id=amo_id,
         actor_user_id=verified_by_user_id,
         entity_type="fracas_case",
         entity_id=str(case.id),
-        action="verify" if status != models.FRACASStatusEnum.CLOSED else "close",
-        after={
+        from_state=before_status,
+        to_state=case.status.value,
+        before_obj={
+            "status": before_status,
+            "amo_id": amo_id,
+        },
+        after_obj={
             "status": case.status.value,
             "verified_at": str(case.verified_at),
             "closed_at": str(case.closed_at) if case.closed_at else None,
+            "amo_id": amo_id,
         },
-        metadata={"module": "reliability"},
         critical=status == models.FRACASStatusEnum.CLOSED,
     )
     db.commit()

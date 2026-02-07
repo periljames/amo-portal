@@ -163,6 +163,8 @@ class QMSDocumentRevision(Base):
 
     approved_by_authority = Column(Boolean, nullable=False, default=False)
     authority_ref = Column(String(255), nullable=True)
+    approved_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
 
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -404,6 +406,8 @@ class QMSAuditFinding(Base):
 
     target_close_date = Column(Date, nullable=True, index=True)
     closed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    verified_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
 
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -457,6 +461,8 @@ class QMSCorrectiveAction(Base):
     responsible_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     due_date = Column(Date, nullable=True, index=True)
     evidence_ref = Column(String(512), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    verified_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
 
     status = Column(
         SAEnum(QMSCAPStatus, name="qms_cap_status", native_enum=False),
