@@ -1,9 +1,11 @@
 # backend/amodb/apps/quality/service.py
 from __future__ import annotations
 
+import importlib.util
 import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import func, or_
@@ -23,6 +25,10 @@ from .enums import (
     QMSDomain,
     infer_level_from_severity,
 )
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+CAR_FORM_OUTPUT_DIR = BASE_DIR / "generated" / "quality" / "cars"
+CAR_FORM_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Default reminder window in days based on finding level (quicker for Level 1).
 CAR_LEVEL_REMINDER_DAYS: dict[FindingLevel, int] = {
@@ -230,3 +236,93 @@ def schedule_next_reminder(car: models.CorrectiveActionRequest, days: Optional[i
 def build_car_invite_link(car: models.CorrectiveActionRequest) -> str:
     base = os.getenv("PORTAL_FRONTEND_BASE_URL", "http://localhost:5173")
     return f"{base}/car-invite?token={car.invite_token}"
+
+
+def generate_car_form_pdf(
+    car: models.CorrectiveActionRequest,
+    invite_url: str,
+    requested_by_name: Optional[str] = None,
+    assigned_to_name: Optional[str] = None,
+) -> Path:
+    if importlib.util.find_spec("reportlab") is None:
+        raise RuntimeError(
+            "Missing dependency 'reportlab'. Install it with 'pip install reportlab'."
+        )
+
+    from reportlab.graphics import renderPDF  # type: ignore[import-not-found]
+    from reportlab.graphics.barcode import qr  # type: ignore[import-not-found]
+    from reportlab.graphics.shapes import Drawing  # type: ignore[import-not-found]
+    from reportlab.lib.pagesizes import letter  # type: ignore[import-not-found]
+    from reportlab.lib.units import inch  # type: ignore[import-not-found]
+    from reportlab.lib.utils import simpleSplit  # type: ignore[import-not-found]
+    from reportlab.pdfgen import canvas  # type: ignore[import-not-found]
+
+    output_path = CAR_FORM_OUTPUT_DIR / f"car_form_{car.id}.pdf"
+    page_width, page_height = letter
+    pdf = canvas.Canvas(str(output_path), pagesize=letter)
+
+    margin = 0.75 * inch
+    cursor_y = page_height - margin
+
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(margin, cursor_y, "Corrective Action Request (CAR)")
+    cursor_y -= 0.35 * inch
+
+    pdf.setFont("Helvetica", 11)
+    entries = [
+        ("CAR Number", car.car_number),
+        ("Title", car.title),
+        ("Summary", car.summary),
+        ("Requested By", requested_by_name or car.requested_by_user_id or "N/A"),
+        ("Assigned To", assigned_to_name or car.assigned_to_user_id or "N/A"),
+        ("Priority", car.priority.value),
+        ("Status", car.status.value),
+        ("Due Date", car.due_date.isoformat() if car.due_date else "N/A"),
+        (
+            "Target Closure Date",
+            car.target_closure_date.isoformat() if car.target_closure_date else "N/A",
+        ),
+        ("Root Cause", car.root_cause or "N/A"),
+        ("Corrective Action Plan (CAP)", car.corrective_action or "N/A"),
+        ("Preventive Action Plan (PAP)", car.preventive_action or "N/A"),
+        ("Evidence Reference", car.evidence_ref or "N/A"),
+    ]
+
+    label_width = 170
+    max_text_width = page_width - (margin * 2) - label_width
+
+    for label, value in entries:
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(margin, cursor_y, f"{label}:")
+        pdf.setFont("Helvetica", 11)
+        lines = simpleSplit(str(value), "Helvetica", 11, max_text_width)
+        if not lines:
+            lines = [""]
+        for line in lines:
+            pdf.drawString(margin + label_width, cursor_y, line)
+            cursor_y -= 0.22 * inch
+        cursor_y -= 0.1 * inch
+        if cursor_y < margin + (1.5 * inch):
+            pdf.showPage()
+            cursor_y = page_height - margin
+
+    qr_widget = qr.QrCodeWidget(invite_url)
+    bounds = qr_widget.getBounds()
+    qr_width = bounds[2] - bounds[0]
+    qr_height = bounds[3] - bounds[1]
+    qr_size = 1.4 * inch
+    drawing = Drawing(
+        qr_size,
+        qr_size,
+        transform=[qr_size / qr_width, 0, 0, qr_size / qr_height, 0, 0],
+    )
+    drawing.add(qr_widget)
+    qr_x = page_width - margin - qr_size
+    qr_y = margin
+    renderPDF.draw(drawing, pdf, qr_x, qr_y)
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(qr_x, qr_y - 0.2 * inch, "Scan to access CAR online")
+
+    pdf.showPage()
+    pdf.save()
+    return output_path
