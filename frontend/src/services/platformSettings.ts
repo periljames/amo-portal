@@ -16,6 +16,9 @@ export type PlatformSettings = {
   platform_logo_filename?: string | null;
   platform_logo_content_type?: string | null;
   platform_logo_uploaded_at?: string | null;
+  gzip_minimum_size?: number | null;
+  gzip_compresslevel?: number | null;
+  max_request_body_bytes?: number | null;
   acme_directory_url?: string | null;
   acme_client?: string | null;
   certificate_status?: string | null;
@@ -36,6 +39,9 @@ export type PlatformSettingsUpdate = Partial<
     | "brand_accent"
     | "brand_accent_soft"
     | "brand_accent_secondary"
+    | "gzip_minimum_size"
+    | "gzip_compresslevel"
+    | "max_request_body_bytes"
     | "acme_directory_url"
     | "acme_client"
     | "certificate_status"
