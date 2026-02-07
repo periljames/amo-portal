@@ -24,7 +24,7 @@ body {
     linear-gradient(135deg, var(--bg-base) 0%, var(--bg-base-alt) 100%);
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
-  transition: background 180ms ease-out, color 180ms ease-out;
+  transition: background 240ms ease-out, color 180ms ease-out;
 }
 
 a {
@@ -580,14 +580,16 @@ button,
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 260px) minmax(0, 1fr);
   height: 100vh;
   padding: 18px;
   gap: 16px;
+  transition: grid-template-columns 220ms ease, gap 220ms ease;
+  will-change: grid-template-columns;
 }
 
 .app-shell--collapsed {
-  grid-template-columns: 80px minmax(0, 1fr);
+  --sidebar-width: 80px;
 }
 
 /* Sidebar outer panel */
@@ -610,6 +612,8 @@ button,
   backdrop-filter: blur(var(--blur-strength));
   -webkit-backdrop-filter: blur(var(--blur-strength));
   position: relative;
+  transition: padding 220ms ease, background 180ms ease, border-color 180ms ease,
+    box-shadow 180ms ease;
 }
 
 /* DepartmentLayout sidebar inner structure */
@@ -849,6 +853,8 @@ button,
   flex-direction: column;
   gap: 16px;
   align-items: center;
+  transition: padding 220ms ease, background 180ms ease, border-color 180ms ease,
+    box-shadow 180ms ease;
 }
 
 .app-shell__main-inner {

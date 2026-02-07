@@ -302,6 +302,7 @@ const DashboardPage: React.FC = () => {
     // If URL dept differs, hard-correct it (prevents cross-department browsing)
     if (requestedDept && requestedDept !== assignedDept) {
       navigate(`/maintenance/${amoSlug}/${assignedDept}`, { replace: true });
+      return;
     }
 
     // If URL dept is missing, send them to assigned dept
