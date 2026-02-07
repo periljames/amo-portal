@@ -1,8 +1,8 @@
 // src/services/reliability.ts
 import { getToken, handleAuthFailure } from "./auth";
+import { getApiBaseUrl } from "./config";
 
-const API_BASE =
-  (import.meta as any).env?.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const API_BASE = getApiBaseUrl();
 
 export type ReliabilityReportStatus = "PENDING" | "READY" | "FAILED";
 
