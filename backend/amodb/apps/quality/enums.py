@@ -124,6 +124,14 @@ class CARActionType(str, enum.Enum):
     ASSIGNMENT = "ASSIGNMENT"
 
 
+class CARResponseStatus(str, enum.Enum):
+    SUBMITTED = "SUBMITTED"
+    ROOT_CAUSE_ACCEPTED = "ROOT_CAUSE_ACCEPTED"
+    ROOT_CAUSE_REJECTED = "ROOT_CAUSE_REJECTED"
+    CAP_REJECTED = "CAP_REJECTED"
+    CAP_ACCEPTED = "CAP_ACCEPTED"
+
+
 class QMSNotificationSeverity(str, enum.Enum):
     INFO = "INFO"
     ACTION_REQUIRED = "ACTION_REQUIRED"

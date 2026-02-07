@@ -139,6 +139,11 @@ async function fetchJson<T>(path: string): Promise<T> {
     throw new Error("Session expired. Please sign in again.");
   }
 
+  if (res.status === 503) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || "Service unavailable. Please retry or contact support.");
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
@@ -166,6 +171,11 @@ async function sendJson<T>(
   if (res.status === 401) {
     handleAuthFailure("expired");
     throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (res.status === 503) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || "Service unavailable. Please retry or contact support.");
   }
 
   if (!res.ok) {
@@ -327,6 +337,48 @@ export async function qmsSubmitCarInvite(
   }
 ): Promise<CAROut> {
   return sendJson<CAROut>(`/quality/cars/invite/${token}`, "PATCH", payload);
+}
+
+export interface CARAttachmentOut {
+  id: string;
+  car_id: string;
+  filename: string;
+  content_type: string | null;
+  size_bytes: number | null;
+  uploaded_at: string;
+  download_url: string;
+}
+
+export async function qmsListCarInviteAttachments(token: string): Promise<CARAttachmentOut[]> {
+  return fetchJson<CARAttachmentOut[]>(`/quality/cars/invite/${token}/attachments`);
+}
+
+export async function qmsUploadCarInviteAttachment(
+  token: string,
+  file: File
+): Promise<CARAttachmentOut> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const authToken = getToken();
+  const res = await fetch(`${getApiBaseUrl()}/quality/cars/invite/${token}/attachments`, {
+    method: "POST",
+    headers: {
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
+    body: formData,
+    credentials: "include",
+  });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+  }
+  return (await res.json()) as CARAttachmentOut;
 }
 
 export type QMSNotificationSeverity = "INFO" | "ACTION_REQUIRED" | "WARNING";

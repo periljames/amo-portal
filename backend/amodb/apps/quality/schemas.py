@@ -405,6 +405,9 @@ class CARUpdate(BaseModel):
     assigned_to_user_id: Optional[str] = None
     closed_at: Optional[datetime] = None
     reminder_interval_days: Optional[int] = Field(default=None, ge=1, le=90)
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    preventive_action: Optional[str] = None
 
 
 class CAROut(BaseModel):
@@ -490,6 +493,24 @@ class CARInviteUpdate(BaseModel):
     due_date: Optional[date] = None
     submitted_by_name: Optional[str] = Field(default=None, max_length=255)
     submitted_by_email: Optional[str] = Field(default=None, max_length=255)
+
+
+class CARReviewUpdate(BaseModel):
+    root_cause_status: Optional[str] = None
+    cap_status: Optional[str] = None
+    message: Optional[str] = None
+
+
+class CARAttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    car_id: UUID
+    filename: str
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    uploaded_at: datetime
+    download_url: str
 
 
 class QMSNotificationOut(BaseModel):

@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
+import shutil
 from typing import Optional, List
 from uuid import UUID
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError, ProgrammingError
@@ -23,8 +27,10 @@ from .schemas import (
     CARCreate,
     CARInviteOut,
     CARInviteUpdate,
+    CARAttachmentOut,
     CAROut,
     CARUpdate,
+    CARReviewUpdate,
     AuditorStatsOut,
     QMSNotificationOut,
     QMSDashboardOut,
@@ -42,6 +48,7 @@ from .service import (
     build_car_invite_link,
     compute_target_close_date,
     create_car,
+    generate_car_form_pdf,
     get_dashboard,
     normalize_finding_level,
     schedule_next_reminder,
@@ -52,6 +59,22 @@ router = APIRouter(
     tags=["Quality / QMS"],
     dependencies=[Depends(require_module("quality"))],
 )
+
+CAR_ATTACHMENT_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "car_attachments"
+CAR_ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
+MAX_CAR_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+
+def _serialize_attachment(invite_token: str, attachment: models.CARAttachment) -> CARAttachmentOut:
+    return CARAttachmentOut(
+        id=attachment.id,
+        car_id=attachment.car_id,
+        filename=attachment.filename,
+        content_type=attachment.content_type,
+        size_bytes=attachment.size_bytes,
+        uploaded_at=attachment.uploaded_at,
+        download_url=f"/quality/cars/invite/{invite_token}/attachments/{attachment.id}/download",
+    )
 
 
 def get_actor() -> Optional[str]:
@@ -109,12 +132,38 @@ def _require_car_write_access(
     db: Session,
     current_user: account_models.User,
     finding_id: Optional[UUID],
+    car: Optional[models.CorrectiveActionRequest] = None,
+    allow_assignee: bool = False,
 ) -> None:
     if _is_quality_admin(current_user):
         return
     if _audit_allows_user(db, finding_id, current_user.id):
         return
+    if car and current_user.id == car.requested_by_user_id:
+        return
+    if allow_assignee and car and current_user.id == car.assigned_to_user_id:
+        return
     raise HTTPException(status_code=403, detail="Insufficient privileges to modify CARs")
+
+
+def _assignee_can_request_extension(
+    db: Session,
+    car: models.CorrectiveActionRequest,
+    requested_date: date,
+) -> bool:
+    if not car.finding_id:
+        return False
+    finding = (
+        db.query(models.QMSAuditFinding)
+        .filter(models.QMSAuditFinding.id == car.finding_id)
+        .first()
+    )
+    if not finding:
+        return False
+    baseline = finding.target_close_date
+    if baseline is None:
+        baseline = compute_target_close_date(finding.level, base=finding.created_at.date())
+    return requested_date > baseline
 
 
 @router.get("/qms/dashboard", response_model=QMSDashboardOut)
@@ -542,21 +591,29 @@ def create_car_request(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_car_write_access(db, current_user, payload.finding_id)
-    car = create_car(
-        db=db,
-        program=payload.program,
-        title=payload.title.strip(),
-        summary=payload.summary.strip(),
-        priority=payload.priority,
-        requested_by_user_id=get_actor(),
-        assigned_to_user_id=payload.assigned_to_user_id,
-        due_date=payload.due_date,
-        target_closure_date=payload.target_closure_date,
-        finding_id=payload.finding_id,
-    )
-    db.commit()
-    db.refresh(car)
-    return car
+    try:
+        car = create_car(
+            db=db,
+            program=payload.program,
+            title=payload.title.strip(),
+            summary=payload.summary.strip(),
+            priority=payload.priority,
+            requested_by_user_id=get_actor(),
+            assigned_to_user_id=payload.assigned_to_user_id,
+            due_date=payload.due_date,
+            target_closure_date=payload.target_closure_date,
+            finding_id=payload.finding_id,
+        )
+        db.commit()
+        db.refresh(car)
+        return car
+    except (OperationalError, ProgrammingError) as exc:
+        if _is_missing_table_error(exc):
+            raise HTTPException(
+                status_code=503,
+                detail="CARs are unavailable because the database schema is missing. Run alembic upgrade heads.",
+            ) from exc
+        raise
 
 
 @router.get("/cars", response_model=List[CAROut])
@@ -566,14 +623,19 @@ def list_cars(
     status_: Optional[models.CARStatus] = None,
     assigned_to_user_id: Optional[str] = None,
 ):
-    qs = db.query(models.CorrectiveActionRequest)
-    if program:
-        qs = qs.filter(models.CorrectiveActionRequest.program == program)
-    if status_:
-        qs = qs.filter(models.CorrectiveActionRequest.status == status_)
-    if assigned_to_user_id:
-        qs = qs.filter(models.CorrectiveActionRequest.assigned_to_user_id == assigned_to_user_id)
-    return qs.order_by(models.CorrectiveActionRequest.created_at.desc()).all()
+    try:
+        qs = db.query(models.CorrectiveActionRequest)
+        if program:
+            qs = qs.filter(models.CorrectiveActionRequest.program == program)
+        if status_:
+            qs = qs.filter(models.CorrectiveActionRequest.status == status_)
+        if assigned_to_user_id:
+            qs = qs.filter(models.CorrectiveActionRequest.assigned_to_user_id == assigned_to_user_id)
+        return qs.order_by(models.CorrectiveActionRequest.created_at.desc()).all()
+    except (OperationalError, ProgrammingError) as exc:
+        if _is_missing_table_error(exc):
+            return []
+        raise
 
 
 @router.get("/cars/assignees", response_model=List[CARAssigneeOut])
@@ -626,22 +688,65 @@ def update_car(
     car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
-    _require_car_write_access(db, current_user, car.finding_id)
+    is_assignee = current_user.id == car.assigned_to_user_id
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=is_assignee)
+
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        return car
 
     changed_status = False
-    for field in (
-        "title",
-        "summary",
-        "priority",
-        "status",
-        "due_date",
+    assignee_allowed = {
+        "root_cause",
+        "corrective_action",
+        "preventive_action",
         "target_closure_date",
-        "assigned_to_user_id",
-        "closed_at",
-        "reminder_interval_days",
+    }
+
+    if is_assignee and not _is_quality_admin(current_user) and not _audit_allows_user(
+        db, car.finding_id, current_user.id
     ):
-        val = getattr(payload, field)
-        if val is not None:
+        disallowed = set(data) - assignee_allowed
+        if disallowed:
+            raise HTTPException(
+                status_code=403,
+                detail="Assignees may only update root cause, CAP/PAP, or request extra time.",
+            )
+        if "target_closure_date" in data:
+            requested_date = data["target_closure_date"]
+            if requested_date is None or not _assignee_can_request_extension(db, car, requested_date):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Additional time can only be requested when exceeding the level due date.",
+                )
+            car.target_closure_date = requested_date
+            add_car_action(
+                db=db,
+                car=car,
+                action_type=models.CARActionType.COMMENT,
+                message=f"Assignee requested extension to {requested_date.isoformat()}",
+                actor_user_id=get_actor(),
+            )
+        updated_fields = {}
+        for field in ("root_cause", "corrective_action", "preventive_action"):
+            if field in data:
+                setattr(car, field, data[field])
+                updated_fields[field] = data[field]
+        if updated_fields:
+            response = models.CARResponse(
+                car_id=car.id,
+                containment_action=car.containment_action,
+                root_cause=car.root_cause,
+                corrective_action=car.corrective_action,
+                preventive_action=car.preventive_action,
+                evidence_ref=car.evidence_ref,
+                submitted_by_name=current_user.full_name,
+                submitted_by_email=current_user.email,
+                status=models.CARResponseStatus.SUBMITTED,
+            )
+            db.add(response)
+    else:
+        for field, val in data.items():
             setattr(car, field, val)
             if field == "status":
                 changed_status = True
@@ -669,10 +774,55 @@ def delete_car(
     car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
-    _require_car_write_access(db, current_user, car.finding_id)
+    _require_car_write_access(db, current_user, car.finding_id, car=car)
     db.delete(car)
     db.commit()
     return None
+
+
+@router.get("/cars/{car_id}/print", response_class=FileResponse)
+def print_car_form(
+    car_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
+
+    assigned_name = None
+    requested_name = None
+    if car.assigned_to_user_id:
+        assigned_user = (
+            db.query(account_models.User)
+            .filter(account_models.User.id == car.assigned_to_user_id)
+            .first()
+        )
+        assigned_name = assigned_user.full_name if assigned_user else None
+    if car.requested_by_user_id:
+        requested_user = (
+            db.query(account_models.User)
+            .filter(account_models.User.id == car.requested_by_user_id)
+            .first()
+        )
+        requested_name = requested_user.full_name if requested_user else None
+
+    try:
+        file_path = generate_car_form_pdf(
+            car=car,
+            invite_url=build_car_invite_link(car),
+            requested_by_name=requested_name,
+            assigned_to_name=assigned_name,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=file_path,
+        filename=f"{car.car_number}.pdf",
+        media_type="application/pdf",
+    )
 
 
 @router.post("/cars/{car_id}/escalate", response_model=CAROut)
@@ -798,6 +948,20 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, db: Sess
         actor_user_id=None,
     )
 
+    response = models.CARResponse(
+        car_id=car.id,
+        containment_action=car.containment_action,
+        root_cause=car.root_cause,
+        corrective_action=car.corrective_action,
+        preventive_action=car.preventive_action,
+        evidence_ref=car.evidence_ref,
+        submitted_by_name=car.submitted_by_name,
+        submitted_by_email=car.submitted_by_email,
+        submitted_at=car.submitted_at or func.now(),
+        status=models.CARResponseStatus.SUBMITTED,
+    )
+    db.add(response)
+
     if car.finding_id:
         audit = (
             db.query(models.QMSAudit)
@@ -818,6 +982,158 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, db: Sess
         ):
             _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.ACTION_REQUIRED)
     _notify_user(db, car.assigned_to_user_id, note_msg, models.QMSNotificationSeverity.ACTION_REQUIRED)
+
+    db.commit()
+    db.refresh(car)
+    return car
+
+
+@router.get("/cars/invite/{invite_token}/attachments", response_model=List[CARAttachmentOut])
+def list_car_invite_attachments(invite_token: str, db: Session = Depends(get_db)):
+    car = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.invite_token == invite_token)
+        .first()
+    )
+    if not car:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    return [_serialize_attachment(invite_token, attachment) for attachment in car.attachments]
+
+
+@router.post(
+    "/cars/invite/{invite_token}/attachments",
+    response_model=CARAttachmentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_car_invite_attachment(
+    invite_token: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    car = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.invite_token == invite_token)
+        .first()
+    )
+    if not car:
+        raise HTTPException(status_code=404, detail="Invite not found")
+
+    original_name = Path(file.filename or "attachment").name
+    unique_name = f"{uuid.uuid4().hex}_{original_name}"
+    target_dir = CAR_ATTACHMENT_DIR / str(car.id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / unique_name
+
+    with target_path.open("wb") as handle:
+        shutil.copyfileobj(file.file, handle)
+
+    size_bytes = target_path.stat().st_size
+    if size_bytes > MAX_CAR_ATTACHMENT_BYTES:
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=413, detail="Attachment exceeds the 10MB limit.")
+
+    attachment = models.CARAttachment(
+        car_id=car.id,
+        filename=original_name,
+        file_ref=str(target_path),
+        content_type=file.content_type,
+        size_bytes=size_bytes,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    return _serialize_attachment(invite_token, attachment)
+
+
+@router.get(
+    "/cars/invite/{invite_token}/attachments/{attachment_id}/download",
+    response_class=FileResponse,
+)
+def download_car_invite_attachment(
+    invite_token: str,
+    attachment_id: UUID,
+    db: Session = Depends(get_db),
+):
+    car = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.invite_token == invite_token)
+        .first()
+    )
+    if not car:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    attachment = (
+        db.query(models.CARAttachment)
+        .filter(
+            models.CARAttachment.id == attachment_id,
+            models.CARAttachment.car_id == car.id,
+        )
+        .first()
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    file_path = Path(attachment.file_ref)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Attachment file missing on server.")
+    return FileResponse(
+        path=file_path,
+        filename=attachment.filename,
+        media_type=attachment.content_type or "application/octet-stream",
+    )
+
+
+@router.post("/cars/{car_id}/review", response_model=CAROut)
+def review_car_response(
+    car_id: UUID,
+    payload: CARReviewUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    if not (_is_quality_admin(current_user) or _audit_allows_user(db, car.finding_id, current_user.id)):
+        raise HTTPException(status_code=403, detail="Insufficient privileges to review CARs")
+
+    latest_response = (
+        db.query(models.CARResponse)
+        .filter(models.CARResponse.car_id == car.id)
+        .order_by(models.CARResponse.submitted_at.desc())
+        .first()
+    )
+    if not latest_response:
+        raise HTTPException(status_code=404, detail="No CAR response found for review")
+
+    note_msg = None
+    if payload.root_cause_status == "REJECTED":
+        latest_response.status = models.CARResponseStatus.ROOT_CAUSE_REJECTED
+        note_msg = (
+            f"Root cause rejected for CAR {car.car_number}. "
+            "CAP/PAP rejected automatically. Please resubmit with corrections."
+        )
+    elif payload.root_cause_status == "ACCEPTED":
+        latest_response.status = models.CARResponseStatus.ROOT_CAUSE_ACCEPTED
+        note_msg = f"Root cause accepted for CAR {car.car_number}."
+        if payload.cap_status == "REJECTED":
+            latest_response.status = models.CARResponseStatus.CAP_REJECTED
+            note_msg = (
+                f"CAP/PAP rejected for CAR {car.car_number}. "
+                "Please resubmit the CAR response with corrections."
+            )
+        elif payload.cap_status == "ACCEPTED":
+            latest_response.status = models.CARResponseStatus.CAP_ACCEPTED
+            note_msg = f"CAP/PAP accepted for CAR {car.car_number}."
+
+    if payload.message:
+        add_car_action(
+            db=db,
+            car=car,
+            action_type=models.CARActionType.COMMENT,
+            message=payload.message.strip(),
+            actor_user_id=get_actor(),
+        )
+
+    if note_msg:
+        _notify_user(db, car.assigned_to_user_id, note_msg, models.QMSNotificationSeverity.ACTION_REQUIRED)
 
     db.commit()
     db.refresh(car)
