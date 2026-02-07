@@ -79,6 +79,18 @@ def _parse_env_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _parse_env_int(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        return int(stripped)
+    except ValueError:
+        return None
+
+
 def _platform_settings_defaults() -> dict:
     return {
         "api_base_url": os.getenv("PLATFORM_API_BASE_URL"),
@@ -87,6 +99,9 @@ def _platform_settings_defaults() -> dict:
         "brand_accent": os.getenv("PLATFORM_BRAND_ACCENT"),
         "brand_accent_soft": os.getenv("PLATFORM_BRAND_ACCENT_SOFT"),
         "brand_accent_secondary": os.getenv("PLATFORM_BRAND_ACCENT_SECONDARY"),
+        "gzip_minimum_size": _parse_env_int(os.getenv("GZIP_MINIMUM_SIZE")),
+        "gzip_compresslevel": _parse_env_int(os.getenv("GZIP_COMPRESSLEVEL")),
+        "max_request_body_bytes": _parse_env_int(os.getenv("MAX_REQUEST_BODY_BYTES")),
         "acme_directory_url": os.getenv("ACME_DIRECTORY_URL"),
         "acme_client": os.getenv("ACME_CLIENT"),
         "certificate_status": os.getenv("ACME_CERT_STATUS"),
