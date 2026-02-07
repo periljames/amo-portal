@@ -63,6 +63,9 @@ if not cors_origin_regex:
         r"https?://("
         r".*\.ts\.net"
         r"|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}"
+        r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+        r"|192\.168\.\d{1,3}\.\d{1,3}"
+        r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
         r")(?::\d+)?"
     )
 allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() in (
