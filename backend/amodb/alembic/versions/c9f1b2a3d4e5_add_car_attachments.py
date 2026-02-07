@@ -19,6 +19,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    if not op.get_bind().dialect.has_table(op.get_bind(), "quality_cars"):
+        return
     op.create_table(
         "quality_car_attachments",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -40,5 +42,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if not op.get_bind().dialect.has_table(op.get_bind(), "quality_car_attachments"):
+        return
     op.drop_index("ix_quality_car_attachments_car_id", table_name="quality_car_attachments")
     op.drop_table("quality_car_attachments")
