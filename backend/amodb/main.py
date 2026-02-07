@@ -1,13 +1,16 @@
 # backend/amodb/main.py
 import os
+import time
 from typing import List
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from jose import JWTError, jwt
 
 from .database import Base, engine, WriteSessionLocal  
 from .security import JWT_ALGORITHM, SECRET_KEY
+from .apps.accounts import models as accounts_models
 
 from .apps.accounts.router_public import router as accounts_public_router
 from .apps.accounts.router_admin import router as accounts_admin_router
@@ -62,6 +65,59 @@ allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() in (
     "true",
     "yes",
 )
+default_gzip_minimum_size = int(os.getenv("GZIP_MINIMUM_SIZE", "1024"))
+default_gzip_compresslevel = int(os.getenv("GZIP_COMPRESSLEVEL", "6"))
+max_request_body_bytes = int(os.getenv("MAX_REQUEST_BODY_BYTES", "0") or "0")
+platform_settings_cache_ttl = int(
+    os.getenv("PLATFORM_SETTINGS_CACHE_TTL_SEC", "30") or "30"
+)
+_platform_settings_cache: dict[str, object] = {"at": 0.0, "data": None}
+
+
+def _load_platform_performance_settings() -> None:
+    global default_gzip_minimum_size
+    global default_gzip_compresslevel
+    global max_request_body_bytes
+    db = WriteSessionLocal()
+    try:
+        settings = db.query(accounts_models.PlatformSettings).first()
+        if not settings:
+            return
+        _platform_settings_cache["data"] = settings
+        _platform_settings_cache["at"] = time.monotonic()
+        if settings.gzip_minimum_size is not None:
+            default_gzip_minimum_size = int(settings.gzip_minimum_size)
+        if settings.gzip_compresslevel is not None:
+            default_gzip_compresslevel = int(settings.gzip_compresslevel)
+        if max_request_body_bytes <= 0 and settings.max_request_body_bytes is not None:
+            max_request_body_bytes = int(settings.max_request_body_bytes)
+    except Exception:
+        return
+    finally:
+        db.close()
+
+
+def _get_platform_settings_cached() -> accounts_models.PlatformSettings | None:
+    if platform_settings_cache_ttl <= 0:
+        return _platform_settings_cache.get("data")  # type: ignore[return-value]
+    now = time.monotonic()
+    cached_at = float(_platform_settings_cache.get("at") or 0.0)
+    cached_data = _platform_settings_cache.get("data")
+    if cached_data and now - cached_at <= platform_settings_cache_ttl:
+        return cached_data  # type: ignore[return-value]
+    db = WriteSessionLocal()
+    try:
+        cached_data = db.query(accounts_models.PlatformSettings).first()
+    except Exception:
+        cached_data = None
+    finally:
+        db.close()
+    _platform_settings_cache["data"] = cached_data
+    _platform_settings_cache["at"] = now
+    return cached_data  # type: ignore[return-value]
+
+
+_load_platform_performance_settings()
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +126,11 @@ app.add_middleware(
     allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=default_gzip_minimum_size,
+    compresslevel=default_gzip_compresslevel,
 )
 
 
@@ -99,6 +160,20 @@ async def meter_api_calls(request: Request, call_next):
             except (JWTError, Exception):
                 pass
     return response
+
+
+@app.middleware("http")
+async def enforce_request_size_limit(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit():
+        limit = max_request_body_bytes
+        if limit <= 0:
+            cached = _get_platform_settings_cached()
+            if cached and cached.max_request_body_bytes:
+                limit = int(cached.max_request_body_bytes)
+        if limit > 0 and int(content_length) > limit:
+            return Response(status_code=413, content="Request body too large.")
+    return await call_next(request)
 
 
 @app.get("/", tags=["health"])

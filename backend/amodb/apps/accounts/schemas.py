@@ -701,6 +701,9 @@ class PlatformSettingsBase(BaseModel):
     platform_logo_filename: Optional[str] = None
     platform_logo_content_type: Optional[str] = None
     platform_logo_uploaded_at: Optional[datetime] = None
+    gzip_minimum_size: Optional[int] = None
+    gzip_compresslevel: Optional[int] = None
+    max_request_body_bytes: Optional[int] = None
     acme_directory_url: Optional[str] = None
     acme_client: Optional[str] = None
     certificate_status: Optional[str] = None

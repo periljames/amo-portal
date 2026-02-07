@@ -1438,6 +1438,9 @@ class PlatformSettings(Base):
     platform_logo_filename = Column(String(255), nullable=True)
     platform_logo_content_type = Column(String(128), nullable=True)
     platform_logo_uploaded_at = Column(DateTime(timezone=True), nullable=True)
+    gzip_minimum_size = Column(Integer, nullable=True)
+    gzip_compresslevel = Column(Integer, nullable=True)
+    max_request_body_bytes = Column(Integer, nullable=True)
 
     acme_directory_url = Column(String(255), nullable=True)
     acme_client = Column(String(128), nullable=True)
