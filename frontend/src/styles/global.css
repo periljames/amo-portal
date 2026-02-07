@@ -3410,6 +3410,13 @@ body[data-color-scheme="light"] .planning-calendar-badge--leave {
   margin-top: 12px;
 }
 
+.upsell-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 @media (max-width: 980px) {
   .upsell-hero {
     grid-template-columns: 1fr;

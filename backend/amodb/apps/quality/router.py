@@ -19,6 +19,7 @@ from . import models
 from .schemas import (
     CARActionCreate,
     CARActionOut,
+    CARAssigneeOut,
     CARCreate,
     CARInviteOut,
     CARInviteUpdate,
@@ -71,6 +72,49 @@ def _notify_user(db: Session, user_id: Optional[str], message: str, severity=mod
         created_by_user_id=get_actor(),
     )
     db.add(note)
+
+
+def _is_quality_admin(current_user: account_models.User) -> bool:
+    return bool(
+        getattr(current_user, "is_superuser", False)
+        or getattr(current_user, "is_amo_admin", False)
+        or current_user.role
+        in {
+            account_models.AccountRole.SUPERUSER,
+            account_models.AccountRole.AMO_ADMIN,
+            account_models.AccountRole.QUALITY_MANAGER,
+        }
+    )
+
+
+def _audit_allows_user(db: Session, finding_id: Optional[UUID], user_id: str) -> bool:
+    if not finding_id:
+        return False
+    audit = (
+        db.query(models.QMSAudit)
+        .join(models.QMSAuditFinding)
+        .filter(models.QMSAuditFinding.id == finding_id)
+        .first()
+    )
+    if not audit:
+        return False
+    return user_id in {
+        audit.lead_auditor_user_id,
+        audit.observer_auditor_user_id,
+        audit.assistant_auditor_user_id,
+    }
+
+
+def _require_car_write_access(
+    db: Session,
+    current_user: account_models.User,
+    finding_id: Optional[UUID],
+) -> None:
+    if _is_quality_admin(current_user):
+        return
+    if _audit_allows_user(db, finding_id, current_user.id):
+        return
+    raise HTTPException(status_code=403, detail="Insufficient privileges to modify CARs")
 
 
 @router.get("/qms/dashboard", response_model=QMSDashboardOut)
@@ -492,7 +536,12 @@ def upsert_cap(finding_id: UUID, payload: QMSCAPUpsert, db: Session = Depends(ge
 
 
 @router.post("/cars", response_model=CAROut, status_code=status.HTTP_201_CREATED)
-def create_car_request(payload: CARCreate, db: Session = Depends(get_db)):
+def create_car_request(
+    payload: CARCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_car_write_access(db, current_user, payload.finding_id)
     car = create_car(
         db=db,
         program=payload.program,
@@ -527,11 +576,57 @@ def list_cars(
     return qs.order_by(models.CorrectiveActionRequest.created_at.desc()).all()
 
 
+@router.get("/cars/assignees", response_model=List[CARAssigneeOut])
+def list_car_assignees(
+    db: Session = Depends(get_db),
+    department_id: Optional[str] = None,
+    search: Optional[str] = None,
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    q = (
+        db.query(account_models.User, account_models.Department)
+        .outerjoin(account_models.Department, account_models.User.department_id == account_models.Department.id)
+        .filter(account_models.User.amo_id == current_user.amo_id)
+        .filter(account_models.User.is_active.is_(True))
+    )
+    if department_id:
+        q = q.filter(account_models.User.department_id == department_id)
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        q = q.filter(
+            (account_models.User.full_name.ilike(like))
+            | (account_models.User.email.ilike(like))
+            | (account_models.User.staff_code.ilike(like))
+        )
+    q = q.order_by(account_models.User.full_name.asc())
+    results = []
+    for user, dept in q.all():
+        results.append(
+            CARAssigneeOut(
+                id=user.id,
+                full_name=user.full_name,
+                email=user.email,
+                staff_code=user.staff_code,
+                role=user.role,
+                department_id=user.department_id,
+                department_code=dept.code if dept else None,
+                department_name=dept.name if dept else None,
+            )
+        )
+    return results
+
+
 @router.patch("/cars/{car_id}", response_model=CAROut)
-def update_car(car_id: UUID, payload: CARUpdate, db: Session = Depends(get_db)):
+def update_car(
+    car_id: UUID,
+    payload: CARUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
+    _require_car_write_access(db, current_user, car.finding_id)
 
     changed_status = False
     for field in (
@@ -563,6 +658,21 @@ def update_car(car_id: UUID, payload: CARUpdate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(car)
     return car
+
+
+@router.delete("/cars/{car_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_car(
+    car_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    _require_car_write_access(db, current_user, car.finding_id)
+    db.delete(car)
+    db.commit()
+    return None
 
 
 @router.post("/cars/{car_id}/escalate", response_model=CAROut)

@@ -79,6 +79,13 @@ const AdminUsageSettingsPage: React.FC = () => {
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(
     null
   );
+  const [performanceDraft, setPerformanceDraft] = useState({
+    gzip_minimum_size: 1024,
+    gzip_compresslevel: 6,
+    max_request_body_bytes: 0,
+  });
+  const [performanceMessage, setPerformanceMessage] = useState<string | null>(null);
+  const [performanceSaving, setPerformanceSaving] = useState(false);
   const [brandingDraft, setBrandingDraft] = useState({
     platform_name: "",
     platform_tagline: "",
@@ -174,6 +181,11 @@ const AdminUsageSettingsPage: React.FC = () => {
           brand_accent: data.brand_accent || "",
           brand_accent_soft: data.brand_accent_soft || "",
           brand_accent_secondary: data.brand_accent_secondary || "",
+        });
+        setPerformanceDraft({
+          gzip_minimum_size: data.gzip_minimum_size ?? 1024,
+          gzip_compresslevel: data.gzip_compresslevel ?? 6,
+          max_request_body_bytes: data.max_request_body_bytes ?? 0,
         });
         setBrandContext({
           name: data.platform_name || "AMO Portal",
@@ -280,6 +292,41 @@ const AdminUsageSettingsPage: React.FC = () => {
     } finally {
       setBrandingSaving(false);
     }
+  };
+
+  const handleSavePerformance = async () => {
+    if (!isSuperuser) return;
+    setPerformanceSaving(true);
+    setPerformanceMessage(null);
+    try {
+      const updated = await updatePlatformSettings({
+        gzip_minimum_size: performanceDraft.gzip_minimum_size || 0,
+        gzip_compresslevel: performanceDraft.gzip_compresslevel || 1,
+        max_request_body_bytes: performanceDraft.max_request_body_bytes || 0,
+      });
+      setPlatformSettings(updated);
+      setPerformanceDraft({
+        gzip_minimum_size: updated.gzip_minimum_size ?? 1024,
+        gzip_compresslevel: updated.gzip_compresslevel ?? 6,
+        max_request_body_bytes: updated.max_request_body_bytes ?? 0,
+      });
+      setPerformanceMessage("Performance settings saved.");
+    } catch (err: any) {
+      setPerformanceMessage(err?.message || "Failed to save performance settings.");
+    } finally {
+      setPerformanceSaving(false);
+    }
+  };
+
+  const formatBytes = (value: number) => {
+    if (value <= 0) return "Disabled";
+    if (value >= 1024 * 1024 * 1024) {
+      return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    }
+    if (value >= 1024 * 1024) {
+      return `${Math.round(value / (1024 * 1024))} MB`;
+    }
+    return `${Math.round(value / 1024)} KB`;
   };
 
   const handlePlatformLogoUpload = async (files: FileList | null) => {
@@ -593,6 +640,103 @@ const AdminUsageSettingsPage: React.FC = () => {
                       </Button>
                       {brandingMessage && (
                         <span className="text-muted">{brandingMessage}</span>
+                      )}
+                    </div>
+                  </div>
+                </details>
+              </Panel>
+            )}
+
+            {isSuperuser && (
+              <Panel
+                title="Performance tuning"
+                subtitle="Adjust response compression and request size limits for the platform."
+              >
+                <details className="admin-disclosure">
+                  <summary>Performance knobs (superuser only)</summary>
+                  <div className="admin-disclosure__content">
+                    <div className="form-row">
+                      <label htmlFor="gzipMinimumSize">
+                        GZip minimum response size
+                      </label>
+                      <input
+                        id="gzipMinimumSize"
+                        type="range"
+                        min={0}
+                        max={64}
+                        value={Math.round(
+                          (performanceDraft.gzip_minimum_size || 0) / 1024
+                        )}
+                        onChange={(e) =>
+                          setPerformanceDraft((prev) => ({
+                            ...prev,
+                            gzip_minimum_size: Number(e.target.value) * 1024,
+                          }))
+                        }
+                      />
+                      <p className="text-muted" style={{ margin: 0 }}>
+                        Current: {formatBytes(performanceDraft.gzip_minimum_size)}
+                      </p>
+                    </div>
+                    <div className="form-row">
+                      <label htmlFor="gzipCompressLevel">GZip compression level</label>
+                      <input
+                        id="gzipCompressLevel"
+                        type="range"
+                        min={1}
+                        max={9}
+                        value={performanceDraft.gzip_compresslevel || 6}
+                        onChange={(e) =>
+                          setPerformanceDraft((prev) => ({
+                            ...prev,
+                            gzip_compresslevel: Number(e.target.value),
+                          }))
+                        }
+                      />
+                      <p className="text-muted" style={{ margin: 0 }}>
+                        Current: level {performanceDraft.gzip_compresslevel || 6}
+                      </p>
+                    </div>
+                    <div className="form-row">
+                      <label htmlFor="maxRequestBodyBytes">Max request body size</label>
+                      <input
+                        id="maxRequestBodyBytes"
+                        type="range"
+                        min={0}
+                        max={10240}
+                        step={50}
+                        value={Math.round(
+                          (performanceDraft.max_request_body_bytes || 0) /
+                            (1024 * 1024)
+                        )}
+                        onChange={(e) =>
+                          setPerformanceDraft((prev) => ({
+                            ...prev,
+                            max_request_body_bytes: Number(e.target.value) * 1024 * 1024,
+                          }))
+                        }
+                      />
+                      <p className="text-muted" style={{ margin: 0 }}>
+                        Current: {formatBytes(performanceDraft.max_request_body_bytes)}
+                      </p>
+                      <p className="text-muted" style={{ margin: 0 }}>
+                        Request size limits apply immediately. GZip changes require an API
+                        restart to take effect.
+                      </p>
+                    </div>
+                    <div
+                      className="form-row"
+                      style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
+                    >
+                      <Button
+                        type="button"
+                        onClick={handleSavePerformance}
+                        disabled={performanceSaving}
+                      >
+                        {performanceSaving ? "Saving..." : "Save performance settings"}
+                      </Button>
+                      {performanceMessage && (
+                        <span className="text-muted">{performanceMessage}</span>
                       )}
                     </div>
                   </div>

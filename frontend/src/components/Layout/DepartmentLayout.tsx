@@ -8,7 +8,7 @@ import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
 import { fetchSubscription } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
-import { getCachedUser, logout, onSessionEvent } from "../../services/auth";
+import { getCachedUser, getContext, logout, onSessionEvent } from "../../services/auth";
 import { listDocumentAlerts } from "../../services/fleet";
 import { fetchOverviewSummary, type OverviewSummary } from "../../services/adminOverview";
 import { qmsListNotifications } from "../../services/qms";
@@ -313,11 +313,20 @@ const DepartmentLayout: React.FC<Props> = ({
     navigate(`/maintenance/${amoCode}/${dept}/training`);
   };
 
+  const resolveLoginSlug = (): string => {
+    const parts = location.pathname.split("/").filter(Boolean);
+    if (parts[0] === "maintenance" && parts[1]) {
+      return parts[1];
+    }
+    const ctx = getContext();
+    return ctx.amoSlug || amoCode || ctx.amoCode || "";
+  };
+
   const handleLogout = () => {
     logout();
 
     // Keep AMO context when logging out
-    const code = (amoCode || "").trim();
+    const code = resolveLoginSlug().trim();
     if (code) {
       navigate(`/maintenance/${code}/login`, { replace: true });
     } else {
@@ -819,7 +828,7 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const handleResumeLogin = () => {
-    const code = (amoCode || "").trim();
+    const code = resolveLoginSlug().trim();
     const target = code ? `/maintenance/${code}/login` : "/login";
     navigate(target, { replace: true, state: { from: returnPath } });
   };
