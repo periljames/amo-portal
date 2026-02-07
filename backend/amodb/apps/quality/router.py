@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 from typing import Optional, List
 from uuid import UUID
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile
 from fastapi.responses import FileResponse
@@ -29,6 +30,7 @@ from .schemas import (
     CARAttachmentOut,
     CAROut,
     CARUpdate,
+    CARReviewUpdate,
     AuditorStatsOut,
     QMSNotificationOut,
     QMSDashboardOut,
@@ -609,7 +611,7 @@ def create_car_request(
         if _is_missing_table_error(exc):
             raise HTTPException(
                 status_code=503,
-                detail="CARs are unavailable because the database schema is missing.",
+                detail="CARs are unavailable because the database schema is missing. Run alembic upgrade heads.",
             ) from exc
         raise
 
@@ -725,9 +727,24 @@ def update_car(
                 message=f"Assignee requested extension to {requested_date.isoformat()}",
                 actor_user_id=get_actor(),
             )
+        updated_fields = {}
         for field in ("root_cause", "corrective_action", "preventive_action"):
             if field in data:
                 setattr(car, field, data[field])
+                updated_fields[field] = data[field]
+        if updated_fields:
+            response = models.CARResponse(
+                car_id=car.id,
+                containment_action=car.containment_action,
+                root_cause=car.root_cause,
+                corrective_action=car.corrective_action,
+                preventive_action=car.preventive_action,
+                evidence_ref=car.evidence_ref,
+                submitted_by_name=current_user.full_name,
+                submitted_by_email=current_user.email,
+                status=models.CARResponseStatus.SUBMITTED,
+            )
+            db.add(response)
     else:
         for field, val in data.items():
             setattr(car, field, val)
@@ -931,6 +948,20 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, db: Sess
         actor_user_id=None,
     )
 
+    response = models.CARResponse(
+        car_id=car.id,
+        containment_action=car.containment_action,
+        root_cause=car.root_cause,
+        corrective_action=car.corrective_action,
+        preventive_action=car.preventive_action,
+        evidence_ref=car.evidence_ref,
+        submitted_by_name=car.submitted_by_name,
+        submitted_by_email=car.submitted_by_email,
+        submitted_at=car.submitted_at or func.now(),
+        status=models.CARResponseStatus.SUBMITTED,
+    )
+    db.add(response)
+
     if car.finding_id:
         audit = (
             db.query(models.QMSAudit)
@@ -987,10 +1018,11 @@ def upload_car_invite_attachment(
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
 
-    safe_name = Path(file.filename or "attachment").name
+    original_name = Path(file.filename or "attachment").name
+    unique_name = f"{uuid.uuid4().hex}_{original_name}"
     target_dir = CAR_ATTACHMENT_DIR / str(car.id)
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / safe_name
+    target_path = target_dir / unique_name
 
     with target_path.open("wb") as handle:
         shutil.copyfileobj(file.file, handle)
@@ -1002,7 +1034,7 @@ def upload_car_invite_attachment(
 
     attachment = models.CARAttachment(
         car_id=car.id,
-        filename=safe_name,
+        filename=original_name,
         file_ref=str(target_path),
         content_type=file.content_type,
         size_bytes=size_bytes,
@@ -1047,6 +1079,65 @@ def download_car_invite_attachment(
         filename=attachment.filename,
         media_type=attachment.content_type or "application/octet-stream",
     )
+
+
+@router.post("/cars/{car_id}/review", response_model=CAROut)
+def review_car_response(
+    car_id: UUID,
+    payload: CARReviewUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    if not (_is_quality_admin(current_user) or _audit_allows_user(db, car.finding_id, current_user.id)):
+        raise HTTPException(status_code=403, detail="Insufficient privileges to review CARs")
+
+    latest_response = (
+        db.query(models.CARResponse)
+        .filter(models.CARResponse.car_id == car.id)
+        .order_by(models.CARResponse.submitted_at.desc())
+        .first()
+    )
+    if not latest_response:
+        raise HTTPException(status_code=404, detail="No CAR response found for review")
+
+    note_msg = None
+    if payload.root_cause_status == "REJECTED":
+        latest_response.status = models.CARResponseStatus.ROOT_CAUSE_REJECTED
+        note_msg = (
+            f"Root cause rejected for CAR {car.car_number}. "
+            "CAP/PAP rejected automatically. Please resubmit with corrections."
+        )
+    elif payload.root_cause_status == "ACCEPTED":
+        latest_response.status = models.CARResponseStatus.ROOT_CAUSE_ACCEPTED
+        note_msg = f"Root cause accepted for CAR {car.car_number}."
+        if payload.cap_status == "REJECTED":
+            latest_response.status = models.CARResponseStatus.CAP_REJECTED
+            note_msg = (
+                f"CAP/PAP rejected for CAR {car.car_number}. "
+                "Please resubmit the CAR response with corrections."
+            )
+        elif payload.cap_status == "ACCEPTED":
+            latest_response.status = models.CARResponseStatus.CAP_ACCEPTED
+            note_msg = f"CAP/PAP accepted for CAR {car.car_number}."
+
+    if payload.message:
+        add_car_action(
+            db=db,
+            car=car,
+            action_type=models.CARActionType.COMMENT,
+            message=payload.message.strip(),
+            actor_user_id=get_actor(),
+        )
+
+    if note_msg:
+        _notify_user(db, car.assigned_to_user_id, note_msg, models.QMSNotificationSeverity.ACTION_REQUIRED)
+
+    db.commit()
+    db.refresh(car)
+    return car
 
 
 @router.get("/auditors/{user_id}/stats", response_model=AuditorStatsOut)
