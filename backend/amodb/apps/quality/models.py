@@ -578,6 +578,13 @@ class CorrectiveActionRequest(Base):
         passive_deletes=True,
         lazy="selectin",
     )
+    attachments = relationship(
+        "CARAttachment",
+        back_populates="car",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
 
     __table_args__ = (
         UniqueConstraint("program", "car_number", name="uq_quality_car_number"),
@@ -621,3 +628,25 @@ class CARActionLog(Base):
 
     def __repr__(self) -> str:
         return f"<CARAction car={self.car_id} type={self.action_type}>"
+
+
+class CARAttachment(Base):
+    __tablename__ = "quality_car_attachments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    car_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("quality_cars.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    filename = Column(String(255), nullable=False)
+    file_ref = Column(String(512), nullable=False)
+    content_type = Column(String(128), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    car = relationship("CorrectiveActionRequest", back_populates="attachments", lazy="joined")
+
+    def __repr__(self) -> str:
+        return f"<CARAttachment id={self.id} car={self.car_id} filename={self.filename}>"
