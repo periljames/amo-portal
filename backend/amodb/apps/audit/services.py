@@ -4,6 +4,8 @@ from datetime import datetime
 import logging
 from typing import Optional, Sequence
 
+import sqlalchemy as sa
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from . import models, schemas
@@ -96,14 +98,91 @@ def list_audit_events(
     entity_id: Optional[str] = None,
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
-) -> Sequence[models.AuditEvent]:
-    query = db.query(models.AuditEvent).filter(models.AuditEvent.amo_id == amo_id)
+) -> Sequence[models.AuditEvent | dict]:
+    try:
+        query = db.query(models.AuditEvent).filter(models.AuditEvent.amo_id == amo_id)
+        if entity_type:
+            query = query.filter(models.AuditEvent.entity_type == entity_type)
+        if entity_id:
+            query = query.filter(models.AuditEvent.entity_id == entity_id)
+        if start:
+            query = query.filter(models.AuditEvent.occurred_at >= start)
+        if end:
+            query = query.filter(models.AuditEvent.occurred_at <= end)
+        return query.order_by(models.AuditEvent.occurred_at.desc()).all()
+    except ProgrammingError as exc:
+        if _is_missing_audit_column_error(exc):
+            return _list_audit_events_with_legacy_columns(
+                db,
+                amo_id=amo_id,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                start=start,
+                end=end,
+            )
+        raise
+
+
+def _is_missing_audit_column_error(exc: Exception) -> bool:
+    message = str(getattr(exc, "orig", exc)).lower()
+    return "undefined column" in message and "audit_events" in message
+
+
+def _list_audit_events_with_legacy_columns(
+    db: Session,
+    *,
+    amo_id: str,
+    entity_type: Optional[str],
+    entity_id: Optional[str],
+    start: Optional[datetime],
+    end: Optional[datetime],
+) -> Sequence[dict]:
+    bind = db.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {col["name"] for col in inspector.get_columns("audit_events")}
+
+    before_expr = "before" if "before" in columns else "before_json" if "before_json" in columns else "NULL"
+    after_expr = "after" if "after" in columns else "after_json" if "after_json" in columns else "NULL"
+    metadata_expr = "metadata" if "metadata" in columns else "NULL"
+
+    where_clauses = ["amo_id = :amo_id"]
+    params: dict[str, object] = {"amo_id": amo_id}
     if entity_type:
-        query = query.filter(models.AuditEvent.entity_type == entity_type)
+        where_clauses.append("entity_type = :entity_type")
+        params["entity_type"] = entity_type
     if entity_id:
-        query = query.filter(models.AuditEvent.entity_id == entity_id)
+        where_clauses.append("entity_id = :entity_id")
+        params["entity_id"] = entity_id
     if start:
-        query = query.filter(models.AuditEvent.occurred_at >= start)
+        where_clauses.append("occurred_at >= :start")
+        params["start"] = start
     if end:
-        query = query.filter(models.AuditEvent.occurred_at <= end)
-    return query.order_by(models.AuditEvent.occurred_at.desc()).all()
+        where_clauses.append("occurred_at <= :end")
+        params["end"] = end
+
+    sql = sa.text(
+        """
+        SELECT
+            id,
+            amo_id,
+            entity_type,
+            entity_id,
+            action,
+            actor_user_id,
+            occurred_at,
+            {before_expr} AS before,
+            {after_expr} AS after,
+            correlation_id,
+            {metadata_expr} AS metadata_json,
+            created_at
+        FROM audit_events
+        WHERE {where_clause}
+        ORDER BY occurred_at DESC
+        """.format(
+            before_expr=before_expr,
+            after_expr=after_expr,
+            metadata_expr=metadata_expr,
+            where_clause=" AND ".join(where_clauses),
+        )
+    )
+    return [dict(row) for row in db.execute(sql, params).mappings().all()]
