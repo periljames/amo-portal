@@ -1,7 +1,7 @@
 """add platform performance settings
 
-Revision ID: n1b2c3d4e5f9
-Revises: m1b2c3d4e5f8
+Revision ID: q1w2e3r4t5y6
+Revises: n1b2c3d4e5f9
 Create Date: 2026-02-06 12:00:00.000000
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "n1b2c3d4e5f9"
-down_revision: Union[str, Sequence[str], None] = "m1b2c3d4e5f8"
+revision: str = "q1w2e3r4t5y6"
+down_revision: Union[str, Sequence[str], None] = "n1b2c3d4e5f9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
