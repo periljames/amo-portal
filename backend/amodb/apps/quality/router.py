@@ -18,6 +18,7 @@ from amodb.entitlements import require_module
 from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
 from amodb.apps.audit import services as audit_services
+from amodb.apps.exports import build_evidence_pack
 from amodb.apps.tasks import services as task_services
 from amodb.database import get_db
 
@@ -138,6 +139,14 @@ def _audit_allows_user(db: Session, finding_id: Optional[UUID], user_id: str) ->
     )
     if not audit:
         return False
+    return user_id in {
+        audit.lead_auditor_user_id,
+        audit.observer_auditor_user_id,
+        audit.assistant_auditor_user_id,
+    }
+
+
+def _audit_allows_user_by_audit(audit: models.QMSAudit, user_id: str) -> bool:
     return user_id in {
         audit.lead_auditor_user_id,
         audit.observer_auditor_user_id,
@@ -647,6 +656,27 @@ def list_audits(
     if status_:
         qs = qs.filter(models.QMSAudit.status == status_)
     return qs.order_by(models.QMSAudit.created_at.desc()).all()
+
+
+@router.get("/audits/{audit_id}/evidence-pack")
+def export_audit_evidence_pack(
+    audit_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    if not _is_quality_admin(current_user) and not _audit_allows_user_by_audit(audit, current_user.id):
+        raise HTTPException(status_code=403, detail="Insufficient privileges to export audit evidence packs")
+    return build_evidence_pack(
+        "qms_audit",
+        audit_id,
+        db,
+        actor_user_id=current_user.id,
+        correlation_id=str(uuid.uuid4()),
+        amo_id=current_user.amo_id,
+    )
 
 
 @router.patch("/audits/{audit_id}", response_model=QMSAuditOut)
@@ -1320,6 +1350,26 @@ def print_car_form(
         path=file_path,
         filename=f"{car.car_number}.pdf",
         media_type="application/pdf",
+    )
+
+
+@router.get("/cars/{car_id}/evidence-pack")
+def export_car_evidence_pack(
+    car_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
+    return build_evidence_pack(
+        "qms_car",
+        car_id,
+        db,
+        actor_user_id=current_user.id,
+        correlation_id=str(uuid.uuid4()),
+        amo_id=current_user.amo_id,
     )
 
 

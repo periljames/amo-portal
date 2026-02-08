@@ -5,6 +5,7 @@ import { useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import {
   createReliabilityReport,
+  downloadFracasEvidencePack,
   downloadReliabilityReport,
   listReliabilityReports,
 } from "../services/reliability";
@@ -29,6 +30,8 @@ const ReliabilityReportsPage: React.FC = () => {
   const [windowEnd, setWindowEnd] = useState("");
   const [creating, setCreating] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadState | null>(null);
+  const [fracasCaseId, setFracasCaseId] = useState("");
+  const [fracasExporting, setFracasExporting] = useState(false);
 
   const hasPending = useMemo(
     () => reports.some((report) => report.status === "PENDING"),
@@ -109,6 +112,30 @@ const ReliabilityReportsPage: React.FC = () => {
     }
   };
 
+  const handleFracasExport = async () => {
+    const caseId = Number(fracasCaseId);
+    if (!caseId || Number.isNaN(caseId)) {
+      setError("Enter a valid FRACAS case ID to export.");
+      return;
+    }
+    setFracasExporting(true);
+    setError(null);
+    try {
+      const blob = await downloadFracasEvidencePack(caseId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `fracas_${caseId}_evidence_pack.zip`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      console.error("Failed to export FRACAS evidence pack", e);
+      setError(e?.message || "Could not export FRACAS evidence pack.");
+    } finally {
+      setFracasExporting(false);
+    }
+  };
+
   const formatSpeed = (progress: TransferProgress) => {
     const mbps = progress.megaBytesPerSecond;
     const mbits = progress.megaBitsPerSecond;
@@ -139,6 +166,36 @@ const ReliabilityReportsPage: React.FC = () => {
           Generate and download reliability PDFs for the selected date window.
         </p>
       </header>
+
+      <section className="page-section">
+        <div className="card">
+          <div className="card-header">
+            <h2>FRACAS Evidence Pack</h2>
+            <p className="text-muted">
+              Export an evidence pack for a specific FRACAS case ID.
+            </p>
+          </div>
+          <div className="form-row">
+            <label className="form-control">
+              <span>Case ID</span>
+              <input
+                type="number"
+                value={fracasCaseId}
+                onChange={(event) => setFracasCaseId(event.target.value)}
+                placeholder="e.g. 1002"
+              />
+            </label>
+            <button
+              type="button"
+              className="primary-chip-btn"
+              onClick={handleFracasExport}
+              disabled={fracasExporting}
+            >
+              {fracasExporting ? "Exporting…" : "Export evidence pack"}
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section className="page-section">
         <div className="card card--form" style={{ padding: 16 }}>

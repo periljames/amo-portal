@@ -4,6 +4,7 @@ import QMSLayout from "../components/QMS/QMSLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { getContext } from "../services/auth";
 import {
+  downloadAuditEvidencePack,
   qmsListAudits,
   type QMSAuditOut,
   type QMSAuditStatus,
@@ -41,6 +42,7 @@ const QMSAuditsPage: React.FC = () => {
     "ALL"
   );
   const [search, setSearch] = useState("");
+  const [exportingId, setExportingId] = useState<string | null>(null);
 
   const load = async () => {
     setState("loading");
@@ -55,6 +57,24 @@ const QMSAuditsPage: React.FC = () => {
     } catch (e: any) {
       setError(e?.message || "Failed to load audit programme.");
       setState("error");
+    }
+  };
+
+  const handleExport = async (audit: QMSAuditOut) => {
+    setError(null);
+    setExportingId(audit.id);
+    try {
+      const blob = await downloadAuditEvidencePack(audit.id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `audit_${audit.audit_ref}_evidence_pack.zip`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(e?.message || "Failed to export evidence pack.");
+    } finally {
+      setExportingId(null);
     }
   };
 
@@ -174,6 +194,7 @@ const QMSAuditsPage: React.FC = () => {
                     <th>Status</th>
                     <th>Start</th>
                     <th>End</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -189,11 +210,21 @@ const QMSAuditsPage: React.FC = () => {
                       </td>
                       <td>{formatDate(audit.planned_start)}</td>
                       <td>{formatDate(audit.planned_end)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary-chip-btn"
+                          onClick={() => handleExport(audit)}
+                          disabled={exportingId === audit.id}
+                        >
+                          {exportingId === audit.id ? "Exporting…" : "Export evidence pack"}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="text-muted">
+                      <td colSpan={6} className="text-muted">
                         No audits match the selected filters.
                       </td>
                     </tr>

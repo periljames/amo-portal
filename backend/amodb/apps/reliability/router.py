@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from amodb.entitlements import require_module
 from amodb.security import get_current_active_user, require_roles
 from amodb.utils.identifiers import generate_uuid7
+from ..exports import build_evidence_pack
 from ...database import get_write_db
 from ..accounts import models as account_models
 from . import ehm as ehm_services
@@ -42,6 +43,21 @@ def _normalize_ehm_pagination(limit: int, offset: int) -> tuple[int, int]:
     if offset < 0:
         offset = 0
     return limit, offset
+
+
+def _can_export_fracas(current_user: account_models.User, case: reliability_models.FRACASCase) -> bool:
+    if current_user.role in {
+        account_models.AccountRole.SUPERUSER,
+        account_models.AccountRole.AMO_ADMIN,
+        account_models.AccountRole.QUALITY_MANAGER,
+    }:
+        return True
+    return current_user.id in {
+        case.created_by_user_id,
+        case.updated_by_user_id,
+        case.verified_by_user_id,
+        case.approved_by_user_id,
+    }
 
 
 def _ensure_ehm_upload_path(path: Path) -> Path:
@@ -548,6 +564,31 @@ def list_fracas_actions(
         return services.list_fracas_actions(db, amo_id=current_user.amo_id, fracas_case_id=fracas_case_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get("/fracas/{fracas_case_id}/evidence-pack")
+def export_fracas_evidence_pack(
+    fracas_case_id: int,
+    current_user: account_models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_write_db),
+):
+    case = (
+        db.query(reliability_models.FRACASCase)
+        .filter(reliability_models.FRACASCase.amo_id == current_user.amo_id, reliability_models.FRACASCase.id == fracas_case_id)
+        .first()
+    )
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="FRACAS case not found")
+    if not _can_export_fracas(current_user, case):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to export FRACAS packs")
+    return build_evidence_pack(
+        "fracas_case",
+        fracas_case_id,
+        db,
+        actor_user_id=current_user.id,
+        correlation_id=generate_uuid7(),
+        amo_id=current_user.amo_id,
+    )
 
 
 @router.post(

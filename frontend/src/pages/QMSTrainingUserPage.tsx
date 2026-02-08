@@ -4,7 +4,7 @@ import QMSLayout from "../components/QMS/QMSLayout";
 import type { AdminUserRead } from "../services/adminUsers";
 import { listAdminUsers } from "../services/adminUsers";
 import { getContext } from "../services/auth";
-import { getUserTrainingStatus } from "../services/training";
+import { downloadTrainingUserEvidencePack, getUserTrainingStatus } from "../services/training";
 import type { TrainingStatusItem } from "../types/training";
 import "../styles/training.css";
 
@@ -82,6 +82,7 @@ const QMSTrainingUserPage: React.FC = () => {
   const [user, setUser] = useState<AdminUserRead | null>(null);
   const [items, setItems] = useState<TrainingStatusItem[]>([]);
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [exporting, setExporting] = useState(false);
 
   const load = async () => {
     if (!userId) return;
@@ -98,6 +99,25 @@ const QMSTrainingUserPage: React.FC = () => {
     } catch (e: any) {
       setError(e?.message || "Failed to load training profile.");
       setState("error");
+    }
+  };
+
+  const handleExport = async () => {
+    if (!userId) return;
+    setError(null);
+    setExporting(true);
+    try {
+      const blob = await downloadTrainingUserEvidencePack(userId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `training_${userId}_evidence_pack.zip`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(e?.message || "Failed to export training evidence pack.");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -167,9 +187,19 @@ const QMSTrainingUserPage: React.FC = () => {
       title="Training Profile"
       subtitle="Detailed training compliance for individual staff members."
       actions={
-        <button type="button" className="primary-chip-btn" onClick={load}>
-          Refresh profile
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" className="primary-chip-btn" onClick={load}>
+            Refresh profile
+          </button>
+          <button
+            type="button"
+            className="secondary-chip-btn"
+            onClick={handleExport}
+            disabled={exporting || !userId}
+          >
+            {exporting ? "Exporting…" : "Export evidence pack"}
+          </button>
+        </div>
       }
     >
       <div className="training-module training-module--qms">
