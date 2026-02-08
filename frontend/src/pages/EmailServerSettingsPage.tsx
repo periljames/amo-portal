@@ -332,7 +332,12 @@ const EmailServerSettingsPage: React.FC = () => {
       amoCode={amoCode ?? "UNKNOWN"}
       activeDepartment="admin-email-settings"
     >
-      <div className="admin-page admin-email-settings">
+      <div
+        className={
+          "admin-page admin-email-settings" +
+          (helpOpen ? " admin-email-settings--drawer-open" : "")
+        }
+      >
         <PageHeader
           title="Email Server Control Deck"
           subtitle="Configure outbound email without touching the backend."
@@ -1102,6 +1107,14 @@ const EmailServerSettingsPage: React.FC = () => {
             </Panel>
           </div>
         </div>
+        {helpOpen && (
+          <button
+            type="button"
+            className="admin-email-settings__backdrop"
+            onClick={() => setHelpOpen(false)}
+            aria-label="Close notes panel"
+          />
+        )}
         <aside
           className={
             "admin-email-settings__drawer" +
