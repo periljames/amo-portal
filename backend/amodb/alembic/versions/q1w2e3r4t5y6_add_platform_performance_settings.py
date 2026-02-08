@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -20,7 +21,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    inspector = sa.inspect(bind)
+    inspector = inspect(bind)
+    if not inspector.has_table("platform_settings"):
+        return
     existing_columns = {column["name"] for column in inspector.get_columns("platform_settings")}
 
     if "gzip_minimum_size" not in existing_columns:
@@ -33,7 +36,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    inspector = sa.inspect(bind)
+    inspector = inspect(bind)
+    if not inspector.has_table("platform_settings"):
+        return
     existing_columns = {column["name"] for column in inspector.get_columns("platform_settings")}
 
     if "max_request_body_bytes" in existing_columns:
