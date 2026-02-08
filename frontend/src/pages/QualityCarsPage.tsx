@@ -10,6 +10,7 @@ import {
   type CARPriority,
   type CARProgram,
   type CARStatus,
+  downloadCarEvidencePack,
   qmsDeleteCar,
   qmsListCarAssignees,
   qmsCreateCar,
@@ -94,6 +95,7 @@ const QualityCarsPage: React.FC = () => {
 
   const [deleteCar, setDeleteCar] = useState<CAROut | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
 
   const assigneeLookup = useMemo(() => {
     const map = new Map<string, CARAssignee>();
@@ -214,6 +216,24 @@ const QualityCarsPage: React.FC = () => {
       assigned_department_id: assigneeLookup.get(car.assigned_to_user_id || "")?.department_id || "",
       assigned_to_user_id: car.assigned_to_user_id || "",
     });
+  };
+
+  const handleExport = async (car: CAROut) => {
+    setError(null);
+    setExportingId(car.id);
+    try {
+      const blob = await downloadCarEvidencePack(car.id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `car_${car.car_number}_evidence_pack.zip`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(e?.message || "Failed to export CAR evidence pack.");
+    } finally {
+      setExportingId(null);
+    }
   };
 
   const handleEditSave = async () => {
@@ -522,6 +542,14 @@ const QualityCarsPage: React.FC = () => {
                             onClick={() => openEdit(car)}
                           >
                             Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => handleExport(car)}
+                            disabled={exportingId === car.id}
+                          >
+                            {exportingId === car.id ? "Exporting…" : "Export pack"}
                           </button>
                           <button
                             type="button"

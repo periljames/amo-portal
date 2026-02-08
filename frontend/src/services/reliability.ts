@@ -141,3 +141,35 @@ export async function downloadReliabilityReport(
     xhr.send();
   });
 }
+
+export async function downloadFracasEvidencePack(caseId: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", `${API_BASE}/reliability/fracas/${caseId}/evidence-pack`);
+    const headers = buildAuthHeader();
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading FRACAS evidence pack."));
+    });
+
+    xhr.send();
+  });
+}

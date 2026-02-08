@@ -329,6 +329,42 @@ export async function downloadTrainingFile(
   });
 }
 
+export async function downloadTrainingUserEvidencePack(userId: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const apiBaseUrl = getApiBaseUrl();
+    xhr.open(
+      "GET",
+      `${apiBaseUrl}/training/users/${encodeURIComponent(userId)}/evidence-pack`,
+    );
+    const headers = authHeaders();
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading training evidence pack."));
+    });
+
+    xhr.send();
+  });
+}
+
 // ---------------------------------------------------------------------------
  // TRAINING RECORDS
 // ---------------------------------------------------------------------------

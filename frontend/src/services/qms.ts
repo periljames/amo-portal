@@ -123,6 +123,38 @@ function toQuery(params: Record<string, QueryVal>): string {
   return s ? `?${s}` : "";
 }
 
+function downloadEvidencePack(path: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", `${API_BASE}${path}`);
+    const token = getToken();
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading evidence pack."));
+    });
+
+    xhr.send();
+  });
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const token = getToken();
   const res = await fetch(`${getApiBaseUrl()}${path}`, {
@@ -413,4 +445,12 @@ export interface AuditorStatsOut {
 
 export async function qmsGetAuditorStats(userId: string): Promise<AuditorStatsOut> {
   return fetchJson<AuditorStatsOut>(`/quality/auditors/${userId}/stats`);
+}
+
+export async function downloadAuditEvidencePack(auditId: string): Promise<Blob> {
+  return downloadEvidencePack(`/quality/audits/${encodeURIComponent(auditId)}/evidence-pack`);
+}
+
+export async function downloadCarEvidencePack(carId: string): Promise<Blob> {
+  return downloadEvidencePack(`/quality/cars/${encodeURIComponent(carId)}/evidence-pack`);
 }
