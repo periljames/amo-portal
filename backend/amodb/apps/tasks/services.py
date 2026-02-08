@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.audit import services as audit_services
 from amodb.apps.accounts import models as account_models
+from amodb.apps.notifications import service as notification_service
 
 from . import models
 
@@ -231,6 +232,15 @@ def _get_qa_user_id(db: Session, amo_id: str) -> Optional[str]:
     return user.id if user else None
 
 
+def _resolve_recipient_email(db: Session, user_id: Optional[str]) -> str:
+    if not user_id:
+        return "unknown"
+    user = db.query(account_models.User).filter(account_models.User.id == user_id).first()
+    if not user or not user.email:
+        return f"unknown:{user_id}"
+    return user.email
+
+
 def _should_notify(task: models.Task, *, now: datetime, cooldown_hours: int) -> bool:
     if not task.metadata_json:
         return True
@@ -271,6 +281,23 @@ def run_task_runner(
     for task in reminders:
         if not _should_notify(task, now=now, cooldown_hours=reminder_cooldown_hours):
             continue
+        recipient = _resolve_recipient_email(db, task.owner_user_id)
+        notification_service.send_email(
+            "task_reminder",
+            recipient,
+            f"Task reminder: {task.title}",
+            {
+                "task_id": str(task.id),
+                "title": task.title,
+                "description": task.description,
+                "due_at": task.due_at.isoformat() if task.due_at else None,
+                "owner_user_id": task.owner_user_id,
+            },
+            correlation_id=f"task:{task.id}:reminder",
+            critical=False,
+            amo_id=task.amo_id,
+            db=db,
+        )
         _merge_metadata(task, {"last_notified_at": now.isoformat()})
         db.add(task)
         audit_services.log_event(
@@ -332,6 +359,29 @@ def run_task_runner(
             escalation_level=target_level,
             new_owner_user_id=new_owner,
         )
+        recipient = _resolve_recipient_email(db, new_owner)
+        try:
+            notification_service.send_email(
+                "task_escalation",
+                recipient,
+                f"Task escalation: {task.title}",
+                {
+                    "task_id": str(task.id),
+                    "title": task.title,
+                    "description": task.description,
+                    "due_at": task.due_at.isoformat() if task.due_at else None,
+                    "owner_user_id": task.owner_user_id,
+                    "escalation_level": target_level,
+                    "new_owner_user_id": new_owner,
+                },
+                correlation_id=f"task:{task.id}:escalation:{target_level}",
+                critical=True,
+                amo_id=task.amo_id,
+                db=db,
+            )
+        except Exception:
+            db.commit()
+            raise
         escalations_sent += 1
 
     return {"reminders": reminders_sent, "escalations": escalations_sent}
