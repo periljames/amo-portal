@@ -16,7 +16,7 @@ def _utcnow() -> datetime:
 
 def send_email(
     template_key: str,
-    recipient: str,
+    recipient: Optional[str],
     subject: str,
     context: dict,
     correlation_id: Optional[str],
@@ -29,9 +29,11 @@ def send_email(
     db = db or WriteSessionLocal()
     if not amo_id:
         raise ValueError("amo_id is required to create an email log entry")
+    cleaned_recipient = (recipient or "").strip()
+    normalized_recipient = cleaned_recipient or "unknown"
     log = models.EmailLog(
         amo_id=amo_id,
-        recipient=recipient,
+        recipient=normalized_recipient,
         subject=subject,
         template_key=template_key,
         status=models.EmailStatus.QUEUED,
@@ -41,6 +43,16 @@ def send_email(
     try:
         db.add(log)
         db.flush()
+
+        if not cleaned_recipient:
+            log.status = models.EmailStatus.FAILED
+            log.error = "Missing recipient email"
+            db.add(log)
+            if owns_session:
+                db.commit()
+            if critical:
+                raise ValueError("Missing recipient email")
+            return log
 
         try:
             provider, configured = providers.get_email_provider()
@@ -65,7 +77,7 @@ def send_email(
         try:
             provider.send(
                 template_key=template_key,
-                recipient=recipient,
+                recipient=cleaned_recipient,
                 subject=subject,
                 context=context or {},
                 correlation_id=correlation_id,

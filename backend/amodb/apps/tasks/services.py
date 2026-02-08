@@ -232,13 +232,14 @@ def _get_qa_user_id(db: Session, amo_id: str) -> Optional[str]:
     return user.id if user else None
 
 
-def _resolve_recipient_email(db: Session, user_id: Optional[str]) -> str:
+def _resolve_recipient_email(db: Session, user_id: Optional[str]) -> Optional[str]:
     if not user_id:
-        return "unknown"
+        return None
     user = db.query(account_models.User).filter(account_models.User.id == user_id).first()
     if not user or not user.email:
-        return f"unknown:{user_id}"
-    return user.email
+        return None
+    cleaned_email = user.email.strip()
+    return cleaned_email or None
 
 
 def _should_notify(task: models.Task, *, now: datetime, cooldown_hours: int) -> bool:
