@@ -360,24 +360,28 @@ def run_task_runner(
             new_owner_user_id=new_owner,
         )
         recipient = _resolve_recipient_email(db, new_owner)
-        notification_service.send_email(
-            "task_escalation",
-            recipient,
-            f"Task escalation: {task.title}",
-            {
-                "task_id": str(task.id),
-                "title": task.title,
-                "description": task.description,
-                "due_at": task.due_at.isoformat() if task.due_at else None,
-                "owner_user_id": task.owner_user_id,
-                "escalation_level": target_level,
-                "new_owner_user_id": new_owner,
-            },
-            correlation_id=f"task:{task.id}:escalation:{target_level}",
-            critical=True,
-            amo_id=task.amo_id,
-            db=db,
-        )
+        try:
+            notification_service.send_email(
+                "task_escalation",
+                recipient,
+                f"Task escalation: {task.title}",
+                {
+                    "task_id": str(task.id),
+                    "title": task.title,
+                    "description": task.description,
+                    "due_at": task.due_at.isoformat() if task.due_at else None,
+                    "owner_user_id": task.owner_user_id,
+                    "escalation_level": target_level,
+                    "new_owner_user_id": new_owner,
+                },
+                correlation_id=f"task:{task.id}:escalation:{target_level}",
+                critical=True,
+                amo_id=task.amo_id,
+                db=db,
+            )
+        except Exception:
+            db.commit()
+            raise
         escalations_sent += 1
 
     return {"reminders": reminders_sent, "escalations": escalations_sent}
