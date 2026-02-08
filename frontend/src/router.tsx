@@ -32,6 +32,8 @@ import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
 import AdminUsageSettingsPage from "./pages/AdminUsageSettingsPage";
 import AdminInvoicesPage from "./pages/AdminInvoicesPage";
 import AdminInvoiceDetailPage from "./pages/AdminInvoiceDetailPage";
+import EmailLogsPage from "./pages/EmailLogsPage";
+import EmailServerSettingsPage from "./pages/EmailServerSettingsPage";
 import TrainingPage from "./pages/MyTrainingPage";
 import QMSHomePage from "./pages/QMSHomePage";
 import QMSDocumentsPage from "./pages/QMSDocumentsPage";
@@ -311,6 +313,22 @@ export const AppRouter: React.FC = () => {
             <RequireTenantAdmin>
               <AdminUsageSettingsPage />
             </RequireTenantAdmin>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/admin/email-logs"
+        element={
+          <RequireAuth>
+            <EmailLogsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/admin/email-settings"
+        element={
+          <RequireAuth>
+            <EmailServerSettingsPage />
           </RequireAuth>
         }
       />
