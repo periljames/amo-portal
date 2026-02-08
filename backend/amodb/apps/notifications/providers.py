@@ -38,4 +38,4 @@ def get_email_provider() -> Tuple[EmailProvider, bool]:
     ).strip().lower()
     if not provider_name or provider_name in {"none", "noop", "disabled"}:
         return NoopProvider(), False
-    return NoopProvider(), False
+    raise ValueError(f"Unsupported email provider: {provider_name}")
