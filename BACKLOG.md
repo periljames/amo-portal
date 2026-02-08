@@ -31,7 +31,7 @@
 - Overdue escalation rules (notify owner → supervisor → QA).
 - Tests: task generation and escalation logic.
 
-### 4) Notification Service + Email Logging
+### [x] 4) Notification Service + Email Logging
 **Goal**: Notifications with email logs for compliance evidence.
 
 **Acceptance Criteria**
