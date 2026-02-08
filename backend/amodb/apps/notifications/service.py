@@ -42,7 +42,18 @@ def send_email(
         db.add(log)
         db.flush()
 
-        provider, configured = providers.get_email_provider()
+        try:
+            provider, configured = providers.get_email_provider()
+        except ValueError as exc:
+            log.status = models.EmailStatus.FAILED
+            log.error = str(exc)
+            db.add(log)
+            if owns_session:
+                db.commit()
+            if critical:
+                raise
+            return log
+
         if not configured:
             log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
             log.error = "No provider configured"
