@@ -20,6 +20,13 @@ type UrlParams = {
 
 type TestState = "idle" | "running" | "success" | "error";
 
+type HelpTopicKey = "smtp" | "test-console" | "compatibility" | "general";
+
+type HelpTopic = {
+  title: string;
+  body: React.ReactNode;
+};
+
 const PROVIDER_LABELS: Record<EmailProvider, string> = {
   none: "No provider (logging only)",
   smtp: "SMTP (own mail server)",
@@ -50,6 +57,8 @@ const EmailServerSettingsPage: React.FC = () => {
   const [testPayloadBytes, setTestPayloadBytes] = useState<number | null>(null);
   const [lastTestedAt, setLastTestedAt] = useState<string | null>(null);
   const [nextTestAt, setNextTestAt] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpTopicKey, setHelpTopicKey] = useState<HelpTopicKey>("general");
   const testTimerRef = useRef<number | null>(null);
   const testIntervalRef = useRef<number | null>(null);
 
@@ -263,6 +272,57 @@ const EmailServerSettingsPage: React.FC = () => {
     setTestLatencyMs(null);
   };
 
+  const helpTopics: Record<HelpTopicKey, HelpTopic> = {
+    general: {
+      title: "Operator notes",
+      body: (
+        <ul className="admin-email-settings__list">
+          <li>Settings are stored locally in your browser profile.</li>
+          <li>Use sandbox mode for dry-run validations before go-live.</li>
+          <li>Realtime testing runs from the browser; ensure CORS is enabled.</li>
+        </ul>
+      ),
+    },
+    smtp: {
+      title: "SMTP notes",
+      body: (
+        <ul className="admin-email-settings__list">
+          <li>Use port 587 for STARTTLS or 465 for SMTPS.</li>
+          <li>App passwords are recommended for Gmail/Outlook.</li>
+          <li>Self-signed certs are supported if you enable them.</li>
+        </ul>
+      ),
+    },
+    "test-console": {
+      title: "Realtime test console",
+      body: (
+        <ul className="admin-email-settings__list">
+          <li>Runs every 5 minutes when realtime testing is enabled.</li>
+          <li>Provide a HTTPS endpoint that returns 2xx on success.</li>
+          <li>Toggle secret masking based on your environment needs.</li>
+        </ul>
+      ),
+    },
+    compatibility: {
+      title: "Provider compatibility",
+      body: (
+        <ul className="admin-email-settings__compatibility">
+          <li>Outlook / Microsoft 365: use SMTP or a custom relay gateway.</li>
+          <li>Gmail / Google Workspace: use SMTP with app password or OAuth relay.</li>
+          <li>Proton Mail: use Proton Bridge SMTP credentials.</li>
+          <li>Any provider: custom HTTP adapter with your preferred gateway.</li>
+        </ul>
+      ),
+    },
+  };
+
+  const openHelp = (key: HelpTopicKey) => {
+    setHelpTopicKey(key);
+    setHelpOpen(true);
+  };
+
+  const activeHelp = helpTopics[helpTopicKey];
+
   if (currentUser && !isSuperuser) {
     return null;
   }
@@ -348,6 +408,17 @@ const EmailServerSettingsPage: React.FC = () => {
         <div className="admin-page__grid">
           <div className="admin-page__main">
             <Panel title="Provider profile" className="admin-email-settings__panel">
+              <div className="admin-email-settings__panel-note">
+                <button
+                  type="button"
+                  className="admin-email-settings__help-btn"
+                  onClick={() => openHelp("general")}
+                  aria-label="Operator notes"
+                  title="Operator notes"
+                >
+                  !
+                </button>
+              </div>
               <div className="admin-email-settings__grid">
                 <div>
                   <label className="admin-email-settings__field-label">Profile label</label>
@@ -426,7 +497,21 @@ const EmailServerSettingsPage: React.FC = () => {
             </Panel>
 
             {config.provider === "smtp" && (
-              <Panel title="SMTP settings" className="admin-email-settings__panel">
+              <Panel
+                title="SMTP settings"
+                className="admin-email-settings__panel"
+                actions={
+                  <button
+                    type="button"
+                    className="admin-email-settings__help-btn"
+                    onClick={() => openHelp("smtp")}
+                    aria-label="SMTP settings notes"
+                    title="SMTP settings notes"
+                  >
+                    ?
+                  </button>
+                }
+              >
                 <div className="admin-email-settings__grid">
                   <div>
                     <label className="admin-email-settings__field-label">SMTP host</label>
@@ -876,10 +961,44 @@ const EmailServerSettingsPage: React.FC = () => {
                 </div>
               </Panel>
             )}
+
+            <Panel
+              title="Provider compatibility"
+              className="admin-email-settings__panel"
+              actions={
+                <button
+                  type="button"
+                  className="admin-email-settings__help-btn"
+                  onClick={() => openHelp("compatibility")}
+                  aria-label="Provider compatibility notes"
+                  title="Provider compatibility notes"
+                >
+                  ?
+                </button>
+              }
+            >
+              <p className="admin-email-settings__hint">
+                Quick compatibility matrix is available in the notes panel.
+              </p>
+            </Panel>
           </div>
 
           <div className="admin-page__side">
-            <Panel title="Realtime test console" className="admin-email-settings__panel">
+            <Panel
+              title="Realtime test console"
+              className="admin-email-settings__panel"
+              actions={
+                <button
+                  type="button"
+                  className="admin-email-settings__help-btn"
+                  onClick={() => openHelp("test-console")}
+                  aria-label="Realtime test console notes"
+                  title="Realtime test console notes"
+                >
+                  !
+                </button>
+              }
+            >
               <div className="admin-email-settings__grid">
                 <div>
                   <label className="admin-email-settings__field-label">Test endpoint URL</label>
@@ -981,24 +1100,37 @@ const EmailServerSettingsPage: React.FC = () => {
                 </InlineAlert>
               )}
             </Panel>
-
-            <Panel title="Operator notes" className="admin-email-settings__panel">
-              <ul className="admin-email-settings__list">
-                <li>Settings are stored locally in your browser profile.</li>
-                <li>Use sandbox mode for dry-run validations before go-live.</li>
-                <li>Realtime testing runs from the browser; ensure CORS is enabled.</li>
-              </ul>
-            </Panel>
-            <Panel title="Provider compatibility" className="admin-email-settings__panel">
-              <ul className="admin-email-settings__compatibility">
-                <li>Outlook / Microsoft 365: use SMTP or a custom relay gateway.</li>
-                <li>Gmail / Google Workspace: use SMTP with app password or OAuth relay.</li>
-                <li>Proton Mail: use Proton Bridge SMTP credentials.</li>
-                <li>Any provider: custom HTTP adapter with your preferred gateway.</li>
-              </ul>
-            </Panel>
           </div>
         </div>
+        <aside
+          className={
+            "admin-email-settings__drawer" +
+            (helpOpen ? " admin-email-settings__drawer--open" : "")
+          }
+        >
+          <div className="admin-email-settings__drawer-header">
+            <h3 className="admin-email-settings__drawer-title">{activeHelp.title}</h3>
+            <button
+              type="button"
+              className="admin-email-settings__drawer-close"
+              onClick={() => setHelpOpen(false)}
+              aria-label="Close notes panel"
+              title="Close"
+            >
+              ×
+            </button>
+          </div>
+          <div className="admin-email-settings__drawer-body">{activeHelp.body}</div>
+          <div className="admin-email-settings__drawer-footer">
+            <button
+              type="button"
+              className="admin-email-settings__drawer-toggle"
+              onClick={() => setHelpOpen(false)}
+            >
+              Collapse panel
+            </button>
+          </div>
+        </aside>
       </div>
     </DepartmentLayout>
   );
