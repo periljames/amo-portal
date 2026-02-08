@@ -39,6 +39,12 @@ const QMSLayout: React.FC<Props> = ({
       description: "Executive summary & live compliance view",
     },
     {
+      id: "tasks",
+      label: "My Tasks",
+      path: `/maintenance/${amoCode}/${department}/qms/tasks`,
+      description: "Due dates & escalations",
+    },
+    {
       id: "documents",
       label: "Document Control",
       path: `/maintenance/${amoCode}/${department}/qms/documents`,

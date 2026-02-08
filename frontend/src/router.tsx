@@ -37,6 +37,7 @@ import QMSHomePage from "./pages/QMSHomePage";
 import QMSDocumentsPage from "./pages/QMSDocumentsPage";
 import QMSAuditsPage from "./pages/QMSAuditsPage";
 import QMSChangeControlPage from "./pages/QMSChangeControlPage";
+import MyTasksPage from "./pages/MyTasksPage";
 import QMSTrainingPage from "./pages/QMSTrainingPage";
 import QMSTrainingUserPage from "./pages/QMSTrainingUserPage";
 import QMSEventsPage from "./pages/QMSEventsPage";
@@ -495,6 +496,15 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <QMSHomePage />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/tasks"
+        element={
+          <RequireAuth>
+            <MyTasksPage />
           </RequireAuth>
         }
       />

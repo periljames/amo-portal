@@ -41,7 +41,7 @@
 | **Stamp Register/Quarantine** | CRS stamp fields (`backend/amodb/apps/crs/models.py`) | No dedicated stamp control UI found | **Partial**: stamp fields exist | **No** | **No** | No controlled stamp register with issuance/return/quarantine workflow. |
 | **Exemptions/Deviations/Concessions** | **Not found** | **Not found** | **No** | **No** | **No** | No exemptions/deviations/concessions workflow. |
 | **Management Review** | **Not found** | **Not found** | **No** | **No** | **No** | Management review records/actions missing. |
-| **Task Engine** | **Not found** | **Not found** | **No** | **No** | **No** | No shared task model or escalation logic. |
+| **Task Engine** | Task model + escalation runner (`backend/amodb/apps/tasks`, `backend/amodb/jobs/qms_task_runner.py`) | Task list page (`frontend/src/pages/MyTasksPage.tsx`) | **Yes**: task statuses | **Partial**: role-gated admin list; owner controls | **Yes**: reminders + escalation runner | Task automation limited to QMS/FRACAS/training hooks. |
 | **Notifications/Email Logging** | In-app notifications for QMS, reliability, training (`backend/amodb/apps/quality/models.py`, `backend/amodb/apps/reliability/models.py`, `backend/amodb/apps/training/models.py`) | No centralized notification UI found | **Partial**: read/unread states | **Partial**: module gating only | **Partial**: in-app notifications | No outbound email or email log store. |
 | **Evidence Packs/Exports** | CAR PDF generation only (`backend/amodb/apps/quality/service.py`) | No evidence pack UI | **Partial**: CAR PDF | **No** | **Partial**: CAR PDF | Evidence pack export (PDF/ZIP) missing for audits/CAPA/occurrences. |
 
@@ -102,7 +102,7 @@ Below, each requirement is marked as **Present** only if explicit code exists.
 ### Compliance-critical (P0)
 - **Audit trail** now logs workflow transitions for QMS/FRACAS/training; coverage remains partial for non-transition actions.
 - **Workflow engine** now enforces state transitions and required-field gating for key QMS/FRACAS/training flows.
-- No **task engine** for due dates/escalation across QMS/MPM workflows.
+- **Task engine** now provides due-date reminders and escalation runner for QMS/FRACAS/training tasks.
 - No **notification/email service** or outbound email log for compliance evidence.
 - Missing **evidence pack** exports for audits, findings, CAPA, occurrences, training, calibration, stores.
 - Missing **calibration register** and **concessions** workflow.

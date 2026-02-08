@@ -32,4 +32,7 @@
 - **RBAC coverage:** Core helpers exist but not uniformly applied across all routers; audit needed.
 - **Dependency audits:** No recent npm/pip audit results checked into repo.
 
+## Cron runners
+- **QMS task runner:** `python -m amodb.jobs.qms_task_runner` (safe to run via cron for reminders/escalations).
+
 This snapshot should be refreshed after major structural, security, or data-model changes.

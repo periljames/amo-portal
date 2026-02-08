@@ -14,6 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import models, schemas
+from ..tasks import services as task_services
 from ..workflow import apply_transition
 from ..work.models import TaskCategoryEnum, TaskCard
 from ..fleet.models import AircraftUsage
@@ -485,6 +486,18 @@ def create_fracas_case(
             "severity": case.severity.value if case.severity else None,
         },
         metadata={"module": "reliability"},
+    )
+    task_services.create_task(
+        db,
+        amo_id=amo_id,
+        title="Start investigation",
+        description=f"Investigate FRACAS case {case.id}: {case.title}.",
+        owner_user_id=created_by_user_id,
+        supervisor_user_id=None,
+        due_at=case.opened_at + timedelta(days=7),
+        entity_type="fracas_case",
+        entity_id=str(case.id),
+        priority=2,
     )
     db.commit()
     db.refresh(case)

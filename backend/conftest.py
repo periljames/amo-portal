@@ -23,6 +23,7 @@ from amodb.apps.fleet import models as fleet_models  # noqa: E402
 from amodb.apps.work import models as work_models  # noqa: E402
 from amodb.apps.reliability import models as reliability_models  # noqa: E402
 from amodb.apps.audit import models as audit_models  # noqa: E402
+from amodb.apps.tasks import models as task_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
 from amodb.apps.integrations import models as integration_models  # noqa: E402
 from amodb.apps.maintenance_program import models as maintenance_program_models  # noqa: E402
@@ -65,6 +66,7 @@ def db_session():
             reliability_models.PartMovementLedger.__table__,
             reliability_models.RemovalEvent.__table__,
             audit_models.AuditEvent.__table__,
+            task_models.Task.__table__,
             quality_models.QMSDocument.__table__,
             quality_models.QMSDocumentRevision.__table__,
             quality_models.QMSDocumentDistribution.__table__,

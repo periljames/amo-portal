@@ -1,7 +1,7 @@
 # backend/amodb/apps/quality/router.py
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 import shutil
 from typing import Optional, List
@@ -18,6 +18,7 @@ from amodb.entitlements import require_module
 from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
 from amodb.apps.audit import services as audit_services
+from amodb.apps.tasks import services as task_services
 from amodb.database import get_db
 
 from . import models
@@ -73,6 +74,12 @@ def _audit_metadata(request: Request) -> dict:
         "user_agent": request.headers.get("user-agent"),
         "module": "quality",
     }
+
+
+def _date_to_datetime(value: Optional[date]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return datetime.combine(value, time.min, tzinfo=timezone.utc)
 
 
 def _serialize_attachment(invite_token: str, attachment: models.CARAttachment) -> CARAttachmentOut:
@@ -410,6 +417,28 @@ def publish_revision(
         )
     except TransitionError as exc:
         return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
+
+    ack_distributions = (
+        db.query(models.QMSDocumentDistribution)
+        .filter(
+            models.QMSDocumentDistribution.document_id == doc.id,
+            models.QMSDocumentDistribution.requires_ack.is_(True),
+            models.QMSDocumentDistribution.holder_user_id.is_not(None),
+        )
+        .all()
+    )
+    for dist in ack_distributions:
+        task_services.create_task(
+            db,
+            amo_id=current_user.amo_id,
+            title="Acknowledge document distribution",
+            description=f"Please acknowledge receipt of document {doc.doc_code}.",
+            owner_user_id=dist.holder_user_id,
+            due_at=_date_to_datetime(payload.effective_date),
+            entity_type="qms_document_distribution",
+            entity_id=str(dist.id),
+            priority=3,
+        )
     db.commit()
     db.refresh(doc)
     return doc
@@ -747,6 +776,19 @@ def add_finding(
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
     )
+    task_owner = audit.lead_auditor_user_id or current_user.id
+    task_services.create_task(
+        db,
+        amo_id=current_user.amo_id,
+        title="Respond to finding",
+        description=f"Finding {finding.finding_ref or finding.id} requires response.",
+        owner_user_id=task_owner,
+        supervisor_user_id=audit.observer_auditor_user_id,
+        due_at=_date_to_datetime(finding.target_close_date),
+        entity_type="qms_finding",
+        entity_id=str(finding.id),
+        priority=2,
+    )
     db.commit()
     db.refresh(finding)
 
@@ -805,6 +847,13 @@ def close_finding(
             )
         except TransitionError as exc:
             return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
+        task_services.close_tasks_for_entity(
+            db,
+            amo_id=current_user.amo_id,
+            entity_type="qms_finding",
+            entity_id=str(finding.id),
+            actor_user_id=current_user.id,
+        )
         db.commit()
         db.refresh(finding)
     return finding
@@ -862,9 +911,11 @@ def upsert_cap(
         raise HTTPException(status_code=404, detail="Finding not found")
 
     cap = db.query(models.QMSCorrectiveAction).filter(models.QMSCorrectiveAction.finding_id == finding_id).first()
+    created_cap = False
     if not cap:
         cap = models.QMSCorrectiveAction(finding_id=finding_id)
         db.add(cap)
+        created_cap = True
 
     before_status = cap.status.value if cap.status else None
     before = {"status": before_status}
@@ -875,6 +926,21 @@ def upsert_cap(
         val = getattr(payload, field)
         if val is not None:
             setattr(cap, field, val)
+
+    if created_cap:
+        db.flush()
+        task_services.create_task(
+            db,
+            amo_id=current_user.amo_id,
+            title="Complete CAPA actions + evidence",
+            description=f"Complete corrective actions for finding {finding.finding_ref or finding.id}.",
+            owner_user_id=cap.responsible_user_id or current_user.id,
+            supervisor_user_id=None,
+            due_at=_date_to_datetime(cap.due_date),
+            entity_type="qms_cap",
+            entity_id=str(cap.id),
+            priority=2,
+        )
 
     if payload.status in (models.QMSCAPStatus.CLOSED, models.QMSCAPStatus.REJECTED):
         audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
@@ -888,6 +954,22 @@ def upsert_cap(
                 audit.assistant_auditor_user_id,
             ):
                 _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.WARNING)
+
+    if payload.status == models.QMSCAPStatus.IN_PROGRESS and cap.evidence_ref:
+        audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
+        verifier_id = audit.lead_auditor_user_id if audit else None
+        task_services.create_task(
+            db,
+            amo_id=current_user.amo_id,
+            title="Verify CAPA",
+            description=f"Verify CAPA evidence for finding {finding.finding_ref or finding.id}.",
+            owner_user_id=verifier_id or current_user.id,
+            supervisor_user_id=None,
+            due_at=None,
+            entity_type="qms_cap",
+            entity_id=str(cap.id),
+            priority=2,
+        )
 
     if payload.status is not None and payload.status.value != before.get("status"):
         try:
@@ -915,6 +997,14 @@ def upsert_cap(
             )
         except TransitionError as exc:
             return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
+        if payload.status == models.QMSCAPStatus.CLOSED:
+            task_services.close_tasks_for_entity(
+                db,
+                amo_id=current_user.amo_id,
+                entity_type="qms_cap",
+                entity_id=str(cap.id),
+                actor_user_id=current_user.id,
+            )
     else:
         audit_services.log_event(
             db,

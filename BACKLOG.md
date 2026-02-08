@@ -22,7 +22,7 @@
 - A clear error response for invalid transitions.
 - Tests: unit tests for transition matrix and guard behavior.
 
-### 3) Task Engine (due dates + escalation)
+### [x] 3) Task Engine (due dates + escalation)
 **Goal**: Centralized tasks with due dates and escalation.
 
 **Acceptance Criteria**
