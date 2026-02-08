@@ -40,7 +40,7 @@
 - Integration with task engine to send reminders.
 - Tests: notification triggers and logging.
 
-### 5) Evidence Pack Export (PDF/ZIP)
+### [x] 5) Evidence Pack Export (PDF/ZIP)
 **Goal**: Evidence packs per record type.
 
 **Acceptance Criteria**

@@ -29,7 +29,7 @@
 | **Records/Retention** | `retention_until` on `QMSAudit`; `ArchivedUser` retention model (`backend/amodb/apps/quality/models.py`, `backend/amodb/models.py`) | No explicit retention UI found | **Partial**: retention fields exist, no enforcement jobs | **No** explicit enforcement | **No** retention scheduling or purge jobs found | Retention policy enforcement and record purge missing. |
 | **Audit Program** | `QMSAudit` model and `/quality/audits` endpoints (`backend/amodb/apps/quality/models.py`, `backend/amodb/apps/quality/router.py`) | `QMSAuditsPage` (`frontend/src/pages/QMSAuditsPage.tsx`) | **Yes**: `QMSAuditStatus` | **No** explicit role checks for audit CRUD | **Partial**: status change sets retention date on close | No audit program scheduling automation; permissions missing. |
 | **Findings** | `QMSAuditFinding` model and `/audits/{id}/findings` endpoints (`backend/amodb/apps/quality/models.py`, `backend/amodb/apps/quality/router.py`) | Findings appear embedded in audit workflow; no dedicated page found | **Yes**: level/severity fields, open/closed via `closed_at` | **No** explicit role checks for findings | **Partial**: target close date computed | No enforced evidence gating on close; no audit trail for finding changes. |
-| **CAPA** | `QMSCorrectiveAction` + `CorrectiveActionRequest` (CAR) models and `/findings/{id}/cap` + `/cars` endpoints (`backend/amodb/apps/quality/models.py`, `backend/amodb/apps/quality/router.py`) | `QualityCarsPage` + `PublicCarInvitePage` (`frontend/src/pages/QualityCarsPage.tsx`, `frontend/src/pages/PublicCarInvitePage.tsx`) | **Yes**: CAP status + CAR status | **Partial**: CAR write access enforced; CAPA update lacks role checks | **Partial**: CAR reminders computed; CAR PDF generation | No evidence pack export; CAPA closure not gated on evidence/verification. |
+| **CAPA** | `QMSCorrectiveAction` + `CorrectiveActionRequest` (CAR) models and `/findings/{id}/cap` + `/cars` endpoints (`backend/amodb/apps/quality/models.py`, `backend/amodb/apps/quality/router.py`) | `QualityCarsPage` + `PublicCarInvitePage` (`frontend/src/pages/QualityCarsPage.tsx`, `frontend/src/pages/PublicCarInvitePage.tsx`) | **Yes**: CAP status + CAR status | **Partial**: CAR write access enforced; CAPA update lacks role checks | **Partial**: CAR reminders computed; CAR PDF generation | Evidence pack export now available; CAPA closure not gated on evidence/verification. |
 | **Occurrence + Investigation** | FRACAS cases/actions (`FRACASCase`, `FRACASAction`) with create/verify/approve endpoints (`backend/amodb/apps/reliability/models.py`, `backend/amodb/apps/reliability/services.py`, `backend/amodb/apps/reliability/router.py`) | No dedicated FRACAS UI found | **Yes**: FRACAS status enums | **Partial**: module gating only; no role checks | **Partial**: notifications for reliability alerts | Missing UI; no investigation templates or automatic task creation. |
 | **Trend/Monthly Review** | Reliability trends + reports (`ReliabilityDefectTrend`, reports services) (`backend/amodb/apps/reliability/models.py`, `backend/amodb/apps/reliability/services.py`) | `ReliabilityReportsPage` (`frontend/src/pages/ReliabilityReportsPage.tsx`) | **Partial**: report status in backend | **Partial**: module gating only | **Yes**: report generation endpoints | Monthly occurrence review pack not implemented as a single-click pack. |
 | **Supplier Management** | Vendors exist (`backend/amodb/apps/finance/models.py`), used in POs (`backend/amodb/apps/inventory/models.py`) | No supplier management UI found | **No** supplier workflow states | **No** | **No** | Supplier approval, monitoring, and outsourcing controls missing. |
@@ -43,7 +43,7 @@
 | **Management Review** | **Not found** | **Not found** | **No** | **No** | **No** | Management review records/actions missing. |
 | **Task Engine** | Task model + escalation runner (`backend/amodb/apps/tasks`, `backend/amodb/jobs/qms_task_runner.py`) | Task list page (`frontend/src/pages/MyTasksPage.tsx`) | **Yes**: task statuses | **Partial**: role-gated admin list; owner controls | **Yes**: reminders + escalation runner | Task automation limited to QMS/FRACAS/training hooks. |
 | **Notifications/Email Logging** | Email log model + service + admin API (`backend/amodb/apps/notifications/models.py`, `backend/amodb/apps/notifications/service.py`, `backend/amodb/apps/notifications/router.py`), in-app notifications for QMS/reliability/training | Email logs admin page (`frontend/src/pages/EmailLogsPage.tsx`) | **Partial**: read-only email log + in-app read/unread states | **Yes**: admin/QA role gate for email logs | **Partial**: email logging for task reminders/escalations | Provider abstraction defaults to no-op; outbound provider integration still needed. |
-| **Evidence Packs/Exports** | CAR PDF generation only (`backend/amodb/apps/quality/service.py`) | No evidence pack UI | **Partial**: CAR PDF | **No** | **Partial**: CAR PDF | Evidence pack export (PDF/ZIP) missing for audits/CAPA/occurrences. |
+| **Evidence Packs/Exports** | Evidence pack ZIP export service for audits/CAR/FRACAS/training (`backend/amodb/apps/exports/evidence_pack.py`, new evidence-pack endpoints in `backend/amodb/apps/quality/router.py`, `backend/amodb/apps/reliability/router.py`, `backend/amodb/apps/training/router.py`) | Evidence pack actions in `QMSAuditsPage`, `QualityCarsPage`, `QMSTrainingUserPage`, `ReliabilityReportsPage` (`frontend/src/pages/*`) | **Yes**: ZIP packs + CAR PDF | **Yes**: role-gated exports | **Partial**: CAR PDF + ZIP packs | Evidence packs now available; ensure size limits align with deployment storage constraints. |
 
 ---
 
@@ -69,7 +69,7 @@ Below, each requirement is marked as **Present** only if explicit code exists.
 - **Required fields gating**: **Present** (audit/finding/CAPA close gates).
 - **Immutable audit trail**: **Partial** (transition events logged; other actions not yet covered).
 - **Attachment/evidence support**: **Partial** (CAR attachments only).
-- **Exportable evidence pack**: **Missing** (only CAR PDF).
+- **Exportable evidence pack**: **Present** (ZIP evidence packs + CAR PDF).
 
 ### Occurrence / Investigation (FRACAS)
 - **State machine / lifecycle**: **Present** (FRACAS statuses).
@@ -77,7 +77,7 @@ Below, each requirement is marked as **Present** only if explicit code exists.
 - **Required fields gating**: **Missing**.
 - **Immutable audit trail**: **Partial** (transition events logged).
 - **Attachment/evidence support**: **Missing**.
-- **Exportable evidence pack**: **Missing**.
+- **Exportable evidence pack**: **Present** (ZIP evidence packs).
 
 ### Training
 - **State machine / lifecycle**: **Present** (training event/participant statuses).
@@ -85,7 +85,7 @@ Below, each requirement is marked as **Present** only if explicit code exists.
 - **Required fields gating**: **Partial** (attendance status requires verification stamps).
 - **Immutable audit trail**: **Partial** (transition events logged; other actions not yet covered).
 - **Attachment/evidence support**: **Partial** (training files exist but no export pack).
-- **Exportable evidence pack**: **Missing**.
+- **Exportable evidence pack**: **Present** (ZIP evidence packs).
 
 ### Inventory / Stores
 - **State machine / lifecycle**: **Partial** (conditions and movement types).
@@ -104,7 +104,7 @@ Below, each requirement is marked as **Present** only if explicit code exists.
 - **Workflow engine** now enforces state transitions and required-field gating for key QMS/FRACAS/training flows.
 - **Task engine** now provides due-date reminders and escalation runner for QMS/FRACAS/training tasks.
 - Email logging exists for task reminders/escalations, but external email provider integration is still pending.
-- Missing **evidence pack** exports for audits, findings, CAPA, occurrences, training, calibration, stores.
+- Evidence pack exports now cover audits, CARs, FRACAS cases, and training users; calibration/stores still missing.
 - Missing **calibration register** and **concessions** workflow.
 - Missing **management review** module and action tracking.
 - Missing **exemptions/deviations/concessions** workflow.

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import urllib.request
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -30,6 +31,7 @@ from ..accounts import models as accounts_models
 from ..audit import services as audit_services
 from ..accounts import services as account_services
 from ..tasks import services as task_services
+from ..exports import build_evidence_pack
 from . import models as training_models
 from . import schemas as training_schemas
 from ..workflow import apply_transition, TransitionError
@@ -2437,6 +2439,32 @@ def get_my_required_training_status(
         )
 
     return items
+
+
+# ---------------------------------------------------------------------------
+# EVIDENCE PACK EXPORTS
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/users/{user_id}/evidence-pack",
+    summary="Export a training evidence pack for a specific user",
+)
+def export_training_user_evidence_pack(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    if current_user.id != user_id and not _is_training_editor(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to export training packs")
+    return build_evidence_pack(
+        "training_user",
+        user_id,
+        db,
+        actor_user_id=current_user.id,
+        correlation_id=str(uuid.uuid4()),
+        amo_id=current_user.amo_id,
+    )
 
 
 # ---------------------------------------------------------------------------
