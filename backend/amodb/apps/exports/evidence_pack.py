@@ -313,7 +313,7 @@ def _build_training_user_pack(
     timeline = _collect_timeline(db, amo_id=amo_id, entities=entities)
 
     attachment_files = [
-        (f"{file.id}_{file.original_filename}", Path(file.storage_path))
+        (f"{file.id}_{Path(file.original_filename).name}", Path(file.storage_path))
         for file in files
     ]
 
