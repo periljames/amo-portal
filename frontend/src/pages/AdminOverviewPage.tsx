@@ -17,7 +17,8 @@ type UrlParams = {
 
 type RefreshReason = "initial" | "retry" | "manual" | "interval";
 
-const POLL_INTERVAL_MS = 60_000;
+const DEFAULT_POLL_INTERVAL_MS = 60_000;
+const SUPERUSER_POLL_INTERVAL_MS = 5 * 60_000;
 const MAX_RETRIES = 3;
 
 const STATUS_LABELS: Record<
@@ -65,6 +66,9 @@ const AdminOverviewPage: React.FC = () => {
   const pollingStoppedRef = useRef(false);
   const pollingInFlightRef = useRef(false);
   const pollingRunnerRef = useRef<(reason: RefreshReason) => void>();
+  const pollIntervalMs = isSuperuser
+    ? SUPERUSER_POLL_INTERVAL_MS
+    : DEFAULT_POLL_INTERVAL_MS;
 
   useEffect(() => {
     if (!currentUser) return;
@@ -134,7 +138,7 @@ const AdminOverviewPage: React.FC = () => {
         if (!pollingStoppedRef.current) {
           pollingTimerRef.current = window.setTimeout(() => {
             pollingRunnerRef.current?.("interval");
-          }, POLL_INTERVAL_MS);
+          }, pollIntervalMs);
         }
       } catch (err) {
         const message =
@@ -146,7 +150,7 @@ const AdminOverviewPage: React.FC = () => {
         setRefreshing(false);
       }
     },
-    [handlePollingFailure, summary]
+    [handlePollingFailure, pollIntervalMs, summary]
   );
 
   pollingRunnerRef.current = runPolling;
