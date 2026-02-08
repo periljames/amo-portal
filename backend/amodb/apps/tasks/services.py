@@ -99,6 +99,8 @@ def update_task_status(
     task.status = status
     if status in (models.TaskStatus.DONE, models.TaskStatus.CANCELLED):
         task.closed_at = _utcnow()
+    else:
+        task.closed_at = None
     db.add(task)
     audit_services.log_event(
         db,
