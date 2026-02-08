@@ -18,6 +18,7 @@ if os.getenv("AMODB_SKIP_MODEL_IMPORTS") != "1":
     from .apps.maintenance_program import models as maintenance_program_models  # AMP + aircraft program items
     from .apps.training import models as training_models  # noqa: F401
     from .apps.integrations import models as integrations_models  # noqa: F401
+    from .apps.notifications import models as notifications_models  # noqa: F401
 
     __all__ = [
         "accounts_models",
@@ -26,6 +27,7 @@ if os.getenv("AMODB_SKIP_MODEL_IMPORTS") != "1":
         "crs_models",
         "maintenance_program_models",
         "integrations_models",
+        "notifications_models",
     ]
 else:
     __all__ = []
