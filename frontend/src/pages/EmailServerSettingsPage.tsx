@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { Button, InlineAlert, PageHeader, Panel, StatusPill } from "../components/UI/Admin";
 import { getCachedUser, getContext } from "../services/auth";
+import "../styles/emailServerSettings.css";
 import {
   clearEmailServerConfig,
   defaultEmailServerConfig,
@@ -46,7 +47,11 @@ const EmailServerSettingsPage: React.FC = () => {
   const [testState, setTestState] = useState<TestState>("idle");
   const [testMessage, setTestMessage] = useState<string | null>(null);
   const [testLatencyMs, setTestLatencyMs] = useState<number | null>(null);
+  const [testPayloadBytes, setTestPayloadBytes] = useState<number | null>(null);
+  const [lastTestedAt, setLastTestedAt] = useState<string | null>(null);
+  const [nextTestAt, setNextTestAt] = useState<string | null>(null);
   const testTimerRef = useRef<number | null>(null);
+  const testIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -164,18 +169,22 @@ const EmailServerSettingsPage: React.FC = () => {
     setTestState("running");
     setTestMessage(null);
     setTestLatencyMs(null);
+    setTestPayloadBytes(null);
     const controller = new AbortController();
     const startedAt = performance.now();
     const timeout = window.setTimeout(() => controller.abort(), config.testTimeoutMs);
+    const payload = {
+      provider: config.provider,
+      sandbox: config.sandboxMode,
+      payload: buildTestPayload(config),
+    };
+    const serialized = JSON.stringify(payload);
+    setTestPayloadBytes(new Blob([serialized]).size);
     try {
       const response = await fetch(config.testEndpointUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: config.provider,
-          sandbox: config.sandboxMode,
-          payload: buildTestPayload(config),
-        }),
+        body: serialized,
         signal: controller.signal,
       });
       const latency = Math.round(performance.now() - startedAt);
@@ -197,6 +206,7 @@ const EmailServerSettingsPage: React.FC = () => {
       }
     } finally {
       window.clearTimeout(timeout);
+      setLastTestedAt(new Date().toISOString());
     }
   }, [config, missingFields]);
 
@@ -211,6 +221,39 @@ const EmailServerSettingsPage: React.FC = () => {
       if (testTimerRef.current) window.clearTimeout(testTimerRef.current);
     };
   }, [autoTest, config, runConnectionTest]);
+
+  useEffect(() => {
+    if (!autoTest) return;
+    if (!config.testEndpointUrl.trim()) return;
+    if (testIntervalRef.current) window.clearInterval(testIntervalRef.current);
+    const scheduleNext = () => {
+      const next = new Date(Date.now() + 5 * 60 * 1000);
+      setNextTestAt(next.toISOString());
+    };
+    scheduleNext();
+    testIntervalRef.current = window.setInterval(() => {
+      runConnectionTest();
+      scheduleNext();
+    }, 5 * 60 * 1000);
+    return () => {
+      if (testIntervalRef.current) window.clearInterval(testIntervalRef.current);
+    };
+  }, [autoTest, config.testEndpointUrl, runConnectionTest]);
+
+  const renderTime = (value: string | null): string => {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const renderSpeed = (bytes: number | null, latencyMs: number | null): string => {
+    if (!bytes || !latencyMs || latencyMs <= 0) return "—";
+    const kilobits = (bytes * 8) / 1024;
+    const seconds = latencyMs / 1000;
+    const kbps = kilobits / seconds;
+    return `${kbps.toFixed(1)} kbps`;
+  };
 
   const resetConfig = () => {
     clearEmailServerConfig();
@@ -268,6 +311,21 @@ const EmailServerSettingsPage: React.FC = () => {
             </div>
           </div>
           <div className="admin-email-settings__toggles">
+            <span
+              className={
+                "admin-email-settings__notification" +
+                (testState === "error" ? " admin-email-settings__notification--error" : "")
+              }
+            >
+              <span className="admin-email-settings__notification-dot" />
+              {testState === "running"
+                ? "Testing connection"
+                : testState === "success"
+                  ? "Connection healthy"
+                  : testState === "error"
+                    ? "Connection issue"
+                    : "Waiting for test"}
+            </span>
             <label className="admin-email-settings__toggle">
               <input
                 type="checkbox"
@@ -872,6 +930,40 @@ const EmailServerSettingsPage: React.FC = () => {
                   </span>
                 )}
               </div>
+              <div className="admin-email-settings__metrics">
+                <div className="admin-email-settings__metric">
+                  <span className="admin-email-settings__metric-label">Latency</span>
+                  <div className="admin-email-settings__metric-value">
+                    {testLatencyMs !== null ? `${testLatencyMs} ms` : "—"}
+                  </div>
+                </div>
+                <div className="admin-email-settings__metric">
+                  <span className="admin-email-settings__metric-label">Payload size</span>
+                  <div className="admin-email-settings__metric-value">
+                    {testPayloadBytes !== null
+                      ? `${(testPayloadBytes / 1024).toFixed(2)} KB`
+                      : "—"}
+                  </div>
+                </div>
+                <div className="admin-email-settings__metric">
+                  <span className="admin-email-settings__metric-label">Estimated speed</span>
+                  <div className="admin-email-settings__metric-value">
+                    {renderSpeed(testPayloadBytes, testLatencyMs)}
+                  </div>
+                </div>
+                <div className="admin-email-settings__metric">
+                  <span className="admin-email-settings__metric-label">Last tested</span>
+                  <div className="admin-email-settings__metric-value">
+                    {renderTime(lastTestedAt)}
+                  </div>
+                </div>
+                <div className="admin-email-settings__metric">
+                  <span className="admin-email-settings__metric-label">Next test</span>
+                  <div className="admin-email-settings__metric-value">
+                    {renderTime(nextTestAt)}
+                  </div>
+                </div>
+              </div>
               {testMessage && (
                 <InlineAlert
                   tone={testState === "success" ? "success" : "danger"}
@@ -895,6 +987,14 @@ const EmailServerSettingsPage: React.FC = () => {
                 <li>Settings are stored locally in your browser profile.</li>
                 <li>Use sandbox mode for dry-run validations before go-live.</li>
                 <li>Realtime testing runs from the browser; ensure CORS is enabled.</li>
+              </ul>
+            </Panel>
+            <Panel title="Provider compatibility" className="admin-email-settings__panel">
+              <ul className="admin-email-settings__compatibility">
+                <li>Outlook / Microsoft 365: use SMTP or a custom relay gateway.</li>
+                <li>Gmail / Google Workspace: use SMTP with app password or OAuth relay.</li>
+                <li>Proton Mail: use Proton Bridge SMTP credentials.</li>
+                <li>Any provider: custom HTTP adapter with your preferred gateway.</li>
               </ul>
             </Panel>
           </div>

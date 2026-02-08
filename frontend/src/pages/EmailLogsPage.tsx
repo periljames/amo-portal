@@ -118,7 +118,7 @@ const EmailLogsPage: React.FC = () => {
           title="Email Logs"
           subtitle="Immutable outbound email attempts for compliance evidence."
           actions={
-            <div className="admin-email-settings__actions">
+            <div className="admin-page-header__actions">
               {isSuperuser && (
                 <Button
                   type="button"
