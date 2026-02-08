@@ -161,6 +161,8 @@ def _build_audit_pack(
     attachments: list[tuple[str, Path]] = []
     if audit.report_file_ref:
         attachments.append((f"audit_report_{audit.id}.pdf", Path(audit.report_file_ref)))
+    if audit.checklist_file_ref:
+        attachments.append((f"audit_checklist_{audit.id}.pdf", Path(audit.checklist_file_ref)))
 
     return summary, linked, timeline, attachments
 

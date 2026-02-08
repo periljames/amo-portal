@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, EmailStr
 
 from amodb.apps.accounts.models import AccountRole
 from .enums import (
@@ -21,6 +21,7 @@ from .enums import (
     QMSChangeRequestStatus,
     QMSAuditKind,
     QMSAuditStatus,
+    QMSAuditScheduleFrequency,
     QMSFindingType,
     QMSFindingSeverity,
     FindingLevel,
@@ -227,6 +228,7 @@ class QMSAuditCreate(BaseModel):
     criteria: Optional[str] = None
     auditee: Optional[str] = None
     auditee_email: Optional[str] = None
+    auditee_user_id: Optional[str] = None
     lead_auditor_user_id: Optional[str] = None
     observer_auditor_user_id: Optional[str] = None
     assistant_auditor_user_id: Optional[str] = None
@@ -242,6 +244,7 @@ class QMSAuditUpdate(BaseModel):
     criteria: Optional[str] = None
     auditee: Optional[str] = None
     auditee_email: Optional[str] = None
+    auditee_user_id: Optional[str] = None
     lead_auditor_user_id: Optional[str] = None
     observer_auditor_user_id: Optional[str] = None
     assistant_auditor_user_id: Optional[str] = None
@@ -252,6 +255,7 @@ class QMSAuditUpdate(BaseModel):
     actual_end: Optional[date] = None
 
     report_file_ref: Optional[str] = None
+    checklist_file_ref: Optional[str] = None
 
 
 class QMSAuditOut(BaseModel):
@@ -269,6 +273,7 @@ class QMSAuditOut(BaseModel):
     criteria: Optional[str]
     auditee: Optional[str]
     auditee_email: Optional[str]
+    auditee_user_id: Optional[str]
 
     lead_auditor_user_id: Optional[str]
     observer_auditor_user_id: Optional[str]
@@ -280,7 +285,10 @@ class QMSAuditOut(BaseModel):
     actual_end: Optional[date]
 
     report_file_ref: Optional[str]
+    checklist_file_ref: Optional[str]
     retention_until: Optional[date]
+    upcoming_notice_sent_at: Optional[datetime]
+    day_of_notice_sent_at: Optional[datetime]
 
     created_by_user_id: Optional[str]
     created_at: datetime
@@ -307,6 +315,12 @@ class QMSFindingVerify(BaseModel):
     verified_at: Optional[datetime] = None
 
 
+class QMSFindingAcknowledge(BaseModel):
+    acknowledged_by_name: Optional[str] = None
+    acknowledged_by_email: Optional[EmailStr] = None
+    acknowledged_at: Optional[datetime] = None
+
+
 class QMSFindingOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -329,7 +343,52 @@ class QMSFindingOut(BaseModel):
     closed_at: Optional[datetime]
     verified_at: Optional[datetime] = None
     verified_by_user_id: Optional[str] = None
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by_user_id: Optional[str] = None
+    acknowledged_by_name: Optional[str] = None
+    acknowledged_by_email: Optional[str] = None
 
+    created_at: datetime
+
+
+class QMSAuditScheduleCreate(BaseModel):
+    domain: QMSDomain
+    kind: QMSAuditKind = QMSAuditKind.INTERNAL
+    frequency: QMSAuditScheduleFrequency = QMSAuditScheduleFrequency.MONTHLY
+    title: str = Field(min_length=1, max_length=255)
+    scope: Optional[str] = None
+    criteria: Optional[str] = None
+    auditee: Optional[str] = None
+    auditee_email: Optional[EmailStr] = None
+    auditee_user_id: Optional[str] = None
+    lead_auditor_user_id: Optional[str] = None
+    observer_auditor_user_id: Optional[str] = None
+    assistant_auditor_user_id: Optional[str] = None
+    duration_days: int = Field(default=1, ge=1, le=90)
+    next_due_date: date
+
+
+class QMSAuditScheduleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    domain: QMSDomain
+    kind: QMSAuditKind
+    frequency: QMSAuditScheduleFrequency
+    title: str
+    scope: Optional[str]
+    criteria: Optional[str]
+    auditee: Optional[str]
+    auditee_email: Optional[str]
+    auditee_user_id: Optional[str]
+    lead_auditor_user_id: Optional[str]
+    observer_auditor_user_id: Optional[str]
+    assistant_auditor_user_id: Optional[str]
+    duration_days: int
+    next_due_date: date
+    last_run_at: Optional[datetime]
+    is_active: bool
+    created_by_user_id: Optional[str]
     created_at: datetime
 
 

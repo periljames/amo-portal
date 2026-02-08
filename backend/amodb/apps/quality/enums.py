@@ -53,6 +53,11 @@ class QMSAuditStatus(str, enum.Enum):
     CLOSED = "CLOSED"
 
 
+class QMSAuditScheduleFrequency(str, enum.Enum):
+    MONTHLY = "MONTHLY"
+    ANNUAL = "ANNUAL"
+
+
 class QMSFindingType(str, enum.Enum):
     NON_CONFORMITY = "NON_CONFORMITY"
     OBSERVATION = "OBSERVATION"

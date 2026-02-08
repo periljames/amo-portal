@@ -52,6 +52,7 @@ from .enums import (
     QMSChangeRequestStatus,
     QMSAuditKind,
     QMSAuditStatus,
+    QMSAuditScheduleFrequency,
     QMSFindingType,
     QMSFindingSeverity,
     FindingLevel,
@@ -324,6 +325,7 @@ class QMSAudit(Base):
 
     auditee = Column(String(255), nullable=True)
     auditee_email = Column(String(255), nullable=True)
+    auditee_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     lead_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     observer_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     assistant_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
@@ -334,7 +336,10 @@ class QMSAudit(Base):
     actual_end = Column(Date, nullable=True)
 
     report_file_ref = Column(String(512), nullable=True)
+    checklist_file_ref = Column(String(512), nullable=True)
     retention_until = Column(Date, nullable=True)
+    upcoming_notice_sent_at = Column(DateTime(timezone=True), nullable=True)
+    day_of_notice_sent_at = Column(DateTime(timezone=True), nullable=True)
 
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -408,6 +413,10 @@ class QMSAuditFinding(Base):
     closed_at = Column(DateTime(timezone=True), nullable=True, index=True)
     verified_at = Column(DateTime(timezone=True), nullable=True, index=True)
     verified_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    acknowledged_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    acknowledged_by_name = Column(String(255), nullable=True)
+    acknowledged_by_email = Column(String(255), nullable=True)
 
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -438,6 +447,51 @@ class QMSAuditFinding(Base):
 
     def __repr__(self) -> str:
         return f"<QMSAuditFinding id={self.id} audit_id={self.audit_id} level={self.level} severity={self.severity}>"
+
+
+class QMSAuditSchedule(Base):
+    __tablename__ = "qms_audit_schedules"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    domain = Column(
+        SAEnum(QMSDomain, name="qms_audit_schedule_domain", native_enum=False),
+        nullable=False,
+        index=True,
+    )
+    kind = Column(
+        SAEnum(QMSAuditKind, name="qms_audit_schedule_kind", native_enum=False),
+        nullable=False,
+        default=QMSAuditKind.INTERNAL,
+        index=True,
+    )
+    frequency = Column(
+        SAEnum(QMSAuditScheduleFrequency, name="qms_audit_schedule_frequency", native_enum=False),
+        nullable=False,
+        default=QMSAuditScheduleFrequency.MONTHLY,
+        index=True,
+    )
+    title = Column(String(255), nullable=False)
+    scope = Column(Text, nullable=True)
+    criteria = Column(Text, nullable=True)
+    auditee = Column(String(255), nullable=True)
+    auditee_email = Column(String(255), nullable=True)
+    auditee_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    lead_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    observer_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    assistant_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    duration_days = Column(Integer, nullable=False, default=1)
+    next_due_date = Column(Date, nullable=False, index=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_qms_audit_schedules_domain_active", "domain", "is_active"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<QMSAuditSchedule id={self.id} frequency={self.frequency} next_due={self.next_due_date}>"
 
 
 class QMSCorrectiveAction(Base):
