@@ -19,12 +19,26 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("platform_settings", sa.Column("gzip_minimum_size", sa.Integer(), nullable=True))
-    op.add_column("platform_settings", sa.Column("gzip_compresslevel", sa.Integer(), nullable=True))
-    op.add_column("platform_settings", sa.Column("max_request_body_bytes", sa.Integer(), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {column["name"] for column in inspector.get_columns("platform_settings")}
+
+    if "gzip_minimum_size" not in existing_columns:
+        op.add_column("platform_settings", sa.Column("gzip_minimum_size", sa.Integer(), nullable=True))
+    if "gzip_compresslevel" not in existing_columns:
+        op.add_column("platform_settings", sa.Column("gzip_compresslevel", sa.Integer(), nullable=True))
+    if "max_request_body_bytes" not in existing_columns:
+        op.add_column("platform_settings", sa.Column("max_request_body_bytes", sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("platform_settings", "max_request_body_bytes")
-    op.drop_column("platform_settings", "gzip_compresslevel")
-    op.drop_column("platform_settings", "gzip_minimum_size")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {column["name"] for column in inspector.get_columns("platform_settings")}
+
+    if "max_request_body_bytes" in existing_columns:
+        op.drop_column("platform_settings", "max_request_body_bytes")
+    if "gzip_compresslevel" in existing_columns:
+        op.drop_column("platform_settings", "gzip_compresslevel")
+    if "gzip_minimum_size" in existing_columns:
+        op.drop_column("platform_settings", "gzip_minimum_size")
