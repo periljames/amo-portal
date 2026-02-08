@@ -8,7 +8,7 @@
 - **Migrations**: Alembic (`backend/amodb/alembic` + `backend/amodb/alembic.ini`).
 - **Auth**: JWT/OAuth2 password flow with Argon2/bcrypt hashing in `backend/amodb/security.py`.
 - **Job Scheduler / Queue**: No queue system found. A cron/Task Scheduler script exists for billing maintenance (`backend/amodb/jobs/billing_maintenance.py`).
-- **Email Provider**: **Cannot confirm from repo**. Searched with `rg -n "email|smtp|sendgrid|ses|mail" backend/amodb` and found no provider integration or outbound email service implementation.
+- **Email Provider**: Notification service abstraction with a no-op default provider and email log store exists (`backend/amodb/apps/notifications`). No external provider configuration detected in repo.
 - **Storage for Attachments**: Local filesystem paths for CAR attachments (`backend/amodb/apps/quality/router.py`, `CAR_ATTACHMENT_DIR` under `backend/amodb/generated/quality`).
 
 ### Frontend
@@ -42,7 +42,7 @@
 | **Exemptions/Deviations/Concessions** | **Not found** | **Not found** | **No** | **No** | **No** | No exemptions/deviations/concessions workflow. |
 | **Management Review** | **Not found** | **Not found** | **No** | **No** | **No** | Management review records/actions missing. |
 | **Task Engine** | Task model + escalation runner (`backend/amodb/apps/tasks`, `backend/amodb/jobs/qms_task_runner.py`) | Task list page (`frontend/src/pages/MyTasksPage.tsx`) | **Yes**: task statuses | **Partial**: role-gated admin list; owner controls | **Yes**: reminders + escalation runner | Task automation limited to QMS/FRACAS/training hooks. |
-| **Notifications/Email Logging** | In-app notifications for QMS, reliability, training (`backend/amodb/apps/quality/models.py`, `backend/amodb/apps/reliability/models.py`, `backend/amodb/apps/training/models.py`) | No centralized notification UI found | **Partial**: read/unread states | **Partial**: module gating only | **Partial**: in-app notifications | No outbound email or email log store. |
+| **Notifications/Email Logging** | Email log model + service + admin API (`backend/amodb/apps/notifications/models.py`, `backend/amodb/apps/notifications/service.py`, `backend/amodb/apps/notifications/router.py`), in-app notifications for QMS/reliability/training | Email logs admin page (`frontend/src/pages/EmailLogsPage.tsx`) | **Partial**: read-only email log + in-app read/unread states | **Yes**: admin/QA role gate for email logs | **Partial**: email logging for task reminders/escalations | Provider abstraction defaults to no-op; outbound provider integration still needed. |
 | **Evidence Packs/Exports** | CAR PDF generation only (`backend/amodb/apps/quality/service.py`) | No evidence pack UI | **Partial**: CAR PDF | **No** | **Partial**: CAR PDF | Evidence pack export (PDF/ZIP) missing for audits/CAPA/occurrences. |
 
 ---
@@ -103,7 +103,7 @@ Below, each requirement is marked as **Present** only if explicit code exists.
 - **Audit trail** now logs workflow transitions for QMS/FRACAS/training; coverage remains partial for non-transition actions.
 - **Workflow engine** now enforces state transitions and required-field gating for key QMS/FRACAS/training flows.
 - **Task engine** now provides due-date reminders and escalation runner for QMS/FRACAS/training tasks.
-- No **notification/email service** or outbound email log for compliance evidence.
+- Email logging exists for task reminders/escalations, but external email provider integration is still pending.
 - Missing **evidence pack** exports for audits, findings, CAPA, occurrences, training, calibration, stores.
 - Missing **calibration register** and **concessions** workflow.
 - Missing **management review** module and action tracking.
