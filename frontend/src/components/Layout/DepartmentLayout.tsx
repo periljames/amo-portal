@@ -43,7 +43,9 @@ type AdminNavId =
   | "admin-users"
   | "admin-assets"
   | "admin-billing"
-  | "admin-settings";
+  | "admin-settings"
+  | "admin-email-logs"
+  | "admin-email-settings";
 
 const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
   { id: "planning", label: "Planning" },
@@ -64,6 +66,8 @@ const ADMIN_NAV_ITEMS: Array<{ id: AdminNavId; label: string }> = [
   { id: "admin-assets", label: "AMO Assets" },
   { id: "admin-billing", label: "Billing & Usage" },
   { id: "admin-settings", label: "Usage Throttling" },
+  { id: "admin-email-logs", label: "Email Logs" },
+  { id: "admin-email-settings", label: "Email Server" },
 ];
 
 type ColorScheme = "dark" | "light";
@@ -186,6 +190,7 @@ const DepartmentLayout: React.FC<Props> = ({
     return ADMIN_NAV_ITEMS.filter((i) => {
       if (i.id === "admin-amos" && !isSuperuser) return false;
       if (i.id === "admin-billing" && !isTenantAdmin) return false;
+      if (i.id === "admin-email-settings" && !isSuperuser) return false;
       return true;
     });
   }, [isAdminArea, isSuperuser, isTenantAdmin]);
@@ -282,6 +287,12 @@ const DepartmentLayout: React.FC<Props> = ({
         break;
       case "admin-settings":
         navigate(`/maintenance/${amoCode}/admin/settings`);
+        break;
+      case "admin-email-logs":
+        navigate(`/maintenance/${amoCode}/admin/email-logs`);
+        break;
+      case "admin-email-settings":
+        navigate(`/maintenance/${amoCode}/admin/email-settings`);
         break;
       default:
         break;
