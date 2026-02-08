@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.audit import services as audit_services
 from amodb.apps.accounts import models as account_models
+from amodb.apps.notifications import models as notification_models
 from amodb.apps.notifications import service as notification_service
 
 from . import models
@@ -283,7 +284,7 @@ def run_task_runner(
         if not _should_notify(task, now=now, cooldown_hours=reminder_cooldown_hours):
             continue
         recipient = _resolve_recipient_email(db, task.owner_user_id)
-        notification_service.send_email(
+        email_log = notification_service.send_email(
             "task_reminder",
             recipient,
             f"Task reminder: {task.title}",
@@ -299,19 +300,20 @@ def run_task_runner(
             amo_id=task.amo_id,
             db=db,
         )
-        _merge_metadata(task, {"last_notified_at": now.isoformat()})
-        db.add(task)
-        audit_services.log_event(
-            db,
-            amo_id=task.amo_id,
-            actor_user_id=task.owner_user_id,
-            entity_type="task",
-            entity_id=str(task.id),
-            action="task_reminder",
-            after={"due_at": str(task.due_at)},
-            metadata={"module": "tasks"},
-        )
-        reminders_sent += 1
+        if email_log.status == notification_models.EmailStatus.SENT:
+            _merge_metadata(task, {"last_notified_at": now.isoformat()})
+            db.add(task)
+            audit_services.log_event(
+                db,
+                amo_id=task.amo_id,
+                actor_user_id=task.owner_user_id,
+                entity_type="task",
+                entity_id=str(task.id),
+                action="task_reminder",
+                after={"due_at": str(task.due_at)},
+                metadata={"module": "tasks"},
+            )
+            reminders_sent += 1
 
     overdue_tasks = (
         db.query(models.Task)
