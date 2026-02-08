@@ -85,6 +85,8 @@ class QMSDocumentRevisionCreate(BaseModel):
 
     approved_by_authority: bool = False
     authority_ref: Optional[str] = None
+    approved_by_user_id: Optional[str] = None
+    approved_at: Optional[datetime] = None
 
 
 class QMSDocumentRevisionOut(BaseModel):
@@ -110,6 +112,8 @@ class QMSDocumentRevisionOut(BaseModel):
 
     approved_by_authority: bool
     authority_ref: Optional[str]
+    approved_by_user_id: Optional[str]
+    approved_at: Optional[datetime]
 
     created_by_user_id: Optional[str]
     created_at: datetime
@@ -298,6 +302,11 @@ class QMSFindingCreate(BaseModel):
     target_close_date: Optional[date] = None  # if None, computed from level
 
 
+class QMSFindingVerify(BaseModel):
+    objective_evidence: Optional[str] = None
+    verified_at: Optional[datetime] = None
+
+
 class QMSFindingOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -318,6 +327,8 @@ class QMSFindingOut(BaseModel):
 
     target_close_date: Optional[date]
     closed_at: Optional[datetime]
+    verified_at: Optional[datetime] = None
+    verified_by_user_id: Optional[str] = None
 
     created_at: datetime
 
@@ -331,6 +342,8 @@ class QMSCAPUpsert(BaseModel):
     responsible_user_id: Optional[str] = None
     due_date: Optional[date] = None
     evidence_ref: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    verified_by_user_id: Optional[str] = None
     status: Optional[QMSCAPStatus] = None
 
 
@@ -348,6 +361,8 @@ class QMSCAPOut(BaseModel):
     responsible_user_id: Optional[str]
     due_date: Optional[date]
     evidence_ref: Optional[str]
+    verified_at: Optional[datetime]
+    verified_by_user_id: Optional[str]
 
     status: QMSCAPStatus
 

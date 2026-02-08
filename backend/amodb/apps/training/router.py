@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -20,16 +20,19 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...entitlements import require_module
 from ...security import get_current_active_user
 from ..accounts import models as accounts_models
+from ..audit import services as audit_services
 from ..accounts import services as account_services
+from ..tasks import services as task_services
 from . import models as training_models
 from . import schemas as training_schemas
+from ..workflow import apply_transition, TransitionError
 
 router = APIRouter(
     prefix="/training",
@@ -175,6 +178,16 @@ def _audit(
     Best-effort audit log. Never blocks the main action if logging fails.
     """
     try:
+        audit_services.log_event(
+            db,
+            amo_id=amo_id,
+            actor_user_id=actor_user_id,
+            entity_type=entity_type,
+            entity_id=str(entity_id) if entity_id else "unknown",
+            action=action,
+            after=details,
+            metadata={"module": "training"},
+        )
         log = training_models.TrainingAuditLog(
             amo_id=amo_id,
             actor_user_id=actor_user_id,
@@ -986,6 +999,29 @@ def update_event(
         details={"changes": data},
     )
 
+    if "status" in data and data["status"] != old_status:
+        try:
+            apply_transition(
+                db,
+                actor_user_id=current_user.id,
+                entity_type="training_event",
+                entity_id=event.id,
+                from_state=old_status.value,
+                to_state=event.status.value,
+                before_obj={
+                    "status": old_status.value,
+                    "amo_id": current_user.amo_id,
+                },
+                after_obj={
+                    "status": event.status.value,
+                    "starts_on": str(event.starts_on),
+                    "amo_id": current_user.amo_id,
+                },
+                critical=False,
+            )
+        except TransitionError as exc:
+            return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
+
     # If key scheduling attributes changed, notify participants
     key_changed = False
     if "starts_on" in data and data["starts_on"] != old_starts_on:
@@ -1123,6 +1159,26 @@ def add_event_participant(
         details={"event_id": event.id, "user_id": trainee.id, "status": str(payload.status)},
     )
 
+    if participant.status in (
+        training_models.TrainingParticipantStatus.SCHEDULED,
+        training_models.TrainingParticipantStatus.INVITED,
+        training_models.TrainingParticipantStatus.CONFIRMED,
+    ):
+        due_date = event.ends_on or event.starts_on
+        due_at = datetime.combine(due_date, datetime.min.time(), tzinfo=timezone.utc)
+        task_services.create_task(
+            db,
+            amo_id=current_user.amo_id,
+            title="Complete training",
+            description=f"Complete training event '{event.title}'.",
+            owner_user_id=participant.user_id,
+            supervisor_user_id=None,
+            due_at=due_at,
+            entity_type="training_event_participant",
+            entity_id=participant.id,
+            priority=3,
+        )
+
     db.commit()
     db.refresh(participant)
     return _participant_to_read(participant)
@@ -1152,6 +1208,7 @@ def update_event_participant(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training event participant not found.")
 
     data = payload.model_dump(exclude_unset=True)
+    before_status = participant.status
 
     # Attendance governance: if status is being set to ATTENDED/NO_SHOW, stamp who/when
     if "status" in data and data["status"] in (
@@ -1165,6 +1222,42 @@ def update_event_participant(
 
     for field, value in data.items():
         setattr(participant, field, value)
+
+    if "status" in data and data["status"] != before_status:
+        try:
+            apply_transition(
+                db,
+                actor_user_id=current_user.id,
+                entity_type="training_event_participant",
+                entity_id=participant.id,
+                from_state=before_status.value,
+                to_state=participant.status.value,
+                before_obj={
+                    "status": before_status.value,
+                    "amo_id": current_user.amo_id,
+                },
+                after_obj={
+                    "status": participant.status.value,
+                    "attendance_marked_at": str(participant.attendance_marked_at) if participant.attendance_marked_at else None,
+                    "attendance_marked_by_user_id": participant.attendance_marked_by_user_id,
+                    "amo_id": current_user.amo_id,
+                },
+                critical=False,
+            )
+        except TransitionError as exc:
+            return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
+        if data["status"] in (
+            training_models.TrainingParticipantStatus.ATTENDED,
+            training_models.TrainingParticipantStatus.NO_SHOW,
+            training_models.TrainingParticipantStatus.CANCELLED,
+        ):
+            task_services.close_tasks_for_entity(
+                db,
+                amo_id=current_user.amo_id,
+                entity_type="training_event_participant",
+                entity_id=participant.id,
+                actor_user_id=current_user.id,
+            )
 
     _audit(
         db,

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
+import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { getContext } from "../services/auth";
 import {
   qmsListDocuments,
@@ -171,6 +172,13 @@ const QMSDocumentsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <section className="qms-grid">
+        <AuditHistoryPanel
+          title="Document control history"
+          entityType="qms_document"
+        />
+      </section>
     </QMSLayout>
   );
 };

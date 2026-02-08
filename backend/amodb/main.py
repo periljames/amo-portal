@@ -26,6 +26,8 @@ from .apps.reliability.router import router as reliability_router
 from .apps.inventory.router import router as inventory_router
 from .apps.finance.router import router as finance_router
 from .apps.audit.router import router as audit_router
+from .apps.audit.router_events import router as audit_events_router
+from .apps.tasks.router import router as tasks_router
 from .apps.accounts.router_billing import router as billing_router
 from .apps.bootstrap.router import router as bootstrap_router
 from .apps.integrations.router import router as integrations_router
@@ -207,5 +209,7 @@ app.include_router(inventory_router)
 app.include_router(finance_router)
 app.include_router(billing_router)
 app.include_router(audit_router)
+app.include_router(audit_events_router)
+app.include_router(tasks_router)
 app.include_router(bootstrap_router)
 app.include_router(integrations_router)

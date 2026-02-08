@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { getCachedUser, getContext } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
@@ -289,6 +290,10 @@ const QualityCarsPage: React.FC = () => {
             </option>
           ))}
         </select>
+      </section>
+
+      <section className="page-section">
+        <AuditHistoryPanel title="CAR history" entityType="qms_car" />
       </section>
 
       {inviteToken && (

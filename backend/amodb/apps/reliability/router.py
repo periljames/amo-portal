@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,7 @@ from ..accounts import models as account_models
 from . import ehm as ehm_services
 from . import models as reliability_models
 from . import schemas, services
+from ..workflow import TransitionError
 from ..fleet import models as fleet_models
 from ..work import models as work_models
 
@@ -454,6 +455,8 @@ def approve_fracas_case(
             approved_by_user_id=current_user.id,
             approval_notes=payload.approval_notes,
         )
+    except TransitionError as exc:
+        return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -477,6 +480,8 @@ def verify_fracas_case(
             verification_notes=payload.verification_notes,
             status=payload.status,
         )
+    except TransitionError as exc:
+        return JSONResponse(status_code=400, content={"error": exc.code, "detail": exc.detail})
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
