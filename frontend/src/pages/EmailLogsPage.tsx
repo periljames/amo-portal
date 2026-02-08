@@ -45,6 +45,13 @@ const formatDate = (value?: string | null): string => {
   });
 };
 
+const toDateTimeParam = (value: string): string | undefined => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
+};
+
 const EmailLogsPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
@@ -92,8 +99,8 @@ const EmailLogsPage: React.FC = () => {
         status: status === "ALL" ? undefined : status,
         templateKey: templateKey.trim() || undefined,
         recipient: recipient.trim() || undefined,
-        start: start || undefined,
-        end: end || undefined,
+        start: toDateTimeParam(start),
+        end: toDateTimeParam(end),
       });
       setLogs(data);
     } catch (err: any) {
