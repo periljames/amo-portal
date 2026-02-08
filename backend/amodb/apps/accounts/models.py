@@ -340,6 +340,7 @@ class User(Base):
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     is_superuser = Column(Boolean, nullable=False, default=False, index=True)
     is_amo_admin = Column(Boolean, nullable=False, default=False, index=True)
+    is_auditor = Column(Boolean, nullable=False, default=False, index=True)
 
     # Marks non-human/system/AI accounts
     is_system_account = Column(

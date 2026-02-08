@@ -472,6 +472,11 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         hashed_password=hashed,
         is_active=True,
         is_amo_admin=data.role == models.AccountRole.AMO_ADMIN,
+        is_auditor=bool(
+            data.is_auditor
+            if data.is_auditor is not None
+            else data.role == models.AccountRole.AUDITOR
+        ),
         must_change_password=True,
         # is_system_account defaults to False in the model – human by default.
     )
@@ -543,6 +548,9 @@ def update_user(
 
     if data.is_amo_admin is not None:
         user.is_amo_admin = data.is_amo_admin
+
+    if data.is_auditor is not None:
+        user.is_auditor = data.is_auditor
 
     # Optional: allow marking system/service accounts via API if schema supports it
     if hasattr(data, "is_system_account") and getattr(
