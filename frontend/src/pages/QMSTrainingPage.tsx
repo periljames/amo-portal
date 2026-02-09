@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
+import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import type { AdminUserRead } from "../services/adminUsers";
 import { listAdminUsers } from "../services/adminUsers";
 import { getContext } from "../services/auth";
@@ -89,8 +90,11 @@ const QMSTrainingPage: React.FC = () => {
   const [trainingRows, setTrainingRows] = useState<TrainingRow[]>([]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
 
   const selectedCourse = searchParams.get("course") || "ALL";
+  const dueWindow = searchParams.get("dueWindow");
+  const statusParam = searchParams.get("status");
 
   const load = async () => {
     setState("loading");
@@ -122,6 +126,20 @@ const QMSTrainingPage: React.FC = () => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (statusParam === "overdue") {
+      setStatusFilter("OVERDUE");
+      return;
+    }
+    if (statusParam === "due") {
+      setStatusFilter("DUE_SOON");
+      return;
+    }
+    if (!statusParam || statusParam === "all") {
+      setStatusFilter("ALL");
+    }
+  }, [statusParam]);
 
   const courseOptions = useMemo(() => {
     const uniqueCourseIds = new Set(trainingRows.map((row) => row.item.course_id));
@@ -168,6 +186,13 @@ const QMSTrainingPage: React.FC = () => {
     return trainingRows.filter((row) => {
       if (selectedCourse !== "ALL" && row.item.course_id !== selectedCourse) return false;
       if (statusFilter !== "ALL" && row.item.status !== statusFilter) return false;
+      if (dueWindow) {
+        const days = row.item.days_until_due;
+        if (dueWindow === "now" && !(days !== null && days < 0)) return false;
+        if (dueWindow === "today" && days !== 0) return false;
+        if (dueWindow === "week" && !(days !== null && days >= 0 && days <= 7)) return false;
+        if (dueWindow === "month" && !(days !== null && days >= 0 && days <= 30)) return false;
+      }
       if (
         q &&
         !row.user.full_name.toLowerCase().includes(q) &&
@@ -456,6 +481,7 @@ const QMSTrainingPage: React.FC = () => {
                     <th>Due date</th>
                     <th>Time left</th>
                     <th>Upcoming event</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -470,7 +496,16 @@ const QMSTrainingPage: React.FC = () => {
                       }
                     >
                       <td>
-                        <strong>{row.user.full_name}</strong>
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigate(`/maintenance/${amoSlug}/admin/users/${row.user.id}`);
+                          }}
+                        >
+                          <strong>{row.user.full_name}</strong>
+                        </button>
                         <div className="text-muted">{row.user.position_title || "Staff"}</div>
                       </td>
                       <td>
@@ -488,11 +523,28 @@ const QMSTrainingPage: React.FC = () => {
                           ? formatDate(row.item.upcoming_event_date)
                           : "—"}
                       </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary-chip-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setPanelContext({
+                              type: "training",
+                              userId: row.user.id,
+                              courseId: row.item.course_id,
+                              courseName: row.item.course_name,
+                            });
+                          }}
+                        >
+                          Quick actions
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {filteredRows.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="text-muted">
+                      <td colSpan={7} className="text-muted">
                         No training records match the selected filters.
                       </td>
                     </tr>
@@ -501,6 +553,11 @@ const QMSTrainingPage: React.FC = () => {
               </table>
             </div>
           </div>
+          <ActionPanel
+            isOpen={!!panelContext}
+            context={panelContext}
+            onClose={() => setPanelContext(null)}
+          />
           </section>
         )}
       </div>

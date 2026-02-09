@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import QMSLayout from "../components/QMS/QMSLayout";
 import { listMyTasks, updateTask, type TaskItem } from "../services/tasks";
@@ -10,6 +10,7 @@ const MyTasksPage: React.FC = () => {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     let active = true;
@@ -33,15 +34,33 @@ const MyTasksPage: React.FC = () => {
     };
   }, []);
 
-  const rows = useMemo(
-    () =>
-      [...tasks].sort((a, b) => {
+  const rows = useMemo(() => {
+    const dueWindow = searchParams.get("dueWindow");
+    const now = new Date();
+    return [...tasks]
+      .filter((task) => {
+        if (!dueWindow) return true;
+        if (!task.due_at) return false;
+        const due = new Date(task.due_at);
+        if (dueWindow === "today") {
+          return due.toDateString() === now.toDateString();
+        }
+        if (dueWindow === "week") {
+          const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+          return diff >= 0 && diff <= 7;
+        }
+        if (dueWindow === "month") {
+          const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+          return diff >= 0 && diff <= 30;
+        }
+        return true;
+      })
+      .sort((a, b) => {
         const aDue = a.due_at ? Date.parse(a.due_at) : Number.POSITIVE_INFINITY;
         const bDue = b.due_at ? Date.parse(b.due_at) : Number.POSITIVE_INFINITY;
         return aDue - bDue;
-      }),
-    [tasks]
-  );
+      });
+  }, [tasks, searchParams]);
 
   const handleMarkDone = async (taskId: string) => {
     try {
