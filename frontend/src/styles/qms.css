@@ -3,9 +3,10 @@
 .qms-shell {
   background: var(--surface);
   border-radius: var(--r-lg);
-  padding: var(--s-5);
+  padding: var(--s-4);
   border: 1px solid var(--border);
   min-height: calc(100vh - 160px);
+  width: 100%;
 }
 
 .qms-header {
