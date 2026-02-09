@@ -418,6 +418,7 @@ const AdminAmoManagementPage: React.FC = () => {
       await syncAdminContext(selectedAmo.id);
       const updated = nextEnabled
         ? await enableTenantModule(selectedAmo.id, moduleCode, {
+            module_code: moduleCode,
             status: "ENABLED",
           })
         : await disableTenantModule(selectedAmo.id, moduleCode);
