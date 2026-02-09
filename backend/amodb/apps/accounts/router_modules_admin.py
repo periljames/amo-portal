@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
-from amodb.security import get_current_active_user, require_admin
+from amodb.security import get_current_active_user
 from amodb.apps.audit import services as audit_services
 from amodb.apps.audit import schemas as audit_schemas
 
@@ -17,7 +17,29 @@ from amodb.apps.finance import services as finance_services
 
 router = APIRouter(prefix="/admin/tenants", tags=["modules_admin"])
 
-ALLOWED_MODULES = {"finance_inventory"}
+
+def _require_superuser(current_user: models.User) -> models.User:
+    if getattr(current_user, "is_system_account", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System/service accounts cannot use superuser endpoints.",
+        )
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superuser privileges required.",
+        )
+    return current_user
+
+ALLOWED_MODULES = {
+    "finance_inventory",
+    "fleet",
+    "maintenance_program",
+    "quality",
+    "reliability",
+    "training",
+    "work",
+}
 
 
 def _resolve_tenant(db: Session, *, tenant_id: str) -> models.AMO:
@@ -81,6 +103,7 @@ def list_modules(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
+    _require_superuser(current_user)
     _ensure_access(current_user, tenant_id)
     _resolve_tenant(db, tenant_id=tenant_id)
     return (
@@ -101,8 +124,9 @@ def enable_module(
     module_code: str,
     payload: Optional[schemas.ModuleSubscriptionCreate] = None,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
+    current_user: models.User = Depends(get_current_active_user),
 ):
+    _require_superuser(current_user)
     _ensure_access(current_user, tenant_id)
     _resolve_tenant(db, tenant_id=tenant_id)
     if module_code not in ALLOWED_MODULES:
@@ -120,7 +144,8 @@ def enable_module(
     )
 
     account_services.seed_default_departments(db, amo_id=tenant_id)
-    finance_services.ensure_finance_defaults(db, amo_id=tenant_id)
+    if module_code == "finance_inventory":
+        finance_services.ensure_finance_defaults(db, amo_id=tenant_id)
 
     audit_services.create_audit_event(
         db,
@@ -147,8 +172,9 @@ def disable_module(
     tenant_id: str,
     module_code: str,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
+    current_user: models.User = Depends(get_current_active_user),
 ):
+    _require_superuser(current_user)
     _ensure_access(current_user, tenant_id)
     _resolve_tenant(db, tenant_id=tenant_id)
     if module_code not in ALLOWED_MODULES:
