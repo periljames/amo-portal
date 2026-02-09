@@ -20,7 +20,6 @@ export interface ModuleSubscriptionRead {
 }
 
 export interface ModuleSubscriptionCreate {
-  module_code: string;
   status: ModuleSubscriptionStatus;
   plan_code?: string | null;
   effective_from?: string | null;

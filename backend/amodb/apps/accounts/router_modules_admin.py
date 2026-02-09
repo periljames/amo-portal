@@ -144,7 +144,8 @@ def enable_module(
     )
 
     account_services.seed_default_departments(db, amo_id=tenant_id)
-    finance_services.ensure_finance_defaults(db, amo_id=tenant_id)
+    if module_code == "finance_inventory":
+        finance_services.ensure_finance_defaults(db, amo_id=tenant_id)
 
     audit_services.create_audit_event(
         db,
