@@ -182,6 +182,7 @@ class UserCreate(UserBase):
     department_id: Optional[str] = None
     staff_code: str
     password: str
+    is_auditor: Optional[bool] = None
 
 
 class UserUpdate(BaseModel):
@@ -201,6 +202,7 @@ class UserUpdate(BaseModel):
 
     is_active: Optional[bool] = None
     is_amo_admin: Optional[bool] = None
+    is_auditor: Optional[bool] = None
 
 
 class UserSelfUpdate(BaseModel):
@@ -227,6 +229,7 @@ class UserRead(UserBase):
     is_active: bool
     is_superuser: bool
     is_amo_admin: bool
+    is_auditor: bool
     must_change_password: bool
     last_login_at: Optional[datetime] = None
     last_login_ip: Optional[str] = None

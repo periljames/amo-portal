@@ -13,6 +13,7 @@ import { getApiBaseUrl } from "./config";
 
 export type QMSDocumentStatus = "DRAFT" | "ACTIVE" | "OBSOLETE";
 export type QMSAuditStatus = "PLANNED" | "IN_PROGRESS" | "CAP_OPEN" | "CLOSED";
+export type QMSAuditScheduleFrequency = "MONTHLY" | "ANNUAL";
 export type QMSChangeRequestStatus =
   | "SUBMITTED"
   | "UNDER_REVIEW"
@@ -73,10 +74,69 @@ export interface QMSAuditOut {
   status: QMSAuditStatus;
   audit_ref: string;
   title: string;
+  scope?: string | null;
+  criteria?: string | null;
+  auditee?: string | null;
+  auditee_email?: string | null;
+  auditee_user_id?: string | null;
+  lead_auditor_user_id?: string | null;
+  observer_auditor_user_id?: string | null;
+  assistant_auditor_user_id?: string | null;
   planned_start: string | null; // YYYY-MM-DD
   planned_end: string | null; // YYYY-MM-DD
+  actual_start?: string | null;
+  actual_end?: string | null;
+  report_file_ref?: string | null;
+  checklist_file_ref?: string | null;
+  retention_until?: string | null;
+  upcoming_notice_sent_at?: string | null;
+  day_of_notice_sent_at?: string | null;
   updated_at: string; // ISO datetime
   created_at: string; // ISO datetime
+}
+
+export interface QMSAuditScheduleOut {
+  id: string;
+  domain: string;
+  kind: string;
+  frequency: QMSAuditScheduleFrequency;
+  title: string;
+  scope?: string | null;
+  criteria?: string | null;
+  auditee?: string | null;
+  auditee_email?: string | null;
+  auditee_user_id?: string | null;
+  lead_auditor_user_id?: string | null;
+  observer_auditor_user_id?: string | null;
+  assistant_auditor_user_id?: string | null;
+  duration_days: number;
+  next_due_date: string;
+  last_run_at?: string | null;
+  is_active: boolean;
+  created_by_user_id?: string | null;
+  created_at: string;
+}
+
+export interface QMSFindingOut {
+  id: string;
+  audit_id: string;
+  finding_ref?: string | null;
+  finding_type: string;
+  severity: string;
+  level: string;
+  requirement_ref?: string | null;
+  description: string;
+  objective_evidence?: string | null;
+  safety_sensitive: boolean;
+  target_close_date?: string | null;
+  closed_at?: string | null;
+  verified_at?: string | null;
+  verified_by_user_id?: string | null;
+  acknowledged_at?: string | null;
+  acknowledged_by_user_id?: string | null;
+  acknowledged_by_name?: string | null;
+  acknowledged_by_email?: string | null;
+  created_at: string;
 }
 
 export interface CAROut {
@@ -153,6 +213,28 @@ function downloadEvidencePack(path: string): Promise<Blob> {
 
     xhr.send();
   });
+}
+
+async function downloadBinary(path: string): Promise<Blob> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "GET",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: "include",
+  });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+  }
+  return res.blob();
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -255,6 +337,153 @@ export async function qmsListAudits(params?: {
   kind?: string;
 }): Promise<QMSAuditOut[]> {
   return fetchJson<QMSAuditOut[]>(`/quality/audits${toQuery(params ?? {})}`);
+}
+
+export async function qmsListAuditSchedules(params?: {
+  domain?: string;
+  active?: boolean;
+}): Promise<QMSAuditScheduleOut[]> {
+  return fetchJson<QMSAuditScheduleOut[]>(
+    `/quality/audits/schedules${toQuery(params ?? {})}`
+  );
+}
+
+export async function qmsCreateAuditSchedule(payload: {
+  domain: string;
+  kind: string;
+  frequency: QMSAuditScheduleFrequency;
+  title: string;
+  scope?: string | null;
+  criteria?: string | null;
+  auditee?: string | null;
+  auditee_email?: string | null;
+  auditee_user_id?: string | null;
+  lead_auditor_user_id?: string | null;
+  observer_auditor_user_id?: string | null;
+  assistant_auditor_user_id?: string | null;
+  duration_days: number;
+  next_due_date: string;
+}): Promise<QMSAuditScheduleOut> {
+  return sendJson<QMSAuditScheduleOut>(
+    "/quality/audits/schedules",
+    "POST",
+    payload
+  );
+}
+
+export async function qmsRunAuditSchedule(
+  scheduleId: string
+): Promise<QMSAuditOut> {
+  return sendJson<QMSAuditOut>(
+    `/quality/audits/schedules/${scheduleId}/run`,
+    "POST",
+    {}
+  );
+}
+
+export async function qmsRunAuditReminders(upcomingDays: number): Promise<{
+  day_of_sent: number;
+  upcoming_sent: number;
+}> {
+  return sendJson<{ day_of_sent: number; upcoming_sent: number }>(
+    `/quality/audits/reminders/run?upcoming_days=${upcomingDays}`,
+    "POST",
+    {}
+  );
+}
+
+export async function qmsUploadAuditChecklist(
+  auditId: string,
+  file: File
+): Promise<QMSAuditOut> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/quality/audits/${auditId}/checklist`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+    credentials: "include",
+  });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+  }
+  return (await res.json()) as QMSAuditOut;
+}
+
+export async function qmsDownloadAuditChecklist(auditId: string): Promise<Blob> {
+  return downloadBinary(`/quality/audits/${auditId}/checklist`);
+}
+
+export async function qmsUploadAuditReport(
+  auditId: string,
+  file: File
+): Promise<QMSAuditOut> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/quality/audits/${auditId}/report`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+    credentials: "include",
+  });
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+  }
+  return (await res.json()) as QMSAuditOut;
+}
+
+export async function qmsDownloadAuditReport(auditId: string): Promise<Blob> {
+  return downloadBinary(`/quality/audits/${auditId}/report`);
+}
+
+export async function qmsListFindings(auditId: string): Promise<QMSFindingOut[]> {
+  return fetchJson<QMSFindingOut[]>(`/quality/audits/${auditId}/findings`);
+}
+
+export async function qmsVerifyFinding(
+  findingId: string,
+  payload: { objective_evidence?: string | null }
+): Promise<QMSFindingOut> {
+  return sendJson<QMSFindingOut>(
+    `/quality/findings/${findingId}/verify`,
+    "POST",
+    payload
+  );
+}
+
+export async function qmsCloseFinding(findingId: string): Promise<QMSFindingOut> {
+  return sendJson<QMSFindingOut>(`/quality/findings/${findingId}/close`, "POST", {});
+}
+
+export async function qmsAcknowledgeFinding(
+  findingId: string,
+  payload: { acknowledged_by_name?: string; acknowledged_by_email?: string }
+): Promise<QMSFindingOut> {
+  return sendJson<QMSFindingOut>(
+    `/quality/findings/${findingId}/ack`,
+    "POST",
+    payload
+  );
 }
 
 export async function qmsListCars(params?: {

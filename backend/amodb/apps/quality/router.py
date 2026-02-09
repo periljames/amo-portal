@@ -1,7 +1,8 @@
 # backend/amodb/apps/quality/router.py
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, timedelta
+import calendar
 from pathlib import Path
 import shutil
 from typing import Optional, List
@@ -42,7 +43,8 @@ from .schemas import (
     QMSDistributionCreate, QMSDistributionOut,
     QMSChangeRequestCreate, QMSChangeRequestUpdate, QMSChangeRequestOut,
     QMSAuditCreate, QMSAuditUpdate, QMSAuditOut,
-    QMSFindingCreate, QMSFindingOut, QMSFindingVerify,
+    QMSFindingCreate, QMSFindingOut, QMSFindingVerify, QMSFindingAcknowledge,
+    QMSAuditScheduleCreate, QMSAuditScheduleOut,
     QMSCAPUpsert, QMSCAPOut,
 )
 from .enums import CARStatus, QMSDomain, QMSAuditStatus
@@ -68,6 +70,14 @@ CAR_ATTACHMENT_DIR = Path(__file__).resolve().parents[2] / "generated" / "qualit
 CAR_ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
 MAX_CAR_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
+AUDIT_CHECKLIST_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "audit_checklists"
+AUDIT_CHECKLIST_DIR.mkdir(parents=True, exist_ok=True)
+MAX_AUDIT_CHECKLIST_BYTES = 15 * 1024 * 1024
+
+AUDIT_REPORT_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "audit_reports"
+AUDIT_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+MAX_AUDIT_REPORT_BYTES = 25 * 1024 * 1024
+
 
 def _audit_metadata(request: Request) -> dict:
     return {
@@ -81,6 +91,33 @@ def _date_to_datetime(value: Optional[date]) -> Optional[datetime]:
     if value is None:
         return None
     return datetime.combine(value, time.min, tzinfo=timezone.utc)
+
+
+def _generate_schedule_audit_ref(schedule: models.QMSAuditSchedule, target_date: date, db: Session) -> str:
+    base = f"SCH-{str(schedule.id)[:8]}-{target_date.strftime('%Y%m')}"
+    candidate = base
+    suffix = 1
+    while (
+        db.query(models.QMSAudit)
+        .filter(models.QMSAudit.domain == schedule.domain, models.QMSAudit.audit_ref == candidate)
+        .first()
+    ):
+        suffix += 1
+        candidate = f"{base}-{suffix}"
+    return candidate
+
+
+def _advance_schedule_date(schedule: models.QMSAuditSchedule, base_date: date) -> date:
+    if schedule.frequency == models.QMSAuditScheduleFrequency.MONTHLY:
+        year = base_date.year + (1 if base_date.month == 12 else 0)
+        month = 1 if base_date.month == 12 else base_date.month + 1
+        day = min(base_date.day, calendar.monthrange(year, month)[1])
+        return date(year, month, day)
+    if schedule.frequency == models.QMSAuditScheduleFrequency.ANNUAL:
+        year = base_date.year + 1
+        day = min(base_date.day, calendar.monthrange(year, base_date.month)[1])
+        return date(year, base_date.month, day)
+    return base_date
 
 
 def _serialize_attachment(invite_token: str, attachment: models.CARAttachment) -> CARAttachmentOut:
@@ -116,14 +153,19 @@ def _notify_user(db: Session, user_id: Optional[str], message: str, severity=mod
 
 
 def _is_quality_admin(current_user: account_models.User) -> bool:
+    role_value = getattr(current_user, "role", None)
+    role_value = getattr(role_value, "value", role_value)
     return bool(
         getattr(current_user, "is_superuser", False)
         or getattr(current_user, "is_amo_admin", False)
-        or current_user.role
+        or role_value
         in {
             account_models.AccountRole.SUPERUSER,
             account_models.AccountRole.AMO_ADMIN,
             account_models.AccountRole.QUALITY_MANAGER,
+            "SUPERUSER",
+            "AMO_ADMIN",
+            "QUALITY_MANAGER",
         }
     )
 
@@ -152,6 +194,21 @@ def _audit_allows_user_by_audit(audit: models.QMSAudit, user_id: str) -> bool:
         audit.observer_auditor_user_id,
         audit.assistant_auditor_user_id,
     }
+
+
+def _require_audit_access(
+    current_user: account_models.User,
+    audit: models.QMSAudit,
+    *,
+    allow_auditee: bool = False,
+) -> None:
+    if _is_quality_admin(current_user):
+        return
+    if _audit_allows_user_by_audit(audit, current_user.id):
+        return
+    if allow_auditee and audit.auditee_user_id == current_user.id:
+        return
+    raise HTTPException(status_code=403, detail="Insufficient privileges to modify audit data")
 
 
 def _require_car_write_access(
@@ -619,6 +676,7 @@ def create_audit(
         criteria=payload.criteria,
         auditee=payload.auditee,
         auditee_email=payload.auditee_email,
+        auditee_user_id=payload.auditee_user_id,
         lead_auditor_user_id=payload.lead_auditor_user_id,
         observer_auditor_user_id=payload.observer_auditor_user_id,
         assistant_auditor_user_id=payload.assistant_auditor_user_id,
@@ -649,13 +707,236 @@ def list_audits(
     db: Session = Depends(get_db),
     domain: Optional[QMSDomain] = None,
     status_: Optional[models.QMSAuditStatus] = None,
+    kind: Optional[models.QMSAuditKind] = None,
 ):
     qs = db.query(models.QMSAudit)
     if domain:
         qs = qs.filter(models.QMSAudit.domain == domain)
     if status_:
         qs = qs.filter(models.QMSAudit.status == status_)
+    if kind:
+        qs = qs.filter(models.QMSAudit.kind == kind)
     return qs.order_by(models.QMSAudit.created_at.desc()).all()
+
+
+@router.get("/audits/schedules", response_model=List[QMSAuditScheduleOut])
+def list_audit_schedules(
+    db: Session = Depends(get_db),
+    domain: Optional[QMSDomain] = None,
+    active: Optional[bool] = None,
+):
+    qs = db.query(models.QMSAuditSchedule)
+    if domain:
+        qs = qs.filter(models.QMSAuditSchedule.domain == domain)
+    if active is not None:
+        qs = qs.filter(models.QMSAuditSchedule.is_active.is_(active))
+    return qs.order_by(models.QMSAuditSchedule.next_due_date.asc()).all()
+
+
+@router.post("/audits/schedules", response_model=QMSAuditScheduleOut, status_code=status.HTTP_201_CREATED)
+def create_audit_schedule(
+    payload: QMSAuditScheduleCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    schedule = models.QMSAuditSchedule(
+        domain=payload.domain,
+        kind=payload.kind,
+        frequency=payload.frequency,
+        title=payload.title.strip(),
+        scope=payload.scope,
+        criteria=payload.criteria,
+        auditee=payload.auditee,
+        auditee_email=payload.auditee_email,
+        auditee_user_id=payload.auditee_user_id,
+        lead_auditor_user_id=payload.lead_auditor_user_id,
+        observer_auditor_user_id=payload.observer_auditor_user_id,
+        assistant_auditor_user_id=payload.assistant_auditor_user_id,
+        duration_days=payload.duration_days,
+        next_due_date=payload.next_due_date,
+        created_by_user_id=get_actor(),
+    )
+    db.add(schedule)
+    db.flush()
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit_schedule",
+        entity_id=str(schedule.id),
+        action="create",
+        after={
+            "frequency": schedule.frequency.value,
+            "next_due_date": str(schedule.next_due_date),
+            "title": schedule.title,
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
+    db.commit()
+    db.refresh(schedule)
+    return schedule
+
+
+@router.post("/audits/schedules/{schedule_id}/run", response_model=QMSAuditOut)
+def run_audit_schedule(
+    schedule_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    schedule = (
+        db.query(models.QMSAuditSchedule)
+        .filter(models.QMSAuditSchedule.id == schedule_id)
+        .first()
+    )
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Audit schedule not found")
+    if not schedule.is_active:
+        raise HTTPException(status_code=400, detail="Audit schedule is inactive")
+
+    planned_start = schedule.next_due_date
+    planned_end = planned_start + timedelta(days=max(schedule.duration_days, 1) - 1)
+    audit_ref = _generate_schedule_audit_ref(schedule, planned_start, db)
+    audit = models.QMSAudit(
+        domain=schedule.domain,
+        kind=schedule.kind,
+        audit_ref=audit_ref,
+        title=schedule.title,
+        scope=schedule.scope,
+        criteria=schedule.criteria,
+        auditee=schedule.auditee,
+        auditee_email=schedule.auditee_email,
+        auditee_user_id=schedule.auditee_user_id,
+        lead_auditor_user_id=schedule.lead_auditor_user_id,
+        observer_auditor_user_id=schedule.observer_auditor_user_id,
+        assistant_auditor_user_id=schedule.assistant_auditor_user_id,
+        planned_start=planned_start,
+        planned_end=planned_end,
+        created_by_user_id=get_actor(),
+    )
+    db.add(audit)
+    db.flush()
+
+    schedule.last_run_at = datetime.now(timezone.utc)
+    schedule.next_due_date = _advance_schedule_date(schedule, schedule.next_due_date)
+
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit",
+        entity_id=str(audit.id),
+        action="create",
+        after={"audit_ref": audit.audit_ref, "status": audit.status.value, "title": audit.title},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit_schedule",
+        entity_id=str(schedule.id),
+        action="run",
+        after={
+            "audit_id": str(audit.id),
+            "audit_ref": audit.audit_ref,
+            "next_due_date": str(schedule.next_due_date),
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
+    db.commit()
+    db.refresh(audit)
+    return audit
+
+
+@router.post("/audits/reminders/run")
+def run_audit_reminders(
+    request: Request,
+    upcoming_days: int = 7,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    if upcoming_days < 1 or upcoming_days > 90:
+        raise HTTPException(status_code=400, detail="Upcoming days must be between 1 and 90")
+    today = date.today()
+    upcoming_end = today + timedelta(days=upcoming_days)
+
+    audits = (
+        db.query(models.QMSAudit)
+        .filter(
+            models.QMSAudit.status == models.QMSAuditStatus.PLANNED,
+            models.QMSAudit.planned_start.isnot(None),
+            models.QMSAudit.planned_start <= upcoming_end,
+        )
+        .all()
+    )
+
+    day_of_sent = 0
+    upcoming_sent = 0
+
+    for audit in audits:
+        planned_start = audit.planned_start
+        if not planned_start:
+            continue
+
+        if planned_start == today:
+            already = audit.day_of_notice_sent_at and audit.day_of_notice_sent_at.date() == today
+            if not already:
+                message = f"Audit {audit.audit_ref} ({audit.title}) is scheduled for today."
+                for target in (
+                    audit.auditee_user_id,
+                    audit.lead_auditor_user_id,
+                    audit.observer_auditor_user_id,
+                    audit.assistant_auditor_user_id,
+                ):
+                    _notify_user(db, target, message, models.QMSNotificationSeverity.ACTION_REQUIRED)
+                audit.day_of_notice_sent_at = datetime.now(timezone.utc)
+                audit_services.log_event(
+                    db,
+                    amo_id=current_user.amo_id,
+                    actor_user_id=current_user.id,
+                    entity_type="qms_audit",
+                    entity_id=str(audit.id),
+                    action="notify_day_of",
+                    after={"planned_start": str(planned_start)},
+                    correlation_id=str(uuid.uuid4()),
+                    metadata=_audit_metadata(request),
+                )
+                day_of_sent += 1
+            continue
+
+        if planned_start > today and audit.upcoming_notice_sent_at is None:
+            message = (
+                f"Upcoming audit {audit.audit_ref} ({audit.title}) is scheduled for "
+                f"{planned_start.isoformat()}."
+            )
+            for target in (
+                audit.auditee_user_id,
+                audit.lead_auditor_user_id,
+                audit.observer_auditor_user_id,
+                audit.assistant_auditor_user_id,
+            ):
+                _notify_user(db, target, message, models.QMSNotificationSeverity.INFO)
+            audit.upcoming_notice_sent_at = datetime.now(timezone.utc)
+            audit_services.log_event(
+                db,
+                amo_id=current_user.amo_id,
+                actor_user_id=current_user.id,
+                entity_type="qms_audit",
+                entity_id=str(audit.id),
+                action="notify_upcoming",
+                after={"planned_start": str(planned_start)},
+                correlation_id=str(uuid.uuid4()),
+                metadata=_audit_metadata(request),
+            )
+            upcoming_sent += 1
+
+    db.commit()
+    return {"day_of_sent": day_of_sent, "upcoming_sent": upcoming_sent}
 
 
 @router.get("/audits/{audit_id}/evidence-pack")
@@ -679,6 +960,134 @@ def export_audit_evidence_pack(
     )
 
 
+@router.post("/audits/{audit_id}/checklist", response_model=QMSAuditOut)
+def upload_audit_checklist(
+    audit_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    _require_audit_access(current_user, audit)
+
+    original_name = Path(file.filename or "checklist").name
+    unique_name = f"{uuid.uuid4().hex}_{original_name}"
+    target_dir = AUDIT_CHECKLIST_DIR / str(audit.id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / unique_name
+
+    with target_path.open("wb") as handle:
+        shutil.copyfileobj(file.file, handle)
+
+    size_bytes = target_path.stat().st_size
+    if size_bytes > MAX_AUDIT_CHECKLIST_BYTES:
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=413, detail="Checklist exceeds the 15MB limit.")
+
+    audit.checklist_file_ref = str(target_path)
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit",
+        entity_id=str(audit.id),
+        action="upload_checklist",
+        after={"checklist_file_ref": audit.checklist_file_ref},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request) if request else None,
+    )
+    db.commit()
+    db.refresh(audit)
+    return audit
+
+
+@router.get("/audits/{audit_id}/checklist", response_class=FileResponse)
+def download_audit_checklist(
+    audit_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
+    if not audit or not audit.checklist_file_ref:
+        raise HTTPException(status_code=404, detail="Checklist not found")
+    _require_audit_access(current_user, audit, allow_auditee=True)
+    file_path = Path(audit.checklist_file_ref)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Checklist file missing on server.")
+    return FileResponse(
+        path=file_path,
+        filename=file_path.name,
+        media_type="application/octet-stream",
+    )
+
+
+@router.post("/audits/{audit_id}/report", response_model=QMSAuditOut)
+def upload_audit_report(
+    audit_id: UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    _require_audit_access(current_user, audit)
+
+    original_name = Path(file.filename or "report").name
+    unique_name = f"{uuid.uuid4().hex}_{original_name}"
+    target_dir = AUDIT_REPORT_DIR / str(audit.id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / unique_name
+
+    with target_path.open("wb") as handle:
+        shutil.copyfileobj(file.file, handle)
+
+    size_bytes = target_path.stat().st_size
+    if size_bytes > MAX_AUDIT_REPORT_BYTES:
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=413, detail="Report exceeds the 25MB limit.")
+
+    audit.report_file_ref = str(target_path)
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit",
+        entity_id=str(audit.id),
+        action="upload_report",
+        after={"report_file_ref": audit.report_file_ref},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
+    db.commit()
+    db.refresh(audit)
+    return audit
+
+
+@router.get("/audits/{audit_id}/report", response_class=FileResponse)
+def download_audit_report(
+    audit_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
+    if not audit or not audit.report_file_ref:
+        raise HTTPException(status_code=404, detail="Report not found")
+    _require_audit_access(current_user, audit, allow_auditee=True)
+    file_path = Path(audit.report_file_ref)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Report file missing on server.")
+    return FileResponse(
+        path=file_path,
+        filename=file_path.name,
+        media_type="application/octet-stream",
+    )
+
+
 @router.patch("/audits/{audit_id}", response_model=QMSAuditOut)
 def update_audit(
     audit_id: UUID,
@@ -692,11 +1101,12 @@ def update_audit(
         raise HTTPException(status_code=404, detail="Audit not found")
     before_status = audit.status.value
     before = {"status": before_status, "title": audit.title}
+    planned_start_changed = False
 
     for field in (
         "status", "scope", "criteria", "auditee", "auditee_email",
         "planned_start", "planned_end", "actual_start", "actual_end",
-        "report_file_ref",
+        "report_file_ref", "checklist_file_ref", "auditee_user_id",
         "lead_auditor_user_id",
         "observer_auditor_user_id",
         "assistant_auditor_user_id",
@@ -704,6 +1114,12 @@ def update_audit(
         val = getattr(payload, field)
         if val is not None:
             setattr(audit, field, val)
+            if field == "planned_start":
+                planned_start_changed = True
+
+    if planned_start_changed:
+        audit.upcoming_notice_sent_at = None
+        audit.day_of_notice_sent_at = None
 
     # If closing, set retention_until = +5 years (if not already set)
     if payload.status == QMSAuditStatus.CLOSED and audit.retention_until is None:
@@ -850,6 +1266,9 @@ def close_finding(
     finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
+    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
+    if audit:
+        _require_audit_access(current_user, audit)
     if not finding.closed_at:
         before_state = "OPEN"
         finding.closed_at = func.now()
@@ -900,6 +1319,9 @@ def verify_finding(
     finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
+    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
+    if audit:
+        _require_audit_access(current_user, audit)
 
     if payload.objective_evidence is not None:
         finding.objective_evidence = payload.objective_evidence
@@ -921,6 +1343,56 @@ def verify_finding(
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
         critical=True,
+    )
+
+    db.commit()
+    db.refresh(finding)
+    return finding
+
+
+@router.post("/findings/{finding_id}/ack", response_model=QMSFindingOut)
+def acknowledge_finding(
+    finding_id: UUID,
+    payload: QMSFindingAcknowledge,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+
+    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
+    if audit:
+        _require_audit_access(current_user, audit, allow_auditee=True)
+
+    finding.acknowledged_at = payload.acknowledged_at or func.now()
+    finding.acknowledged_by_user_id = current_user.id
+    finding.acknowledged_by_name = payload.acknowledged_by_name or current_user.full_name
+    finding.acknowledged_by_email = payload.acknowledged_by_email or current_user.email
+
+    if audit:
+        note_msg = f"Finding {finding.finding_ref or finding.id} acknowledged by {finding.acknowledged_by_name}."
+        for auditor_id in (
+            audit.lead_auditor_user_id,
+            audit.observer_auditor_user_id,
+            audit.assistant_auditor_user_id,
+        ):
+            _notify_user(db, auditor_id, note_msg, models.QMSNotificationSeverity.INFO)
+
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_finding",
+        entity_id=str(finding.id),
+        action="acknowledge",
+        after={
+            "acknowledged_at": str(finding.acknowledged_at),
+            "acknowledged_by_user_id": finding.acknowledged_by_user_id,
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
     )
 
     db.commit()
@@ -1690,12 +2162,14 @@ def review_car_response(
         raise HTTPException(status_code=404, detail="No CAR response found for review")
 
     note_msg = None
+    status_update = None
     if payload.root_cause_status == "REJECTED":
         latest_response.status = models.CARResponseStatus.ROOT_CAUSE_REJECTED
         note_msg = (
             f"Root cause rejected for CAR {car.car_number}. "
             "CAP/PAP rejected automatically. Please resubmit with corrections."
         )
+        status_update = models.CARStatus.IN_PROGRESS
     elif payload.root_cause_status == "ACCEPTED":
         latest_response.status = models.CARResponseStatus.ROOT_CAUSE_ACCEPTED
         note_msg = f"Root cause accepted for CAR {car.car_number}."
@@ -1705,9 +2179,21 @@ def review_car_response(
                 f"CAP/PAP rejected for CAR {car.car_number}. "
                 "Please resubmit the CAR response with corrections."
             )
+            status_update = models.CARStatus.IN_PROGRESS
         elif payload.cap_status == "ACCEPTED":
             latest_response.status = models.CARResponseStatus.CAP_ACCEPTED
             note_msg = f"CAP/PAP accepted for CAR {car.car_number}."
+            status_update = models.CARStatus.PENDING_VERIFICATION
+
+    if status_update and car.status != status_update:
+        car.status = status_update
+        add_car_action(
+            db=db,
+            car=car,
+            action_type=models.CARActionType.STATUS_CHANGE,
+            message=f"Status changed to {car.status}",
+            actor_user_id=get_actor(),
+        )
 
     if payload.message:
         add_car_action(
