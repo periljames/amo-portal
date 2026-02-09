@@ -1,0 +1,39 @@
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.6);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 9998;
+}
+
+.drawer {
+  width: min(420px, 90vw);
+  height: 100%;
+  background: var(--surface-elevated, var(--surface));
+  border-left: 1px solid var(--border);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+
+.drawer__title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.drawer__close {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.2rem;
+}
