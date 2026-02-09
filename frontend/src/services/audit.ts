@@ -44,8 +44,11 @@ export async function listAuditEvents(params: {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
+    if (resp.status === 401) {
       handleAuthFailure();
+    }
+    if (resp.status === 403) {
+      throw new Error("Access denied.");
     }
     throw new Error("Failed to load audit history.");
   }

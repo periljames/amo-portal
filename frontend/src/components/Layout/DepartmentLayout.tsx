@@ -436,6 +436,11 @@ const DepartmentLayout: React.FC<Props> = ({
     );
   }, []);
 
+  const isForbiddenError = useCallback((err: unknown): boolean => {
+    const message = err instanceof Error ? err.message : String(err);
+    return message.includes("403") || message.toLowerCase().includes("forbidden");
+  }, []);
+
   const refreshSubscription = useCallback(async () => {
     try {
       const sub = await fetchSubscription();
@@ -463,14 +468,34 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const refreshUnreadNotifications = useCallback(async () => {
     if (!currentUser) return;
-    const trainingPromise = listTrainingNotifications({
-      unread_only: true,
-      limit: 100,
-    }).then((data) => {
-      setUnreadNotifications(data.length);
-    });
-    await Promise.all([trainingPromise, qmsListNotifications(), listDocumentAlerts()]);
-  }, [currentUser]);
+    const handleModuleCall = async <T,>(
+      promise: Promise<T>,
+      onSuccess?: (value: T) => void,
+      onForbidden?: () => void
+    ) => {
+      try {
+        const data = await promise;
+        onSuccess?.(data);
+      } catch (err) {
+        if (isForbiddenError(err)) {
+          onForbidden?.();
+          return;
+        }
+        throw err;
+      }
+    };
+
+    const trainingPromise = handleModuleCall(
+      listTrainingNotifications({ unread_only: true, limit: 100 }),
+      (data) => setUnreadNotifications(data.length),
+      () => setUnreadNotifications(0)
+    );
+
+    const qmsPromise = handleModuleCall(qmsListNotifications());
+    const documentsPromise = handleModuleCall(listDocumentAlerts());
+
+    await Promise.all([trainingPromise, qmsPromise, documentsPromise]);
+  }, [currentUser, isForbiddenError]);
 
   const handlePollingFailure = useCallback(
     (err: unknown) => {
