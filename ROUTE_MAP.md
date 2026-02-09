@@ -62,6 +62,7 @@
 - `/maintenance/:amoCode/admin/amo-profile`
 - `/maintenance/:amoCode/admin/users`
 - `/maintenance/:amoCode/admin/users/new`
+- `/maintenance/:amoCode/admin/users/:userId`
 - `/maintenance/:amoCode/admin/amo-assets`
 - `/maintenance/:amoCode/admin/billing`
 - `/maintenance/:amoCode/admin/invoices`
