@@ -6,6 +6,7 @@ import {
   createAdminUser,
   listAdminAmos,
   listAdminDepartments,
+  listStaffCodeSuggestions,
   setActiveAmoId,
   LS_ACTIVE_AMO_ID,
 } from "../services/adminUsers";
@@ -64,7 +65,6 @@ const AdminUserNewPage: React.FC = () => {
   }, [amoCode, ctx.amoCode]);
 
   const [form, setForm] = useState({
-    staffCode: "",
     firstName: "",
     lastName: "",
     email: "",
@@ -74,6 +74,11 @@ const AdminUserNewPage: React.FC = () => {
     password: "",
     confirmPassword: "",
   });
+  const [staffCodeOptions, setStaffCodeOptions] = useState<string[]>([]);
+  const [staffCodeLoading, setStaffCodeLoading] = useState(false);
+  const [staffCodeError, setStaffCodeError] = useState<string | null>(null);
+  const [selectedStaffCode, setSelectedStaffCode] = useState<string>("");
+  const [staffCodeSeed, setStaffCodeSeed] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [amos, setAmos] = useState<AdminAmoRead[]>([]);
   const [amoLoading, setAmoLoading] = useState(false);
@@ -91,6 +96,11 @@ const AdminUserNewPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const activeDepartments = useMemo(
+    () => departments.filter((dept) => dept.is_active),
+    [departments]
+  );
+
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
@@ -99,10 +109,8 @@ const AdminUserNewPage: React.FC = () => {
   };
 
   const validate = (): string | null => {
-    const staff = form.staffCode.trim();
     const email = form.email.trim();
 
-    if (!staff) return "Staff code is required.";
     if (!email) return "Email is required.";
     if (!form.firstName.trim() || !form.lastName.trim()) {
       return "First name and last name are required.";
@@ -129,11 +137,11 @@ const AdminUserNewPage: React.FC = () => {
     if (isSuperuser && !selectedAmoId) {
       return "Select an AMO for this user.";
     }
-    if (departments.length === 0) {
-      return "Create a department for this AMO before adding users.";
-    }
-    if (departments.length > 0 && !selectedDepartmentId) {
+    if (activeDepartments.length > 0 && !selectedDepartmentId) {
       return "Select a department for this user.";
+    }
+    if (!selectedStaffCode) {
+      return "Select a staff code suggestion before creating the user.";
     }
 
     return null;
@@ -219,8 +227,9 @@ const AdminUserNewPage: React.FC = () => {
       try {
         const data = await listAdminDepartments(targetAmoId);
         setDepartments(data);
-        if (!selectedDepartmentId && data.length > 0) {
-          setSelectedDepartmentId(data[0].id);
+        const active = data.filter((dept) => dept.is_active);
+        if (!selectedDepartmentId && active.length > 0) {
+          setSelectedDepartmentId(active[0].id);
         }
       } catch (err: any) {
         console.error("Failed to load departments", err);
@@ -232,6 +241,52 @@ const AdminUserNewPage: React.FC = () => {
 
     loadDepartments();
   }, [currentUser, isSuperuser, selectedAmoId]);
+
+  React.useEffect(() => {
+    const first = form.firstName.trim();
+    const last = form.lastName.trim();
+    const targetAmoId = isSuperuser ? selectedAmoId : currentUser?.amo_id;
+
+    if (!first || !last || !targetAmoId) {
+      setStaffCodeOptions([]);
+      setSelectedStaffCode("");
+      return;
+    }
+
+    setStaffCodeLoading(true);
+    setStaffCodeError(null);
+
+    const timer = window.setTimeout(() => {
+      listStaffCodeSuggestions({
+        first_name: first,
+        last_name: last,
+        amo_id: isSuperuser ? targetAmoId : undefined,
+      })
+        .then((data) => {
+          const suggestions = data.suggestions || [];
+          setStaffCodeOptions(suggestions);
+          setSelectedStaffCode((prev) =>
+            suggestions.includes(prev) ? prev : suggestions[0] || ""
+          );
+        })
+        .catch((err: any) => {
+          console.error("Failed to load staff code suggestions", err);
+          setStaffCodeError(err?.message || "Failed to load staff code suggestions.");
+          setStaffCodeOptions([]);
+          setSelectedStaffCode("");
+        })
+        .finally(() => setStaffCodeLoading(false));
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    form.firstName,
+    form.lastName,
+    isSuperuser,
+    selectedAmoId,
+    currentUser?.amo_id,
+    staffCodeSeed,
+  ]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -259,7 +314,7 @@ const AdminUserNewPage: React.FC = () => {
       const last = form.lastName.trim();
 
       const payload: AdminUserCreatePayload = {
-        staff_code: form.staffCode.trim().toUpperCase(),
+        staff_code: selectedStaffCode,
         email: form.email.trim().toLowerCase(),
         first_name: first,
         last_name: last,
@@ -328,33 +383,34 @@ const AdminUserNewPage: React.FC = () => {
       <PageHeader
         title={pageTitle}
         subtitle="Create an AMO user and assign their role and temporary password."
+        className="admin-page-header--centered"
       />
 
-      <Panel>
-        <form onSubmit={handleSubmit} className="form-grid">
+      <Panel className="admin-user-form">
+        <form onSubmit={handleSubmit} className="form-grid form-grid--two-column">
           {error && (
-            <InlineAlert tone="danger" title="Error">
+            <InlineAlert tone="danger" title="Error" className="form-row--span-2">
               <span>{error}</span>
             </InlineAlert>
           )}
           {success && (
-            <InlineAlert tone="success" title="Success">
+            <InlineAlert tone="success" title="Success" className="form-row--span-2">
               <span>{success}</span>
             </InlineAlert>
           )}
           {amoError && (
-            <InlineAlert tone="danger" title="Error">
+            <InlineAlert tone="danger" title="Error" className="form-row--span-2">
               <span>{amoError}</span>
             </InlineAlert>
           )}
           {departmentsError && (
-            <InlineAlert tone="danger" title="Error">
+            <InlineAlert tone="danger" title="Error" className="form-row--span-2">
               <span>{departmentsError}</span>
             </InlineAlert>
           )}
 
           {isSuperuser && (
-            <div className="form-row">
+            <div className="form-row form-row--span-2">
               <label htmlFor="amoId">Target AMO</label>
               <select
                 id="amoId"
@@ -384,44 +440,61 @@ const AdminUserNewPage: React.FC = () => {
             </div>
           )}
 
-          <div className="form-row">
-            <label htmlFor="departmentId">Department</label>
+          <div className="form-row form-row--span-2">
+            <div className="form-row__header">
+              <label htmlFor="departmentId">Department</label>
+              <button
+                type="button"
+                className="admin-link-btn"
+                onClick={() => navigate(`${backTarget}#departments-panel`)}
+              >
+                Manage departments
+              </button>
+            </div>
             <select
               id="departmentId"
               name="departmentId"
               value={selectedDepartmentId}
               onChange={(e) => setSelectedDepartmentId(e.target.value)}
               disabled={submitting || departmentsLoading}
-              required={departments.length > 0}
+              required={activeDepartments.length > 0}
             >
               <option value="" disabled>
                 {departmentsLoading ? "Loading departments..." : "Select a department"}
               </option>
-              {departments.map((dept) => (
+              {activeDepartments.map((dept) => (
                 <option key={dept.id} value={dept.id}>
                   {dept.name} ({dept.code})
                 </option>
               ))}
             </select>
             <p className="form-hint">
-              Assign the default department so the user lands in the right dashboard.
+              Assign the default department so the user lands in the right dashboard. Only active
+              departments are listed.
             </p>
           </div>
-
-          <div className="form-row">
-            <label htmlFor="staffCode">Staff Code</label>
-            <input
-              id="staffCode"
-              name="staffCode"
-              type="text"
-              value={form.staffCode}
-              onChange={handleChange}
-              autoComplete="off"
-              required
-              disabled={submitting}
-            />
-            <p className="form-hint">Use the official staff code (e.g. AMO-123).</p>
-          </div>
+          {!departmentsLoading && activeDepartments.length === 0 && (
+            <InlineAlert
+              tone="warning"
+              title="No departments yet"
+              className="form-row--span-2"
+              actions={(
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => navigate(`${backTarget}#departments-panel`)}
+                >
+                  Create department
+                </Button>
+              )}
+            >
+              <span>
+                No custom departments found. The user will follow default access rules until
+                departments are added.
+              </span>
+            </InlineAlert>
+          )}
 
           <div className="form-row">
             <label htmlFor="firstName">First Name</label>
@@ -451,7 +524,47 @@ const AdminUserNewPage: React.FC = () => {
             />
           </div>
 
-          <div className="form-row">
+          <div className="form-row form-row--span-2">
+            <div className="form-row__header">
+              <label htmlFor="staffCode">Staff Code (auto)</label>
+              <button
+                type="button"
+                className="admin-link-btn"
+                onClick={() => {
+                  setStaffCodeSeed((prev) => prev + 1);
+                }}
+                disabled={staffCodeLoading || !form.firstName.trim() || !form.lastName.trim()}
+              >
+                Refresh suggestions
+              </button>
+            </div>
+            <select
+              id="staffCode"
+              name="staffCode"
+              value={selectedStaffCode}
+              onChange={(e) => setSelectedStaffCode(e.target.value)}
+              disabled={staffCodeLoading || staffCodeOptions.length === 0}
+              required
+            >
+              <option value="" disabled>
+                {staffCodeLoading ? "Generating staff codes..." : "Select a staff code"}
+              </option>
+              {staffCodeOptions.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+            {staffCodeError ? (
+              <p className="form-hint">{staffCodeError}</p>
+            ) : (
+              <p className="form-hint">
+                Staff codes are generated from first/last name. Choose any suggested code.
+              </p>
+            )}
+          </div>
+
+          <div className="form-row form-row--span-2">
             <label htmlFor="email">Work Email</label>
             <input
               id="email"
@@ -465,7 +578,7 @@ const AdminUserNewPage: React.FC = () => {
             />
           </div>
 
-          <div className="form-row">
+          <div className="form-row form-row--span-2">
             <label htmlFor="role">Role</label>
             <select
               id="role"
@@ -483,7 +596,8 @@ const AdminUserNewPage: React.FC = () => {
               )}
             </select>
             <p className="form-hint">
-              Choose the closest operational role. Admins get dashboard access.
+              Choose the closest operational role. Role controls permissions while department
+              controls the dashboard landing page.
             </p>
           </div>
 
@@ -500,7 +614,7 @@ const AdminUserNewPage: React.FC = () => {
             />
           </div>
 
-          <div className="form-row">
+          <div className="form-row form-row--span-2">
             <label htmlFor="phone">Phone</label>
             <input
               id="phone"
@@ -539,7 +653,7 @@ const AdminUserNewPage: React.FC = () => {
             />
           </div>
 
-          <div className="form-row">
+          <div className="form-row form-row--span-2">
             <div className="form-actions form-actions--inline">
               <Button
                 type="button"
@@ -576,7 +690,7 @@ const AdminUserNewPage: React.FC = () => {
             </p>
           </div>
 
-          <div className="form-actions">
+          <div className="form-actions form-row--span-2">
             <Button
               type="button"
               variant="secondary"

@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from typing import List, Optional
+import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -549,6 +550,99 @@ def list_departments(
         q = q.filter(models.Department.amo_id == current_user.amo_id)
 
     return q.order_by(models.Department.sort_order.asc()).all()
+
+
+@router.get(
+    "/staff-code-suggestions",
+    response_model=schemas.StaffCodeSuggestions,
+    summary="Suggest staff codes based on first/last name",
+)
+def staff_code_suggestions(
+    first_name: str,
+    last_name: str,
+    amo_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    if not first_name.strip() or not last_name.strip():
+        raise HTTPException(status_code=400, detail="First and last name are required.")
+
+    target_amo_id = amo_id if current_user.is_superuser and amo_id else current_user.amo_id
+
+    def _clean(value: str) -> str:
+        return re.sub(r"[^A-Z0-9]", "", value.strip().upper())
+
+    first = _clean(first_name)
+    last = _clean(last_name)
+    if not first or not last:
+        raise HTTPException(status_code=400, detail="Name cannot be empty.")
+
+    base_candidates = [
+        f"{first[0]}{last}",
+        f"{first}{last[0]}",
+        f"{first}{last}",
+        f"{first[0]}{last[:6]}",
+        f"{last}{first[0]}",
+    ]
+
+    existing = {
+        row[0]
+        for row in db.query(models.User.staff_code)
+        .filter(models.User.amo_id == target_amo_id)
+        .all()
+    }
+
+    suggestions: List[str] = []
+    for candidate in base_candidates:
+        if candidate and candidate not in existing and candidate not in suggestions:
+            suggestions.append(candidate)
+
+    suffix = 1
+    while len(suggestions) < 5:
+        base = base_candidates[0]
+        candidate = f"{base}{suffix}"
+        suffix += 1
+        if candidate in existing or candidate in suggestions:
+            continue
+        suggestions.append(candidate)
+
+    return schemas.StaffCodeSuggestions(suggestions=suggestions)
+
+
+@router.put(
+    "/departments/{department_id}",
+    response_model=schemas.DepartmentRead,
+    summary="Update a department (AMO admin or superuser)",
+)
+def update_department(
+    department_id: str,
+    payload: schemas.DepartmentUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    dept = db.query(models.Department).filter(models.Department.id == department_id).first()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found.")
+
+    if not current_user.is_superuser and dept.amo_id != current_user.amo_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot update department for another AMO.",
+        )
+
+    if payload.name is not None:
+        dept.name = payload.name
+    if payload.default_route is not None:
+        dept.default_route = payload.default_route
+    if payload.sort_order is not None:
+        dept.sort_order = payload.sort_order
+    if payload.is_active is not None:
+        dept.is_active = payload.is_active
+
+    db.add(dept)
+    db.commit()
+    db.refresh(dept)
+    return dept
 
 
 # ---------------------------------------------------------------------------

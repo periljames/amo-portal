@@ -14,16 +14,19 @@ import {
 import { getCachedUser, getContext } from "../services/auth";
 import {
   createAdminAmo,
+  createAdminDepartment,
   getAdminContext,
   listAdminAmos,
   listAdminDepartments,
   listAdminUsers,
   deactivateAdminUser,
   updateAdminUser,
+  updateAdminDepartment,
   setAdminContext,
 } from "../services/adminUsers";
 import type {
   AdminAmoRead,
+  AdminDepartmentCreatePayload,
   AdminDepartmentRead,
   AdminUserRead,
   DataMode,
@@ -55,6 +58,14 @@ const AdminDashboardPage: React.FC = () => {
   const [departmentsLoading, setDepartmentsLoading] = useState(false);
   const [departmentsError, setDepartmentsError] = useState<string | null>(null);
   const [departmentSelections, setDepartmentSelections] = useState<Record<string, string>>({});
+  const [departmentCreateError, setDepartmentCreateError] = useState<string | null>(null);
+  const [departmentCreateSuccess, setDepartmentCreateSuccess] = useState<string | null>(null);
+  const [departmentForm, setDepartmentForm] = useState({
+    code: "",
+    name: "",
+    defaultRoute: "",
+    sortOrder: "",
+  });
   const lastUsersRequestKey = useRef<string | null>(null);
   const lastUsersFetchAt = useRef<number>(0);
   const usersRequestRef = useRef<{
@@ -517,6 +528,75 @@ const AdminDashboardPage: React.FC = () => {
       );
     } catch (err: any) {
       setError(err?.message || "Failed to update user status.");
+    }
+  };
+
+  const handleCreateDepartment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setDepartmentCreateError(null);
+    setDepartmentCreateSuccess(null);
+
+    if (!effectiveAmoId) {
+      setDepartmentCreateError("Select an AMO before creating departments.");
+      return;
+    }
+
+    const code = departmentForm.code.trim().toLowerCase();
+    const name = departmentForm.name.trim();
+    const defaultRoute = departmentForm.defaultRoute.trim();
+    const sortOrderRaw = departmentForm.sortOrder.trim();
+
+    if (!code || !name) {
+      setDepartmentCreateError("Department code and name are required.");
+      return;
+    }
+
+    let sortOrder: number | null = null;
+    if (sortOrderRaw) {
+      const parsed = Number(sortOrderRaw);
+      if (!Number.isFinite(parsed)) {
+        setDepartmentCreateError("Sort order must be a valid number.");
+        return;
+      }
+      sortOrder = parsed;
+    }
+
+    const payload: AdminDepartmentCreatePayload = {
+      amo_id: effectiveAmoId,
+      code,
+      name,
+      default_route: defaultRoute || null,
+      sort_order: sortOrder,
+    };
+
+    try {
+      const created = await createAdminDepartment(payload);
+      setDepartments((prev) => {
+        const next = [...prev, created];
+        return next.sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999));
+      });
+      setDepartmentForm({
+        code: "",
+        name: "",
+        defaultRoute: "",
+        sortOrder: "",
+      });
+      setDepartmentCreateSuccess(`Department ${created.name} created.`);
+    } catch (err: any) {
+      setDepartmentCreateError(err?.message || "Failed to create department.");
+    }
+  };
+
+  const handleToggleDepartment = async (dept: AdminDepartmentRead) => {
+    try {
+      const updated = await updateAdminDepartment(dept.id, {
+        is_active: !dept.is_active,
+      });
+      setDepartments((prev) =>
+        prev.map((item) => (item.id === dept.id ? updated : item))
+      );
+    } catch (err: any) {
+      setDepartmentCreateError(err?.message || "Failed to update department.");
     }
   };
 
@@ -1100,6 +1180,123 @@ const AdminDashboardPage: React.FC = () => {
                 Export PDF
               </Button>
             </Panel>
+
+            <div id="departments-panel">
+              <Panel
+                title="Departments"
+                subtitle="Create and manage department options for user assignments."
+              >
+                {departmentsLoading && <p>Loading departments…</p>}
+                {departmentsError && (
+                  <InlineAlert tone="danger" title="Department Error">
+                    <span>{departmentsError}</span>
+                  </InlineAlert>
+                )}
+                {!departmentsLoading && departments.length > 0 && (
+                  <div className="admin-dept-list">
+                    {departments.map((dept) => (
+                      <div key={dept.id} className="admin-dept-list__item">
+                        <div>
+                          <strong>{dept.name}</strong>
+                          <div className="text-muted" style={{ fontSize: 12 }}>
+                            Code: {dept.code}
+                          </div>
+                        </div>
+                        <div className="admin-dept-list__actions">
+                          <span className="badge badge--neutral">
+                            {dept.is_active ? "Active" : "Inactive"}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={dept.is_active ? "ghost" : "secondary"}
+                            onClick={() => handleToggleDepartment(dept)}
+                          >
+                            {dept.is_active ? "Deactivate" : "Reactivate"}
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <form onSubmit={handleCreateDepartment} className="admin-form">
+                  <div className="admin-form__row">
+                    <label htmlFor="deptCode">Code</label>
+                    <input
+                      id="deptCode"
+                      className="input"
+                      value={departmentForm.code}
+                      onChange={(e) =>
+                        setDepartmentForm((prev) => ({
+                          ...prev,
+                          code: e.target.value,
+                        }))
+                      }
+                      placeholder="planning"
+                    />
+                  </div>
+                  <div className="admin-form__row">
+                    <label htmlFor="deptName">Name</label>
+                    <input
+                      id="deptName"
+                      className="input"
+                      value={departmentForm.name}
+                      onChange={(e) =>
+                        setDepartmentForm((prev) => ({
+                          ...prev,
+                          name: e.target.value,
+                        }))
+                      }
+                      placeholder="Planning"
+                    />
+                  </div>
+                  <div className="admin-form__row">
+                    <label htmlFor="deptRoute">Default route (optional)</label>
+                    <input
+                      id="deptRoute"
+                      className="input"
+                      value={departmentForm.defaultRoute}
+                      onChange={(e) =>
+                        setDepartmentForm((prev) => ({
+                          ...prev,
+                          defaultRoute: e.target.value,
+                        }))
+                      }
+                      placeholder="/maintenance/:amoCode/planning"
+                    />
+                  </div>
+                  <div className="admin-form__row">
+                    <label htmlFor="deptSort">Sort order (optional)</label>
+                    <input
+                      id="deptSort"
+                      className="input"
+                      value={departmentForm.sortOrder}
+                      onChange={(e) =>
+                        setDepartmentForm((prev) => ({
+                          ...prev,
+                          sortOrder: e.target.value,
+                        }))
+                      }
+                      placeholder="10"
+                    />
+                  </div>
+                  {departmentCreateError && (
+                    <InlineAlert tone="danger" title="Create failed">
+                      <span>{departmentCreateError}</span>
+                    </InlineAlert>
+                  )}
+                  {departmentCreateSuccess && (
+                    <InlineAlert tone="success" title="Department created">
+                      <span>{departmentCreateSuccess}</span>
+                    </InlineAlert>
+                  )}
+                  <Button type="submit" size="sm">
+                    Create department
+                  </Button>
+                </form>
+              </Panel>
+            </div>
 
             <Panel
               title="CRS Asset Setup"
