@@ -4,8 +4,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { BrandContext } from "../Brand/BrandContext";
 import { BrandHeader } from "../Brand/BrandHeader";
 import { BrandProvider } from "../Brand/BrandProvider";
+import AppShell from "../AppShell/AppShell";
+import { useToast } from "../feedback/ToastProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
+import { isUiShellV2Enabled } from "../../utils/featureFlags";
 import { fetchSubscription } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
 import { getCachedUser, getContext, logout, onSessionEvent } from "../../services/auth";
@@ -122,10 +125,14 @@ const DepartmentLayout: React.FC<Props> = ({
   const [pollingError, setPollingError] = useState<string | null>(null);
   const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(null);
   const [overviewSummaryUnavailable, setOverviewSummaryUnavailable] = useState(false);
+  const [trialMenuOpen, setTrialMenuOpen] = useState(false);
+  const [trialChipHidden, setTrialChipHidden] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
   const { trackEvent } = useAnalytics();
+  const { pushToast } = useToast();
+  const uiShellV2 = isUiShellV2Enabled();
 
   const currentUser = getCachedUser();
   const isSuperuser = !!currentUser?.is_superuser;
@@ -339,9 +346,8 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const amoLabel = (amoCode || "AMO").toUpperCase();
-  const shellClassName = collapsed
-    ? "app-shell app-shell--collapsed"
-    : "app-shell";
+  const shellBase = uiShellV2 ? "app-shell app-shell--v2" : "app-shell";
+  const shellClassName = collapsed ? `${shellBase} app-shell--collapsed` : shellBase;
 
   const isBillingRoute = useMemo(() => {
     return location.pathname.includes("/billing");
@@ -374,6 +380,57 @@ const DepartmentLayout: React.FC<Props> = ({
   const isQmsRoute = useMemo(() => {
     return location.pathname.includes("/qms");
   }, [location.pathname]);
+
+  const qmsNavItems = useMemo(
+    () => [
+      {
+        id: "qms-dashboard",
+        label: "Dashboard",
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms`,
+      },
+      {
+        id: "qms-tasks",
+        label: "My Tasks",
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms/tasks`,
+      },
+      {
+        id: "qms-documents",
+        label: "Document Control",
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms/documents`,
+      },
+      {
+        id: "qms-audits",
+        label: "Audits & Inspections",
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms/audits`,
+      },
+      {
+        id: "qms-change",
+        label: "Change Control",
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms/change-control`,
+      },
+      {
+        id: "qms-cars",
+        label: "CAR Register",
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms/cars`,
+      },
+      {
+        id: "qms-training",
+        label: "Training & Competence",
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms/training`,
+      },
+      {
+        id: "qms-events",
+        label: "Quality Events",
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms/events`,
+      },
+      {
+        id: "qms-kpis",
+        label: "KPIs & Review",
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms/kpis`,
+      },
+    ],
+    [activeDepartment, amoCode]
+  );
 
   const isReliabilityRoute = useMemo(() => {
     return location.pathname.includes("/reliability");
@@ -417,6 +474,8 @@ const DepartmentLayout: React.FC<Props> = ({
   const pollingStoppedRef = useRef(false);
   const pollingInFlightRef = useRef(false);
   const pollingRunnerRef = useRef<(reason: "initial" | "retry" | "manual" | "interval") => void>();
+  const trialMenuRef = useRef<HTMLDivElement | null>(null);
+  const lastPollingToastRef = useRef<string | null>(null);
 
   const clearPollingTimer = useCallback(() => {
     if (pollingTimerRef.current) {
@@ -864,6 +923,43 @@ const DepartmentLayout: React.FC<Props> = ({
   const isTrialing = subscription?.status === "TRIALING";
   const isExpired = subscription?.status === "EXPIRED";
   const isReadOnly = !!subscription?.is_read_only;
+  const trialHideKey = `ui_shell_trial_hide:${amoCode}:${currentUser?.id ?? "anon"}`;
+  const trialSessionKey = `ui_shell_trial_hide_session:${amoCode}:${currentUser?.id ?? "anon"}`;
+
+  useEffect(() => {
+    if (!uiShellV2) return;
+    const hideUntil = window.localStorage.getItem(trialHideKey);
+    const hideUntilValue = hideUntil ? Number(hideUntil) : 0;
+    const sessionHidden = window.sessionStorage.getItem(trialSessionKey) === "1";
+    const shouldHide = sessionHidden || (hideUntilValue > 0 && hideUntilValue > Date.now());
+    setTrialChipHidden(shouldHide);
+  }, [trialHideKey, trialSessionKey, uiShellV2]);
+
+  useEffect(() => {
+    if (!uiShellV2) return;
+    if (!pollingError) {
+      lastPollingToastRef.current = null;
+      return;
+    }
+    if (lastPollingToastRef.current === pollingError) return;
+    lastPollingToastRef.current = pollingError;
+    pushToast({
+      title: "Sync issue",
+      message: pollingError,
+      variant: "error",
+    });
+  }, [pollingError, pushToast, uiShellV2]);
+
+  useEffect(() => {
+    if (!trialMenuOpen) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!trialMenuRef.current?.contains(event.target as Node)) {
+        setTrialMenuOpen(false);
+      }
+    };
+    window.addEventListener("click", handleClick);
+    return () => window.removeEventListener("click", handleClick);
+  }, [trialMenuOpen]);
 
   const handleStaySignedIn = () => {
     resetIdleTimers();
@@ -896,8 +992,8 @@ const DepartmentLayout: React.FC<Props> = ({
       logoSource={isAdminArea && isSuperuser ? "platform" : "amo"}
     >
       <BrandContext.Consumer>
-        {(brand) => (
-          <div className={shellClassName}>
+        {(brand) => {
+          const sidebar = (
             <aside className="app-shell__sidebar">
               <div className="sidebar__header">
                 <BrandHeader variant="sidebar" />
@@ -912,555 +1008,737 @@ const DepartmentLayout: React.FC<Props> = ({
                 </button>
               </div>
 
-        <nav className="sidebar__nav">
-          {visibleAdminNav.map((nav) => {
-            const isActive = nav.id === activeDepartment;
-            const badge = adminBadgeMap[nav.id];
-            const badgeUnavailable =
-              overviewSummaryUnavailable || overviewSummaryDown || badge?.available === false;
-            const hasCount = !!badge?.available && !badgeUnavailable && (badge?.count ?? 0) > 0;
-            const showBadge = hasCount || badgeUnavailable;
-            const badgeSeverity = badge?.severity || "info";
-            const badgeRoute = hasCount || badgeUnavailable ? badge?.route : undefined;
-            return (
-              <button
-                key={nav.id}
-                type="button"
-                onClick={() => handleAdminNav(nav.id, badgeRoute)}
-                className={
-                  "sidebar__item" + (isActive ? " sidebar__item--active" : "")
-                }
-              >
-                <span className="sidebar__item-label">{nav.label}</span>
-                {nav.id !== "admin-overview" && showBadge && (
-                  <span
-                    className={`sidebar__badge sidebar__badge--${badgeSeverity} ${
-                      hasCount ? "sidebar__badge--count" : "sidebar__badge--dot"
-                    }`}
-                  >
-                    {hasCount ? badge?.count : ""}
-                  </span>
+              <nav className="sidebar__nav">
+                {visibleAdminNav.map((nav) => {
+                  const isActive = nav.id === activeDepartment;
+                  const badge = adminBadgeMap[nav.id];
+                  const badgeUnavailable =
+                    overviewSummaryUnavailable || overviewSummaryDown || badge?.available === false;
+                  const hasCount =
+                    !!badge?.available && !badgeUnavailable && (badge?.count ?? 0) > 0;
+                  const showBadge = hasCount || badgeUnavailable;
+                  const badgeSeverity = badge?.severity || "info";
+                  const badgeRoute = hasCount || badgeUnavailable ? badge?.route : undefined;
+                  return (
+                    <button
+                      key={nav.id}
+                      type="button"
+                      onClick={() => handleAdminNav(nav.id, badgeRoute)}
+                      className={
+                        "sidebar__item" + (isActive ? " sidebar__item--active" : "")
+                      }
+                    >
+                      <span className="sidebar__item-label">{nav.label}</span>
+                      {nav.id !== "admin-overview" && showBadge && (
+                        <span
+                          className={`sidebar__badge sidebar__badge--${badgeSeverity} ${
+                            hasCount ? "sidebar__badge--count" : "sidebar__badge--dot"
+                          }`}
+                        >
+                          {hasCount ? badge?.count : ""}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+
+                {visibleDepartments.map((dept) => {
+                  const isActive = dept.id === activeDepartment;
+                  return (
+                    <button
+                      key={dept.id}
+                      type="button"
+                      onClick={() => handleNav(dept.id)}
+                      className={
+                        "sidebar__item" + (isActive ? " sidebar__item--active" : "")
+                      }
+                    >
+                      <span className="sidebar__item-label">{dept.label}</span>
+                    </button>
+                  );
+                })}
+
+                {((!isAdminArea && visibleDepartments.length > 0) ||
+                  (isAdminArea && visibleDepartments.length > 0)) && (
+                  <div className="sidebar__divider" />
                 )}
-              </button>
-            );
-          })}
 
-          {visibleDepartments.map((dept) => {
-            const isActive = dept.id === activeDepartment;
-            return (
-              <button
-                key={dept.id}
-                type="button"
-                onClick={() => handleNav(dept.id)}
-                className={
-                  "sidebar__item" + (isActive ? " sidebar__item--active" : "")
-                }
-              >
-                <span className="sidebar__item-label">{dept.label}</span>
-              </button>
-            );
-          })}
-
-          {((!isAdminArea && visibleDepartments.length > 0) ||
-            (isAdminArea && visibleDepartments.length > 0)) && (
-            <div className="sidebar__divider" />
-          )}
-
-          {!isAdminArea && activeDepartment === "planning" && (
-            <>
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/planning/aircraft-import`)
-                }
-                className={
-                  "sidebar__item" +
-                  (isAircraftImportRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Setup Aircraft"
-                title="Setup Aircraft"
-              >
-                <span className="sidebar__item-label">Setup Aircraft</span>
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/planning/component-import`)
-                }
-                className={
-                  "sidebar__item" +
-                  (isComponentImportRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Import Components"
-                title="Import Components"
-              >
-                <span className="sidebar__item-label">Import Components</span>
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/planning/aircraft-documents`)
-                }
-                className={
-                  "sidebar__item" +
-                  (isAircraftDocumentsRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Aircraft Documents"
-                title="Aircraft Documents"
-              >
-                <span className="sidebar__item-label">Aircraft Documents</span>
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/planning/work-orders`)
-                }
-                className={
-                  "sidebar__item" +
-                  (isWorkOrdersRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Work Orders"
-                title="Work Orders"
-              >
-                <span className="sidebar__item-label">Work Orders</span>
-              </button>
-            </>
-          )}
-
-          {!isAdminArea &&
-            (activeDepartment === "production" ||
-              activeDepartment === "engineering") && (
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(`/maintenance/${amoCode}/${activeDepartment}/work-orders`)
-                }
-                className={
-                  "sidebar__item" +
-                  (isWorkOrdersRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Work Orders"
-                title="Work Orders"
-              >
-                <span className="sidebar__item-label">Work Orders</span>
-              </button>
-            )}
-
-          {!isAdminArea && (
-            <button
-              type="button"
-              onClick={gotoMyTraining}
-              className={
-                "sidebar__item" +
-                (isTrainingRoute ? " sidebar__item--active" : "")
-              }
-              aria-label="My Training"
-              title="My Training"
-            >
-              <span className="sidebar__item-label">My Training</span>
-            </button>
-          )}
-
-          {!isAdminArea && activeDepartment === "quality" && (
-            <>
-              <button
-                type="button"
-                onClick={() => navigate(`/maintenance/${amoCode}/quality/qms`)}
-                className={
-                  "sidebar__item" + (isQmsRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Quality Management System"
-                title="Quality Management System"
-              >
-                <span className="sidebar__item-label">QMS Overview</span>
-              </button>
-            </>
-          )}
-
-          {!isAdminArea && activeDepartment === "reliability" && (
-            <>
-              <button
-                type="button"
-                onClick={() => navigate(`/maintenance/${amoCode}/reliability`)}
-                className={
-                  "sidebar__item" +
-                  (isReliabilityRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Reliability Reports"
-                title="Reliability Reports"
-              >
-                <span className="sidebar__item-label">Reliability Reports</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(`/maintenance/${amoCode}/ehm/dashboard`)}
-                className={
-                  "sidebar__item" + (isEhmDashboardRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Engine Health Monitoring dashboard"
-                title="Engine Health Monitoring dashboard"
-              >
-                <span className="sidebar__item-label">EHM Dashboard</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(`/maintenance/${amoCode}/ehm/trends`)}
-                className={
-                  "sidebar__item" + (isEhmTrendsRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Engine Health Monitoring trends"
-                title="Engine Health Monitoring trends"
-              >
-                <span className="sidebar__item-label">EHM Trends</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(`/maintenance/${amoCode}/ehm/uploads`)}
-                className={
-                  "sidebar__item" + (isEhmUploadsRoute ? " sidebar__item--active" : "")
-                }
-                aria-label="Engine Health Monitoring uploads"
-                title="Engine Health Monitoring uploads"
-              >
-                <span className="sidebar__item-label">EHM Uploads</span>
-              </button>
-            </>
-          )}
-        </nav>
-
-            </aside>
-
-            <main className="app-shell__main">
-        <header className="app-shell__topbar">
-          <div className="app-shell__topbar-title">
-            <BrandHeader variant="topbar" />
-            <div className="app-shell__topbar-context">
-              <div className="app-shell__topbar-heading">{deptLabel}</div>
-              <div className="app-shell__topbar-subtitle">
-                {amoLabel} · Daily operations workspace
-              </div>
-            </div>
-          </div>
-
-          <div className="app-shell__topbar-actions">
-            <div ref={notificationsRef} className="notification-menu">
-              <button
-                type="button"
-                className="notification-bell"
-                aria-label="Training notifications"
-                aria-expanded={notificationsOpen}
-                onClick={() => setNotificationsOpen((v) => !v)}
-              >
-                <span className="notification-bell__icon">🔔</span>
-                {unreadNotifications > 0 ? (
-                  <span className="notification-bell__badge">{unreadNotifications}</span>
-                ) : null}
-              </button>
-
-              {notificationsOpen && (
-                <div className="notification-panel notification-panel--drawer">
-                  <div className="notification-panel__header">
-                    <div>
-                      <strong>Notifications</strong>
-                      <div className="text-muted" style={{ fontSize: 12 }}>
-                        {unreadNotifications} unread
-                      </div>
-                    </div>
+                {!isAdminArea && activeDepartment === "planning" && (
+                  <>
                     <button
                       type="button"
-                      className="secondary-chip-btn"
-                      onClick={async () => {
-                        await markAllTrainingNotificationsRead();
-                        await refreshNotifications();
-                      }}
+                      onClick={() =>
+                        navigate(`/maintenance/${amoCode}/planning/aircraft-import`)
+                      }
+                      className={
+                        "sidebar__item" +
+                        (isAircraftImportRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Setup Aircraft"
+                      title="Setup Aircraft"
                     >
-                      Mark all read
+                      <span className="sidebar__item-label">Setup Aircraft</span>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate(`/maintenance/${amoCode}/planning/component-import`)
+                      }
+                      className={
+                        "sidebar__item" +
+                        (isComponentImportRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Import Components"
+                      title="Import Components"
+                    >
+                      <span className="sidebar__item-label">Import Components</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate(`/maintenance/${amoCode}/planning/aircraft-documents`)
+                      }
+                      className={
+                        "sidebar__item" +
+                        (isAircraftDocumentsRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Aircraft Documents"
+                      title="Aircraft Documents"
+                    >
+                      <span className="sidebar__item-label">Aircraft Documents</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate(`/maintenance/${amoCode}/planning/work-orders`)
+                      }
+                      className={
+                        "sidebar__item" +
+                        (isWorkOrdersRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Work Orders"
+                      title="Work Orders"
+                    >
+                      <span className="sidebar__item-label">Work Orders</span>
+                    </button>
+                  </>
+                )}
+
+                {!isAdminArea &&
+                  (activeDepartment === "production" ||
+                    activeDepartment === "engineering") && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate(`/maintenance/${amoCode}/${activeDepartment}/work-orders`)
+                      }
+                      className={
+                        "sidebar__item" +
+                        (isWorkOrdersRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Work Orders"
+                      title="Work Orders"
+                    >
+                      <span className="sidebar__item-label">Work Orders</span>
+                    </button>
+                  )}
+
+                {!isAdminArea && (
+                  <button
+                    type="button"
+                    onClick={gotoMyTraining}
+                    className={
+                      "sidebar__item" + (isTrainingRoute ? " sidebar__item--active" : "")
+                    }
+                    aria-label="My Training"
+                    title="My Training"
+                  >
+                    <span className="sidebar__item-label">My Training</span>
+                  </button>
+                )}
+
+                {!isAdminArea && activeDepartment === "quality" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/maintenance/${amoCode}/quality/qms`)}
+                      className={
+                        "sidebar__item" + (isQmsRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Quality Management System"
+                      title="Quality Management System"
+                    >
+                      <span className="sidebar__item-label">QMS Overview</span>
+                    </button>
+                    {isQmsRoute && (
+                      <div className="sidebar__qms-nav" aria-label="QMS modules">
+                        {qmsNavItems.map((item) => {
+                          const isActive = location.pathname.startsWith(item.path);
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => navigate(item.path)}
+                              className={
+                                "sidebar__item" +
+                                (isActive ? " sidebar__item--active" : "")
+                              }
+                            >
+                              <span className="sidebar__item-label">{item.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {!isAdminArea && activeDepartment === "reliability" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/maintenance/${amoCode}/reliability`)}
+                      className={
+                        "sidebar__item" +
+                        (isReliabilityRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Reliability Reports"
+                      title="Reliability Reports"
+                    >
+                      <span className="sidebar__item-label">Reliability Reports</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/maintenance/${amoCode}/ehm/dashboard`)}
+                      className={
+                        "sidebar__item" +
+                        (isEhmDashboardRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Engine Health Monitoring dashboard"
+                      title="Engine Health Monitoring dashboard"
+                    >
+                      <span className="sidebar__item-label">EHM Dashboard</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/maintenance/${amoCode}/ehm/trends`)}
+                      className={
+                        "sidebar__item" + (isEhmTrendsRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Engine Health Monitoring trends"
+                      title="Engine Health Monitoring trends"
+                    >
+                      <span className="sidebar__item-label">EHM Trends</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/maintenance/${amoCode}/ehm/uploads`)}
+                      className={
+                        "sidebar__item" + (isEhmUploadsRoute ? " sidebar__item--active" : "")
+                      }
+                      aria-label="Engine Health Monitoring uploads"
+                      title="Engine Health Monitoring uploads"
+                    >
+                      <span className="sidebar__item-label">EHM Uploads</span>
+                    </button>
+                  </>
+                )}
+              </nav>
+            </aside>
+          );
+
+          const trialChipVisible =
+            uiShellV2 && isTrialing && subscription?.trial_ends_at && !trialChipHidden;
+
+          const header = (
+            <header className="app-shell__topbar">
+              <div className="app-shell__topbar-title">
+                <BrandHeader variant="topbar" />
+                <div className="app-shell__topbar-context">
+                  <div className="app-shell__topbar-heading">{deptLabel}</div>
+                  <div className="app-shell__topbar-subtitle">
+                    {amoLabel} · Daily operations workspace
                   </div>
+                </div>
+              </div>
 
-                  {notificationsLoading && (
-                    <div className="notification-panel__state">Loading notifications…</div>
-                  )}
-
-                  {notificationsError && (
-                    <div className="notification-panel__state notification-panel__state--error">
-                      {notificationsError}
-                    </div>
-                  )}
-
-                  {!notificationsLoading && !notificationsError && (
-                    <div className="notification-panel__list">
-                      {notifications.map((note) => (
+              <div className="app-shell__topbar-actions">
+                {trialChipVisible && (
+                  <div ref={trialMenuRef} style={{ position: "relative" }}>
+                    <button
+                      type="button"
+                      className="app-shell__status-chip app-shell__status-chip--trial"
+                      onClick={() => setTrialMenuOpen((prev) => !prev)}
+                      aria-expanded={trialMenuOpen}
+                      aria-haspopup="menu"
+                    >
+                      Trial{trialCountdown ? ` · ${trialCountdown} left` : ""}
+                    </button>
+                    {trialMenuOpen && (
+                      <div className="app-shell__status-menu" role="menu">
+                        <div className="app-shell__status-menu-meta">
+                          {trialCountdown
+                            ? `Trial ends in ${trialCountdown}.`
+                            : "Trial ending soon."}
+                        </div>
                         <button
                           type="button"
-                          key={note.id}
-                          className={`notification-item${note.read_at ? "" : " notification-item--unread"}`}
-                          onClick={async () => {
-                            if (!note.read_at) {
-                              await markTrainingNotificationRead(note.id, {});
-                            }
-                            setNotificationsOpen(false);
-                            await refreshNotifications();
-                            const target = resolveNotificationLink(note.link_path);
-                            if (target) {
-                              navigate(target);
-                            }
+                          onClick={() => {
+                            setTrialMenuOpen(false);
+                            navigate(`/maintenance/${amoCode}/upsell`);
                           }}
                         >
-                          <div className="notification-item__title">{note.title}</div>
-                          {note.body ? (
-                            <div className="notification-item__body">{note.body}</div>
-                          ) : null}
-                          <div className="notification-item__meta">
-                            <span>{new Date(note.created_at).toLocaleString()}</span>
-                            <span className="badge badge--neutral">{note.severity}</span>
-                          </div>
+                          View plans
                         </button>
-                      ))}
-                      {notifications.length === 0 ? (
-                        <div className="notification-panel__state">No notifications yet.</div>
-                      ) : null}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTrialMenuOpen(false);
+                            navigate(`/maintenance/${amoCode}/admin/billing`);
+                          }}
+                        >
+                          Convert to paid
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const hideUntil =
+                              Date.now() + 7 * 24 * 60 * 60 * 1000;
+                            window.localStorage.setItem(
+                              trialHideKey,
+                              String(hideUntil)
+                            );
+                            setTrialChipHidden(true);
+                            setTrialMenuOpen(false);
+                          }}
+                        >
+                          Hide for 7 days
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.sessionStorage.setItem(trialSessionKey, "1");
+                            setTrialChipHidden(true);
+                            setTrialMenuOpen(false);
+                          }}
+                        >
+                          Hide this session
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div ref={notificationsRef} className="notification-menu">
+                  <button
+                    type="button"
+                    className="notification-bell"
+                    aria-label="Training notifications"
+                    aria-expanded={notificationsOpen}
+                    onClick={() => setNotificationsOpen((v) => !v)}
+                  >
+                    <span className="notification-bell__icon">🔔</span>
+                    {unreadNotifications > 0 ? (
+                      <span className="notification-bell__badge">{unreadNotifications}</span>
+                    ) : null}
+                  </button>
+
+                  {notificationsOpen && (
+                    <div className="notification-panel notification-panel--drawer">
+                      <div className="notification-panel__header">
+                        <div>
+                          <strong>Notifications</strong>
+                          <div className="text-muted" style={{ fontSize: 12 }}>
+                            {unreadNotifications} unread
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary-chip-btn"
+                          onClick={async () => {
+                            await markAllTrainingNotificationsRead();
+                            await refreshNotifications();
+                          }}
+                        >
+                          Mark all read
+                        </button>
+                      </div>
+
+                      {notificationsLoading && (
+                        <div className="notification-panel__state">
+                          Loading notifications…
+                        </div>
+                      )}
+
+                      {notificationsError && (
+                        <div className="notification-panel__state notification-panel__state--error">
+                          {notificationsError}
+                        </div>
+                      )}
+
+                      {!notificationsLoading && !notificationsError && (
+                        <div className="notification-panel__list">
+                          {notifications.map((note) => (
+                            <button
+                              type="button"
+                              key={note.id}
+                              className={`notification-item${
+                                note.read_at ? "" : " notification-item--unread"
+                              }`}
+                              onClick={async () => {
+                                if (!note.read_at) {
+                                  await markTrainingNotificationRead(note.id, {});
+                                }
+                                setNotificationsOpen(false);
+                                await refreshNotifications();
+                                const target = resolveNotificationLink(note.link_path);
+                                if (target) {
+                                  navigate(target);
+                                }
+                              }}
+                            >
+                              <div className="notification-item__title">{note.title}</div>
+                              {note.body ? (
+                                <div className="notification-item__body">{note.body}</div>
+                              ) : null}
+                              <div className="notification-item__meta">
+                                <span>{new Date(note.created_at).toLocaleString()}</span>
+                                <span className="badge badge--neutral">{note.severity}</span>
+                              </div>
+                            </button>
+                          ))}
+                          {notifications.length === 0 ? (
+                            <div className="notification-panel__state">
+                              No notifications yet.
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
                   )}
-
                 </div>
-              )}
-            </div>
 
-            <div ref={profileRef} className="profile-menu">
-              <button
-                type="button"
-                onClick={() => setProfileOpen((v) => !v)}
-                aria-haspopup="menu"
-                aria-expanded={profileOpen}
-                className="profile-menu__trigger"
-                title={userName}
-              >
-                <span className="profile-menu__avatar">{userInitials}</span>
-                <span className="profile-menu__meta">
-                  <span className="profile-menu__name">{userName}</span>
-                  <span className="profile-menu__role">Profile</span>
-                </span>
-                <span className="profile-menu__caret">{profileOpen ? "▲" : "▼"}</span>
-              </button>
+                <div ref={profileRef} className="profile-menu">
+                  <button
+                    type="button"
+                    onClick={() => setProfileOpen((v) => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={profileOpen}
+                    className="profile-menu__trigger"
+                    title={userName}
+                  >
+                    <span className="profile-menu__avatar">{userInitials}</span>
+                    <span className="profile-menu__meta">
+                      <span className="profile-menu__name">{userName}</span>
+                      <span className="profile-menu__role">Profile</span>
+                    </span>
+                    <span className="profile-menu__caret">
+                      {profileOpen ? "▲" : "▼"}
+                    </span>
+                  </button>
 
-              {profileOpen && (
-                <div role="menu" className="profile-drawer">
-                  <div className="profile-drawer__header">
-                    <div className="profile-drawer__avatar">{userInitials}</div>
-                    <div>
-                      <div className="profile-drawer__name">{userName}</div>
-                      <div className="profile-drawer__meta">Profile & settings</div>
+                  {profileOpen && (
+                    <div role="menu" className="profile-drawer">
+                      <div className="profile-drawer__header">
+                        <div className="profile-drawer__avatar">{userInitials}</div>
+                        <div>
+                          <div className="profile-drawer__name">{userName}</div>
+                          <div className="profile-drawer__meta">Profile & settings</div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="profile-drawer__item"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          gotoMyTraining();
+                        }}
+                      >
+                        My Training
+                      </button>
+
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="profile-drawer__item"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          const dept = resolveDeptForTraining();
+                          navigate(`/maintenance/${amoCode}/${dept}/settings/widgets`);
+                        }}
+                      >
+                        Dashboard widgets
+                      </button>
+
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="profile-drawer__item"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          toggleColorScheme();
+                        }}
+                      >
+                        {colorScheme === "dark"
+                          ? "Switch to Light mode"
+                          : "Switch to Dark mode"}
+                      </button>
+
+                      <div className="profile-drawer__divider" />
+
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="profile-drawer__item profile-drawer__item--danger"
+                        onClick={() => {
+                          setProfileOpen(false);
+                          handleLogout();
+                        }}
+                      >
+                        Sign out
+                      </button>
                     </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="profile-drawer__item"
-                    onClick={() => {
-                      setProfileOpen(false);
-                      gotoMyTraining();
-                    }}
-                  >
-                    My Training
-                  </button>
-
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="profile-drawer__item"
-                    onClick={() => {
-                      setProfileOpen(false);
-                      const dept = resolveDeptForTraining();
-                      navigate(`/maintenance/${amoCode}/${dept}/settings/widgets`);
-                    }}
-                  >
-                    Dashboard widgets
-                  </button>
-
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="profile-drawer__item"
-                    onClick={() => {
-                      setProfileOpen(false);
-                      toggleColorScheme();
-                    }}
-                  >
-                    {colorScheme === "dark"
-                      ? "Switch to Light mode"
-                      : "Switch to Dark mode"}
-                  </button>
-
-                  <div className="profile-drawer__divider" />
-
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="profile-drawer__item profile-drawer__item--danger"
-                    onClick={() => {
-                      setProfileOpen(false);
-                      handleLogout();
-                    }}
-                  >
-                    Sign out
-                  </button>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
-        </header>
+              </div>
+            </header>
+          );
 
-        {qualityReadOnly && !isAdminArea && (
-          <div className="info-banner info-banner--soft" role="status" style={{ margin: "12px 0" }}>
-            <div>
-              <strong>Quality access</strong>
-              <p className="text-muted" style={{ margin: 0 }}>
-                Quality users have read-only access outside their department. AMO admins can make
-                updates.
-              </p>
-            </div>
-          </div>
-        )}
+          const sessionOverlay = (idleWarningOpen || logoutReason) && (
+            <div className="session-timeout-overlay" role="dialog" aria-live="polite">
+              <div className="session-timeout-card">
+                {idleWarningOpen && !logoutReason && (
+                  <>
+                    <h2>Inactivity warning</h2>
+                    <p>
+                      You will be logged out in{" "}
+                      <strong>{formattedCountdown}</strong> due to inactivity.
+                    </p>
+                    <p>Please click below to stay signed in.</p>
+                    <div className="session-timeout-actions">
+                      <button className="btn btn-secondary" onClick={handleIdleLogout}>
+                        Log out now
+                      </button>
+                      <button className="btn btn-primary" onClick={handleStaySignedIn}>
+                        Stay signed in
+                      </button>
+                    </div>
+                  </>
+                )}
 
-        {showPollingErrorBanner && pollingError && (
-          <div className="info-banner info-banner--warning" role="status" style={{ margin: "12px 0" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-              }}
-            >
-              <span>{pollingError}</span>
-              <button type="button" className="secondary-chip-btn" onClick={handlePollingRetry}>
-                Retry refresh
-              </button>
-            </div>
-          </div>
-        )}
-
-        {isTrialing && subscription?.trial_ends_at && (
-          <div className="info-banner info-banner--soft" style={{ margin: "12px 16px 0" }}>
-            <div>
-              <strong>Trial in progress</strong>
-              <p className="text-muted" style={{ margin: 0 }}>
-                {trialCountdown
-                  ? `Ends in ${trialCountdown}.`
-                  : "Trial ending soon."}{" "}
-                Convert to paid to avoid any grace or lockout.
-              </p>
-            </div>
-            <div className="page-section__actions">
-              <button
-                className="btn btn-primary"
-                onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`)}
-              >
-                Convert to paid
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => navigate(`/maintenance/${amoCode}/upsell`)}
-              >
-                View plans
-              </button>
-            </div>
-          </div>
-        )}
-
-        {isExpired && (
-          <div
-            className={`card ${isReadOnly ? "card--error" : "card--warning"}`}
-            style={{ margin: "12px 16px 0" }}
-          >
-            <div className="card-header">
-              <div>
-                <h3 style={{ margin: "4px 0" }}>
-                  {isReadOnly ? "Trial locked" : "Trial expired"}
-                </h3>
-                <p className="text-muted" style={{ margin: 0 }}>
-                  {isReadOnly
-                    ? "Grace ended; workspace is read-only until a paid plan starts."
-                    : graceCountdown
-                    ? `Grace expires in ${graceCountdown}.`
-                    : "Grace period is in effect. Add a payment method to keep access."}
-                </p>
-                {subscriptionError && (
-                  <p className="text-muted" style={{ margin: 0 }}>
-                    {subscriptionError}
-                  </p>
+                {logoutReason && (
+                  <>
+                    <h2>Session ended</h2>
+                    <p>
+                      {logoutReason === "idle"
+                        ? "You have been logged out due to inactivity."
+                        : "Your session has expired. Please log in again."}
+                    </p>
+                    <div className="session-timeout-actions">
+                      <button className="btn btn-primary" onClick={handleResumeLogin}>
+                        Log in
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
-              <div className="page-section__actions">
-                <button
-                  className="btn btn-primary"
-                  onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`)}
-                >
-                  Go to billing
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => navigate(`/maintenance/${amoCode}/upsell`)}
-                >
-                  See plans
-                </button>
-              </div>
             </div>
-          </div>
-        )}
+          );
 
-        <div className="app-shell__main-inner">{children}</div>
+          if (!uiShellV2) {
+            return (
+              <div className={shellClassName}>
+                {sidebar}
+                <main className="app-shell__main">
+                  {header}
 
-        <footer className="app-shell__footer">
-          <span>© {currentYear} {brand.name}.</span>
-          <span>{brand.tagline || "All rights reserved."}</span>
-        </footer>
-      </main>
-
-            {(idleWarningOpen || logoutReason) && (
-              <div className="session-timeout-overlay" role="dialog" aria-live="polite">
-                <div className="session-timeout-card">
-                  {idleWarningOpen && !logoutReason && (
-                    <>
-                      <h2>Inactivity warning</h2>
-                      <p>
-                        You will be logged out in{" "}
-                        <strong>{formattedCountdown}</strong> due to inactivity.
-                      </p>
-                      <p>Please click below to stay signed in.</p>
-                      <div className="session-timeout-actions">
-                        <button className="btn btn-secondary" onClick={handleIdleLogout}>
-                          Log out now
-                        </button>
-                        <button className="btn btn-primary" onClick={handleStaySignedIn}>
-                          Stay signed in
-                        </button>
+                  {qualityReadOnly && !isAdminArea && (
+                    <div
+                      className="info-banner info-banner--soft"
+                      role="status"
+                      style={{ margin: "12px 0" }}
+                    >
+                      <div>
+                        <strong>Quality access</strong>
+                        <p className="text-muted" style={{ margin: 0 }}>
+                          Quality users have read-only access outside their department. AMO
+                          admins can make updates.
+                        </p>
                       </div>
-                    </>
+                    </div>
                   )}
 
-                  {logoutReason && (
-                    <>
-                      <h2>Session ended</h2>
-                      <p>
-                        {logoutReason === "idle"
-                          ? "You have been logged out due to inactivity."
-                          : "Your session has expired. Please log in again."}
-                      </p>
-                      <div className="session-timeout-actions">
-                        <button className="btn btn-primary" onClick={handleResumeLogin}>
-                          Log in
+                  {showPollingErrorBanner && pollingError && (
+                    <div
+                      className="info-banner info-banner--warning"
+                      role="status"
+                      style={{ margin: "12px 0" }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
+                      >
+                        <span>{pollingError}</span>
+                        <button
+                          type="button"
+                          className="secondary-chip-btn"
+                          onClick={handlePollingRetry}
+                        >
+                          Retry refresh
                         </button>
                       </div>
-                    </>
+                    </div>
                   )}
-                </div>
+
+                  {isTrialing && subscription?.trial_ends_at && (
+                    <div className="info-banner info-banner--soft" style={{ margin: "12px 16px 0" }}>
+                      <div>
+                        <strong>Trial in progress</strong>
+                        <p className="text-muted" style={{ margin: 0 }}>
+                          {trialCountdown ? `Ends in ${trialCountdown}.` : "Trial ending soon."}{" "}
+                          Convert to paid to avoid any grace or lockout.
+                        </p>
+                      </div>
+                      <div className="page-section__actions">
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`)}
+                        >
+                          Convert to paid
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => navigate(`/maintenance/${amoCode}/upsell`)}
+                        >
+                          View plans
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {isExpired && (
+                    <div
+                      className={`card ${isReadOnly ? "card--error" : "card--warning"}`}
+                      style={{ margin: "12px 16px 0" }}
+                    >
+                      <div className="card-header">
+                        <div>
+                          <h3 style={{ margin: "4px 0" }}>
+                            {isReadOnly ? "Trial locked" : "Trial expired"}
+                          </h3>
+                          <p className="text-muted" style={{ margin: 0 }}>
+                            {isReadOnly
+                              ? "Grace ended; workspace is read-only until a paid plan starts."
+                              : graceCountdown
+                              ? `Grace expires in ${graceCountdown}.`
+                              : "Grace period is in effect. Add a payment method to keep access."}
+                          </p>
+                          {subscriptionError && (
+                            <p className="text-muted" style={{ margin: 0 }}>
+                              {subscriptionError}
+                            </p>
+                          )}
+                        </div>
+                        <div className="page-section__actions">
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`)}
+                          >
+                            Go to billing
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => navigate(`/maintenance/${amoCode}/upsell`)}
+                          >
+                            See plans
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="app-shell__main-inner">{children}</div>
+
+                  <footer className="app-shell__footer">
+                    <span>© {currentYear} {brand.name}.</span>
+                    <span>{brand.tagline || "All rights reserved."}</span>
+                  </footer>
+                </main>
+                {sessionOverlay}
               </div>
-            )}
-          </div>
-        )}
+            );
+          }
+
+          return (
+            <>
+              <AppShell className={shellClassName} sidebar={sidebar} header={header}>
+                {qualityReadOnly && !isAdminArea && (
+                  <div className="info-banner info-banner--soft" role="status">
+                    <div>
+                      <strong>Quality access</strong>
+                      <p className="text-muted" style={{ margin: 0 }}>
+                        Quality users have read-only access outside their department. AMO admins
+                        can make updates.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {isExpired && (
+                  <div className={`card ${isReadOnly ? "card--error" : "card--warning"}`}>
+                    <div className="card-header">
+                      <div>
+                        <h3 style={{ margin: "4px 0" }}>
+                          {isReadOnly ? "Trial locked" : "Trial expired"}
+                        </h3>
+                        <p className="text-muted" style={{ margin: 0 }}>
+                          {isReadOnly
+                            ? "Grace ended; workspace is read-only until a paid plan starts."
+                            : graceCountdown
+                            ? `Grace expires in ${graceCountdown}.`
+                            : "Grace period is in effect. Add a payment method to keep access."}
+                        </p>
+                        {subscriptionError && (
+                          <p className="text-muted" style={{ margin: 0 }}>
+                            {subscriptionError}
+                          </p>
+                        )}
+                      </div>
+                      <div className="page-section__actions">
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => navigate(`/maintenance/${amoCode}/admin/billing`)}
+                        >
+                          Go to billing
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => navigate(`/maintenance/${amoCode}/upsell`)}
+                        >
+                          See plans
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {children}
+
+                <footer className="app-shell__footer">
+                  <span>© {currentYear} {brand.name}.</span>
+                  <span>{brand.tagline || "All rights reserved."}</span>
+                </footer>
+              </AppShell>
+              {sessionOverlay}
+            </>
+          );
+        }}
       </BrandContext.Consumer>
     </BrandProvider>
   );

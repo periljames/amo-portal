@@ -1,0 +1,24 @@
+.data-table {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.data-table__header {
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.data-table__title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.data-table__body {
+  padding: var(--s-3) var(--s-4);
+}
