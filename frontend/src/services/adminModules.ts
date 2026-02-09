@@ -20,6 +20,7 @@ export interface ModuleSubscriptionRead {
 }
 
 export interface ModuleSubscriptionCreate {
+  module_code: string;
   status: ModuleSubscriptionStatus;
   plan_code?: string | null;
   effective_from?: string | null;
@@ -43,7 +44,11 @@ export async function enableTenantModule(
     `/admin/tenants/${encodeURIComponent(tenantId)}/modules/${encodeURIComponent(
       moduleCode
     )}/enable`,
-    payload ?? {},
+    {
+      module_code: moduleCode,
+      status: "ENABLED",
+      ...payload,
+    },
     { headers: authHeaders() }
   );
 }
@@ -56,7 +61,7 @@ export async function disableTenantModule(
     `/admin/tenants/${encodeURIComponent(tenantId)}/modules/${encodeURIComponent(
       moduleCode
     )}/disable`,
-    {},
+    undefined,
     { headers: authHeaders() }
   );
 }
