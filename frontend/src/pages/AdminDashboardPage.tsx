@@ -1086,9 +1086,33 @@ const AdminDashboardPage: React.FC = () => {
                       )}
                       {filteredUsers.map((u) => (
                         <tr key={u.id}>
-                          <td>{u.staff_code}</td>
-                          <td>{u.full_name}</td>
-                          <td>{u.email}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => navigate(`/maintenance/${amoCode}/admin/users/${u.id}`)}
+                            >
+                              {u.staff_code}
+                            </button>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => navigate(`/maintenance/${amoCode}/admin/users/${u.id}`)}
+                            >
+                              {u.full_name}
+                            </button>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => navigate(`/maintenance/${amoCode}/admin/users/${u.id}`)}
+                            >
+                              {u.email}
+                            </button>
+                          </td>
                           <td>{u.role}</td>
                           <td>{departmentMap.get(u.department_id ?? "")?.name ?? "—"}</td>
                           <td>{u.is_active ? "Active" : "Inactive"}</td>

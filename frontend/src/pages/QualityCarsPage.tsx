@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { useToast } from "../components/feedback/ToastProvider";
+import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getCachedUser, getContext } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
@@ -99,6 +100,7 @@ const QualityCarsPage: React.FC = () => {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
+  const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
   const { pushToast } = useToast();
 
   const assigneeLookup = useMemo(() => {
@@ -106,6 +108,31 @@ const QualityCarsPage: React.FC = () => {
     assignees.forEach((assignee) => map.set(assignee.id, assignee));
     return map;
   }, [assignees]);
+
+  const filteredCars = useMemo(() => {
+    const statusParam = searchParams.get("status");
+    const dueWindow = searchParams.get("dueWindow");
+    const carId = searchParams.get("carId");
+    const now = new Date();
+    return cars.filter((car) => {
+      if (carId && car.id !== carId) return false;
+      if (statusParam === "overdue") {
+        if (!car.due_date) return false;
+        return new Date(car.due_date) < now && car.status !== "CLOSED";
+      }
+      if (statusParam === "open") {
+        if (car.status === "CLOSED") return false;
+      }
+      if (dueWindow && car.due_date) {
+        const diff = (new Date(car.due_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        if (dueWindow === "now" && diff >= 0) return false;
+        if (dueWindow === "today" && Math.floor(diff) !== 0) return false;
+        if (dueWindow === "week" && !(diff >= 0 && diff <= 7)) return false;
+        if (dueWindow === "month" && !(diff >= 0 && diff <= 30)) return false;
+      }
+      return true;
+    });
+  }, [cars, searchParams]);
 
   const departmentOptions = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
@@ -540,7 +567,7 @@ const QualityCarsPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {cars.map((car) => (
+                  {filteredCars.map((car) => (
                     <tr key={car.id}>
                       <td>{car.car_number}</td>
                       <td>{car.title}</td>
@@ -565,12 +592,38 @@ const QualityCarsPage: React.FC = () => {
                       <td>{new Date(car.updated_at).toLocaleDateString()}</td>
                       <td>
                         <div style={{ display: "flex", gap: 8 }}>
+                          {car.assigned_to_user_id && (
+                            <button
+                              type="button"
+                              className="secondary-chip-btn"
+                              onClick={() =>
+                                navigate(`/maintenance/${amoSlug}/admin/users/${car.assigned_to_user_id}`)
+                              }
+                            >
+                              Owner
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="secondary-chip-btn"
                             onClick={() => openEdit(car)}
                           >
                             Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() =>
+                              setPanelContext({
+                                type: "car",
+                                id: car.id,
+                                title: car.title,
+                                status: car.status,
+                                ownerId: car.assigned_to_user_id,
+                              })
+                            }
+                          >
+                            Quick actions
                           </button>
                           <button
                             type="button"
@@ -599,7 +652,7 @@ const QualityCarsPage: React.FC = () => {
                       </td>
                     </tr>
                   ))}
-                  {cars.length === 0 && (
+                  {filteredCars.length === 0 && (
                     <tr>
                       <td colSpan={9} className="text-muted">
                         No CARs logged for this programme yet.
@@ -915,6 +968,11 @@ const QualityCarsPage: React.FC = () => {
           </p>
         </div>
       )}
+      <ActionPanel
+        isOpen={!!panelContext}
+        context={panelContext}
+        onClose={() => setPanelContext(null)}
+      />
     </DepartmentLayout>
   );
 };

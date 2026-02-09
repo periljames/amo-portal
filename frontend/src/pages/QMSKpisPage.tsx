@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
+import DashboardCockpit from "../dashboards/DashboardCockpit";
 import { getContext } from "../services/auth";
 import {
   qmsListAudits,
@@ -12,6 +13,7 @@ import {
 } from "../services/qms";
 import { listTrainingEvents } from "../services/training";
 import type { TrainingEventRead } from "../types/training";
+import { isUiShellV2Enabled } from "../utils/featureFlags";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -21,6 +23,7 @@ const QMSKpisPage: React.FC = () => {
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
+  const uiShellV2 = isUiShellV2Enabled();
 
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -51,9 +54,11 @@ const QMSKpisPage: React.FC = () => {
   };
 
   useEffect(() => {
-    load();
+    if (!uiShellV2) {
+      load();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [uiShellV2]);
 
   const kpis = useMemo(() => {
     const totalAudits = audits.length;
@@ -116,47 +121,55 @@ const QMSKpisPage: React.FC = () => {
       title="KPIs & Management Review"
       subtitle="Quality performance indicators aligned with management review needs."
       actions={
-        <button type="button" className="primary-chip-btn" onClick={load}>
-          Refresh KPIs
-        </button>
+        uiShellV2 ? null : (
+          <button type="button" className="primary-chip-btn" onClick={load}>
+            Refresh KPIs
+          </button>
+        )
       }
     >
-      <section className="qms-toolbar">
-        <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
-          Back
-        </button>
-      </section>
+      {uiShellV2 ? (
+        <DashboardCockpit />
+      ) : (
+        <>
+          <section className="qms-toolbar">
+            <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
+              Back
+            </button>
+          </section>
 
-      {state === "loading" && (
-        <div className="card card--info">
-          <p>Loading KPI dashboard…</p>
-        </div>
-      )}
-
-      {state === "error" && (
-        <div className="card card--error">
-          <p>{error}</p>
-          <button type="button" className="primary-chip-btn" onClick={load}>
-            Retry
-          </button>
-        </div>
-      )}
-
-      {state === "ready" && (
-        <section className="qms-grid">
-          {kpis.map((kpi) => (
-            <div key={kpi.id} className="qms-card">
-              <div className="qms-card__header">
-                <div>
-                  <h3 className="qms-card__title">{kpi.label}</h3>
-                  <p className="qms-card__subtitle">{kpi.description}</p>
-                </div>
-                <span className="qms-pill">{kpi.trend}</span>
-              </div>
-              <div className="qms-kpi__value qms-kpi__value--large">{kpi.value}</div>
+          {state === "loading" && (
+            <div className="card card--info">
+              <p>Loading KPI dashboard…</p>
             </div>
-          ))}
-        </section>
+          )}
+
+          {state === "error" && (
+            <div className="card card--error">
+              <p>{error}</p>
+              <button type="button" className="primary-chip-btn" onClick={load}>
+                Retry
+              </button>
+            </div>
+          )}
+
+          {state === "ready" && (
+            <section className="qms-grid">
+              {kpis.map((kpi) => (
+                <div key={kpi.id} className="qms-card">
+                  <div className="qms-card__header">
+                    <div>
+                      <h3 className="qms-card__title">{kpi.label}</h3>
+                      <p className="qms-card__subtitle">{kpi.description}</p>
+                    </div>
+                    <span className="qms-pill">{kpi.trend}</span>
+                  </div>
+                  <div className="qms-kpi__value qms-kpi__value--large">{kpi.value}</div>
+                </div>
+              ))}
+            </section>
+          )}
+        </>
       )}
     </QMSLayout>
   );

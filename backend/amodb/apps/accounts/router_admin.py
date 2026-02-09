@@ -860,6 +860,16 @@ def create_user_admin(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    audit_services.log_event(
+        db,
+        amo_id=user.amo_id,
+        actor_user_id=str(current_user.id),
+        entity_type="accounts.user",
+        entity_id=str(user.id),
+        action="CREATED",
+        after={"email": user.email, "role": user.role, "is_active": user.is_active},
+        metadata={"module": "accounts"},
+    )
     return user
 
 
@@ -960,6 +970,16 @@ def update_user_admin(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    audit_services.log_event(
+        db,
+        amo_id=user.amo_id,
+        actor_user_id=str(current_user.id),
+        entity_type="accounts.user",
+        entity_id=str(user.id),
+        action="UPDATED",
+        after=update_data,
+        metadata={"module": "accounts"},
+    )
     return user
 
 
@@ -989,6 +1009,16 @@ def deactivate_user_admin(
     user.deactivated_reason = "deactivated_by_admin"
     db.add(user)
     db.commit()
+    audit_services.log_event(
+        db,
+        amo_id=user.amo_id,
+        actor_user_id=str(current_user.id),
+        entity_type="accounts.user",
+        entity_id=str(user.id),
+        action="DEACTIVATED",
+        after={"is_active": False},
+        metadata={"module": "accounts"},
+    )
     return
 
 

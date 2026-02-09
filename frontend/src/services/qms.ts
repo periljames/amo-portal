@@ -327,6 +327,17 @@ export async function qmsListDistributions(params?: {
   );
 }
 
+export async function qmsCreateDistribution(payload: {
+  doc_id: string;
+  recipient_user_id: string;
+  requires_ack?: boolean;
+}): Promise<QMSDistributionOut> {
+  return sendJson<QMSDistributionOut>("/quality/qms/distributions", "POST", {
+    ...payload,
+    requires_ack: payload.requires_ack ?? true,
+  });
+}
+
 export async function qmsListChangeRequests(params?: {
   domain?: string;
   status_?: QMSChangeRequestStatus;
