@@ -1,0 +1,40 @@
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+
+.page-header__breadcrumbs {
+  display: flex;
+  gap: var(--s-2);
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: var(--s-2);
+}
+
+.page-header__breadcrumbs a {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.page-header__breadcrumbs span {
+  opacity: 0.6;
+}
+
+.page-header__title {
+  font-size: 1.6rem;
+  margin: 0;
+}
+
+.page-header__subtitle {
+  margin: var(--s-1) 0 0;
+  color: var(--text-secondary);
+}
+
+.page-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}

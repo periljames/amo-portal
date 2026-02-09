@@ -1,0 +1,35 @@
+:root {
+  --bg: var(--bg-base);
+  --text: var(--text-primary);
+  --surface: var(--surface);
+  --surface-2: var(--surface-elevated);
+  --border: var(--surface-border);
+  --hover: rgba(148, 163, 184, 0.16);
+  --brand: #8b6f00;
+  --brand-weak: rgba(139, 111, 0, 0.12);
+  --danger: var(--accent-danger);
+  --warning: var(--accent-warning);
+  --success: #22c55e;
+  --focus-ring: var(--brand);
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 40px;
+  --s-8: 48px;
+
+  --content-max: 1240px;
+
+  --sh-1: 0 10px 30px rgba(15, 23, 42, 0.35);
+  --sh-2: 0 16px 40px rgba(15, 23, 42, 0.45);
+
+  --header-h: 56px;
+}

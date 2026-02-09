@@ -1,10 +1,11 @@
 /* ---------- QMS standalone shell ---------- */
 
 .qms-shell {
-  background: #f8fafc;
-  border-radius: 24px;
-  padding: 28px;
-  min-height: calc(100vh - 120px);
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  padding: var(--s-5);
+  border: 1px solid var(--border);
+  min-height: calc(100vh - 160px);
 }
 
 .qms-header {

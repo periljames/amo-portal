@@ -82,9 +82,9 @@ body::-webkit-scrollbar-thumb,
   --shadow-card: 0 12px 32px rgba(15, 23, 42, 0.35);
 
   --brand-name: "AMO Portal";
-  --brand-accent: #22c55e;
-  --brand-accent-soft: rgba(34, 197, 94, 0.12);
-  --brand-accent-secondary: #16a34a;
+  --brand-accent: var(--brand);
+  --brand-accent-soft: var(--brand-weak);
+  --brand-accent-secondary: var(--brand);
   --brand-accent-contrast: #f8fafc;
 
   --bg-base: #0f172a;
