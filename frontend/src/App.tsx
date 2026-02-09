@@ -6,7 +6,8 @@ import { AppRouter } from "./router";
 import { useTimeOfDayTheme } from "./hooks/useTimeOfDayTheme";
 import { useColorScheme } from "./hooks/useColorScheme";
 
-import "./styles/global.css";
+import { ToastProvider } from "./components/feedback/ToastProvider";
+
 import "./styles/auth.css";
 
 const App: React.FC = () => {
@@ -19,7 +20,11 @@ const App: React.FC = () => {
 
   void scheme;
 
-  return <AppRouter />;
+  return (
+    <ToastProvider>
+      <AppRouter />
+    </ToastProvider>
+  );
 };
 
 export default App;
