@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { getContext } from "../services/auth";
 import {
   qmsListDocuments,
+  qmsListDistributions,
   type QMSDocumentOut,
   type QMSDocumentStatus,
 } from "../services/qms";
+import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -29,6 +31,7 @@ const STATUS_OPTIONS: Array<{ value: QMSDocumentStatus | "ALL"; label: string }>
 const QMSDocumentsPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
@@ -36,11 +39,13 @@ const QMSDocumentsPage: React.FC = () => {
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [documents, setDocuments] = useState<QMSDocumentOut[]>([]);
+  const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<QMSDocumentStatus | "ALL">(
     "ALL"
   );
   const [query, setQuery] = useState("");
+  const ackFilter = searchParams.get("ack");
 
   const load = async () => {
     setState("loading");
@@ -51,7 +56,13 @@ const QMSDocumentsPage: React.FC = () => {
         status_: statusFilter === "ALL" ? undefined : statusFilter,
         q: query.trim() || undefined,
       });
-      setDocuments(docs);
+      if (ackFilter === "pending") {
+        const dists = await qmsListDistributions({ outstanding_only: true });
+        const pendingDocIds = new Set(dists.map((dist) => dist.doc_id));
+        setDocuments(docs.filter((doc) => pendingDocIds.has(doc.id)));
+      } else {
+        setDocuments(docs);
+      }
       setState("ready");
     } catch (e: any) {
       setError(e?.message || "Failed to load document register.");
@@ -62,7 +73,7 @@ const QMSDocumentsPage: React.FC = () => {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+  }, [statusFilter, ackFilter]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -143,6 +154,7 @@ const QMSDocumentsPage: React.FC = () => {
                   <th>Status</th>
                   <th>Effective</th>
                   <th>Updated</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -158,11 +170,22 @@ const QMSDocumentsPage: React.FC = () => {
                     </td>
                     <td>{formatDate(doc.effective_date)}</td>
                     <td>{formatDate(doc.updated_at)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="secondary-chip-btn"
+                        onClick={() =>
+                          setPanelContext({ type: "document", docId: doc.id, title: doc.title })
+                        }
+                      >
+                        Quick actions
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="text-muted">
+                    <td colSpan={7} className="text-muted">
                       No documents match the selected filters.
                     </td>
                   </tr>
@@ -172,6 +195,12 @@ const QMSDocumentsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ActionPanel
+        isOpen={!!panelContext}
+        context={panelContext}
+        onClose={() => setPanelContext(null)}
+      />
 
       <section className="qms-grid">
         <AuditHistoryPanel

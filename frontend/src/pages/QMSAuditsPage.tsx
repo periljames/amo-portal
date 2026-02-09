@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import Drawer from "../components/shared/Drawer";
@@ -51,6 +51,7 @@ const STATUS_OPTIONS: Array<{ value: QMSAuditStatus | "ALL"; label: string }> =
 
 const QMSAuditsPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
+  const [searchParams] = useSearchParams();
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
@@ -59,9 +60,8 @@ const QMSAuditsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [audits, setAudits] = useState<QMSAuditOut[]>([]);
   const [schedules, setSchedules] = useState<QMSAuditScheduleOut[]>([]);
-  const [statusFilter, setStatusFilter] = useState<QMSAuditStatus | "ALL">(
-    "ALL"
-  );
+  const [statusFilter, setStatusFilter] = useState<QMSAuditStatus | "ALL">("ALL");
+  const statusParam = searchParams.get("status");
   const [search, setSearch] = useState("");
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [scheduleState, setScheduleState] = useState<LoadState>("idle");
@@ -160,6 +160,17 @@ const QMSAuditsPage: React.FC = () => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
+
+  useEffect(() => {
+    if (!statusParam) return;
+    if (statusParam === "open") {
+      setStatusFilter("ALL");
+      return;
+    }
+    if (["PLANNED", "IN_PROGRESS", "CAP_OPEN", "CLOSED"].includes(statusParam.toUpperCase())) {
+      setStatusFilter(statusParam.toUpperCase() as QMSAuditStatus);
+    }
+  }, [statusParam]);
 
   useEffect(() => {
     loadSchedules();
@@ -389,14 +400,18 @@ const QMSAuditsPage: React.FC = () => {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return audits;
-    return audits.filter(
+    let list = audits;
+    if (statusParam === "open") {
+      list = list.filter((audit) => audit.status !== "CLOSED");
+    }
+    if (!q) return list;
+    return list.filter(
       (audit) =>
         audit.title.toLowerCase().includes(q) ||
         audit.audit_ref.toLowerCase().includes(q) ||
         audit.kind.toLowerCase().includes(q)
     );
-  }, [audits, search]);
+  }, [audits, search, statusParam]);
 
   const upcoming = filtered
     .filter((audit) => audit.planned_start && new Date(audit.planned_start) > new Date())

@@ -18,6 +18,7 @@ import "./styles/components/inline-error.css";
 import "./styles/components/toast.css";
 import "./styles/components/drawer.css";
 import "./styles/components/dashboard-cockpit.css";
+import "./styles/components/action-panel.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -38,6 +38,16 @@ def _get_user_from_token(token: str, db: Session) -> account_models.User:
         raise _credentials_exception()
     if not getattr(user, "is_active", False):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user account")
+    effective_amo_id = user.amo_id
+    if getattr(user, "is_superuser", False):
+        context = (
+            db.query(account_models.UserActiveContext)
+            .filter(account_models.UserActiveContext.user_id == user.id)
+            .first()
+        )
+        if context and context.active_amo_id:
+            effective_amo_id = context.active_amo_id
+    setattr(user, "effective_amo_id", effective_amo_id)
     return user
 
 
@@ -63,7 +73,8 @@ async def _event_generator(
             try:
                 event = await asyncio.to_thread(q.get, True, 15)
                 amo_id = event.metadata.get("amoId") if isinstance(event.metadata, dict) else None
-                if amo_id and str(amo_id) != str(getattr(user, "amo_id", "")):
+                effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
+                if amo_id and str(amo_id) != str(effective_amo_id):
                     continue
                 yield format_sse(event.to_json(), event=event.type)
             except queue.Empty:

@@ -1,19 +1,27 @@
-# Realtime Event Schema (Proposed)
+# Realtime Event Schema (Implemented)
 
-This schema is intended for the SSE/WebSocket event stream for QMS and cross-module activity.
+## Implemented Endpoint
+- **SSE endpoint**: `GET /api/events`
+- **Auth**: `token` query parameter (JWT). Example: `/api/events?token=<JWT>`
+- **Headers**: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`
+- **Heartbeat**: server emits `event: heartbeat` every ~15s when idle
+- **Last-Event-ID**: not supported
 
-## Transport
-- **Preferred:** Server-Sent Events (SSE) at `/api/events` or `/qms/events`.
-- **Fallback:** WebSocket at `/ws/events` if SSE is not feasible.
+**Connection example (frontend)**
+```ts
+const source = new EventSource(`${API_BASE}/api/events?token=${encodeURIComponent(jwt)}`, {
+  withCredentials: true,
+});
+```
 
-## Event envelope
+## Event Envelope (stable contract)
 ```json
 {
   "id": "evt_01HXYZ...",
-  "type": "qms.car.updated",
-  "entityType": "car",
-  "entityId": "c9c3d0e9-acde-4f6a-8b7a-acde1234",
-  "action": "UPDATED",
+  "type": "qms_car.create",
+  "entityType": "qms_car",
+  "entityId": "uuid",
+  "action": "create",
   "timestamp": "2024-05-16T14:23:41.123Z",
   "actor": {
     "userId": "user_123",
@@ -21,48 +29,54 @@ This schema is intended for the SSE/WebSocket event stream for QMS and cross-mod
     "department": "QUALITY"
   },
   "metadata": {
-    "status": "IN_PROGRESS",
-    "priority": "HIGH",
-    "dueDate": "2024-05-20",
     "amoId": "amo_001",
-    "departmentCode": "QUALITY"
+    "module": "quality"
   }
 }
 ```
 
-## Required fields
-- `id`: Unique event ID (string).
-- `type`: Canonical event type (string) e.g. `qms.audit.updated`, `qms.document.acknowledged`.
-- `entityType`: Entity category (`audit`, `car`, `document`, `training`, `task`, `user`, etc.).
-- `entityId`: UUID or stable entity identifier.
-- `action`: One of `CREATED`, `UPDATED`, `DELETED`, `ACKNOWLEDGED`, `STATUS_CHANGED`, `ASSIGNED`.
-- `timestamp`: ISO-8601 datetime.
-- `metadata`: Arbitrary JSON for quick UI routing/filtering (status, due window, department, etc.).
+### Required fields
+- `id`, `type`, `entityType`, `entityId`, `action`, `timestamp`
 
-## Suggested event types
-- **QMS**
-  - `qms.dashboard.updated`
-  - `qms.document.created|updated|published|acknowledged`
-  - `qms.audit.created|updated|status_changed`
-  - `qms.finding.created|verified|acknowledged|closed`
-  - `qms.car.created|updated|escalated|reviewed|closed`
-  - `qms.change_request.created|updated|approved|rejected`
-- **Training**
-  - `training.assignment.created|completed|overdue`
-  - `training.deferral.requested|approved|rejected`
-- **Tasks**
-  - `tasks.assignment.created|updated|completed`
-- **Accounts**
-  - `accounts.user.created|updated|authorization.revoked`
+### Optional fields
+- `actor`, `metadata`
 
-## Frontend handling (React Query)
-- `qms.*` → invalidate `qms-dashboard`, `qms-documents`, `qms-audits`, `qms-cars`, `qms-change-requests`.
-- `training.*` → invalidate `training-assignments`, `training-dashboard`.
-- `tasks.*` → invalidate `tasks` and `my-tasks`.
-- `accounts.*` → invalidate `admin-users`, `user-profile`.
+### Allowed `entityType` values (current)
+- `qms_document`, `qms_document_revision`, `qms_document_distribution`
+- `qms_audit`, `qms_audit_schedule`, `qms_finding`, `qms_car`
+- `TrainingEvent`, `TrainingEventParticipant`, `TrainingRecord`, `TrainingDeferralRequest`
+- `accounts.user`
 
-## Security
-- Events must be scoped to the tenant and user permissions:
-  - Filter by AMO/tenant.
-  - Restrict sensitive events to authorized roles (Quality, AMO admin, etc.).
-  - Avoid leaking PII in `metadata` when not authorized.
+### Allowed `action` values (current)
+- Quality/QMS: `create`, `update`, `publish`, `acknowledge`, `close`, `verify`, `escalate` (varies by entity)
+- Training: `EVENT_*`, `RECORD_*`, `DEFERRAL_*` (see emitted table)
+- Accounts: `CREATED`, `UPDATED`, `DEACTIVATED`
+
+## Emitted today (authoritative)
+| event.type | entityType | action | producer location | when emitted | frontend invalidation keys |
+|---|---|---|---|---|---|
+| `qms_document.create` | `qms_document` | `create` | `backend/amodb/apps/quality/router.py` | document created | `qms-documents` |
+| `qms_document.update` | `qms_document` | `update` | `backend/amodb/apps/quality/router.py` | document updated | `qms-documents` |
+| `qms_document_distribution.create` | `qms_document_distribution` | `create` | `backend/amodb/apps/quality/router.py` | distribution created | `qms-documents`, `qms-distributions` |
+| `qms_document_distribution.ack` | `qms_document_distribution` | `ack` | `backend/amodb/apps/quality/router.py` | acknowledgement recorded | `qms-documents` |
+| `qms_audit.create` | `qms_audit` | `create` | `backend/amodb/apps/quality/router.py` | audit created | `qms-audits` |
+| `qms_audit.update` | `qms_audit` | `update` | `backend/amodb/apps/quality/router.py` | audit updated/closed | `qms-audits` |
+| `qms_car.create` | `qms_car` | `create` | `backend/amodb/apps/quality/router.py` | CAR created | `qms-cars` |
+| `qms_car.update` | `qms_car` | `update` | `backend/amodb/apps/quality/router.py` | CAR updated | `qms-cars` |
+| `training.trainingeventparticipant.event_participant_add` | `TrainingEventParticipant` | `EVENT_PARTICIPANT_ADD` | `backend/amodb/apps/training/router.py` | participant added | `training-events`, `training-status` |
+| `training.trainingeventparticipant.event_participant_update` | `TrainingEventParticipant` | `EVENT_PARTICIPANT_UPDATE` | `backend/amodb/apps/training/router.py` | participant updated | `training-events`, `training-status` |
+| `accounts.user.created` | `accounts.user` | `CREATED` | `backend/amodb/apps/accounts/router_admin.py` | user created | `admin-users`, `user-profile` |
+| `accounts.user.updated` | `accounts.user` | `UPDATED` | `backend/amodb/apps/accounts/router_admin.py` | user updated | `admin-users`, `user-profile` |
+| `accounts.user.deactivated` | `accounts.user` | `DEACTIVATED` | `backend/amodb/apps/accounts/router_admin.py` | user deactivated | `admin-users`, `user-profile` |
+
+## Query invalidation map (frontend)
+- `qms.*` → `qms-dashboard`, `qms-documents`, `qms-audits`, `qms-cars`, `qms-change-requests`
+- `training.*` → `training-assignments`, `training-dashboard`, `training-events`, `training-status`
+- `tasks.*` → `tasks`, `my-tasks`
+- `accounts.*` → `admin-users`, `user-profile`
+- **Debounce**: 350ms batched invalidations (event storm protection)
+
+## Security + scoping
+- **Tenant scoping**: events are filtered by `metadata.amoId` against the user’s effective AMO.
+- **Permission scoping**: user must be active; superuser uses active AMO context.
+- **Redaction**: no PII is redacted yet; `metadata` should avoid sensitive content.

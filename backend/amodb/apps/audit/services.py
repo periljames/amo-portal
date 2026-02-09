@@ -75,16 +75,20 @@ def log_event(
                 metadata=metadata,
             ),
         )
+        metadata_payload = {"amoId": amo_id, **(event.metadata_json or {})}
+        event_type = f"{event.entity_type}.{event.action}".lower()
+        if metadata_payload.get("module") == "training":
+            event_type = f"training.{event.entity_type}.{event.action}".lower()
         publish_event(
             EventEnvelope(
                 id=str(event.id),
-                type=f\"{event.entity_type}.{event.action}\".lower(),
+                type=event_type,
                 entityType=event.entity_type,
                 entityId=event.entity_id,
                 action=event.action,
                 timestamp=event.occurred_at.isoformat() if event.occurred_at else event.created_at.isoformat(),
-                actor={\"userId\": actor_user_id} if actor_user_id else None,
-                metadata={\"amoId\": amo_id, **(event.metadata_json or {})},
+                actor={"userId": actor_user_id} if actor_user_id else None,
+                metadata=metadata_payload,
             )
         )
         return event

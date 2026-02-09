@@ -24,6 +24,8 @@ export type ActionItem = {
   type: string;
   title: string;
   owner?: string;
+  ownerId?: string | null;
+  onOwnerClick?: () => void;
   due?: string;
   status?: string;
   priority?: string;
@@ -139,7 +141,20 @@ const DashboardScaffold: React.FC<Props> = ({
                     >
                       <strong>{item.type}</strong>
                       <span>{item.title}</span>
-                      <span>{item.owner ?? "—"}</span>
+                      {item.owner && item.onOwnerClick ? (
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            item.onOwnerClick?.();
+                          }}
+                        >
+                          {item.owner}
+                        </button>
+                      ) : (
+                        <span>{item.owner ?? "—"}</span>
+                      )}
                       <span>{item.due ?? "—"}</span>
                       <span>{item.status ?? "—"}</span>
                       <button

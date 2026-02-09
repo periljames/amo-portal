@@ -49,7 +49,14 @@ const MAX_ACTIVITY = 40;
 
 function mapEventToInvalidations(type: string): string[] {
   if (type.startsWith("qms.") || type.startsWith("qms_")) {
-    return ["qms-dashboard", "qms-documents", "qms-audits", "qms-cars", "qms-change-requests"];
+    return [
+      "qms-dashboard",
+      "qms-documents",
+      "qms-audits",
+      "qms-cars",
+      "qms-change-requests",
+      "qms-distributions",
+    ];
   }
   if (type.startsWith("training.") || type.startsWith("training_")) {
     return ["training-assignments", "training-dashboard", "training-events", "training-status"];
@@ -70,6 +77,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const sourceRef = useRef<EventSource | null>(null);
   const invalidateTimer = useRef<number | null>(null);
+  const reconnectTimer = useRef<number | null>(null);
+  const retryCount = useRef(0);
 
   const scheduleInvalidations = useCallback(
     (keys: string[]) => {
@@ -111,6 +120,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const source = new EventSource(url, { withCredentials: true });
     sourceRef.current = source;
 
+    source.onopen = () => {
+      retryCount.current = 0;
+      setStatus("live");
+    };
+
     source.onmessage = (evt) => {
       try {
         const payload = JSON.parse(evt.data);
@@ -122,6 +136,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     source.onerror = () => {
       setStatus("offline");
+      source.close();
+      if (reconnectTimer.current) {
+        window.clearTimeout(reconnectTimer.current);
+      }
+      const retryDelay = Math.min(15000, 2000 * 2 ** retryCount.current);
+      retryCount.current += 1;
+      reconnectTimer.current = window.setTimeout(() => connect(), retryDelay);
     };
   }, [handleEvent]);
 
@@ -131,6 +152,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       sourceRef.current?.close();
       if (invalidateTimer.current) {
         window.clearTimeout(invalidateTimer.current);
+      }
+      if (reconnectTimer.current) {
+        window.clearTimeout(reconnectTimer.current);
       }
     };
   }, [connect]);

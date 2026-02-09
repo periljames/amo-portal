@@ -1,13 +1,15 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { addDays, endOfDay, isBefore, isWithinInterval, parseISO } from "date-fns";
 
 import DashboardScaffold from "../components/dashboard/DashboardScaffold";
-import { getContext } from "../services/auth";
+import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
+import { getCachedUser, getContext } from "../services/auth";
 import { qmsListAudits, qmsListCars, qmsListDistributions } from "../services/qms";
 import { listMyTasks } from "../services/tasks";
 import { useRealtime } from "../components/realtime/RealtimeProvider";
+import { getMyTrainingStatus } from "../services/training";
 
 const isWithinDays = (dateStr: string | null | undefined, days: number) => {
   if (!dateStr) return false;
@@ -30,6 +32,8 @@ const DashboardCockpit: React.FC = () => {
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
   const { activity } = useRealtime();
+  const currentUser = getCachedUser();
+  const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
 
   const qmsEnabled = department === "quality" || department === "safety";
 
@@ -56,11 +60,20 @@ const DashboardCockpit: React.FC = () => {
     queryFn: () => listMyTasks(),
   });
 
+  const { data: trainingStatus = [] } = useQuery({
+    queryKey: ["training-status", amoCode],
+    queryFn: () => getMyTrainingStatus(),
+  });
+
   const kpis = useMemo(() => {
     const overdueCars = cars.filter((car) => car.status !== "CLOSED" && isPastDue(car.due_date));
     const dueWeek = cars.filter((car) => car.status !== "CLOSED" && isWithinDays(car.due_date, 7));
     const dueMonth = cars.filter((car) => car.status !== "CLOSED" && isWithinDays(car.due_date, 30));
     const dueTasksToday = tasks.filter((task) => isWithinDays(task.due_at, 0));
+    const overdueTraining = trainingStatus.filter((item) => item.status === "OVERDUE");
+    const dueSoonTraining = trainingStatus.filter(
+      (item) => item.days_until_due !== null && item.days_until_due <= 7 && item.days_until_due >= 0
+    );
 
     return [
       {
@@ -99,6 +112,28 @@ const DashboardCockpit: React.FC = () => {
           navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=open&dueWindow=month`),
       },
       {
+        id: "training-overdue",
+        label: "Overdue training",
+        value: overdueTraining.length,
+        timeframe: "Now",
+        updatedAt: "just now",
+        onClick: () =>
+          navigate(
+            `/maintenance/${amoCode}/${department}/qms/training?status=overdue&dueWindow=now`
+          ),
+      },
+      {
+        id: "training-week",
+        label: "Training due this week",
+        value: dueSoonTraining.length,
+        timeframe: "Week",
+        updatedAt: "just now",
+        onClick: () =>
+          navigate(
+            `/maintenance/${amoCode}/${department}/qms/training?status=due&dueWindow=week`
+          ),
+      },
+      {
         id: "acks",
         label: "Pending acknowledgements",
         value: distributions.length,
@@ -117,7 +152,7 @@ const DashboardCockpit: React.FC = () => {
           navigate(`/maintenance/${amoCode}/${department}/qms/audits?status=open`),
       },
     ];
-  }, [audits, cars, distributions.length, tasks, amoCode, department, navigate]);
+  }, [audits, cars, distributions.length, tasks, trainingStatus, amoCode, department, navigate]);
 
   const drivers = useMemo(() => {
     const auditOpen = audits.filter((audit) => audit.status !== "CLOSED").length;
@@ -142,11 +177,21 @@ const DashboardCockpit: React.FC = () => {
       type: "Task",
       title: task.title,
       owner: task.owner_user_id ?? "Assigned",
+      ownerId: task.owner_user_id ?? null,
+      onOwnerClick: task.owner_user_id
+        ? () => navigate(`/maintenance/${amoCode}/admin/users/${task.owner_user_id}`)
+        : undefined,
       due: task.due_at ? new Date(task.due_at).toLocaleDateString() : "—",
       status: task.status,
       priority: String(task.priority),
       onClick: () => navigate(`/maintenance/${amoCode}/${department}/tasks/${task.id}`),
-      action: () => navigate(`/maintenance/${amoCode}/${department}/tasks/${task.id}`),
+      action: () =>
+        setPanelContext({
+          type: "user",
+          userId: task.owner_user_id ?? currentUser?.id ?? "",
+          name: task.owner_user_id ?? currentUser?.full_name ?? "User",
+          role: currentUser?.role,
+        }),
     }));
 
     const carItems = cars.slice(0, 10).map((car) => ({
@@ -154,17 +199,53 @@ const DashboardCockpit: React.FC = () => {
       type: "CAR",
       title: `${car.car_number} · ${car.title}`,
       owner: car.assigned_to_user_id ?? "Unassigned",
+      ownerId: car.assigned_to_user_id ?? null,
+      onOwnerClick: car.assigned_to_user_id
+        ? () => navigate(`/maintenance/${amoCode}/admin/users/${car.assigned_to_user_id}`)
+        : undefined,
       due: car.due_date ?? "—",
       status: car.status,
       priority: car.priority,
       onClick: () =>
         navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${car.id}`),
       action: () =>
-        navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${car.id}`),
+        setPanelContext({
+          type: "car",
+          id: car.id,
+          title: car.title,
+          status: car.status,
+          ownerId: car.assigned_to_user_id,
+        }),
     }));
 
-    return [...taskItems, ...carItems].slice(0, 20);
-  }, [tasks, cars, amoCode, department, navigate]);
+    const trainingItems = trainingStatus
+      .filter((item) => ["OVERDUE", "DUE_SOON"].includes(item.status))
+      .slice(0, 6)
+      .map((item) => ({
+        id: item.course_id,
+        type: "Training",
+        title: item.course_name,
+        owner: currentUser?.full_name ?? "Me",
+        ownerId: currentUser?.id ?? null,
+        onOwnerClick: currentUser?.id
+          ? () => navigate(`/maintenance/${amoCode}/admin/users/${currentUser.id}`)
+          : undefined,
+        due: item.extended_due_date ?? item.valid_until ?? "—",
+        status: item.status,
+        priority: item.status === "OVERDUE" ? "High" : "Medium",
+        onClick: () =>
+          navigate(`/maintenance/${amoCode}/${department}/qms/training?status=overdue`),
+        action: () =>
+          setPanelContext({
+            type: "training",
+            userId: currentUser?.id ?? "",
+            courseId: item.course_id,
+            courseName: item.course_name,
+          }),
+      }));
+
+    return [...taskItems, ...carItems, ...trainingItems].slice(0, 20);
+  }, [tasks, cars, trainingStatus, currentUser, amoCode, department, navigate]);
 
   const activityItems = useMemo(
     () =>
@@ -179,14 +260,17 @@ const DashboardCockpit: React.FC = () => {
   );
 
   return (
-    <DashboardScaffold
-      title={`${department.toUpperCase()} cockpit`}
-      subtitle="Realtime QMS management overview"
-      kpis={kpis}
-      drivers={drivers}
-      actionItems={actionItems}
-      activity={activityItems}
-    />
+    <>
+      <DashboardScaffold
+        title={`${department.toUpperCase()} cockpit`}
+        subtitle="Realtime QMS management overview"
+        kpis={kpis}
+        drivers={drivers}
+        actionItems={actionItems}
+        activity={activityItems}
+      />
+      <ActionPanel isOpen={!!panelContext} context={panelContext} onClose={() => setPanelContext(null)} />
+    </>
   );
 };
 
