@@ -192,6 +192,8 @@ def _is_missing_table_error(exc: Exception) -> bool:
     return (
         ("relation" in message and "does not exist" in message)
         or "no such table" in message
+        or ("column" in message and "does not exist" in message)
+        or "undefined column" in message
     )
 
 
@@ -816,91 +818,98 @@ def authenticate_user(
     Returns a user on success, or None on failure (lockout, bad credentials).
     System/service accounts are not allowed to authenticate via this flow.
     """
-    email = _normalise_email(login_req.email) if login_req.email else None
-    staff_code = _normalise_staff_code(login_req.staff_code) if login_req.staff_code else None
-    amo_slug_raw = (login_req.amo_slug or "").strip()
-    amo_slug = amo_slug_raw.lower()
+    try:
+        email = _normalise_email(login_req.email) if login_req.email else None
+        staff_code = _normalise_staff_code(login_req.staff_code) if login_req.staff_code else None
+        amo_slug_raw = (login_req.amo_slug or "").strip()
+        amo_slug = amo_slug_raw.lower()
 
-    user: Optional[models.User] = None
-    amo: Optional[models.AMO] = None
+        user: Optional[models.User] = None
+        amo: Optional[models.AMO] = None
 
-    # -----------------------------------------------------------------------
-    # Global superuser login (system owner)
-    # -----------------------------------------------------------------------
-    if amo_slug in {"", "system", "root"}:
-        if not email:
-            _log_security_event(
-                db,
-                user=None,
-                amo=None,
-                event_type="LOGIN_FAILED",
-                description="Superuser login attempted without email.",
-                ip=ip,
-                user_agent=user_agent,
-            )
-            return None
-
-        user = get_global_superuser_by_email(db, email=email)
-
-        if not user:
-            _log_security_event(
-                db,
-                user=None,
-                amo=None,
-                event_type="LOGIN_FAILED",
-                description="Unknown superuser or inactive account.",
-                ip=ip,
-                user_agent=user_agent,
-            )
-            return None
-        # For global superuser, amo stays None
-    else:
-        # -------------------------------------------------------------------
-        # Normal AMO-scoped login
-        # -------------------------------------------------------------------
-        if staff_code:
-            amo = _find_amo_by_slug_or_code(db, amo_slug_raw)
-            if amo:
-                user = get_active_user_by_staff_code(
-                    db=db,
-                    amo_id=amo.id,
-                    staff_code=staff_code,
+        # -----------------------------------------------------------------------
+        # Global superuser login (system owner)
+        # -----------------------------------------------------------------------
+        if amo_slug in {"", "system", "root"}:
+            if not email:
+                _log_security_event(
+                    db,
+                    user=None,
+                    amo=None,
+                    event_type="LOGIN_FAILED",
+                    description="Superuser login attempted without email.",
+                    ip=ip,
+                    user_agent=user_agent,
                 )
-        elif email:
-            user = get_user_for_login(
-                db=db,
-                amo_slug=amo_slug_raw,
-                email=email,
-            )
+                return None
 
-        if user:
-            amo = user.amo
+            user = get_global_superuser_by_email(db, email=email)
+
+            if not user:
+                _log_security_event(
+                    db,
+                    user=None,
+                    amo=None,
+                    event_type="LOGIN_FAILED",
+                    description="Unknown superuser or inactive account.",
+                    ip=ip,
+                    user_agent=user_agent,
+                )
+                return None
+            # For global superuser, amo stays None
         else:
-            # If AMO exists, log a generic failed login.
-            amo = amo or _find_amo_by_slug_or_code(db, amo_slug_raw)
+            # -------------------------------------------------------------------
+            # Normal AMO-scoped login
+            # -------------------------------------------------------------------
+            if staff_code:
+                amo = _find_amo_by_slug_or_code(db, amo_slug_raw)
+                if amo:
+                    user = get_active_user_by_staff_code(
+                        db=db,
+                        amo_id=amo.id,
+                        staff_code=staff_code,
+                    )
+            elif email:
+                user = get_user_for_login(
+                    db=db,
+                    amo_slug=amo_slug_raw,
+                    email=email,
+                )
+
+            if user:
+                amo = user.amo
+            else:
+                # If AMO exists, log a generic failed login.
+                amo = amo or _find_amo_by_slug_or_code(db, amo_slug_raw)
+                _log_security_event(
+                    db,
+                    user=None,
+                    amo=amo,
+                    event_type="LOGIN_FAILED",
+                    description="Unknown user or inactive account.",
+                    ip=ip,
+                    user_agent=user_agent,
+                )
+                return None
+
+        # Block system/AI/service accounts from using human login flows.
+        if getattr(user, "is_system_account", False):
             _log_security_event(
                 db,
-                user=None,
+                user=user,
                 amo=amo,
                 event_type="LOGIN_FAILED",
-                description="Unknown user or inactive account.",
+                description="System/service account attempted password login.",
                 ip=ip,
                 user_agent=user_agent,
             )
             return None
-
-    # Block system/AI/service accounts from using human login flows.
-    if getattr(user, "is_system_account", False):
-        _log_security_event(
-            db,
-            user=user,
-            amo=amo,
-            event_type="LOGIN_FAILED",
-            description="System/service account attempted password login.",
-            ip=ip,
-            user_agent=user_agent,
-        )
-        return None
+    except (OperationalError, ProgrammingError) as exc:
+        if _is_missing_table_error(exc):
+            raise SchemaNotInitialized(
+                "Database schema is missing required tables or columns."
+            ) from exc
+        raise
 
     if _is_account_locked(user):
         retry_after = _seconds_until_unlock(user)

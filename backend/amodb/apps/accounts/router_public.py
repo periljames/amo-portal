@@ -225,6 +225,11 @@ def login(
             ip=_client_ip(request),
             user_agent=_user_agent(request),
         )
+    except services.SchemaNotInitialized:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database schema is not initialized. Run migrations and retry.",
+        )
     except services.AuthenticationError as exc:
         detail = str(exc) or "Incorrect email, password or AMO slug."
         raise HTTPException(
