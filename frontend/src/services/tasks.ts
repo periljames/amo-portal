@@ -30,8 +30,11 @@ export async function listMyTasks(): Promise<TaskItem[]> {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
+    if (resp.status === 401) {
       handleAuthFailure();
+    }
+    if (resp.status === 403) {
+      throw new Error("Access denied.");
     }
     throw new Error("Failed to load tasks.");
   }
@@ -49,8 +52,11 @@ export async function updateTask(taskId: string, payload: { status?: TaskStatus 
     body: JSON.stringify(payload),
   });
   if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
+    if (resp.status === 401) {
       handleAuthFailure();
+    }
+    if (resp.status === 403) {
+      throw new Error("Access denied.");
     }
     throw new Error("Failed to update task.");
   }
