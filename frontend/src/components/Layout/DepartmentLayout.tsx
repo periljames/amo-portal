@@ -64,10 +64,86 @@ type ColorScheme = "dark" | "light";
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const IDLE_WARNING_MS = 3 * 60 * 1000;
-const POLLING_INTERVAL_MS = 60000;
-const ADMIN_OVERVIEW_POLLING_INTERVAL_MS = 15 * 60 * 1000;
-const POLLING_RETRY_DELAYS_MS = [1000, 3000, 10000];
-const MAX_POLLING_RETRIES = POLLING_RETRY_DELAYS_MS.length;
+const LAYOUT_CACHE_TTL_MS = 5 * 60 * 1000;
+const LAYOUT_CACHE_FAST_TTL_MS = 10 * 60 * 1000;
+const LAYOUT_CACHE_PREFIX = "amo_portal_layout_cache";
+const layoutMemoryCache = new Map<string, LayoutCacheEntry<unknown>>();
+
+type LayoutCacheEntry<T> = {
+  value: T;
+  savedAt: number;
+};
+
+function getLayoutCacheProfile(): {
+  maxAgeMs: number;
+  useMemory: boolean;
+} {
+  if (typeof window === "undefined") {
+    return { maxAgeMs: LAYOUT_CACHE_TTL_MS, useMemory: false };
+  }
+  const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+  const connection = (navigator as Navigator & {
+    connection?: { effectiveType?: string };
+  }).connection;
+  const effectiveType = connection?.effectiveType;
+  const isFastConnection = !effectiveType || effectiveType === "4g";
+  const useMemory = deviceMemory >= 8 && isFastConnection;
+  return {
+    maxAgeMs: useMemory ? LAYOUT_CACHE_FAST_TTL_MS : LAYOUT_CACHE_TTL_MS,
+    useMemory,
+  };
+}
+
+function readLayoutCache<T>(key: string, maxAgeMs: number, useMemory: boolean): T | null {
+  if (typeof window === "undefined") return null;
+  if (useMemory) {
+    const entry = layoutMemoryCache.get(key) as LayoutCacheEntry<T> | undefined;
+    if (entry) {
+      if (Date.now() - entry.savedAt <= maxAgeMs) {
+        return entry.value ?? null;
+      }
+      layoutMemoryCache.delete(key);
+    }
+  }
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as LayoutCacheEntry<T>;
+    if (!parsed?.savedAt) return null;
+    if (Date.now() - parsed.savedAt > maxAgeMs) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return parsed.value ?? null;
+  } catch {
+    window.localStorage.removeItem(key);
+    return null;
+  }
+}
+
+function writeLayoutCache<T>(key: string, value: T, useMemory: boolean): void {
+  if (typeof window === "undefined") return;
+  const payload: LayoutCacheEntry<T> = { value, savedAt: Date.now() };
+  if (useMemory) {
+    layoutMemoryCache.set(key, payload);
+  }
+  window.localStorage.setItem(key, JSON.stringify(payload));
+}
+
+function clearLayoutCache(prefix: string): void {
+  if (typeof window === "undefined") return;
+  layoutMemoryCache.forEach((_value, key) => {
+    if (key.startsWith(prefix)) {
+      layoutMemoryCache.delete(key);
+    }
+  });
+  for (let i = window.localStorage.length - 1; i >= 0; i -= 1) {
+    const key = window.localStorage.key(i);
+    if (key && key.startsWith(prefix)) {
+      window.localStorage.removeItem(key);
+    }
+  }
+}
 
 function isAdminNavId(v: string): v is AdminNavId {
   return ADMIN_NAV_ITEMS.some((d) => d.id === v);
@@ -448,19 +524,6 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/ehm/uploads");
   }, [location.pathname]);
 
-  const isAdminOverviewRoute = useMemo(() => {
-    return location.pathname.includes("/admin/overview");
-  }, [location.pathname]);
-
-  const shouldPoll = useMemo(() => {
-    return !location.pathname.includes("/admin") || isAdminOverviewRoute;
-  }, [location.pathname, isAdminOverviewRoute]);
-
-  const pollingIntervalMs = useMemo(() => {
-    return isAdminOverviewRoute
-      ? ADMIN_OVERVIEW_POLLING_INTERVAL_MS
-      : POLLING_INTERVAL_MS;
-  }, [isAdminOverviewRoute]);
 
   const lockedEventRef = useRef<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
@@ -469,64 +532,142 @@ const DepartmentLayout: React.FC<Props> = ({
   const idleLogoutTimeoutRef = useRef<number | null>(null);
   const idleCountdownIntervalRef = useRef<number | null>(null);
   const lastActivityRef = useRef<number>(0);
-  const pollingTimerRef = useRef<number | null>(null);
-  const pollingRetriesRef = useRef(0);
-  const pollingStoppedRef = useRef(false);
   const pollingInFlightRef = useRef(false);
-  const pollingRunnerRef = useRef<(reason: "initial" | "retry" | "manual" | "interval") => void>();
   const trialMenuRef = useRef<HTMLDivElement | null>(null);
   const lastPollingToastRef = useRef<string | null>(null);
-
-  const clearPollingTimer = useCallback(() => {
-    if (pollingTimerRef.current) {
-      window.clearTimeout(pollingTimerRef.current);
-      pollingTimerRef.current = null;
-    }
-  }, []);
-
-  const isPollingFatal = useCallback((err: unknown): boolean => {
-    if (err instanceof TypeError) return true;
-    const message = err instanceof Error ? err.message : String(err);
-    return (
-      message.includes("500") ||
-      message.includes("Failed to fetch") ||
-      message.includes("NetworkError") ||
-      message.toLowerCase().includes("cors")
-    );
-  }, []);
 
   const isForbiddenError = useCallback((err: unknown): boolean => {
     const message = err instanceof Error ? err.message : String(err);
     return message.includes("403") || message.toLowerCase().includes("forbidden");
   }, []);
 
-  const refreshSubscription = useCallback(async () => {
+  const cacheKeyBase = useMemo(() => {
+    return `${LAYOUT_CACHE_PREFIX}:${amoCode}:${currentUser?.id || "anonymous"}`;
+  }, [amoCode, currentUser?.id]);
+
+  const cacheProfile = useMemo(() => getLayoutCacheProfile(), []);
+
+  const subscriptionCacheKey = `${cacheKeyBase}:subscription`;
+  const overviewCacheKey = `${cacheKeyBase}:overview-summary`;
+  const unreadCacheKey = `${cacheKeyBase}:unread-count`;
+
+  useEffect(() => {
+    if (!currentUser) {
+      clearLayoutCache(`${LAYOUT_CACHE_PREFIX}:`);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    return onSessionEvent((detail) => {
+      if (detail.type === "expired" || detail.type === "idle-logout") {
+        clearLayoutCache(`${LAYOUT_CACHE_PREFIX}:`);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const cachedSubscription = readLayoutCache<Subscription>(
+      subscriptionCacheKey,
+      cacheProfile.maxAgeMs,
+      cacheProfile.useMemory
+    );
+    if (cachedSubscription) {
+      setSubscription(cachedSubscription);
+      setSubscriptionError(null);
+    }
+
+    const cachedOverview = readLayoutCache<OverviewSummary>(
+      overviewCacheKey,
+      cacheProfile.maxAgeMs,
+      cacheProfile.useMemory
+    );
+    if (cachedOverview) {
+      setOverviewSummary(cachedOverview);
+      setOverviewSummaryUnavailable(false);
+    }
+
+    const cachedUnread = readLayoutCache<number>(
+      unreadCacheKey,
+      cacheProfile.maxAgeMs,
+      cacheProfile.useMemory
+    );
+    if (typeof cachedUnread === "number") {
+      setUnreadNotifications(cachedUnread);
+    }
+  }, [
+    cacheProfile.maxAgeMs,
+    cacheProfile.useMemory,
+    currentUser,
+    overviewCacheKey,
+    subscriptionCacheKey,
+    unreadCacheKey,
+  ]);
+
+  const refreshSubscription = useCallback(async (opts?: { force?: boolean }) => {
+    if (!opts?.force) {
+      const cached = readLayoutCache<Subscription>(
+        subscriptionCacheKey,
+        cacheProfile.maxAgeMs,
+        cacheProfile.useMemory
+      );
+      if (cached) {
+        setSubscription(cached);
+        setSubscriptionError(null);
+        return;
+      }
+    }
     try {
       const sub = await fetchSubscription();
       setSubscription(sub);
       setSubscriptionError(null);
+      writeLayoutCache(subscriptionCacheKey, sub, cacheProfile.useMemory);
     } catch (err: any) {
       setSubscription(null);
       setSubscriptionError(err?.message || "Unable to load subscription status.");
       throw err;
     }
-  }, []);
+  }, [cacheProfile.maxAgeMs, cacheProfile.useMemory, subscriptionCacheKey]);
 
-  const refreshOverviewSummary = useCallback(async () => {
+  const refreshOverviewSummary = useCallback(async (opts?: { force?: boolean }) => {
     if (!isAdminUser(currentUser)) return;
+    if (!opts?.force) {
+      const cached = readLayoutCache<OverviewSummary>(
+        overviewCacheKey,
+        cacheProfile.maxAgeMs,
+        cacheProfile.useMemory
+      );
+      if (cached) {
+        setOverviewSummary(cached);
+        setOverviewSummaryUnavailable(false);
+        return;
+      }
+    }
     try {
       const data = await fetchOverviewSummary();
       setOverviewSummary(data);
       setOverviewSummaryUnavailable(false);
+      writeLayoutCache(overviewCacheKey, data, cacheProfile.useMemory);
     } catch (err) {
       console.error("Failed to refresh overview summary", err);
       setOverviewSummary(null);
       setOverviewSummaryUnavailable(true);
     }
-  }, [currentUser]);
+  }, [cacheProfile.maxAgeMs, cacheProfile.useMemory, currentUser, overviewCacheKey]);
 
-  const refreshUnreadNotifications = useCallback(async () => {
+  const refreshUnreadNotifications = useCallback(async (opts?: { force?: boolean }) => {
     if (!currentUser) return;
+    if (!opts?.force) {
+      const cached = readLayoutCache<number>(
+        unreadCacheKey,
+        cacheProfile.maxAgeMs,
+        cacheProfile.useMemory
+      );
+      if (typeof cached === "number") {
+        setUnreadNotifications(cached);
+        return;
+      }
+    }
     const handleModuleCall = async <T,>(
       promise: Promise<T>,
       onSuccess?: (value: T) => void,
@@ -546,67 +687,41 @@ const DepartmentLayout: React.FC<Props> = ({
 
     const trainingPromise = handleModuleCall(
       listTrainingNotifications({ unread_only: true, limit: 100 }),
-      (data) => setUnreadNotifications(data.length),
-      () => setUnreadNotifications(0)
+      (data) => {
+        setUnreadNotifications(data.length);
+        writeLayoutCache(unreadCacheKey, data.length, cacheProfile.useMemory);
+      },
+      () => {
+        setUnreadNotifications(0);
+        writeLayoutCache(unreadCacheKey, 0, cacheProfile.useMemory);
+      }
     );
 
     const qmsPromise = handleModuleCall(qmsListNotifications());
     const documentsPromise = handleModuleCall(listDocumentAlerts());
 
     await Promise.all([trainingPromise, qmsPromise, documentsPromise]);
-  }, [currentUser, isForbiddenError]);
+  }, [cacheProfile.maxAgeMs, cacheProfile.useMemory, currentUser, isForbiddenError, unreadCacheKey]);
 
   const handlePollingFailure = useCallback(
     (err: unknown) => {
-      clearPollingTimer();
       const message = err instanceof Error ? err.message : "Unable to refresh data.";
-      if (isPollingFatal(err)) {
-        const attempt = pollingRetriesRef.current;
-        if (attempt < MAX_POLLING_RETRIES) {
-          const delay = POLLING_RETRY_DELAYS_MS[attempt];
-          pollingRetriesRef.current += 1;
-          setPollingError(
-            `Live data refresh failed. Retrying in ${Math.round(delay / 1000)}s.`
-          );
-          pollingTimerRef.current = window.setTimeout(() => {
-            pollingRunnerRef.current?.("retry");
-          }, delay);
-          return;
-        }
-        pollingStoppedRef.current = true;
-        setPollingError(
-          "Live data refresh paused after repeated errors. Retry when the backend is available."
-        );
-        return;
-      }
-
       setPollingError(message);
-      pollingTimerRef.current = window.setTimeout(() => {
-        pollingRunnerRef.current?.("interval");
-      }, pollingIntervalMs);
     },
-    [clearPollingTimer, isPollingFatal, pollingIntervalMs]
+    []
   );
 
   const runPolling = useCallback(
-    async (reason: "initial" | "retry" | "manual" | "interval") => {
+    async (reason: "manual") => {
       if (!currentUser) return;
-      if (pollingStoppedRef.current && reason !== "manual") return;
       if (pollingInFlightRef.current) return;
       pollingInFlightRef.current = true;
-      clearPollingTimer();
       try {
-        await refreshSubscription();
-        await refreshUnreadNotifications();
-        await refreshOverviewSummary();
-        pollingRetriesRef.current = 0;
-        pollingStoppedRef.current = false;
+        const force = reason === "manual";
+        await refreshSubscription({ force });
+        await refreshUnreadNotifications({ force });
+        await refreshOverviewSummary({ force });
         setPollingError(null);
-        if (reason !== "manual") {
-          pollingTimerRef.current = window.setTimeout(() => {
-            pollingRunnerRef.current?.("interval");
-          }, pollingIntervalMs);
-        }
       } catch (err: unknown) {
         handlePollingFailure(err);
       } finally {
@@ -614,24 +729,13 @@ const DepartmentLayout: React.FC<Props> = ({
       }
     },
     [
-      clearPollingTimer,
       currentUser,
       handlePollingFailure,
-      pollingIntervalMs,
       refreshSubscription,
       refreshUnreadNotifications,
+      refreshOverviewSummary,
     ]
   );
-
-  pollingRunnerRef.current = runPolling;
-
-  useEffect(() => {
-    if (!currentUser || !shouldPoll) return;
-    runPolling("initial");
-    return () => {
-      clearPollingTimer();
-    };
-  }, [clearPollingTimer, currentUser, runPolling, shouldPoll]);
 
   const refreshNotifications = useCallback(
     async (opts?: { unreadOnly?: boolean }) => {
@@ -648,9 +752,12 @@ const DepartmentLayout: React.FC<Props> = ({
         });
         if (unreadOnly) {
           setUnreadNotifications(data.length);
+          writeLayoutCache(unreadCacheKey, data.length, cacheProfile.useMemory);
         } else {
           setNotifications(data);
-          setUnreadNotifications(data.filter((n) => !n.read_at).length);
+          const unreadCount = data.filter((n) => !n.read_at).length;
+          setUnreadNotifications(unreadCount);
+          writeLayoutCache(unreadCacheKey, unreadCount, cacheProfile.useMemory);
         }
       } catch (err: any) {
         if (!unreadOnly) {
@@ -661,7 +768,7 @@ const DepartmentLayout: React.FC<Props> = ({
         if (!unreadOnly) setNotificationsLoading(false);
       }
     },
-    [currentUser, handlePollingFailure]
+    [cacheProfile.useMemory, currentUser, handlePollingFailure, unreadCacheKey]
   );
 
   useEffect(() => {
@@ -979,8 +1086,6 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const handlePollingRetry = () => {
-    pollingStoppedRef.current = false;
-    pollingRetriesRef.current = 0;
     setPollingError(null);
     runPolling("manual");
   };

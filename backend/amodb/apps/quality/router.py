@@ -108,11 +108,21 @@ def _generate_schedule_audit_ref(schedule: models.QMSAuditSchedule, target_date:
 
 
 def _advance_schedule_date(schedule: models.QMSAuditSchedule, base_date: date) -> date:
-    if schedule.frequency == models.QMSAuditScheduleFrequency.MONTHLY:
-        year = base_date.year + (1 if base_date.month == 12 else 0)
-        month = 1 if base_date.month == 12 else base_date.month + 1
+    def _add_months(months: int) -> date:
+        year_offset, month_index = divmod(base_date.month - 1 + months, 12)
+        year = base_date.year + year_offset
+        month = month_index + 1
         day = min(base_date.day, calendar.monthrange(year, month)[1])
         return date(year, month, day)
+
+    if schedule.frequency == models.QMSAuditScheduleFrequency.ONE_TIME:
+        return base_date
+    if schedule.frequency == models.QMSAuditScheduleFrequency.MONTHLY:
+        return _add_months(1)
+    if schedule.frequency == models.QMSAuditScheduleFrequency.QUARTERLY:
+        return _add_months(3)
+    if schedule.frequency == models.QMSAuditScheduleFrequency.BI_ANNUAL:
+        return _add_months(6)
     if schedule.frequency == models.QMSAuditScheduleFrequency.ANNUAL:
         year = base_date.year + 1
         day = min(base_date.day, calendar.monthrange(year, base_date.month)[1])
@@ -820,7 +830,10 @@ def run_audit_schedule(
     db.flush()
 
     schedule.last_run_at = datetime.now(timezone.utc)
-    schedule.next_due_date = _advance_schedule_date(schedule, schedule.next_due_date)
+    if schedule.frequency == models.QMSAuditScheduleFrequency.ONE_TIME:
+        schedule.is_active = False
+    else:
+        schedule.next_due_date = _advance_schedule_date(schedule, schedule.next_due_date)
 
     audit_services.log_event(
         db,

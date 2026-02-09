@@ -503,7 +503,10 @@ const QMSAuditsPage: React.FC = () => {
                 }))
               }
             >
+              <option value="ONE_TIME">One time</option>
               <option value="MONTHLY">Monthly</option>
+              <option value="QUARTERLY">Quarterly</option>
+              <option value="BI_ANNUAL">Bi-annual</option>
               <option value="ANNUAL">Annual</option>
             </select>
           </label>
