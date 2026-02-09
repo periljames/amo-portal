@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
+import { useToast } from "../components/feedback/ToastProvider";
 import { getCachedUser, getContext } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
@@ -14,6 +15,7 @@ import {
   qmsDeleteCar,
   qmsListCarAssignees,
   qmsCreateCar,
+  qmsGetCarInvite,
   qmsListCars,
   qmsUpdateCar,
 } from "../services/qms";
@@ -96,6 +98,8 @@ const QualityCarsPage: React.FC = () => {
   const [deleteCar, setDeleteCar] = useState<CAROut | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
+  const { pushToast } = useToast();
 
   const assigneeLookup = useMemo(() => {
     const map = new Map<string, CARAssignee>();
@@ -201,6 +205,31 @@ const QualityCarsPage: React.FC = () => {
       setError(e?.message || "Failed to create CAR");
     } finally {
       setPreviewBusy(false);
+    }
+  };
+
+  const handleCopyInvite = async (car: CAROut) => {
+    setInviteBusyId(car.id);
+    try {
+      const invite = await qmsGetCarInvite(car.id);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(invite.invite_url);
+        pushToast({
+          title: "Invite link copied",
+          message: invite.invite_url,
+          variant: "success",
+        });
+      } else {
+        window.prompt("Copy CAR invite link:", invite.invite_url);
+      }
+    } catch (e: any) {
+      pushToast({
+        title: "Invite failed",
+        message: e?.message || "Unable to fetch the invite link.",
+        variant: "error",
+      });
+    } finally {
+      setInviteBusyId(null);
     }
   };
 
@@ -550,6 +579,14 @@ const QualityCarsPage: React.FC = () => {
                             disabled={exportingId === car.id}
                           >
                             {exportingId === car.id ? "Exporting…" : "Export pack"}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => handleCopyInvite(car)}
+                            disabled={inviteBusyId === car.id}
+                          >
+                            {inviteBusyId === car.id ? "Copying…" : "Copy invite"}
                           </button>
                           <button
                             type="button"
