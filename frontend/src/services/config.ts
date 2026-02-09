@@ -21,9 +21,13 @@ export function getApiBaseUrl(): string {
     return normaliseBaseUrl(import.meta.env.VITE_API_BASE_URL);
   }
   if (typeof window !== "undefined") {
-    const { protocol, hostname } = window.location;
+    const { protocol, hostname, port } = window.location;
     if (hostname && !["localhost", "127.0.0.1"].includes(hostname)) {
-      return normaliseBaseUrl(`${protocol}//${hostname}:8080`);
+      const portSuffix = port ? `:${port}` : "";
+      if (port === "5173" || port === "4173") {
+        return normaliseBaseUrl(`${protocol}//${hostname}:8080`);
+      }
+      return normaliseBaseUrl(`${protocol}//${hostname}${portSuffix}`);
     }
   }
   return "http://127.0.0.1:8080";
