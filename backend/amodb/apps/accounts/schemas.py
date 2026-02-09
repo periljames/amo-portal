@@ -94,6 +94,10 @@ class DepartmentRead(DepartmentBase):
         from_attributes = True
 
 
+class StaffCodeSuggestions(BaseModel):
+    suggestions: List[str]
+
+
 
 # ---------------------------------------------------------------------------
 # AMO ASSETS

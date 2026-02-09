@@ -18,6 +18,16 @@ import {
   markTrainingNotificationRead,
 } from "../../services/training";
 import type { TrainingNotificationRead } from "../../types/training";
+import {
+  DEPARTMENT_ITEMS,
+  type DepartmentId,
+  canAccessDepartment,
+  getAllowedDepartments,
+  getAssignedDepartment,
+  isAdminUser,
+  isDepartmentId,
+  isQualityReadOnly,
+} from "../../utils/departmentAccess";
 
 type Props = {
   amoCode: string;
@@ -25,17 +35,6 @@ type Props = {
   children: React.ReactNode;
   showPollingErrorBanner?: boolean;
 };
-
-type DepartmentId =
-  | "planning"
-  | "production"
-  | "quality"
-  | "reliability"
-  | "safety"
-  | "stores"
-  | "engineering"
-  | "workshops"
-  | "admin";
 
 type AdminNavId =
   | "admin-overview"
@@ -46,18 +45,6 @@ type AdminNavId =
   | "admin-settings"
   | "admin-email-logs"
   | "admin-email-settings";
-
-const DEPARTMENTS: Array<{ id: DepartmentId; label: string }> = [
-  { id: "planning", label: "Planning" },
-  { id: "production", label: "Production" },
-  { id: "quality", label: "Quality & Compliance" },
-  { id: "reliability", label: "Reliability" },
-  { id: "safety", label: "Safety Management" },
-  { id: "stores", label: "Procurement & Stores" },
-  { id: "engineering", label: "Engineering" },
-  { id: "workshops", label: "Workshops" },
-  { id: "admin", label: "System Admin" },
-];
 
 const ADMIN_NAV_ITEMS: Array<{ id: AdminNavId; label: string }> = [
   { id: "admin-overview", label: "Overview" },
@@ -79,22 +66,8 @@ const ADMIN_OVERVIEW_POLLING_INTERVAL_MS = 15 * 60 * 1000;
 const POLLING_RETRY_DELAYS_MS = [1000, 3000, 10000];
 const MAX_POLLING_RETRIES = POLLING_RETRY_DELAYS_MS.length;
 
-function isDepartmentId(v: string): v is DepartmentId {
-  return DEPARTMENTS.some((d) => d.id === v);
-}
-
 function isAdminNavId(v: string): v is AdminNavId {
   return ADMIN_NAV_ITEMS.some((d) => d.id === v);
-}
-
-function isAdminUser(u: any): boolean {
-  if (!u) return false;
-  return (
-    !!u.is_superuser ||
-    !!u.is_amo_admin ||
-    u.role === "SUPERUSER" ||
-    u.role === "AMO_ADMIN"
-  );
 }
 
 function getUserDisplayName(u: any): string {
@@ -116,14 +89,6 @@ function getUserInitials(u: any): string {
   const a = parts[0]?.[0] ?? "U";
   const b = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
   return (a + b).toUpperCase();
-}
-
-function getUserDeptId(u: any): DepartmentId | null {
-  const code = (u?.department?.code || u?.department_code || "").toString().trim();
-  if (!code) return null;
-  const v = code.toLowerCase();
-  if (isDepartmentId(v)) return v;
-  return null;
 }
 
 const DepartmentLayout: React.FC<Props> = ({
@@ -166,24 +131,25 @@ const DepartmentLayout: React.FC<Props> = ({
   const isSuperuser = !!currentUser?.is_superuser;
   const isTenantAdmin = isSuperuser || !!currentUser?.is_amo_admin;
   const isAdminArea = isAdminNavId(activeDepartment);
+  const assignedDepartment = getAssignedDepartment(currentUser, getContext().department);
+  const allowedDepartments = getAllowedDepartments(currentUser, assignedDepartment);
+  const qualityReadOnly = isQualityReadOnly(currentUser, assignedDepartment);
 
   // Admins/SUPERUSER can see all departments and the System Admin area.
   const canAccessAdmin = isAdminUser(currentUser);
 
   const visibleDepartments = useMemo(() => {
-    if (isAdminArea) return [];
-    if (canAccessAdmin) return DEPARTMENTS;
+    if (isAdminArea) {
+      return canAccessAdmin
+        ? DEPARTMENT_ITEMS.filter((dept) => dept.id !== "admin")
+        : [];
+    }
+    if (canAccessAdmin) return DEPARTMENT_ITEMS;
 
-    // Non-admin users: show ONLY their current department in the ribbon.
-    const deptId = isDepartmentId(activeDepartment) ? activeDepartment : null;
-    if (!deptId) return [];
-
-    // Non-admins never see the System Admin tab.
-    if (deptId === "admin") return [];
-
-    const match = DEPARTMENTS.find((d) => d.id === deptId);
-    return match ? [match] : [];
-  }, [canAccessAdmin, activeDepartment, isAdminArea]);
+    return DEPARTMENT_ITEMS.filter((dept) =>
+      allowedDepartments.includes(dept.id)
+    );
+  }, [canAccessAdmin, isAdminArea, allowedDepartments]);
 
   const visibleAdminNav = useMemo(() => {
     if (!isAdminArea) return [];
@@ -194,6 +160,33 @@ const DepartmentLayout: React.FC<Props> = ({
       return true;
     });
   }, [isAdminArea, isSuperuser, isTenantAdmin]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    if (isAdminArea) {
+      if (!canAccessAdmin) {
+        const fallback = assignedDepartment || allowedDepartments[0] || "planning";
+        navigate(`/maintenance/${amoCode}/${fallback}`, { replace: true });
+      }
+      return;
+    }
+
+    if (!canAccessAdmin && isDepartmentId(activeDepartment)) {
+      if (!allowedDepartments.includes(activeDepartment)) {
+        const fallback = assignedDepartment || allowedDepartments[0] || "planning";
+        navigate(`/maintenance/${amoCode}/${fallback}`, { replace: true });
+      }
+    }
+  }, [
+    activeDepartment,
+    allowedDepartments,
+    assignedDepartment,
+    canAccessAdmin,
+    currentUser,
+    isAdminArea,
+    navigate,
+    amoCode,
+  ]);
 
   const adminBadgeMap = useMemo(() => {
     const badges = overviewSummary?.badges || {};
@@ -239,8 +232,10 @@ const DepartmentLayout: React.FC<Props> = ({
 
     // Non-admins should not navigate across departments.
     if (!canAccessAdmin) {
-      const active = isDepartmentId(activeDepartment) ? activeDepartment : null;
-      if (active && deptId === active) {
+      if (
+        canAccessDepartment(currentUser, assignedDepartment, deptId) &&
+        isDepartmentId(deptId)
+      ) {
         navigate(targetPath);
       }
       return;
@@ -305,10 +300,8 @@ const DepartmentLayout: React.FC<Props> = ({
       return activeDepartment;
     }
 
-    // Next: user department (if available)
-    const userDept = getUserDeptId(currentUser);
-    if (userDept && userDept !== "admin") {
-      return userDept;
+    if (assignedDepartment && assignedDepartment !== "admin") {
+      return assignedDepartment;
     }
 
     // Next: first visible non-admin department
@@ -681,14 +674,26 @@ const DepartmentLayout: React.FC<Props> = ({
 
   useEffect(() => {
     if (!currentUser) return;
+    resetIdleTimers();
+  }, [currentUser, location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!currentUser) return;
     scheduleIdleTimers();
 
-    const activityEvents = [
+    const activityEvents: Array<keyof WindowEventMap> = [
       "mousemove",
+      "mousedown",
+      "mouseup",
       "keydown",
       "click",
       "scroll",
+      "wheel",
       "touchstart",
+      "touchmove",
+      "pointerdown",
+      "pointermove",
+      "focus",
     ];
     const handleActivity = () => {
       if (logoutReason) return;
@@ -702,10 +707,18 @@ const DepartmentLayout: React.FC<Props> = ({
       window.addEventListener(evt, handleActivity, { passive: true })
     );
 
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        resetIdleTimers();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
       activityEvents.forEach((evt) =>
         window.removeEventListener(evt, handleActivity)
       );
+      document.removeEventListener("visibilitychange", handleVisibility);
       clearIdleTimers();
     };
   }, [currentUser, logoutReason]);
@@ -784,7 +797,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const deptLabel =
     ADMIN_NAV_ITEMS.find((d) => d.id === (activeDepartment as AdminNavId))
       ?.label ||
-    DEPARTMENTS.find((d) => d.id === (activeDepartment as any))?.label ||
+    DEPARTMENT_ITEMS.find((d) => d.id === (activeDepartment as any))?.label ||
     (activeDepartment || "Department");
 
   const userName = getUserDisplayName(currentUser);
@@ -923,7 +936,10 @@ const DepartmentLayout: React.FC<Props> = ({
             );
           })}
 
-          {!isAdminArea && <div className="sidebar__divider" />}
+          {((!isAdminArea && visibleDepartments.length > 0) ||
+            (isAdminArea && visibleDepartments.length > 0)) && (
+            <div className="sidebar__divider" />
+          )}
 
           {!isAdminArea && activeDepartment === "planning" && (
             <>
@@ -1270,6 +1286,18 @@ const DepartmentLayout: React.FC<Props> = ({
             </div>
           </div>
         </header>
+
+        {qualityReadOnly && !isAdminArea && (
+          <div className="info-banner info-banner--soft" role="status" style={{ margin: "12px 0" }}>
+            <div>
+              <strong>Quality access</strong>
+              <p className="text-muted" style={{ margin: 0 }}>
+                Quality users have read-only access outside their department. AMO admins can make
+                updates.
+              </p>
+            </div>
+          </div>
+        )}
 
         {showPollingErrorBanner && pollingError && (
           <div className="info-banner info-banner--warning" role="status" style={{ margin: "12px 0" }}>

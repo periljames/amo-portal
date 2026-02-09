@@ -117,6 +117,25 @@ export interface AdminDepartmentRead {
   is_active: boolean;
 }
 
+export interface AdminDepartmentCreatePayload {
+  amo_id: string;
+  code: string;
+  name: string;
+  default_route?: string | null;
+  sort_order?: number | null;
+}
+
+export interface AdminDepartmentUpdatePayload {
+  name?: string | null;
+  default_route?: string | null;
+  sort_order?: number | null;
+  is_active?: boolean | null;
+}
+
+export interface StaffCodeSuggestions {
+  suggestions: string[];
+}
+
 export type AdminAssetKind = "CRS_LOGO" | "CRS_TEMPLATE" | "OTHER";
 
 export interface AdminAssetRead {
@@ -395,6 +414,40 @@ export async function listAdminDepartments(amoId?: string): Promise<AdminDepartm
   return apiGet<AdminDepartmentRead[]>(path, {
     headers: authHeaders(),
   });
+}
+
+export async function createAdminDepartment(
+  payload: AdminDepartmentCreatePayload
+): Promise<AdminDepartmentRead> {
+  return apiPost<AdminDepartmentRead>(
+    "/accounts/admin/departments",
+    JSON.stringify(payload),
+    { headers: authHeaders() }
+  );
+}
+
+export async function updateAdminDepartment(
+  departmentId: string,
+  payload: AdminDepartmentUpdatePayload
+): Promise<AdminDepartmentRead> {
+  return apiPut<AdminDepartmentRead>(
+    `/accounts/admin/departments/${encodeURIComponent(departmentId)}`,
+    JSON.stringify(payload),
+    { headers: authHeaders() }
+  );
+}
+
+export async function listStaffCodeSuggestions(params: {
+  first_name: string;
+  last_name: string;
+  amo_id?: string;
+}): Promise<StaffCodeSuggestions> {
+  const sp = new URLSearchParams();
+  sp.set("first_name", params.first_name);
+  sp.set("last_name", params.last_name);
+  if (params.amo_id) sp.set("amo_id", params.amo_id);
+  const path = `/accounts/admin/staff-code-suggestions?${sp.toString()}`;
+  return apiGet<StaffCodeSuggestions>(path, { headers: authHeaders() });
 }
 
 type AssetListParams = {

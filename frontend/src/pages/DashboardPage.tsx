@@ -5,6 +5,14 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext, getCachedUser, normalizeDepartmentCode } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
+  type DepartmentId,
+  DEPARTMENT_LABELS,
+  getAllowedDepartments,
+  getAssignedDepartment,
+  isAdminUser,
+  isDepartmentId,
+} from "../utils/departmentAccess";
+import {
   listDocumentAlerts,
   type AircraftDocument,
 } from "../services/fleet";
@@ -17,28 +25,8 @@ import {
 } from "../services/qms";
 import { DASHBOARD_WIDGETS, getWidgetStorageKey } from "../utils/dashboardWidgets";
 
-type DepartmentId =
-  | "planning"
-  | "production"
-  | "quality"
-  | "safety"
-  | "stores"
-  | "engineering"
-  | "workshops"
-  | "admin";
-
-const DEPT_LABEL: Record<string, string> = {
-  planning: "Planning",
-  production: "Production",
-  quality: "Quality & Compliance",
-  safety: "Safety Management",
-  stores: "Procurement & Stores",
-  engineering: "Engineering",
-  workshops: "Workshops",
-  admin: "System Admin",
-};
-
-const niceLabel = (dept: string) => DEPT_LABEL[dept] || dept;
+const niceLabel = (dept: string) =>
+  DEPARTMENT_LABELS[dept as DepartmentId] || dept;
 
 type Holiday = {
   date: string;
@@ -81,20 +69,6 @@ type DueSummary = {
   due_status?: string | null;
   days_to_due?: number | null;
 };
-
-function isAdminUser(u: any): boolean {
-  if (!u) return false;
-  return (
-    !!u.is_superuser ||
-    !!u.is_amo_admin ||
-    u.role === "SUPERUSER" ||
-    u.role === "AMO_ADMIN"
-  );
-}
-
-function isDepartmentId(v: string): v is DepartmentId {
-  return Object.prototype.hasOwnProperty.call(DEPT_LABEL, v);
-}
 
 function getLocalStorageJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -274,9 +248,15 @@ const DashboardPage: React.FC = () => {
   );
 
   // For normal users, this MUST be their assigned department (server-driven context).
-  const assignedDept = useMemo(() => {
-    return normalizeDepartmentCode(ctx.department);
-  }, [ctx.department]);
+  const assignedDept = useMemo(
+    () => getAssignedDepartment(currentUser, ctx.department),
+    [currentUser, ctx.department]
+  );
+
+  const allowedDepartments = useMemo(
+    () => getAllowedDepartments(currentUser, assignedDept),
+    [currentUser, assignedDept]
+  );
 
   const requestedDeptRaw = (params.department || "").trim();
   const requestedDept: string | null =
@@ -300,7 +280,7 @@ const DashboardPage: React.FC = () => {
     }
 
     // If URL dept differs, hard-correct it (prevents cross-department browsing)
-    if (requestedDept && requestedDept !== assignedDept) {
+    if (requestedDept && !allowedDepartments.includes(requestedDept as DepartmentId)) {
       navigate(`/maintenance/${amoSlug}/${assignedDept}`, { replace: true });
       return;
     }
@@ -309,14 +289,24 @@ const DashboardPage: React.FC = () => {
     if (!requestedDept) {
       navigate(`/maintenance/${amoSlug}/${assignedDept}`, { replace: true });
     }
-  }, [currentUser, isAdmin, assignedDept, requestedDept, amoSlug, navigate]);
+  }, [
+    currentUser,
+    isAdmin,
+    assignedDept,
+    requestedDept,
+    allowedDepartments,
+    amoSlug,
+    navigate,
+  ]);
 
   // While we are correcting routes for non-admins, render nothing to avoid flicker.
   if (
     currentUser &&
     !isAdmin &&
     assignedDept &&
-    (requestedDept !== assignedDept || !requestedDept)
+    (!requestedDept ||
+      (requestedDept !== assignedDept &&
+        !allowedDepartments.includes(requestedDept as DepartmentId)))
   ) {
     return null;
   }
