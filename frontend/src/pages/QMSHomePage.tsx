@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
+import DashboardCockpit from "../dashboards/DashboardCockpit";
 import type { AdminUserRead } from "../services/adminUsers";
 import { listAdminUsers } from "../services/adminUsers";
 import { getContext } from "../services/auth";
@@ -17,6 +18,7 @@ import {
   type QMSDistributionOut,
   type QMSDocumentOut,
 } from "../services/qms";
+import { isUiShellV2Enabled } from "../utils/featureFlags";
 import {
   getUserTrainingStatus,
   listTrainingCourses,
@@ -87,6 +89,7 @@ const QMSHomePage: React.FC = () => {
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
+  const uiShellV2 = isUiShellV2Enabled();
 
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -155,9 +158,11 @@ const QMSHomePage: React.FC = () => {
   };
 
   useEffect(() => {
-    load();
+    if (!uiShellV2) {
+      load();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [uiShellV2]);
 
   const metrics = useMemo(() => {
     const docCounts = {
@@ -307,28 +312,34 @@ const QMSHomePage: React.FC = () => {
       title="Quality Dashboard"
       subtitle={`Enterprise QMS overview aligned to ${niceDomain("AMO")} standards.`}
       actions={
-        <button type="button" className="primary-chip-btn" onClick={load}>
-          Refresh data
-        </button>
+        uiShellV2 ? null : (
+          <button type="button" className="primary-chip-btn" onClick={load}>
+            Refresh data
+          </button>
+        )
       }
     >
-      {state === "loading" && (
-        <div className="card card--info">
-          <p>Loading QMS dashboard…</p>
-        </div>
-      )}
-
-      {state === "error" && (
-        <div className="card card--error">
-          <p>{error}</p>
-          <button type="button" className="primary-chip-btn" onClick={load}>
-            Retry
-          </button>
-        </div>
-      )}
-
-      {state === "ready" && (
+      {uiShellV2 ? (
+        <DashboardCockpit />
+      ) : (
         <>
+          {state === "loading" && (
+            <div className="card card--info">
+              <p>Loading QMS dashboard…</p>
+            </div>
+          )}
+
+          {state === "error" && (
+            <div className="card card--error">
+              <p>{error}</p>
+              <button type="button" className="primary-chip-btn" onClick={load}>
+                Retry
+              </button>
+            </div>
+          )}
+
+          {state === "ready" && (
+            <>
           <section className="page-section">
             <div
               className="page-section__actions"
@@ -962,6 +973,8 @@ const QMSHomePage: React.FC = () => {
               </div>
             </div>
           </section>
+            </>
+          )}
         </>
       )}
     </QMSLayout>

@@ -32,6 +32,7 @@ from .apps.tasks.router import router as tasks_router
 from .apps.accounts.router_billing import router as billing_router
 from .apps.bootstrap.router import router as bootstrap_router
 from .apps.integrations.router import router as integrations_router
+from .apps.events.router import router as events_router
 from .apps.accounts import services as account_services
 
 
@@ -215,3 +216,4 @@ app.include_router(notifications_router)
 app.include_router(tasks_router)
 app.include_router(bootstrap_router)
 app.include_router(integrations_router)
+app.include_router(events_router)

@@ -1,6 +1,11 @@
 .app-shell--v2 {
   background: transparent;
   --app-header-offset: var(--header-h);
+  display: grid;
+  grid-template-columns: var(--sidebar-width, 260px) minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  gap: var(--s-4);
 }
 
 .app-shell--v2 .app-shell__topbar {
@@ -115,11 +120,143 @@
 
 .app-shell--v2 .app-shell__main {
   align-items: stretch;
+  overflow: hidden;
 }
 
 .app-shell--v2 .app-shell__footer {
   margin-top: auto;
   width: 100%;
+}
+
+.app-shell--v2 .app-shell__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: var(--s-2);
+}
+
+.app-shell--v2 .app-shell__sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-shell--v2 .sidebar__nav {
+  overflow-y: auto;
+}
+
+.app-shell--focus {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell--focus .app-shell__sidebar {
+  display: none;
+}
+
+.focus-launcher {
+  position: relative;
+}
+
+.focus-launcher__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  background: var(--menu-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--s-2);
+  box-shadow: var(--sh-1);
+  z-index: 50;
+}
+
+.focus-launcher__panel .app-shell__sidebar {
+  display: block;
+  height: auto;
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+}
+
+.focus-launcher__toggle {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.live-status {
+  position: relative;
+}
+
+.live-status__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.live-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent-primary);
+}
+
+.live-status__chip--offline .live-status__dot {
+  background: var(--accent-danger);
+}
+
+.live-status__chip--syncing .live-status__dot {
+  background: var(--accent-warning);
+}
+
+.live-status__time {
+  color: var(--text-secondary);
+}
+
+.live-status__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  background: var(--menu-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--s-2);
+  min-width: 200px;
+  box-shadow: var(--sh-1);
+  z-index: 40;
+}
+
+.live-status__menu button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: var(--s-2) var(--s-3);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+
+.live-status__menu button:hover {
+  background: var(--hover);
+}
+
+.live-status__meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: var(--s-1) var(--s-3);
 }
 
 .sidebar__qms-nav {
