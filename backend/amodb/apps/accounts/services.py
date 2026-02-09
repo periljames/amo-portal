@@ -14,7 +14,7 @@ import string
 from jose import JWTError, jwt  # noqa: F401  (imported for future token use)
 
 from fastapi import HTTPException
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, text
 from sqlalchemy.orm import Session, joinedload, noload
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
@@ -56,6 +56,7 @@ METER_KEY_API_CALLS = "api_calls"
 METER_LIMIT_KEY_MAP = {
     METER_KEY_STORAGE_MB: ("storage_gb", 1024),
 }
+REQUIRED_AUDITOR_REVISION = "t1u2v3w4x5y6"
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +198,27 @@ def _is_missing_table_error(exc: Exception) -> bool:
     )
 
 
+def _get_alembic_versions(db: Session) -> Optional[Set[str]]:
+    try:
+        rows = db.execute(text("SELECT version_num FROM alembic_version")).fetchall()
+    except (OperationalError, ProgrammingError):
+        return None
+    return {row[0] for row in rows if row and row[0]}
+
+
+def _schema_error_detail(db: Session, exc: Exception) -> str:
+    base_message = "Database schema is missing required tables or columns."
+    message = str(getattr(exc, "orig", exc)).lower()
+    if "users.is_auditor" in message:
+        versions = _get_alembic_versions(db)
+        if versions is not None and REQUIRED_AUDITOR_REVISION not in versions:
+            return (
+                f"{base_message} Missing alembic revision "
+                f"{REQUIRED_AUDITOR_REVISION}. Run alembic upgrade head."
+            )
+    return base_message
+
+
 def resolve_login_context(db: Session, identifier: str) -> models.User | None:
     identifier = identifier.strip()
     if "@" in identifier:
@@ -225,7 +247,7 @@ def resolve_login_context(db: Session, identifier: str) -> models.User | None:
     except (OperationalError, ProgrammingError) as exc:
         if _is_missing_table_error(exc):
             raise SchemaNotInitialized(
-                "Database schema is missing required tables."
+                _schema_error_detail(db, exc)
             ) from exc
         raise
 
@@ -907,7 +929,7 @@ def authenticate_user(
     except (OperationalError, ProgrammingError) as exc:
         if _is_missing_table_error(exc):
             raise SchemaNotInitialized(
-                "Database schema is missing required tables or columns."
+                _schema_error_detail(db, exc)
             ) from exc
         raise
 
