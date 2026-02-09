@@ -16,6 +16,12 @@ import {
   LS_ACTIVE_AMO_ID,
 } from "../services/adminUsers";
 import {
+  disableTenantModule,
+  enableTenantModule,
+  listTenantModules,
+  type ModuleSubscriptionRead,
+} from "../services/adminModules";
+import {
   fetchCatalog,
   fetchSubscriptionStatus,
   startTrial,
@@ -80,6 +86,12 @@ const AdminAmoManagementPage: React.FC = () => {
   const [trialSubscription, setTrialSubscription] = useState<Subscription | null>(null);
   const [trialSkuCode, setTrialSkuCode] = useState<string>("");
   const [lastCreatedAmoId, setLastCreatedAmoId] = useState<string | null>(null);
+  const [moduleSubscriptions, setModuleSubscriptions] = useState<
+    Record<string, ModuleSubscriptionRead>
+  >({});
+  const [modulesLoading, setModulesLoading] = useState(false);
+  const [modulesError, setModulesError] = useState<string | null>(null);
+  const [moduleActionState, setModuleActionState] = useState<Record<string, boolean>>({});
   const [amoForm, setAmoForm] = useState<AmoFormState>({
     amoCode: "",
     name: "",
@@ -154,6 +166,19 @@ const AdminAmoManagementPage: React.FC = () => {
   const selectedAmo = useMemo(
     () => amos.find((a) => a.id === activeAmoId) || null,
     [amos, activeAmoId]
+  );
+
+  const moduleOptions = useMemo(
+    () => [
+      { code: "quality", label: "Quality Management System" },
+      { code: "training", label: "Training & Competence" },
+      { code: "work", label: "Work Orders" },
+      { code: "fleet", label: "Fleet & Aircraft" },
+      { code: "maintenance_program", label: "Maintenance Program" },
+      { code: "reliability", label: "Reliability" },
+      { code: "finance_inventory", label: "Finance & Inventory" },
+    ],
+    []
   );
   const inactiveAmos = useMemo(
     () => amos.filter((amo) => !amo.is_active).length,
@@ -258,6 +283,36 @@ const AdminAmoManagementPage: React.FC = () => {
     }
   };
 
+  const loadModuleSubscriptions = async (amo: AdminAmoRead | null) => {
+    if (!amo) {
+      setModuleSubscriptions({});
+      return;
+    }
+    setModulesLoading(true);
+    setModulesError(null);
+    try {
+      await syncAdminContext(amo.id);
+      const data = await listTenantModules(amo.id);
+      const next = data.reduce<Record<string, ModuleSubscriptionRead>>((acc, item) => {
+        acc[item.module_code] = item;
+        return acc;
+      }, {});
+      setModuleSubscriptions(next);
+    } catch (err: any) {
+      console.error("Failed to load module subscriptions", err);
+      setModulesError(
+        err?.response?.data?.detail || err?.message || "Unable to load module subscriptions."
+      );
+    } finally {
+      setModulesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTrialData(selectedAmo);
+    loadModuleSubscriptions(selectedAmo);
+  }, [selectedAmo?.id]);
+
   const handleStartTrial = async () => {
     if (!selectedAmo) return;
     if (!trialSkuCode) {
@@ -352,6 +407,28 @@ const AdminAmoManagementPage: React.FC = () => {
           ? msg
           : "Could not create AMO. Please try again."
       );
+    }
+  };
+
+  const handleModuleToggle = async (moduleCode: string, nextEnabled: boolean) => {
+    if (!selectedAmo) return;
+    setModulesError(null);
+    setModuleActionState((prev) => ({ ...prev, [moduleCode]: true }));
+    try {
+      await syncAdminContext(selectedAmo.id);
+      const updated = nextEnabled
+        ? await enableTenantModule(selectedAmo.id, moduleCode, {
+            status: "ENABLED",
+          })
+        : await disableTenantModule(selectedAmo.id, moduleCode);
+      setModuleSubscriptions((prev) => ({ ...prev, [moduleCode]: updated }));
+    } catch (err: any) {
+      console.error("Failed to update module subscription", err);
+      setModulesError(
+        err?.response?.data?.detail || err?.message || "Unable to update module access."
+      );
+    } finally {
+      setModuleActionState((prev) => ({ ...prev, [moduleCode]: false }));
     }
   };
 
@@ -666,6 +743,78 @@ const AdminAmoManagementPage: React.FC = () => {
                   Create first user
                 </Button>
               </div>
+            </Panel>
+
+            <Panel
+              title="Module access"
+              subtitle="Toggle paid modules for the active AMO."
+            >
+              {!selectedAmo && (
+                <p className="admin-muted">Select an AMO to manage module access.</p>
+              )}
+              {selectedAmo && (
+                <>
+                  {modulesError && (
+                    <InlineAlert tone="danger" title="Error">
+                      <span>{modulesError}</span>
+                    </InlineAlert>
+                  )}
+                  {modulesLoading ? (
+                    <p>Loading modules…</p>
+                  ) : (
+                    <Table>
+                      <thead>
+                        <tr>
+                          <th>Module</th>
+                          <th>Status</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {moduleOptions.map((module) => {
+                          const subscription = moduleSubscriptions[module.code];
+                          const status = subscription?.status || "DISABLED";
+                          const isEnabled =
+                            status === "ENABLED" || status === "TRIAL";
+                          const tone =
+                            status === "ENABLED" || status === "TRIAL"
+                              ? "success"
+                              : status === "SUSPENDED"
+                                ? "danger"
+                                : "warning";
+                          return (
+                            <tr key={module.code}>
+                              <td>{module.label}</td>
+                              <td>
+                                <Badge tone={tone} size="sm">
+                                  {status}
+                                </Badge>
+                              </td>
+                              <td>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={isEnabled ? "ghost" : "primary"}
+                                  onClick={() =>
+                                    handleModuleToggle(module.code, !isEnabled)
+                                  }
+                                  disabled={!!moduleActionState[module.code]}
+                                >
+                                  {moduleActionState[module.code]
+                                    ? "Updating…"
+                                    : isEnabled
+                                      ? "Disable"
+                                      : "Enable"}
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </Table>
+                  )}
+                </>
+              )}
             </Panel>
 
             <Panel
