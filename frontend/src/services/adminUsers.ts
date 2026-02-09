@@ -527,6 +527,12 @@ export async function updateAdminUser(
   );
 }
 
+export async function getAdminUser(userId: string): Promise<AdminUserRead> {
+  return apiGet<AdminUserRead>(`/accounts/admin/users/${encodeURIComponent(userId)}`, {
+    headers: authHeaders(),
+  });
+}
+
 export async function deactivateAdminUser(userId: string): Promise<void> {
   await apiDelete<void>(`/accounts/admin/users/${encodeURIComponent(userId)}`, undefined, {
     headers: authHeaders(),

@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import DashboardCockpit from "../dashboards/DashboardCockpit";
 import { getContext, getCachedUser, normalizeDepartmentCode } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
@@ -24,6 +25,7 @@ import {
   type QMSNotificationOut,
 } from "../services/qms";
 import { DASHBOARD_WIDGETS, getWidgetStorageKey } from "../utils/dashboardWidgets";
+import { isUiShellV2Enabled } from "../utils/featureFlags";
 
 const niceLabel = (dept: string) =>
   DEPARTMENT_LABELS[dept as DepartmentId] || dept;
@@ -187,6 +189,7 @@ const DashboardPage: React.FC = () => {
 
   const currentUser = getCachedUser();
   const isAdmin = isAdminUser(currentUser);
+  const uiShellV2 = isUiShellV2Enabled();
   const isSuperuser =
     !!currentUser &&
     (currentUser.is_superuser || currentUser.role === "SUPERUSER");
@@ -661,7 +664,11 @@ const DashboardPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
-      <header className="page-header">
+      {uiShellV2 ? (
+        <DashboardCockpit />
+      ) : (
+        <>
+          <header className="page-header">
         <h1 className="page-header__title">
           {niceLabel(department)} · {amoDisplay}
         </h1>
@@ -1424,12 +1431,14 @@ const DashboardPage: React.FC = () => {
         </section>
       )}
 
-      {!isCRSDept && !isSystemAdminDept && (
-        <section className="page-section">
-          <p className="page-section__body">
-            Department widgets for {niceLabel(department)} will appear here.
-          </p>
-        </section>
+          {!isCRSDept && !isSystemAdminDept && (
+            <section className="page-section">
+              <p className="page-section__body">
+                Department widgets for {niceLabel(department)} will appear here.
+              </p>
+            </section>
+          )}
+        </>
       )}
     </DepartmentLayout>
   );

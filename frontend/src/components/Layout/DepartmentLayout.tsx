@@ -5,6 +5,8 @@ import { BrandContext } from "../Brand/BrandContext";
 import { BrandHeader } from "../Brand/BrandHeader";
 import { BrandProvider } from "../Brand/BrandProvider";
 import AppShell from "../AppShell/AppShell";
+import AppShellV2 from "../AppShell/AppShellV2";
+import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
 import { useToast } from "../feedback/ToastProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
@@ -203,12 +205,21 @@ const DepartmentLayout: React.FC<Props> = ({
   const [overviewSummaryUnavailable, setOverviewSummaryUnavailable] = useState(false);
   const [trialMenuOpen, setTrialMenuOpen] = useState(false);
   const [trialChipHidden, setTrialChipHidden] = useState(false);
+  const [focusMenuOpen, setFocusMenuOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
   const { trackEvent } = useAnalytics();
   const { pushToast } = useToast();
   const uiShellV2 = isUiShellV2Enabled();
+
+  useEffect(() => {
+    if (!uiShellV2) return;
+    document.body.classList.add("app-shell-v2");
+    return () => {
+      document.body.classList.remove("app-shell-v2");
+    };
+  }, [uiShellV2]);
 
   const currentUser = getCachedUser();
   const isSuperuser = !!currentUser?.is_superuser;
@@ -424,6 +435,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const amoLabel = (amoCode || "AMO").toUpperCase();
   const shellBase = uiShellV2 ? "app-shell app-shell--v2" : "app-shell";
   const shellClassName = collapsed ? `${shellBase} app-shell--collapsed` : shellBase;
+  const focusMode = uiShellV2 && isCockpitRoute;
 
   const isBillingRoute = useMemo(() => {
     return location.pathname.includes("/billing");
@@ -456,6 +468,16 @@ const DepartmentLayout: React.FC<Props> = ({
   const isQmsRoute = useMemo(() => {
     return location.pathname.includes("/qms");
   }, [location.pathname]);
+
+  const isCockpitRoute = useMemo(() => {
+    const base = `/maintenance/${amoCode}/${activeDepartment}`;
+    const normalized = location.pathname.replace(/\/$/, "");
+    return (
+      normalized === base ||
+      normalized === `${base}/qms` ||
+      normalized === `${base}/qms/kpis`
+    );
+  }, [activeDepartment, amoCode, location.pathname]);
 
   const qmsNavItems = useMemo(
     () => [
@@ -1098,8 +1120,8 @@ const DepartmentLayout: React.FC<Props> = ({
     >
       <BrandContext.Consumer>
         {(brand) => {
-          const sidebar = (
-            <aside className="app-shell__sidebar">
+          const sidebarContent = (
+            <>
               <div className="sidebar__header">
                 <BrandHeader variant="sidebar" />
 
@@ -1349,6 +1371,13 @@ const DepartmentLayout: React.FC<Props> = ({
                   </>
                 )}
               </nav>
+            </>
+          );
+
+          const sidebar = <aside className="app-shell__sidebar">{sidebarContent}</aside>;
+          const focusSidebar = (
+            <aside className="app-shell__sidebar app-shell__sidebar--focus">
+              {sidebarContent}
             </aside>
           );
 
@@ -1368,6 +1397,25 @@ const DepartmentLayout: React.FC<Props> = ({
               </div>
 
               <div className="app-shell__topbar-actions">
+                {uiShellV2 && <LiveStatusIndicator />}
+                {focusMode && (
+                  <div
+                    className="focus-launcher"
+                    onBlur={() => setFocusMenuOpen(false)}
+                    tabIndex={-1}
+                  >
+                    <button
+                      type="button"
+                      className="focus-launcher__toggle"
+                      onClick={() => setFocusMenuOpen((prev) => !prev)}
+                    >
+                      Modules
+                    </button>
+                    {focusMenuOpen && (
+                      <div className="focus-launcher__panel">{focusSidebar}</div>
+                    )}
+                  </div>
+                )}
                 {trialChipVisible && (
                   <div ref={trialMenuRef} style={{ position: "relative" }}>
                     <button
@@ -1782,7 +1830,12 @@ const DepartmentLayout: React.FC<Props> = ({
 
           return (
             <>
-              <AppShell className={shellClassName} sidebar={sidebar} header={header}>
+              <AppShellV2
+                className={shellClassName}
+                sidebar={sidebar}
+                header={header}
+                focusMode={focusMode}
+              >
                 {qualityReadOnly && !isAdminArea && (
                   <div className="info-banner info-banner--soft" role="status">
                     <div>
@@ -1839,7 +1892,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   <span>© {currentYear} {brand.name}.</span>
                   <span>{brand.tagline || "All rights reserved."}</span>
                 </footer>
-              </AppShell>
+              </AppShellV2>
               {sessionOverlay}
             </>
           );

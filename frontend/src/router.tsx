@@ -24,6 +24,7 @@ import WorkOrderDetailPage from "./pages/work/WorkOrderDetailPage";
 import TaskSummaryPage from "./pages/work/TaskSummaryPage";
 import TaskPrintPage from "./pages/work/TaskPrintPage";
 import AdminUserNewPage from "./pages/AdminUserNewPage";
+import AdminUserDetailPage from "./pages/AdminUserDetailPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminOverviewPage from "./pages/AdminOverviewPage";
 import AdminAmoManagementPage from "./pages/AdminAmoManagementPage";
@@ -249,6 +250,16 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <AdminDashboardPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/admin/users/:userId"
+        element={
+          <RequireAuth>
+            <RequireTenantAdmin>
+              <AdminUserDetailPage />
+            </RequireTenantAdmin>
           </RequireAuth>
         }
       />
