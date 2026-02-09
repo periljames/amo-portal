@@ -225,6 +225,11 @@ def login(
             ip=_client_ip(request),
             user_agent=_user_agent(request),
         )
+    except services.SchemaNotInitialized as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc) or "Database schema is not initialized. Run migrations and retry.",
+        )
     except services.AuthenticationError as exc:
         detail = str(exc) or "Incorrect email, password or AMO slug."
         raise HTTPException(
@@ -307,10 +312,10 @@ def login_context(
     identifier_value = _validate_login_identifier(resolved)
     try:
         user = services.resolve_login_context(db=db, identifier=identifier_value)
-    except services.SchemaNotInitialized:
+    except services.SchemaNotInitialized as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database schema is not initialized. Run migrations and retry.",
+            detail=str(exc) or "Database schema is not initialized. Run migrations and retry.",
         )
     except services.LoginContextConflict as exc:
         raise HTTPException(
