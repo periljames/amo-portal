@@ -8,6 +8,7 @@ import InlineError from "../components/shared/InlineError";
 import SectionCard from "../components/shared/SectionCard";
 import { useToast } from "../components/feedback/ToastProvider";
 import { getContext } from "../services/auth";
+import { listAdminDepartments, type AdminDepartmentRead } from "../services/adminUsers";
 import {
   downloadAuditEvidencePack,
   qmsListAudits,
@@ -74,6 +75,10 @@ const QMSAuditsPage: React.FC = () => {
     auditee_email: "",
   });
   const [scheduleDrawerOpen, setScheduleDrawerOpen] = useState(false);
+  const [scheduleDepartmentId, setScheduleDepartmentId] = useState("");
+  const [departments, setDepartments] = useState<AdminDepartmentRead[]>([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(false);
+  const [departmentsError, setDepartmentsError] = useState<string | null>(null);
   const [reminderBusy, setReminderBusy] = useState(false);
   const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
   const [uploadingChecklistId, setUploadingChecklistId] = useState<string | null>(null);
@@ -117,6 +122,19 @@ const QMSAuditsPage: React.FC = () => {
     }
   };
 
+  const loadDepartments = async () => {
+    setDepartmentsLoading(true);
+    setDepartmentsError(null);
+    try {
+      const data = await listAdminDepartments();
+      setDepartments(data.filter((dept) => dept.is_active));
+    } catch (e: any) {
+      setDepartmentsError(e?.message || "Failed to load departments.");
+    } finally {
+      setDepartmentsLoading(false);
+    }
+  };
+
   const handleExport = async (audit: QMSAuditOut) => {
     setExportingId(audit.id);
     try {
@@ -148,6 +166,11 @@ const QMSAuditsPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    loadDepartments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleCreateSchedule = async (ev: React.FormEvent) => {
     ev.preventDefault();
     if (!scheduleForm.title.trim() || !scheduleForm.next_due_date) return;
@@ -168,7 +191,10 @@ const QMSAuditsPage: React.FC = () => {
         ...prev,
         title: "",
         next_due_date: "",
+        auditee: "",
+        auditee_email: "",
       }));
+      setScheduleDepartmentId("");
       setScheduleDrawerOpen(false);
       await loadSchedules();
     } catch (e: any) {
@@ -514,12 +540,44 @@ const QMSAuditsPage: React.FC = () => {
           </label>
 
           <label className="form-control">
-            <span>Auditee (optional)</span>
+            <span>Responsible department</span>
+            <select
+              value={scheduleDepartmentId}
+              onChange={(event) => {
+                const deptId = event.target.value;
+                setScheduleDepartmentId(deptId);
+                const dept = departments.find((entry) => entry.id === deptId);
+                setScheduleForm((prev) => ({
+                  ...prev,
+                  auditee: dept ? dept.name : prev.auditee,
+                }));
+              }}
+              disabled={departmentsLoading}
+            >
+              <option value="">
+                {departmentsLoading ? "Loading departments…" : "Select department"}
+              </option>
+              {departments.map((dept) => (
+                <option key={dept.id} value={dept.id}>
+                  {dept.name}
+                </option>
+              ))}
+            </select>
+            {departmentsError && (
+              <span className="text-muted" style={{ marginTop: 6 }}>
+                {departmentsError}
+              </span>
+            )}
+          </label>
+
+          <label className="form-control">
+            <span>Auditee / team (optional)</span>
             <input
               value={scheduleForm.auditee}
-              onChange={(event) =>
-                setScheduleForm((prev) => ({ ...prev, auditee: event.target.value }))
-              }
+              onChange={(event) => {
+                setScheduleDepartmentId("");
+                setScheduleForm((prev) => ({ ...prev, auditee: event.target.value }));
+              }}
               placeholder="Department / team"
             />
           </label>

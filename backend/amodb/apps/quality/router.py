@@ -1551,6 +1551,14 @@ def create_car_request(
             target_closure_date=payload.target_closure_date,
             finding_id=payload.finding_id,
         )
+        if car.assigned_to_user_id:
+            invite_url = build_car_invite_link(car)
+            _notify_user(
+                db,
+                car.assigned_to_user_id,
+                f"CAR {car.car_number} assigned to you. Submit response: {invite_url}",
+                models.QMSNotificationSeverity.ACTION_REQUIRED,
+            )
         audit_services.log_event(
             db,
             amo_id=current_user.amo_id,
@@ -1655,6 +1663,7 @@ def update_car(
     if not data:
         return car
 
+    previous_assignee = car.assigned_to_user_id
     changed_status = False
     assignee_allowed = {
         "root_cause",
@@ -1719,6 +1728,16 @@ def update_car(
             message=f"Status changed to {car.status}",
             actor_user_id=get_actor(),
         )
+
+    if "assigned_to_user_id" in data and car.assigned_to_user_id != previous_assignee:
+        if car.assigned_to_user_id:
+            invite_url = build_car_invite_link(car)
+            _notify_user(
+                db,
+                car.assigned_to_user_id,
+                f"CAR {car.car_number} assigned to you. Submit response: {invite_url}",
+                models.QMSNotificationSeverity.ACTION_REQUIRED,
+            )
 
     audit_services.log_event(
         db,
