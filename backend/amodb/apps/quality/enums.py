@@ -54,7 +54,10 @@ class QMSAuditStatus(str, enum.Enum):
 
 
 class QMSAuditScheduleFrequency(str, enum.Enum):
+    ONE_TIME = "ONE_TIME"
     MONTHLY = "MONTHLY"
+    QUARTERLY = "QUARTERLY"
+    BI_ANNUAL = "BI_ANNUAL"
     ANNUAL = "ANNUAL"
 
 

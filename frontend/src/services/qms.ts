@@ -13,7 +13,12 @@ import { getApiBaseUrl } from "./config";
 
 export type QMSDocumentStatus = "DRAFT" | "ACTIVE" | "OBSOLETE";
 export type QMSAuditStatus = "PLANNED" | "IN_PROGRESS" | "CAP_OPEN" | "CLOSED";
-export type QMSAuditScheduleFrequency = "MONTHLY" | "ANNUAL";
+export type QMSAuditScheduleFrequency =
+  | "ONE_TIME"
+  | "MONTHLY"
+  | "QUARTERLY"
+  | "BI_ANNUAL"
+  | "ANNUAL";
 export type QMSChangeRequestStatus =
   | "SUBMITTED"
   | "UNDER_REVIEW"
