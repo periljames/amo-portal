@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { Button, InlineAlert, PageHeader, Panel, StatusPill } from "../components/UI/Admin";
+import Drawer from "../components/shared/Drawer";
 import { getCachedUser, getContext } from "../services/auth";
 import "../styles/emailServerSettings.css";
 import {
@@ -1102,24 +1103,11 @@ const EmailServerSettingsPage: React.FC = () => {
             </Panel>
           </div>
         </div>
-        <aside
-          className={
-            "admin-email-settings__drawer" +
-            (helpOpen ? " admin-email-settings__drawer--open" : "")
-          }
+        <Drawer
+          title={activeHelp.title}
+          isOpen={helpOpen}
+          onClose={() => setHelpOpen(false)}
         >
-          <div className="admin-email-settings__drawer-header">
-            <h3 className="admin-email-settings__drawer-title">{activeHelp.title}</h3>
-            <button
-              type="button"
-              className="admin-email-settings__drawer-close"
-              onClick={() => setHelpOpen(false)}
-              aria-label="Close notes panel"
-              title="Close"
-            >
-              ×
-            </button>
-          </div>
           <div className="admin-email-settings__drawer-body">{activeHelp.body}</div>
           <div className="admin-email-settings__drawer-footer">
             <button
@@ -1130,7 +1118,7 @@ const EmailServerSettingsPage: React.FC = () => {
               Collapse panel
             </button>
           </div>
-        </aside>
+        </Drawer>
       </div>
     </DepartmentLayout>
   );

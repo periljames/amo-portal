@@ -1,5 +1,6 @@
 .app-shell--v2 {
   background: transparent;
+  --app-header-offset: var(--header-h);
 }
 
 .app-shell--v2 .app-shell__topbar {

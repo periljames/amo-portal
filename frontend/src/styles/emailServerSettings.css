@@ -209,58 +209,6 @@
   right: 16px;
 }
 
-.admin-email-settings__drawer {
-  position: fixed;
-  top: 18px;
-  left: calc(var(--sidebar-width, 260px) + 34px);
-  width: 320px;
-  height: calc(100vh - 36px);
-  background: rgba(12, 20, 35, 0.75);
-  backdrop-filter: blur(18px);
-  border-right: 1px solid rgba(120, 255, 255, 0.2);
-  transform: translateX(calc(-100% - var(--sidebar-width, 260px) - 34px));
-  transition: transform 0.25s ease, box-shadow 0.25s ease, opacity 0.2s ease;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  padding: 18px;
-  border-radius: 16px;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-}
-
-.admin-email-settings__drawer--open {
-  transform: translateX(0);
-  box-shadow: 24px 0 40px rgba(0, 0, 0, 0.4);
-  opacity: 1;
-  pointer-events: auto;
-  visibility: visible;
-}
-
-.admin-email-settings__drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.admin-email-settings__drawer-title {
-  margin: 0;
-  font-size: 1rem;
-  color: rgba(190, 240, 255, 0.95);
-}
-
-.admin-email-settings__drawer-close {
-  background: transparent;
-  border: 1px solid rgba(120, 255, 255, 0.3);
-  color: rgba(200, 240, 255, 0.9);
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
 .admin-email-settings__drawer-body {
   margin-top: 16px;
   flex: 1;
