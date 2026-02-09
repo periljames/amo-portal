@@ -3,7 +3,13 @@
   --text: var(--text-primary);
   --surface: var(--surface);
   --surface-2: var(--surface-elevated);
+  --surface-0: var(--surface-soft);
+  --surface-1: var(--surface);
+  --surface-2: var(--surface-elevated);
   --border: var(--surface-border);
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-muted);
   --hover: rgba(148, 163, 184, 0.16);
   --brand: #8b6f00;
   --brand-weak: rgba(139, 111, 0, 0.12);

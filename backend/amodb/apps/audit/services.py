@@ -4,6 +4,8 @@ from datetime import datetime
 import logging
 from typing import Optional, Sequence
 
+from amodb.apps.events.broker import EventEnvelope, publish_event
+
 import sqlalchemy as sa
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
@@ -72,6 +74,18 @@ def log_event(
                 correlation_id=correlation_id,
                 metadata=metadata,
             ),
+        )
+        publish_event(
+            EventEnvelope(
+                id=str(event.id),
+                type=f\"{event.entity_type}.{event.action}\".lower(),
+                entityType=event.entity_type,
+                entityId=event.entity_id,
+                action=event.action,
+                timestamp=event.occurred_at.isoformat() if event.occurred_at else event.created_at.isoformat(),
+                actor={\"userId\": actor_user_id} if actor_user_id else None,
+                metadata={\"amoId\": amo_id, **(event.metadata_json or {})},
+            )
         )
         return event
     except Exception:

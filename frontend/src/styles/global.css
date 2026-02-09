@@ -27,6 +27,10 @@ body {
   transition: background 240ms ease-out, color 180ms ease-out;
 }
 
+body.app-shell-v2 {
+  overflow: hidden;
+}
+
 a {
   color: var(--accent-primary);
 }
@@ -534,6 +538,20 @@ body[data-theme="night"] {
 button,
 .auth-form button {
   font-family: inherit;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent-primary);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+}
+
+.link-button:hover {
+  text-decoration: underline;
 }
 
 .btn,
