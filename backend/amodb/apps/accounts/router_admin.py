@@ -542,14 +542,29 @@ def list_departments(
       if omitted, sees departments for their own (ROOT/system) AMO.
     """
     q = db.query(models.Department)
+    target_amo_id = None
 
     if current_user.is_superuser:
-        if amo_id:
-            q = q.filter(models.Department.amo_id == amo_id)
+        target_amo_id = amo_id or current_user.amo_id
     else:
-        q = q.filter(models.Department.amo_id == current_user.amo_id)
+        target_amo_id = current_user.amo_id
 
-    return q.order_by(models.Department.sort_order.asc()).all()
+    if target_amo_id:
+        q = q.filter(models.Department.amo_id == target_amo_id)
+
+    departments = q.order_by(models.Department.sort_order.asc()).all()
+    if not departments and target_amo_id:
+        created = services.seed_default_departments(db, amo_id=target_amo_id)
+        if created:
+            db.commit()
+            departments = (
+                db.query(models.Department)
+                .filter(models.Department.amo_id == target_amo_id)
+                .order_by(models.Department.sort_order.asc())
+                .all()
+            )
+
+    return departments
 
 
 @router.get(
