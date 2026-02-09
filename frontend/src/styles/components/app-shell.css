@@ -13,6 +13,8 @@
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   color: var(--text);
+  width: 100%;
+  border-radius: 0;
 }
 
 .app-shell--v2 .app-shell__topbar-title {
@@ -33,6 +35,9 @@
   padding: var(--s-5) var(--s-4) var(--s-7);
   margin: 0 auto;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--header-h) - var(--s-7));
 }
 
 .app-shell__content--fluid {
@@ -107,6 +112,15 @@
   color: var(--text);
 }
 
+.app-shell--v2 .app-shell__main {
+  align-items: stretch;
+}
+
+.app-shell--v2 .app-shell__footer {
+  margin-top: auto;
+  width: 100%;
+}
+
 .sidebar__qms-nav {
   margin-top: var(--s-2);
   padding-left: var(--s-2);
@@ -122,6 +136,24 @@
   .app-shell--v2 .app-shell__topbar {
     background: rgba(15, 23, 42, 0.9);
   }
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .app-shell__topbar {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .app-shell__status-chip {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item {
+  color: var(--text-primary);
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active {
+  color: var(--text-primary);
 }
 
 @media (min-width: 1600px) {
