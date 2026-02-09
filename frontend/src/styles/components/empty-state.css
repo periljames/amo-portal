@@ -1,0 +1,22 @@
+.empty-state {
+  text-align: left;
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  border: 1px dashed var(--border);
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.empty-state__title {
+  margin: 0 0 var(--s-1);
+  font-size: 0.95rem;
+}
+
+.empty-state__description {
+  margin: 0 0 var(--s-3);
+  color: var(--text-secondary);
+}
+
+.empty-state__actions {
+  display: flex;
+  gap: var(--s-2);
+}

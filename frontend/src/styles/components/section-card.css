@@ -1,0 +1,26 @@
+.section-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--s-4);
+  box-shadow: var(--sh-1);
+}
+
+.section-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+.section-card__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.section-card__subtitle {
+  margin: var(--s-1) 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}

@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
+import Drawer from "../components/shared/Drawer";
+import EmptyState from "../components/shared/EmptyState";
+import InlineError from "../components/shared/InlineError";
+import SectionCard from "../components/shared/SectionCard";
+import { useToast } from "../components/feedback/ToastProvider";
 import { getContext } from "../services/auth";
 import {
   downloadAuditEvidencePack,
@@ -45,7 +50,6 @@ const STATUS_OPTIONS: Array<{ value: QMSAuditStatus | "ALL"; label: string }> =
 
 const QMSAuditsPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
-  const navigate = useNavigate();
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
@@ -69,6 +73,7 @@ const QMSAuditsPage: React.FC = () => {
     auditee: "",
     auditee_email: "",
   });
+  const [scheduleDrawerOpen, setScheduleDrawerOpen] = useState(false);
   const [reminderBusy, setReminderBusy] = useState(false);
   const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
   const [uploadingChecklistId, setUploadingChecklistId] = useState<string | null>(null);
@@ -81,6 +86,7 @@ const QMSAuditsPage: React.FC = () => {
   const [findings, setFindings] = useState<QMSFindingOut[]>([]);
   const [findingsState, setFindingsState] = useState<LoadState>("idle");
   const [findingsError, setFindingsError] = useState<string | null>(null);
+  const { pushToast } = useToast();
 
   const load = async () => {
     setState("loading");
@@ -112,7 +118,6 @@ const QMSAuditsPage: React.FC = () => {
   };
 
   const handleExport = async (audit: QMSAuditOut) => {
-    setError(null);
     setExportingId(audit.id);
     try {
       const blob = await downloadAuditEvidencePack(audit.id);
@@ -123,7 +128,11 @@ const QMSAuditsPage: React.FC = () => {
       link.click();
       window.URL.revokeObjectURL(url);
     } catch (e: any) {
-      setError(e?.message || "Failed to export evidence pack.");
+      pushToast({
+        title: "Export failed",
+        message: e?.message || "Failed to export evidence pack.",
+        variant: "error",
+      });
     } finally {
       setExportingId(null);
     }
@@ -160,6 +169,7 @@ const QMSAuditsPage: React.FC = () => {
         title: "",
         next_due_date: "",
       }));
+      setScheduleDrawerOpen(false);
       await loadSchedules();
     } catch (e: any) {
       setScheduleError(e?.message || "Failed to create audit schedule.");
@@ -277,12 +287,15 @@ const QMSAuditsPage: React.FC = () => {
     const file = event.target.files?.[0];
     if (!file || !pendingChecklistAuditId) return;
     setUploadingChecklistId(pendingChecklistAuditId);
-    setError(null);
     try {
       await qmsUploadAuditChecklist(pendingChecklistAuditId, file);
       await load();
     } catch (e: any) {
-      setError(e?.message || "Failed to upload checklist.");
+      pushToast({
+        title: "Upload failed",
+        message: e?.message || "Failed to upload checklist.",
+        variant: "error",
+      });
     } finally {
       setUploadingChecklistId(null);
       setPendingChecklistAuditId(null);
@@ -296,12 +309,15 @@ const QMSAuditsPage: React.FC = () => {
     const file = event.target.files?.[0];
     if (!file || !pendingReportAuditId) return;
     setUploadingReportId(pendingReportAuditId);
-    setError(null);
     try {
       await qmsUploadAuditReport(pendingReportAuditId, file);
       await load();
     } catch (e: any) {
-      setError(e?.message || "Failed to upload report.");
+      pushToast({
+        title: "Upload failed",
+        message: e?.message || "Failed to upload report.",
+        variant: "error",
+      });
     } finally {
       setUploadingReportId(null);
       setPendingReportAuditId(null);
@@ -310,7 +326,6 @@ const QMSAuditsPage: React.FC = () => {
   };
 
   const handleDownloadChecklist = async (audit: QMSAuditOut) => {
-    setError(null);
     try {
       const blob = await qmsDownloadAuditChecklist(audit.id);
       const url = window.URL.createObjectURL(blob);
@@ -320,12 +335,15 @@ const QMSAuditsPage: React.FC = () => {
       link.click();
       window.URL.revokeObjectURL(url);
     } catch (e: any) {
-      setError(e?.message || "Failed to download checklist.");
+      pushToast({
+        title: "Download failed",
+        message: e?.message || "Failed to download checklist.",
+        variant: "error",
+      });
     }
   };
 
   const handleDownloadReport = async (audit: QMSAuditOut) => {
-    setError(null);
     try {
       const blob = await qmsDownloadAuditReport(audit.id);
       const url = window.URL.createObjectURL(blob);
@@ -335,7 +353,11 @@ const QMSAuditsPage: React.FC = () => {
       link.click();
       window.URL.revokeObjectURL(url);
     } catch (e: any) {
-      setError(e?.message || "Failed to download report.");
+      pushToast({
+        title: "Download failed",
+        message: e?.message || "Failed to download report.",
+        variant: "error",
+      });
     }
   };
 
@@ -362,9 +384,26 @@ const QMSAuditsPage: React.FC = () => {
       title="Audits & Inspections"
       subtitle="Plan, execute, and close quality audits with compliance visibility."
       actions={
-        <button type="button" className="primary-chip-btn" onClick={load}>
-          Refresh audits
-        </button>
+        <>
+          <button
+            type="button"
+            className="primary-chip-btn"
+            onClick={() => setScheduleDrawerOpen(true)}
+          >
+            Create schedule
+          </button>
+          <button
+            type="button"
+            className="secondary-chip-btn"
+            onClick={handleRunReminders}
+            disabled={reminderBusy}
+          >
+            {reminderBusy ? "Sending reminders…" : "Send 7-day reminders"}
+          </button>
+          <button type="button" className="secondary-chip-btn" onClick={load}>
+            Refresh audits
+          </button>
+        </>
       }
     >
       <section className="qms-toolbar">
@@ -391,9 +430,6 @@ const QMSAuditsPage: React.FC = () => {
             placeholder="Search audit title, reference, or type"
           />
         </label>
-        <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
-          Back
-        </button>
       </section>
 
       <input
@@ -409,127 +445,117 @@ const QMSAuditsPage: React.FC = () => {
         onChange={handleReportFileChange}
       />
 
-      <section className="qms-grid">
-        <div className="qms-card">
-          <div className="qms-card__header">
-            <div>
-              <h3 className="qms-card__title">Recurring audit schedules</h3>
-              <p className="qms-card__subtitle">
-                Create monthly or annual audit schedules and generate the next audit instantly.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="secondary-chip-btn"
-              onClick={handleRunReminders}
-              disabled={reminderBusy}
+      <Drawer
+        title="Create audit schedule"
+        isOpen={scheduleDrawerOpen}
+        onClose={() => setScheduleDrawerOpen(false)}
+      >
+        {scheduleError && (
+          <InlineError message={scheduleError} onAction={loadSchedules} />
+        )}
+        <form onSubmit={handleCreateSchedule} className="form-grid">
+          <label className="form-control" style={{ gridColumn: "1 / 3" }}>
+            <span>Schedule title</span>
+            <input
+              value={scheduleForm.title}
+              onChange={(event) =>
+                setScheduleForm((prev) => ({ ...prev, title: event.target.value }))
+              }
+              placeholder="e.g., Monthly AMO compliance audit"
+              required
+            />
+          </label>
+
+          <label className="form-control">
+            <span>Frequency</span>
+            <select
+              value={scheduleForm.frequency}
+              onChange={(event) =>
+                setScheduleForm((prev) => ({
+                  ...prev,
+                  frequency: event.target.value as QMSAuditScheduleFrequency,
+                }))
+              }
             >
-              {reminderBusy ? "Sending reminders…" : "Send 7-day reminders"}
+              <option value="MONTHLY">Monthly</option>
+              <option value="ANNUAL">Annual</option>
+            </select>
+          </label>
+
+          <label className="form-control">
+            <span>Next due date</span>
+            <input
+              type="date"
+              value={scheduleForm.next_due_date}
+              onChange={(event) =>
+                setScheduleForm((prev) => ({
+                  ...prev,
+                  next_due_date: event.target.value,
+                }))
+              }
+              required
+            />
+          </label>
+
+          <label className="form-control">
+            <span>Duration (days)</span>
+            <input
+              type="number"
+              min={1}
+              max={90}
+              value={scheduleForm.duration_days}
+              onChange={(event) =>
+                setScheduleForm((prev) => ({
+                  ...prev,
+                  duration_days: Number(event.target.value),
+                }))
+              }
+            />
+          </label>
+
+          <label className="form-control">
+            <span>Auditee (optional)</span>
+            <input
+              value={scheduleForm.auditee}
+              onChange={(event) =>
+                setScheduleForm((prev) => ({ ...prev, auditee: event.target.value }))
+              }
+              placeholder="Department / team"
+            />
+          </label>
+
+          <label className="form-control">
+            <span>Auditee email (optional)</span>
+            <input
+              type="email"
+              value={scheduleForm.auditee_email}
+              onChange={(event) =>
+                setScheduleForm((prev) => ({ ...prev, auditee_email: event.target.value }))
+              }
+              placeholder="auditee@example.com"
+            />
+          </label>
+
+          <div className="form-control" style={{ alignSelf: "end" }}>
+            <button
+              type="submit"
+              className="primary-chip-btn"
+              disabled={scheduleState === "loading"}
+            >
+              {scheduleState === "loading" ? "Saving…" : "Create schedule"}
             </button>
           </div>
+        </form>
+      </Drawer>
 
+      <section className="qms-grid">
+        <SectionCard
+          title="Recurring audit schedules"
+          subtitle="Create monthly or annual audit schedules and generate the next audit instantly."
+        >
           {scheduleError && (
-            <div className="card card--warning" style={{ marginBottom: 12 }}>
-              <p>{scheduleError}</p>
-            </div>
+            <InlineError message={scheduleError} onAction={loadSchedules} />
           )}
-
-          <form onSubmit={handleCreateSchedule} className="form-grid">
-            <label className="form-control" style={{ gridColumn: "1 / 3" }}>
-              <span>Schedule title</span>
-              <input
-                value={scheduleForm.title}
-                onChange={(event) =>
-                  setScheduleForm((prev) => ({ ...prev, title: event.target.value }))
-                }
-                placeholder="e.g., Monthly AMO compliance audit"
-                required
-              />
-            </label>
-
-            <label className="form-control">
-              <span>Frequency</span>
-              <select
-                value={scheduleForm.frequency}
-                onChange={(event) =>
-                  setScheduleForm((prev) => ({
-                    ...prev,
-                    frequency: event.target.value as QMSAuditScheduleFrequency,
-                  }))
-                }
-              >
-                <option value="MONTHLY">Monthly</option>
-                <option value="ANNUAL">Annual</option>
-              </select>
-            </label>
-
-            <label className="form-control">
-              <span>Next due date</span>
-              <input
-                type="date"
-                value={scheduleForm.next_due_date}
-                onChange={(event) =>
-                  setScheduleForm((prev) => ({
-                    ...prev,
-                    next_due_date: event.target.value,
-                  }))
-                }
-                required
-              />
-            </label>
-
-            <label className="form-control">
-              <span>Duration (days)</span>
-              <input
-                type="number"
-                min={1}
-                max={90}
-                value={scheduleForm.duration_days}
-                onChange={(event) =>
-                  setScheduleForm((prev) => ({
-                    ...prev,
-                    duration_days: Number(event.target.value),
-                  }))
-                }
-              />
-            </label>
-
-            <label className="form-control">
-              <span>Auditee (optional)</span>
-              <input
-                value={scheduleForm.auditee}
-                onChange={(event) =>
-                  setScheduleForm((prev) => ({ ...prev, auditee: event.target.value }))
-                }
-                placeholder="Department / team"
-              />
-            </label>
-
-            <label className="form-control">
-              <span>Auditee email (optional)</span>
-              <input
-                type="email"
-                value={scheduleForm.auditee_email}
-                onChange={(event) =>
-                  setScheduleForm((prev) => ({ ...prev, auditee_email: event.target.value }))
-                }
-                placeholder="auditee@example.com"
-              />
-            </label>
-
-            <div className="form-control" style={{ alignSelf: "end" }}>
-              <button
-                type="submit"
-                className="primary-chip-btn"
-                disabled={scheduleState === "loading"}
-              >
-                {scheduleState === "loading" ? "Saving…" : "Create schedule"}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        <div className="qms-card qms-card--wide">
           <div className="table-responsive">
             <table className="table">
               <thead>
@@ -579,19 +605,14 @@ const QMSAuditsPage: React.FC = () => {
               </tbody>
             </table>
           </div>
-        </div>
+        </SectionCard>
       </section>
 
       <section className="qms-grid">
-        <div className="qms-card">
-          <div className="qms-card__header">
-            <div>
-              <h3 className="qms-card__title">Next up</h3>
-              <p className="qms-card__subtitle">
-                Immediate audit plan for the coming weeks.
-              </p>
-            </div>
-          </div>
+        <SectionCard
+          title="Next up"
+          subtitle="Immediate audit plan for the coming weeks."
+        >
           <div className="qms-list">
             {upcoming.map((audit) => (
               <div key={audit.id} className="qms-list__item">
@@ -607,24 +628,29 @@ const QMSAuditsPage: React.FC = () => {
               </div>
             ))}
             {upcoming.length === 0 && (
-              <p className="text-muted">No upcoming audits scheduled.</p>
+              <EmptyState
+                title="No upcoming audits"
+                description="Create a schedule to populate the upcoming plan."
+                action={
+                  <button
+                    type="button"
+                    className="secondary-chip-btn"
+                    onClick={() => setScheduleDrawerOpen(true)}
+                  >
+                    Create schedule
+                  </button>
+                }
+              />
             )}
           </div>
-        </div>
+        </SectionCard>
 
-        <div className="qms-card qms-card--wide">
+        <SectionCard title="Audit programme">
           {state === "loading" && (
-            <div className="card card--info">
-              <p>Loading audits…</p>
-            </div>
+            <p className="text-muted">Loading audits…</p>
           )}
           {state === "error" && (
-            <div className="card card--error">
-              <p>{error}</p>
-              <button type="button" className="primary-chip-btn" onClick={load}>
-                Retry
-              </button>
-            </div>
+            <InlineError message={error || "Failed to load audits."} onAction={load} />
           )}
           {state === "ready" && (
             <div className="table-responsive">
@@ -707,8 +733,20 @@ const QMSAuditsPage: React.FC = () => {
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="text-muted">
-                        No audits match the selected filters.
+                      <td colSpan={6}>
+                        <EmptyState
+                          title="No audits found"
+                          description="Adjust filters or create a new schedule."
+                          action={
+                            <button
+                              type="button"
+                              className="secondary-chip-btn"
+                              onClick={() => setScheduleDrawerOpen(true)}
+                            >
+                              Create schedule
+                            </button>
+                          }
+                        />
                       </td>
                     </tr>
                   )}
@@ -716,7 +754,7 @@ const QMSAuditsPage: React.FC = () => {
               </table>
             </div>
           )}
-        </div>
+        </SectionCard>
       </section>
 
       {selectedAuditId && (
@@ -729,7 +767,12 @@ const QMSAuditsPage: React.FC = () => {
               </p>
             </div>
             {findingsState === "loading" && <p>Loading findings…</p>}
-            {findingsError && <p className="error-text">{findingsError}</p>}
+            {findingsError && (
+              <InlineError
+                message={findingsError}
+                onAction={selectedAuditId ? () => loadFindings(selectedAuditId) : undefined}
+              />
+            )}
             {findingsState === "ready" && findings.length === 0 && (
               <p className="text-muted">No findings recorded for this audit yet.</p>
             )}
