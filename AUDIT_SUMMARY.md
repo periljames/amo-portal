@@ -7,9 +7,9 @@
   - **Live now (no flag)**: Existing AppShell V1, existing routes and pages, legacy dashboards and lists.
   - **Behind flag (`VITE_UI_SHELL_V2`)**: AppShell V2 layout + focus mode on cockpit routes (`/maintenance/:amoCode/:department`, `/maintenance/:amoCode/:department/qms`, `/maintenance/:amoCode/:department/qms/kpis`) and new DashboardCockpit scaffold.
 - **Major remaining gaps**
-  - Action panel coverage is partial (no evidence upload, no in-panel document ack status view).
-  - Tasks module still lacks explicit SSE emit hooks (quality/training/accounts emit via audit log; tasks are not yet wired).
-  - Cockpit KPI set is still limited (training is now included but document currency and audit closure trends need deeper data integration).
+  - Activity feed virtualization is still pending (action queue is virtualized).
+  - User-management command actions (disable/enable/revoke/reset password) are not fully wired end-to-end.
+  - Cursor halo/magnetic interaction layer has not been added yet.
 
 ## Changed in this run
 ### 1) Drilldown query support + list filtering
@@ -125,3 +125,36 @@
 - **Manual verification**:
   1. Open cockpit and confirm new KPI cards render with counts/timeframe chips.
   2. Click each card and verify route includes canonical filter params.
+
+
+## Changed in this run (2026-02-10)
+### Focus mode discoverability + fixed shell behavior
+- **Intent + outcome**: strengthened cockpit default focus mode by adding an edge-peek launcher and keyboard shortcut (`Ctrl/⌘ + \`) while keeping sidebar hidden by default; reinforced fixed-shell behavior so main pane remains the primary scroller.
+- **Exact files changed**:
+  - `frontend/src/components/Layout/DepartmentLayout.tsx`
+  - `frontend/src/styles/components/app-shell.css`
+
+### Realtime stale-state UX + targeted refresh
+- **Intent + outcome**: preserved SSE-first updates while adding stale detection and an explicit “Refresh data” action that invalidates only allowlisted query keys (no full page reload).
+- **Exact files changed**:
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/components/realtime/LiveStatusIndicator.tsx`
+
+### Cockpit visual polish + precise drilldowns
+- **Intent + outcome**: added motion-driven KPI/card interactions, standardized status pills, and explicit route+query drilldowns for KPI cards/activity rows.
+- **Exact files changed**:
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+  - `frontend/src/styles/components/dashboard-cockpit.css`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+
+- **Screenshots artifact paths**:
+  - `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
+- **Verification steps**:
+  1. Run app with `VITE_UI_SHELL_V2=1` and open cockpit route.
+  2. Verify sidebar is hidden by default and edge-peek launcher appears.
+  3. Press `Ctrl/⌘ + \` to open module launcher.
+  4. Open live status menu and verify stale messaging + `Refresh data` action.
+  5. Click each KPI to verify precise route + query params.
+- **Tests run + results + known failures**:
+  - `npx tsc -b` ✅ pass.
+  - `npm run build` ⚠️ Vite build did not complete within execution window in this environment; type-check succeeded.

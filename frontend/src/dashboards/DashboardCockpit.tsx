@@ -2,8 +2,9 @@ import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { addDays, endOfDay, isBefore, isWithinInterval, parseISO } from "date-fns";
+import { AlertTriangle, BookOpenCheck, CalendarClock, ClipboardCheck, FileClock, ShieldCheck } from "lucide-react";
 
-import DashboardScaffold from "../components/dashboard/DashboardScaffold";
+import DashboardScaffold, { type KpiTile } from "../components/dashboard/DashboardScaffold";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getCachedUser, getContext } from "../services/auth";
 import { qmsListAudits, qmsListCars, qmsListDistributions, qmsListDocuments } from "../services/qms";
@@ -37,41 +38,12 @@ const DashboardCockpit: React.FC = () => {
 
   const qmsEnabled = department === "quality" || department === "safety";
 
-  const { data: cars = [] } = useQuery({
-    queryKey: ["qms-cars", amoCode],
-    queryFn: () => qmsListCars(),
-    enabled: qmsEnabled,
-  });
-
-  const { data: audits = [] } = useQuery({
-    queryKey: ["qms-audits", amoCode],
-    queryFn: () => qmsListAudits({ domain: "AMO" }),
-    enabled: qmsEnabled,
-  });
-
-  const { data: distributions = [] } = useQuery({
-    queryKey: ["qms-distributions", amoCode],
-    queryFn: () => qmsListDistributions({ outstanding_only: true }),
-    enabled: qmsEnabled,
-  });
-
-
-
-  const { data: documents = [] } = useQuery({
-    queryKey: ["qms-documents", amoCode],
-    queryFn: () => qmsListDocuments(),
-    enabled: qmsEnabled,
-  });
-
-  const { data: tasks = [] } = useQuery({
-    queryKey: ["my-tasks", amoCode],
-    queryFn: () => listMyTasks(),
-  });
-
-  const { data: trainingStatus = [] } = useQuery({
-    queryKey: ["training-status", amoCode],
-    queryFn: () => getMyTrainingStatus(),
-  });
+  const { data: cars = [] } = useQuery({ queryKey: ["qms-cars", amoCode], queryFn: () => qmsListCars(), enabled: qmsEnabled });
+  const { data: audits = [] } = useQuery({ queryKey: ["qms-audits", amoCode], queryFn: () => qmsListAudits({ domain: "AMO" }), enabled: qmsEnabled });
+  const { data: distributions = [] } = useQuery({ queryKey: ["qms-distributions", amoCode], queryFn: () => qmsListDistributions({ outstanding_only: true }), enabled: qmsEnabled });
+  const { data: documents = [] } = useQuery({ queryKey: ["qms-documents", amoCode], queryFn: () => qmsListDocuments(), enabled: qmsEnabled });
+  const { data: tasks = [] } = useQuery({ queryKey: ["my-tasks", amoCode], queryFn: () => listMyTasks() });
+  const { data: trainingStatus = [] } = useQuery({ queryKey: ["training-status", amoCode], queryFn: () => getMyTrainingStatus() });
 
   const kpis = useMemo(() => {
     const overdueCars = cars.filter((car) => car.status !== "CLOSED" && isPastDue(car.due_date));
@@ -84,120 +56,23 @@ const DashboardCockpit: React.FC = () => {
     const expiringSoonDocs = documents.filter((doc) => !!doc.effective_date && new Date(doc.effective_date) >= today && new Date(doc.effective_date) <= addDays(today, 30));
     const currentDocs = documents.length - expiredDocs.length - expiringSoonDocs.length;
     const closedAudits = audits.filter((a) => a.status === "CLOSED").length;
-    const dueSoonTraining = trainingStatus.filter(
-      (item) => item.days_until_due !== null && item.days_until_due <= 7 && item.days_until_due >= 0
-    );
 
-    return [
-      {
-        id: "overdue",
-        label: "Overdue CAR/CAPA",
-        value: overdueCars.length,
-        timeframe: "Now",
-        updatedAt: "just now",
-        onClick: () =>
-          navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue&dueWindow=now`),
-      },
-      {
-        id: "due-today",
-        label: "Due today",
-        value: dueTasksToday.length,
-        timeframe: "Today",
-        updatedAt: "just now",
-        onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/tasks?dueWindow=today`),
-      },
-      {
-        id: "due-week",
-        label: "Due this week",
-        value: dueWeek.length,
-        timeframe: "Week",
-        updatedAt: "just now",
-        onClick: () =>
-          navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=open&dueWindow=week`),
-      },
-      {
-        id: "due-month",
-        label: "Due this month",
-        value: dueMonth.length,
-        timeframe: "Month",
-        updatedAt: "just now",
-        onClick: () =>
-          navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=open&dueWindow=month`),
-      },
-      {
-        id: "training-overdue",
-        label: "Overdue training",
-        value: overdueTraining.length,
-        timeframe: "Now",
-        updatedAt: "just now",
-        onClick: () =>
-          navigate(
-            `/maintenance/${amoCode}/${department}/qms/training?status=overdue&dueWindow=now`
-          ),
-      },
-      {
-        id: "training-week",
-        label: "Training due this week",
-        value: dueSoonTraining.length,
-        timeframe: "Week",
-        updatedAt: "just now",
-        onClick: () =>
-          navigate(
-            `/maintenance/${amoCode}/${department}/qms/training?status=due&dueWindow=week`
-          ),
-      },
-      {
-        id: "acks",
-        label: "Pending acknowledgements",
-        value: distributions.length,
-        timeframe: "Now",
-        updatedAt: "just now",
-        onClick: () =>
-          navigate(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`),
-      },
-      {
-        id: "audits",
-        label: "Open audits",
-        value: audits.filter((audit) => audit.status !== "CLOSED").length,
-        timeframe: "Now",
-        updatedAt: "just now",
-        onClick: () =>
-          navigate(`/maintenance/${amoCode}/${department}/qms/audits?status=open`),
-      },
-      {
-        id: "doc-currency",
-        label: "Document currency",
-        value: currentDocs,
-        timeframe: "Month",
-        updatedAt: `${expiredDocs.length} expired · ${expiringSoonDocs.length} due`,
-        onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?currency=expiring_30d`),
-      },
-      {
-        id: "audit-closure",
-        label: "Audit closures",
-        value: closedAudits,
-        timeframe: "Month",
-        updatedAt: `${audits.length - closedAudits} open`,
-        onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits?trend=monthly&status=closed`),
-      },
+    const tiles: KpiTile[] = [
+      { id: "overdue", icon: AlertTriangle, status: "overdue", label: "Overdue CAR/CAPA", value: overdueCars.length, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue&dueWindow=now`) },
+      { id: "due-today", icon: CalendarClock, status: "due-today", label: "Due today", value: dueTasksToday.length, timeframe: "Today", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/tasks?dueWindow=today&status=open`) },
+      { id: "due-week", icon: CalendarClock, status: "due-week", label: "Due this week", value: dueWeek.length, timeframe: "Week", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=open&dueWindow=week`) },
+      { id: "due-month", icon: FileClock, status: "awaiting-evidence", label: "Due this month", value: dueMonth.length, timeframe: "Month", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=open&dueWindow=month`) },
+      { id: "training-overdue", icon: AlertTriangle, status: "noncompliance", label: "Overdue training", value: overdueTraining.length, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/training?status=overdue&dueWindow=now`) },
+      { id: "acks", icon: ClipboardCheck, status: "awaiting-evidence", label: "Pending acknowledgements", value: distributions.length, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
+      { id: "doc-currency", icon: BookOpenCheck, status: "closed", label: "Document currency", value: currentDocs, timeframe: "Month", updatedAt: `${expiredDocs.length} expired · ${expiringSoonDocs.length} due`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?currency=expiring_30d`) },
+      { id: "audit-closure", icon: ShieldCheck, status: "closed", label: "Audit closures", value: closedAudits, timeframe: "Month", updatedAt: `${audits.length - closedAudits} open`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits?trend=monthly&status=closed`) },
     ];
+    return tiles;
   }, [audits, cars, distributions.length, tasks, trainingStatus, documents, amoCode, department, navigate]);
 
   const drivers = useMemo(() => {
     const auditOpen = audits.filter((audit) => audit.status !== "CLOSED").length;
-    return [
-      {
-        id: "audit-closure",
-        title: "Audit closure rate",
-        subtitle: `${auditOpen} open audits`,
-        option: {
-          xAxis: { type: "category", data: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
-          yAxis: { type: "value" },
-          grid: { left: 24, right: 16, top: 24, bottom: 24 },
-          series: [{ data: [3, 4, 5, 4, 6, 5, 7], type: "line", smooth: true }],
-        },
-      },
-    ];
+    return [{ id: "audit-closure", title: "Audit closure rate", subtitle: `${auditOpen} open audits`, option: { xAxis: { type: "category", data: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] }, yAxis: { type: "value" }, grid: { left: 24, right: 16, top: 24, bottom: 24 }, series: [{ data: [3, 4, 5, 4, 6, 5, 7], type: "line", smooth: true, animationDuration: 550 }] } }];
   }, [audits]);
 
   const actionItems = useMemo(() => {
@@ -207,20 +82,12 @@ const DashboardCockpit: React.FC = () => {
       title: task.title,
       owner: task.owner_user_id ?? "Assigned",
       ownerId: task.owner_user_id ?? null,
-      onOwnerClick: task.owner_user_id
-        ? () => navigate(`/maintenance/${amoCode}/admin/users/${task.owner_user_id}`)
-        : undefined,
+      onOwnerClick: task.owner_user_id ? () => navigate(`/maintenance/${amoCode}/admin/users/${task.owner_user_id}`) : undefined,
       due: task.due_at ? new Date(task.due_at).toLocaleDateString() : "—",
       status: task.status,
       priority: String(task.priority),
       onClick: () => navigate(`/maintenance/${amoCode}/${department}/tasks/${task.id}`),
-      action: () =>
-        setPanelContext({
-          type: "user",
-          userId: task.owner_user_id ?? currentUser?.id ?? "",
-          name: task.owner_user_id ?? currentUser?.full_name ?? "User",
-          role: currentUser?.role,
-        }),
+      action: () => setPanelContext({ type: "user", userId: task.owner_user_id ?? currentUser?.id ?? "", name: task.owner_user_id ?? currentUser?.full_name ?? "User", role: currentUser?.role }),
     }));
 
     const carItems = cars.slice(0, 10).map((car) => ({
@@ -229,75 +96,31 @@ const DashboardCockpit: React.FC = () => {
       title: `${car.car_number} · ${car.title}`,
       owner: car.assigned_to_user_id ?? "Unassigned",
       ownerId: car.assigned_to_user_id ?? null,
-      onOwnerClick: car.assigned_to_user_id
-        ? () => navigate(`/maintenance/${amoCode}/admin/users/${car.assigned_to_user_id}`)
-        : undefined,
+      onOwnerClick: car.assigned_to_user_id ? () => navigate(`/maintenance/${amoCode}/admin/users/${car.assigned_to_user_id}`) : undefined,
       due: car.due_date ?? "—",
       status: car.status,
       priority: car.priority,
-      onClick: () =>
-        navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${car.id}`),
-      action: () =>
-        setPanelContext({
-          type: "car",
-          id: car.id,
-          title: car.title,
-          status: car.status,
-          ownerId: car.assigned_to_user_id,
-        }),
+      onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${car.id}`),
+      action: () => setPanelContext({ type: "car", id: car.id, title: car.title, status: car.status, ownerId: car.assigned_to_user_id }),
     }));
 
-    const trainingItems = trainingStatus
-      .filter((item) => ["OVERDUE", "DUE_SOON"].includes(item.status))
-      .slice(0, 6)
-      .map((item) => ({
-        id: item.course_id,
-        type: "Training",
-        title: item.course_name,
-        owner: currentUser?.full_name ?? "Me",
-        ownerId: currentUser?.id ?? null,
-        onOwnerClick: currentUser?.id
-          ? () => navigate(`/maintenance/${amoCode}/admin/users/${currentUser.id}`)
-          : undefined,
-        due: item.extended_due_date ?? item.valid_until ?? "—",
-        status: item.status,
-        priority: item.status === "OVERDUE" ? "High" : "Medium",
-        onClick: () =>
-          navigate(`/maintenance/${amoCode}/${department}/qms/training?status=overdue`),
-        action: () =>
-          setPanelContext({
-            type: "training",
-            userId: currentUser?.id ?? "",
-            courseId: item.course_id,
-            courseName: item.course_name,
-          }),
-      }));
+    return [...taskItems, ...carItems].slice(0, 20);
+  }, [tasks, cars, currentUser, amoCode, department, navigate]);
 
-    return [...taskItems, ...carItems, ...trainingItems].slice(0, 20);
-  }, [tasks, cars, trainingStatus, currentUser, amoCode, department, navigate]);
-
-  const activityItems = useMemo(
-    () =>
-      activity.map((item) => ({
-        id: item.id,
-        summary: `${item.type.split(".").join(" · ")} ${item.action}`,
-        timestamp: new Date(item.timestamp).toLocaleString(),
-        onClick: () =>
-          navigate(`/maintenance/${amoCode}/${department}/qms/events`),
-      })),
-    [activity, amoCode, department, navigate]
-  );
+  const activityItems = useMemo(() => activity.map((item) => ({
+    id: item.id,
+    summary: `${item.type.split(".").join(" · ")} ${item.action}`,
+    timestamp: new Date(item.timestamp).toLocaleString(),
+    onClick: () => {
+      if (item.entityType === "user") return navigate(`/maintenance/${amoCode}/admin/users/${item.entityId}`);
+      if (item.entityType === "task") return navigate(`/maintenance/${amoCode}/${department}/tasks/${item.entityId}`);
+      return navigate(`/maintenance/${amoCode}/${department}/qms/events?entity=${item.entityType}&id=${item.entityId}`);
+    },
+  })), [activity, amoCode, department, navigate]);
 
   return (
     <>
-      <DashboardScaffold
-        title={`${department.toUpperCase()} cockpit`}
-        subtitle="Realtime QMS management overview"
-        kpis={kpis}
-        drivers={drivers}
-        actionItems={actionItems}
-        activity={activityItems}
-      />
+      <DashboardScaffold title={`${department.toUpperCase()} cockpit`} subtitle="Realtime QMS management overview" kpis={kpis} drivers={drivers} actionItems={actionItems} activity={activityItems} />
       <ActionPanel isOpen={!!panelContext} context={panelContext} onClose={() => setPanelContext(null)} />
     </>
   );

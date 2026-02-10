@@ -23,3 +23,19 @@ Next actions should prioritise secrets enforcement, auth rate limiting, and uplo
 - **Upload hardening**: **Partially addressed** for CAR attachments.
   - Implementation: allowlisted MIME/extensions + size caps + sanitized filenames + random storage names + SHA-256 persisted (`quality_car_attachments.sha256`) in `backend/amodb/apps/quality/router.py` and model/migration updates.
   - Verification: upload disallowed type returns 415; >10MB returns 413; accepted file persists with SHA-256 metadata.
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/components/realtime/LiveStatusIndicator.tsx`
+  - `frontend/src/components/Layout/DepartmentLayout.tsx`
+- **Security-relevant changes:**
+  - No new backend endpoints were introduced in this run.
+  - Manual refresh now invalidates an allowlisted set of React Query keys instead of global query invalidation, reducing accidental broad data exposure in mixed-role sessions.
+- **RBAC for new endpoints:** none (no endpoint additions).
+- **Commands run:** `npx tsc -b`
+- **Verification:**
+  1. Confirm focus-mode launcher and edge-peek reveal only navigation UI (no direct privileged action changes).
+  2. Confirm stale refresh button does not force page reload and only re-fetches existing authorized queries.
+- **Known issues:** user action endpoints (disable/revoke/reset password) remain a backend gap for complete cockpit command workflows.
+- **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`

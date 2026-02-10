@@ -22,6 +22,9 @@ type RealtimeContextValue = {
   status: RealtimeStatus;
   lastUpdated: Date | null;
   activity: ActivityEvent[];
+  isStale: boolean;
+  staleSeconds: number;
+  refreshData: () => void;
   triggerSync: () => void;
 };
 
@@ -46,6 +49,25 @@ const eventSchema = z.object({
 });
 
 const MAX_ACTIVITY = 40;
+const STALE_AFTER_SECONDS = 45;
+
+const TARGETED_REFRESH_KEYS = [
+  "dashboard",
+  "qms-dashboard",
+  "qms-documents",
+  "qms-audits",
+  "qms-cars",
+  "qms-change-requests",
+  "qms-distributions",
+  "training-assignments",
+  "training-dashboard",
+  "training-events",
+  "training-status",
+  "tasks",
+  "my-tasks",
+  "admin-users",
+  "user-profile",
+] as const;
 
 function mapEventToInvalidations(type: string): string[] {
   if (type.startsWith("qms.") || type.startsWith("qms_")) {
@@ -82,6 +104,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const invalidateTimer = useRef<number | null>(null);
   const reconnectTimer = useRef<number | null>(null);
   const retryCount = useRef(0);
+  const staleIntervalRef = useRef<number | null>(null);
+  const [staleSeconds, setStaleSeconds] = useState(0);
+
+  const isStale = status !== "live" || staleSeconds > STALE_AFTER_SECONDS;
 
   const scheduleInvalidations = useCallback(
     (keys: string[]) => {
@@ -103,6 +129,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const event = parsed.data;
       setStatus("live");
       setLastUpdated(new Date(event.timestamp));
+      setStaleSeconds(0);
       setActivity((prev) => {
         const next = [event, ...prev];
         return next.slice(0, MAX_ACTIVITY);
@@ -126,6 +153,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     source.onopen = () => {
       retryCount.current = 0;
       setStatus("live");
+      setStaleSeconds(0);
     };
 
     source.onmessage = (evt) => {
@@ -151,6 +179,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     connect();
+    staleIntervalRef.current = window.setInterval(() => {
+      setStaleSeconds((prev) => prev + 1);
+    }, 1000);
     return () => {
       sourceRef.current?.close();
       if (invalidateTimer.current) {
@@ -159,17 +190,26 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (reconnectTimer.current) {
         window.clearTimeout(reconnectTimer.current);
       }
+      if (staleIntervalRef.current) {
+        window.clearInterval(staleIntervalRef.current);
+      }
     };
   }, [connect]);
 
-  const triggerSync = useCallback(() => {
+  const refreshData = useCallback(() => {
     setStatus("syncing");
-    queryClient.invalidateQueries();
+    TARGETED_REFRESH_KEYS.forEach((key) => {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    });
   }, [queryClient]);
 
+  const triggerSync = useCallback(() => {
+    refreshData();
+  }, [refreshData]);
+
   const value = useMemo(
-    () => ({ status, lastUpdated, activity, triggerSync }),
-    [status, lastUpdated, activity, triggerSync]
+    () => ({ status, lastUpdated, activity, isStale, staleSeconds, refreshData, triggerSync }),
+    [status, lastUpdated, activity, isStale, staleSeconds, refreshData, triggerSync]
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

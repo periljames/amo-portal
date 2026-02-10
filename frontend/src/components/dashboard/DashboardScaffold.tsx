@@ -1,11 +1,15 @@
 import React, { useMemo, useRef } from "react";
 import ReactECharts from "echarts-for-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { motion, useReducedMotion } from "framer-motion";
+import type { LucideIcon } from "lucide-react";
 
 export type KpiTile = {
   id: string;
   label: string;
   value: string | number;
+  icon?: LucideIcon;
+  status?: "overdue" | "due-today" | "due-week" | "noncompliance" | "awaiting-evidence" | "closed";
   timeframe?: string;
   updatedAt?: string;
   onClick?: () => void;
@@ -49,25 +53,27 @@ type Props = {
   activity: ActivityItem[];
 };
 
-const DashboardScaffold: React.FC<Props> = ({
-  title,
-  subtitle,
-  kpis,
-  drivers,
-  actionItems,
-  activity,
-}) => {
+const DashboardScaffold: React.FC<Props> = ({ title, subtitle, kpis, drivers, actionItems, activity }) => {
   const actionParentRef = useRef<HTMLDivElement | null>(null);
+  const prefersReduced = useReducedMotion();
   const rowVirtualizer = useVirtualizer({
     count: actionItems.length,
     getScrollElement: () => actionParentRef.current,
-    estimateSize: () => 48,
+    estimateSize: () => 56,
   });
 
   const driverCharts = useMemo(
     () =>
-      drivers.map((driver) => (
-        <div key={driver.id} className="dashboard-card" onClick={driver.onClick}>
+      drivers.map((driver, index) => (
+        <motion.div
+          key={driver.id}
+          className="dashboard-card"
+          onClick={driver.onClick}
+          initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+          animate={prefersReduced ? undefined : { opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, delay: index * 0.05 }}
+          whileHover={prefersReduced ? undefined : { y: -2 }}
+        >
           <div className="dashboard-card__header">
             <div>
               <h3 className="dashboard-card__title">{driver.title}</h3>
@@ -75,15 +81,11 @@ const DashboardScaffold: React.FC<Props> = ({
             </div>
           </div>
           <div className="dashboard-chart">
-            <ReactECharts
-              option={driver.option}
-              style={{ height: "100%", width: "100%" }}
-              opts={{ renderer: "canvas", devicePixelRatio: window.devicePixelRatio || 1 }}
-            />
+            <ReactECharts option={driver.option} style={{ height: "100%", width: "100%" }} opts={{ renderer: "canvas" }} />
           </div>
-        </div>
+        </motion.div>
       )),
-    [drivers]
+    [drivers, prefersReduced]
   );
 
   return (
@@ -96,16 +98,34 @@ const DashboardScaffold: React.FC<Props> = ({
       </div>
 
       <section className="dashboard-kpis">
-        {kpis.map((kpi) => (
-          <button key={kpi.id} type="button" className="dashboard-kpi" onClick={kpi.onClick}>
-            <div className="dashboard-kpi__value">{kpi.value}</div>
-            <div className="dashboard-kpi__label">{kpi.label}</div>
-            <div className="dashboard-kpi__meta">
-              <span>{kpi.timeframe}</span>
-              <span>{kpi.updatedAt ? `Updated ${kpi.updatedAt}` : ""}</span>
-            </div>
-          </button>
-        ))}
+        {kpis.map((kpi, idx) => {
+          const Icon = kpi.icon;
+          return (
+            <motion.button
+              key={kpi.id}
+              type="button"
+              className="dashboard-kpi"
+              data-status={kpi.status}
+              onClick={kpi.onClick}
+              initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+              animate={prefersReduced ? undefined : { opacity: 1, y: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 26, delay: idx * 0.03 }}
+              whileHover={prefersReduced ? undefined : { scale: 1.01, y: -2 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.99 }}
+            >
+              <div className="dashboard-kpi__top">
+                {Icon ? <Icon size={16} aria-hidden /> : null}
+                {kpi.status ? <span className={`status-pill status-pill--${kpi.status}`}>{kpi.status.replace("-", " ")}</span> : null}
+              </div>
+              <div className="dashboard-kpi__value">{kpi.value}</div>
+              <div className="dashboard-kpi__label">{kpi.label}</div>
+              <div className="dashboard-kpi__meta">
+                <span>{kpi.timeframe}</span>
+                <span>{kpi.updatedAt ? `Updated ${kpi.updatedAt}` : ""}</span>
+              </div>
+            </motion.button>
+          );
+        })}
       </section>
 
       <section className="dashboard-layer">
@@ -115,14 +135,8 @@ const DashboardScaffold: React.FC<Props> = ({
               <h3 className="dashboard-card__title">Action queue</h3>
               <span className="dashboard-card__meta">Next up</span>
             </div>
-            <div
-              ref={actionParentRef}
-              style={{ height: 260, overflow: "auto" }}
-              className="dashboard-action-queue"
-            >
-              {actionItems.length === 0 && (
-                <div className="dashboard-action-queue__empty">All clear for now.</div>
-              )}
+            <div ref={actionParentRef} style={{ height: 260, overflow: "auto" }} className="dashboard-action-queue">
+              {actionItems.length === 0 && <div className="dashboard-action-queue__empty">All clear for now.</div>}
               <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
                 {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                   const item = actionItems[virtualRow.index];
@@ -130,13 +144,7 @@ const DashboardScaffold: React.FC<Props> = ({
                     <div
                       key={item.id}
                       className="dashboard-action-queue__row"
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualRow.start}px)`,
-                      }}
+                      style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${virtualRow.start}px)` }}
                       onClick={item.onClick}
                     >
                       <strong>{item.type}</strong>
@@ -182,15 +190,9 @@ const DashboardScaffold: React.FC<Props> = ({
               <span className="dashboard-card__meta">Live</span>
             </div>
             <div className="dashboard-activity">
-              {activity.length === 0 && (
-                <div className="dashboard-action-queue__empty">No recent activity.</div>
-              )}
+              {activity.length === 0 && <div className="dashboard-action-queue__empty">No recent activity.</div>}
               {activity.map((item) => (
-                <div
-                  key={item.id}
-                  className="dashboard-activity__item"
-                  onClick={item.onClick}
-                >
+                <div key={item.id} className="dashboard-activity__item" onClick={item.onClick}>
                   <strong>{item.summary}</strong>
                   <div>{item.timestamp}</div>
                 </div>

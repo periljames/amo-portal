@@ -132,3 +132,26 @@
   - Evidence: CAR attachment hardening + Action Panel evidence controls (`backend/amodb/apps/quality/router.py`, `frontend/src/components/panels/ActionPanel.tsx`).
 - **Security controls**: partial closure of top gaps.
   - Evidence: production secret guard + auth endpoint rate limiting (`backend/amodb/security.py`, `backend/amodb/apps/accounts/router_public.py`).
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/Layout/DepartmentLayout.tsx`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/components/realtime/LiveStatusIndicator.tsx`
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+- **P0 (active):**
+  - Implement backend user command actions (disable/enable/revoke/reset password/notify/schedule) with RBAC + audit + SSE emit.
+  - Acceptance: every cockpit user drilldown action available and realtime-updating.
+- **P1 (active):**
+  - Virtualize cockpit activity feed and add targeted entity drilldowns for remaining entity types.
+  - Acceptance: feed supports >1000 rows with smooth scroll and deterministic routing.
+- **P1 (new):**
+  - Add cursor halo/magnetic effect with reduced-motion and touch-device guards.
+  - Acceptance: 60fps on desktop, auto-disabled on reduced-motion/touch.
+- **P2 (moved):**
+  - Expand chart set (2–4 per cockpit) with lazy-load + idle prefetch.
+- **Commands run:** `npx tsc -b`
+- **Verification:** cockpit focus mode + realtime stale refresh + KPI drilldowns.
+- **Known issues:** activity feed virtualization pending.
+- **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`

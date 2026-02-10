@@ -20,16 +20,19 @@ const statusLabel = (status: string): string => {
 };
 
 const LiveStatusIndicator: React.FC = () => {
-  const { status, lastUpdated, triggerSync } = useRealtime();
+  const { status, lastUpdated, isStale, staleSeconds, refreshData, triggerSync } = useRealtime();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const label = useMemo(() => statusLabel(status), [status]);
+  const label = useMemo(() => {
+    if (isStale && status === "live") return "Stale";
+    return statusLabel(status);
+  }, [isStale, status]);
 
   return (
     <div className="live-status" onBlur={() => setMenuOpen(false)}>
       <button
         type="button"
-        className={`live-status__chip live-status__chip--${status}`}
+        className={`live-status__chip live-status__chip--${isStale ? "offline" : status}`}
         onClick={() => setMenuOpen((prev) => !prev)}
       >
         <span className="live-status__dot" />
@@ -38,9 +41,11 @@ const LiveStatusIndicator: React.FC = () => {
       </button>
       {menuOpen && (
         <div className="live-status__menu" role="menu">
-          <div className="live-status__meta">
-            Last update: {formatTime(lastUpdated)}
-          </div>
+          <div className="live-status__meta">Last update: {formatTime(lastUpdated)}</div>
+          {isStale && <div className="live-status__meta">Stream stale for {staleSeconds}s.</div>}
+          <button type="button" onClick={() => refreshData()}>
+            Refresh data
+          </button>
           <button type="button" onClick={() => triggerSync()}>
             Sync now
           </button>

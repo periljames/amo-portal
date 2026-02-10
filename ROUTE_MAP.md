@@ -148,3 +148,28 @@
 - `DELETE /quality/cars/:carId/attachments/:attachmentId`
 
 All routes are additive and preserve existing invite-token endpoints under `/quality/cars/invite/:token/attachments*`.
+
+## Changed in this run (2026-02-10)
+### Cockpit drilldown precision updates
+- **Files changed:**
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+- **Cockpit tile routes (route + params):**
+  - Overdue CAR/CAPA → `/maintenance/:amoCode/:department/qms/cars?status=overdue&dueWindow=now`
+  - Due today → `/maintenance/:amoCode/:department/qms/tasks?dueWindow=today&status=open`
+  - Due this week → `/maintenance/:amoCode/:department/qms/cars?status=open&dueWindow=week`
+  - Due this month → `/maintenance/:amoCode/:department/qms/cars?status=open&dueWindow=month`
+  - Overdue training → `/maintenance/:amoCode/:department/qms/training?status=overdue&dueWindow=now`
+  - Pending acknowledgements → `/maintenance/:amoCode/:department/qms/documents?ack=pending`
+  - Document currency → `/maintenance/:amoCode/:department/qms/documents?currency=expiring_30d`
+  - Audit closures → `/maintenance/:amoCode/:department/qms/audits?trend=monthly&status=closed`
+- **Activity feed drilldowns:**
+  - `entityType=user` → `/maintenance/:amoCode/admin/users/:entityId`
+  - `entityType=task` → `/maintenance/:amoCode/:department/tasks/:entityId`
+  - fallback → `/maintenance/:amoCode/:department/qms/events?entity=:entityType&id=:entityId`
+- **Commands run:** `npx tsc -b`
+- **Verification:**
+  1. Open cockpit in focus mode.
+  2. Click each KPI tile and confirm path + query string.
+  3. Click activity items and confirm entity-aware route mapping.
+- **Known issues:** Some entities still fall back to events page until explicit detail routes exist.
+- **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
