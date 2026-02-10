@@ -78,16 +78,6 @@ export function getAllowedDepartments(
 
   if (!assignedDepartment) return [];
 
-  if (assignedDepartment === "quality") {
-    return DEPARTMENT_ITEMS.filter((dept) => dept.id !== "admin").map(
-      (dept) => dept.id
-    );
-  }
-
-  if (assignedDepartment === "planning") {
-    return ["planning", "reliability"];
-  }
-
   return [assignedDepartment];
 }
 

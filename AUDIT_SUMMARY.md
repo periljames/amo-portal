@@ -171,3 +171,17 @@
 ## Changed in this run (2026-02-10)
 - Fixed auth/password-reset recursion bug in public router (`_client_ip` no longer re-enters rate-limit function).
 - Added regression tests for helper behavior and 429 threshold enforcement.
+
+
+## Changed in this run (2026-02-10)
+### Current state snapshot updates
+- Cockpit is now **Quality-only**.
+- Non-quality departments currently render scaffold placeholders when `VITE_UI_SHELL_V2` is enabled:
+  - planning, production, reliability, safety, stores, engineering, workshops.
+- QMS route guard enforced: non-quality `/qms` visits redirect to department root with toast guidance.
+
+
+## Changed in this run (2026-02-10)
+- Enforced dedicated department landing for normal users at login and runtime navigation.
+- Updated admin/superuser login landing to `/admin/overview`.
+- Non-admin department visibility now restricted to assigned department only.

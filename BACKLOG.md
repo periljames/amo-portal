@@ -127,3 +127,22 @@
 ## Run update (2026-02-10)
 ### Closed
 - [x] Fix `RecursionError` in `/auth/password-reset/confirm` rate-limiting path caused by `_client_ip` ↔ `_enforce_auth_rate_limit` re-entry.
+
+
+## Run update (2026-02-10)
+### Closed
+- [x] Restrict QMS cockpit to Quality & Compliance only (no QMS cockpit leakage to other departments).
+- [x] Restore always-reachable module/department launcher in focus mode.
+- [x] Fix light-mode hard-coded white text contrast regression in shell badge.
+
+### Follow-ups
+- [ ] Replace placeholder landing scaffolds with department-specific dashboards (planning/production/reliability/safety/stores/engineering/workshops).
+
+
+## Run update (2026-02-10)
+### Closed
+- [x] Enforce assigned-department landing behavior for non-admin users.
+- [x] Set admin/superuser post-login default landing to admin overview.
+
+### Remaining
+- [ ] Add explicit E2E auth-routing tests in CI for non-admin department lock and admin overview landing.

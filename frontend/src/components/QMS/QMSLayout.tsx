@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DepartmentLayout from "../Layout/DepartmentLayout";
 import PageHeader from "../shared/PageHeader";
 import { decodeAmoCertFromUrl } from "../../utils/amo";
+import { useToast } from "../feedback/ToastProvider";
 
 type Props = {
   amoCode: string;
@@ -22,7 +23,21 @@ const QMSLayout: React.FC<Props> = ({
   children,
 }) => {
   const navigate = useNavigate();
+  const { pushToast } = useToast();
   const amoDisplay = amoCode !== "UNKNOWN" ? decodeAmoCertFromUrl(amoCode) : "AMO";
+
+  useEffect(() => {
+    if (department === "quality") return;
+    pushToast({
+      title: "QMS cockpit is under Quality & Compliance.",
+      variant: "info",
+    });
+    navigate(`/maintenance/${amoCode}/${department}`, { replace: true });
+  }, [amoCode, department, navigate, pushToast]);
+
+  if (department !== "quality") {
+    return null;
+  }
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment={department}>

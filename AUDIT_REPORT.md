@@ -185,3 +185,53 @@
 ### Commands executed
 - `cd backend && pytest amodb/apps/accounts/tests/test_router_public_rate_limit.py amodb/apps/accounts/tests/test_user_commands.py -q`
 - `cd backend && alembic -c amodb/alembic.ini heads`
+
+
+## Changed in this run (2026-02-10)
+### Department scoping fix
+- **Bug:** Quality & Compliance cockpit was rendered for non-quality departments when `VITE_UI_SHELL_V2` was enabled.
+- **Root cause:** `DashboardPage` rendered `DashboardCockpit` unconditionally for all departments in the V2 branch.
+- **Fix:** Added strict `department === "quality"` gate for cockpit rendering; non-quality departments now render `DepartmentLandingScaffold`.
+- Added QMS route guard in `QMSLayout`: `/maintenance/:amoCode/:department/qms` redirects to `/maintenance/:amoCode/:department` with toast when department is not `quality`.
+- Focus mode now only applies to quality cockpit routes; topbar launcher remains available so modules/departments are always reachable.
+- Light-mode contrast issue addressed by replacing hard-coded white badge text with tokenized `var(--text)`.
+
+### Verification steps
+1. Open `/maintenance/demo/quality` → quality cockpit context is shown.
+2. Open `/maintenance/demo/planning` → department landing scaffold shown (no QMS KPI cockpit).
+3. Open `/maintenance/demo/planning/qms` → redirects back to `/maintenance/demo/planning` with informational toast.
+4. In quality cockpit, open launcher via topbar “Modules” button.
+5. Toggle light mode and verify notification badge text remains readable.
+
+### Screenshots
+- Quality cockpit: `browser:/tmp/codex_browser_invocations/80bd7277b5bb3391/artifacts/artifacts/quality-cockpit.png`
+- Non-quality landing scaffold: `browser:/tmp/codex_browser_invocations/80bd7277b5bb3391/artifacts/artifacts/operations-landing.png`
+- Focus launcher open: `browser:/tmp/codex_browser_invocations/80bd7277b5bb3391/artifacts/artifacts/focus-launcher-open.png`
+- Non-quality `/qms` redirect result: `browser:/tmp/codex_browser_invocations/80bd7277b5bb3391/artifacts/artifacts/operations-qms-redirect.png`
+
+
+## Changed in this run (2026-02-10)
+### Department-assignment landing enforcement
+- Normal users now always land in their assigned department after login and cannot browse to other departments.
+- Superusers/AMO Admins now land on `/maintenance/:amoCode/admin/overview` after login for operational control access.
+
+### Root cause + fix
+- Previous role access logic allowed broad department visibility for non-admin quality/planning users via `getAllowedDepartments`.
+- Tightened non-admin access policy to **assigned department only** in `departmentAccess.ts`.
+- Updated login redirect logic to send admins to `/admin/overview` and keep non-admins on assigned department only.
+
+### Verification
+- `/login` with non-admin context redirects to `/maintenance/demo/planning` (assigned dept).
+- Non-admin access to `/maintenance/demo/quality` hard-corrects back to assigned department.
+- `/login` with admin context redirects to `/maintenance/demo/admin/overview`.
+
+### Screenshots
+- Non-quality landing: `browser:/tmp/codex_browser_invocations/f3abb0dc176ba8b0/artifacts/artifacts/non-quality-landing.png`
+- Non-quality qms redirect: `browser:/tmp/codex_browser_invocations/f3abb0dc176ba8b0/artifacts/artifacts/non-quality-qms-redirect.png`
+- Quality launcher open: `browser:/tmp/codex_browser_invocations/f3abb0dc176ba8b0/artifacts/artifacts/quality-launcher-open.png`
+- Quality cockpit (light mode): `browser:/tmp/codex_browser_invocations/9c7733a00de17a6c/artifacts/artifacts/quality-cockpit-light.png`
+
+### Commands executed
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build` *(runner transform stall persists)*
+- Playwright smoke: login landing + department lock + non-quality qms redirect + admin landing

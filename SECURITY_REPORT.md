@@ -89,3 +89,13 @@
 ## Changed in this run (2026-02-10)
 - Corrected auth rate-limit helper recursion that could deny service for password reset confirmation requests under load/error loops.
 - Added regression tests for rate-limit utility behavior.
+
+
+## Changed in this run (2026-02-10)
+- Reduced accidental cross-department exposure of Quality cockpit UI by enforcing department-level route behavior guard for `/qms` pages.
+- No auth model or token validation changes.
+
+
+## Changed in this run (2026-02-10)
+- Tightened frontend department access posture for non-admin users (assigned department only).
+- Reduced accidental cross-department UI exposure by hard-correcting non-admin route access to assigned department.

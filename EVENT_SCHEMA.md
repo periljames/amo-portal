@@ -122,3 +122,13 @@
 ## Changed in this run (2026-02-10)
 - No event schema changes.
 - This run only fixed auth rate-limit helper recursion in public auth router.
+
+
+## Changed in this run (2026-02-10)
+- No event schema contract changes.
+- Department scoping/focus-mode/theming fixes are frontend-only behavior updates.
+
+
+## Changed in this run (2026-02-10)
+- No event payload contract changes.
+- Login/department access changes are routing and authorization UX behavior only.

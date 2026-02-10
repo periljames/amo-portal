@@ -26,7 +26,7 @@ const DashboardCockpit: React.FC = () => {
   });
   const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
 
-  const qmsEnabled = department === "quality" || department === "safety";
+  const qmsEnabled = department === "quality";
 
   const { data: snapshot } = useQuery({
     queryKey: ["qms-cockpit-snapshot", amoCode],
