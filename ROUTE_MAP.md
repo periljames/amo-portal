@@ -246,3 +246,37 @@ All routes are additive and preserve existing invite-token endpoints under `/qua
 
 ### Screenshots/artifacts
 - `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
+
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/events/router.py`
+  - `frontend/src/services/events.ts`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+
+### New route
+- `GET /api/events/history`
+  - Query params: `cursor`, `limit`, `entityType`, `entityId`, `timeStart`, `timeEnd`
+  - Returns: paged activity timeline with `next_cursor`.
+
+### Activity feed drilldowns (current)
+- `user` -> `/maintenance/:amoCode/admin/users/:entityId`
+- `task` -> `/maintenance/:amoCode/:department/tasks/:entityId`
+- `qms_document` -> `/maintenance/:amoCode/:department/qms/documents?documentId=:entityId`
+- `qms_audit` -> `/maintenance/:amoCode/:department/qms/audits?auditId=:entityId`
+- `qms_car` -> `/maintenance/:amoCode/:department/qms/cars?carId=:entityId`
+- `training*` -> `/maintenance/:amoCode/:department/qms/training?userId=:entityId`
+- fallback -> `/maintenance/:amoCode/:department/qms/events?entity=:entityType&id=:entityId`
+
+### Commands run
+- `cd frontend && npx tsc -b`
+
+### Verification steps
+1. Call `/api/events/history?limit=2` and follow `next_cursor`.
+2. Click feed rows and verify exact route mapping above.
+
+### Known issues
+- Fallback route still used for uncommon entity types.
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/49e5689b10ac2749/artifacts/artifacts/cockpit-sse-history-phase.png`

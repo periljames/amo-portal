@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { addDays, endOfDay, isBefore, isWithinInterval, parseISO } from "date-fns";
 import { AlertTriangle, BookOpenCheck, CalendarClock, ClipboardCheck, FileClock, ShieldCheck } from "lucide-react";
 
@@ -10,6 +10,7 @@ import { getCachedUser, getContext } from "../services/auth";
 import { qmsListAudits, qmsListCars, qmsListDistributions, qmsListDocuments } from "../services/qms";
 import { listMyTasks } from "../services/tasks";
 import { useRealtime } from "../components/realtime/RealtimeProvider";
+import { listEventHistory } from "../services/events";
 import { getMyTrainingStatus } from "../services/training";
 
 const isWithinDays = (dateStr: string | null | undefined, days: number) => {
@@ -33,6 +34,13 @@ const DashboardCockpit: React.FC = () => {
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
   const { activity } = useRealtime();
+
+  const { data: activityHistory } = useInfiniteQuery({
+    queryKey: ["activity-history", amoCode, department],
+    queryFn: ({ pageParam }) => listEventHistory({ cursor: pageParam as string | undefined, limit: 300 }),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    initialPageParam: undefined as string | undefined,
+  });
   const currentUser = getCachedUser();
   const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
 
@@ -107,17 +115,32 @@ const DashboardCockpit: React.FC = () => {
     return [...taskItems, ...carItems].slice(0, 20);
   }, [tasks, cars, currentUser, amoCode, department, navigate]);
 
-  const activityItems = useMemo(() => activity.map((item) => ({
-    id: item.id,
-    summary: `${item.type.split(".").join(" · ")} ${item.action}`,
-    timestamp: new Date(item.timestamp).toLocaleString(),
-    occurredAt: item.timestamp,
-    onClick: () => {
-      if (item.entityType === "user") return navigate(`/maintenance/${amoCode}/admin/users/${item.entityId}`);
-      if (item.entityType === "task") return navigate(`/maintenance/${amoCode}/${department}/tasks/${item.entityId}`);
-      return navigate(`/maintenance/${amoCode}/${department}/qms/events?entity=${item.entityType}&id=${item.entityId}`);
-    },
-  })), [activity, amoCode, department, navigate]);
+  const activityItems = useMemo(() => {
+    const fromHistory = (activityHistory?.pages ?? []).flatMap((page) => page.items ?? []);
+    const merged = [...activity, ...fromHistory];
+    const seen = new Set<string>();
+    return merged
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .map((item) => ({
+        id: item.id,
+        summary: `${item.type.split(".").join(" · ")} ${item.action}`,
+        timestamp: new Date(item.timestamp).toLocaleString(),
+        occurredAt: item.timestamp,
+        onClick: () => {
+          if (item.entityType === "user") return navigate(`/maintenance/${amoCode}/admin/users/${item.entityId}`);
+          if (item.entityType === "task") return navigate(`/maintenance/${amoCode}/${department}/tasks/${item.entityId}`);
+          if (item.entityType === "qms_document") return navigate(`/maintenance/${amoCode}/${department}/qms/documents?documentId=${item.entityId}`);
+          if (item.entityType === "qms_audit") return navigate(`/maintenance/${amoCode}/${department}/qms/audits?auditId=${item.entityId}`);
+          if (item.entityType === "qms_car") return navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${item.entityId}`);
+          if (item.entityType.toLowerCase().includes("training")) return navigate(`/maintenance/${amoCode}/${department}/qms/training?userId=${item.entityId}`);
+          return navigate(`/maintenance/${amoCode}/${department}/qms/events?entity=${item.entityType}&id=${item.entityId}`);
+        },
+      }));
+  }, [activity, activityHistory?.pages, amoCode, department, navigate]);
 
   return (
     <>

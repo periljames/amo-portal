@@ -289,3 +289,34 @@ Monthly shelf-life job → expiring list
 1. Add bounded Last-Event-ID replay support in SSE endpoint.
 2. Add server-backed activity feed query/pagination endpoint and align virtual feed to API cursoring.
 3. Extend cockpit chart library wrappers with explicit click handlers map coverage audit.
+
+
+## Phase result (2026-02-10)
+### What shipped
+- SSE Last-Event-ID replay/resume + reset event handling.
+- Server-backed activity feed endpoint with cursor pagination and filter support.
+- Cockpit feed now merges paged server history with live SSE updates.
+
+### Metrics/perf notes
+- Feed virtualization retained; history load now paged and does not require unbounded client-only buffer.
+- Event storm handling remains debounced at 350ms invalidation cadence in frontend provider.
+
+### Remaining + why
+- Durable replay persistence remains open; current bounded in-memory ring buffer is minimal-risk interim.
+
+### Files changed
+- `backend/amodb/apps/events/broker.py`
+- `backend/amodb/apps/events/router.py`
+- `backend/amodb/apps/events/tests/test_events_history.py`
+- `frontend/src/components/realtime/RealtimeProvider.tsx`
+- `frontend/src/services/events.ts`
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+
+### Commands run
+- `python -m py_compile backend/amodb/apps/events/router.py backend/amodb/apps/events/broker.py backend/amodb/apps/events/tests/test_events_history.py`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build`
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/49e5689b10ac2749/artifacts/artifacts/cockpit-sse-history-phase.png`

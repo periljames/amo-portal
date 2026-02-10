@@ -86,3 +86,21 @@ Next actions should prioritise secrets enforcement, auth rate limiting, and uplo
   - Cursor interaction currently cockpit-scoped; no global policy toggle surfaced in user settings yet.
 - **Screenshots/artifacts:**
   - `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
+
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/events/router.py`
+  - `backend/amodb/apps/events/broker.py`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+- **Security-relevant changes:**
+  - SSE reconnect now uses replay ids and reset signaling; no auth model changes.
+  - History endpoint is token-authenticated via existing query-token auth dependency and AMO-scoped server filtering.
+- **Commands run:**
+  - `python -m py_compile backend/amodb/apps/events/router.py backend/amodb/apps/events/broker.py`
+  - `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
+- **Verification steps:**
+  1. Verify `/api/events/history` returns only current effective AMO events.
+  2. Verify stale replay id does not leak cross-tenant events and yields controlled reset.
+- **Known issues:**
+  - Replay buffer is volatile and non-persistent across process restarts.

@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { getApiBaseUrl } from "../../services/config";
-import { getToken } from "../../services/auth";
+import { getContext, getToken } from "../../services/auth";
 
 export type RealtimeStatus = "live" | "syncing" | "offline";
 
@@ -67,7 +67,7 @@ const TARGETED_REFRESH_KEYS = [
   "my-tasks",
   "admin-users",
   "user-profile",
-  "qms-dashboard",
+  "activity-history",
 ] as const;
 
 function mapEventToInvalidations(type: string): string[] {
@@ -79,21 +79,22 @@ function mapEventToInvalidations(type: string): string[] {
       "qms-cars",
       "qms-change-requests",
       "qms-distributions",
+      "activity-history",
     ];
   }
   if (type.startsWith("training.") || type.startsWith("training_")) {
-    return ["training-assignments", "training-dashboard", "training-events", "training-status"];
+    return ["training-assignments", "training-dashboard", "training-events", "training-status", "activity-history"];
   }
   if (type.startsWith("tasks.task.")) {
-    return ["tasks", "my-tasks", "qms-dashboard", "dashboard"];
+    return ["tasks", "my-tasks", "qms-dashboard", "dashboard", "activity-history"];
   }
   if (type.startsWith("tasks.") || type.startsWith("tasks_")) {
-    return ["tasks", "my-tasks"];
+    return ["tasks", "my-tasks", "activity-history"];
   }
   if (type.startsWith("accounts.") || type.startsWith("accounts_")) {
-    return ["admin-users", "user-profile", "qms-dashboard", "dashboard"];
+    return ["admin-users", "user-profile", "qms-dashboard", "dashboard", "activity-history"];
   }
-  return ["dashboard"]; 
+  return ["dashboard", "activity-history"];
 }
 
 export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -107,6 +108,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const retryCount = useRef(0);
   const staleIntervalRef = useRef<number | null>(null);
   const [staleSeconds, setStaleSeconds] = useState(0);
+  const ctx = getContext();
+  const lastEventKey = `amo:last-event-id:${ctx.amoCode || "unknown"}`;
 
   const isStale = status !== "live" || staleSeconds > STALE_AFTER_SECONDS;
 
@@ -128,6 +131,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!parsed.success) return;
 
       const event = parsed.data;
+      window.localStorage.setItem(lastEventKey, event.id);
       setStatus("live");
       setLastUpdated(new Date(event.timestamp));
       setStaleSeconds(0);
@@ -137,7 +141,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
       scheduleInvalidations(mapEventToInvalidations(event.type));
     },
-    [scheduleInvalidations]
+    [lastEventKey, scheduleInvalidations]
   );
 
   const connect = useCallback(() => {
@@ -146,8 +150,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     setStatus("syncing");
     const token = getToken();
-    const qs = token ? `?token=${encodeURIComponent(token)}` : "";
-    const url = `${getApiBaseUrl()}/api/events${qs}`;
+    const persisted = typeof window !== "undefined" ? window.localStorage.getItem(lastEventKey) : null;
+    const qs = new URLSearchParams();
+    if (token) qs.set("token", token);
+    if (persisted) qs.set("lastEventId", persisted);
+    const url = `${getApiBaseUrl()}/api/events?${qs.toString()}`;
     const source = new EventSource(url, { withCredentials: true });
     sourceRef.current = source;
 
@@ -166,6 +173,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     };
 
+    source.addEventListener("reset", () => {
+      window.localStorage.removeItem(lastEventKey);
+      scheduleInvalidations(["activity-history", "dashboard", "qms-dashboard"]);
+    });
+
     source.onerror = () => {
       setStatus("offline");
       source.close();
@@ -176,7 +188,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       retryCount.current += 1;
       reconnectTimer.current = window.setTimeout(() => connect(), retryDelay);
     };
-  }, [handleEvent]);
+  }, [handleEvent, lastEventKey, scheduleInvalidations]);
 
   useEffect(() => {
     connect();

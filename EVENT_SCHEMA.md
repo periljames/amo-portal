@@ -170,3 +170,31 @@ Debounce remains **350ms** in `frontend/src/components/realtime/RealtimeProvider
 
 ### Screenshots/artifacts
 - `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
+
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/events/broker.py`
+  - `backend/amodb/apps/events/router.py`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+
+### SSE protocol updates
+| Event | Semantics | Producer path | Trigger | Frontend handling |
+|---|---|---|---|---|
+| `reset` | Replay cursor unavailable/too old; client should targeted-refetch | `backend/amodb/apps/events/router.py` | reconnect with stale `Last-Event-ID` | invalidate `activity-history`, `dashboard`, `qms-dashboard` only |
+
+### Envelope/resume behavior
+- Stream now emits `id: <event.id>` for each event frame.
+- Server reads `Last-Event-ID` header (and `lastEventId` query fallback) and replays buffered events when available.
+- Replay window currently bounded by in-memory broker history.
+
+### Commands run
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
+
+### Verification steps
+1. Publish events and reconnect with previous event id.
+2. Validate replay events arrive before live stream continues.
+3. Reconnect with unknown id and verify `reset` event emitted.
+
+### Known issues
+- Replay history is process-memory scoped.

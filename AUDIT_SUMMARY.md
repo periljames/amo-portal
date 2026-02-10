@@ -7,9 +7,9 @@
   - **Live now (no flag)**: Existing AppShell V1, existing routes and pages, legacy dashboards and lists.
   - **Behind flag (`VITE_UI_SHELL_V2`)**: AppShell V2 layout + focus mode on cockpit routes (`/maintenance/:amoCode/:department`, `/maintenance/:amoCode/:department/qms`, `/maintenance/:amoCode/:department/qms/kpis`) and new DashboardCockpit scaffold.
 - **Major remaining gaps**
-  - Last-Event-ID replay is still not implemented (reconnects rely on fresh stream + targeted refetch).
-  - Activity feed backend pagination is still pending (UI is virtualized, but provider buffer is in-memory).
-  - Cursor layer is feature-flagged and currently cockpit-scoped only (`VITE_UI_CURSOR_LAYER`).
+  - Per-tenant durable event log replay window is in-memory broker history (not persisted across process restarts).
+  - Activity feed backend currently backed by audit stream and cursor pagination, but department-level aggregation/pinning is still a follow-up.
+  - Cursor layer is cockpit-scoped and feature-flagged (`VITE_UI_CURSOR_LAYER`) by design.
 
 ## Changed in this run
 ### 1) Drilldown query support + list filtering
@@ -265,3 +265,61 @@
 
 ### Known issues
 - Full production bundle (`npm run build`) continues timing out in this runner during vite transform despite successful TS build.
+
+
+## Changed in this run (2026-02-10)
+### Current State Snapshot (reconciled)
+- **Live now / behind flags**
+  - AppShell V2 cockpit experience remains behind `VITE_UI_SHELL_V2`.
+  - Cursor halo/magnetic layer remains behind `VITE_UI_CURSOR_LAYER`.
+- **What shipped this run**
+  - SSE replay/resume support using Last-Event-ID with controlled reset signaling.
+  - Server-backed activity timeline endpoint with cursor pagination + filters.
+  - Cockpit now merges server history with live SSE stream while preserving deterministic drilldowns.
+
+### Feature flags / env / migrations
+- **Feature flags added/used**
+  - `VITE_UI_CURSOR_LAYER` (existing from previous run, now actively used in cockpit scaffold guards).
+- **Env vars added/changed**
+  - None this run.
+- **Migrations added**
+  - None this run.
+
+### Files changed
+- `backend/amodb/apps/events/broker.py`
+- `backend/amodb/apps/events/router.py`
+- `backend/amodb/apps/events/tests/test_events_history.py`
+- `frontend/src/components/realtime/RealtimeProvider.tsx`
+- `frontend/src/services/events.ts`
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+- plus run-contract markdown files
+
+### User-visible changes
+- Reconnect behavior is more reliable (missed events replay when possible).
+- Activity feed loads history from backend and remains virtualized/live-updating.
+
+### Non-obvious internal changes
+- SSE stream now emits `id:` lines and accepts Last-Event-ID replay semantics.
+- Server emits `reset` SSE event when replay cursor is too old.
+
+### Rollback plan
+1. Revert changes in `backend/amodb/apps/events/{broker,router}.py`.
+2. Revert `frontend/src/components/realtime/RealtimeProvider.tsx`, `frontend/src/services/events.ts`, and `frontend/src/dashboards/DashboardCockpit.tsx`.
+3. Restore docs to previous snapshot if partial rollback is required.
+
+### Commands run
+- `python -m py_compile backend/amodb/apps/events/router.py backend/amodb/apps/events/broker.py backend/amodb/apps/events/tests/test_events_history.py`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build`
+
+### Verification steps (manual)
+1. Open cockpit route and confirm feed renders historical rows immediately.
+2. Trigger an action that emits audit/SSE event and confirm feed prepends without hard refresh.
+3. Reconnect client with stale last event id and confirm controlled `reset` handling + targeted refetch (no global invalidate).
+
+### Known issues
+- Replay history is in-memory and does not survive process restart.
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/49e5689b10ac2749/artifacts/artifacts/cockpit-sse-history-phase.png`

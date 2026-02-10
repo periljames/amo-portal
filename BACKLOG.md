@@ -1,3 +1,8 @@
+## Known issues / Remaining priorities (authoritative)
+- ⏳ P1: Durable SSE replay window across process restarts (currently in-memory broker history).
+- ⏳ P1: Department-aware activity timeline views/pinning and richer filters.
+- ⏳ P2: Additional cockpit chart interaction coverage audit and perf instrumentation.
+
 # QMS/MPM Backlog (Prioritized)
 
 > This backlog is evidence-based from AUDIT_REPORT.md and aligned to the required QMS/MPM scope. Acceptance criteria are designed to be testable and incremental.
@@ -219,3 +224,24 @@
 
 ### Screenshots/artifacts
 - `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
+
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/events/broker.py`
+  - `backend/amodb/apps/events/router.py`
+  - `backend/amodb/apps/events/tests/test_events_history.py`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/services/events.ts`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+- **Status updates:**
+  - ✅ SSE Last-Event-ID replay/resume implemented (bounded memory window).
+  - ✅ Server-backed activity feed pagination endpoint implemented and consumed by cockpit.
+  - ⏳ Durable replay persistence remains open.
+- **Commands run:**
+  - `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
+- **Verification steps:**
+  1. Validate replay behavior with reconnect.
+  2. Validate feed pagination endpoint returns cursor + non-overlapping pages.
+- **Screenshots/artifacts:**
+  - `browser:/tmp/codex_browser_invocations/49e5689b10ac2749/artifacts/artifacts/cockpit-sse-history-phase.png`

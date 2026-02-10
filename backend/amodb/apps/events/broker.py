@@ -4,8 +4,9 @@ import json
 import queue
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Deque, Dict, Iterable, Optional
 
 
 @dataclass
@@ -34,12 +35,13 @@ class EventEnvelope:
 
 
 class EventBroker:
-    def __init__(self) -> None:
+    def __init__(self, replay_size: int = 2000) -> None:
         self._subscribers: set[queue.Queue[EventEnvelope]] = set()
+        self._history: Deque[EventEnvelope] = deque(maxlen=replay_size)
         self._lock = threading.Lock()
 
     def subscribe(self) -> queue.Queue[EventEnvelope]:
-        q: queue.Queue[EventEnvelope] = queue.Queue(maxsize=200)
+        q: queue.Queue[EventEnvelope] = queue.Queue(maxsize=400)
         with self._lock:
             self._subscribers.add(q)
         return q
@@ -48,8 +50,27 @@ class EventBroker:
         with self._lock:
             self._subscribers.discard(q)
 
+    def replay_since(self, *, last_event_id: str, amo_id: Optional[str]) -> tuple[list[EventEnvelope], bool]:
+        with self._lock:
+            history = list(self._history)
+        if not history:
+            return [], False
+        ids = [event.id for event in history]
+        if last_event_id not in ids:
+            return [], True
+        start_index = ids.index(last_event_id) + 1
+        replay = history[start_index:]
+        if amo_id:
+            replay = [
+                event
+                for event in replay
+                if str((event.metadata or {}).get("amoId", "")) == str(amo_id)
+            ]
+        return replay, False
+
     def publish(self, event: EventEnvelope) -> None:
         with self._lock:
+            self._history.append(event)
             subscribers: Iterable[queue.Queue[EventEnvelope]] = list(self._subscribers)
         for q in subscribers:
             try:
@@ -69,8 +90,10 @@ def publish_event(event: EventEnvelope) -> None:
     broker.publish(event)
 
 
-def format_sse(data: str, event: Optional[str] = None) -> str:
+def format_sse(data: str, event: Optional[str] = None, event_id: Optional[str] = None) -> str:
     lines = []
+    if event_id:
+        lines.append(f"id: {event_id}")
     if event:
         lines.append(f"event: {event}")
     for chunk in data.splitlines():
