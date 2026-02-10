@@ -41,6 +41,22 @@ class ActivityHistoryResponse(BaseModel):
     next_cursor: Optional[str] = None
 
 
+class ActivityEventRead(BaseModel):
+    id: str
+    type: str
+    entityType: str
+    entityId: str
+    action: str
+    timestamp: str
+    actor: Optional[dict] = None
+    metadata: dict = {}
+
+
+class ActivityHistoryResponse(BaseModel):
+    items: list[ActivityEventRead]
+    next_cursor: Optional[str] = None
+
+
 def _credentials_exception() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
