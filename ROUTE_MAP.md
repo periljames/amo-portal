@@ -71,3 +71,29 @@
 
 ### Screenshots
 - Not applicable.
+
+
+## Changed in this run (2026-02-10)
+### Route behavior/perf delta
+- No route path changes.
+- Route modules are now lazy-loaded in router to avoid eager import waterfall on cockpit entry.
+
+### API query cap changes
+- `/api/events/history` now defaults to `limit=50` and caps at `200` per request.
+
+### Files changed
+- `frontend/src/router.tsx`
+- `backend/amodb/apps/events/router.py`
+- `ROUTE_MAP.md`
+
+### Commands run
+- `cd frontend && npx tsc -b`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
+
+### Verification
+1. Load `/maintenance/demo/quality`; confirm page renders via lazy route import.
+2. Confirm drilldowns still navigate to documented paths.
+3. Confirm history endpoint limit cap.
+
+### Known issues
+- No path-level regressions observed in smoke checks.

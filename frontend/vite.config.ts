@@ -44,5 +44,26 @@ export default defineConfig(({ mode }) => {
     server: {
       https,
     },
+    build: {
+      sourcemap: false,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/echarts') || id.includes('node_modules/echarts-for-react')) {
+              return 'charts-vendor'
+            }
+            if (id.includes('node_modules/ag-grid')) {
+              return 'grid-vendor'
+            }
+            if (id.includes('node_modules/react-pdf') || id.includes('node_modules/pdfjs-dist')) {
+              return 'pdf-vendor'
+            }
+            if (id.includes('node_modules/react-plotly.js') || id.includes('node_modules/plotly.js-dist-min')) {
+              return 'plotly-vendor'
+            }
+          },
+        },
+      },
+    },
   }
 })

@@ -93,3 +93,57 @@
 
 ### Screenshots
 - Not applicable (backend migration only).
+
+
+## Changed in this run (2026-02-10)
+### Current State Snapshot updates
+- Migration chain now has single head `z1y2x3w4v5u6` after adding replay-query index migration.
+- Added strict compatibility + downgrade behavior for schema-drift mitigation migration (`y3z4a5b6c7d8`).
+- Cockpit first-load request pressure reduced by replacing three list calls with one aggregated QMS dashboard snapshot call.
+
+### User-visible changes
+- Cockpit still renders same KPIs, but pending-ack/docs/audit KPI values now come from `/quality/qms/dashboard` snapshot for lighter network load.
+- Activity history boot page size lowered to 100 items client-side and 50 default server-side.
+
+### Non-obvious internal changes
+- `/api/events/history` now supports weak ETag + `If-None-Match` 304 for short-term history polling/reloads.
+- Added composite index for replay/history query shape: `(amo_id, occurred_at DESC, id DESC)`.
+- Router converted page modules to `React.lazy` + `Suspense` to reduce initial cockpit bundle pressure.
+
+### Files changed
+- `backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py`
+- `backend/amodb/alembic/versions/z1y2x3w4v5u6_add_audit_events_replay_index.py`
+- `backend/amodb/apps/events/router.py`
+- `backend/amodb/apps/events/tests/test_events_history.py`
+- `frontend/src/router.tsx`
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+- `frontend/src/services/qms.ts`
+- `frontend/vite.config.ts`
+- `frontend/package.json`
+- `frontend/scripts/perf-report.mjs`
+
+### Commands run
+- `python -m py_compile backend/amodb/apps/events/router.py backend/amodb/apps/events/tests/test_events_history.py backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py backend/amodb/alembic/versions/z1y2x3w4v5u6_add_audit_events_replay_index.py`
+- `cd backend && alembic -c amodb/alembic.ini heads`
+- `cd backend && alembic -c amodb/alembic.ini upgrade head` *(blocked: DATABASE_URL not set in this environment)*
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build` *(transform step did not finish in runner window)*
+
+### Perf outcomes (measured in dev waterfall capture)
+- Initial cockpit load captured `157` requests and ~`32.4MB` transferred in dev mode (source: Playwright perf capture artifact).
+- Largest transfer offenders confirmed: plotly/ag-grid/react-pdf bundles pulled eagerly due route-level imports; mitigation applied via router lazy loading + manualChunks.
+
+### Verification
+1. `alembic -c amodb/alembic.ini heads` returns single head `z1y2x3w4v5u6`.
+2. Backend event/history tests pass (8 tests).
+3. Cockpit route `/maintenance/demo/quality` renders and KPIs resolve using snapshot endpoint + action queue.
+4. `/api/events/history` returns ETag and sends 304 when `If-None-Match` matches.
+
+### Screenshots / artifacts
+- `browser:/tmp/codex_browser_invocations/d217d7a1e1f1f99e/artifacts/artifacts/cockpit-load-optimized.png`
+- `browser:/tmp/codex_browser_invocations/cffc26b8bc29c596/artifacts/artifacts/cockpit-network-trace.json`
+
+### Known issues / rollback
+- Production build command still times out in this runner; local/prod CI should run with longer execution window.
+- Rollback: revert migrations `z1y2x3w4v5u6` and `y3z4a5b6c7d8` + router/events changes, then rerun test suite.

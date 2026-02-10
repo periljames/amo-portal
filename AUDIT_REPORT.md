@@ -74,3 +74,53 @@
 
 ### Known issues / follow-up
 - If a local DB is far behind, run full chain: `alembic -c amodb/alembic.ini upgrade head` before launching uvicorn.
+
+
+## Phase result (2026-02-10)
+### Root cause of "6-minute load" (measured)
+- Route file imported all page modules eagerly, causing very large dev/prod preload graph (plotly/ag-grid/react-pdf and unrelated pages loaded for cockpit route).
+- Cockpit mounted multiple full-list API calls for KPI derivation where aggregate snapshot existed.
+
+### Perf report
+| Metric | Observed | Notes |
+|---|---:|---|
+| First-load request count (dev capture) | 157 | Captured via Playwright perf script |
+| Total transferred (dev capture) | 32,417,567 bytes | Includes Vite dev modules (non-gzip) |
+| DCL (dev capture) | 20,908ms | Dev mode, not production baseline |
+| Load event end (dev capture) | 20,935ms | Dev mode, not production baseline |
+| Top resource | `react-plotly__js.js` (12.78MB) | Eager import evidence |
+
+### What changed to fix
+- Converted page imports in router to `React.lazy` + `Suspense` to prevent eager loading of non-active routes.
+- Added Rollup manual chunking for heavy vendors (`charts-vendor`, `plotly-vendor`, `grid-vendor`, `pdf-vendor`).
+- Replaced cockpit list-fetch dependencies (documents/audits/distributions lists) with single `/quality/qms/dashboard` aggregate call for snapshot KPIs.
+- Capped history defaults (`limit=50`, max `200`) and added ETag/304 behavior for history endpoint.
+- Added replay/history index migration for query path.
+
+### Files changed
+- `frontend/src/router.tsx`
+- `frontend/vite.config.ts`
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+- `frontend/src/services/qms.ts`
+- `frontend/scripts/perf-report.mjs`
+- `frontend/package.json`
+- `backend/amodb/apps/events/router.py`
+- `backend/amodb/apps/events/tests/test_events_history.py`
+- `backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py`
+- `backend/amodb/alembic/versions/z1y2x3w4v5u6_add_audit_events_replay_index.py`
+
+### Commands executed
+- `cd backend && alembic -c amodb/alembic.ini heads`
+- `cd backend && alembic -c amodb/alembic.ini upgrade head` *(env blocked: DATABASE_URL missing)*
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build` *(runner timeout)*
+- Playwright cockpit perf capture (artifact + console PERF_JSON)
+
+### Tests added/extended
+- `test_list_event_history_sets_etag_header`
+- `test_list_event_history_returns_304_on_matching_etag`
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/d217d7a1e1f1f99e/artifacts/artifacts/cockpit-load-optimized.png`
+- `browser:/tmp/codex_browser_invocations/cffc26b8bc29c596/artifacts/artifacts/cockpit-network-trace.json`

@@ -61,5 +61,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """No-op downgrade: safety migration should not drop runtime compatibility columns."""
-    pass
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if _has_table(inspector, "audit_events"):
+        if _has_column(inspector, "audit_events", "metadata"):
+            op.drop_column("audit_events", "metadata")
+        if _has_column(inspector, "audit_events", "after"):
+            op.drop_column("audit_events", "after")
+        if _has_column(inspector, "audit_events", "before"):
+            op.drop_column("audit_events", "before")
+
+    if _has_table(inspector, "users"):
+        if _has_column(inspector, "users", "token_revoked_at"):
+            op.drop_column("users", "token_revoked_at")
+        if _has_column(inspector, "users", "must_change_password"):
+            op.drop_column("users", "must_change_password")
+        if _has_column(inspector, "users", "lockout_count"):
+            op.drop_column("users", "lockout_count")
+        if _has_column(inspector, "users", "is_auditor"):
+            op.drop_column("users", "is_auditor")

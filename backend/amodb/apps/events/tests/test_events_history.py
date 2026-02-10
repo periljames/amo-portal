@@ -13,6 +13,11 @@ class _DummyRequest:
     headers = {}
 
 
+class _DummyResponse:
+    def __init__(self):
+        self.headers = {}
+
+
 def _create_amo_and_user(db_session, code: str = "EVM01"):
     amo = account_models.AMO(amo_code=code, name=f"Events {code}", login_slug=code.lower(), is_active=True)
     db_session.add(amo)
@@ -143,6 +148,7 @@ def test_list_event_history_cursor_pagination(db_session):
 
     page1 = events_router.list_event_history(
         request=_DummyRequest(),
+        response=_DummyResponse(),
         cursor=None,
         limit=2,
         db=db_session,
@@ -153,6 +159,7 @@ def test_list_event_history_cursor_pagination(db_session):
 
     page2 = events_router.list_event_history(
         request=_DummyRequest(),
+        response=_DummyResponse(),
         cursor=page1.next_cursor,
         limit=2,
         db=db_session,
@@ -162,3 +169,68 @@ def test_list_event_history_cursor_pagination(db_session):
     ids1 = {item.id for item in page1.items}
     ids2 = {item.id for item in page2.items}
     assert ids1.isdisjoint(ids2)
+
+
+def test_list_event_history_sets_etag_header(db_session):
+    amo, user = _create_amo_and_user(db_session, code="EVM04")
+    audit_services.log_event(
+        db_session,
+        amo_id=amo.id,
+        actor_user_id=user.id,
+        entity_type="tasks.task",
+        entity_id="T1",
+        action="UPDATED",
+    )
+    db_session.commit()
+
+    response = _DummyResponse()
+    page = events_router.list_event_history(
+        request=_DummyRequest(),
+        response=response,
+        cursor=None,
+        limit=10,
+        db=db_session,
+        user=user,
+    )
+
+    assert len(page.items) == 1
+    assert response.headers.get("ETag")
+    assert response.headers.get("Cache-Control") == "private, max-age=15"
+
+
+def test_list_event_history_returns_304_on_matching_etag(db_session):
+    amo, user = _create_amo_and_user(db_session, code="EVM05")
+    audit_services.log_event(
+        db_session,
+        amo_id=amo.id,
+        actor_user_id=user.id,
+        entity_type="tasks.task",
+        entity_id="T1",
+        action="UPDATED",
+    )
+    db_session.commit()
+
+    first_response = _DummyResponse()
+    events_router.list_event_history(
+        request=_DummyRequest(),
+        response=first_response,
+        cursor=None,
+        limit=10,
+        db=db_session,
+        user=user,
+    )
+    etag = first_response.headers.get("ETag")
+    req = _DummyRequest()
+    req.headers = {"if-none-match": etag}
+
+    second_response = _DummyResponse()
+    result = events_router.list_event_history(
+        request=req,
+        response=second_response,
+        cursor=None,
+        limit=10,
+        db=db_session,
+        user=user,
+    )
+    assert hasattr(result, "status_code")
+    assert result.status_code == 304

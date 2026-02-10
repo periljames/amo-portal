@@ -7,7 +7,7 @@ import { AlertTriangle, BookOpenCheck, CalendarClock, ClipboardCheck, FileClock,
 import DashboardScaffold, { type KpiTile } from "../components/dashboard/DashboardScaffold";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getCachedUser, getContext } from "../services/auth";
-import { qmsListAudits, qmsListCars, qmsListDistributions, qmsListDocuments } from "../services/qms";
+import { qmsGetDashboard, qmsListCars } from "../services/qms";
 import { listMyTasks } from "../services/tasks";
 import { useRealtime } from "../components/realtime/RealtimeProvider";
 import { listEventHistory } from "../services/events";
@@ -37,7 +37,7 @@ const DashboardCockpit: React.FC = () => {
 
   const { data: activityHistory } = useInfiniteQuery({
     queryKey: ["activity-history", amoCode, department],
-    queryFn: ({ pageParam }) => listEventHistory({ cursor: pageParam as string | undefined, limit: 300 }),
+    queryFn: ({ pageParam }) => listEventHistory({ cursor: pageParam as string | undefined, limit: 100 }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     initialPageParam: undefined as string | undefined,
   });
@@ -47,9 +47,7 @@ const DashboardCockpit: React.FC = () => {
   const qmsEnabled = department === "quality" || department === "safety";
 
   const { data: cars = [] } = useQuery({ queryKey: ["qms-cars", amoCode], queryFn: () => qmsListCars(), enabled: qmsEnabled });
-  const { data: audits = [] } = useQuery({ queryKey: ["qms-audits", amoCode], queryFn: () => qmsListAudits({ domain: "AMO" }), enabled: qmsEnabled });
-  const { data: distributions = [] } = useQuery({ queryKey: ["qms-distributions", amoCode], queryFn: () => qmsListDistributions({ outstanding_only: true }), enabled: qmsEnabled });
-  const { data: documents = [] } = useQuery({ queryKey: ["qms-documents", amoCode], queryFn: () => qmsListDocuments(), enabled: qmsEnabled });
+  const { data: dashboardSnapshot } = useQuery({ queryKey: ["qms-dashboard", amoCode], queryFn: () => qmsGetDashboard(), enabled: qmsEnabled });
   const { data: tasks = [] } = useQuery({ queryKey: ["my-tasks", amoCode], queryFn: () => listMyTasks() });
   const { data: trainingStatus = [] } = useQuery({ queryKey: ["training-status", amoCode], queryFn: () => getMyTrainingStatus() });
 
@@ -59,11 +57,9 @@ const DashboardCockpit: React.FC = () => {
     const dueMonth = cars.filter((car) => car.status !== "CLOSED" && isWithinDays(car.due_date, 30));
     const dueTasksToday = tasks.filter((task) => isWithinDays(task.due_at, 0));
     const overdueTraining = trainingStatus.filter((item) => item.status === "OVERDUE");
-    const today = new Date();
-    const expiredDocs = documents.filter((doc) => !!doc.effective_date && new Date(doc.effective_date) < today);
-    const expiringSoonDocs = documents.filter((doc) => !!doc.effective_date && new Date(doc.effective_date) >= today && new Date(doc.effective_date) <= addDays(today, 30));
-    const currentDocs = documents.length - expiredDocs.length - expiringSoonDocs.length;
-    const closedAudits = audits.filter((a) => a.status === "CLOSED").length;
+    const currentDocs = dashboardSnapshot?.documents_active ?? 0;
+    const expiredDocs = dashboardSnapshot?.documents_obsolete ?? 0;
+    const closedAudits = Math.max((dashboardSnapshot?.audits_total ?? 0) - (dashboardSnapshot?.audits_open ?? 0), 0);
 
     const tiles: KpiTile[] = [
       { id: "overdue", icon: AlertTriangle, status: "overdue", label: "Overdue CAR/CAPA", value: overdueCars.length, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue&dueWindow=now`) },
@@ -71,17 +67,17 @@ const DashboardCockpit: React.FC = () => {
       { id: "due-week", icon: CalendarClock, status: "due-week", label: "Due this week", value: dueWeek.length, timeframe: "Week", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=open&dueWindow=week`) },
       { id: "due-month", icon: FileClock, status: "awaiting-evidence", label: "Due this month", value: dueMonth.length, timeframe: "Month", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=open&dueWindow=month`) },
       { id: "training-overdue", icon: AlertTriangle, status: "noncompliance", label: "Overdue training", value: overdueTraining.length, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/training?status=overdue&dueWindow=now`) },
-      { id: "acks", icon: ClipboardCheck, status: "awaiting-evidence", label: "Pending acknowledgements", value: distributions.length, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
-      { id: "doc-currency", icon: BookOpenCheck, status: "closed", label: "Document currency", value: currentDocs, timeframe: "Month", updatedAt: `${expiredDocs.length} expired · ${expiringSoonDocs.length} due`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?currency=expiring_30d`) },
-      { id: "audit-closure", icon: ShieldCheck, status: "closed", label: "Audit closures", value: closedAudits, timeframe: "Month", updatedAt: `${audits.length - closedAudits} open`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits?trend=monthly&status=closed`) },
+      { id: "acks", icon: ClipboardCheck, status: "awaiting-evidence", label: "Pending acknowledgements", value: dashboardSnapshot?.distributions_pending_ack ?? 0, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
+      { id: "doc-currency", icon: BookOpenCheck, status: "closed", label: "Document currency", value: currentDocs, timeframe: "Month", updatedAt: `${expiredDocs} obsolete`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?currency=expiring_30d`) },
+      { id: "audit-closure", icon: ShieldCheck, status: "closed", label: "Audit closures", value: closedAudits, timeframe: "Month", updatedAt: `${dashboardSnapshot?.audits_open ?? 0} open`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits?trend=monthly&status=closed`) },
     ];
     return tiles;
-  }, [audits, cars, distributions.length, tasks, trainingStatus, documents, amoCode, department, navigate]);
+  }, [cars, tasks, trainingStatus, dashboardSnapshot, amoCode, department, navigate]);
 
   const drivers = useMemo(() => {
-    const auditOpen = audits.filter((audit) => audit.status !== "CLOSED").length;
+    const auditOpen = dashboardSnapshot?.audits_open ?? 0;
     return [{ id: "audit-closure", title: "Audit closure rate", subtitle: `${auditOpen} open audits`, option: { xAxis: { type: "category", data: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] }, yAxis: { type: "value" }, grid: { left: 24, right: 16, top: 24, bottom: 24 }, series: [{ data: [3, 4, 5, 4, 6, 5, 7], type: "line", smooth: true, animationDuration: 550 }] } }];
-  }, [audits]);
+  }, [dashboardSnapshot]);
 
   const actionItems = useMemo(() => {
     const taskItems = tasks.slice(0, 10).map((task) => ({

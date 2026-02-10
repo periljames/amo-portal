@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import queue
 from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -23,22 +24,6 @@ router = APIRouter(prefix="/api", tags=["events"])
 
 REPLAY_RETENTION_DAYS = 7
 REPLAY_MAX_EVENTS = 500
-
-
-class ActivityEventRead(BaseModel):
-    id: str
-    type: str
-    entityType: str
-    entityId: str
-    action: str
-    timestamp: str
-    actor: Optional[dict] = None
-    metadata: dict = {}
-
-
-class ActivityHistoryResponse(BaseModel):
-    items: list[ActivityEventRead]
-    next_cursor: Optional[str] = None
 
 
 class ActivityEventRead(BaseModel):
@@ -224,11 +209,40 @@ async def stream_events(
     )
 
 
+def _history_etag(
+    *,
+    amo_id: str,
+    cursor: Optional[str],
+    limit: int,
+    entity_type: Optional[str],
+    entity_id: Optional[str],
+    time_start: Optional[datetime],
+    time_end: Optional[datetime],
+    page: list[audit_models.AuditEvent],
+) -> str:
+    payload = "|".join([
+        str(amo_id),
+        str(cursor or ""),
+        str(limit),
+        str(entity_type or ""),
+        str(entity_id or ""),
+        str(time_start.isoformat() if time_start else ""),
+        str(time_end.isoformat() if time_end else ""),
+        str(len(page)),
+        str((page[0].id if page else "")),
+        str((page[-1].id if page else "")),
+    ])
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+    return f'W/"{digest}"'
+
+
+
 @router.get("/events/history", response_model=ActivityHistoryResponse)
 def list_event_history(
     request: Request,
+    response: Response,
     cursor: Optional[str] = Query(default=None, description="Opaque cursor as '<iso_ts>|<id>'"),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=50, ge=1, le=200),
     entityType: Optional[str] = None,
     entityId: Optional[str] = None,
     timeStart: Optional[datetime] = None,
@@ -267,8 +281,24 @@ def list_event_history(
     )
     has_more = len(rows) > limit
     page = rows[:limit]
+    etag = _history_etag(
+        amo_id=str(effective_amo_id),
+        cursor=cursor,
+        limit=limit,
+        entity_type=entityType,
+        entity_id=entityId,
+        time_start=timeStart,
+        time_end=timeEnd,
+        page=page,
+    )
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag, "Cache-Control": "private, max-age=15"})
+
     next_cursor = None
     if has_more and page:
         last = page[-1]
         next_cursor = f"{(last.occurred_at or last.created_at).isoformat()}|{last.id}"
+
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "private, max-age=15"
     return ActivityHistoryResponse(items=[_event_to_row(row) for row in page], next_cursor=next_cursor)

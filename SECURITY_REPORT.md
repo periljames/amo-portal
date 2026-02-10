@@ -49,3 +49,27 @@
 
 ### Screenshots
 - Not applicable.
+
+
+## Changed in this run (2026-02-10)
+### Security and reliability deltas
+- Added downgrade implementation to compatibility migration for explicit rollback path.
+- Added replay/history index migration to improve query performance under load (reducing timeout risk).
+- Added short-lived cache headers (`private, max-age=15`) + ETag for history endpoint; no public caching introduced.
+
+### Files changed
+- `backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py`
+- `backend/amodb/alembic/versions/z1y2x3w4v5u6_add_audit_events_replay_index.py`
+- `backend/amodb/apps/events/router.py`
+- `SECURITY_REPORT.md`
+
+### Commands run
+- `python -m py_compile backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py backend/amodb/alembic/versions/z1y2x3w4v5u6_add_audit_events_replay_index.py`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
+
+### Verification
+1. Confirm single migration head and explicit downgrade blocks exist.
+2. Confirm history endpoint sends private cache headers and 304 only on matching ETag.
+
+### Known issues
+- `alembic upgrade head` could not be executed in this runner due missing DATABASE_URL env var.

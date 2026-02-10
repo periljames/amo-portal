@@ -71,3 +71,32 @@
 
 ### Screenshots
 - Not applicable.
+
+
+## Update (2026-02-10)
+- ✅ Added migration discipline hardening: single-head chain + explicit upgrade/downgrade on compatibility migration + new replay index migration.
+- ✅ Added history endpoint caps/ETag behavior and tests.
+- ✅ Implemented route-level lazy loading + cockpit snapshot fetch consolidation to reduce initial payload pressure.
+- ⏳ Run production build perf capture in non-constrained CI to confirm gzip/brotli chunk budgets.
+
+### Acceptance criteria status
+- `alembic heads` single head: ✅
+- Missing migration runtime errors: ✅ mitigated with compatibility + index migrations
+- Cockpit minutes-long load root cause identified/measured: ✅
+- Production bundle metric capture in this runner: ⏳ blocked by build timeout
+
+### Files changed
+- `BACKLOG.md`
+- backend/frontend files listed in AUDIT_REPORT update section
+
+### Commands run
+- `cd backend && alembic -c amodb/alembic.ini heads`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+
+### Verification
+1. Validate cockpit still routes and renders under `VITE_UI_SHELL_V2`.
+2. Validate events history endpoint responds with ETag and 304 path.
+
+### Known issues
+- Build still timing out in this execution environment.

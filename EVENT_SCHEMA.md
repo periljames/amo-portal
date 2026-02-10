@@ -80,3 +80,30 @@
 
 ### Screenshots
 - Not applicable.
+
+
+## Changed in this run (2026-02-10)
+### Event/history transport deltas
+- `/api/events/history` default page size reduced to `50` (max `200`).
+- Added response headers for history endpoint: `ETag` and `Cache-Control: private, max-age=15`.
+- Added `If-None-Match` handling returning `304 Not Modified` for unchanged pages.
+
+### Producer/consumer impact
+- No changes to canonical SSE envelope fields or entity/action mappings.
+- Frontend realtime invalidation strategy remains targeted (no global invalidation).
+
+### Files changed
+- `backend/amodb/apps/events/router.py`
+- `backend/amodb/apps/events/tests/test_events_history.py`
+- `EVENT_SCHEMA.md`
+
+### Commands run
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
+
+### Verification
+1. Call `/api/events/history` and confirm ETag header present.
+2. Repeat call with `If-None-Match` and confirm 304.
+3. Confirm replay/reset behavior unchanged for `/api/events`.
+
+### Known issues
+- None beyond existing retention-window replay limitations.
