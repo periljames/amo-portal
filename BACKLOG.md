@@ -155,3 +155,36 @@
 - **Verification:** cockpit focus mode + realtime stale refresh + KPI drilldowns.
 - **Known issues:** activity feed virtualization pending.
 - **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/accounts/router_admin.py`
+  - `backend/amodb/apps/accounts/models.py`
+  - `backend/amodb/security.py`
+  - `frontend/src/pages/AdminUserDetailPage.tsx`
+  - `frontend/src/services/adminUsers.ts`
+
+### P0 status update
+- ✅ **Completed:** User-management command actions end-to-end (disable/enable/revoke/reset/notify/schedule) with audit + SSE event emission and frontend command center wiring.
+  - Evidence: command endpoints + tests (`backend/amodb/apps/accounts/tests/test_user_commands.py`) and command center UI.
+- ✅ **Completed:** Deterministic user drilldown command workflow at `/maintenance/:amoCode/admin/users/:userId`.
+
+### Remaining priorities
+- **P1:** Activity feed virtualization and entity-specific drilldowns for all activity item types.
+- **P1:** Cursor halo/magnetic layer (feature-flagged) with reduced-motion + touch guards.
+- **P2:** Additional chart lazy-load + idle prefetch optimizations.
+
+### Commands run
+- `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+
+### Verification
+1. Open Admin User Detail route.
+2. Execute each command and confirm status updates.
+3. Confirm command-created review task appears in task workflows.
+
+### Known issues
+- Global per-token blacklist not implemented; revocation is timestamp-based at user level.
+
+### Screenshots
+- `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 from contextvars import ContextVar
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Callable, Union, Set
 
 from fastapi import Depends, HTTPException, status
@@ -146,7 +146,8 @@ def create_access_token(
         if expires_delta is not None
         else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    to_encode.update({"exp": expire})
+    now = datetime.utcnow()
+    to_encode.update({"exp": expire, "iat": now})
 
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt
@@ -213,6 +214,19 @@ def get_current_user(
     user = get_user_by_id(db, user_id)
     if user is None:
         raise _credentials_exception()
+
+    token_issued_at = payload.get("iat")
+    revoked_at = getattr(user, "token_revoked_at", None)
+    if revoked_at is not None:
+        if isinstance(token_issued_at, (int, float)):
+            issued_at_dt = datetime.fromtimestamp(token_issued_at, tz=timezone.utc)
+        elif isinstance(token_issued_at, datetime):
+            issued_at_dt = token_issued_at if token_issued_at.tzinfo else token_issued_at.replace(tzinfo=timezone.utc)
+        else:
+            issued_at_dt = None
+        revoked_dt = revoked_at if revoked_at.tzinfo else revoked_at.replace(tzinfo=timezone.utc)
+        if issued_at_dt is None or issued_at_dt <= revoked_dt:
+            raise _credentials_exception()
 
     return user
 

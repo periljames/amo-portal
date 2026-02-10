@@ -114,3 +114,32 @@ Debounce remains **350ms** in `frontend/src/components/realtime/RealtimeProvider
   3. Disconnect SSE >45s and verify stale state + manual “Refresh data”.
 - **Known issues:** No Last-Event-ID replay support yet; stale refresh relies on targeted key refetch only.
 - **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/accounts/router_admin.py`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+
+### New accounts user command events
+| event.type | entityType | action | producer path | trigger | frontend invalidation keys |
+|---|---|---|---|---|---|
+| `accounts.user.command.disabled` | `accounts.user.command` | `DISABLED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/disable` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.enabled` | `accounts.user.command` | `ENABLED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/enable` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.access_revoked` | `accounts.user.command` | `ACCESS_REVOKED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/revoke-access` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.password_reset_forced` | `accounts.user.command` | `PASSWORD_RESET_FORCED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/force-password-reset` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.notified` | `accounts.user.command` | `NOTIFIED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/notify` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.review_scheduled` | `accounts.user.command` | `REVIEW_SCHEDULED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/schedule-review` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+
+### Commands run
+- `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
+
+### Verification
+1. Trigger each command endpoint.
+2. Confirm `audit_events` row created with entity type `accounts.user.command`.
+3. Confirm frontend invalidates targeted keys only.
+
+### Known issues
+- No Last-Event-ID replay yet.
+
+### Screenshots
+- `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`

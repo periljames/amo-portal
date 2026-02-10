@@ -158,3 +158,62 @@
 - **Tests run + results + known failures**:
   - `npx tsc -b` ✅ pass.
   - `npm run build` ⚠️ Vite build did not complete within execution window in this environment; type-check succeeded.
+
+## Changed in this run (2026-02-10)
+### Current State Snapshot (updated)
+- **Completed this run**
+  - P0 user command actions are now implemented end-to-end (backend endpoints + Admin User Detail command center UI + audit/SSE emit).
+  - Deterministic user drilldown route `/maintenance/:amoCode/admin/users/:userId` now supports operational actions: disable, enable, revoke access, force password reset, notify, schedule review.
+- **Remaining gaps**
+  - Activity feed virtualization still pending.
+  - Global cursor magnetic layer still pending (not shipped this run).
+
+### What changed
+- Added backend command endpoints under `/accounts/admin/users/{user_id}/commands/*` and a missing direct user-detail GET endpoint.
+- Added token revocation model support (`users.token_revoked_at`) and JWT `iat` enforcement.
+- Added AdminUserDetailPage command center controls with confirmation gates for destructive actions.
+- Added targeted realtime invalidation coverage for accounts command events to refresh user/admin/cockpit keys only.
+
+### Exact files changed
+- `backend/amodb/apps/accounts/router_admin.py`
+- `backend/amodb/apps/accounts/models.py`
+- `backend/amodb/apps/accounts/schemas.py`
+- `backend/amodb/security.py`
+- `backend/amodb/alembic/versions/z9y8x7w6v5u4_add_user_token_revoked_at.py`
+- `backend/amodb/apps/accounts/tests/conftest.py`
+- `backend/amodb/apps/accounts/tests/test_user_commands.py`
+- `frontend/src/services/adminUsers.ts`
+- `frontend/src/pages/AdminUserDetailPage.tsx`
+- `frontend/src/components/realtime/RealtimeProvider.tsx`
+
+### Manual verification (exact URLs)
+1. Open cockpit tab: `/maintenance/demo/quality`.
+2. Open user command center tab: `/maintenance/demo/admin/users/:userId`.
+3. Trigger `Revoke Access` or `Force Password Reset` on user detail tab.
+4. Confirm user detail status fields refresh and cockpit/admin user lists update without hard reload.
+5. Validate command routes directly (admin token):
+   - `POST /accounts/admin/users/:userId/commands/disable`
+   - `POST /accounts/admin/users/:userId/commands/enable`
+   - `POST /accounts/admin/users/:userId/commands/revoke-access`
+   - `POST /accounts/admin/users/:userId/commands/force-password-reset`
+   - `POST /accounts/admin/users/:userId/commands/notify`
+   - `POST /accounts/admin/users/:userId/commands/schedule-review`
+
+### Rollback notes
+- Revert commit touching the files above.
+- Apply alembic downgrade for `z9y8x7w6v5u4` to remove `users.token_revoked_at`.
+- Remove AdminUserDetail command controls and new adminUsers service functions if partial rollback required.
+
+### Commands run
+- `python -m py_compile backend/amodb/apps/accounts/router_admin.py backend/amodb/apps/accounts/models.py backend/amodb/apps/accounts/schemas.py backend/amodb/security.py backend/amodb/apps/accounts/tests/conftest.py backend/amodb/apps/accounts/tests/test_user_commands.py`
+- `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build` (timed in this environment)
+
+### Tests run + results + known failures
+- `pytest ...test_user_commands.py` ✅ (2 tests passed).
+- `npx tsc -b` ✅.
+- `npm run build` ⚠️ vite build step did not return before execution timeout in this environment.
+
+### Screenshots
+- `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`

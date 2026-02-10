@@ -67,6 +67,7 @@ const TARGETED_REFRESH_KEYS = [
   "my-tasks",
   "admin-users",
   "user-profile",
+  "qms-dashboard",
 ] as const;
 
 function mapEventToInvalidations(type: string): string[] {
@@ -90,7 +91,7 @@ function mapEventToInvalidations(type: string): string[] {
     return ["tasks", "my-tasks"];
   }
   if (type.startsWith("accounts.") || type.startsWith("accounts_")) {
-    return ["admin-users", "user-profile"];
+    return ["admin-users", "user-profile", "qms-dashboard", "dashboard"];
   }
   return ["dashboard"]; 
 }

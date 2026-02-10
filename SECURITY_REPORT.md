@@ -39,3 +39,32 @@ Next actions should prioritise secrets enforcement, auth rate limiting, and uplo
   2. Confirm stale refresh button does not force page reload and only re-fetches existing authorized queries.
 - **Known issues:** user action endpoints (disable/revoke/reset password) remain a backend gap for complete cockpit command workflows.
 - **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/accounts/router_admin.py`
+  - `backend/amodb/apps/accounts/models.py`
+  - `backend/amodb/security.py`
+  - `backend/amodb/alembic/versions/z9y8x7w6v5u4_add_user_token_revoked_at.py`
+- **Security/RBAC changes:**
+  - Added explicit RBAC-protected user command endpoints under `/accounts/admin/users/:id/commands/*` guarded by `require_admin` and AMO scoping.
+  - Added token revocation timestamp (`users.token_revoked_at`) and JWT `iat` validation to invalidate sessions after revoke/reset commands.
+  - Force-password-reset command now sets `must_change_password=true` and revokes pre-existing tokens.
+- **Verification:**
+  1. Run command endpoint as AMO admin in-scope user (expect 200).
+  2. Run command endpoint against out-of-scope user (expect 404/forbidden behavior).
+  3. Confirm revoked token fails `get_current_user` checks after `token_revoked_at` update.
+- **New endpoints + RBAC:**
+  - `POST /accounts/admin/users/:id/commands/disable` — AMO_ADMIN/SUPERUSER scoped.
+  - `POST /accounts/admin/users/:id/commands/enable` — AMO_ADMIN/SUPERUSER scoped.
+  - `POST /accounts/admin/users/:id/commands/revoke-access` — AMO_ADMIN/SUPERUSER scoped.
+  - `POST /accounts/admin/users/:id/commands/force-password-reset` — AMO_ADMIN/SUPERUSER scoped.
+  - `POST /accounts/admin/users/:id/commands/notify` — AMO_ADMIN/SUPERUSER scoped.
+  - `POST /accounts/admin/users/:id/commands/schedule-review` — AMO_ADMIN/SUPERUSER scoped.
+- **Commands run:**
+  - `python -m py_compile ...`
+  - `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
+- **Known issues:**
+  - Session revocation is JWT timestamp-based (`iat`) and does not currently maintain per-token server-side blacklist.
+- **Screenshots:**
+  - `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`

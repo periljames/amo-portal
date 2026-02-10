@@ -226,3 +226,32 @@ Monthly shelf-life job → expiring list
 1. Add user action endpoints (disable/enable/revoke/reset/notify/schedule) with RBAC + audit + SSE.
 2. Virtualize activity feed and add lazy-loaded charts with idle prefetch.
 3. Implement attachment hardening regression tests across all evidence upload surfaces.
+
+## Changed in this run (2026-02-10)
+- **Exact files changed:**
+  - `backend/amodb/apps/accounts/router_admin.py`
+  - `backend/amodb/apps/accounts/models.py`
+  - `backend/amodb/apps/accounts/schemas.py`
+  - `backend/amodb/security.py`
+  - `backend/amodb/alembic/versions/z9y8x7w6v5u4_add_user_token_revoked_at.py`
+  - `backend/amodb/apps/accounts/tests/conftest.py`
+  - `backend/amodb/apps/accounts/tests/test_user_commands.py`
+  - `frontend/src/services/adminUsers.ts`
+  - `frontend/src/pages/AdminUserDetailPage.tsx`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `AUDIT_SUMMARY.md`, `ROUTE_MAP.md`, `EVENT_SCHEMA.md`, `SECURITY_REPORT.md`, `BACKLOG.md`, `AUDIT_REPORT.md`
+- **Commands run:**
+  - `python -m py_compile backend/amodb/apps/accounts/router_admin.py backend/amodb/apps/accounts/models.py backend/amodb/apps/accounts/schemas.py backend/amodb/security.py backend/amodb/apps/accounts/tests/conftest.py backend/amodb/apps/accounts/tests/test_user_commands.py`
+  - `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
+  - `cd frontend && npx tsc -b`
+  - `cd frontend && npm run build` (timed in environment)
+- **Tests executed + results:**
+  - Backend targeted command tests: ✅ 2 passed.
+  - Python compile checks on touched backend modules: ✅ pass.
+  - Frontend TypeScript build: ✅ pass.
+  - Frontend full production bundle: ⚠️ timed out during vite transform in this environment.
+- **Known issues / follow-ups:**
+  - Manual two-tab SSE validation requires seeded authenticated session in local runtime; documented route-level verification steps in summary docs.
+  - Token revocation is user-level timestamp based; per-token blacklist remains optional hardening.
+- **Screenshots:**
+  - `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`

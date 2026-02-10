@@ -173,3 +173,49 @@ All routes are additive and preserve existing invite-token endpoints under `/qua
   3. Click activity items and confirm entity-aware route mapping.
 - **Known issues:** Some entities still fall back to events page until explicit detail routes exist.
 - **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/accounts/router_admin.py`
+  - `frontend/src/services/adminUsers.ts`
+  - `frontend/src/pages/AdminUserDetailPage.tsx`
+
+### New/updated user command routes
+- `GET /accounts/admin/users/:userId`
+  - Canonical use: load AdminUserDetailPage profile card + command state.
+- `POST /accounts/admin/users/:userId/commands/disable`
+- `POST /accounts/admin/users/:userId/commands/enable`
+- `POST /accounts/admin/users/:userId/commands/revoke-access`
+- `POST /accounts/admin/users/:userId/commands/force-password-reset`
+- `POST /accounts/admin/users/:userId/commands/notify`
+- `POST /accounts/admin/users/:userId/commands/schedule-review`
+
+### Canonical command examples
+- Disable user: `/accounts/admin/users/ID-ABCD1234/commands/disable`
+- Enable user: `/accounts/admin/users/ID-ABCD1234/commands/enable`
+- Revoke access: `/accounts/admin/users/ID-ABCD1234/commands/revoke-access`
+- Force reset: `/accounts/admin/users/ID-ABCD1234/commands/force-password-reset`
+- Notify:
+  - body `{ "subject": "QMS Notice", "message": "Please review assigned findings." }`
+- Schedule review:
+  - body `{ "title": "Authorization review", "due_at": "2026-02-20T10:00:00Z", "priority": 2 }`
+
+### UI route stability
+- Existing deterministic user detail route remains unchanged:
+  - `/maintenance/:amoCode/admin/users/:userId`
+- Action Queue and activity user links continue routing here.
+
+### Commands run
+- `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+
+### Verification
+1. Navigate to `/maintenance/demo/admin/users/:userId`.
+2. Execute each command button and verify corresponding API route call.
+3. Confirm the page refreshes via query invalidation/SSE (no hard reload).
+
+### Known issues
+- Manual end-to-end two-tab verification depends on seeded auth/session data in environment.
+
+### Screenshots
+- `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
