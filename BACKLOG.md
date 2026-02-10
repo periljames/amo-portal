@@ -100,3 +100,15 @@
 
 ### Known issues
 - Build still timing out in this execution environment.
+
+
+## Run update (2026-02-10)
+### Closed
+- [x] Replace cockpit initial API fan-out with a single snapshot endpoint.
+- [x] Reduce cockpit history bootstrap page size from 100 to 50.
+
+### Remaining
+- [ ] Remove Plotly from default prod path (`plotly-vendor` still >2.9MB gzip).
+  - **Acceptance:** cockpit route does not load `plotly-vendor` unless a plotly-only feature is opened.
+- [ ] Execute Alembic upgrade in CI against ephemeral PostgreSQL service.
+  - **Acceptance:** `alembic upgrade head` passes on PostgreSQL and smoke query is recorded in CI logs.

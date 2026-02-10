@@ -332,6 +332,34 @@ export async function qmsGetDashboard(params?: {
   return fetchJson<QMSDashboardOut>(`/quality/qms/dashboard${toQuery(params ?? {})}`);
 }
 
+
+export interface QMSCockpitActionItemOut {
+  id: string;
+  kind: string;
+  title: string;
+  status: string;
+  priority: string;
+  due_date: string | null;
+  assignee_user_id: string | null;
+}
+
+export interface QMSCockpitSnapshotOut {
+  generated_at: string;
+  pending_acknowledgements: number;
+  audits_open: number;
+  audits_total: number;
+  findings_overdue: number;
+  findings_open_total: number;
+  documents_active: number;
+  documents_obsolete: number;
+  action_queue: QMSCockpitActionItemOut[];
+}
+
+export async function qmsGetCockpitSnapshot(params?: {
+  domain?: string;
+}): Promise<QMSCockpitSnapshotOut> {
+  return fetchJson<QMSCockpitSnapshotOut>(`/quality/qms/cockpit-snapshot${toQuery(params ?? {})}`);
+}
 export async function qmsListDocuments(params?: {
   status_?: QMSDocumentStatus;
   domain?: string;

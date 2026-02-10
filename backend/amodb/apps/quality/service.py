@@ -26,6 +26,8 @@ from .enums import (
     infer_level_from_severity,
 )
 
+COCKPIT_ACTION_QUEUE_LIMIT = 25
+
 BASE_DIR = Path(__file__).resolve().parents[2]
 CAR_FORM_OUTPUT_DIR = BASE_DIR / "generated" / "quality" / "cars"
 CAR_FORM_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -129,6 +131,42 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
         "findings_open_level_2": findings_open_level_2,
         "findings_open_level_3": findings_open_level_3,
         "findings_overdue_total": findings_overdue_total,
+    }
+
+
+def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dict:
+    dashboard = get_dashboard(db, domain=domain)
+    open_statuses = [CARStatus.OPEN, CARStatus.IN_PROGRESS, CARStatus.PENDING_VERIFICATION]
+    cars_q = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.status.in_(open_statuses))
+    action_rows = (
+        cars_q.order_by(
+            models.CorrectiveActionRequest.due_date.asc().nulls_last(),
+            models.CorrectiveActionRequest.updated_at.desc(),
+        )
+        .limit(COCKPIT_ACTION_QUEUE_LIMIT)
+        .all()
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc),
+        "pending_acknowledgements": dashboard["distributions_pending_ack"],
+        "audits_open": dashboard["audits_open"],
+        "audits_total": dashboard["audits_total"],
+        "findings_overdue": dashboard["findings_overdue_total"],
+        "findings_open_total": dashboard["findings_open_total"],
+        "documents_active": dashboard["documents_active"],
+        "documents_obsolete": dashboard["documents_obsolete"],
+        "action_queue": [
+            {
+                "id": str(row.id),
+                "kind": "CAR",
+                "title": f"{row.car_number} · {row.title}",
+                "status": row.status.value,
+                "priority": row.priority.value,
+                "due_date": row.due_date,
+                "assignee_user_id": row.assigned_to_user_id,
+            }
+            for row in action_rows
+        ],
     }
 
 

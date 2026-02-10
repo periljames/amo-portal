@@ -124,3 +124,27 @@
 ### Screenshots/artifacts
 - `browser:/tmp/codex_browser_invocations/d217d7a1e1f1f99e/artifacts/artifacts/cockpit-load-optimized.png`
 - `browser:/tmp/codex_browser_invocations/cffc26b8bc29c596/artifacts/artifacts/cockpit-network-trace.json`
+
+
+## Changed in this run (2026-02-10)
+### Root cause + fix
+- Cockpit first-load latency was driven by concurrent `qmsListCars`, `listMyTasks`, and `getMyTrainingStatus` calls on mount.
+- Replaced that fan-out with one compact backend snapshot endpoint (`GET /quality/qms/cockpit-snapshot`) + first-page activity history (`limit=50`).
+
+### Production perf evidence
+| Metric | Value | Evidence |
+|---|---:|---|
+| Total built JS/CSS (gzip) | 4,021,182 bytes | `frontend/dist/perf-report.json` |
+| Cockpit shell chunk (`index-*.js`) gzip | 97,928 bytes | `frontend/dist/perf-report.json` |
+| Largest offender gzip | 2,939,506 bytes (`plotly-vendor`) | `frontend/dist/perf-report.json` |
+| First-page history API page size | 50 | `frontend/src/dashboards/DashboardCockpit.tsx` |
+
+### Commands executed
+- `cd backend && pytest amodb/apps/quality/tests/test_cockpit_snapshot.py amodb/apps/events/tests/test_events_history.py -q`
+- `cd backend && DATABASE_URL=sqlite:///./alembic_local.db alembic -c amodb/alembic.ini heads`
+- `cd backend && DATABASE_URL=sqlite:///./alembic_local.db alembic -c amodb/alembic.ini upgrade head` *(fails on SQLite constraint DDL; repo migrations require PostgreSQL for full run)*
+- `cd frontend && npm run build`
+- `cd frontend && node scripts/perf-report.mjs`
+
+### Network/perf notes
+- Playwright cockpit network capture attempt succeeded once for screenshot and then failed due Chromium crash in this runner (SIGSEGV), so waterfall request counts are not fully reproducible in this environment.
