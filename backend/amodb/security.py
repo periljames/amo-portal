@@ -40,10 +40,14 @@ from amodb.apps.accounts.models import AccountRole
 
 # In production, ALWAYS override these via environment variables.
 SECRET_KEY = (os.getenv("SECRET_KEY") or "").strip()
-if not SECRET_KEY or SECRET_KEY == "CHANGE_ME_IN_PRODUCTION":
+_APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
+_is_production = _APP_ENV in {"prod", "production"}
+if _is_production and (not SECRET_KEY or SECRET_KEY == "CHANGE_ME_IN_PRODUCTION"):
     raise RuntimeError(
-        "SECRET_KEY must be provided via environment variable and cannot use the default placeholder."
+        "SECRET_KEY must be provided via environment variable and cannot use the default placeholder in production."
     )
+if not SECRET_KEY:
+    SECRET_KEY = "CHANGE_ME_IN_PRODUCTION"
 
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 

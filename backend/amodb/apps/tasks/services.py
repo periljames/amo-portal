@@ -76,9 +76,9 @@ def create_task(
         db,
         amo_id=amo_id,
         actor_user_id=owner_user_id,
-        entity_type="task",
+        entity_type="tasks.task",
         entity_id=str(task.id),
-        action="task_create",
+        action="CREATED",
         after={
             "title": task.title,
             "status": task.status.value,
@@ -104,13 +104,14 @@ def update_task_status(
     else:
         task.closed_at = None
     db.add(task)
+    action = "CLOSED" if status in (models.TaskStatus.DONE, models.TaskStatus.CANCELLED) else "STATUS_CHANGED"
     audit_services.log_event(
         db,
         amo_id=task.amo_id,
         actor_user_id=actor_user_id,
-        entity_type="task",
+        entity_type="tasks.task",
         entity_id=str(task.id),
-        action="task_update",
+        action=action,
         after={"status": task.status.value, "closed_at": str(task.closed_at) if task.closed_at else None},
         metadata={"module": "tasks"},
     )
@@ -131,9 +132,9 @@ def update_task_details(
         db,
         amo_id=task.amo_id,
         actor_user_id=actor_user_id,
-        entity_type="task",
+        entity_type="tasks.task",
         entity_id=str(task.id),
-        action="task_update",
+        action="UPDATED",
         after={k: str(v) if isinstance(v, datetime) else v for k, v in changes.items()},
         metadata={"module": "tasks"},
     )
@@ -163,9 +164,9 @@ def escalate_task(
         db,
         amo_id=task.amo_id,
         actor_user_id=actor_user_id,
-        entity_type="task",
+        entity_type="tasks.task",
         entity_id=str(task.id),
-        action="task_escalate",
+        action="ESCALATED",
         after={
             "owner_user_id": task.owner_user_id,
             "escalated_at": str(task.escalated_at),
@@ -307,9 +308,9 @@ def run_task_runner(
                 db,
                 amo_id=task.amo_id,
                 actor_user_id=task.owner_user_id,
-                entity_type="task",
+                entity_type="tasks.task",
                 entity_id=str(task.id),
-                action="task_reminder",
+                action="REMINDER_SENT",
                 after={"due_at": str(task.due_at)},
                 metadata={"module": "tasks"},
             )

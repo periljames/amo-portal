@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import date, datetime, time, timezone, timedelta
 import calendar
 from pathlib import Path
+import hashlib
+import re
 import shutil
 from typing import Optional, List
 from uuid import UUID
@@ -69,6 +71,8 @@ router = APIRouter(
 CAR_ATTACHMENT_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "car_attachments"
 CAR_ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
 MAX_CAR_ATTACHMENT_BYTES = 10 * 1024 * 1024
+CAR_ALLOWED_MIME_TYPES = {"application/pdf", "image/png", "image/jpeg", "text/plain"}
+CAR_ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".txt"}
 
 AUDIT_CHECKLIST_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "audit_checklists"
 AUDIT_CHECKLIST_DIR.mkdir(parents=True, exist_ok=True)
@@ -137,10 +141,50 @@ def _serialize_attachment(invite_token: str, attachment: models.CARAttachment) -
         filename=attachment.filename,
         content_type=attachment.content_type,
         size_bytes=attachment.size_bytes,
+        sha256=attachment.sha256,
         uploaded_at=attachment.uploaded_at,
         download_url=f"/quality/cars/invite/{invite_token}/attachments/{attachment.id}/download",
     )
 
+
+
+
+def _sanitize_attachment_filename(value: str) -> str:
+    base = Path(value or "attachment.bin").name
+    clean = re.sub(r"[^A-Za-z0-9._-]", "_", base).strip("._")
+    if not clean:
+        clean = "attachment.bin"
+    return clean[:120]
+
+
+def _store_car_attachment(car_id: UUID, file: UploadFile) -> tuple[Path, str, str, int]:
+    original_name = _sanitize_attachment_filename(file.filename or "attachment.bin")
+    ext = Path(original_name).suffix.lower()
+    if ext not in CAR_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Attachment extension is not allowed.")
+    if file.content_type and file.content_type not in CAR_ALLOWED_MIME_TYPES:
+        raise HTTPException(status_code=415, detail="Attachment MIME type is not allowed.")
+
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    target_dir = CAR_ATTACHMENT_DIR / str(car_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / unique_name
+
+    digest = hashlib.sha256()
+    total = 0
+    with target_path.open("wb") as handle:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_CAR_ATTACHMENT_BYTES:
+                target_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="Attachment exceeds the 10MB limit.")
+            digest.update(chunk)
+            handle.write(chunk)
+
+    return target_path, original_name, digest.hexdigest(), total
 
 def get_actor() -> Optional[str]:
     """
@@ -2107,19 +2151,7 @@ def upload_car_invite_attachment(
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
 
-    original_name = Path(file.filename or "attachment").name
-    unique_name = f"{uuid.uuid4().hex}_{original_name}"
-    target_dir = CAR_ATTACHMENT_DIR / str(car.id)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / unique_name
-
-    with target_path.open("wb") as handle:
-        shutil.copyfileobj(file.file, handle)
-
-    size_bytes = target_path.stat().st_size
-    if size_bytes > MAX_CAR_ATTACHMENT_BYTES:
-        target_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=413, detail="Attachment exceeds the 10MB limit.")
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
 
     attachment = models.CARAttachment(
         car_id=car.id,
@@ -2127,6 +2159,7 @@ def upload_car_invite_attachment(
         file_ref=str(target_path),
         content_type=file.content_type,
         size_bytes=size_bytes,
+        sha256=sha256,
     )
     db.add(attachment)
     db.commit()
@@ -2168,6 +2201,125 @@ def download_car_invite_attachment(
         filename=attachment.filename,
         media_type=attachment.content_type or "application/octet-stream",
     )
+
+
+@router.get("/cars/{car_id}/attachments", response_model=List[CARAttachmentOut])
+def list_car_attachments(
+    car_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
+    return [
+        CARAttachmentOut(
+            id=a.id,
+            car_id=a.car_id,
+            filename=a.filename,
+            content_type=a.content_type,
+            size_bytes=a.size_bytes,
+            sha256=a.sha256,
+            uploaded_at=a.uploaded_at,
+            download_url=f"/quality/cars/{car.id}/attachments/{a.id}/download",
+        )
+        for a in car.attachments
+    ]
+
+
+@router.post("/cars/{car_id}/attachments", response_model=CARAttachmentOut, status_code=status.HTTP_201_CREATED)
+def upload_car_attachment(
+    car_id: UUID,
+    file: UploadFile = File(...),
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
+    attachment = models.CARAttachment(
+        car_id=car.id,
+        filename=original_name,
+        file_ref=str(target_path),
+        content_type=file.content_type,
+        size_bytes=size_bytes,
+        sha256=sha256,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    audit_services.log_event(
+        db,
+        amo_id=car.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_car_attachment",
+        entity_id=str(attachment.id),
+        action="uploaded",
+        after={"car_id": str(car.id), "filename": attachment.filename, "sha256": attachment.sha256},
+        metadata=_audit_metadata(request) if request else {"module": "quality"},
+    )
+    db.commit()
+    return CARAttachmentOut(
+        id=attachment.id,
+        car_id=attachment.car_id,
+        filename=attachment.filename,
+        content_type=attachment.content_type,
+        size_bytes=attachment.size_bytes,
+        sha256=attachment.sha256,
+        uploaded_at=attachment.uploaded_at,
+        download_url=f"/quality/cars/{car.id}/attachments/{attachment.id}/download",
+    )
+
+
+@router.get("/cars/{car_id}/attachments/{attachment_id}/download", response_class=FileResponse)
+def download_car_attachment(
+    car_id: UUID,
+    attachment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
+    attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    file_path = Path(attachment.file_ref)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Attachment file missing on server.")
+    return FileResponse(path=file_path, filename=attachment.filename, media_type=attachment.content_type or "application/octet-stream")
+
+
+@router.delete("/cars/{car_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_car_attachment(
+    car_id: UUID,
+    attachment_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
+    if not car:
+        raise HTTPException(status_code=404, detail="CAR not found")
+    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=False)
+    attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    try:
+        Path(attachment.file_ref).unlink(missing_ok=True)
+    except Exception:
+        pass
+    db.delete(attachment)
+    audit_services.log_event(
+        db, amo_id=car.amo_id, actor_user_id=current_user.id, entity_type="qms_car_attachment", entity_id=str(attachment_id), action="deleted", metadata=_audit_metadata(request)
+    )
+    db.commit()
+    return None
 
 
 @router.post("/cars/{car_id}/review", response_model=CAROut)

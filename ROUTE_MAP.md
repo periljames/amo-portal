@@ -130,3 +130,21 @@
 - Added/updated query param support for training, cars, documents, audits, and tasks.
 - Added action panel overlay usage for list pages and cockpit.
 - **Breaking changes**: none.
+
+
+## Changed in this run (2026-02-10)
+### Cockpit drilldowns (new canonical examples)
+- `/maintenance/:amoCode/:department/qms/documents?currency=expiring_30d`
+  - Canonical meaning: focus documents due/expiring in next 30 days from cockpit document-currency KPI.
+  - Example: `/maintenance/SAFA03/quality/qms/documents?currency=expiring_30d`.
+- `/maintenance/:amoCode/:department/qms/audits?trend=monthly&status=closed`
+  - Canonical meaning: open audits page with closure trend drilldown from cockpit audit-closure KPI.
+  - Example: `/maintenance/SAFA03/quality/qms/audits?trend=monthly&status=closed`.
+
+### Evidence routes (new)
+- `GET /quality/cars/:carId/attachments`
+- `POST /quality/cars/:carId/attachments`
+- `GET /quality/cars/:carId/attachments/:attachmentId/download`
+- `DELETE /quality/cars/:carId/attachments/:attachmentId`
+
+All routes are additive and preserve existing invite-token endpoints under `/quality/cars/invite/:token/attachments*`.

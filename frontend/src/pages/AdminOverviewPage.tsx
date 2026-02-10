@@ -65,7 +65,7 @@ const AdminOverviewPage: React.FC = () => {
   const pollingRetriesRef = useRef(0);
   const pollingStoppedRef = useRef(false);
   const pollingInFlightRef = useRef(false);
-  const pollingRunnerRef = useRef<(reason: RefreshReason) => void>();
+  const pollingRunnerRef = useRef<((reason: RefreshReason) => void) | undefined>(undefined);
   const pollIntervalMs = isSuperuser
     ? SUPERUSER_POLL_INTERVAL_MS
     : DEFAULT_POLL_INTERVAL_MS;
@@ -105,7 +105,7 @@ const AdminOverviewPage: React.FC = () => {
       const delay = Math.min(30_000, 3_000 * Math.pow(2, attempt));
       pollingRetriesRef.current += 1;
       setRefreshError(
-        `Refresh failed. Retrying in ${Math.round(delay / 1000)}s.`
+        `${message} Retrying in ${Math.round(delay / 1000)}s.`
       );
       pollingTimerRef.current = window.setTimeout(() => {
         pollingRunnerRef.current?.("retry");

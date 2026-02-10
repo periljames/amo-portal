@@ -1330,7 +1330,9 @@ const AdminDashboardPage: React.FC = () => {
                   Manage CRS assets
                 </Button>
               )}
-            />
+            >
+              <></>
+            </Panel>
           </div>
         </div>
     </div>

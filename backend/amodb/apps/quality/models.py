@@ -743,6 +743,7 @@ class CARAttachment(Base):
     file_ref = Column(String(512), nullable=False)
     content_type = Column(String(128), nullable=True)
     size_bytes = Column(Integer, nullable=True)
+    sha256 = Column(String(64), nullable=True, index=True)
     uploaded_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     car = relationship("CorrectiveActionRequest", back_populates="attachments", lazy="joined")

@@ -583,6 +583,7 @@ class CARAttachmentOut(BaseModel):
     filename: str
     content_type: Optional[str] = None
     size_bytes: Optional[int] = None
+    sha256: Optional[str] = None
     uploaded_at: datetime
     download_url: str
 
