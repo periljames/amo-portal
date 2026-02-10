@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import DashboardCockpit from "../dashboards/DashboardCockpit";
+import DepartmentLandingScaffold from "../components/dashboard/DepartmentLandingScaffold";
 import { getContext, getCachedUser, normalizeDepartmentCode } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import {
@@ -665,7 +666,11 @@ const DashboardPage: React.FC = () => {
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
       {uiShellV2 ? (
-        <DashboardCockpit />
+        isQualityDept ? (
+          <DashboardCockpit />
+        ) : (
+          <DepartmentLandingScaffold departmentLabel={niceLabel(department)} />
+        )
       ) : (
         <>
           <header className="page-header">

@@ -453,6 +453,28 @@ class QMSDashboardOut(BaseModel):
     findings_overdue_total: int
 
 
+class CockpitActionItemOut(BaseModel):
+    id: str
+    kind: str
+    title: str
+    status: str
+    priority: str
+    due_date: Optional[date] = None
+    assignee_user_id: Optional[str] = None
+
+
+class QMSCockpitSnapshotOut(BaseModel):
+    generated_at: datetime
+    pending_acknowledgements: int
+    audits_open: int
+    audits_total: int
+    findings_overdue: int
+    findings_open_total: int
+    documents_active: int
+    documents_obsolete: int
+    action_queue: list[CockpitActionItemOut]
+
+
 # -----------------------------
 # Corrective Action Requests (CAR)
 # -----------------------------

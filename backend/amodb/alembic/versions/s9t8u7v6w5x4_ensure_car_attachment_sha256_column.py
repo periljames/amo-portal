@@ -1,14 +1,18 @@
-"""add car attachment sha256
+"""ensure car attachment sha256 column
 
-Revision ID: b1c2d3e4f5a6
-Revises: f8a1b2c3d4e6
-Create Date: 2026-02-10
+Revision ID: s9t8u7v6w5x4
+Revises: z1y2x3w4v5u6
+Create Date: 2026-02-10 07:30:00.000000
 """
+
+from __future__ import annotations
+
 from alembic import op
 import sqlalchemy as sa
 
-revision = 'b1c2d3e4f5a6'
-down_revision = 'f8a1b2c3d4e6'
+
+revision = "s9t8u7v6w5x4"
+down_revision = "z1y2x3w4v5u6"
 branch_labels = None
 depends_on = None
 

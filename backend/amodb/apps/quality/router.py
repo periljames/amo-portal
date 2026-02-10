@@ -40,6 +40,7 @@ from .schemas import (
     AuditorStatsOut,
     QMSNotificationOut,
     QMSDashboardOut,
+    QMSCockpitSnapshotOut,
     QMSDocumentCreate, QMSDocumentUpdate, QMSDocumentOut,
     QMSDocumentRevisionCreate, QMSDocumentRevisionOut, QMSPublishRevision,
     QMSDistributionCreate, QMSDistributionOut,
@@ -57,6 +58,7 @@ from .service import (
     create_car,
     generate_car_form_pdf,
     get_dashboard,
+    get_cockpit_snapshot,
     normalize_finding_level,
     schedule_next_reminder,
 )
@@ -309,6 +311,14 @@ def qms_dashboard(
     domain: Optional[QMSDomain] = Query(default=None),
 ):
     return get_dashboard(db, domain=domain)
+
+
+@router.get("/qms/cockpit-snapshot", response_model=QMSCockpitSnapshotOut)
+def qms_cockpit_snapshot(
+    db: Session = Depends(get_db),
+    domain: Optional[QMSDomain] = Query(default=None),
+):
+    return get_cockpit_snapshot(db, domain=domain)
 
 
 # -----------------------------

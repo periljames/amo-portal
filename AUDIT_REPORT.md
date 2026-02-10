@@ -124,3 +124,114 @@
 ### Screenshots/artifacts
 - `browser:/tmp/codex_browser_invocations/d217d7a1e1f1f99e/artifacts/artifacts/cockpit-load-optimized.png`
 - `browser:/tmp/codex_browser_invocations/cffc26b8bc29c596/artifacts/artifacts/cockpit-network-trace.json`
+
+
+## Changed in this run (2026-02-10)
+### Root cause + fix
+- Cockpit first-load latency was driven by concurrent `qmsListCars`, `listMyTasks`, and `getMyTrainingStatus` calls on mount.
+- Replaced that fan-out with one compact backend snapshot endpoint (`GET /quality/qms/cockpit-snapshot`) + first-page activity history (`limit=50`).
+
+### Production perf evidence
+| Metric | Value | Evidence |
+|---|---:|---|
+| Total built JS/CSS (gzip) | 4,021,182 bytes | `frontend/dist/perf-report.json` |
+| Cockpit shell chunk (`index-*.js`) gzip | 97,928 bytes | `frontend/dist/perf-report.json` |
+| Largest offender gzip | 2,939,506 bytes (`plotly-vendor`) | `frontend/dist/perf-report.json` |
+| First-page history API page size | 50 | `frontend/src/dashboards/DashboardCockpit.tsx` |
+
+### Commands executed
+- `cd backend && pytest amodb/apps/quality/tests/test_cockpit_snapshot.py amodb/apps/events/tests/test_events_history.py -q`
+- `cd backend && DATABASE_URL=sqlite:///./alembic_local.db alembic -c amodb/alembic.ini heads`
+- `cd backend && DATABASE_URL=sqlite:///./alembic_local.db alembic -c amodb/alembic.ini upgrade head` *(fails on SQLite constraint DDL; repo migrations require PostgreSQL for full run)*
+- `cd frontend && npm run build`
+- `cd frontend && node scripts/perf-report.mjs`
+
+### Network/perf notes
+- Playwright cockpit network capture attempt succeeded once for screenshot and then failed due Chromium crash in this runner (SIGSEGV), so waterfall request counts are not fully reproducible in this environment.
+
+
+## Changed in this run (2026-02-10)
+### Migration incident fixed
+- Fixed `b1c2d3e4f5a6_add_car_attachment_sha256` so it no longer hard-fails when `quality_car_attachments` is absent in divergent branch states.
+- Added follow-up migration `s9t8u7v6w5x4_ensure_car_attachment_sha256_column` to enforce final schema correctness at head (column + index), even when earlier branch ordering skipped the add-column operation.
+
+### DB verification evidence
+- `alembic heads` now resolves to single head `s9t8u7v6w5x4`.
+- Reproduced and validated the user-reported path with a real local PostgreSQL instance:
+  - `stamp f8a1b2c3d4e6`
+  - `upgrade b1c2d3e4f5a6`
+  - result: migration completes without `UndefinedTable` failure.
+
+### Commands executed
+- `apt-get update -y && apt-get install -y postgresql postgresql-contrib`
+- `pg_ctlcluster 16 main start && pg_isready`
+- `createdb amo_portal_migfix`
+- `cd backend && DATABASE_URL=postgresql+psycopg2:///amo_portal_migfix alembic -c amodb/alembic.ini stamp f8a1b2c3d4e6`
+- `cd backend && DATABASE_URL=postgresql+psycopg2:///amo_portal_migfix alembic -c amodb/alembic.ini upgrade b1c2d3e4f5a6`
+- `cd backend && alembic -c amodb/alembic.ini heads`
+
+### Known migration debt
+- Full clean-slate `upgrade head` still fails at `f8a1b2c3d4e6` due duplicate column on `part_movement_ledger.created_by_user_id`; this predates current fix and is tracked for a separate compatibility migration.
+
+
+## Changed in this run (2026-02-10)
+### Incident fixed
+- Resolved recursion crash in auth public router where `_client_ip()` incorrectly called `_enforce_auth_rate_limit()`, which itself calls `_client_ip()`; this caused `RecursionError` on password reset confirm path.
+
+### Code changes
+- Removed recursive call from `_client_ip()` in `backend/amodb/apps/accounts/router_public.py`.
+- Added focused tests for auth rate-limit helper and client IP extraction behavior.
+
+### Commands executed
+- `cd backend && pytest amodb/apps/accounts/tests/test_router_public_rate_limit.py amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd backend && alembic -c amodb/alembic.ini heads`
+
+
+## Changed in this run (2026-02-10)
+### Department scoping fix
+- **Bug:** Quality & Compliance cockpit was rendered for non-quality departments when `VITE_UI_SHELL_V2` was enabled.
+- **Root cause:** `DashboardPage` rendered `DashboardCockpit` unconditionally for all departments in the V2 branch.
+- **Fix:** Added strict `department === "quality"` gate for cockpit rendering; non-quality departments now render `DepartmentLandingScaffold`.
+- Added QMS route guard in `QMSLayout`: `/maintenance/:amoCode/:department/qms` redirects to `/maintenance/:amoCode/:department` with toast when department is not `quality`.
+- Focus mode now only applies to quality cockpit routes; topbar launcher remains available so modules/departments are always reachable.
+- Light-mode contrast issue addressed by replacing hard-coded white badge text with tokenized `var(--text)`.
+
+### Verification steps
+1. Open `/maintenance/demo/quality` → quality cockpit context is shown.
+2. Open `/maintenance/demo/planning` → department landing scaffold shown (no QMS KPI cockpit).
+3. Open `/maintenance/demo/planning/qms` → redirects back to `/maintenance/demo/planning` with informational toast.
+4. In quality cockpit, open launcher via topbar “Modules” button.
+5. Toggle light mode and verify notification badge text remains readable.
+
+### Screenshots
+- Quality cockpit: `browser:/tmp/codex_browser_invocations/80bd7277b5bb3391/artifacts/artifacts/quality-cockpit.png`
+- Non-quality landing scaffold: `browser:/tmp/codex_browser_invocations/80bd7277b5bb3391/artifacts/artifacts/operations-landing.png`
+- Focus launcher open: `browser:/tmp/codex_browser_invocations/80bd7277b5bb3391/artifacts/artifacts/focus-launcher-open.png`
+- Non-quality `/qms` redirect result: `browser:/tmp/codex_browser_invocations/80bd7277b5bb3391/artifacts/artifacts/operations-qms-redirect.png`
+
+
+## Changed in this run (2026-02-10)
+### Department-assignment landing enforcement
+- Normal users now always land in their assigned department after login and cannot browse to other departments.
+- Superusers/AMO Admins now land on `/maintenance/:amoCode/admin/overview` after login for operational control access.
+
+### Root cause + fix
+- Previous role access logic allowed broad department visibility for non-admin quality/planning users via `getAllowedDepartments`.
+- Tightened non-admin access policy to **assigned department only** in `departmentAccess.ts`.
+- Updated login redirect logic to send admins to `/admin/overview` and keep non-admins on assigned department only.
+
+### Verification
+- `/login` with non-admin context redirects to `/maintenance/demo/planning` (assigned dept).
+- Non-admin access to `/maintenance/demo/quality` hard-corrects back to assigned department.
+- `/login` with admin context redirects to `/maintenance/demo/admin/overview`.
+
+### Screenshots
+- Non-quality landing: `browser:/tmp/codex_browser_invocations/f3abb0dc176ba8b0/artifacts/artifacts/non-quality-landing.png`
+- Non-quality qms redirect: `browser:/tmp/codex_browser_invocations/f3abb0dc176ba8b0/artifacts/artifacts/non-quality-qms-redirect.png`
+- Quality launcher open: `browser:/tmp/codex_browser_invocations/f3abb0dc176ba8b0/artifacts/artifacts/quality-launcher-open.png`
+- Quality cockpit (light mode): `browser:/tmp/codex_browser_invocations/9c7733a00de17a6c/artifacts/artifacts/quality-cockpit-light.png`
+
+### Commands executed
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build` *(runner transform stall persists)*
+- Playwright smoke: login landing + department lock + non-quality qms redirect + admin landing

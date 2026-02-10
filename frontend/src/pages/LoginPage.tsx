@@ -105,13 +105,18 @@ const LoginPage: React.FC = () => {
       }
 
       // Normal users MUST go to server-assigned department
-      const landingDept = admin ? (ctx.department || "admin") : (ctx.department || null);
+      const landingDept = admin ? "admin" : (ctx.department || null);
 
       if (!admin && !landingDept) {
         // Stay on login and show a clean error
         setErrorMsg(
           "Your account is missing a department assignment. Please contact the AMO Administrator or Quality/IT."
         );
+        return;
+      }
+
+      if (admin) {
+        navigate(`/maintenance/${slug}/admin/overview`, { replace: true });
         return;
       }
 
@@ -236,8 +241,7 @@ const LoginPage: React.FC = () => {
       }
 
       // Admin/superuser: use dropdown as landing preference (DO NOT override stored context)
-      const landingDept = ctx.department || "admin";
-      navigate(`/maintenance/${slugToUse}/${landingDept}`, { replace: true });
+      navigate(`/maintenance/${slugToUse}/admin/overview`, { replace: true });
     } catch (err: unknown) {
       console.error("Login error:", err);
       if (err instanceof Error) {
