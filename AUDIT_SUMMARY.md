@@ -7,9 +7,9 @@
   - **Live now (no flag)**: Existing AppShell V1, existing routes and pages, legacy dashboards and lists.
   - **Behind flag (`VITE_UI_SHELL_V2`)**: AppShell V2 layout + focus mode on cockpit routes (`/maintenance/:amoCode/:department`, `/maintenance/:amoCode/:department/qms`, `/maintenance/:amoCode/:department/qms/kpis`) and new DashboardCockpit scaffold.
 - **Major remaining gaps**
-  - Activity feed virtualization is still pending (action queue is virtualized).
-  - User-management command actions (disable/enable/revoke/reset password) are not fully wired end-to-end.
-  - Cursor halo/magnetic interaction layer has not been added yet.
+  - Last-Event-ID replay is still not implemented (reconnects rely on fresh stream + targeted refetch).
+  - Activity feed backend pagination is still pending (UI is virtualized, but provider buffer is in-memory).
+  - Cursor layer is feature-flagged and currently cockpit-scoped only (`VITE_UI_CURSOR_LAYER`).
 
 ## Changed in this run
 ### 1) Drilldown query support + list filtering
@@ -217,3 +217,51 @@
 
 ### Screenshots
 - `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
+
+
+## Changed in this run (2026-02-10)
+### Current State Snapshot (single source of truth)
+- **Completed this run**
+  - Cockpit activity feed is now virtualized with section headers (Today / This Week / This Month / Older) and keyboard-focusable rows.
+  - Cursor halo + magnetic hover layer added for cockpit interactive surfaces, guarded by `VITE_UI_CURSOR_LAYER`, reduced-motion, and touch-device checks.
+  - Driver charts are now lazy-loaded with idle prefetch to improve first paint while preserving interactive drilldown behavior.
+- **Remaining gaps**
+  - SSE replay via Last-Event-ID remains unimplemented.
+  - Activity feed data source is still bounded by client event buffer (1500 events) rather than server pagination.
+- **Rollback risk**
+  - Low/medium: frontend-only behavior changes in cockpit scaffold/styles/flags; rollback by reverting dashboard scaffold + css + feature-flag helper updates.
+
+### User-visible changes
+- Activity feed scroll remains smooth with large event lists and sticky-ish section headers.
+- Cockpit cards feel more responsive with subtle magnetic/halo interactions (desktop only when enabled).
+- Charts render via deferred loading with no route changes.
+
+### Non-obvious internal changes
+- `MAX_ACTIVITY` raised to 1500 to support large feed virtualization scenarios.
+- `echarts-for-react` now lazy-imported; idle prefetch warms chunk after first paint.
+- `VITE_UI_CURSOR_LAYER` flag support added in feature flags utility.
+
+### Files changed
+- `frontend/src/components/dashboard/DashboardScaffold.tsx`
+- `frontend/src/styles/components/dashboard-cockpit.css`
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+- `frontend/src/components/realtime/RealtimeProvider.tsx`
+- `frontend/src/utils/featureFlags.ts`
+
+### Commands run
+- `cd frontend && npm audit --audit-level=high --json`
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build`
+
+### Verification steps
+1. Open cockpit route under UI shell v2 (`/maintenance/:amoCode/:department`).
+2. Scroll activity feed with long event history and confirm no jank / keyboard-selectable rows.
+3. Enable cursor layer via `VITE_UI_CURSOR_LAYER=1`; verify halo/magnetic effects on desktop only.
+4. Toggle reduced motion or test on touch simulation; verify cursor layer is disabled.
+5. Click chart/card/feed actions and verify deterministic routes remain unchanged.
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
+
+### Known issues
+- Full production bundle (`npm run build`) continues timing out in this runner during vite transform despite successful TS build.

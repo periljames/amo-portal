@@ -219,3 +219,30 @@ All routes are additive and preserve existing invite-token endpoints under `/qua
 
 ### Screenshots
 - `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+
+### Cockpit click-map verification (virtualized feed/charts)
+- KPI tiles remain unchanged and deterministic (see existing entries).
+- Activity feed rows now virtualized and route as follows:
+  - `entityType=user` → `/maintenance/:amoCode/admin/users/:entityId`
+  - `entityType=task` → `/maintenance/:amoCode/:department/tasks/:entityId`
+  - fallback → `/maintenance/:amoCode/:department/qms/events?entity=:entityType&id=:entityId`
+- Driver chart card click keeps existing `driver.onClick` destinations from cockpit config.
+
+### Commands run
+- `cd frontend && npx tsc -b`
+
+### Verification steps
+1. Open cockpit and scroll activity feed.
+2. Click user/task/fallback activity rows and verify deterministic destinations.
+3. Click chart cards and verify configured drilldown routes.
+
+### Known issues
+- Feed currently groups by client timestamp bucket and uses streamed event buffer.
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`

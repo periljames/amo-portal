@@ -188,3 +188,34 @@
 
 ### Screenshots
 - `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+  - `frontend/src/styles/components/dashboard-cockpit.css`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/utils/featureFlags.ts`
+
+### Status movement
+- ✅ **P1 completed:** Activity feed virtualization for cockpit with high-row support and keyboard-focusable row actions.
+- ✅ **P1 completed (guarded):** Cursor halo/magnetic hover cockpit layer behind `VITE_UI_CURSOR_LAYER` with reduced-motion/touch auto-disable.
+- ✅ **P1 completed:** Lazy-loaded chart rendering path with idle prefetch.
+- ⏳ **P1 remaining:** SSE replay / Last-Event-ID support.
+- ⏳ **P2 remaining:** server-backed activity feed persistence/pagination endpoint.
+
+### Commands run
+- `cd frontend && npm audit --audit-level=high --json`
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build`
+
+### Verification steps
+1. Enable `VITE_UI_CURSOR_LAYER=1` and validate cockpit pointer interactions.
+2. Validate activity feed scroll at high event counts.
+3. Confirm chart cards still route via deterministic drilldowns.
+
+### Known issues
+- Full vite bundle completion remains environment-limited (timeout).
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`

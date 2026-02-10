@@ -211,7 +211,7 @@ Monthly shelf-life job → expiring list
   - Cockpit KPI drilldowns now map to specific route + query filters for all visible tiles.
 - **New findings:**
   - **P1 / Frontend owner:** Activity feed virtualization still missing (action queue is virtualized; feed remains static list).
-  - **P1 / Backend owner:** user-management action endpoints required by command center (disable/enable/revoke/reset) still incomplete for cockpit workflows.
+  - **Resolved in later run:** user-management command endpoints are implemented; this finding is closed.
   - **P2 / Frontend owner:** cursor halo/magnetic interaction layer not implemented yet.
 - **Commands run:** `npx tsc -b`, `npm run dev -- --host 0.0.0.0 --port 4173`, Playwright screenshot script.
 - **Verification:**
@@ -223,7 +223,7 @@ Monthly shelf-life job → expiring list
 - **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
 
 ### Next phase priorities
-1. Add user action endpoints (disable/enable/revoke/reset/notify/schedule) with RBAC + audit + SSE.
+1. Keep user action endpoints monitored with regression tests (RBAC + audit + SSE).
 2. Virtualize activity feed and add lazy-loaded charts with idle prefetch.
 3. Implement attachment hardening regression tests across all evidence upload surfaces.
 
@@ -255,3 +255,37 @@ Monthly shelf-life job → expiring list
   - Token revocation is user-level timestamp based; per-token blacklist remains optional hardening.
 - **Screenshots:**
   - `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
+
+## Changed in this run (2026-02-10)
+- **Exact files changed:**
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+  - `frontend/src/styles/components/dashboard-cockpit.css`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/utils/featureFlags.ts`
+  - `AUDIT_SUMMARY.md`, `AUDIT_REPORT.md`, `ROUTE_MAP.md`, `EVENT_SCHEMA.md`, `SECURITY_REPORT.md`, `BACKLOG.md`
+- **Resolved findings:**
+  - Activity feed virtualization implemented for high-row counts.
+  - Cursor halo/magnetic interaction layer shipped behind feature flag with reduced-motion/touch guards.
+  - Chart loading path moved to lazy + idle-prefetch pattern.
+- **New findings:**
+  - **P1 / Platform:** Last-Event-ID replay still absent (recoverability gap on reconnect).
+  - **P2 / Backend:** activity feed persistence/pagination endpoint not yet implemented; UI currently consumes client-side stream buffer.
+- **Commands run:**
+  - `cd frontend && npm audit --audit-level=high --json`
+  - `cd frontend && npx tsc -b`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run dev -- --host 0.0.0.0 --port 4173`
+- **Tests executed and results:**
+  - `npm audit` ✅ 0 high/critical.
+  - TypeScript build ✅.
+  - Full Vite production build ⚠️ timeout in runner during transform phase.
+- **Known issues / follow-ups:**
+  - Two-tab realtime validation was partially environment-limited due seeded auth/data assumptions.
+- **Screenshots/artifacts:**
+  - `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
+
+### Next phase priorities
+1. Add bounded Last-Event-ID replay support in SSE endpoint.
+2. Add server-backed activity feed query/pagination endpoint and align virtual feed to API cursoring.
+3. Extend cockpit chart library wrappers with explicit click handlers map coverage audit.

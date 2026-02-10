@@ -111,6 +111,7 @@ const DashboardCockpit: React.FC = () => {
     id: item.id,
     summary: `${item.type.split(".").join(" · ")} ${item.action}`,
     timestamp: new Date(item.timestamp).toLocaleString(),
+    occurredAt: item.timestamp,
     onClick: () => {
       if (item.entityType === "user") return navigate(`/maintenance/${amoCode}/admin/users/${item.entityId}`);
       if (item.entityType === "task") return navigate(`/maintenance/${amoCode}/${department}/tasks/${item.entityId}`);

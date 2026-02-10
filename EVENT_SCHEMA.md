@@ -143,3 +143,30 @@ Debounce remains **350ms** in `frontend/src/components/realtime/RealtimeProvider
 
 ### Screenshots
 - `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+
+### Invalidation mapping adjustments
+| event prefix | invalidation keys | note |
+|---|---|---|
+| `accounts.*` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` | ensures cockpit aggregates refresh on user-state command events |
+
+### Feed/stream handling update
+- Client activity ring buffer size increased to **1500** events to support virtualized cockpit feed scenarios.
+
+### Commands run
+- `cd frontend && npx tsc -b`
+
+### Verification steps
+1. Generate repeated account command events.
+2. Confirm activity feed remains responsive when event list grows.
+3. Confirm only targeted keys are invalidated.
+
+### Known issues
+- No Last-Event-ID replay; reconnects depend on fresh events + targeted refetch.
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`

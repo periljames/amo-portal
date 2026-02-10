@@ -48,7 +48,7 @@ const eventSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
-const MAX_ACTIVITY = 40;
+const MAX_ACTIVITY = 1500;
 const STALE_AFTER_SECONDS = 45;
 
 const TARGETED_REFRESH_KEYS = [

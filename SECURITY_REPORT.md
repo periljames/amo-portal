@@ -68,3 +68,21 @@ Next actions should prioritise secrets enforcement, auth rate limiting, and uplo
   - Session revocation is JWT timestamp-based (`iat`) and does not currently maintain per-token server-side blacklist.
 - **Screenshots:**
   - `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+  - `frontend/src/utils/featureFlags.ts`
+- **Security-relevant notes:**
+  - Cursor halo/magnetic layer is explicitly feature-flagged (`VITE_UI_CURSOR_LAYER`) and disabled on touch/reduced-motion contexts to avoid degraded accessibility behavior.
+  - No auth/RBAC or endpoint-scope changes in this run.
+- **Commands run:**
+  - `cd frontend && npm audit --audit-level=high --json`
+- **Verification steps:**
+  1. Confirm `VITE_UI_CURSOR_LAYER=0` disables pointer layer.
+  2. Confirm touch/reduced-motion disables pointer layer even when feature flag is on.
+  3. Confirm no new network endpoints are introduced by cockpit interaction changes.
+- **Known issues:**
+  - Cursor interaction currently cockpit-scoped; no global policy toggle surfaced in user settings yet.
+- **Screenshots/artifacts:**
+  - `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
