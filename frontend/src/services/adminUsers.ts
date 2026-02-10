@@ -65,6 +65,7 @@ export interface AdminUserRead {
   is_superuser: boolean;
   is_amo_admin: boolean;
   must_change_password: boolean;
+  token_revoked_at: string | null;
   last_login_at: string | null;
   last_login_ip: string | null;
   created_at: string;
@@ -105,6 +106,27 @@ export interface AdminAmoRead {
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
+}
+
+
+export interface UserCommandResult {
+  user_id: string;
+  command: string;
+  status: string;
+  effective_at: string;
+  task_id?: string | null;
+}
+
+export interface UserNotifyPayload {
+  subject: string;
+  message: string;
+}
+
+export interface UserScheduleReviewPayload {
+  title: string;
+  description?: string;
+  due_at?: string;
+  priority?: number;
 }
 
 export interface AdminDepartmentRead {
@@ -537,4 +559,59 @@ export async function deactivateAdminUser(userId: string): Promise<void> {
   await apiDelete<void>(`/accounts/admin/users/${encodeURIComponent(userId)}`, undefined, {
     headers: authHeaders(),
   });
+}
+
+
+export async function disableAdminUser(userId: string): Promise<UserCommandResult> {
+  return apiPost<UserCommandResult>(
+    `/accounts/admin/users/${encodeURIComponent(userId)}/commands/disable`,
+    JSON.stringify({}),
+    { headers: authHeaders() }
+  );
+}
+
+export async function enableAdminUser(userId: string): Promise<UserCommandResult> {
+  return apiPost<UserCommandResult>(
+    `/accounts/admin/users/${encodeURIComponent(userId)}/commands/enable`,
+    JSON.stringify({}),
+    { headers: authHeaders() }
+  );
+}
+
+export async function revokeAdminUserAccess(userId: string): Promise<UserCommandResult> {
+  return apiPost<UserCommandResult>(
+    `/accounts/admin/users/${encodeURIComponent(userId)}/commands/revoke-access`,
+    JSON.stringify({}),
+    { headers: authHeaders() }
+  );
+}
+
+export async function forceAdminUserPasswordReset(userId: string): Promise<UserCommandResult> {
+  return apiPost<UserCommandResult>(
+    `/accounts/admin/users/${encodeURIComponent(userId)}/commands/force-password-reset`,
+    JSON.stringify({}),
+    { headers: authHeaders() }
+  );
+}
+
+export async function notifyAdminUser(
+  userId: string,
+  payload: UserNotifyPayload
+): Promise<UserCommandResult> {
+  return apiPost<UserCommandResult>(
+    `/accounts/admin/users/${encodeURIComponent(userId)}/commands/notify`,
+    JSON.stringify(payload),
+    { headers: authHeaders() }
+  );
+}
+
+export async function scheduleAdminUserReview(
+  userId: string,
+  payload: UserScheduleReviewPayload
+): Promise<UserCommandResult> {
+  return apiPost<UserCommandResult>(
+    `/accounts/admin/users/${encodeURIComponent(userId)}/commands/schedule-review`,
+    JSON.stringify(payload),
+    { headers: authHeaders() }
+  );
 }
