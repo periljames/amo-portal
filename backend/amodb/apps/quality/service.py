@@ -4,14 +4,18 @@ from __future__ import annotations
 import importlib.util
 import os
 import uuid
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import func, or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import models
+from ..finance import models as finance_models
+from ..training import models as training_models
 from .enums import (
     CARActionType,
     CARPriority,
@@ -134,6 +138,55 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
     }
 
 
+
+
+
+
+def _safe_count(query) -> int:
+    try:
+        return query.count()
+    except SQLAlchemyError:
+        return 0
+
+
+def _build_audit_closure_trend(db: Session, window_days: int = 90, bucket_days: int = 7) -> list[dict]:
+    today = date.today()
+    start = today - timedelta(days=window_days - 1)
+    try:
+        audits = (
+            db.query(models.QMSAudit.id, models.QMSAudit.actual_end)
+            .filter(models.QMSAudit.status == QMSAuditStatus.CLOSED, models.QMSAudit.actual_end.is_not(None))
+            .all()
+        )
+    except SQLAlchemyError:
+        return []
+
+    buckets: dict[date, list[str]] = defaultdict(list)
+    for audit_id, actual_end in audits:
+        if not actual_end:
+            continue
+        closed_day = actual_end
+        if closed_day < start or closed_day > today:
+            continue
+        offset = (closed_day - start).days
+        bucket_start = start + timedelta(days=(offset // bucket_days) * bucket_days)
+        buckets[bucket_start].append(str(audit_id))
+
+    trend: list[dict] = []
+    cursor = start
+    while cursor <= today:
+        bucket_end = min(cursor + timedelta(days=bucket_days - 1), today)
+        ids = sorted(buckets.get(cursor, []))
+        trend.append({
+            "period_start": cursor,
+            "period_end": bucket_end,
+            "closed_count": len(ids),
+            "audit_ids": ids,
+        })
+        cursor = cursor + timedelta(days=bucket_days)
+    return trend
+
+
 def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dict:
     dashboard = get_dashboard(db, domain=domain)
     open_statuses = [CARStatus.OPEN, CARStatus.IN_PROGRESS, CARStatus.PENDING_VERIFICATION]
@@ -146,6 +199,33 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dic
         .limit(COCKPIT_ACTION_QUEUE_LIMIT)
         .all()
     )
+
+    today = date.today()
+    cars_open_total = _safe_count(cars_q)
+    cars_overdue = _safe_count(cars_q.filter(
+        models.CorrectiveActionRequest.due_date.is_not(None),
+        models.CorrectiveActionRequest.due_date < today,
+    ))
+
+    training_expiring_30d = _safe_count(db.query(training_models.TrainingRecord).filter(
+        training_models.TrainingRecord.valid_until.is_not(None),
+        training_models.TrainingRecord.valid_until >= today,
+        training_models.TrainingRecord.valid_until <= today + timedelta(days=30),
+    ))
+    training_expired = _safe_count(db.query(training_models.TrainingRecord).filter(
+        training_models.TrainingRecord.valid_until.is_not(None),
+        training_models.TrainingRecord.valid_until < today,
+    ))
+    training_unverified = _safe_count(db.query(training_models.TrainingRecord).filter(
+        training_models.TrainingRecord.verification_status == training_models.TrainingRecordVerificationStatus.PENDING,
+    ))
+    training_deferrals_pending = _safe_count(db.query(training_models.TrainingDeferralRequest).filter(
+        training_models.TrainingDeferralRequest.status == training_models.DeferralStatus.PENDING,
+    ))
+
+    suppliers_active = _safe_count(db.query(finance_models.Vendor).filter(finance_models.Vendor.is_active.is_(True)))
+    suppliers_inactive = _safe_count(db.query(finance_models.Vendor).filter(finance_models.Vendor.is_active.is_(False)))
+
     return {
         "generated_at": datetime.now(timezone.utc),
         "pending_acknowledgements": dashboard["distributions_pending_ack"],
@@ -154,7 +234,18 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dic
         "findings_overdue": dashboard["findings_overdue_total"],
         "findings_open_total": dashboard["findings_open_total"],
         "documents_active": dashboard["documents_active"],
+        "documents_draft": dashboard["documents_draft"],
         "documents_obsolete": dashboard["documents_obsolete"],
+        "change_requests_open": dashboard["change_requests_open"],
+        "cars_open_total": cars_open_total,
+        "cars_overdue": cars_overdue,
+        "training_records_expiring_30d": training_expiring_30d,
+        "training_records_expired": training_expired,
+        "training_records_unverified": training_unverified,
+        "training_deferrals_pending": training_deferrals_pending,
+        "suppliers_active": suppliers_active,
+        "suppliers_inactive": suppliers_inactive,
+        "audit_closure_trend": _build_audit_closure_trend(db),
         "action_queue": [
             {
                 "id": str(row.id),

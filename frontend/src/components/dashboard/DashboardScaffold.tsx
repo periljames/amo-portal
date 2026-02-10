@@ -23,6 +23,7 @@ export type DriverCard = {
   subtitle?: string;
   option: Record<string, unknown>;
   onClick?: () => void;
+  onChartClick?: (payload: { data?: unknown; name?: string | number; value?: unknown }) => void;
 };
 
 export type ActionItem = {
@@ -280,6 +281,14 @@ const DashboardScaffold: React.FC<Props> = ({ title, subtitle, kpis, drivers, ac
                     option={driver.option}
                     style={{ height: "100%", width: "100%" }}
                     opts={{ renderer: "canvas", devicePixelRatio: window.devicePixelRatio || 1 }}
+                    onEvents={
+                      driver.onChartClick
+                        ? {
+                            click: (event: { data?: unknown; name?: string | number; value?: unknown }) =>
+                              driver.onChartClick?.(event),
+                          }
+                        : undefined
+                    }
                   />
                 </Suspense>
               </div>

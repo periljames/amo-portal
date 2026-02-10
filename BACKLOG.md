@@ -151,3 +151,17 @@
 ## Run update (2026-02-10)
 ### Closed
 - [x] Resolve `finance_inventory` module-enable 500 caused by enum insert casting mismatch in finance default seeding.
+
+## Run update (2026-02-10) — QMS cockpit operationalization
+### Closed
+- [x] Restrict cockpit rendering to Quality & Compliance only.
+- [x] Fix Modules launcher navigation and close behavior for deterministic route switching.
+- [x] Upgrade QMS cockpit to operational control set (docs/CAR/training/suppliers) with deterministic drilldowns.
+- [x] Add interactive audit closure chart (tooltip + zoom + click drilldown).
+- [x] Improve light-mode cockpit status contrast.
+
+### Remaining
+- [ ] Produce full production perf report table once `npm run build` completes in CI/local without transform stall.
+  - **Acceptance:** include chunk-size table and before/after transferred MB in `AUDIT_REPORT.md` from prod artifacts.
+- [ ] Add authenticated automated frontend route-smoke in CI for Quality Navigator tile routes and top-priority `Resolve now` navigation.
+  - **Acceptance:** CI browser smoke validates all 9 navigator destinations and priority CTA drilldown.
