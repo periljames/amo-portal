@@ -93,3 +93,108 @@ const source = new EventSource(`${API_BASE}/api/events?token=${encodeURIComponen
 | `tasks.task.escalated` | `tasks.task` | `ESCALATED` | `backend/amodb/apps/tasks/services.py` | `escalate_task` | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
 
 Debounce remains **350ms** in `frontend/src/components/realtime/RealtimeProvider.tsx`.
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/components/realtime/LiveStatusIndicator.tsx`
+
+### UI invalidation dependency mapping update
+| entity_type | action | payload shape | publisher | UI dependents |
+|---|---|---|---|---|
+| `qms.*` (type prefix) | any | `{ id, type, entityType, entityId, action, timestamp, actor?, metadata? }` | SSE broker (`/api/events`) | `qms-dashboard`, `qms-documents`, `qms-audits`, `qms-cars`, `qms-change-requests`, `qms-distributions` |
+| `training.*` | any | same envelope | SSE broker (`/api/events`) | `training-assignments`, `training-dashboard`, `training-events`, `training-status` |
+| `tasks.task.*` | any | same envelope | SSE broker (`/api/events`) | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
+| `accounts.*` | any | same envelope | SSE broker (`/api/events`) | `admin-users`, `user-profile` |
+
+- **Commands run:** `npx tsc -b`
+- **Verification:**
+  1. Trigger event-producing changes in QMS/tasks/accounts modules.
+  2. Confirm targeted query invalidation (no global invalidate).
+  3. Disconnect SSE >45s and verify stale state + manual “Refresh data”.
+- **Known issues:** No Last-Event-ID replay support yet; stale refresh relies on targeted key refetch only.
+- **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/accounts/router_admin.py`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+
+### New accounts user command events
+| event.type | entityType | action | producer path | trigger | frontend invalidation keys |
+|---|---|---|---|---|---|
+| `accounts.user.command.disabled` | `accounts.user.command` | `DISABLED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/disable` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.enabled` | `accounts.user.command` | `ENABLED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/enable` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.access_revoked` | `accounts.user.command` | `ACCESS_REVOKED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/revoke-access` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.password_reset_forced` | `accounts.user.command` | `PASSWORD_RESET_FORCED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/force-password-reset` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.notified` | `accounts.user.command` | `NOTIFIED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/notify` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+| `accounts.user.command.review_scheduled` | `accounts.user.command` | `REVIEW_SCHEDULED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/schedule-review` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
+
+### Commands run
+- `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
+
+### Verification
+1. Trigger each command endpoint.
+2. Confirm `audit_events` row created with entity type `accounts.user.command`.
+3. Confirm frontend invalidates targeted keys only.
+
+### Known issues
+- No Last-Event-ID replay yet.
+
+### Screenshots
+- `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+
+### Invalidation mapping adjustments
+| event prefix | invalidation keys | note |
+|---|---|---|
+| `accounts.*` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` | ensures cockpit aggregates refresh on user-state command events |
+
+### Feed/stream handling update
+- Client activity ring buffer size increased to **1500** events to support virtualized cockpit feed scenarios.
+
+### Commands run
+- `cd frontend && npx tsc -b`
+
+### Verification steps
+1. Generate repeated account command events.
+2. Confirm activity feed remains responsive when event list grows.
+3. Confirm only targeted keys are invalidated.
+
+### Known issues
+- No Last-Event-ID replay; reconnects depend on fresh events + targeted refetch.
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
+
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/events/broker.py`
+  - `backend/amodb/apps/events/router.py`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+
+### SSE protocol updates
+| Event | Semantics | Producer path | Trigger | Frontend handling |
+|---|---|---|---|---|
+| `reset` | Replay cursor unavailable/too old; client should targeted-refetch | `backend/amodb/apps/events/router.py` | reconnect with stale `Last-Event-ID` | invalidate `activity-history`, `dashboard`, `qms-dashboard` only |
+
+### Envelope/resume behavior
+- Stream now emits `id: <event.id>` for each event frame.
+- Server reads `Last-Event-ID` header (and `lastEventId` query fallback) and replays buffered events when available.
+- Replay window currently bounded by in-memory broker history.
+
+### Commands run
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
+
+### Verification steps
+1. Publish events and reconnect with previous event id.
+2. Validate replay events arrive before live stream continues.
+3. Reconnect with unknown id and verify `reset` event emitted.
+
+### Known issues
+- Replay history is process-memory scoped.

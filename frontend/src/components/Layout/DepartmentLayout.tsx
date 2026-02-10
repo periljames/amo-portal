@@ -205,6 +205,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const [trialMenuOpen, setTrialMenuOpen] = useState(false);
   const [trialChipHidden, setTrialChipHidden] = useState(false);
   const [focusMenuOpen, setFocusMenuOpen] = useState(false);
+  const [edgePeekOpen, setEdgePeekOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -477,6 +478,23 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [activeDepartment, amoCode, location.pathname]);
 
   const focusMode = uiShellV2 && isCockpitRoute;
+
+
+  useEffect(() => {
+    if (!focusMode) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "\\") {
+        event.preventDefault();
+        setFocusMenuOpen((prev) => !prev);
+      }
+      if (event.key === "Escape") {
+        setFocusMenuOpen(false);
+        setEdgePeekOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [focusMode]);
 
   const qmsNavItems = useMemo(
     () => [
@@ -1410,6 +1428,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     >
                       Modules
                     </button>
+                    <span className="focus-launcher__hint">Ctrl/⌘ + \</span>
                     {focusMenuOpen && (
                       <div className="focus-launcher__panel">{focusSidebar}</div>
                     )}
@@ -1829,6 +1848,21 @@ const DepartmentLayout: React.FC<Props> = ({
 
           return (
             <>
+              {focusMode && (
+                <button
+                  type="button"
+                  className={`focus-edge-peek${edgePeekOpen ? " is-open" : ""}`}
+                  onMouseEnter={() => setEdgePeekOpen(true)}
+                  onMouseLeave={() => setEdgePeekOpen(false)}
+                  onFocus={() => setEdgePeekOpen(true)}
+                  onBlur={() => setEdgePeekOpen(false)}
+                  onClick={() => setFocusMenuOpen((prev) => !prev)}
+                  aria-label="Open module launcher"
+                  title="Open module launcher (Ctrl/⌘ + \)"
+                >
+                  <span>Modules</span>
+                </button>
+              )}
               <AppShellV2
                 className={shellClassName}
                 sidebar={sidebar}

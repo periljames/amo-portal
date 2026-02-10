@@ -1,20 +1,41 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import queue
-from typing import AsyncGenerator
+from datetime import datetime
+from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from jose import JWTError, jwt
+from pydantic import BaseModel
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
+from amodb.apps.audit import models as audit_models
+from amodb.apps.accounts import models as account_models
 from amodb.database import get_db
 from amodb.security import JWT_ALGORITHM, SECRET_KEY, get_user_by_id
-from amodb.apps.accounts import models as account_models
 from .broker import broker, format_sse, keepalive_message
 
 router = APIRouter(prefix="/api", tags=["events"])
+
+
+class ActivityEventRead(BaseModel):
+    id: str
+    type: str
+    entityType: str
+    entityId: str
+    action: str
+    timestamp: str
+    actor: Optional[dict] = None
+    metadata: dict = {}
+
+
+class ActivityHistoryResponse(BaseModel):
+    items: list[ActivityEventRead]
+    next_cursor: Optional[str] = None
 
 
 def _credentials_exception() -> HTTPException:
@@ -61,24 +82,52 @@ def get_current_active_user_from_query(
     return _get_user_from_token(token, db)
 
 
+def _event_to_row(event: audit_models.AuditEvent) -> ActivityEventRead:
+    metadata = {"amoId": event.amo_id, **(event.metadata_json or {})}
+    event_type = f"{event.entity_type}.{event.action}".lower()
+    if metadata.get("module") == "training":
+        event_type = f"training.{event.entity_type}.{event.action}".lower()
+    return ActivityEventRead(
+        id=str(event.id),
+        type=event_type,
+        entityType=event.entity_type,
+        entityId=event.entity_id,
+        action=event.action,
+        timestamp=(event.occurred_at or event.created_at).isoformat(),
+        actor={"userId": event.actor_user_id} if event.actor_user_id else None,
+        metadata=metadata,
+    )
+
+
 async def _event_generator(
     request: Request,
     user: account_models.User,
 ) -> AsyncGenerator[str, None]:
     q = broker.subscribe()
     try:
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                event = await asyncio.to_thread(q.get, True, 15)
-                amo_id = event.metadata.get("amoId") if isinstance(event.metadata, dict) else None
-                effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
-                if amo_id and str(amo_id) != str(effective_amo_id):
-                    continue
-                yield format_sse(event.to_json(), event=event.type)
-            except queue.Empty:
-                yield keepalive_message()
+      last_event_id = request.headers.get("last-event-id") or request.query_params.get("lastEventId")
+      effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
+      if last_event_id:
+          replay, requires_reset = broker.replay_since(last_event_id=last_event_id, amo_id=str(effective_amo_id))
+          if requires_reset:
+              yield format_sse(
+                  json.dumps({"type": "reset", "reason": "last_event_id_too_old", "lastEventId": last_event_id}),
+                  event="reset",
+              )
+          else:
+              for event in replay:
+                  yield format_sse(event.to_json(), event=event.type, event_id=event.id)
+      while True:
+          if await request.is_disconnected():
+              break
+          try:
+              event = await asyncio.to_thread(q.get, True, 15)
+              amo_id = event.metadata.get("amoId") if isinstance(event.metadata, dict) else None
+              if amo_id and str(amo_id) != str(effective_amo_id):
+                  continue
+              yield format_sse(event.to_json(), event=event.type, event_id=event.id)
+          except queue.Empty:
+              yield keepalive_message()
     finally:
         broker.unsubscribe(q)
 
@@ -96,3 +145,53 @@ async def stream_events(
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/events/history", response_model=ActivityHistoryResponse)
+def list_event_history(
+    request: Request,
+    cursor: Optional[str] = Query(default=None, description="Opaque cursor as '<iso_ts>|<id>'"),
+    limit: int = Query(default=100, ge=1, le=500),
+    entityType: Optional[str] = None,
+    entityId: Optional[str] = None,
+    timeStart: Optional[datetime] = None,
+    timeEnd: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+    user: account_models.User = Depends(get_current_active_user_from_query),
+) -> ActivityHistoryResponse:
+    effective_amo_id = getattr(user, "effective_amo_id", None) or user.amo_id
+    query = db.query(audit_models.AuditEvent).filter(audit_models.AuditEvent.amo_id == effective_amo_id)
+    if entityType:
+        query = query.filter(audit_models.AuditEvent.entity_type == entityType)
+    if entityId:
+        query = query.filter(audit_models.AuditEvent.entity_id == entityId)
+    if timeStart:
+        query = query.filter(audit_models.AuditEvent.occurred_at >= timeStart)
+    if timeEnd:
+        query = query.filter(audit_models.AuditEvent.occurred_at <= timeEnd)
+    if cursor:
+        ts_raw, _, event_id = cursor.partition("|")
+        if ts_raw:
+            try:
+                ts = datetime.fromisoformat(ts_raw)
+                query = query.filter(
+                    or_(
+                        audit_models.AuditEvent.occurred_at < ts,
+                        and_(audit_models.AuditEvent.occurred_at == ts, audit_models.AuditEvent.id < event_id),
+                    )
+                )
+            except ValueError:
+                pass
+
+    rows = (
+        query.order_by(audit_models.AuditEvent.occurred_at.desc(), audit_models.AuditEvent.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = None
+    if has_more and page:
+        last = page[-1]
+        next_cursor = f"{(last.occurred_at or last.created_at).isoformat()}|{last.id}"
+    return ActivityHistoryResponse(items=[_event_to_row(row) for row in page], next_cursor=next_cursor)

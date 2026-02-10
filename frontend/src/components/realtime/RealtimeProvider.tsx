@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { getApiBaseUrl } from "../../services/config";
-import { getToken } from "../../services/auth";
+import { getContext, getToken } from "../../services/auth";
 
 export type RealtimeStatus = "live" | "syncing" | "offline";
 
@@ -22,6 +22,9 @@ type RealtimeContextValue = {
   status: RealtimeStatus;
   lastUpdated: Date | null;
   activity: ActivityEvent[];
+  isStale: boolean;
+  staleSeconds: number;
+  refreshData: () => void;
   triggerSync: () => void;
 };
 
@@ -45,7 +48,27 @@ const eventSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
-const MAX_ACTIVITY = 40;
+const MAX_ACTIVITY = 1500;
+const STALE_AFTER_SECONDS = 45;
+
+const TARGETED_REFRESH_KEYS = [
+  "dashboard",
+  "qms-dashboard",
+  "qms-documents",
+  "qms-audits",
+  "qms-cars",
+  "qms-change-requests",
+  "qms-distributions",
+  "training-assignments",
+  "training-dashboard",
+  "training-events",
+  "training-status",
+  "tasks",
+  "my-tasks",
+  "admin-users",
+  "user-profile",
+  "activity-history",
+] as const;
 
 function mapEventToInvalidations(type: string): string[] {
   if (type.startsWith("qms.") || type.startsWith("qms_")) {
@@ -56,21 +79,22 @@ function mapEventToInvalidations(type: string): string[] {
       "qms-cars",
       "qms-change-requests",
       "qms-distributions",
+      "activity-history",
     ];
   }
   if (type.startsWith("training.") || type.startsWith("training_")) {
-    return ["training-assignments", "training-dashboard", "training-events", "training-status"];
+    return ["training-assignments", "training-dashboard", "training-events", "training-status", "activity-history"];
   }
   if (type.startsWith("tasks.task.")) {
-    return ["tasks", "my-tasks", "qms-dashboard", "dashboard"];
+    return ["tasks", "my-tasks", "qms-dashboard", "dashboard", "activity-history"];
   }
   if (type.startsWith("tasks.") || type.startsWith("tasks_")) {
-    return ["tasks", "my-tasks"];
+    return ["tasks", "my-tasks", "activity-history"];
   }
   if (type.startsWith("accounts.") || type.startsWith("accounts_")) {
-    return ["admin-users", "user-profile"];
+    return ["admin-users", "user-profile", "qms-dashboard", "dashboard", "activity-history"];
   }
-  return ["dashboard"]; 
+  return ["dashboard", "activity-history"];
 }
 
 export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -82,6 +106,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const invalidateTimer = useRef<number | null>(null);
   const reconnectTimer = useRef<number | null>(null);
   const retryCount = useRef(0);
+  const staleIntervalRef = useRef<number | null>(null);
+  const [staleSeconds, setStaleSeconds] = useState(0);
+  const ctx = getContext();
+  const lastEventKey = `amo:last-event-id:${ctx.amoCode || "unknown"}`;
+
+  const isStale = status !== "live" || staleSeconds > STALE_AFTER_SECONDS;
 
   const scheduleInvalidations = useCallback(
     (keys: string[]) => {
@@ -101,15 +131,17 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!parsed.success) return;
 
       const event = parsed.data;
+      window.localStorage.setItem(lastEventKey, event.id);
       setStatus("live");
       setLastUpdated(new Date(event.timestamp));
+      setStaleSeconds(0);
       setActivity((prev) => {
         const next = [event, ...prev];
         return next.slice(0, MAX_ACTIVITY);
       });
       scheduleInvalidations(mapEventToInvalidations(event.type));
     },
-    [scheduleInvalidations]
+    [lastEventKey, scheduleInvalidations]
   );
 
   const connect = useCallback(() => {
@@ -118,14 +150,18 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     setStatus("syncing");
     const token = getToken();
-    const qs = token ? `?token=${encodeURIComponent(token)}` : "";
-    const url = `${getApiBaseUrl()}/api/events${qs}`;
+    const persisted = typeof window !== "undefined" ? window.localStorage.getItem(lastEventKey) : null;
+    const qs = new URLSearchParams();
+    if (token) qs.set("token", token);
+    if (persisted) qs.set("lastEventId", persisted);
+    const url = `${getApiBaseUrl()}/api/events?${qs.toString()}`;
     const source = new EventSource(url, { withCredentials: true });
     sourceRef.current = source;
 
     source.onopen = () => {
       retryCount.current = 0;
       setStatus("live");
+      setStaleSeconds(0);
     };
 
     source.onmessage = (evt) => {
@@ -137,6 +173,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     };
 
+    source.addEventListener("reset", () => {
+      window.localStorage.removeItem(lastEventKey);
+      scheduleInvalidations(["activity-history", "dashboard", "qms-dashboard"]);
+    });
+
     source.onerror = () => {
       setStatus("offline");
       source.close();
@@ -147,10 +188,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       retryCount.current += 1;
       reconnectTimer.current = window.setTimeout(() => connect(), retryDelay);
     };
-  }, [handleEvent]);
+  }, [handleEvent, lastEventKey, scheduleInvalidations]);
 
   useEffect(() => {
     connect();
+    staleIntervalRef.current = window.setInterval(() => {
+      setStaleSeconds((prev) => prev + 1);
+    }, 1000);
     return () => {
       sourceRef.current?.close();
       if (invalidateTimer.current) {
@@ -159,17 +203,26 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (reconnectTimer.current) {
         window.clearTimeout(reconnectTimer.current);
       }
+      if (staleIntervalRef.current) {
+        window.clearInterval(staleIntervalRef.current);
+      }
     };
   }, [connect]);
 
-  const triggerSync = useCallback(() => {
+  const refreshData = useCallback(() => {
     setStatus("syncing");
-    queryClient.invalidateQueries();
+    TARGETED_REFRESH_KEYS.forEach((key) => {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    });
   }, [queryClient]);
 
+  const triggerSync = useCallback(() => {
+    refreshData();
+  }, [refreshData]);
+
   const value = useMemo(
-    () => ({ status, lastUpdated, activity, triggerSync }),
-    [status, lastUpdated, activity, triggerSync]
+    () => ({ status, lastUpdated, activity, isStale, staleSeconds, refreshData, triggerSync }),
+    [status, lastUpdated, activity, isStale, staleSeconds, refreshData, triggerSync]
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
