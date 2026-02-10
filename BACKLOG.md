@@ -122,3 +122,8 @@
 ### Remaining
 - [ ] Add compatibility fix for `f8a1b2c3d4e6` duplicate-column crash (`part_movement_ledger.created_by_user_id`) on clean-slate Postgres upgrades.
   - **Acceptance:** `alembic -c backend/amodb/alembic.ini upgrade head` succeeds from empty Postgres database.
+
+
+## Run update (2026-02-10)
+### Closed
+- [x] Fix `RecursionError` in `/auth/password-reset/confirm` rate-limiting path caused by `_client_ip` ↔ `_enforce_auth_rate_limit` re-entry.

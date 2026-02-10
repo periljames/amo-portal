@@ -172,3 +172,16 @@
 
 ### Known migration debt
 - Full clean-slate `upgrade head` still fails at `f8a1b2c3d4e6` due duplicate column on `part_movement_ledger.created_by_user_id`; this predates current fix and is tracked for a separate compatibility migration.
+
+
+## Changed in this run (2026-02-10)
+### Incident fixed
+- Resolved recursion crash in auth public router where `_client_ip()` incorrectly called `_enforce_auth_rate_limit()`, which itself calls `_client_ip()`; this caused `RecursionError` on password reset confirm path.
+
+### Code changes
+- Removed recursive call from `_client_ip()` in `backend/amodb/apps/accounts/router_public.py`.
+- Added focused tests for auth rate-limit helper and client IP extraction behavior.
+
+### Commands executed
+- `cd backend && pytest amodb/apps/accounts/tests/test_router_public_rate_limit.py amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd backend && alembic -c amodb/alembic.ini heads`

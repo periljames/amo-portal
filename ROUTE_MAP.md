@@ -110,3 +110,8 @@
 ## Changed in this run (2026-02-10)
 - No route changes in this run.
 - Backend changes are migration-only (Alembic stability and schema reconciliation).
+
+
+## Changed in this run (2026-02-10)
+- No route shape changes.
+- Runtime behavior of existing password reset confirm path stabilized (no recursion on auth rate limiting).

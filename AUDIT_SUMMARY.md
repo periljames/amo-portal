@@ -166,3 +166,8 @@
 - Hardened migration `b1c2d3e4f5a6` with table/column/index existence guards to prevent branch-order crashes (`quality_car_attachments` absent).
 - Added migration `s9t8u7v6w5x4` to guarantee `quality_car_attachments.sha256` and its index exist at head.
 - Current head updated to `s9t8u7v6w5x4`.
+
+
+## Changed in this run (2026-02-10)
+- Fixed auth/password-reset recursion bug in public router (`_client_ip` no longer re-enters rate-limit function).
+- Added regression tests for helper behavior and 429 threshold enforcement.

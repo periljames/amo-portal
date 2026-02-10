@@ -84,3 +84,8 @@
 ## Changed in this run (2026-02-10)
 - Security posture unchanged at API/auth layer.
 - Migration hardening reduces operational risk from failed partial upgrades (prevents runtime breakage from missing `quality_car_attachments` during schema migration).
+
+
+## Changed in this run (2026-02-10)
+- Corrected auth rate-limit helper recursion that could deny service for password reset confirmation requests under load/error loops.
+- Added regression tests for rate-limit utility behavior.
