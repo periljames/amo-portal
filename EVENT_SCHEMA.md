@@ -107,3 +107,8 @@
 
 ### Known issues
 - None beyond existing retention-window replay limitations.
+
+
+## Changed in this run (2026-02-10)
+- No event envelope changes.
+- Cockpit bootstrap now requests `/api/events/history` with `limit=50` instead of `100` to reduce initial payload size.
