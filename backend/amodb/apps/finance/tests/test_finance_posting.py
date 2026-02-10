@@ -186,3 +186,20 @@ def test_journal_reversal_creates_offsetting_entry(db_session):
     assert debit == credit
     assert reversal.reversal_of_id == entry.id
     assert entry.status == finance_models.JournalStatusEnum.REVERSED
+
+
+def test_ensure_finance_defaults_is_idempotent(db_session):
+    amo = _create_amo(db_session)
+
+    finance_services.ensure_finance_defaults(db_session, amo_id=amo.id)
+    finance_services.ensure_finance_defaults(db_session, amo_id=amo.id)
+    db_session.commit()
+
+    accounts = (
+        db_session.query(finance_models.GLAccount)
+        .filter(finance_models.GLAccount.amo_id == amo.id)
+        .order_by(finance_models.GLAccount.code.asc())
+        .all()
+    )
+    assert len(accounts) == len(finance_services.DEFAULT_ACCOUNTS)
+    assert [a.code for a in accounts] == [item[0] for item in finance_services.DEFAULT_ACCOUNTS]

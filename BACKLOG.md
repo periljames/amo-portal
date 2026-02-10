@@ -146,3 +146,8 @@
 
 ### Remaining
 - [ ] Add explicit E2E auth-routing tests in CI for non-admin department lock and admin overview landing.
+
+
+## Run update (2026-02-10)
+### Closed
+- [x] Resolve `finance_inventory` module-enable 500 caused by enum insert casting mismatch in finance default seeding.

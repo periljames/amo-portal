@@ -58,6 +58,9 @@ def ensure_finance_defaults(db: Session, *, amo_id: str) -> None:
     for code, name, acc_type in DEFAULT_ACCOUNTS:
         if code in existing_accounts:
             continue
+        # Flush each GL account insert independently to avoid driver-side
+        # insertmany VALUES casting regressions on some PostgreSQL enum
+        # deployments (`gl_account_type_enum` vs VARCHAR).
         db.add(
             models.GLAccount(
                 amo_id=amo_id,
@@ -67,6 +70,7 @@ def ensure_finance_defaults(db: Session, *, amo_id: str) -> None:
                 is_active=True,
             )
         )
+        db.flush()
         created = True
 
     existing_tax = {t.code for t in db.query(models.TaxCode).all()}

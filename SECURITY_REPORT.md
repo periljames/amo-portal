@@ -99,3 +99,8 @@
 ## Changed in this run (2026-02-10)
 - Tightened frontend department access posture for non-admin users (assigned department only).
 - Reduced accidental cross-department UI exposure by hard-correcting non-admin route access to assigned department.
+
+
+## Changed in this run (2026-02-10)
+- Improved backend operational reliability for tenant module enable flows (finance seed no longer fails on enum cast mismatch).
+- No auth/RBAC policy changes.

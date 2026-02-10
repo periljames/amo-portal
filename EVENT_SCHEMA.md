@@ -132,3 +132,8 @@
 ## Changed in this run (2026-02-10)
 - No event payload contract changes.
 - Login/department access changes are routing and authorization UX behavior only.
+
+
+## Changed in this run (2026-02-10)
+- No event schema changes.
+- Finance seed fix does not alter SSE/event envelopes.

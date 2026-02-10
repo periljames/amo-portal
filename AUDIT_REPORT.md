@@ -235,3 +235,17 @@
 - `cd frontend && npx tsc -b`
 - `cd frontend && npm run build` *(runner transform stall persists)*
 - Playwright smoke: login landing + department lock + non-quality qms redirect + admin landing
+
+
+## Changed in this run (2026-02-10)
+### Finance module enable regression fix
+- **Bug:** enabling `finance_inventory` module failed with 500 during default GL account seed (`DatatypeMismatch` on `gl_account_type_enum` vs `VARCHAR`).
+- **Root cause:** batched insert path generated driver-side `INSERT ... SELECT ... p3::VARCHAR` for enum values, which mismatched PostgreSQL enum column type in affected environments.
+- **Fix:** `ensure_finance_defaults()` now flushes each GL account insert independently, avoiding problematic insertmany enum casting path while preserving idempotent seeding behavior.
+
+### Verification
+1. Enable `finance_inventory` module for tenant (no 500 on default account seed).
+2. Re-run module enable call; ensure idempotent behavior (no duplicate chart accounts).
+
+### Commands executed
+- `cd backend && pytest amodb/apps/finance/tests/test_finance_posting.py amodb/apps/accounts/tests/test_module_gating.py -q`

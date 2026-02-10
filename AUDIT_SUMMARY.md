@@ -185,3 +185,8 @@
 - Enforced dedicated department landing for normal users at login and runtime navigation.
 - Updated admin/superuser login landing to `/admin/overview`.
 - Non-admin department visibility now restricted to assigned department only.
+
+
+## Changed in this run (2026-02-10)
+- Fixed finance default seed compatibility for PostgreSQL enum typing during module enable.
+- Added idempotency regression test for `ensure_finance_defaults()` seeding path.
