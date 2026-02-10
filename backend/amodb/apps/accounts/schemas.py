@@ -231,6 +231,7 @@ class UserRead(UserBase):
     is_amo_admin: bool
     is_auditor: bool
     must_change_password: bool
+    token_revoked_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
     last_login_ip: Optional[str] = None
     created_at: datetime
@@ -239,6 +240,27 @@ class UserRead(UserBase):
     class Config:
         from_attributes = True
 
+
+
+
+class UserCommandNotifyPayload(BaseModel):
+    subject: str = Field(min_length=3, max_length=160)
+    message: str = Field(min_length=3, max_length=5000)
+
+
+class UserCommandSchedulePayload(BaseModel):
+    title: str = Field(min_length=3, max_length=180)
+    description: Optional[str] = Field(default=None, max_length=5000)
+    due_at: Optional[datetime] = None
+    priority: int = Field(default=2, ge=1, le=5)
+
+
+class UserCommandResult(BaseModel):
+    user_id: str
+    command: str
+    status: str
+    effective_at: datetime
+    task_id: Optional[str] = None
 
 class OnboardingStatusRead(BaseModel):
     is_complete: bool

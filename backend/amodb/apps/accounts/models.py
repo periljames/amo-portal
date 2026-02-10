@@ -406,6 +406,11 @@ class User(Base):
         default=True,
         doc="Require the user to change their password on first login.",
     )
+    token_revoked_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="All access tokens issued before this timestamp are invalid.",
+    )
 
     # Future: mark if user has registered WebAuthn / passkeys (MFA hook)
     webauthn_registered = Column(Boolean, nullable=False, default=False)

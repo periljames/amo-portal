@@ -1,127 +1,95 @@
-# AMO Portal Audit Summary (Living Document)
+# AMO Portal Audit Summary (Living)
 
-## Current State Snapshot
-- **Feature flags**
-  - `VITE_UI_SHELL_V2`: Enables AppShell V2 (fixed sidebar + single scroll container), cockpit landing layouts, focus mode launcher, and realtime status chip. When **OFF**, AppShell V1 and legacy dashboards remain active.
-- **Live now vs behind flag**
-  - **Live now (no flag)**: Existing AppShell V1, existing routes and pages, legacy dashboards and lists.
-  - **Behind flag (`VITE_UI_SHELL_V2`)**: AppShell V2 layout + focus mode on cockpit routes (`/maintenance/:amoCode/:department`, `/maintenance/:amoCode/:department/qms`, `/maintenance/:amoCode/:department/qms/kpis`) and new DashboardCockpit scaffold.
+## Current State Snapshot (reconciled)
+- **Feature flags active**
+  - `VITE_UI_SHELL_V2`: AppShell V2, fixed sidebar behavior, cockpit focus-mode defaults, cockpit scaffold.
+  - `VITE_UI_CURSOR_LAYER`: cockpit-only pointer halo/magnetic interactions (desktop + motion-allowed contexts).
+- **Live vs behind flags**
+  - **Live now**: Existing routes/pages, backend user command endpoints, SSE stream (`/api/events`), server-paged activity history (`/api/events/history`), admin user command center actions.
+  - **Behind flags**: AppShell V2 cockpit experience and cursor interaction layer.
+- **Realtime architecture status**
+  - SSE remains primary transport.
+  - Last-Event-ID resume now uses **durable replay from `audit_events`** (tenant-scoped), not broker memory.
+  - If replay cursor is missing/expired (older than retention), server emits `event: reset`; UI performs targeted refetch only.
 - **Major remaining gaps**
-  - Action panel coverage is partial (no evidence upload, no in-panel document ack status view).
-  - Tasks module still lacks explicit SSE emit hooks (quality/training/accounts emit via audit log; tasks are not yet wired).
-  - Cockpit KPI set is still limited (training is now included but document currency and audit closure trends need deeper data integration).
+  - Durable replay currently depends on audit retention window (`REPLAY_RETENTION_DAYS=7`); there is no separate long-term event journal table.
+  - Department-specific activity pinning/ranking in feed is still a P2 enhancement.
 
-## Changed in this run
-### 1) Drilldown query support + list filtering
-- **Files changed**
-  - `frontend/src/pages/QMSTrainingPage.tsx`
-  - `frontend/src/pages/QMSDocumentsPage.tsx`
-  - `frontend/src/pages/QMSAuditsPage.tsx`
-  - `frontend/src/pages/MyTasksPage.tsx`
-  - `frontend/src/pages/QualityCarsPage.tsx`
-- **Behavior change**
-  - QMS Training, Cars, Documents, Audits, and Tasks pages now parse cockpit query params (`status`, `dueWindow`, `ack`, `carId`) and filter content accordingly.
-  - User names on training rows link to `/maintenance/:amoCode/admin/users/:userId`.
-- **Risk/rollback**
-  - Additive query parsing only; legacy behavior unchanged without query params.
-- **Manual verification steps**
-  1. Open `/maintenance/demo/quality/qms/training?status=overdue&dueWindow=now`.
-  2. Confirm list shows only overdue items.
-  3. Open `/maintenance/demo/quality/qms/cars?status=overdue&dueWindow=now` and confirm list is filtered.
-  4. Open `/maintenance/demo/quality/qms/documents?ack=pending` and confirm only docs with outstanding acknowledgements appear.
-  5. Open `/maintenance/demo/quality/qms/audits?status=open` and confirm closed audits are hidden.
+## Changed in this run (2026-02-10)
+### User-visible changes
+- Reconnect reliability improved: cockpit clients now resume from durable audit-backed replay after disconnects/restarts when the cursor is in retention.
+- Controlled reset behavior standardized (`event: reset`) so stale cursors trigger targeted query invalidation instead of full refresh.
 
-### 2) Right-side Action Panel (overlay) integrated into cockpit + lists
-- **Files changed**
-  - `frontend/src/components/panels/ActionPanel.tsx`
-  - `frontend/src/styles/components/action-panel.css`
-  - `frontend/src/dashboards/DashboardCockpit.tsx`
-  - `frontend/src/pages/QualityCarsPage.tsx`
-  - `frontend/src/pages/QMSDocumentsPage.tsx`
-  - `frontend/src/pages/QMSTrainingPage.tsx`
-- **Behavior change**
-  - Action Panel slides in from the right (overlay, no layout reflow) for CAR, Training, Document, and User quick actions.
-  - Action Queue “Act” button opens the panel with context.
-- **Risk/rollback**
-  - Action panel is a purely additive overlay; dismiss to return to existing flows.
-- **Manual verification steps**
-  1. Open cockpit (with `VITE_UI_SHELL_V2=1`) and click “Act” on a CAR row.
-  2. Confirm panel opens from the right and allows status/assignee changes.
-  3. In QMS Documents, click “Quick actions” on a document to request ack.
-  4. In QMS Training, click “Quick actions” on a row to assign a training event.
+### Non-obvious internal changes
+- SSE replay path moved from in-memory `EventBroker` history to DB-backed lookup in `audit_events` (scoped by effective AMO).
+- Added replay tests for unknown cursor reset, expiry reset, and tenant scoping.
 
-### 3) SSE scope expanded to Accounts (user changes)
-- **Files changed**
-  - `backend/amodb/apps/accounts/router_admin.py`
-  - `backend/amodb/apps/audit/services.py`
-  - `backend/amodb/apps/events/router.py`
-- **Behavior change**
-  - Admin user create/update/deactivate now emit `accounts.user.*` events via audit log → SSE.
-  - SSE filtering uses effective AMO (superuser active AMO respected).
-- **Risk/rollback**
-  - Additive logging; no API contract changes.
-- **Manual verification steps**
-  1. Update a user via `/accounts/admin/users/:id`.
-  2. Confirm SSE event is sent with `accounts.user.updated`.
-  3. Verify the frontend invalidates admin user lists on event receive.
+### Files changed
+- `backend/amodb/apps/events/router.py`
+- `backend/amodb/apps/events/tests/test_events_history.py`
+- `AUDIT_SUMMARY.md`
+- `AUDIT_REPORT.md`
+- `ROUTE_MAP.md`
+- `EVENT_SCHEMA.md`
+- `SECURITY_REPORT.md`
+- `BACKLOG.md`
 
-## Known Issues / Follow-ups
-- **Open** — Tasks module does not emit SSE events directly (no audit log hooks). Evidence: `backend/amodb/apps/tasks/router.py` has no audit logging.
-- **Open** — Action Panel does not yet support evidence upload or document ack status view. Evidence: panel provides update/assign/notify only.
-- **Mitigated** — Cockpit query params now supported in training/cars/docs/audits/tasks; older routes still work without params.
+### Env vars / migrations
+- **Env vars**: none added this run.
+- **Migrations**: none added this run.
 
-## Realtime Status
-- **SSE endpoint**: `GET /api/events`
-- **Auth**: token passed via query param (`/api/events?token=<JWT>`). Cookies are not used by EventSource.
-- **Reconnect/backoff**: client retries with exponential backoff (2s → 4s → 8s up to 15s).
-- **Heartbeat**: server sends `event: heartbeat` when idle (approx every 15s).
-- **Last-Event-ID**: not supported.
-- **Modules emitting events today**:
-  - Quality/QMS (documents, distributions, audits, findings, cars) via `audit_services.log_event`.
-  - Training (events/participants/records/deferrals) via `audit_services.log_event` with training module prefix.
-  - Accounts (admin user create/update/deactivate) via `audit_services.log_event`.
+### Commands run
+- `python -m py_compile backend/amodb/apps/events/router.py backend/amodb/apps/events/tests/test_events_history.py backend/amodb/apps/events/broker.py`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm audit --audit-level=high --json`
+- `cd frontend && npm run build` (runner timeout limitation)
+- `cd frontend && npm run dev -- --host 0.0.0.0 --port 4173`
+
+### Verification steps
+1. Open cockpit: `/maintenance/demo/quality` with `VITE_UI_SHELL_V2=1`; verify focus mode and fixed sidebar behavior.
+2. Open Action Panel from an action queue row (`Act`) and verify evidence section is visible.
+3. Trigger a state change that emits audit events; disconnect/reconnect SSE with `Last-Event-ID`; confirm replayed events arrive in order.
+4. Retry with stale/unknown cursor; confirm `event: reset` and targeted refetch only.
+
+### Screenshots / artifacts
+- `browser:/tmp/codex_browser_invocations/ea7e3e21baeb5f77/artifacts/artifacts/cockpit-focus-mode.png`
+- `browser:/tmp/codex_browser_invocations/ea7e3e21baeb5f77/artifacts/artifacts/action-panel-evidence.png`
+
+### Known issues
+- `npm run build` in this environment does not finish within the runner window during Vite transform; typecheck and tests pass.
+
+### Rollback plan
+1. Revert commit for `backend/amodb/apps/events/router.py` and tests.
+2. Deploy rollback to prior SSE behavior (in-memory replay path).
+3. Re-run events/accounts test targets and frontend typecheck before promoting.
 
 
 ## Changed in this run (2026-02-10)
-### Tasks realtime + invalidation
-- **Files**: `backend/amodb/apps/tasks/services.py`, `frontend/src/components/realtime/RealtimeProvider.tsx`.
-- **Changes**:
-  - Task audit events now use explicit task entity/event semantics (`tasks.task` with actions `CREATED`, `UPDATED`, `STATUS_CHANGED`, `CLOSED`, `ESCALATED`) so SSE event types normalize to `tasks.task.*`.
-  - Realtime client now targets task event invalidations to `tasks`, `my-tasks`, and cockpit aggregate keys (`qms-dashboard`, `dashboard`) with the existing 350ms debounce.
-- **Rollback**: revert task action/entity strings in `tasks/services.py` and revert the additional task invalidation branch in `RealtimeProvider`.
-- **Manual verification**:
-  1. Open cockpit and My Tasks in two tabs for same AMO.
-  2. Update a task status in tab A.
-  3. Confirm tab B task lists and cockpit counts update without hard refresh.
+### Intent + outcome
+- Added a compatibility Alembic migration to fix missing schema columns/tables encountered on older databases so login-context and realtime auth paths can boot without schema failures.
 
-### Action Panel evidence + ack visibility increment
-- **Files**: `frontend/src/components/panels/ActionPanel.tsx`, `frontend/src/services/qms.ts`, `backend/amodb/apps/quality/router.py`, `backend/amodb/apps/quality/models.py`, `backend/amodb/apps/quality/schemas.py`, `backend/amodb/alembic/versions/b1c2d3e4f5a6_add_car_attachment_sha256.py`.
-- **Changes**:
-  - Added authenticated CAR attachment endpoints (list/upload/download/delete) and surfaced them in Action Panel for CAR context.
-  - Added training evidence upload/list/download controls in Action Panel training context.
-  - Added document acknowledgement status list in Action Panel document context.
-  - CAR attachment upload now enforces extension/MIME allowlist and computes SHA-256 recorded in DB (`quality_car_attachments.sha256`).
-- **Rollback**: remove new CAR attachment routes and revert Action Panel evidence section.
-- **Manual verification**:
-  1. Open a CAR quick action panel; upload PDF/PNG evidence and verify it appears in the list and can be downloaded/deleted.
-  2. Open a training quick action panel; upload evidence and verify download action.
-  3. Open a document quick action panel; verify acknowledgement status entries render.
+### Files changed
+- `backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py`
+- `AUDIT_SUMMARY.md`
+- `AUDIT_REPORT.md`
+- `ROUTE_MAP.md`
+- `EVENT_SCHEMA.md`
+- `SECURITY_REPORT.md`
+- `BACKLOG.md`
 
-### Security increments
-- **Files**: `backend/amodb/security.py`, `backend/amodb/apps/accounts/router_public.py`.
-- **Changes**:
-  - SECRET_KEY guard is now explicitly production-gated (`APP_ENV/ENV in {prod,production}`) with fail-fast on missing/default key in production.
-  - Added in-memory auth rate limiting for `/auth/login`, `/auth/password-reset/request`, and `/auth/password-reset/confirm` (window/attempts tunable via `AUTH_RATE_LIMIT_WINDOW_SEC` and `AUTH_RATE_LIMIT_MAX_ATTEMPTS`).
-- **Rollback**: remove `_enforce_auth_rate_limit` calls and restore prior SECRET_KEY block.
-- **Manual verification**:
-  1. In production-like env with missing SECRET_KEY, startup should fail with explicit error.
-  2. Repeatedly call `/auth/login` from same IP beyond threshold and confirm HTTP 429.
+### Commands run
+- `python -m py_compile backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py`
+- `cd backend && alembic -c amodb/alembic.ini heads`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
 
-### Cockpit KPI usefulness
-- **Files**: `frontend/src/dashboards/DashboardCockpit.tsx`.
-- **Changes**:
-  - Added `Document currency` KPI (current vs expired/expiring summary with drilldown).
-  - Added `Audit closures` KPI (closed count with open remainder and drilldown to closed audit filter).
-- **Manual verification**:
-  1. Open cockpit and confirm new KPI cards render with counts/timeframe chips.
-  2. Click each card and verify route includes canonical filter params.
+### Verification
+1. Run `alembic -c amodb/alembic.ini upgrade head`.
+2. Confirm head resolves to `y3z4a5b6c7d8`.
+3. Start backend and hit `/auth/login-context?identifier=...` and `/api/events?token=...`.
+
+### Known issues
+- `GET /api/events` still returns 401 if token is expired/invalid; this is expected auth behavior, not schema failure.
+
+### Screenshots
+- Not applicable (backend migration only).
