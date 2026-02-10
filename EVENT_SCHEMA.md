@@ -1,200 +1,82 @@
-# Realtime Event Schema (Implemented)
+# Event Schema and Realtime Invalidation Map
 
-## Implemented Endpoint
-- **SSE endpoint**: `GET /api/events`
-- **Auth**: `token` query parameter (JWT). Example: `/api/events?token=<JWT>`
-- **Headers**: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`
-- **Heartbeat**: server emits `event: heartbeat` every ~15s when idle
-- **Last-Event-ID**: not supported
-
-**Connection example (frontend)**
-```ts
-const source = new EventSource(`${API_BASE}/api/events?token=${encodeURIComponent(jwt)}`, {
-  withCredentials: true,
-});
-```
-
-## Event Envelope (stable contract)
+## Canonical envelope
 ```json
 {
-  "id": "evt_01HXYZ...",
-  "type": "qms_car.create",
-  "entityType": "qms_car",
-  "entityId": "uuid",
-  "action": "create",
-  "timestamp": "2024-05-16T14:23:41.123Z",
-  "actor": {
-    "userId": "user_123",
-    "name": "A. Auditor",
-    "department": "QUALITY"
-  },
-  "metadata": {
-    "amoId": "amo_001",
-    "module": "quality"
-  }
+  "id": "<audit_event_id>",
+  "type": "<entityType.action lowercase>",
+  "entityType": "accounts.user.command",
+  "entityId": "<entity id>",
+  "action": "DISABLE",
+  "timestamp": "<iso8601>",
+  "actor": {"userId": "<id>"},
+  "metadata": {"amoId": "<tenant>", "module": "..."}
 }
 ```
 
-### Required fields
-- `id`, `type`, `entityType`, `entityId`, `action`, `timestamp`
+## Replay/resume behavior
+- SSE endpoint emits `id:` field for each event.
+- Client reconnect uses `Last-Event-ID` (header) and `lastEventId` (query fallback).
+- Server replay source: `audit_events` table (tenant-scoped).
+- Retention guard: replay cursor older than `REPLAY_RETENTION_DAYS` (7) returns `event: reset`.
+- Replay cap: `REPLAY_MAX_EVENTS` (500) per reconnect.
 
-### Optional fields
-- `actor`, `metadata`
-
-### Allowed `entityType` values (current)
-- `qms_document`, `qms_document_revision`, `qms_document_distribution`
-- `qms_audit`, `qms_audit_schedule`, `qms_finding`, `qms_car`
-- `TrainingEvent`, `TrainingEventParticipant`, `TrainingRecord`, `TrainingDeferralRequest`
-- `accounts.user`
-
-### Allowed `action` values (current)
-- Quality/QMS: `create`, `update`, `publish`, `acknowledge`, `close`, `verify`, `escalate` (varies by entity)
-- Training: `EVENT_*`, `RECORD_*`, `DEFERRAL_*` (see emitted table)
-- Accounts: `CREATED`, `UPDATED`, `DEACTIVATED`
-
-## Emitted today (authoritative)
-| event.type | entityType | action | producer location | when emitted | frontend invalidation keys |
-|---|---|---|---|---|---|
-| `qms_document.create` | `qms_document` | `create` | `backend/amodb/apps/quality/router.py` | document created | `qms-documents` |
-| `qms_document.update` | `qms_document` | `update` | `backend/amodb/apps/quality/router.py` | document updated | `qms-documents` |
-| `qms_document_distribution.create` | `qms_document_distribution` | `create` | `backend/amodb/apps/quality/router.py` | distribution created | `qms-documents`, `qms-distributions` |
-| `qms_document_distribution.ack` | `qms_document_distribution` | `ack` | `backend/amodb/apps/quality/router.py` | acknowledgement recorded | `qms-documents` |
-| `qms_audit.create` | `qms_audit` | `create` | `backend/amodb/apps/quality/router.py` | audit created | `qms-audits` |
-| `qms_audit.update` | `qms_audit` | `update` | `backend/amodb/apps/quality/router.py` | audit updated/closed | `qms-audits` |
-| `qms_car.create` | `qms_car` | `create` | `backend/amodb/apps/quality/router.py` | CAR created | `qms-cars` |
-| `qms_car.update` | `qms_car` | `update` | `backend/amodb/apps/quality/router.py` | CAR updated | `qms-cars` |
-| `training.trainingeventparticipant.event_participant_add` | `TrainingEventParticipant` | `EVENT_PARTICIPANT_ADD` | `backend/amodb/apps/training/router.py` | participant added | `training-events`, `training-status` |
-| `training.trainingeventparticipant.event_participant_update` | `TrainingEventParticipant` | `EVENT_PARTICIPANT_UPDATE` | `backend/amodb/apps/training/router.py` | participant updated | `training-events`, `training-status` |
-| `accounts.user.created` | `accounts.user` | `CREATED` | `backend/amodb/apps/accounts/router_admin.py` | user created | `admin-users`, `user-profile` |
-| `accounts.user.updated` | `accounts.user` | `UPDATED` | `backend/amodb/apps/accounts/router_admin.py` | user updated | `admin-users`, `user-profile` |
-| `accounts.user.deactivated` | `accounts.user` | `DEACTIVATED` | `backend/amodb/apps/accounts/router_admin.py` | user deactivated | `admin-users`, `user-profile` |
-
-## Query invalidation map (frontend)
-- `qms.*` → `qms-dashboard`, `qms-documents`, `qms-audits`, `qms-cars`, `qms-change-requests`
-- `training.*` → `training-assignments`, `training-dashboard`, `training-events`, `training-status`
-- `tasks.*` → `tasks`, `my-tasks`
-- `accounts.*` → `admin-users`, `user-profile`
-- **Debounce**: 350ms batched invalidations (event storm protection)
-
-## Security + scoping
-- **Tenant scoping**: events are filtered by `metadata.amoId` against the user’s effective AMO.
-- **Permission scoping**: user must be active; superuser uses active AMO context.
-- **Redaction**: no PII is redacted yet; `metadata` should avoid sensitive content.
-
-
-## Changed in this run (2026-02-10)
-### Emitted today additions (tasks)
-| event.type | entityType | action | Producer path | Trigger | Frontend invalidation keys |
-|---|---|---|---|---|---|
-| `tasks.task.created` | `tasks.task` | `CREATED` | `backend/amodb/apps/tasks/services.py` | `create_task` | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
-| `tasks.task.updated` | `tasks.task` | `UPDATED` | `backend/amodb/apps/tasks/services.py` | `update_task_details` | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
-| `tasks.task.status_changed` | `tasks.task` | `STATUS_CHANGED` | `backend/amodb/apps/tasks/services.py` | `update_task_status` (non-close transitions) | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
-| `tasks.task.closed` | `tasks.task` | `CLOSED` | `backend/amodb/apps/tasks/services.py` | `update_task_status` to DONE/CANCELLED | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
-| `tasks.task.escalated` | `tasks.task` | `ESCALATED` | `backend/amodb/apps/tasks/services.py` | `escalate_task` | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
-
-Debounce remains **350ms** in `frontend/src/components/realtime/RealtimeProvider.tsx`.
-
-## Changed in this run (2026-02-10)
-- **Files changed:**
-  - `frontend/src/components/realtime/RealtimeProvider.tsx`
-  - `frontend/src/components/realtime/LiveStatusIndicator.tsx`
-
-### UI invalidation dependency mapping update
-| entity_type | action | payload shape | publisher | UI dependents |
+## Event producers and semantics
+| event.type example | entityType | action | Producer path | Trigger |
 |---|---|---|---|---|
-| `qms.*` (type prefix) | any | `{ id, type, entityType, entityId, action, timestamp, actor?, metadata? }` | SSE broker (`/api/events`) | `qms-dashboard`, `qms-documents`, `qms-audits`, `qms-cars`, `qms-change-requests`, `qms-distributions` |
-| `training.*` | any | same envelope | SSE broker (`/api/events`) | `training-assignments`, `training-dashboard`, `training-events`, `training-status` |
-| `tasks.task.*` | any | same envelope | SSE broker (`/api/events`) | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
-| `accounts.*` | any | same envelope | SSE broker (`/api/events`) | `admin-users`, `user-profile` |
+| `accounts.user.command.disable` | `accounts.user.command` | `DISABLE` | `backend/amodb/apps/accounts/router_admin.py` | Admin disables user |
+| `accounts.user.command.enable` | `accounts.user.command` | `ENABLE` | `backend/amodb/apps/accounts/router_admin.py` | Admin enables user |
+| `accounts.user.command.revoke_access` | `accounts.user.command` | `REVOKE_ACCESS` | `backend/amodb/apps/accounts/router_admin.py` | Admin revokes tokens/access |
+| `accounts.user.command.force_password_reset` | `accounts.user.command` | `FORCE_PASSWORD_RESET` | `backend/amodb/apps/accounts/router_admin.py` | Admin forces password reset |
+| `tasks.task.updated` | `tasks.task` | `UPDATED` | `backend/amodb/apps/tasks/services.py` | Task mutation |
+| `qms.car.updated` | `qms.car` | `UPDATED` | QMS service routers | CAR lifecycle updates |
 
-- **Commands run:** `npx tsc -b`
-- **Verification:**
-  1. Trigger event-producing changes in QMS/tasks/accounts modules.
-  2. Confirm targeted query invalidation (no global invalidate).
-  3. Disconnect SSE >45s and verify stale state + manual “Refresh data”.
-- **Known issues:** No Last-Event-ID replay support yet; stale refresh relies on targeted key refetch only.
-- **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
+## Frontend targeted invalidation keys
+| entity/action match | Invalidated keys |
+|---|---|
+| `accounts.user*` and `accounts.user.command*` | `user-profile`, `admin-users`, `qms-dashboard`, `dashboard`, `activity-history` |
+| `tasks.task.*` | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard`, `activity-history` |
+| qms documents/audits/cars/training actions | module-specific query keys + `activity-history` |
+| `event: reset` control signal | targeted refresh allowlist only (no global invalidate) |
 
-## Changed in this run (2026-02-10)
-- **Files changed:**
-  - `backend/amodb/apps/accounts/router_admin.py`
-  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+## Files changed
+- `EVENT_SCHEMA.md`
+- `backend/amodb/apps/events/router.py`
 
-### New accounts user command events
-| event.type | entityType | action | producer path | trigger | frontend invalidation keys |
-|---|---|---|---|---|---|
-| `accounts.user.command.disabled` | `accounts.user.command` | `DISABLED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/disable` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
-| `accounts.user.command.enabled` | `accounts.user.command` | `ENABLED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/enable` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
-| `accounts.user.command.access_revoked` | `accounts.user.command` | `ACCESS_REVOKED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/revoke-access` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
-| `accounts.user.command.password_reset_forced` | `accounts.user.command` | `PASSWORD_RESET_FORCED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/force-password-reset` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
-| `accounts.user.command.notified` | `accounts.user.command` | `NOTIFIED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/notify` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
-| `accounts.user.command.review_scheduled` | `accounts.user.command` | `REVIEW_SCHEDULED` | `backend/amodb/apps/accounts/router_admin.py` | `POST /accounts/admin/users/:id/commands/schedule-review` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` |
-
-### Commands run
-- `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
-
-### Verification
-1. Trigger each command endpoint.
-2. Confirm `audit_events` row created with entity type `accounts.user.command`.
-3. Confirm frontend invalidates targeted keys only.
-
-### Known issues
-- No Last-Event-ID replay yet.
-
-### Screenshots
-- `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
-
-## Changed in this run (2026-02-10)
-- **Files changed:**
-  - `frontend/src/components/realtime/RealtimeProvider.tsx`
-  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
-
-### Invalidation mapping adjustments
-| event prefix | invalidation keys | note |
-|---|---|---|
-| `accounts.*` | `admin-users`, `user-profile`, `qms-dashboard`, `dashboard` | ensures cockpit aggregates refresh on user-state command events |
-
-### Feed/stream handling update
-- Client activity ring buffer size increased to **1500** events to support virtualized cockpit feed scenarios.
-
-### Commands run
+## Commands run
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
 - `cd frontend && npx tsc -b`
 
-### Verification steps
-1. Generate repeated account command events.
-2. Confirm activity feed remains responsive when event list grows.
-3. Confirm only targeted keys are invalidated.
+## Verification steps
+1. Trigger user command action and inspect SSE event payload includes `id` + canonical envelope fields.
+2. Reconnect with stale cursor and confirm `event: reset` is emitted.
+3. Confirm UI only invalidates mapped keys.
 
-### Known issues
-- No Last-Event-ID replay; reconnects depend on fresh events + targeted refetch.
+## Known issues
+- Replay relies on audit retention policy; very old cursors return reset as designed.
 
-### Screenshots/artifacts
-- `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
+## Screenshots
+- `browser:/tmp/codex_browser_invocations/ea7e3e21baeb5f77/artifacts/artifacts/cockpit-focus-mode.png`
 
 
 ## Changed in this run (2026-02-10)
-- **Files changed:**
-  - `backend/amodb/apps/events/broker.py`
-  - `backend/amodb/apps/events/router.py`
-  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+### Event schema impact
+- No event envelope changes.
+- Migration ensures legacy DBs still support audit-event JSON columns required by event serialization and history read paths.
 
-### SSE protocol updates
-| Event | Semantics | Producer path | Trigger | Frontend handling |
-|---|---|---|---|---|
-| `reset` | Replay cursor unavailable/too old; client should targeted-refetch | `backend/amodb/apps/events/router.py` | reconnect with stale `Last-Event-ID` | invalidate `activity-history`, `dashboard`, `qms-dashboard` only |
-
-### Envelope/resume behavior
-- Stream now emits `id: <event.id>` for each event frame.
-- Server reads `Last-Event-ID` header (and `lastEventId` query fallback) and replays buffered events when available.
-- Replay window currently bounded by in-memory broker history.
+### Files changed
+- `backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py`
+- `EVENT_SCHEMA.md`
 
 ### Commands run
-- `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
+- `cd backend && alembic -c amodb/alembic.ini heads`
 
-### Verification steps
-1. Publish events and reconnect with previous event id.
-2. Validate replay events arrive before live stream continues.
-3. Reconnect with unknown id and verify `reset` event emitted.
+### Verification
+1. Apply migration and emit any audit event.
+2. Confirm `/api/events` and `/api/events/history` still return canonical envelope fields.
 
 ### Known issues
-- Replay history is process-memory scoped.
+- None specific to event schema changes in this run.
+
+### Screenshots
+- Not applicable.

@@ -1,247 +1,73 @@
-## Known issues / Remaining priorities (authoritative)
-- ⏳ P1: Durable SSE replay window across process restarts (currently in-memory broker history).
-- ⏳ P1: Department-aware activity timeline views/pinning and richer filters.
-- ⏳ P2: Additional cockpit chart interaction coverage audit and perf instrumentation.
+# BACKLOG (Authoritative)
 
-# QMS/MPM Backlog (Prioritized)
+## Known issues / Remaining priorities
+- ⏳ **P1** Durable replay archival beyond audit retention (7-day replay window is implemented; long-term replay store optional).
+- ⏳ **P1** CI build runtime for frontend production bundle occasionally exceeds runner window.
+- ⏳ **P2** Department-level activity feed pinning/ranking and additional explicit detail routes for low-frequency entities.
 
-> This backlog is evidence-based from AUDIT_REPORT.md and aligned to the required QMS/MPM scope. Acceptance criteria are designed to be testable and incremental.
+## P0
+- ✅ User command center actions (disable/enable/revoke/reset/notify/schedule) end-to-end with RBAC/audit/SSE.
+- ✅ Deterministic user drilldowns to `/maintenance/:amoCode/admin/users/:userId` from cockpit/list contexts.
 
-## P0 — Compliance-Critical
+## P1
+- ✅ SSE Last-Event-ID replay with reset fallback and targeted refetch semantics.
+- ✅ Server-backed activity history with cursor pagination and filters.
+- ✅ Activity feed virtualization and cockpit interactivity layer behind feature flags.
+- ⏳ Add persistent archival replay beyond configured retention.
 
-### [x] 1) Audit Log Foundation (immutable event log)
-**Goal**: Provide immutable event logging across QMS/MPM records.
-
-**Acceptance Criteria**
-- Add a shared audit log writer that appends to `audit_events` with before/after values and correlation IDs.
-- All changes to: QMS documents, revisions, distributions; audits; findings; CAPA/CAR; training records; FRACAS cases/actions; inventory movements are logged.
-- Audit log is read-only in the UI; no delete/update endpoints.
-- Tests: unit tests for log creation; integration tests verifying audit events on key flows.
-
-### [x] 2) Workflow Engine (generic state + transition guards)
-**Goal**: Enforce lifecycle rules and required-field gating.
-
-**Acceptance Criteria**
-- A shared workflow configuration model with allowed transitions + guard checks.
-- For audits, findings, CAPA, FRACAS, training events: transitions are blocked if required fields are missing (evidence, verification, approvals).
-- A clear error response for invalid transitions.
-- Tests: unit tests for transition matrix and guard behavior.
-
-### [x] 3) Task Engine (due dates + escalation)
-**Goal**: Centralized tasks with due dates and escalation.
-
-**Acceptance Criteria**
-- Task model (owner, status, due date, escalation thresholds, record links).
-- Auto-task creation on audit/finding/CAPA/investigation creation.
-- Overdue escalation rules (notify owner → supervisor → QA).
-- Tests: task generation and escalation logic.
-
-### [x] 4) Notification Service + Email Logging
-**Goal**: Notifications with email logs for compliance evidence.
-
-**Acceptance Criteria**
-- Outbound email service abstraction + retry handling.
-- Email log table (recipient, subject, template, status, error, timestamps).
-- Integration with task engine to send reminders.
-- Tests: notification triggers and logging.
-
-### [x] 5) Evidence Pack Export (PDF/ZIP)
-**Goal**: Evidence packs per record type.
-
-**Acceptance Criteria**
-- Export service that gathers timeline/history, approvals, attachments, linked records into a ZIP/PDF bundle.
-- Evidence pack endpoints for audits, CAPA/CAR, FRACAS cases, training records.
-- Tests: export includes required evidence and audit log timeline.
-
-### 6) Calibration Register + Concessions
-**Goal**: Provide calibration register and concession workflows.
-
-**Acceptance Criteria**
-- Calibration assets model + due dates + calibration history.
-- “Calibration due list” endpoint and export.
-- Concessions captured with approvals and audit trail.
-- Tests: due list generation and permissions.
-
-### 7) Management Review + Action Tracking
-**Goal**: Management review records, actions, and evidence.
-
-**Acceptance Criteria**
-- Management review meeting model with agenda, attendees, decisions, actions.
-- Action tracking integrates with task engine.
-- Evidence pack export for management reviews.
-- Tests: action creation and audit log capture.
-
----
-
-## P1 — High-Impact UX Automation (Single-Click)
-
-### 8) One-click “Create CAPA from Finding”
-**Acceptance Criteria**
-- Button on finding view that creates a CAPA, links finding, assigns owner, creates tasks, and opens CAPA form prefilled.
-- Idempotent backend action (same finding cannot create duplicates).
-- Audit log records the action.
-
-### 9) One-click “Close Finding” (evidence + verification gating)
-**Acceptance Criteria**
-- Close action only enabled if evidence uploaded + verification completed.
-- Audit log records closure.
-
-### 10) One-click “Publish Revision + Notify Distribution”
-**Acceptance Criteria**
-- Locks revision, sets document current version, marks prior revision superseded, sends distribution requests, logs notifications.
-- Audit log and email log entries.
-
-### 11) One-click “Start Investigation” (from occurrence/FRACAS)
-**Acceptance Criteria**
-- Creates investigation task with scope/objective template and reminders.
-- Links to FRACAS case.
-
-### 12) One-click “Generate Monthly Occurrence Review Pack”
-**Acceptance Criteria**
-- Generates reliability trend report + action list + evidence pack.
-- Stores export with audit trail and notification.
-
-### 13) One-click “Generate Calibration Due List + Send”
-**Acceptance Criteria**
-- Generates due list; sends distribution; logs email.
-
-### 14) One-click “Run Shelf-life Control”
-**Acceptance Criteria**
-- Generates monthly expiry report; quarantines expiring items; creates procurement tasks.
-- Audit log captures actions.
-
----
-
-## P2 — Coverage Expansion
-
-### 15) Supplier & Outsourcing Controls
-**Acceptance Criteria**
-- Supplier register with approval status, audit dates, and risk scoring.
-- Outsourced function register + oversight tasks.
-
-### 16) Exemptions/Deviations/Concessions
-**Acceptance Criteria**
-- Record type with lifecycle, approvals, and audit trail.
-- Evidence pack export.
-
-### 17) Records Retention Enforcement
-**Acceptance Criteria**
-- Retention schedules applied to QMS records with automated archival/purge workflows.
-- Audit log entries for retention events.
-
+## P2
+- ⏳ Expanded chart drilldown density by department config.
+- ⏳ Additional evidence workflows in Action Panel for remaining modules.
 
 ## Changed in this run (2026-02-10)
-- **Task realtime gap**: Increment completed toward P0/P1 operational loop.
-  - Evidence: task lifecycle actions now emit normalized SSE-compatible events via audit (`backend/amodb/apps/tasks/services.py`), and frontend invalidates tasks/cockpit aggregate keys (`frontend/src/components/realtime/RealtimeProvider.tsx`).
-- **Evidence upload hardening**: partial progress on compliance gating.
-  - Evidence: CAR attachment hardening + Action Panel evidence controls (`backend/amodb/apps/quality/router.py`, `frontend/src/components/panels/ActionPanel.tsx`).
-- **Security controls**: partial closure of top gaps.
-  - Evidence: production secret guard + auth endpoint rate limiting (`backend/amodb/security.py`, `backend/amodb/apps/accounts/router_public.py`).
-
-## Changed in this run (2026-02-10)
-- **Files changed:**
-  - `frontend/src/components/Layout/DepartmentLayout.tsx`
-  - `frontend/src/components/realtime/RealtimeProvider.tsx`
-  - `frontend/src/components/realtime/LiveStatusIndicator.tsx`
-  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
-  - `frontend/src/dashboards/DashboardCockpit.tsx`
-- **P0 (active):**
-  - Implement backend user command actions (disable/enable/revoke/reset password/notify/schedule) with RBAC + audit + SSE emit.
-  - Acceptance: every cockpit user drilldown action available and realtime-updating.
-- **P1 (active):**
-  - Virtualize cockpit activity feed and add targeted entity drilldowns for remaining entity types.
-  - Acceptance: feed supports >1000 rows with smooth scroll and deterministic routing.
-- **P1 (new):**
-  - Add cursor halo/magnetic effect with reduced-motion and touch-device guards.
-  - Acceptance: 60fps on desktop, auto-disabled on reduced-motion/touch.
-- **P2 (moved):**
-  - Expand chart set (2–4 per cockpit) with lazy-load + idle prefetch.
-- **Commands run:** `npx tsc -b`
-- **Verification:** cockpit focus mode + realtime stale refresh + KPI drilldowns.
-- **Known issues:** activity feed virtualization pending.
-- **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
-
-## Changed in this run (2026-02-10)
-- **Files changed:**
-  - `backend/amodb/apps/accounts/router_admin.py`
-  - `backend/amodb/apps/accounts/models.py`
-  - `backend/amodb/security.py`
-  - `frontend/src/pages/AdminUserDetailPage.tsx`
-  - `frontend/src/services/adminUsers.ts`
-
-### P0 status update
-- ✅ **Completed:** User-management command actions end-to-end (disable/enable/revoke/reset/notify/schedule) with audit + SSE event emission and frontend command center wiring.
-  - Evidence: command endpoints + tests (`backend/amodb/apps/accounts/tests/test_user_commands.py`) and command center UI.
-- ✅ **Completed:** Deterministic user drilldown command workflow at `/maintenance/:amoCode/admin/users/:userId`.
-
-### Remaining priorities
-- **P1:** Activity feed virtualization and entity-specific drilldowns for all activity item types.
-- **P1:** Cursor halo/magnetic layer (feature-flagged) with reduced-motion + touch guards.
-- **P2:** Additional chart lazy-load + idle prefetch optimizations.
+### Files changed
+- `backend/amodb/apps/events/router.py`
+- `backend/amodb/apps/events/tests/test_events_history.py`
+- `BACKLOG.md`
+- `AUDIT_SUMMARY.md`
+- `AUDIT_REPORT.md`
+- `ROUTE_MAP.md`
+- `EVENT_SCHEMA.md`
+- `SECURITY_REPORT.md`
 
 ### Commands run
-- `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
+- `python -m py_compile backend/amodb/apps/events/router.py backend/amodb/apps/events/tests/test_events_history.py backend/amodb/apps/events/broker.py`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
 - `cd frontend && npx tsc -b`
-
-### Verification
-1. Open Admin User Detail route.
-2. Execute each command and confirm status updates.
-3. Confirm command-created review task appears in task workflows.
-
-### Known issues
-- Global per-token blacklist not implemented; revocation is timestamp-based at user level.
-
-### Screenshots
-- `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
-
-## Changed in this run (2026-02-10)
-- **Files changed:**
-  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
-  - `frontend/src/styles/components/dashboard-cockpit.css`
-  - `frontend/src/dashboards/DashboardCockpit.tsx`
-  - `frontend/src/components/realtime/RealtimeProvider.tsx`
-  - `frontend/src/utils/featureFlags.ts`
-
-### Status movement
-- ✅ **P1 completed:** Activity feed virtualization for cockpit with high-row support and keyboard-focusable row actions.
-- ✅ **P1 completed (guarded):** Cursor halo/magnetic hover cockpit layer behind `VITE_UI_CURSOR_LAYER` with reduced-motion/touch auto-disable.
-- ✅ **P1 completed:** Lazy-loaded chart rendering path with idle prefetch.
-- ⏳ **P1 remaining:** SSE replay / Last-Event-ID support.
-- ⏳ **P2 remaining:** server-backed activity feed persistence/pagination endpoint.
-
-### Commands run
 - `cd frontend && npm audit --audit-level=high --json`
-- `cd frontend && npx tsc -b`
 - `cd frontend && npm run build`
 
 ### Verification steps
-1. Enable `VITE_UI_CURSOR_LAYER=1` and validate cockpit pointer interactions.
-2. Validate activity feed scroll at high event counts.
-3. Confirm chart cards still route via deterministic drilldowns.
+1. Validate reconnect replay from `Last-Event-ID` after short disconnect.
+2. Validate reset behavior for stale cursor.
+3. Validate cockpit/action-panel screenshots still represent current UI.
 
 ### Known issues
-- Full vite bundle completion remains environment-limited (timeout).
+- Build command may time out in constrained runner while Vite transforms large module graph.
 
-### Screenshots/artifacts
-- `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
+### Screenshots
+- `browser:/tmp/codex_browser_invocations/ea7e3e21baeb5f77/artifacts/artifacts/cockpit-focus-mode.png`
+- `browser:/tmp/codex_browser_invocations/ea7e3e21baeb5f77/artifacts/artifacts/action-panel-evidence.png`
 
 
-## Changed in this run (2026-02-10)
-- **Files changed:**
-  - `backend/amodb/apps/events/broker.py`
-  - `backend/amodb/apps/events/router.py`
-  - `backend/amodb/apps/events/tests/test_events_history.py`
-  - `frontend/src/components/realtime/RealtimeProvider.tsx`
-  - `frontend/src/services/events.ts`
-  - `frontend/src/dashboards/DashboardCockpit.tsx`
-- **Status updates:**
-  - ✅ SSE Last-Event-ID replay/resume implemented (bounded memory window).
-  - ✅ Server-backed activity feed pagination endpoint implemented and consumed by cockpit.
-  - ⏳ Durable replay persistence remains open.
-- **Commands run:**
-  - `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
-- **Verification steps:**
-  1. Validate replay behavior with reconnect.
-  2. Validate feed pagination endpoint returns cursor + non-overlapping pages.
-- **Screenshots/artifacts:**
-  - `browser:/tmp/codex_browser_invocations/49e5689b10ac2749/artifacts/artifacts/cockpit-sse-history-phase.png`
+## Status update (2026-02-10)
+- ✅ Added compatibility migration for older DBs that were missing required auth/realtime columns.
+- ⏳ Keep monitoring for any additional environment-specific schema drift.
+
+### Files changed
+- `backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py`
+- `BACKLOG.md`
+
+### Commands run
+- `cd backend && alembic -c amodb/alembic.ini heads`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py amodb/apps/accounts/tests/test_user_commands.py -q`
+
+### Verification
+1. Upgrade to head and restart backend.
+2. Verify login-context no longer throws schema initialization error.
+
+### Known issues
+- None new beyond existing build/runtime constraints.
+
+### Screenshots
+- Not applicable.

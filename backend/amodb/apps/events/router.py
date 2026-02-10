@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -13,13 +13,32 @@ from pydantic import BaseModel
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from amodb.apps.audit import models as audit_models
 from amodb.apps.accounts import models as account_models
+from amodb.apps.audit import models as audit_models
 from amodb.database import get_db
 from amodb.security import JWT_ALGORITHM, SECRET_KEY, get_user_by_id
-from .broker import broker, format_sse, keepalive_message
+from .broker import EventEnvelope, broker, format_sse, keepalive_message
 
 router = APIRouter(prefix="/api", tags=["events"])
+
+REPLAY_RETENTION_DAYS = 7
+REPLAY_MAX_EVENTS = 500
+
+
+class ActivityEventRead(BaseModel):
+    id: str
+    type: str
+    entityType: str
+    entityId: str
+    action: str
+    timestamp: str
+    actor: Optional[dict] = None
+    metadata: dict = {}
+
+
+class ActivityHistoryResponse(BaseModel):
+    items: list[ActivityEventRead]
+    next_cursor: Optional[str] = None
 
 
 class ActivityEventRead(BaseModel):
@@ -99,35 +118,92 @@ def _event_to_row(event: audit_models.AuditEvent) -> ActivityEventRead:
     )
 
 
+def _audit_row_to_envelope(event: audit_models.AuditEvent) -> EventEnvelope:
+    row = _event_to_row(event)
+    return EventEnvelope(
+        id=row.id,
+        type=row.type,
+        entityType=row.entityType,
+        entityId=row.entityId,
+        action=row.action,
+        timestamp=row.timestamp,
+        actor=row.actor,
+        metadata=row.metadata,
+    )
+
+
+def _replay_events_since(
+    db: Session,
+    *,
+    amo_id: str,
+    last_event_id: str,
+) -> tuple[list[EventEnvelope], bool]:
+    anchor = (
+        db.query(audit_models.AuditEvent)
+        .filter(
+            audit_models.AuditEvent.amo_id == amo_id,
+            audit_models.AuditEvent.id == last_event_id,
+        )
+        .first()
+    )
+    if not anchor:
+        return [], True
+
+    anchor_ts = anchor.occurred_at or anchor.created_at
+    replay_threshold = datetime.now(timezone.utc) - timedelta(days=REPLAY_RETENTION_DAYS)
+    if anchor_ts < replay_threshold:
+        return [], True
+
+    rows = (
+        db.query(audit_models.AuditEvent)
+        .filter(
+            audit_models.AuditEvent.amo_id == amo_id,
+            or_(
+                audit_models.AuditEvent.occurred_at > anchor_ts,
+                and_(audit_models.AuditEvent.occurred_at == anchor_ts, audit_models.AuditEvent.id > anchor.id),
+            ),
+        )
+        .order_by(audit_models.AuditEvent.occurred_at.asc(), audit_models.AuditEvent.id.asc())
+        .limit(REPLAY_MAX_EVENTS)
+        .all()
+    )
+    return [_audit_row_to_envelope(row) for row in rows], False
+
+
 async def _event_generator(
     request: Request,
     user: account_models.User,
+    db: Session,
 ) -> AsyncGenerator[str, None]:
     q = broker.subscribe()
     try:
-      last_event_id = request.headers.get("last-event-id") or request.query_params.get("lastEventId")
-      effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
-      if last_event_id:
-          replay, requires_reset = broker.replay_since(last_event_id=last_event_id, amo_id=str(effective_amo_id))
-          if requires_reset:
-              yield format_sse(
-                  json.dumps({"type": "reset", "reason": "last_event_id_too_old", "lastEventId": last_event_id}),
-                  event="reset",
-              )
-          else:
-              for event in replay:
-                  yield format_sse(event.to_json(), event=event.type, event_id=event.id)
-      while True:
-          if await request.is_disconnected():
-              break
-          try:
-              event = await asyncio.to_thread(q.get, True, 15)
-              amo_id = event.metadata.get("amoId") if isinstance(event.metadata, dict) else None
-              if amo_id and str(amo_id) != str(effective_amo_id):
-                  continue
-              yield format_sse(event.to_json(), event=event.type, event_id=event.id)
-          except queue.Empty:
-              yield keepalive_message()
+        last_event_id = request.headers.get("last-event-id") or request.query_params.get("lastEventId")
+        effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
+        if last_event_id:
+            replay, requires_reset = _replay_events_since(
+                db,
+                amo_id=str(effective_amo_id),
+                last_event_id=last_event_id,
+            )
+            if requires_reset:
+                yield format_sse(
+                    json.dumps({"type": "reset", "reason": "last_event_id_out_of_window", "lastEventId": last_event_id}),
+                    event="reset",
+                )
+            else:
+                for event in replay:
+                    yield format_sse(event.to_json(), event=event.type, event_id=event.id)
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                event = await asyncio.to_thread(q.get, True, 15)
+                amo_id = event.metadata.get("amoId") if isinstance(event.metadata, dict) else None
+                if amo_id and str(amo_id) != str(effective_amo_id):
+                    continue
+                yield format_sse(event.to_json(), event=event.type, event_id=event.id)
+            except queue.Empty:
+                yield keepalive_message()
     finally:
         broker.unsubscribe(q)
 
@@ -135,10 +211,11 @@ async def _event_generator(
 @router.get("/events")
 async def stream_events(
     request: Request,
+    db: Session = Depends(get_db),
     user: account_models.User = Depends(get_current_active_user_from_query),
 ) -> StreamingResponse:
     return StreamingResponse(
-        _event_generator(request, user),
+        _event_generator(request, user, db),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
