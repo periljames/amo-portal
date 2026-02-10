@@ -351,7 +351,23 @@ export interface QMSCockpitSnapshotOut {
   findings_overdue: number;
   findings_open_total: number;
   documents_active: number;
+  documents_draft: number;
   documents_obsolete: number;
+  change_requests_open: number;
+  cars_open_total: number;
+  cars_overdue: number;
+  training_records_expiring_30d: number;
+  training_records_expired: number;
+  training_records_unverified: number;
+  training_deferrals_pending: number;
+  suppliers_active: number;
+  suppliers_inactive: number;
+  audit_closure_trend: {
+    period_start: string;
+    period_end: string;
+    closed_count: number;
+    audit_ids: string[];
+  }[];
   action_queue: QMSCockpitActionItemOut[];
 }
 
