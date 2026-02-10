@@ -147,3 +147,46 @@
 ### Known issues / rollback
 - Production build command still times out in this runner; local/prod CI should run with longer execution window.
 - Rollback: revert migrations `z1y2x3w4v5u6` and `y3z4a5b6c7d8` + router/events changes, then rerun test suite.
+
+
+## Changed in this run (2026-02-10)
+### User-visible changes
+- Cockpit now boots from one compact snapshot query (`qms-cockpit-snapshot`) and a 50-row history page, removing three eager list queries at first paint.
+
+### Backend/API changes
+- Added `GET /quality/qms/cockpit-snapshot` for small KPI + action queue payloads.
+
+### Migrations
+- No new schema changes this run, therefore no new Alembic revision created.
+- `alembic heads` remains single head: `z1y2x3w4v5u6`.
+
+
+## Changed in this run (2026-02-10)
+### Alembic reliability
+- Hardened migration `b1c2d3e4f5a6` with table/column/index existence guards to prevent branch-order crashes (`quality_car_attachments` absent).
+- Added migration `s9t8u7v6w5x4` to guarantee `quality_car_attachments.sha256` and its index exist at head.
+- Current head updated to `s9t8u7v6w5x4`.
+
+
+## Changed in this run (2026-02-10)
+- Fixed auth/password-reset recursion bug in public router (`_client_ip` no longer re-enters rate-limit function).
+- Added regression tests for helper behavior and 429 threshold enforcement.
+
+
+## Changed in this run (2026-02-10)
+### Current state snapshot updates
+- Cockpit is now **Quality-only**.
+- Non-quality departments currently render scaffold placeholders when `VITE_UI_SHELL_V2` is enabled:
+  - planning, production, reliability, safety, stores, engineering, workshops.
+- QMS route guard enforced: non-quality `/qms` visits redirect to department root with toast guidance.
+
+
+## Changed in this run (2026-02-10)
+- Enforced dedicated department landing for normal users at login and runtime navigation.
+- Updated admin/superuser login landing to `/admin/overview`.
+- Non-admin department visibility now restricted to assigned department only.
+
+
+## Changed in this run (2026-02-10)
+- Fixed finance default seed compatibility for PostgreSQL enum typing during module enable.
+- Added idempotency regression test for `ensure_finance_defaults()` seeding path.

@@ -159,6 +159,10 @@
   position: relative;
 }
 
+.focus-launcher--topbar {
+  margin-right: var(--s-2);
+}
+
 .focus-launcher__panel {
   position: absolute;
   top: calc(100% + 8px);
@@ -170,6 +174,11 @@
   padding: var(--s-2);
   box-shadow: var(--sh-1);
   z-index: 50;
+}
+
+.focus-launcher__panel--left {
+  right: auto;
+  left: 0;
 }
 
 .focus-launcher__panel .app-shell__sidebar {

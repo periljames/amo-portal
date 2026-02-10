@@ -97,3 +97,43 @@
 
 ### Known issues
 - No path-level regressions observed in smoke checks.
+
+
+## Changed in this run (2026-02-10)
+- Added route: `GET /quality/qms/cockpit-snapshot` (auth/module-gated via existing quality router dependencies).
+- Cockpit frontend data-flow now resolves deterministically to:
+  1. `GET /quality/qms/cockpit-snapshot`
+  2. `GET /api/events/history?limit=50`
+  3. `GET /api/events` SSE stream
+
+
+## Changed in this run (2026-02-10)
+- No route changes in this run.
+- Backend changes are migration-only (Alembic stability and schema reconciliation).
+
+
+## Changed in this run (2026-02-10)
+- No route shape changes.
+- Runtime behavior of existing password reset confirm path stabilized (no recursion on auth rate limiting).
+
+
+## Changed in this run (2026-02-10)
+### Route behavior notes (no path changes)
+- `/maintenance/:amoCode/:department/qms` is restricted to `department == quality`.
+- For non-quality departments, route behavior redirects to `/maintenance/:amoCode/:department` and shows toast: `QMS cockpit is under Quality & Compliance.`
+- `/maintenance/:amoCode/:department` now renders:
+  - Quality: QMS cockpit
+  - Other departments: landing scaffold placeholder
+
+
+## Changed in this run (2026-02-10)
+### Behavior notes (path-stable)
+- `/login` landing behavior:
+  - non-admin users -> `/maintenance/:amoCode/:assignedDepartment`
+  - superuser/AMO admin -> `/maintenance/:amoCode/admin/overview`
+- Non-admin attempts to open other departments are corrected to assigned department route.
+
+
+## Changed in this run (2026-02-10)
+- No route path or behavior contract changes in this run.
+- Fix is backend finance seeding reliability during module enable.

@@ -477,7 +477,7 @@ const DepartmentLayout: React.FC<Props> = ({
     );
   }, [activeDepartment, amoCode, location.pathname]);
 
-  const focusMode = uiShellV2 && isCockpitRoute;
+  const focusMode = uiShellV2 && activeDepartment === "quality" && isCockpitRoute;
 
 
   useEffect(() => {
@@ -1404,6 +1404,25 @@ const DepartmentLayout: React.FC<Props> = ({
           const header = (
             <header className="app-shell__topbar">
               <div className="app-shell__topbar-title">
+                {uiShellV2 && (
+                  <div
+                    className="focus-launcher focus-launcher--topbar"
+                    onBlur={() => setFocusMenuOpen(false)}
+                    tabIndex={-1}
+                  >
+                    <button
+                      type="button"
+                      className="focus-launcher__toggle"
+                      onClick={() => setFocusMenuOpen((prev) => !prev)}
+                      aria-label="Open modules and departments"
+                    >
+                      Modules
+                    </button>
+                    {focusMenuOpen && (
+                      <div className="focus-launcher__panel focus-launcher__panel--left">{focusSidebar}</div>
+                    )}
+                  </div>
+                )}
                 <BrandHeader variant="topbar" />
                 <div className="app-shell__topbar-context">
                   <div className="app-shell__topbar-heading">{deptLabel}</div>
@@ -1415,25 +1434,7 @@ const DepartmentLayout: React.FC<Props> = ({
 
               <div className="app-shell__topbar-actions">
                 {uiShellV2 && <LiveStatusIndicator />}
-                {focusMode && (
-                  <div
-                    className="focus-launcher"
-                    onBlur={() => setFocusMenuOpen(false)}
-                    tabIndex={-1}
-                  >
-                    <button
-                      type="button"
-                      className="focus-launcher__toggle"
-                      onClick={() => setFocusMenuOpen((prev) => !prev)}
-                    >
-                      Modules
-                    </button>
-                    <span className="focus-launcher__hint">Ctrl/⌘ + \</span>
-                    {focusMenuOpen && (
-                      <div className="focus-launcher__panel">{focusSidebar}</div>
-                    )}
-                  </div>
-                )}
+                {focusMode && <span className="focus-launcher__hint">Ctrl/⌘ + \</span>}
                 {trialChipVisible && (
                   <div ref={trialMenuRef} style={{ position: "relative" }}>
                     <button

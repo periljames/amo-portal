@@ -240,3 +240,28 @@
     display: none;
   }
 }
+
+.department-landing {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.department-landing__card {
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+  padding: var(--s-5);
+}
+
+.department-landing__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.3rem;
+}
+
+.department-landing__subtitle {
+  margin: var(--s-2) 0 0;
+  color: var(--text-secondary);
+}

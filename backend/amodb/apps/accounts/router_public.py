@@ -62,7 +62,6 @@ RESET_LINK_BASE_URL = (
 
 
 def _client_ip(request: Request) -> str | None:
-    _enforce_auth_rate_limit(request, "password-reset-confirm")
     try:
         return request.client.host if request.client else None
     except Exception:
