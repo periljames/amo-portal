@@ -18,6 +18,8 @@ from amodb.database import get_db
 from amodb.apps.audit import services as audit_services
 from amodb.apps.audit import models as audit_models
 from amodb.apps.audit import schemas as audit_schemas
+from amodb.apps.notifications import service as notification_service
+from amodb.apps.tasks import services as task_services
 from amodb.security import get_current_active_user, require_admin, require_roles
 from . import models, schemas, services
 
@@ -34,6 +36,41 @@ AIRCRAFT_DOC_UPLOAD_DIR = Path(
 AIRCRAFT_DOC_AMO_SUBDIR = "aircraft"
 
 ALLOWED_PLATFORM_LOGO_EXTS = {".png", ".jpg", ".jpeg", ".svg"}
+
+
+
+def _get_managed_user_or_404(db: Session, *, current_user: models.User, user_id: str) -> models.User:
+    query = db.query(models.User).filter(models.User.id == user_id)
+    if not current_user.is_superuser:
+        query = query.filter(models.User.amo_id == current_user.amo_id)
+    user = query.first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found or not in your AMO.",
+        )
+    return user
+
+
+def _emit_user_command_event(
+    db: Session,
+    *,
+    actor_user_id: str,
+    user: models.User,
+    action: str,
+    after: Optional[dict] = None,
+    metadata: Optional[dict] = None,
+) -> None:
+    audit_services.log_event(
+        db,
+        amo_id=user.amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="accounts.user.command",
+        entity_id=str(user.id),
+        action=action,
+        after=after or {},
+        metadata={"module": "accounts", **(metadata or {})},
+    )
 
 
 def _ensure_amo_storage_dirs(amo_id: str) -> None:
@@ -916,6 +953,19 @@ def list_users_admin(
     return q.all()
 
 
+@router.get(
+    "/users/{user_id}",
+    response_model=schemas.UserRead,
+    summary="Get one user (scoped to current AMO for admins; any AMO for superuser)",
+)
+def get_user_admin(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    return _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+
+
 @router.put(
     "/users/{user_id}",
     response_model=schemas.UserRead,
@@ -993,16 +1043,7 @@ def deactivate_user_admin(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    q = db.query(models.User).filter(models.User.id == user_id)
-    if not current_user.is_superuser:
-        q = q.filter(models.User.amo_id == current_user.amo_id)
-
-    user = q.first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found or not in your AMO.",
-        )
+    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
 
     user.is_active = False
     user.deactivated_at = datetime.now(timezone.utc)
@@ -1020,6 +1061,156 @@ def deactivate_user_admin(
         metadata={"module": "accounts"},
     )
     return
+
+
+@router.post("/users/{user_id}/commands/disable", response_model=schemas.UserCommandResult)
+def command_disable_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    user.is_active = False
+    user.deactivated_at = datetime.now(timezone.utc)
+    user.deactivated_reason = "disabled_by_admin_command"
+    db.add(user)
+    _emit_user_command_event(
+        db,
+        actor_user_id=str(current_user.id),
+        user=user,
+        action="DISABLED",
+        after={"is_active": False},
+    )
+    db.commit()
+    return schemas.UserCommandResult(user_id=user.id, command="disable", status="ok", effective_at=datetime.now(timezone.utc))
+
+
+@router.post("/users/{user_id}/commands/enable", response_model=schemas.UserCommandResult)
+def command_enable_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    user.is_active = True
+    user.deactivated_at = None
+    user.deactivated_reason = None
+    db.add(user)
+    _emit_user_command_event(
+        db,
+        actor_user_id=str(current_user.id),
+        user=user,
+        action="ENABLED",
+        after={"is_active": True},
+    )
+    db.commit()
+    return schemas.UserCommandResult(user_id=user.id, command="enable", status="ok", effective_at=datetime.now(timezone.utc))
+
+
+@router.post("/users/{user_id}/commands/revoke-access", response_model=schemas.UserCommandResult)
+def command_revoke_access(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    now = datetime.now(timezone.utc)
+    user.token_revoked_at = now
+    db.add(user)
+    _emit_user_command_event(
+        db,
+        actor_user_id=str(current_user.id),
+        user=user,
+        action="ACCESS_REVOKED",
+        after={"token_revoked_at": now.isoformat()},
+    )
+    db.commit()
+    return schemas.UserCommandResult(user_id=user.id, command="revoke-access", status="ok", effective_at=now)
+
+
+@router.post("/users/{user_id}/commands/force-password-reset", response_model=schemas.UserCommandResult)
+def command_force_password_reset(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    now = datetime.now(timezone.utc)
+    user.must_change_password = True
+    user.token_revoked_at = now
+    db.add(user)
+    _emit_user_command_event(
+        db,
+        actor_user_id=str(current_user.id),
+        user=user,
+        action="PASSWORD_RESET_FORCED",
+        after={"must_change_password": True, "token_revoked_at": now.isoformat()},
+    )
+    db.commit()
+    return schemas.UserCommandResult(user_id=user.id, command="force-password-reset", status="ok", effective_at=now)
+
+
+@router.post("/users/{user_id}/commands/notify", response_model=schemas.UserCommandResult)
+def command_notify_user(
+    user_id: str,
+    payload: schemas.UserCommandNotifyPayload,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    now = datetime.now(timezone.utc)
+    notification_service.send_email(
+        template_key="accounts.user.command.notify",
+        recipient=user.email,
+        subject=payload.subject,
+        context={"message": payload.message, "user_id": user.id, "actor_user_id": current_user.id},
+        correlation_id=f"user-notify-{user.id}-{int(now.timestamp())}",
+        amo_id=user.amo_id,
+        db=db,
+    )
+    _emit_user_command_event(
+        db,
+        actor_user_id=str(current_user.id),
+        user=user,
+        action="NOTIFIED",
+        after={"subject": payload.subject},
+    )
+    db.commit()
+    return schemas.UserCommandResult(user_id=user.id, command="notify", status="ok", effective_at=now)
+
+
+@router.post("/users/{user_id}/commands/schedule-review", response_model=schemas.UserCommandResult)
+def command_schedule_review(
+    user_id: str,
+    payload: schemas.UserCommandSchedulePayload,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    now = datetime.now(timezone.utc)
+    task = task_services.create_task(
+        db,
+        amo_id=user.amo_id,
+        title=payload.title,
+        description=payload.description,
+        owner_user_id=user.id,
+        supervisor_user_id=current_user.id,
+        due_at=payload.due_at,
+        entity_type="accounts.user",
+        entity_id=user.id,
+        priority=payload.priority,
+        metadata={"scheduled_by": current_user.id, "command": "schedule-review"},
+    )
+    _emit_user_command_event(
+        db,
+        actor_user_id=str(current_user.id),
+        user=user,
+        action="REVIEW_SCHEDULED",
+        after={"task_id": task.id, "due_at": payload.due_at.isoformat() if payload.due_at else None},
+        metadata={"task_id": task.id},
+    )
+    db.commit()
+    return schemas.UserCommandResult(user_id=user.id, command="schedule-review", status="ok", effective_at=now, task_id=task.id)
 
 
 # ---------------------------------------------------------------------------

@@ -138,11 +138,13 @@
   position: sticky;
   top: 0;
   height: 100vh;
+  max-height: 100vh;
   overflow: hidden;
 }
 
 .app-shell--v2 .sidebar__nav {
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .app-shell--focus {
@@ -297,5 +299,42 @@ body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active {
 @media (min-width: 1600px) {
   .app-shell__content {
     max-width: 100%;
+  }
+}
+
+
+.focus-launcher__hint {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.focus-edge-peek {
+  position: fixed;
+  left: 0;
+  top: calc(var(--header-h) + 20px);
+  z-index: 42;
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 999px 999px 0;
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  transform: translateX(-65%);
+  transition: transform 180ms ease, color 180ms ease, box-shadow 180ms ease;
+  cursor: pointer;
+}
+
+.focus-edge-peek:hover,
+.focus-edge-peek:focus-visible,
+.focus-edge-peek.is-open {
+  transform: translateX(0);
+  color: var(--text-primary);
+  box-shadow: var(--sh-1);
+}
+
+@media (max-width: 1024px) {
+  .focus-launcher__hint {
+    display: none;
   }
 }

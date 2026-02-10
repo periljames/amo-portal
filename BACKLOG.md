@@ -132,3 +132,90 @@
   - Evidence: CAR attachment hardening + Action Panel evidence controls (`backend/amodb/apps/quality/router.py`, `frontend/src/components/panels/ActionPanel.tsx`).
 - **Security controls**: partial closure of top gaps.
   - Evidence: production secret guard + auth endpoint rate limiting (`backend/amodb/security.py`, `backend/amodb/apps/accounts/router_public.py`).
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/Layout/DepartmentLayout.tsx`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/components/realtime/LiveStatusIndicator.tsx`
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+- **P0 (active):**
+  - Implement backend user command actions (disable/enable/revoke/reset password/notify/schedule) with RBAC + audit + SSE emit.
+  - Acceptance: every cockpit user drilldown action available and realtime-updating.
+- **P1 (active):**
+  - Virtualize cockpit activity feed and add targeted entity drilldowns for remaining entity types.
+  - Acceptance: feed supports >1000 rows with smooth scroll and deterministic routing.
+- **P1 (new):**
+  - Add cursor halo/magnetic effect with reduced-motion and touch-device guards.
+  - Acceptance: 60fps on desktop, auto-disabled on reduced-motion/touch.
+- **P2 (moved):**
+  - Expand chart set (2–4 per cockpit) with lazy-load + idle prefetch.
+- **Commands run:** `npx tsc -b`
+- **Verification:** cockpit focus mode + realtime stale refresh + KPI drilldowns.
+- **Known issues:** activity feed virtualization pending.
+- **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `backend/amodb/apps/accounts/router_admin.py`
+  - `backend/amodb/apps/accounts/models.py`
+  - `backend/amodb/security.py`
+  - `frontend/src/pages/AdminUserDetailPage.tsx`
+  - `frontend/src/services/adminUsers.ts`
+
+### P0 status update
+- ✅ **Completed:** User-management command actions end-to-end (disable/enable/revoke/reset/notify/schedule) with audit + SSE event emission and frontend command center wiring.
+  - Evidence: command endpoints + tests (`backend/amodb/apps/accounts/tests/test_user_commands.py`) and command center UI.
+- ✅ **Completed:** Deterministic user drilldown command workflow at `/maintenance/:amoCode/admin/users/:userId`.
+
+### Remaining priorities
+- **P1:** Activity feed virtualization and entity-specific drilldowns for all activity item types.
+- **P1:** Cursor halo/magnetic layer (feature-flagged) with reduced-motion + touch guards.
+- **P2:** Additional chart lazy-load + idle prefetch optimizations.
+
+### Commands run
+- `cd backend && pytest amodb/apps/accounts/tests/test_user_commands.py -q`
+- `cd frontend && npx tsc -b`
+
+### Verification
+1. Open Admin User Detail route.
+2. Execute each command and confirm status updates.
+3. Confirm command-created review task appears in task workflows.
+
+### Known issues
+- Global per-token blacklist not implemented; revocation is timestamp-based at user level.
+
+### Screenshots
+- `browser:/tmp/codex_browser_invocations/e7a34149932062de/artifacts/artifacts/user-command-center.png`
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+  - `frontend/src/styles/components/dashboard-cockpit.css`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/utils/featureFlags.ts`
+
+### Status movement
+- ✅ **P1 completed:** Activity feed virtualization for cockpit with high-row support and keyboard-focusable row actions.
+- ✅ **P1 completed (guarded):** Cursor halo/magnetic hover cockpit layer behind `VITE_UI_CURSOR_LAYER` with reduced-motion/touch auto-disable.
+- ✅ **P1 completed:** Lazy-loaded chart rendering path with idle prefetch.
+- ⏳ **P1 remaining:** SSE replay / Last-Event-ID support.
+- ⏳ **P2 remaining:** server-backed activity feed persistence/pagination endpoint.
+
+### Commands run
+- `cd frontend && npm audit --audit-level=high --json`
+- `cd frontend && npx tsc -b`
+- `cd frontend && npm run build`
+
+### Verification steps
+1. Enable `VITE_UI_CURSOR_LAYER=1` and validate cockpit pointer interactions.
+2. Validate activity feed scroll at high event counts.
+3. Confirm chart cards still route via deterministic drilldowns.
+
+### Known issues
+- Full vite bundle completion remains environment-limited (timeout).
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/4ded072f3d2512cf/artifacts/artifacts/cockpit-virtual-feed-cursor-layer.png`
