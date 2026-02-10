@@ -124,3 +124,51 @@
 ### Screenshots/artifacts
 - `browser:/tmp/codex_browser_invocations/d217d7a1e1f1f99e/artifacts/artifacts/cockpit-load-optimized.png`
 - `browser:/tmp/codex_browser_invocations/cffc26b8bc29c596/artifacts/artifacts/cockpit-network-trace.json`
+
+
+## Changed in this run (2026-02-10)
+### Root cause + fix
+- Cockpit first-load latency was driven by concurrent `qmsListCars`, `listMyTasks`, and `getMyTrainingStatus` calls on mount.
+- Replaced that fan-out with one compact backend snapshot endpoint (`GET /quality/qms/cockpit-snapshot`) + first-page activity history (`limit=50`).
+
+### Production perf evidence
+| Metric | Value | Evidence |
+|---|---:|---|
+| Total built JS/CSS (gzip) | 4,021,182 bytes | `frontend/dist/perf-report.json` |
+| Cockpit shell chunk (`index-*.js`) gzip | 97,928 bytes | `frontend/dist/perf-report.json` |
+| Largest offender gzip | 2,939,506 bytes (`plotly-vendor`) | `frontend/dist/perf-report.json` |
+| First-page history API page size | 50 | `frontend/src/dashboards/DashboardCockpit.tsx` |
+
+### Commands executed
+- `cd backend && pytest amodb/apps/quality/tests/test_cockpit_snapshot.py amodb/apps/events/tests/test_events_history.py -q`
+- `cd backend && DATABASE_URL=sqlite:///./alembic_local.db alembic -c amodb/alembic.ini heads`
+- `cd backend && DATABASE_URL=sqlite:///./alembic_local.db alembic -c amodb/alembic.ini upgrade head` *(fails on SQLite constraint DDL; repo migrations require PostgreSQL for full run)*
+- `cd frontend && npm run build`
+- `cd frontend && node scripts/perf-report.mjs`
+
+### Network/perf notes
+- Playwright cockpit network capture attempt succeeded once for screenshot and then failed due Chromium crash in this runner (SIGSEGV), so waterfall request counts are not fully reproducible in this environment.
+
+
+## Changed in this run (2026-02-10)
+### Migration incident fixed
+- Fixed `b1c2d3e4f5a6_add_car_attachment_sha256` so it no longer hard-fails when `quality_car_attachments` is absent in divergent branch states.
+- Added follow-up migration `s9t8u7v6w5x4_ensure_car_attachment_sha256_column` to enforce final schema correctness at head (column + index), even when earlier branch ordering skipped the add-column operation.
+
+### DB verification evidence
+- `alembic heads` now resolves to single head `s9t8u7v6w5x4`.
+- Reproduced and validated the user-reported path with a real local PostgreSQL instance:
+  - `stamp f8a1b2c3d4e6`
+  - `upgrade b1c2d3e4f5a6`
+  - result: migration completes without `UndefinedTable` failure.
+
+### Commands executed
+- `apt-get update -y && apt-get install -y postgresql postgresql-contrib`
+- `pg_ctlcluster 16 main start && pg_isready`
+- `createdb amo_portal_migfix`
+- `cd backend && DATABASE_URL=postgresql+psycopg2:///amo_portal_migfix alembic -c amodb/alembic.ini stamp f8a1b2c3d4e6`
+- `cd backend && DATABASE_URL=postgresql+psycopg2:///amo_portal_migfix alembic -c amodb/alembic.ini upgrade b1c2d3e4f5a6`
+- `cd backend && alembic -c amodb/alembic.ini heads`
+
+### Known migration debt
+- Full clean-slate `upgrade head` still fails at `f8a1b2c3d4e6` due duplicate column on `part_movement_ledger.created_by_user_id`; this predates current fix and is tracked for a separate compatibility migration.

@@ -73,3 +73,14 @@
 
 ### Known issues
 - `alembic upgrade head` could not be executed in this runner due missing DATABASE_URL env var.
+
+
+## Changed in this run (2026-02-10)
+- Added read-only cockpit snapshot endpoint under existing quality module auth boundaries (`require_module("quality")`).
+- No auth model changes and no new public endpoints.
+- Verified event history cap reduction to 50 on cockpit bootstrap, reducing first-load data exposure window.
+
+
+## Changed in this run (2026-02-10)
+- Security posture unchanged at API/auth layer.
+- Migration hardening reduces operational risk from failed partial upgrades (prevents runtime breakage from missing `quality_car_attachments` during schema migration).
