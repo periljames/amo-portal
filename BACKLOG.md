@@ -100,3 +100,30 @@
 
 ### Known issues
 - Build still timing out in this execution environment.
+
+
+## Run update (2026-02-10)
+### Closed
+- [x] Replace cockpit initial API fan-out with a single snapshot endpoint.
+- [x] Reduce cockpit history bootstrap page size from 100 to 50.
+
+### Remaining
+- [ ] Remove Plotly from default prod path (`plotly-vendor` still >2.9MB gzip).
+  - **Acceptance:** cockpit route does not load `plotly-vendor` unless a plotly-only feature is opened.
+- [ ] Execute Alembic upgrade in CI against ephemeral PostgreSQL service.
+  - **Acceptance:** `alembic upgrade head` passes on PostgreSQL and smoke query is recorded in CI logs.
+
+
+## Run update (2026-02-10)
+### Closed
+- [x] Resolve `UndefinedTable` crash in `b1c2d3e4f5a6` during `upgrade heads` on divergent DB states.
+- [x] Add head-level schema reconciliation for CAR attachment checksum column/index.
+
+### Remaining
+- [ ] Add compatibility fix for `f8a1b2c3d4e6` duplicate-column crash (`part_movement_ledger.created_by_user_id`) on clean-slate Postgres upgrades.
+  - **Acceptance:** `alembic -c backend/amodb/alembic.ini upgrade head` succeeds from empty Postgres database.
+
+
+## Run update (2026-02-10)
+### Closed
+- [x] Fix `RecursionError` in `/auth/password-reset/confirm` rate-limiting path caused by `_client_ip` ↔ `_enforce_auth_rate_limit` re-entry.

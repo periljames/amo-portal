@@ -97,3 +97,21 @@
 
 ### Known issues
 - No path-level regressions observed in smoke checks.
+
+
+## Changed in this run (2026-02-10)
+- Added route: `GET /quality/qms/cockpit-snapshot` (auth/module-gated via existing quality router dependencies).
+- Cockpit frontend data-flow now resolves deterministically to:
+  1. `GET /quality/qms/cockpit-snapshot`
+  2. `GET /api/events/history?limit=50`
+  3. `GET /api/events` SSE stream
+
+
+## Changed in this run (2026-02-10)
+- No route changes in this run.
+- Backend changes are migration-only (Alembic stability and schema reconciliation).
+
+
+## Changed in this run (2026-02-10)
+- No route shape changes.
+- Runtime behavior of existing password reset confirm path stabilized (no recursion on auth rate limiting).

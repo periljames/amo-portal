@@ -1,31 +1,14 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { addDays, endOfDay, isBefore, isWithinInterval, parseISO } from "date-fns";
-import { AlertTriangle, BookOpenCheck, CalendarClock, ClipboardCheck, FileClock, ShieldCheck } from "lucide-react";
+import { AlertTriangle, BookOpenCheck, ClipboardCheck, FileClock, ShieldCheck } from "lucide-react";
 
 import DashboardScaffold, { type KpiTile } from "../components/dashboard/DashboardScaffold";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
-import { getCachedUser, getContext } from "../services/auth";
-import { qmsGetDashboard, qmsListCars } from "../services/qms";
-import { listMyTasks } from "../services/tasks";
+import { getContext } from "../services/auth";
+import { qmsGetCockpitSnapshot, type CARStatus } from "../services/qms";
 import { useRealtime } from "../components/realtime/RealtimeProvider";
 import { listEventHistory } from "../services/events";
-import { getMyTrainingStatus } from "../services/training";
-
-const isWithinDays = (dateStr: string | null | undefined, days: number) => {
-  if (!dateStr) return false;
-  const parsed = parseISO(dateStr);
-  if (Number.isNaN(parsed.getTime())) return false;
-  return isWithinInterval(parsed, { start: new Date(), end: addDays(new Date(), days) });
-};
-
-const isPastDue = (dateStr: string | null | undefined) => {
-  if (!dateStr) return false;
-  const parsed = parseISO(dateStr);
-  if (Number.isNaN(parsed.getTime())) return false;
-  return isBefore(parsed, endOfDay(new Date()));
-};
 
 const DashboardCockpit: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
@@ -37,79 +20,51 @@ const DashboardCockpit: React.FC = () => {
 
   const { data: activityHistory } = useInfiniteQuery({
     queryKey: ["activity-history", amoCode, department],
-    queryFn: ({ pageParam }) => listEventHistory({ cursor: pageParam as string | undefined, limit: 100 }),
+    queryFn: ({ pageParam }) => listEventHistory({ cursor: pageParam as string | undefined, limit: 50 }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     initialPageParam: undefined as string | undefined,
   });
-  const currentUser = getCachedUser();
   const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
 
   const qmsEnabled = department === "quality" || department === "safety";
 
-  const { data: cars = [] } = useQuery({ queryKey: ["qms-cars", amoCode], queryFn: () => qmsListCars(), enabled: qmsEnabled });
-  const { data: dashboardSnapshot } = useQuery({ queryKey: ["qms-dashboard", amoCode], queryFn: () => qmsGetDashboard(), enabled: qmsEnabled });
-  const { data: tasks = [] } = useQuery({ queryKey: ["my-tasks", amoCode], queryFn: () => listMyTasks() });
-  const { data: trainingStatus = [] } = useQuery({ queryKey: ["training-status", amoCode], queryFn: () => getMyTrainingStatus() });
+  const { data: snapshot } = useQuery({
+    queryKey: ["qms-cockpit-snapshot", amoCode],
+    queryFn: () => qmsGetCockpitSnapshot(),
+    enabled: qmsEnabled,
+    staleTime: 15_000,
+  });
 
   const kpis = useMemo(() => {
-    const overdueCars = cars.filter((car) => car.status !== "CLOSED" && isPastDue(car.due_date));
-    const dueWeek = cars.filter((car) => car.status !== "CLOSED" && isWithinDays(car.due_date, 7));
-    const dueMonth = cars.filter((car) => car.status !== "CLOSED" && isWithinDays(car.due_date, 30));
-    const dueTasksToday = tasks.filter((task) => isWithinDays(task.due_at, 0));
-    const overdueTraining = trainingStatus.filter((item) => item.status === "OVERDUE");
-    const currentDocs = dashboardSnapshot?.documents_active ?? 0;
-    const expiredDocs = dashboardSnapshot?.documents_obsolete ?? 0;
-    const closedAudits = Math.max((dashboardSnapshot?.audits_total ?? 0) - (dashboardSnapshot?.audits_open ?? 0), 0);
-
+    const auditsClosed = Math.max((snapshot?.audits_total ?? 0) - (snapshot?.audits_open ?? 0), 0);
     const tiles: KpiTile[] = [
-      { id: "overdue", icon: AlertTriangle, status: "overdue", label: "Overdue CAR/CAPA", value: overdueCars.length, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue&dueWindow=now`) },
-      { id: "due-today", icon: CalendarClock, status: "due-today", label: "Due today", value: dueTasksToday.length, timeframe: "Today", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/tasks?dueWindow=today&status=open`) },
-      { id: "due-week", icon: CalendarClock, status: "due-week", label: "Due this week", value: dueWeek.length, timeframe: "Week", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=open&dueWindow=week`) },
-      { id: "due-month", icon: FileClock, status: "awaiting-evidence", label: "Due this month", value: dueMonth.length, timeframe: "Month", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?status=open&dueWindow=month`) },
-      { id: "training-overdue", icon: AlertTriangle, status: "noncompliance", label: "Overdue training", value: overdueTraining.length, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/training?status=overdue&dueWindow=now`) },
-      { id: "acks", icon: ClipboardCheck, status: "awaiting-evidence", label: "Pending acknowledgements", value: dashboardSnapshot?.distributions_pending_ack ?? 0, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
-      { id: "doc-currency", icon: BookOpenCheck, status: "closed", label: "Document currency", value: currentDocs, timeframe: "Month", updatedAt: `${expiredDocs} obsolete`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?currency=expiring_30d`) },
-      { id: "audit-closure", icon: ShieldCheck, status: "closed", label: "Audit closures", value: closedAudits, timeframe: "Month", updatedAt: `${dashboardSnapshot?.audits_open ?? 0} open`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits?trend=monthly&status=closed`) },
+      { id: "findings-overdue", icon: AlertTriangle, status: "overdue", label: "Overdue findings", value: snapshot?.findings_overdue ?? 0, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits?status=in_progress`) },
+      { id: "findings-open", icon: FileClock, status: "awaiting-evidence", label: "Open findings", value: snapshot?.findings_open_total ?? 0, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits?status=cap_open`) },
+      { id: "acks", icon: ClipboardCheck, status: "awaiting-evidence", label: "Pending acknowledgements", value: snapshot?.pending_acknowledgements ?? 0, timeframe: "Now", updatedAt: "just now", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
+      { id: "doc-currency", icon: BookOpenCheck, status: "closed", label: "Document currency", value: snapshot?.documents_active ?? 0, timeframe: "Month", updatedAt: `${snapshot?.documents_obsolete ?? 0} obsolete`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?currency=expiring_30d`) },
+      { id: "audit-closure", icon: ShieldCheck, status: "closed", label: "Audit closures", value: auditsClosed, timeframe: "Month", updatedAt: `${snapshot?.audits_open ?? 0} open`, onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits?trend=monthly&status=closed`) },
     ];
     return tiles;
-  }, [cars, tasks, trainingStatus, dashboardSnapshot, amoCode, department, navigate]);
+  }, [snapshot, amoCode, department, navigate]);
 
   const drivers = useMemo(() => {
-    const auditOpen = dashboardSnapshot?.audits_open ?? 0;
+    const auditOpen = snapshot?.audits_open ?? 0;
     return [{ id: "audit-closure", title: "Audit closure rate", subtitle: `${auditOpen} open audits`, option: { xAxis: { type: "category", data: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] }, yAxis: { type: "value" }, grid: { left: 24, right: 16, top: 24, bottom: 24 }, series: [{ data: [3, 4, 5, 4, 6, 5, 7], type: "line", smooth: true, animationDuration: 550 }] } }];
-  }, [dashboardSnapshot]);
+  }, [snapshot]);
 
-  const actionItems = useMemo(() => {
-    const taskItems = tasks.slice(0, 10).map((task) => ({
-      id: task.id,
-      type: "Task",
-      title: task.title,
-      owner: task.owner_user_id ?? "Assigned",
-      ownerId: task.owner_user_id ?? null,
-      onOwnerClick: task.owner_user_id ? () => navigate(`/maintenance/${amoCode}/admin/users/${task.owner_user_id}`) : undefined,
-      due: task.due_at ? new Date(task.due_at).toLocaleDateString() : "—",
-      status: task.status,
-      priority: String(task.priority),
-      onClick: () => navigate(`/maintenance/${amoCode}/${department}/tasks/${task.id}`),
-      action: () => setPanelContext({ type: "user", userId: task.owner_user_id ?? currentUser?.id ?? "", name: task.owner_user_id ?? currentUser?.full_name ?? "User", role: currentUser?.role }),
-    }));
-
-    const carItems = cars.slice(0, 10).map((car) => ({
-      id: car.id,
-      type: "CAR",
-      title: `${car.car_number} · ${car.title}`,
-      owner: car.assigned_to_user_id ?? "Unassigned",
-      ownerId: car.assigned_to_user_id ?? null,
-      onOwnerClick: car.assigned_to_user_id ? () => navigate(`/maintenance/${amoCode}/admin/users/${car.assigned_to_user_id}`) : undefined,
-      due: car.due_date ?? "—",
-      status: car.status,
-      priority: car.priority,
-      onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${car.id}`),
-      action: () => setPanelContext({ type: "car", id: car.id, title: car.title, status: car.status, ownerId: car.assigned_to_user_id }),
-    }));
-
-    return [...taskItems, ...carItems].slice(0, 20);
-  }, [tasks, cars, currentUser, amoCode, department, navigate]);
+  const actionItems = useMemo(() => (snapshot?.action_queue ?? []).map((item) => ({
+    id: item.id,
+    type: item.kind,
+    title: item.title,
+    owner: item.assignee_user_id ?? "Unassigned",
+    ownerId: item.assignee_user_id,
+    onOwnerClick: item.assignee_user_id ? () => navigate(`/maintenance/${amoCode}/admin/users/${item.assignee_user_id}`) : undefined,
+    due: item.due_date ?? "—",
+    status: item.status as CARStatus,
+    priority: item.priority,
+    onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${item.id}`),
+    action: () => setPanelContext({ type: "car", id: item.id, title: item.title, status: item.status as CARStatus, ownerId: item.assignee_user_id }),
+  })), [snapshot?.action_queue, amoCode, department, navigate]);
 
   const activityItems = useMemo(() => {
     const fromHistory = (activityHistory?.pages ?? []).flatMap((page) => page.items ?? []);
