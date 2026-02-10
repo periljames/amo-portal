@@ -159,3 +159,10 @@
 ### Migrations
 - No new schema changes this run, therefore no new Alembic revision created.
 - `alembic heads` remains single head: `z1y2x3w4v5u6`.
+
+
+## Changed in this run (2026-02-10)
+### Alembic reliability
+- Hardened migration `b1c2d3e4f5a6` with table/column/index existence guards to prevent branch-order crashes (`quality_car_attachments` absent).
+- Added migration `s9t8u7v6w5x4` to guarantee `quality_car_attachments.sha256` and its index exist at head.
+- Current head updated to `s9t8u7v6w5x4`.

@@ -105,3 +105,8 @@
   1. `GET /quality/qms/cockpit-snapshot`
   2. `GET /api/events/history?limit=50`
   3. `GET /api/events` SSE stream
+
+
+## Changed in this run (2026-02-10)
+- No route changes in this run.
+- Backend changes are migration-only (Alembic stability and schema reconciliation).

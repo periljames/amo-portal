@@ -112,3 +112,13 @@
   - **Acceptance:** cockpit route does not load `plotly-vendor` unless a plotly-only feature is opened.
 - [ ] Execute Alembic upgrade in CI against ephemeral PostgreSQL service.
   - **Acceptance:** `alembic upgrade head` passes on PostgreSQL and smoke query is recorded in CI logs.
+
+
+## Run update (2026-02-10)
+### Closed
+- [x] Resolve `UndefinedTable` crash in `b1c2d3e4f5a6` during `upgrade heads` on divergent DB states.
+- [x] Add head-level schema reconciliation for CAR attachment checksum column/index.
+
+### Remaining
+- [ ] Add compatibility fix for `f8a1b2c3d4e6` duplicate-column crash (`part_movement_ledger.created_by_user_id`) on clean-slate Postgres upgrades.
+  - **Acceptance:** `alembic -c backend/amodb/alembic.ini upgrade head` succeeds from empty Postgres database.

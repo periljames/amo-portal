@@ -112,3 +112,8 @@
 ## Changed in this run (2026-02-10)
 - No event envelope changes.
 - Cockpit bootstrap now requests `/api/events/history` with `limit=50` instead of `100` to reduce initial payload size.
+
+
+## Changed in this run (2026-02-10)
+- No event contract/schema changes in this run.
+- Work was limited to Alembic migration safety/reconciliation for CAR attachment checksum schema.
