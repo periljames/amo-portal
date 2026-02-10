@@ -197,3 +197,6 @@
 - Upgraded cockpit controls from audit-centric to broader QMS operations (document control, CAR overdue, training controls, supplier hold indicators), each with deterministic filtered drilldown routes.
 - Replaced static-feel audit closure line with interactive chart behavior (hover tooltip, zoom/pan via dataZoom, click-through drilldown to filtered audit list).
 - Improved light-theme readability for cockpit status pills so text no longer washes out against light surfaces.
+- Added always-visible Quality Navigator panel covering every QMS subpage route as interactive navigation tiles.
+- Added top-priority focus gate: when a priority count exists, only navigator + top-priority card render, with `Resolve now` canonical drilldown CTA.
+- Added interactive ECharts pie/donut control mix chart with tooltip + click drilldowns to complement the interactive closure trend chart.

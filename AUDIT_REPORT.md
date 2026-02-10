@@ -307,3 +307,46 @@
 ### Performance budget notes
 - Budget target retained for quality cockpit authenticated first load in production: **< 2MB transferred**.
 - Route-level lazy loading remains in place; cockpit chart library (`echarts-for-react`) remains lazy-loaded inside cockpit scaffold and is not imported on non-cockpit department landing render path.
+
+## Quality Navigator + Priority Focus Gate (2026-02-10)
+### Implemented behavior
+- Added persistent **Quality Navigator** panel (always visible in cockpit/focus mode) with one interactive tile per QMS destination:
+  - `/maintenance/:amoCode/quality/qms`
+  - `/maintenance/:amoCode/quality/qms/tasks`
+  - `/maintenance/:amoCode/quality/qms/documents`
+  - `/maintenance/:amoCode/quality/qms/audits`
+  - `/maintenance/:amoCode/quality/qms/change-control`
+  - `/maintenance/:amoCode/quality/qms/cars`
+  - `/maintenance/:amoCode/quality/qms/training`
+  - `/maintenance/:amoCode/quality/qms/events`
+  - `/maintenance/:amoCode/quality/qms/kpis`
+- Added deterministic **Top Priority** focus gate ordering using snapshot fields:
+  1. `findings_overdue`
+  2. `cars_overdue`
+  3. `training_records_expired`, then `training_records_expiring_30d`
+  4. `documents_draft`
+  5. `pending_acknowledgements`
+  6. `suppliers_inactive`
+  7. fallback `findings_open_total`
+- While top-priority count > 0, cockpit renders only:
+  - Quality Navigator
+  - top-priority card with primary CTA **Resolve now**
+- When top-priority count reaches 0 on snapshot refresh/update, full cockpit sections re-render automatically.
+
+### Interactivity coverage
+- KPI tiles: clickable and route to canonical drilldowns.
+- Action queue rows: row click drills to CAR view; inline Act opens Action Panel.
+- Charts:
+  - Audit closure line chart supports hover tooltip + zoom/pan + click-through drilldown.
+  - Added ECharts pie/donut “QMS control mix” with hover tooltip + segment-click drilldown.
+
+### Verification steps
+1. Open `/maintenance/demo/quality` and confirm Quality Navigator shows all 9 routes.
+2. Click each navigator tile and verify URL matches route list above.
+3. If top-priority card visible, verify non-navigator cockpit sections are hidden and only CTA appears.
+4. Click **Resolve now** and verify navigation to that priority’s canonical drilldown route.
+5. With priority count zero in snapshot, verify full KPI/charts/action/activity sections reappear.
+6. Hover/click both charts and confirm tooltip + drilldown behavior.
+
+### Artifacts
+- Screenshot (current cockpit): `browser:/tmp/codex_browser_invocations/7b2a02f9775e8e75/artifacts/artifacts/quality-cockpit-priority-dark.png`

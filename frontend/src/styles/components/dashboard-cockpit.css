@@ -287,3 +287,118 @@ body[data-color-scheme="light"] .status-pill--closed {
   margin: var(--s-2) 0 0;
   color: var(--text-secondary);
 }
+
+.quality-navigator {
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+  padding: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+
+.quality-navigator__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+
+.quality-navigator__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.quality-navigator__subtitle {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.quality-navigator__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--s-2);
+}
+
+.quality-navigator__tile {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-soft);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  padding: 10px;
+  text-align: left;
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.quality-navigator__tile:hover,
+.quality-navigator__tile:focus-visible {
+  border-color: var(--accent-primary);
+  box-shadow: var(--sh-2);
+  outline: none;
+}
+
+.quality-navigator__tile-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.quality-navigator__badge {
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.priority-gate {
+  border-radius: var(--r-lg);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: linear-gradient(140deg, rgba(239, 68, 68, 0.12), rgba(15, 23, 42, 0.08));
+  box-shadow: var(--sh-2);
+  padding: var(--s-5);
+}
+
+.priority-gate__eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.priority-gate__title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.priority-gate__description {
+  color: var(--text-secondary);
+  margin: 10px 0;
+}
+
+.priority-gate__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
+.priority-gate__count {
+  font-weight: 700;
+  color: var(--text-primary);
+}

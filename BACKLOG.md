@@ -163,3 +163,5 @@
 ### Remaining
 - [ ] Produce full production perf report table once `npm run build` completes in CI/local without transform stall.
   - **Acceptance:** include chunk-size table and before/after transferred MB in `AUDIT_REPORT.md` from prod artifacts.
+- [ ] Add authenticated automated frontend route-smoke in CI for Quality Navigator tile routes and top-priority `Resolve now` navigation.
+  - **Acceptance:** CI browser smoke validates all 9 navigator destinations and priority CTA drilldown.
