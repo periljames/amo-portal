@@ -195,3 +195,34 @@ Monthly shelf-life job → expiring list
   └─ Auto-quarantine movements + procurement tasks
   └─ Evidence pack for controls
 ```
+
+## Changed in this run (2026-02-10)
+- **Files changed:**
+  - `frontend/src/components/Layout/DepartmentLayout.tsx`
+  - `frontend/src/components/realtime/RealtimeProvider.tsx`
+  - `frontend/src/components/realtime/LiveStatusIndicator.tsx`
+  - `frontend/src/components/dashboard/DashboardScaffold.tsx`
+  - `frontend/src/dashboards/DashboardCockpit.tsx`
+  - `frontend/src/styles/components/app-shell.css`
+  - `frontend/src/styles/components/dashboard-cockpit.css`
+- **Resolved findings:**
+  - Focus-mode discoverability improved with keyboard shortcut (`Ctrl/⌘ + \`) and edge-peek launcher on cockpit pages.
+  - Realtime stale-state UX added (stale indicator + targeted manual refresh button without full-page reload).
+  - Cockpit KPI drilldowns now map to specific route + query filters for all visible tiles.
+- **New findings:**
+  - **P1 / Frontend owner:** Activity feed virtualization still missing (action queue is virtualized; feed remains static list).
+  - **P1 / Backend owner:** user-management action endpoints required by command center (disable/enable/revoke/reset) still incomplete for cockpit workflows.
+  - **P2 / Frontend owner:** cursor halo/magnetic interaction layer not implemented yet.
+- **Commands run:** `npx tsc -b`, `npm run dev -- --host 0.0.0.0 --port 4173`, Playwright screenshot script.
+- **Verification:**
+  1. Open cockpit route with `VITE_UI_SHELL_V2=1`.
+  2. Confirm sidebar is hidden by default (focus mode).
+  3. Use edge-peek and `Ctrl/⌘ + \` to reveal module launcher.
+  4. Force realtime disconnect and verify stale menu messaging + refresh action.
+- **Known issues:** full cockpit “command center” backend action parity is still in-progress.
+- **Screenshots:** `browser:/tmp/codex_browser_invocations/19aa7325a4460d99/artifacts/artifacts/cockpit-shell-updates.png`
+
+### Next phase priorities
+1. Add user action endpoints (disable/enable/revoke/reset/notify/schedule) with RBAC + audit + SSE.
+2. Virtualize activity feed and add lazy-loaded charts with idle prefetch.
+3. Implement attachment hardening regression tests across all evidence upload surfaces.
