@@ -137,3 +137,28 @@
 ## Changed in this run (2026-02-10)
 - No route path or behavior contract changes in this run.
 - Fix is backend finance seeding reliability during module enable.
+
+## Update (2026-02-10) — Rendering rules + deterministic cockpit click map
+### Department rendering rules (paths unchanged)
+- `/maintenance/:amoCode/:department`
+  - `department=quality` and UI shell v2 cockpit route: render `DashboardCockpit`.
+  - other departments: render `DepartmentLandingScaffold` (no QMS cockpit leakage).
+- `/maintenance/:amoCode/:department/qms*`
+  - `department=quality`: render QMS layouts/pages.
+  - non-quality: redirect to `/maintenance/:amoCode/:department` with informational toast.
+
+### Modules launcher click map
+- All department/module sidebar buttons now navigate through a close-and-route handler.
+- Navigation closes launcher panel and edge-peek state on success.
+- Outside click closes launcher deterministically.
+
+### QMS cockpit KPI/click map
+- Overdue findings → `/maintenance/:amoCode/quality/qms/audits?status=in_progress&finding=overdue`
+- Open findings → `/maintenance/:amoCode/quality/qms/audits?status=cap_open`
+- Pending acknowledgements → `/maintenance/:amoCode/quality/qms/documents?ack=pending`
+- Pending doc approvals → `/maintenance/:amoCode/quality/qms/documents?status_=DRAFT`
+- Overdue CARs → `/maintenance/:amoCode/quality/qms/cars?status=overdue`
+- Training currency → `/maintenance/:amoCode/quality/qms/training?currency=expiring_30d`
+- Pending training controls → `/maintenance/:amoCode/quality/qms/training?verification=pending&deferral=pending`
+- Supplier quality hold → `/maintenance/:amoCode/quality/qms/events?entity=supplier&status=hold`
+- Audit chart point → `/maintenance/:amoCode/quality/qms/audits?status=closed&closed_from=<start>&closed_to=<end>&auditIds=<ids>`

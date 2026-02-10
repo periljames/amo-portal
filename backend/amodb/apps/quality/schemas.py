@@ -463,6 +463,15 @@ class CockpitActionItemOut(BaseModel):
     assignee_user_id: Optional[str] = None
 
 
+
+
+class AuditClosureTrendPointOut(BaseModel):
+    period_start: date
+    period_end: date
+    closed_count: int
+    audit_ids: list[str]
+
+
 class QMSCockpitSnapshotOut(BaseModel):
     generated_at: datetime
     pending_acknowledgements: int
@@ -471,7 +480,18 @@ class QMSCockpitSnapshotOut(BaseModel):
     findings_overdue: int
     findings_open_total: int
     documents_active: int
+    documents_draft: int
     documents_obsolete: int
+    change_requests_open: int
+    cars_open_total: int
+    cars_overdue: int
+    training_records_expiring_30d: int
+    training_records_expired: int
+    training_records_unverified: int
+    training_deferrals_pending: int
+    suppliers_active: int
+    suppliers_inactive: int
+    audit_closure_trend: list[AuditClosureTrendPointOut]
     action_queue: list[CockpitActionItemOut]
 
 

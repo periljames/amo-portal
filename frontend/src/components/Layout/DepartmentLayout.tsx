@@ -310,6 +310,19 @@ const DepartmentLayout: React.FC<Props> = ({
     setColorScheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
 
+  const closeLauncher = useCallback(() => {
+    setFocusMenuOpen(false);
+    setEdgePeekOpen(false);
+  }, []);
+
+  const navigateFromLauncher = useCallback(
+    (path: string, options?: { replace?: boolean; state?: unknown }) => {
+      closeLauncher();
+      navigate(path, options as never);
+    },
+    [closeLauncher, navigate]
+  );
+
   const handleNav = (deptId: DepartmentId) => {
     const targetPath = `/maintenance/${amoCode}/${deptId}`;
     if (
@@ -330,18 +343,18 @@ const DepartmentLayout: React.FC<Props> = ({
         canAccessDepartment(currentUser, assignedDepartment, deptId) &&
         isDepartmentId(deptId)
       ) {
-        navigate(targetPath);
+        navigateFromLauncher(targetPath);
       }
       return;
     }
 
     // System Admin is NOT a normal department dashboard; route is explicit.
     if (deptId === "admin") {
-      navigate(`/maintenance/${amoCode}/admin/overview`);
+      navigateFromLauncher(`/maintenance/${amoCode}/admin/overview`);
       return;
     }
 
-    navigate(targetPath);
+    navigateFromLauncher(targetPath);
   };
 
   const handleAdminNav = (navId: AdminNavId, overrideRoute?: string) => {
@@ -354,34 +367,34 @@ const DepartmentLayout: React.FC<Props> = ({
     }
 
     if (overrideRoute) {
-      navigate(`/maintenance/${amoCode}${overrideRoute}`);
+      navigateFromLauncher(`/maintenance/${amoCode}${overrideRoute}`);
       return;
     }
 
     switch (navId) {
       case "admin-overview":
-        navigate(`/maintenance/${amoCode}/admin/overview`);
+        navigateFromLauncher(`/maintenance/${amoCode}/admin/overview`);
         break;
       case "admin-amos":
-        navigate(`/maintenance/${amoCode}/admin/amos`);
+        navigateFromLauncher(`/maintenance/${amoCode}/admin/amos`);
         break;
       case "admin-users":
-        navigate(`/maintenance/${amoCode}/admin/users`);
+        navigateFromLauncher(`/maintenance/${amoCode}/admin/users`);
         break;
       case "admin-assets":
-        navigate(`/maintenance/${amoCode}/admin/amo-assets`);
+        navigateFromLauncher(`/maintenance/${amoCode}/admin/amo-assets`);
         break;
       case "admin-billing":
-        navigate(`/maintenance/${amoCode}/admin/billing`);
+        navigateFromLauncher(`/maintenance/${amoCode}/admin/billing`);
         break;
       case "admin-settings":
-        navigate(`/maintenance/${amoCode}/admin/settings`);
+        navigateFromLauncher(`/maintenance/${amoCode}/admin/settings`);
         break;
       case "admin-email-logs":
-        navigate(`/maintenance/${amoCode}/admin/email-logs`);
+        navigateFromLauncher(`/maintenance/${amoCode}/admin/email-logs`);
         break;
       case "admin-email-settings":
-        navigate(`/maintenance/${amoCode}/admin/email-settings`);
+        navigateFromLauncher(`/maintenance/${amoCode}/admin/email-settings`);
         break;
       default:
         break;
@@ -408,7 +421,7 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const gotoMyTraining = () => {
     const dept = resolveDeptForTraining();
-    navigate(`/maintenance/${amoCode}/${dept}/training`);
+    navigateFromLauncher(`/maintenance/${amoCode}/${dept}/training`);
   };
 
   const resolveLoginSlug = (): string => {
@@ -496,6 +509,17 @@ const DepartmentLayout: React.FC<Props> = ({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [focusMode]);
 
+  useEffect(() => {
+    if (!focusMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!focusLauncherRef.current?.contains(event.target as Node)) {
+        closeLauncher();
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [closeLauncher, focusMenuOpen]);
+
   const qmsNavItems = useMemo(
     () => [
       {
@@ -567,6 +591,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const lockedEventRef = useRef<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
+  const focusLauncherRef = useRef<HTMLDivElement | null>(null);
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
   const idleCountdownIntervalRef = useRef<number | null>(null);
@@ -1212,7 +1237,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigate(`/maintenance/${amoCode}/planning/aircraft-import`)
+                        navigateFromLauncher(`/maintenance/${amoCode}/planning/aircraft-import`)
                       }
                       className={
                         "sidebar__item" +
@@ -1226,7 +1251,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigate(`/maintenance/${amoCode}/planning/component-import`)
+                        navigateFromLauncher(`/maintenance/${amoCode}/planning/component-import`)
                       }
                       className={
                         "sidebar__item" +
@@ -1240,7 +1265,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigate(`/maintenance/${amoCode}/planning/aircraft-documents`)
+                        navigateFromLauncher(`/maintenance/${amoCode}/planning/aircraft-documents`)
                       }
                       className={
                         "sidebar__item" +
@@ -1254,7 +1279,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigate(`/maintenance/${amoCode}/planning/work-orders`)
+                        navigateFromLauncher(`/maintenance/${amoCode}/planning/work-orders`)
                       }
                       className={
                         "sidebar__item" +
@@ -1274,7 +1299,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigate(`/maintenance/${amoCode}/${activeDepartment}/work-orders`)
+                        navigateFromLauncher(`/maintenance/${amoCode}/${activeDepartment}/work-orders`)
                       }
                       className={
                         "sidebar__item" +
@@ -1305,7 +1330,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   <>
                     <button
                       type="button"
-                      onClick={() => navigate(`/maintenance/${amoCode}/quality/qms`)}
+                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/quality/qms`)}
                       className={
                         "sidebar__item" + (isQmsRoute ? " sidebar__item--active" : "")
                       }
@@ -1322,7 +1347,7 @@ const DepartmentLayout: React.FC<Props> = ({
                             <button
                               key={item.id}
                               type="button"
-                              onClick={() => navigate(item.path)}
+                              onClick={() => navigateFromLauncher(item.path)}
                               className={
                                 "sidebar__item" +
                                 (isActive ? " sidebar__item--active" : "")
@@ -1341,7 +1366,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   <>
                     <button
                       type="button"
-                      onClick={() => navigate(`/maintenance/${amoCode}/reliability`)}
+                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/reliability`)}
                       className={
                         "sidebar__item" +
                         (isReliabilityRoute ? " sidebar__item--active" : "")
@@ -1353,7 +1378,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigate(`/maintenance/${amoCode}/ehm/dashboard`)}
+                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/ehm/dashboard`)}
                       className={
                         "sidebar__item" +
                         (isEhmDashboardRoute ? " sidebar__item--active" : "")
@@ -1365,7 +1390,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigate(`/maintenance/${amoCode}/ehm/trends`)}
+                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/ehm/trends`)}
                       className={
                         "sidebar__item" + (isEhmTrendsRoute ? " sidebar__item--active" : "")
                       }
@@ -1376,7 +1401,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigate(`/maintenance/${amoCode}/ehm/uploads`)}
+                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/ehm/uploads`)}
                       className={
                         "sidebar__item" + (isEhmUploadsRoute ? " sidebar__item--active" : "")
                       }
@@ -1406,9 +1431,8 @@ const DepartmentLayout: React.FC<Props> = ({
               <div className="app-shell__topbar-title">
                 {uiShellV2 && (
                   <div
+                    ref={focusLauncherRef}
                     className="focus-launcher focus-launcher--topbar"
-                    onBlur={() => setFocusMenuOpen(false)}
-                    tabIndex={-1}
                   >
                     <button
                       type="button"
@@ -1466,7 +1490,7 @@ const DepartmentLayout: React.FC<Props> = ({
                           type="button"
                           onClick={() => {
                             setTrialMenuOpen(false);
-                            navigate(`/maintenance/${amoCode}/admin/billing`);
+                            navigateFromLauncher(`/maintenance/${amoCode}/admin/billing`);
                           }}
                         >
                           Convert to paid
