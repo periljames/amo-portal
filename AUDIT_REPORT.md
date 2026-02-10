@@ -249,3 +249,61 @@
 
 ### Commands executed
 - `cd backend && pytest amodb/apps/finance/tests/test_finance_posting.py amodb/apps/accounts/tests/test_module_gating.py -q`
+
+## Changed in this run (2026-02-10) — QMS cockpit scope, navigation reliability, contrast, and interactive controls
+### What changed
+- Strict cockpit scoping remains enforced: only `quality` routes render the QMS cockpit; all other departments render department landing scaffold on unchanged dashboard paths.
+- Modules launcher now uses deterministic navigation-close flow (`navigateFromLauncher`) for department/module clicks and closes on outside click to avoid lost-click/focus-trap behavior.
+- QMS cockpit upgraded from audit-only KPI set to broader operational controls (documents, CARs, training, suppliers) with deterministic drilldown routes.
+- Audit closure driver chart upgraded to interactive ECharts with tooltip + zoom (inside + slider) + point click drilldown to filtered audits.
+- Light/dark contrast hardening for status pills in cockpit cards: light theme now uses readable dark foregrounds.
+
+### Exact files changed
+- `frontend/src/components/Layout/DepartmentLayout.tsx`
+- `frontend/src/components/dashboard/DashboardScaffold.tsx`
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+- `frontend/src/styles/components/dashboard-cockpit.css`
+- `frontend/src/services/qms.ts`
+- `backend/amodb/apps/quality/service.py`
+- `backend/amodb/apps/quality/schemas.py`
+- `backend/amodb/apps/quality/tests/test_cockpit_snapshot.py`
+- `ROUTE_MAP.md`
+- `EVENT_SCHEMA.md`
+- `SECURITY_REPORT.md`
+- `AUDIT_SUMMARY.md`
+- `BACKLOG.md`
+- `AUDIT_REPORT.md`
+
+### Click map (deterministic drilldowns)
+- Overdue findings → `/maintenance/:amoCode/quality/qms/audits?status=in_progress&finding=overdue`
+- Open findings → `/maintenance/:amoCode/quality/qms/audits?status=cap_open`
+- Pending acknowledgements → `/maintenance/:amoCode/quality/qms/documents?ack=pending`
+- Pending doc approvals → `/maintenance/:amoCode/quality/qms/documents?status_=DRAFT`
+- Overdue CARs (`X/Total`) → `/maintenance/:amoCode/quality/qms/cars?status=overdue`
+- Training currency (`expired/30d`) → `/maintenance/:amoCode/quality/qms/training?currency=expiring_30d`
+- Pending training controls (`verify/deferral`) → `/maintenance/:amoCode/quality/qms/training?verification=pending&deferral=pending`
+- Supplier quality hold (`inactive/active`) → `/maintenance/:amoCode/quality/qms/events?entity=supplier&status=hold`
+- Audit closure chart point click → `/maintenance/:amoCode/quality/qms/audits?status=closed&closed_from=YYYY-MM-DD&closed_to=YYYY-MM-DD&auditIds=<ids>`
+
+### Manual verification / click test plan
+1. Open `/maintenance/demo/quality`, click topbar **Modules**, click `Planning`; verify route changes to `/maintenance/demo/planning` and launcher panel closes.
+2. Re-open launcher, click `Quality`; verify return to quality dashboard and launcher closes.
+3. On `/maintenance/demo/quality`, click each KPI tile listed above and confirm resulting filtered route/query params match click map.
+4. In the **Audit closure rate** chart:
+   - Hover line points (tooltip contains closed count + date window + audit-id count).
+   - Zoom via mouse wheel (inside zoom) and slider.
+   - Click a point to open closed audits filtered by that point window.
+5. Toggle dark/light theme and verify status-pill foreground remains readable against backgrounds.
+
+### Visual QA artifacts
+- Dark screenshot: `browser:/tmp/codex_browser_invocations/0345a7eecc746e8c/artifacts/artifacts/quality-cockpit-dark.png`
+- Light screenshot: `browser:/tmp/codex_browser_invocations/0345a7eecc746e8c/artifacts/artifacts/quality-cockpit-light.png`
+
+### Performance artifacts
+- `npm run perf:report` currently blocked because prod build stalls in this runner before `dist/` is emitted.
+- Dev-route network capture artifact (for sanity comparison quality vs planning route in local dev):
+  - `browser:/tmp/codex_browser_invocations/e69a89c3ea0e068a/artifacts/artifacts/network-metrics.json`
+
+### Performance budget notes
+- Budget target retained for quality cockpit authenticated first load in production: **< 2MB transferred**.
+- Route-level lazy loading remains in place; cockpit chart library (`echarts-for-react`) remains lazy-loaded inside cockpit scaffold and is not imported on non-cockpit department landing render path.

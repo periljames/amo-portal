@@ -190,3 +190,10 @@
 ## Changed in this run (2026-02-10)
 - Fixed finance default seed compatibility for PostgreSQL enum typing during module enable.
 - Added idempotency regression test for `ensure_finance_defaults()` seeding path.
+
+## Run summary (2026-02-10) — QMS cockpit + launcher + contrast + interactivity
+- Enforced QMS cockpit visibility to Quality & Compliance flows only; non-quality departments continue to render their own stable landing routes.
+- Fixed Modules launcher reliability by routing via deterministic navigation handlers and always closing the launcher on successful module/department switches and outside click.
+- Upgraded cockpit controls from audit-centric to broader QMS operations (document control, CAR overdue, training controls, supplier hold indicators), each with deterministic filtered drilldown routes.
+- Replaced static-feel audit closure line with interactive chart behavior (hover tooltip, zoom/pan via dataZoom, click-through drilldown to filtered audit list).
+- Improved light-theme readability for cockpit status pills so text no longer washes out against light surfaces.
