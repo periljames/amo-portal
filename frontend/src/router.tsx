@@ -5,52 +5,9 @@
 //   CRS pages, aircraft import, QMS dashboard, and admin user management.
 // - Uses RequireAuth wrapper to redirect unauthenticated users back to login.
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
-import LoginPage from "./pages/LoginPage";
-import PasswordResetPage from "./pages/PasswordResetPage";
-import DashboardPage from "./pages/DashboardPage";
-import EhmDashboardPage from "./pages/ehm/EhmDashboardPage";
-import EhmTrendsPage from "./pages/ehm/EhmTrendsPage";
-import EhmUploadsPage from "./pages/ehm/EhmUploadsPage";
-import ReliabilityReportsPage from "./pages/ReliabilityReportsPage";
-import CRSNewPage from "./pages/CRSNewPage";
-import AircraftImportPage from "./pages/AircraftImportPage";
-import ComponentImportPage from "./pages/ComponentImportPage";
-import AircraftDocumentsPage from "./pages/AircraftDocumentsPage";
-import WorkOrderSearchPage from "./pages/work/WorkOrderSearchPage";
-import WorkOrderDetailPage from "./pages/work/WorkOrderDetailPage";
-import TaskSummaryPage from "./pages/work/TaskSummaryPage";
-import TaskPrintPage from "./pages/work/TaskPrintPage";
-import AdminUserNewPage from "./pages/AdminUserNewPage";
-import AdminUserDetailPage from "./pages/AdminUserDetailPage";
-import AdminDashboardPage from "./pages/AdminDashboardPage";
-import AdminOverviewPage from "./pages/AdminOverviewPage";
-import AdminAmoManagementPage from "./pages/AdminAmoManagementPage";
-import AdminAmoProfilePage from "./pages/AdminAmoProfilePage";
-import AdminAmoAssetsPage from "./pages/AdminAmoAssetsPage";
-import AdminUsageSettingsPage from "./pages/AdminUsageSettingsPage";
-import AdminInvoicesPage from "./pages/AdminInvoicesPage";
-import AdminInvoiceDetailPage from "./pages/AdminInvoiceDetailPage";
-import EmailLogsPage from "./pages/EmailLogsPage";
-import EmailServerSettingsPage from "./pages/EmailServerSettingsPage";
-import TrainingPage from "./pages/MyTrainingPage";
-import QMSHomePage from "./pages/QMSHomePage";
-import QMSDocumentsPage from "./pages/QMSDocumentsPage";
-import QMSAuditsPage from "./pages/QMSAuditsPage";
-import QMSChangeControlPage from "./pages/QMSChangeControlPage";
-import MyTasksPage from "./pages/MyTasksPage";
-import QMSTrainingPage from "./pages/QMSTrainingPage";
-import QMSTrainingUserPage from "./pages/QMSTrainingUserPage";
-import QMSEventsPage from "./pages/QMSEventsPage";
-import QMSKpisPage from "./pages/QMSKpisPage";
-import QualityCarsPage from "./pages/QualityCarsPage";
-import PublicCarInvitePage from "./pages/PublicCarInvitePage";
-import SubscriptionManagementPage from "./pages/SubscriptionManagementPage";
-import UpsellPage from "./pages/UpsellPage";
-import UserWidgetsPage from "./pages/UserWidgetsPage";
-import OnboardingPasswordPage from "./pages/OnboardingPasswordPage";
 
 import {
   fetchOnboardingStatus,
@@ -59,6 +16,50 @@ import {
   isAuthenticated,
   type OnboardingStatus,
 } from "./services/auth";
+
+const LoginPage = lazy(() => import("./pages/LoginPage"));
+const PasswordResetPage = lazy(() => import("./pages/PasswordResetPage"));
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const EhmDashboardPage = lazy(() => import("./pages/ehm/EhmDashboardPage"));
+const EhmTrendsPage = lazy(() => import("./pages/ehm/EhmTrendsPage"));
+const EhmUploadsPage = lazy(() => import("./pages/ehm/EhmUploadsPage"));
+const ReliabilityReportsPage = lazy(() => import("./pages/ReliabilityReportsPage"));
+const CRSNewPage = lazy(() => import("./pages/CRSNewPage"));
+const AircraftImportPage = lazy(() => import("./pages/AircraftImportPage"));
+const ComponentImportPage = lazy(() => import("./pages/ComponentImportPage"));
+const AircraftDocumentsPage = lazy(() => import("./pages/AircraftDocumentsPage"));
+const WorkOrderSearchPage = lazy(() => import("./pages/work/WorkOrderSearchPage"));
+const WorkOrderDetailPage = lazy(() => import("./pages/work/WorkOrderDetailPage"));
+const TaskSummaryPage = lazy(() => import("./pages/work/TaskSummaryPage"));
+const TaskPrintPage = lazy(() => import("./pages/work/TaskPrintPage"));
+const AdminUserNewPage = lazy(() => import("./pages/AdminUserNewPage"));
+const AdminUserDetailPage = lazy(() => import("./pages/AdminUserDetailPage"));
+const AdminDashboardPage = lazy(() => import("./pages/AdminDashboardPage"));
+const AdminOverviewPage = lazy(() => import("./pages/AdminOverviewPage"));
+const AdminAmoManagementPage = lazy(() => import("./pages/AdminAmoManagementPage"));
+const AdminAmoProfilePage = lazy(() => import("./pages/AdminAmoProfilePage"));
+const AdminAmoAssetsPage = lazy(() => import("./pages/AdminAmoAssetsPage"));
+const AdminUsageSettingsPage = lazy(() => import("./pages/AdminUsageSettingsPage"));
+const AdminInvoicesPage = lazy(() => import("./pages/AdminInvoicesPage"));
+const AdminInvoiceDetailPage = lazy(() => import("./pages/AdminInvoiceDetailPage"));
+const EmailLogsPage = lazy(() => import("./pages/EmailLogsPage"));
+const EmailServerSettingsPage = lazy(() => import("./pages/EmailServerSettingsPage"));
+const TrainingPage = lazy(() => import("./pages/MyTrainingPage"));
+const QMSHomePage = lazy(() => import("./pages/QMSHomePage"));
+const QMSDocumentsPage = lazy(() => import("./pages/QMSDocumentsPage"));
+const QMSAuditsPage = lazy(() => import("./pages/QMSAuditsPage"));
+const QMSChangeControlPage = lazy(() => import("./pages/QMSChangeControlPage"));
+const MyTasksPage = lazy(() => import("./pages/MyTasksPage"));
+const QMSTrainingPage = lazy(() => import("./pages/QMSTrainingPage"));
+const QMSTrainingUserPage = lazy(() => import("./pages/QMSTrainingUserPage"));
+const QMSEventsPage = lazy(() => import("./pages/QMSEventsPage"));
+const QMSKpisPage = lazy(() => import("./pages/QMSKpisPage"));
+const QualityCarsPage = lazy(() => import("./pages/QualityCarsPage"));
+const PublicCarInvitePage = lazy(() => import("./pages/PublicCarInvitePage"));
+const SubscriptionManagementPage = lazy(() => import("./pages/SubscriptionManagementPage"));
+const UpsellPage = lazy(() => import("./pages/UpsellPage"));
+const UserWidgetsPage = lazy(() => import("./pages/UserWidgetsPage"));
+const OnboardingPasswordPage = lazy(() => import("./pages/OnboardingPasswordPage"));
 
 type RequireAuthProps = {
   children: React.ReactElement;
@@ -188,6 +189,7 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
  */
 export const AppRouter: React.FC = () => {
   return (
+    <Suspense fallback={<div className="page-loading">Loading…</div>}>
     <Routes>
       {/* Root → login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
@@ -613,6 +615,7 @@ export const AppRouter: React.FC = () => {
       {/* Catch-all → login */}
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
+    </Suspense>
   );
 };
 

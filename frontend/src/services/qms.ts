@@ -307,6 +307,31 @@ async function sendJson<T>(
   return (await res.json()) as T;
 }
 
+
+export interface QMSDashboardOut {
+  domain: string | null;
+  documents_total: number;
+  documents_active: number;
+  documents_draft: number;
+  documents_obsolete: number;
+  distributions_pending_ack: number;
+  change_requests_total: number;
+  change_requests_open: number;
+  audits_total: number;
+  audits_open: number;
+  findings_open_total: number;
+  findings_open_level_1: number;
+  findings_open_level_2: number;
+  findings_open_level_3: number;
+  findings_overdue_total: number;
+}
+
+export async function qmsGetDashboard(params?: {
+  domain?: string;
+}): Promise<QMSDashboardOut> {
+  return fetchJson<QMSDashboardOut>(`/quality/qms/dashboard${toQuery(params ?? {})}`);
+}
+
 export async function qmsListDocuments(params?: {
   status_?: QMSDocumentStatus;
   domain?: string;

@@ -1,150 +1,99 @@
-# AMO Portal Route Map (Authoritative)
+# Route Map (Cockpit + Drilldowns)
 
-## Route inventory
-> Protection legend: **Public** (no auth), **Auth** (RequireAuth), **TenantAdmin** (RequireTenantAdmin)
+## Stable routes (no breaking changes)
+- Cockpit landing: `/maintenance/:amoCode/:department`
+- QMS cockpit: `/maintenance/:amoCode/:department/qms`
+- KPI cockpit variant: `/maintenance/:amoCode/:department/qms/kpis`
+- Admin user detail (command center): `/maintenance/:amoCode/admin/users/:userId`
+- SSE stream: `/api/events`
+- Activity history: `/api/events/history`
 
-### Public
-- `/` → redirect to `/login` (Public, Navigate)
-- `/login` → `LoginPage` (Public)
-- `/maintenance/:amoCode/login` → `LoginPage` (Public)
-- `/reset-password` → `PasswordResetPage` (Public)
-- `/car-invite` → `PublicCarInvitePage` (Public)
+## New/changed route behavior this run
+- No new UI routes added.
+- Reconnect behavior enhanced for `/api/events` using `Last-Event-ID` header or `lastEventId` query fallback.
 
-### Onboarding (Auth)
-- `/maintenance/:amoCode/onboarding` → `OnboardingPasswordPage` (Auth)
-- `/maintenance/:amoCode/onboarding/setup` → `OnboardingPasswordPage` (Auth)
+## Activity history query params
+- `cursor=<iso_ts>|<event_id>`
+- `limit=1..500`
+- `entityType=<string>`
+- `entityId=<string>`
+- `timeStart=<ISO datetime>`
+- `timeEnd=<ISO datetime>`
 
-### Department landing / dashboards (Auth)
-- `/maintenance/:amoCode` → `DashboardPage` (Auth)
-- `/maintenance/:amoCode/:department` → `DashboardPage` (Auth)
+## Click Map (deterministic drilldowns)
+| UI element | Destination | Query params | Purpose |
+|---|---|---|---|
+| Cockpit KPI: Overdue tasks | `/maintenance/:amoCode/:department/tasks` | `status=overdue&dueWindow=now` | Work queue triage |
+| Cockpit KPI: Due this week | `/maintenance/:amoCode/:department/tasks` | `status=open&dueWindow=week` | Weekly planning |
+| Cockpit KPI: Pending acknowledgements | `/maintenance/:amoCode/:department/qms/documents` | `ack=pending` | Doc acknowledgement action |
+| Activity row: user entity | `/maintenance/:amoCode/admin/users/:userId` | none | User command center |
+| Activity row: task entity | `/maintenance/:amoCode/:department/tasks/:taskId` (or tasks list fallback) | `taskId` when available | Task execution |
+| Activity row: qms document | `/maintenance/:amoCode/:department/qms/documents` | `docId=<entityId>` | Document operations |
+| Activity row: qms audit | `/maintenance/:amoCode/:department/qms/audits` | `auditId=<entityId>` | Audit follow-up |
+| Activity row: CAR/CAPA | `/maintenance/:amoCode/:department/qms/cars` | `carId=<entityId>` | Corrective action workflow |
+| Activity row: training | `/maintenance/:amoCode/:department/qms/training` | `userId=<entityId>` or training filter | Training action |
 
-### Work orders / tasks (Auth)
-- `/maintenance/:amoCode/:department/work-orders` → `WorkOrderSearchPage` (Auth)
-- `/maintenance/:amoCode/:department/work-orders/:id` → `WorkOrderDetailPage` (Auth)
-- `/maintenance/:amoCode/:department/tasks/:taskId` → `TaskSummaryPage` (Auth)
-- `/maintenance/:amoCode/:department/tasks/:taskId/print` → `TaskPrintPage` (Auth)
+## Files changed
+- `ROUTE_MAP.md`
+- `backend/amodb/apps/events/router.py`
 
-### Reliability / EHM (Auth)
-- `/maintenance/:amoCode/ehm` → `EhmDashboardPage` (Auth)
-- `/maintenance/:amoCode/ehm/dashboard` → `EhmDashboardPage` (Auth)
-- `/maintenance/:amoCode/ehm/trends` → `EhmTrendsPage` (Auth)
-- `/maintenance/:amoCode/ehm/uploads` → `EhmUploadsPage` (Auth)
-- `/maintenance/:amoCode/reliability` → `ReliabilityReportsPage` (Auth)
-- `/maintenance/:amoCode/reliability/reports` → `ReliabilityReportsPage` (Auth)
+## Commands run
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
+- `cd frontend && npx tsc -b`
 
-### Training (Auth)
-- `/maintenance/:amoCode/:department/training` → `MyTrainingPage` (Auth)
+## Verification steps
+1. Click cockpit KPI tiles and verify destination routes include expected filters.
+2. Click user IDs in activity feed and confirm direct route to admin user detail.
+3. Call `/api/events/history` with filters and verify paging cursor behavior.
 
-### QMS module (Auth)
-- `/maintenance/:amoCode/:department/qms` → `QMSHomePage` (Auth)
-- `/maintenance/:amoCode/:department/qms/tasks` → `MyTasksPage` (Auth)
-- `/maintenance/:amoCode/:department/qms/documents` → `QMSDocumentsPage` (Auth)
-- `/maintenance/:amoCode/:department/qms/audits` → `QMSAuditsPage` (Auth)
-- `/maintenance/:amoCode/:department/qms/change-control` → `QMSChangeControlPage` (Auth)
-- `/maintenance/:amoCode/:department/qms/cars` → `QualityCarsPage` (Auth)
-- `/maintenance/:amoCode/:department/qms/training` → `QMSTrainingPage` (Auth)
-- `/maintenance/:amoCode/:department/qms/training/:userId` → `QMSTrainingUserPage` (Auth)
-- `/maintenance/:amoCode/:department/qms/events` → `QMSEventsPage` (Auth)
-- `/maintenance/:amoCode/:department/qms/kpis` → `QMSKpisPage` (Auth)
+## Known issues
+- Some activity entity types still use list-page fallback when entity-specific detail route is not yet implemented.
 
-### Aircraft / component import (Auth)
-- `/maintenance/:amoCode/:department/aircraft-import` → `AircraftImportPage` (Auth)
-- `/maintenance/:amoCode/:department/component-import` → `ComponentImportPage` (Auth)
-- `/maintenance/:amoCode/:department/aircraft-documents` → `AircraftDocumentsPage` (Auth)
+## Screenshots
+- `browser:/tmp/codex_browser_invocations/ea7e3e21baeb5f77/artifacts/artifacts/cockpit-focus-mode.png`
 
-### CRS (Auth)
-- `/maintenance/:amoCode/:department/crs/new` → `CRSNewPage` (Auth)
 
-### User widgets (Auth)
-- `/maintenance/:amoCode/:department/settings/widgets` → `UserWidgetsPage` (Auth)
+## Migration support update (2026-02-10)
+### Files changed
+- `backend/amodb/alembic/versions/y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py`
+- `ROUTE_MAP.md`
 
-### Admin / billing (TenantAdmin unless noted)
-- `/maintenance/:amoCode/admin` → `AdminOverviewPage` (Auth)
-- `/maintenance/:amoCode/admin/overview` → `AdminOverviewPage` (Auth)
-- `/maintenance/:amoCode/admin/amos` → `AdminAmoManagementPage` (Auth)
-- `/maintenance/:amoCode/admin/amo-profile` → `AdminAmoProfilePage` (Auth)
-- `/maintenance/:amoCode/admin/users` → `AdminDashboardPage` (Auth)
-- `/maintenance/:amoCode/admin/users/new` → `AdminUserNewPage` (Auth)
-- `/maintenance/:amoCode/admin/users/:userId` → `AdminUserDetailPage` (Auth + TenantAdmin)
-- `/maintenance/:amoCode/admin/amo-assets` → `AdminAmoAssetsPage` (Auth)
-- `/maintenance/:amoCode/admin/billing` → `SubscriptionManagementPage` (Auth + TenantAdmin)
-- `/maintenance/:amoCode/admin/invoices` → `AdminInvoicesPage` (Auth + TenantAdmin)
-- `/maintenance/:amoCode/admin/invoices/:invoiceId` → `AdminInvoiceDetailPage` (Auth + TenantAdmin)
-- `/maintenance/:amoCode/admin/settings` → `AdminUsageSettingsPage` (Auth)
-- `/maintenance/:amoCode/admin/email-logs` → `EmailLogsPage` (Auth)
-- `/maintenance/:amoCode/admin/email-settings` → `EmailServerSettingsPage` (Auth)
+### Commands run
+- `cd backend && alembic -c amodb/alembic.ini heads`
 
-### Upsell (Auth)
-- `/maintenance/:amoCode/upsell` → `UpsellPage` (Auth)
+### Verification
+1. Apply migration.
+2. Verify existing routes remain unchanged (no route additions/removals).
+3. Verify `/auth/login-context` no longer fails due missing schema columns.
 
-## Canonical drilldown query parameters (cockpit)
+### Known issues
+- No route changes in this run; migration-only backend fix.
 
-### Training list (`/maintenance/:amoCode/:department/qms/training`)
-- **Params**:
-  - `status`: `overdue | due | all`
-  - `dueWindow`: `now | today | week | month`
-  - `course`: course id (existing UI filter)
-- **Defaults**: no params → full list.
-- **Examples**:
-  - Overdue now: `/maintenance/:amoCode/:department/qms/training?status=overdue&dueWindow=now`
-  - Due today: `/maintenance/:amoCode/:department/qms/training?status=due&dueWindow=today`
-  - Due week: `/maintenance/:amoCode/:department/qms/training?status=due&dueWindow=week`
-  - Due month: `/maintenance/:amoCode/:department/qms/training?status=due&dueWindow=month`
-
-### CAR/CAPA list (`/maintenance/:amoCode/:department/qms/cars`)
-- **Params**:
-  - `status`: `overdue | open`
-  - `dueWindow`: `now | today | week | month`
-  - `carId`: specific car id (optional)
-- **Defaults**: no params → full list.
-- **Examples**:
-  - Overdue now: `/maintenance/:amoCode/:department/qms/cars?status=overdue&dueWindow=now`
-  - Due today: `/maintenance/:amoCode/:department/qms/cars?status=open&dueWindow=today`
-  - Due week: `/maintenance/:amoCode/:department/qms/cars?status=open&dueWindow=week`
-  - Due month: `/maintenance/:amoCode/:department/qms/cars?status=open&dueWindow=month`
-
-### Documents list (`/maintenance/:amoCode/:department/qms/documents`)
-- **Params**:
-  - `ack`: `pending`
-- **Defaults**: no params → full list.
-- **Examples**:
-  - Pending acknowledgements: `/maintenance/:amoCode/:department/qms/documents?ack=pending`
-
-### Audits list (`/maintenance/:amoCode/:department/qms/audits`)
-- **Params**:
-  - `status`: `open | planned | in_progress | cap_open | closed`
-- **Defaults**: no params → full list.
-- **Examples**:
-  - Open audits: `/maintenance/:amoCode/:department/qms/audits?status=open`
-
-### Tasks list (`/maintenance/:amoCode/:department/qms/tasks`)
-- **Params**:
-  - `dueWindow`: `today | week | month`
-- **Defaults**: no params → full list.
-- **Examples**:
-  - Due today: `/maintenance/:amoCode/:department/qms/tasks?dueWindow=today`
-  - Due week: `/maintenance/:amoCode/:department/qms/tasks?dueWindow=week`
-  - Due month: `/maintenance/:amoCode/:department/qms/tasks?dueWindow=month`
-
-## Changed in this run
-- Added/updated query param support for training, cars, documents, audits, and tasks.
-- Added action panel overlay usage for list pages and cockpit.
-- **Breaking changes**: none.
+### Screenshots
+- Not applicable.
 
 
 ## Changed in this run (2026-02-10)
-### Cockpit drilldowns (new canonical examples)
-- `/maintenance/:amoCode/:department/qms/documents?currency=expiring_30d`
-  - Canonical meaning: focus documents due/expiring in next 30 days from cockpit document-currency KPI.
-  - Example: `/maintenance/SAFA03/quality/qms/documents?currency=expiring_30d`.
-- `/maintenance/:amoCode/:department/qms/audits?trend=monthly&status=closed`
-  - Canonical meaning: open audits page with closure trend drilldown from cockpit audit-closure KPI.
-  - Example: `/maintenance/SAFA03/quality/qms/audits?trend=monthly&status=closed`.
+### Route behavior/perf delta
+- No route path changes.
+- Route modules are now lazy-loaded in router to avoid eager import waterfall on cockpit entry.
 
-### Evidence routes (new)
-- `GET /quality/cars/:carId/attachments`
-- `POST /quality/cars/:carId/attachments`
-- `GET /quality/cars/:carId/attachments/:attachmentId/download`
-- `DELETE /quality/cars/:carId/attachments/:attachmentId`
+### API query cap changes
+- `/api/events/history` now defaults to `limit=50` and caps at `200` per request.
 
-All routes are additive and preserve existing invite-token endpoints under `/quality/cars/invite/:token/attachments*`.
+### Files changed
+- `frontend/src/router.tsx`
+- `backend/amodb/apps/events/router.py`
+- `ROUTE_MAP.md`
+
+### Commands run
+- `cd frontend && npx tsc -b`
+- `cd backend && pytest amodb/apps/events/tests/test_events_history.py -q`
+
+### Verification
+1. Load `/maintenance/demo/quality`; confirm page renders via lazy route import.
+2. Confirm drilldowns still navigate to documented paths.
+3. Confirm history endpoint limit cap.
+
+### Known issues
+- No path-level regressions observed in smoke checks.

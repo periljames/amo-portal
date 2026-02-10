@@ -13,6 +13,9 @@ os.environ["DATABASE_WRITE_URL"] = "sqlite+pysqlite:///:memory:"
 
 from amodb.database import Base  # noqa: E402
 from amodb.apps.accounts import models  # noqa: E402
+from amodb.apps.audit import models as audit_models  # noqa: E402
+from amodb.apps.tasks import models as task_models  # noqa: E402
+from amodb.apps.notifications import models as notification_models  # noqa: E402
 
 
 @pytest.fixture()
@@ -26,6 +29,9 @@ def db_session():
             models.Department.__table__,
             models.User.__table__,
             models.UserActiveContext.__table__,
+            models.AuthorisationType.__table__,
+            models.UserAuthorisation.__table__,
+            models.AccountSecurityEvent.__table__,
             models.CatalogSKU.__table__,
             models.TenantLicense.__table__,
             models.LicenseEntitlement.__table__,
@@ -36,6 +42,9 @@ def db_session():
             models.BillingInvoice.__table__,
             models.BillingAuditLog.__table__,
             models.WebhookEvent.__table__,
+            audit_models.AuditEvent.__table__,
+            task_models.Task.__table__,
+            notification_models.EmailLog.__table__,
         ],
     )
     TestingSession = sessionmaker(
