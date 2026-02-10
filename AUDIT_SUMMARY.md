@@ -80,3 +80,48 @@
   - Quality/QMS (documents, distributions, audits, findings, cars) via `audit_services.log_event`.
   - Training (events/participants/records/deferrals) via `audit_services.log_event` with training module prefix.
   - Accounts (admin user create/update/deactivate) via `audit_services.log_event`.
+
+
+## Changed in this run (2026-02-10)
+### Tasks realtime + invalidation
+- **Files**: `backend/amodb/apps/tasks/services.py`, `frontend/src/components/realtime/RealtimeProvider.tsx`.
+- **Changes**:
+  - Task audit events now use explicit task entity/event semantics (`tasks.task` with actions `CREATED`, `UPDATED`, `STATUS_CHANGED`, `CLOSED`, `ESCALATED`) so SSE event types normalize to `tasks.task.*`.
+  - Realtime client now targets task event invalidations to `tasks`, `my-tasks`, and cockpit aggregate keys (`qms-dashboard`, `dashboard`) with the existing 350ms debounce.
+- **Rollback**: revert task action/entity strings in `tasks/services.py` and revert the additional task invalidation branch in `RealtimeProvider`.
+- **Manual verification**:
+  1. Open cockpit and My Tasks in two tabs for same AMO.
+  2. Update a task status in tab A.
+  3. Confirm tab B task lists and cockpit counts update without hard refresh.
+
+### Action Panel evidence + ack visibility increment
+- **Files**: `frontend/src/components/panels/ActionPanel.tsx`, `frontend/src/services/qms.ts`, `backend/amodb/apps/quality/router.py`, `backend/amodb/apps/quality/models.py`, `backend/amodb/apps/quality/schemas.py`, `backend/amodb/alembic/versions/b1c2d3e4f5a6_add_car_attachment_sha256.py`.
+- **Changes**:
+  - Added authenticated CAR attachment endpoints (list/upload/download/delete) and surfaced them in Action Panel for CAR context.
+  - Added training evidence upload/list/download controls in Action Panel training context.
+  - Added document acknowledgement status list in Action Panel document context.
+  - CAR attachment upload now enforces extension/MIME allowlist and computes SHA-256 recorded in DB (`quality_car_attachments.sha256`).
+- **Rollback**: remove new CAR attachment routes and revert Action Panel evidence section.
+- **Manual verification**:
+  1. Open a CAR quick action panel; upload PDF/PNG evidence and verify it appears in the list and can be downloaded/deleted.
+  2. Open a training quick action panel; upload evidence and verify download action.
+  3. Open a document quick action panel; verify acknowledgement status entries render.
+
+### Security increments
+- **Files**: `backend/amodb/security.py`, `backend/amodb/apps/accounts/router_public.py`.
+- **Changes**:
+  - SECRET_KEY guard is now explicitly production-gated (`APP_ENV/ENV in {prod,production}`) with fail-fast on missing/default key in production.
+  - Added in-memory auth rate limiting for `/auth/login`, `/auth/password-reset/request`, and `/auth/password-reset/confirm` (window/attempts tunable via `AUTH_RATE_LIMIT_WINDOW_SEC` and `AUTH_RATE_LIMIT_MAX_ATTEMPTS`).
+- **Rollback**: remove `_enforce_auth_rate_limit` calls and restore prior SECRET_KEY block.
+- **Manual verification**:
+  1. In production-like env with missing SECRET_KEY, startup should fail with explicit error.
+  2. Repeatedly call `/auth/login` from same IP beyond threshold and confirm HTTP 429.
+
+### Cockpit KPI usefulness
+- **Files**: `frontend/src/dashboards/DashboardCockpit.tsx`.
+- **Changes**:
+  - Added `Document currency` KPI (current vs expired/expiring summary with drilldown).
+  - Added `Audit closures` KPI (closed count with open remainder and drilldown to closed audit filter).
+- **Manual verification**:
+  1. Open cockpit and confirm new KPI cards render with counts/timeframe chips.
+  2. Click each card and verify route includes canonical filter params.

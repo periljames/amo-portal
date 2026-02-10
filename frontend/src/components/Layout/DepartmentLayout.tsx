@@ -4,7 +4,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { BrandContext } from "../Brand/BrandContext";
 import { BrandHeader } from "../Brand/BrandHeader";
 import { BrandProvider } from "../Brand/BrandProvider";
-import AppShell from "../AppShell/AppShell";
 import AppShellV2 from "../AppShell/AppShellV2";
 import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
 import { useToast } from "../feedback/ToastProvider";
@@ -435,8 +434,6 @@ const DepartmentLayout: React.FC<Props> = ({
   const amoLabel = (amoCode || "AMO").toUpperCase();
   const shellBase = uiShellV2 ? "app-shell app-shell--v2" : "app-shell";
   const shellClassName = collapsed ? `${shellBase} app-shell--collapsed` : shellBase;
-  const focusMode = uiShellV2 && isCockpitRoute;
-
   const isBillingRoute = useMemo(() => {
     return location.pathname.includes("/billing");
   }, [location.pathname]);
@@ -478,6 +475,8 @@ const DepartmentLayout: React.FC<Props> = ({
       normalized === `${base}/qms/kpis`
     );
   }, [activeDepartment, amoCode, location.pathname]);
+
+  const focusMode = uiShellV2 && isCockpitRoute;
 
   const qmsNavItems = useMemo(
     () => [

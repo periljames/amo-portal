@@ -123,3 +123,12 @@
 **Acceptance Criteria**
 - Retention schedules applied to QMS records with automated archival/purge workflows.
 - Audit log entries for retention events.
+
+
+## Changed in this run (2026-02-10)
+- **Task realtime gap**: Increment completed toward P0/P1 operational loop.
+  - Evidence: task lifecycle actions now emit normalized SSE-compatible events via audit (`backend/amodb/apps/tasks/services.py`), and frontend invalidates tasks/cockpit aggregate keys (`frontend/src/components/realtime/RealtimeProvider.tsx`).
+- **Evidence upload hardening**: partial progress on compliance gating.
+  - Evidence: CAR attachment hardening + Action Panel evidence controls (`backend/amodb/apps/quality/router.py`, `frontend/src/components/panels/ActionPanel.tsx`).
+- **Security controls**: partial closure of top gaps.
+  - Evidence: production secret guard + auth endpoint rate limiting (`backend/amodb/security.py`, `backend/amodb/apps/accounts/router_public.py`).

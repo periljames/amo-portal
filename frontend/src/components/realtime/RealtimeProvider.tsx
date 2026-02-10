@@ -61,6 +61,9 @@ function mapEventToInvalidations(type: string): string[] {
   if (type.startsWith("training.") || type.startsWith("training_")) {
     return ["training-assignments", "training-dashboard", "training-events", "training-status"];
   }
+  if (type.startsWith("tasks.task.")) {
+    return ["tasks", "my-tasks", "qms-dashboard", "dashboard"];
+  }
   if (type.startsWith("tasks.") || type.startsWith("tasks_")) {
     return ["tasks", "my-tasks"];
   }

@@ -622,6 +622,7 @@ export interface CARAttachmentOut {
   filename: string;
   content_type: string | null;
   size_bytes: number | null;
+  sha256: string | null;
   uploaded_at: string;
   download_url: string;
 }
@@ -656,6 +657,39 @@ export async function qmsUploadCarInviteAttachment(
     throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
   }
   return (await res.json()) as CARAttachmentOut;
+}
+
+
+
+export async function qmsListCarAttachments(carId: string): Promise<CARAttachmentOut[]> {
+  return fetchJson<CARAttachmentOut[]>(`/quality/cars/${encodeURIComponent(carId)}/attachments`);
+}
+
+export async function qmsUploadCarAttachment(carId: string, file: File): Promise<CARAttachmentOut> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const authToken = getToken();
+  const res = await fetch(`${getApiBaseUrl()}/quality/cars/${encodeURIComponent(carId)}/attachments`, {
+    method: "POST",
+    headers: {
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
+    body: formData,
+    credentials: "include",
+  });
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+  }
+  return (await res.json()) as CARAttachmentOut;
+}
+
+export async function qmsDeleteCarAttachment(carId: string, attachmentId: string): Promise<void> {
+  await sendJson<void>(`/quality/cars/${encodeURIComponent(carId)}/attachments/${encodeURIComponent(attachmentId)}`, "DELETE", undefined);
 }
 
 export type QMSNotificationSeverity = "INFO" | "ACTION_REQUIRED" | "WARNING";

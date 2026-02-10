@@ -244,7 +244,7 @@ const QualityCarsPage: React.FC = () => {
         pushToast({
           title: "Invite link copied",
           message: invite.invite_url,
-          variant: "success",
+          variant: "info",
         });
       } else {
         window.prompt("Copy CAR invite link:", invite.invite_url);

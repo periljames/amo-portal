@@ -80,3 +80,16 @@ const source = new EventSource(`${API_BASE}/api/events?token=${encodeURIComponen
 - **Tenant scoping**: events are filtered by `metadata.amoId` against the user’s effective AMO.
 - **Permission scoping**: user must be active; superuser uses active AMO context.
 - **Redaction**: no PII is redacted yet; `metadata` should avoid sensitive content.
+
+
+## Changed in this run (2026-02-10)
+### Emitted today additions (tasks)
+| event.type | entityType | action | Producer path | Trigger | Frontend invalidation keys |
+|---|---|---|---|---|---|
+| `tasks.task.created` | `tasks.task` | `CREATED` | `backend/amodb/apps/tasks/services.py` | `create_task` | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
+| `tasks.task.updated` | `tasks.task` | `UPDATED` | `backend/amodb/apps/tasks/services.py` | `update_task_details` | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
+| `tasks.task.status_changed` | `tasks.task` | `STATUS_CHANGED` | `backend/amodb/apps/tasks/services.py` | `update_task_status` (non-close transitions) | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
+| `tasks.task.closed` | `tasks.task` | `CLOSED` | `backend/amodb/apps/tasks/services.py` | `update_task_status` to DONE/CANCELLED | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
+| `tasks.task.escalated` | `tasks.task` | `ESCALATED` | `backend/amodb/apps/tasks/services.py` | `escalate_task` | `tasks`, `my-tasks`, `qms-dashboard`, `dashboard` |
+
+Debounce remains **350ms** in `frontend/src/components/realtime/RealtimeProvider.tsx`.

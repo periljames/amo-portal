@@ -5,18 +5,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getContext } from "../services/auth";
 import {
-  AccountRole,
-  AdminUserRead,
-  AdminUserUpdatePayload,
   deactivateAdminUser,
   getAdminUser,
   updateAdminUser,
 } from "../services/adminUsers";
+import type { AccountRole, AdminUserUpdatePayload } from "../services/adminUsers";
 import {
   addTrainingEventParticipant,
   listTrainingEvents,
-  type TrainingEventRead,
 } from "../services/training";
+import type { TrainingEventRead } from "../types/training";
 
 const ROLE_OPTIONS: AccountRole[] = [
   "SUPERUSER",

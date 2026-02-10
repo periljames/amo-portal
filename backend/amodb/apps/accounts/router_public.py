@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import time
+import threading
 import urllib.request
 from urllib.parse import urlencode
 
@@ -27,6 +29,31 @@ from . import models, schemas, services
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 RESERVED_PLATFORM_SLUGS = {"", "system", "root"}
+
+
+# Basic in-memory auth rate limiting (per-IP + endpoint).
+_AUTH_RATE_LIMIT_WINDOW_SEC = int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SEC", "60") or "60")
+_AUTH_RATE_LIMIT_MAX_ATTEMPTS = int(os.getenv("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "10") or "10")
+_RATE_LIMIT_STATE: dict[tuple[str, str], list[float]] = {}
+_RATE_LIMIT_LOCK = threading.Lock()
+
+
+def _enforce_auth_rate_limit(request: Request, endpoint_key: str) -> None:
+    ip = _client_ip(request) or "unknown"
+    now = time.monotonic()
+    key = (ip, endpoint_key)
+    with _RATE_LIMIT_LOCK:
+        attempts = _RATE_LIMIT_STATE.get(key, [])
+        cutoff = now - _AUTH_RATE_LIMIT_WINDOW_SEC
+        attempts = [ts for ts in attempts if ts >= cutoff]
+        if len(attempts) >= _AUTH_RATE_LIMIT_MAX_ATTEMPTS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many authentication attempts. Please try again shortly.",
+            )
+        attempts.append(now)
+        _RATE_LIMIT_STATE[key] = attempts
+
 RESET_LINK_BASE_URL = (
     os.getenv("PORTAL_BASE_URL")
     or os.getenv("FRONTEND_BASE_URL")
@@ -35,6 +62,7 @@ RESET_LINK_BASE_URL = (
 
 
 def _client_ip(request: Request) -> str | None:
+    _enforce_auth_rate_limit(request, "password-reset-confirm")
     try:
         return request.client.host if request.client else None
     except Exception:
@@ -205,6 +233,8 @@ def login(
     - If `amo_slug` is empty / `system` / `root`, the platform owner
       (SUPERUSER) can log in even if their AMO is the ROOT AMO.
     """
+    _enforce_auth_rate_limit(request, "login")
+    _enforce_auth_rate_limit(request, "password-reset-request")
     payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
     if payload.identifier and not payload.email and not payload.staff_code:
         identifier = payload.identifier.strip()
@@ -452,6 +482,7 @@ def request_password_reset(
 )
 def confirm_password_reset(
     payload: schemas.PasswordResetConfirm,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     try:

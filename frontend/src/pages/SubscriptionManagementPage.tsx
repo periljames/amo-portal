@@ -220,7 +220,8 @@ const SubscriptionManagementPage: React.FC = () => {
   const handlePlanChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
-    const { name, value, type, checked } = e.target;
+    const { name, value, type } = e.target;
+    const checked = (e.target as HTMLInputElement).checked;
     setPlanForm((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,
@@ -230,7 +231,8 @@ const SubscriptionManagementPage: React.FC = () => {
   const handlePlanEditChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
-    const { name, value, type, checked } = e.target;
+    const { name, value, type } = e.target;
+    const checked = (e.target as HTMLInputElement).checked;
     setPlanEditForm((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,

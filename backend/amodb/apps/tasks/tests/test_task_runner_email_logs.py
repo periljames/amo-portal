@@ -126,4 +126,4 @@ def test_task_runner_creates_email_logs(db_session):
 
     audit_events = db_session.query(audit_models.AuditEvent).all()
     assert any(event.action == "task_reminder" for event in audit_events)
-    assert any(event.action == "task_escalate" for event in audit_events)
+    assert any(event.action == "ESCALATED" for event in audit_events)

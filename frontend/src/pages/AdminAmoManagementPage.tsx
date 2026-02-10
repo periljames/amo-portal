@@ -21,13 +21,7 @@ import {
   listTenantModules,
   type ModuleSubscriptionRead,
 } from "../services/adminModules";
-import {
-  fetchCatalog,
-  fetchSubscriptionStatus,
-  startTrial,
-} from "../services/billing";
 import type { AdminAmoRead } from "../services/adminUsers";
-import type { CatalogSKU, Subscription } from "../types/billing";
 
 type UrlParams = {
   amoCode?: string;
@@ -42,17 +36,6 @@ type AmoFormState = {
   contactEmail: string;
   contactPhone: string;
   timeZone: string;
-};
-
-type AmoProfileState = {
-  name: string;
-  icaoCode: string;
-  country: string;
-  contactEmail: string;
-  contactPhone: string;
-  timeZone: string;
-  isDemo: boolean;
-  isActive: boolean;
 };
 
 const RESERVED_LOGIN_SLUGS = new Set(["system", "root"]);
@@ -78,13 +61,6 @@ const AdminAmoManagementPage: React.FC = () => {
   const [amoCreateSuccess, setAmoCreateSuccess] = useState<string | null>(null);
   const [amoActionError, setAmoActionError] = useState<string | null>(null);
   const [amoActionSuccess, setAmoActionSuccess] = useState<string | null>(null);
-  const [amoProfileSaving, setAmoProfileSaving] = useState(false);
-  const [trialLoading, setTrialLoading] = useState(false);
-  const [trialError, setTrialError] = useState<string | null>(null);
-  const [trialSuccess, setTrialSuccess] = useState<string | null>(null);
-  const [trialCatalog, setTrialCatalog] = useState<CatalogSKU[]>([]);
-  const [trialSubscription, setTrialSubscription] = useState<Subscription | null>(null);
-  const [trialSkuCode, setTrialSkuCode] = useState<string>("");
   const [lastCreatedAmoId, setLastCreatedAmoId] = useState<string | null>(null);
   const [moduleSubscriptions, setModuleSubscriptions] = useState<
     Record<string, ModuleSubscriptionRead>
@@ -101,16 +77,6 @@ const AdminAmoManagementPage: React.FC = () => {
     contactEmail: "",
     contactPhone: "",
     timeZone: "",
-  });
-  const [amoProfile, setAmoProfile] = useState<AmoProfileState>({
-    name: "",
-    icaoCode: "",
-    country: "",
-    contactEmail: "",
-    contactPhone: "",
-    timeZone: "",
-    isDemo: false,
-    isActive: true,
   });
 
   useEffect(() => {
@@ -240,49 +206,6 @@ const AdminAmoManagementPage: React.FC = () => {
     setAmoForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleProfileChange = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ): void => {
-    const { name, value, type, checked } = e.target;
-    setAmoProfile((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
-  };
-
-  const loadTrialData = async (amo: AdminAmoRead | null) => {
-    if (!amo) {
-      setTrialCatalog([]);
-      setTrialSubscription(null);
-      setTrialSkuCode("");
-      return;
-    }
-    setTrialLoading(true);
-    setTrialError(null);
-    setTrialSuccess(null);
-    try {
-      await syncAdminContext(amo.id);
-      const [catalog, subscriptionResult] = await Promise.all([
-        fetchCatalog(),
-        fetchSubscriptionStatus(),
-      ]);
-      const activeSkus = catalog.filter((sku) => sku.is_active);
-      setTrialCatalog(activeSkus);
-      setTrialSubscription(subscriptionResult.subscription);
-      if (activeSkus.length > 0) {
-        const existing =
-          !!trialSkuCode && activeSkus.some((sku) => sku.code === trialSkuCode);
-        setTrialSkuCode(existing ? trialSkuCode : activeSkus[0].code);
-      } else {
-        setTrialSkuCode("");
-      }
-    } catch (err: any) {
-      setTrialError(err?.message || "Unable to load subscription status.");
-    } finally {
-      setTrialLoading(false);
-    }
-  };
-
   const loadModuleSubscriptions = async (amo: AdminAmoRead | null) => {
     if (!amo) {
       setModuleSubscriptions({});
@@ -309,39 +232,8 @@ const AdminAmoManagementPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadTrialData(selectedAmo);
     loadModuleSubscriptions(selectedAmo);
   }, [selectedAmo?.id]);
-
-  const handleStartTrial = async () => {
-    if (!selectedAmo) return;
-    if (!trialSkuCode) {
-      setTrialError("Select a plan to start a trial.");
-      return;
-    }
-    const confirmation = window.prompt(
-      `Type START TRIAL ${selectedAmo.amo_code} to confirm trial activation.`
-    );
-    if (confirmation === null) return;
-    const expected = `START TRIAL ${selectedAmo.amo_code}`.trim();
-    if (confirmation.trim() !== expected) {
-      setTrialError("Confirmation phrase did not match. Trial not started.");
-      return;
-    }
-    setTrialLoading(true);
-    setTrialError(null);
-    setTrialSuccess(null);
-    try {
-      await syncAdminContext(selectedAmo.id);
-      const subscription = await startTrial(trialSkuCode);
-      setTrialSubscription(subscription);
-      setTrialSuccess(`Trial started for ${selectedAmo.amo_code}.`);
-    } catch (err: any) {
-      setTrialError(err?.message || "Failed to start trial.");
-    } finally {
-      setTrialLoading(false);
-    }
-  };
 
   const handleCreateAmo = async (e: React.FormEvent) => {
     e.preventDefault();

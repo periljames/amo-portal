@@ -54,7 +54,7 @@ def test_create_task_writes_task_and_audit_event(db_session):
     assert task.id is not None
     event = (
         db_session.query(audit_models.AuditEvent)
-        .filter(audit_models.AuditEvent.entity_type == "task", audit_models.AuditEvent.action == "task_create")
+        .filter(audit_models.AuditEvent.entity_type == "tasks.task", audit_models.AuditEvent.action == "CREATED")
         .first()
     )
     assert event is not None
@@ -86,7 +86,7 @@ def test_escalate_task_updates_escalated_at_and_logs_audit_event(db_session):
     assert task.escalated_at is not None
     event = (
         db_session.query(audit_models.AuditEvent)
-        .filter(audit_models.AuditEvent.entity_type == "task", audit_models.AuditEvent.action == "task_escalate")
+        .filter(audit_models.AuditEvent.entity_type == "tasks.task", audit_models.AuditEvent.action == "ESCALATED")
         .first()
     )
     assert event is not None

@@ -6,7 +6,7 @@ import { addDays, endOfDay, isBefore, isWithinInterval, parseISO } from "date-fn
 import DashboardScaffold from "../components/dashboard/DashboardScaffold";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getCachedUser, getContext } from "../services/auth";
-import { qmsListAudits, qmsListCars, qmsListDistributions } from "../services/qms";
+import { qmsListAudits, qmsListCars, qmsListDistributions, qmsListDocuments } from "../services/qms";
 import { listMyTasks } from "../services/tasks";
 import { useRealtime } from "../components/realtime/RealtimeProvider";
 import { getMyTrainingStatus } from "../services/training";
@@ -55,6 +55,14 @@ const DashboardCockpit: React.FC = () => {
     enabled: qmsEnabled,
   });
 
+
+
+  const { data: documents = [] } = useQuery({
+    queryKey: ["qms-documents", amoCode],
+    queryFn: () => qmsListDocuments(),
+    enabled: qmsEnabled,
+  });
+
   const { data: tasks = [] } = useQuery({
     queryKey: ["my-tasks", amoCode],
     queryFn: () => listMyTasks(),
@@ -71,6 +79,11 @@ const DashboardCockpit: React.FC = () => {
     const dueMonth = cars.filter((car) => car.status !== "CLOSED" && isWithinDays(car.due_date, 30));
     const dueTasksToday = tasks.filter((task) => isWithinDays(task.due_at, 0));
     const overdueTraining = trainingStatus.filter((item) => item.status === "OVERDUE");
+    const today = new Date();
+    const expiredDocs = documents.filter((doc) => !!doc.effective_date && new Date(doc.effective_date) < today);
+    const expiringSoonDocs = documents.filter((doc) => !!doc.effective_date && new Date(doc.effective_date) >= today && new Date(doc.effective_date) <= addDays(today, 30));
+    const currentDocs = documents.length - expiredDocs.length - expiringSoonDocs.length;
+    const closedAudits = audits.filter((a) => a.status === "CLOSED").length;
     const dueSoonTraining = trainingStatus.filter(
       (item) => item.days_until_due !== null && item.days_until_due <= 7 && item.days_until_due >= 0
     );
@@ -151,8 +164,24 @@ const DashboardCockpit: React.FC = () => {
         onClick: () =>
           navigate(`/maintenance/${amoCode}/${department}/qms/audits?status=open`),
       },
+      {
+        id: "doc-currency",
+        label: "Document currency",
+        value: currentDocs,
+        timeframe: "Month",
+        updatedAt: `${expiredDocs.length} expired · ${expiringSoonDocs.length} due`,
+        onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/documents?currency=expiring_30d`),
+      },
+      {
+        id: "audit-closure",
+        label: "Audit closures",
+        value: closedAudits,
+        timeframe: "Month",
+        updatedAt: `${audits.length - closedAudits} open`,
+        onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits?trend=monthly&status=closed`),
+      },
     ];
-  }, [audits, cars, distributions.length, tasks, trainingStatus, amoCode, department, navigate]);
+  }, [audits, cars, distributions.length, tasks, trainingStatus, documents, amoCode, department, navigate]);
 
   const drivers = useMemo(() => {
     const auditOpen = audits.filter((audit) => audit.status !== "CLOSED").length;

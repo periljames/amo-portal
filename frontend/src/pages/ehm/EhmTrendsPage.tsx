@@ -393,10 +393,10 @@ const EhmTrendsPage: React.FC = () => {
                 config={chartConfig}
                 style={{ width: "100%", height: "100%" }}
                 useResizeHandler
-                onInitialized={(_, graphDiv) => {
+                onInitialized={(_figure: unknown, graphDiv: unknown) => {
                   chartRef.current = graphDiv as HTMLDivElement;
                 }}
-                onUpdate={(_, graphDiv) => {
+                onUpdate={(_figure: unknown, graphDiv: unknown) => {
                   chartRef.current = graphDiv as HTMLDivElement;
                 }}
               />
