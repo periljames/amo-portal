@@ -25,6 +25,8 @@ def _pg_enum_ensure_values(enum_name: str, values: Sequence[str]) -> None:
         sa.text(
             f"""
 DO $$
+DECLARE
+    v text;
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_type t
