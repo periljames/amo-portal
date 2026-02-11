@@ -79,6 +79,29 @@ type PriorityItem = {
   route: string;
 };
 
+type AuditTrendPoint = {
+  period_start: string;
+  period_end: string;
+  closed_count: number;
+  audit_ids: string[];
+};
+
+type NavigatorTile = {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ size?: number }>;
+  to: string;
+  badge?: number;
+};
+
+type PriorityItem = {
+  id: string;
+  title: string;
+  description: string;
+  count: number;
+  route: string;
+};
+
 const DashboardCockpit: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const navigate = useNavigate();
@@ -94,7 +117,8 @@ const DashboardCockpit: React.FC = () => {
 
   const { data: activityHistory } = useInfiniteQuery({
     queryKey: ["activity-history", amoCode, department],
-    queryFn: ({ pageParam }) => listEventHistory({ cursor: pageParam as string | undefined, limit: 50 }),
+    queryFn: ({ pageParam }) =>
+      listEventHistory({ cursor: pageParam as string | undefined, limit: 50 }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     initialPageParam: undefined as string | undefined,
   });
