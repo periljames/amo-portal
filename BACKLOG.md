@@ -165,3 +165,5 @@
   - **Acceptance:** include chunk-size table and before/after transferred MB in `AUDIT_REPORT.md` from prod artifacts.
 - [ ] Add authenticated automated frontend route-smoke in CI for Quality Navigator tile routes and top-priority `Resolve now` navigation.
   - **Acceptance:** CI browser smoke validates all 9 navigator destinations and priority CTA drilldown.
+- [ ] Add in-repo Playwright test runner config so cockpit smoke checks (quality-only render, non-quality redirect, module launcher switch, tile drilldown) run in CI.
+  - **Acceptance:** `npm run test:e2e` executes these checks headlessly in CI.

@@ -200,3 +200,6 @@
 - Added always-visible Quality Navigator panel covering every QMS subpage route as interactive navigation tiles.
 - Added top-priority focus gate: when a priority count exists, only navigator + top-priority card render, with `Resolve now` canonical drilldown CTA.
 - Added interactive ECharts pie/donut control mix chart with tooltip + click drilldowns to complement the interactive closure trend chart.
+- Rebuilt the QMS cockpit UI into a professional colorful responsive dashboard (KPI row, gauge, donuts, trend, scatter, bar ranking, manpower panel) using Recharts.
+- Added mock-response adapter + dev badge fallback so cockpit still renders if snapshot request fails.
+- Verified quality-only cockpit + non-quality `/qms` redirect and module launcher navigation behavior via browser smoke.

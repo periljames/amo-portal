@@ -350,3 +350,43 @@
 
 ### Artifacts
 - Screenshot (current cockpit): `browser:/tmp/codex_browser_invocations/7b2a02f9775e8e75/artifacts/artifacts/quality-cockpit-priority-dark.png`
+
+## Visual redesign run (2026-02-10) — professional colorful QMS cockpit (Recharts)
+### What changed
+- Replaced cockpit content rendering with a new responsive, colorful layout:
+  - header with auditor segmented control + refresh
+  - compact manpower panel
+  - 4 KPI cards row
+  - gauge + two donuts row
+  - full-width monthly trend
+  - scatter + horizontal bar row
+  - action queue + activity sections with compact empty states
+- Kept Quality-only cockpit route invariants and non-quality `/qms` redirect behavior unchanged.
+- Kept module launcher deterministic navigation behavior and verified smoke path.
+- Charts migrated to **Recharts** for cockpit visuals (no Plotly introduced), with click tooltips/drilldowns and stable container heights to reduce flicker/remount behavior.
+- Added mock-response adapter path in cockpit:
+  - attempts live `/quality/qms/cockpit-snapshot`
+  - falls back to in-file mock data on error and shows dev-only “Using mock data” badge.
+
+### Files changed in this redesign run
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+- `frontend/src/components/dashboard/QualityCockpitCanvas.tsx`
+- `frontend/src/styles/components/dashboard-cockpit.css`
+- `frontend/package.json`
+- `frontend/package-lock.json`
+- `AUDIT_REPORT.md`
+- `ROUTE_MAP.md`
+- `AUDIT_SUMMARY.md`
+- `BACKLOG.md`
+
+### Verification
+1. `/maintenance/demo/quality` shows cockpit with colorful KPI/grid/chart layout and navigator.
+2. `/maintenance/demo/planning/qms` redirects to `/maintenance/demo/planning`.
+3. Modules launcher opens and Planning switch changes URL.
+4. Navigator “Documents” tile routes to `/maintenance/demo/quality/qms/documents`.
+
+### Artifacts
+- After (dark): `browser:/tmp/codex_browser_invocations/c0b4aa89d0345f1b/artifacts/artifacts/qms-dashboard-after-dark.png`
+- After (light): `browser:/tmp/codex_browser_invocations/c0b4aa89d0345f1b/artifacts/artifacts/qms-dashboard-after-light.png`
+- Smoke results JSON: `browser:/tmp/codex_browser_invocations/c0b4aa89d0345f1b/artifacts/artifacts/qms-smoke-results.json`
+- Prior screenshot (before this redesign baseline): `browser:/tmp/codex_browser_invocations/7b2a02f9775e8e75/artifacts/artifacts/quality-cockpit-priority-dark.png`
