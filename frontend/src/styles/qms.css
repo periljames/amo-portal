@@ -1243,22 +1243,44 @@ button.qms-list__item:hover {
   }
 }
 
-.calendar-critical-toggle {
+
+.calendar-info-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
   border: 1px solid var(--surface-border);
   background: var(--surface);
   color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.76rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
-.calendar-critical-toggle.is-active {
-  border-color: #ef4444;
-  background: color-mix(in srgb, #ef4444 18%, var(--surface));
+.calendar-info-btn:hover {
   color: var(--text-primary);
+  border-color: var(--accent-primary);
 }
 
-.calendar-summary-tile--critical {
-  border-color: color-mix(in srgb, #ef4444 50%, var(--surface-border));
+.calendar-help-drawer {
+  display: grid;
+  gap: 0.6rem;
+  color: var(--text-secondary);
+}
+
+.calendar-help-drawer p {
+  margin: 0;
+}
+
+.calendar-help-drawer__actions {
+  margin-top: 0.35rem;
+}
+
+.calendar-help-drawer__collapse {
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
 }

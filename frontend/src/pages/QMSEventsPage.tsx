@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Clock3, Plane, RefreshCw, Users } from "lucide-react";
+import { CalendarDays, Clock3, Info, Plane, RefreshCw, Users } from "lucide-react";
 import QMSLayout from "../components/QMS/QMSLayout";
+import Drawer from "../components/shared/Drawer";
 import { getContext } from "../services/auth";
 import {
   fetchCalendarEvents,
@@ -107,7 +108,7 @@ const QMSEventsPage: React.FC = () => {
   const [filters, setFilters] = useState<DashboardFilter>({ auditor: "All", dateRange: "30d" });
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("All");
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("All");
-  const [criticalOnly, setCriticalOnly] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [monthCursor, setMonthCursor] = useState<Date>(new Date());
   const [draggingEventId, setDraggingEventId] = useState<string | null>(null);
@@ -140,10 +141,9 @@ const QMSEventsPage: React.FC = () => {
   const filtered = useMemo(() => {
     return sourceScoped.filter((event) => {
       const scopeOk = scopeFilter === "All" || event.scope === scopeFilter;
-      const criticalOk = !criticalOnly || event.severity === "critical";
-      return scopeOk && criticalOk;
+      return scopeOk;
     });
-  }, [criticalOnly, scopeFilter, sourceScoped]);
+  }, [scopeFilter, sourceScoped]);
 
   const dateList = useMemo(
     () => [...new Set(filtered.map((item) => item.viewDate))].sort((a, b) => a.localeCompare(b)),
@@ -202,7 +202,7 @@ const QMSEventsPage: React.FC = () => {
   const scopeCounts = useMemo(() => {
     return sourceScoped.reduce<Record<WorkScope, number>>(
       (acc, event) => {
-        if (!criticalOnly || event.severity === "critical") acc[event.scope] += 1;
+        acc[event.scope] += 1;
         return acc;
       },
       {
@@ -214,7 +214,7 @@ const QMSEventsPage: React.FC = () => {
         Engineering: 0,
       },
     );
-  }, [criticalOnly, sourceScoped]);
+  }, [sourceScoped]);
 
   const monthCells = useMemo(() => buildMonthCells(monthCursor), [monthCursor]);
 
@@ -288,10 +288,12 @@ const QMSEventsPage: React.FC = () => {
           </select>
           <button
             type="button"
-            className={`calendar-critical-toggle ${criticalOnly ? "is-active" : ""}`}
-            onClick={() => setCriticalOnly((prev) => !prev)}
+            className="calendar-info-btn"
+            onClick={() => setHelpOpen(true)}
+            aria-label="Calendar info"
+            title="Calendar info"
           >
-            {criticalOnly ? "Showing critical" : "Critical only"}
+            <Info size={14} aria-hidden="true" />
           </button>
           <button type="button" className="primary-chip-btn" onClick={() => refetch()}>
             <RefreshCw size={14} aria-hidden="true" />
@@ -513,6 +515,19 @@ const QMSEventsPage: React.FC = () => {
           </div>
         )}
       </section>
+
+      <Drawer title="Calendar quick info" isOpen={helpOpen} onClose={() => setHelpOpen(false)}>
+        <div className="calendar-help-drawer">
+          <p>Click an event to open its module.</p>
+          <p>Drag an event to a different date to reschedule.</p>
+          <p>Use source filter + scope tabs to narrow the board.</p>
+          <div className="calendar-help-drawer__actions">
+            <button type="button" className="calendar-help-drawer__collapse" onClick={() => setHelpOpen(false)}>
+              Collapse panel
+            </button>
+          </div>
+        </div>
+      </Drawer>
     </QMSLayout>
   );
 };
