@@ -2705,6 +2705,75 @@ body[data-color-scheme="light"] .planning-calendar-badge--leave {
   gap: 12px;
 }
 
+.qms-car-form-card {
+  max-width: 1080px;
+  margin-inline: auto;
+}
+
+.qms-car-form {
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.qms-car-form .form-control--full {
+  grid-column: 1 / -1;
+}
+
+.qms-car-assignee-search {
+  position: relative;
+}
+
+.qms-car-assignee-suggestions {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.qms-car-assignee-suggestion {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  background: transparent;
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.qms-car-assignee-suggestion:hover,
+.qms-car-assignee-suggestion:focus-visible {
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  outline: none;
+}
+
+.qms-car-assignee-suggestion span {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.qms-car-assignee-selected {
+  gap: 8px;
+}
+
+.qms-car-assignee-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+
 .form-grid--two-column {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

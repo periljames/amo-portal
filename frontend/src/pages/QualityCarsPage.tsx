@@ -161,6 +161,25 @@ const QualityCarsPage: React.FC = () => {
     });
   }, [assignees, assigneeSearch, form.assigned_department_id]);
 
+  const assigneeSuggestions = useMemo(() => filteredAssignees.slice(0, 6), [filteredAssignees]);
+
+  const selectedAssignee = useMemo(() => {
+    if (!form.assigned_to_user_id) return null;
+    return assigneeLookup.get(form.assigned_to_user_id) || null;
+  }, [assigneeLookup, form.assigned_to_user_id]);
+
+  const selectAssignee = (assigneeId: string) => {
+    setForm((prev) => ({ ...prev, assigned_to_user_id: assigneeId }));
+    setAssigneeSearch("");
+  };
+
+  const handleAssigneeSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    if (assigneeSuggestions.length === 0) return;
+    event.preventDefault();
+    selectAssignee(assigneeSuggestions[0].id);
+  };
+
   const load = async () => {
     setState("loading");
     setError(null);
@@ -400,7 +419,7 @@ const QualityCarsPage: React.FC = () => {
       )}
 
       <section className="page-section">
-        <div className="card">
+        <div className="card qms-car-form-card">
           <div className="card-header">
             <h2>Log a new CAR</h2>
             <p className="text-muted">
@@ -408,7 +427,7 @@ const QualityCarsPage: React.FC = () => {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="form-grid">
+          <form onSubmit={handleSubmit} className="form-grid qms-car-form">
             <label className="form-control">
               <span>Programme</span>
               <select
@@ -440,7 +459,7 @@ const QualityCarsPage: React.FC = () => {
               </select>
             </label>
 
-            <label className="form-control" style={{ gridColumn: "1 / 3" }}>
+            <label className="form-control form-control--full">
               <span>Title</span>
               <input
                 type="text"
@@ -451,13 +470,13 @@ const QualityCarsPage: React.FC = () => {
               />
             </label>
 
-            <label className="form-control" style={{ gridColumn: "1 / 3" }}>
+            <label className="form-control form-control--full">
               <span>Summary</span>
               <textarea
                 value={form.summary}
                 onChange={(e) => setForm((f) => ({ ...f, summary: e.target.value }))}
                 placeholder="Detail the finding, containment, and requested corrective actions."
-                rows={4}
+                rows={3}
                 required
               />
             </label>
@@ -486,13 +505,14 @@ const QualityCarsPage: React.FC = () => {
               <span>Responsible department</span>
               <select
                 value={form.assigned_department_id}
-                onChange={(e) =>
+                onChange={(e) => {
                   setForm((f) => ({
                     ...f,
                     assigned_department_id: e.target.value,
                     assigned_to_user_id: "",
-                  }))
-                }
+                  }));
+                  setAssigneeSearch("");
+                }}
               >
                 <option value="">All departments</option>
                 {departmentOptions.map((dept) => (
@@ -503,34 +523,64 @@ const QualityCarsPage: React.FC = () => {
               </select>
             </label>
 
-            <label className="form-control">
+            <label className="form-control qms-car-assignee-search">
               <span>Search assignees</span>
               <input
                 type="text"
                 value={assigneeSearch}
                 onChange={(e) => setAssigneeSearch(e.target.value)}
+                onKeyDown={handleAssigneeSearchKeyDown}
                 placeholder="Search by name, email, or staff code"
+                autoComplete="off"
               />
+              {assigneeSearch.trim() && assigneeSuggestions.length > 0 && (
+                <ul className="qms-car-assignee-suggestions" role="listbox" aria-label="Assignee suggestions">
+                  {assigneeSuggestions.map((assignee) => (
+                    <li key={assignee.id}>
+                      <button
+                        type="button"
+                        className="qms-car-assignee-suggestion"
+                        onClick={() => selectAssignee(assignee.id)}
+                      >
+                        <strong>{assignee.full_name}</strong>
+                        <span>
+                          {assignee.email || assignee.staff_code || "No contact info"}
+                          {assignee.department_name ? ` · ${assignee.department_name}` : ""}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {assigneeSearch.trim() && assigneeSuggestions.length === 0 && (
+                <span className="text-muted">No matching assignees.</span>
+              )}
             </label>
 
-            <label className="form-control" style={{ gridColumn: "1 / 3" }}>
+            <div className="form-control form-control--full qms-car-assignee-selected" aria-live="polite">
               <span>Responsible owner</span>
-              <select
-                value={form.assigned_to_user_id}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, assigned_to_user_id: e.target.value }))
-                }
-                disabled={assigneesState === "loading"}
-              >
-                <option value="">Unassigned</option>
-                {filteredAssignees.map((assignee) => (
-                  <option key={assignee.id} value={assignee.id}>
-                    {assignee.full_name}
-                    {assignee.department_name ? ` · ${assignee.department_name}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+              {selectedAssignee ? (
+                <div className="qms-car-assignee-pill">
+                  <div>
+                    <strong>{selectedAssignee.full_name}</strong>
+                    <p className="text-muted" style={{ margin: 0 }}>
+                      {selectedAssignee.email || selectedAssignee.staff_code || "No contact info"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-chip-btn"
+                    onClick={() => setForm((prev) => ({ ...prev, assigned_to_user_id: "" }))}
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : (
+                <p className="text-muted" style={{ margin: 0 }}>
+                  Unassigned. Type in the search box to select an owner.
+                </p>
+              )}
+            </div>
 
             <div>
               <button type="submit" className="primary-chip-btn">
