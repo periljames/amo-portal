@@ -199,3 +199,4 @@
 - [ ] Add environment docs for `VITE_AUTH_FACEBOOK_URL` and `VITE_AUTH_ILLUSTRATION_IMAGE` in deployment runbook.
 - [ ] Connect login subtitle source to live highest-priority incident feed once backend endpoint is available.
 - [ ] Pull highest-priority issue snippet directly from backend status API for login subtitle source precedence.
+- [ ] Validate one-page no-scroll dashboard mode against smallest supported laptop viewport and tune card/chart heights per department.

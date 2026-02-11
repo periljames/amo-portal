@@ -573,3 +573,10 @@ Addressed user feedback that the mock cockpit appeared empty. Root cause was pri
 - Improved social icon visibility (Apple icon forced high-contrast dark fill and stronger active tile styling).
 - Verification artifact:
   - `browser:/tmp/codex_browser_invocations/aedeb2d38a803f50/artifacts/artifacts/login-restored-email-first-and-resized.png`
+
+## Update (2026-02-11) — dashboard de-glass + full-width one-page layout
+- Removed dashboard glass wrappers from shared dashboard card primitives and departmental scaffold KPI tiles.
+- Restored full-width cockpit/department canvas behavior by dropping max-width container constraint and applying viewport-filling shell rules.
+- Reduced cockpit chart/list heights to keep dashboard content in a single-page viewport layout without external page scroll.
+- Visual verification artifact:
+  - `browser:/tmp/codex_browser_invocations/98ad9f0f622a9352/artifacts/artifacts/dashboard-fullwidth-no-glass.png`

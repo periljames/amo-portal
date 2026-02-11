@@ -1,7 +1,6 @@
 import React from "react";
 import { Activity, Gauge, ShieldCheck, Wrench } from "lucide-react";
 import DashboardCard from "./DashboardCard";
-import { GlassCard } from "../../ui/liquidGlass";
 
 type Props = {
   departmentLabel: string;
@@ -13,7 +12,7 @@ const DepartmentLandingScaffold: React.FC<Props> = ({ departmentLabel }) => {
       <header className="department-landing__header">
         <div>
           <h1 className="department-landing__title">{departmentLabel} Dashboard</h1>
-          <p className="department-landing__subtitle">Dense operational snapshot. Use module shortcuts while feature teams wire live data.</p>
+          <p className="department-landing__subtitle">Full-width operations overview with no glass overlays.</p>
         </div>
       </header>
 
@@ -29,12 +28,12 @@ const DepartmentLandingScaffold: React.FC<Props> = ({ departmentLabel }) => {
         </div>
 
         <div className="department-grid__center">
-          <DashboardCard title="Department KPI Cluster" subtitle="No wasted space layout">
+          <DashboardCard title="Department KPI Cluster" subtitle="One-page no-scroll layout">
             <div className="department-kpi-row">
-              <GlassCard className="department-kpi" preset="kpiCard" padding={12}><span>Open Tasks</span><strong>24</strong></GlassCard>
-              <GlassCard className="department-kpi" preset="kpiCard" padding={12}><span>Due This Week</span><strong>11</strong></GlassCard>
-              <GlassCard className="department-kpi" preset="kpiCard" padding={12}><span>Blocked</span><strong>2</strong></GlassCard>
-              <GlassCard className="department-kpi" preset="kpiCard" padding={12}><span>Throughput</span><strong>92%</strong></GlassCard>
+              <div className="department-kpi"><span>Open Tasks</span><strong>24</strong></div>
+              <div className="department-kpi"><span>Due This Week</span><strong>11</strong></div>
+              <div className="department-kpi"><span>Blocked</span><strong>2</strong></div>
+              <div className="department-kpi"><span>Throughput</span><strong>92%</strong></div>
             </div>
           </DashboardCard>
         </div>

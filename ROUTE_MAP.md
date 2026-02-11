@@ -236,3 +236,7 @@
 - No route changes.
 - `/login` and `/maintenance/:amoCode/login` keep existing auth flow and AMO route semantics.
 - Social provider entry buttons now present as Google / Apple / Facebook icons with env-gated targets.
+
+## Update (2026-02-11) — dashboard layout mode rollback
+- No route changes.
+- Dashboard presentation rolled back from glass card treatment to full-width non-glass card surfaces.

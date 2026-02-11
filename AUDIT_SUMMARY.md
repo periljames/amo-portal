@@ -299,3 +299,4 @@
 - Login Liquid Glass control sizing is now hard-constrained (no default 300x200 blocks) with explicit dimensions and a typed helper wrapper.
 - Login subtitle now changes dynamically with an enforced 8-word maximum (platform focus override, env override, then time/payroll fallback).
 - Restored email-first then password login progression and reduced login visual scale; Apple social icon visibility corrected.
+- Dashboard/cockpit surfaces now use non-glass cards with full-width, viewport-filling one-page layout defaults.
