@@ -390,6 +390,12 @@ body[data-color-scheme="light"] .status-pill--closed {
   margin: 10px 0;
 }
 
+.priority-gate__note {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
 .priority-gate__actions {
   display: flex;
   justify-content: space-between;
@@ -518,7 +524,7 @@ body[data-color-scheme="dark"] .qms-cockpit-shell {
 .qms-pro-kpi__value { color: var(--qms-text); font-size: 1.55rem; font-weight: 700; margin-top: 6px; }
 
 .qms-pro-grid { display: grid; gap: var(--s-3); }
-.qms-pro-grid--row2 { grid-template-columns: 1fr 1.5fr 1.5fr; }
+.qms-pro-grid--row2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .qms-pro-grid--row4 { grid-template-columns: 2fr 1fr; }
 .qms-pro-grid--single { grid-template-columns: 1fr; }
 

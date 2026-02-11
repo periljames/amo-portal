@@ -472,6 +472,12 @@ class AuditClosureTrendPointOut(BaseModel):
     audit_ids: list[str]
 
 
+class MostCommonFindingTrendPointOut(BaseModel):
+    period_start: date
+    finding_type: str
+    count: int
+
+
 class QMSCockpitSnapshotOut(BaseModel):
     generated_at: datetime
     pending_acknowledgements: int
@@ -492,6 +498,7 @@ class QMSCockpitSnapshotOut(BaseModel):
     suppliers_active: int
     suppliers_inactive: int
     audit_closure_trend: list[AuditClosureTrendPointOut]
+    most_common_finding_trend_12m: list[MostCommonFindingTrendPointOut]
     action_queue: list[CockpitActionItemOut]
 
 

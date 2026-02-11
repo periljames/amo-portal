@@ -44,5 +44,6 @@ def test_cockpit_snapshot_returns_compact_dashboard_and_action_queue(db_session,
     assert snapshot["change_requests_open"] == 4
     assert snapshot["cars_open_total"] == 30
     assert "audit_closure_trend" in snapshot
+    assert "most_common_finding_trend_12m" in snapshot
     assert len(snapshot["action_queue"]) == 25
     assert snapshot["action_queue"][0]["kind"] == "CAR"

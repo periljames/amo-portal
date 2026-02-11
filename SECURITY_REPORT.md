@@ -109,3 +109,13 @@
 - No new backend routes were introduced.
 - Existing `/quality/qms/cockpit-snapshot` response was expanded with additional aggregated counters and trend payloads only.
 - Auth model and authorization boundaries unchanged; no cross-tenant data path changes introduced.
+
+
+## Update (2026-02-11)
+- Security controls unchanged.
+- No auth bypass, route guard, or role-policy change introduced.
+- Quality chart enhancements consume existing authenticated endpoint (`/quality/qms/cockpit-snapshot`) and preserve current module gating.
+
+
+## Update (2026-02-11, follow-up)
+- No security model changes; mock preview visibility change is frontend-only rendering behavior.

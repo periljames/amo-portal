@@ -203,3 +203,58 @@
 - Rebuilt the QMS cockpit UI into a professional colorful responsive dashboard (KPI row, gauge, donuts, trend, scatter, bar ranking, manpower panel) using Recharts.
 - Added mock-response adapter + dev badge fallback so cockpit still renders if snapshot request fails.
 - Verified quality-only cockpit + non-quality `/qms` redirect and module launcher navigation behavior via browser smoke.
+
+
+## Run update (2026-02-11) — Quality dashboard chart uplift
+### What changed
+- Added new backend snapshot field `most_common_finding_trend_12m` (derived from last 12 months of QMS findings, no fabricated values).
+- Added frontend charts:
+  - 2D pie chart for manpower by role (engineers/technicians/inspectors).
+  - 12-month trend for the most common finding type.
+- Updated dashboard title copy to `Quality Dashboard`.
+- Preserved existing routes/auth/feature behavior.
+
+### Exact files changed
+- `backend/amodb/apps/quality/service.py`
+- `backend/amodb/apps/quality/schemas.py`
+- `backend/amodb/apps/quality/tests/test_cockpit_snapshot.py`
+- `frontend/src/services/qms.ts`
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+- `frontend/src/components/dashboard/QualityCockpitCanvas.tsx`
+- `frontend/src/styles/components/dashboard-cockpit.css`
+- `ROUTE_MAP.md`
+- `EVENT_SCHEMA.md`
+- `SECURITY_REPORT.md`
+- `BACKLOG.md`
+- `AUDIT_SUMMARY.md`
+- `AUDIT_REPORT.md`
+
+### Verification steps
+1. `cd backend && pytest amodb/apps/quality/tests/test_cockpit_snapshot.py -q` → pass.
+2. `cd frontend && npx tsc -b` → pass.
+3. `cd frontend && npm run build` → pass; chunk warning noted from existing large bundles.
+
+### New routes and rendering
+- No new routes added this run.
+- `/maintenance/:amoCode/quality` renders updated Quality dashboard charts.
+
+### Perf summary
+- Build artifacts generated successfully; quality cockpit/chart bundles remain route-split.
+- Largest bundle warning remains on pre-existing `grid-vendor` chunk.
+
+### Screenshots/artifacts
+- `browser:/tmp/codex_browser_invocations/4b1fee0fe42bdb46/artifacts/artifacts/quality-dashboard-charts.png`
+
+
+## Run update (2026-02-11) — mock layout visibility fix
+### What changed
+- Fixed mock preview behavior so charts remain visible even when a top-priority item exists.
+- Kept deterministic priority gate for live data; only mock preview bypasses secondary-content hiding.
+- Added preview note text in the priority card for clarity.
+
+### Verification
+1. `cd frontend && npx tsc -b`
+2. Open `/maintenance/demo/quality` in mock mode and confirm charts render below priority card.
+
+### Artifacts
+- `browser:/tmp/codex_browser_invocations/99a9e44c8dcfb9c0/artifacts/artifacts/quality-dashboard-mock-layout-filled.png`

@@ -167,3 +167,15 @@
   - **Acceptance:** CI browser smoke validates all 9 navigator destinations and priority CTA drilldown.
 - [ ] Add in-repo Playwright test runner config so cockpit smoke checks (quality-only render, non-quality redirect, module launcher switch, tile drilldown) run in CI.
   - **Acceptance:** `npm run test:e2e` executes these checks headlessly in CI.
+
+
+## Run update (2026-02-11)
+### Closed
+- [x] Add interactive 2D manpower allocation pie chart (per-role) to Quality dashboard.
+- [x] Add one-year “most common finding” trend chart with deterministic drilldown filters.
+- [x] Correct cockpit heading to “Quality Dashboard” (not “Quality Control”).
+
+
+## Run update (2026-02-11)
+### Closed
+- [x] Keep Quality charts visible in mock preview mode for layout validation while preserving live priority gate behavior.
