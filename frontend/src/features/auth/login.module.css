@@ -131,14 +131,21 @@
 
 .recoveryLink {
   color: #7a7a86;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.submitButtonWrap {
+  width: 100%;
 }
 
 .submitButton {
   margin-top: 8px;
   width: 100%;
-  height: 50px;
+  height: 56px;
   border-radius: 12px;
   color: #ffffff;
   font-size: 1.04rem;
@@ -151,7 +158,7 @@
   margin-top: 16px;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 20px;
 }
 
 .dividerLine {
@@ -169,12 +176,12 @@
   margin-top: 14px;
   display: flex;
   justify-content: center;
-  gap: 14px;
+  gap: 20px;
 }
 
 .socialButton {
-  width: 50px;
-  height: 50px;
+  width: 56px;
+  height: 56px;
   border-radius: 15px;
   background: #fdfdfd;
   border: 1px solid #ececf3;
@@ -293,13 +300,4 @@
     max-width: 300px;
   }
 
-  .socialButton {
-    width: 46px;
-    height: 46px;
-  }
-
-  .submitButton {
-    height: 48px;
-    font-size: 1rem;
-  }
 }
