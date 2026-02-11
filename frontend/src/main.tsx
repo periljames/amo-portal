@@ -2,7 +2,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
+import '@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css';
 import App from "./App";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import "./styles/tokens.css";
@@ -19,25 +22,40 @@ import "./styles/components/toast.css";
 import "./styles/components/drawer.css";
 import "./styles/components/dashboard-cockpit.css";
 import "./styles/components/action-panel.css";
+import "./styles/components/liquid-glass.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 10_000,
-      refetchInterval: 45_000,
-      refetchOnWindowFocus: true,
+      staleTime: 30_000,
+      gcTime: 10 * 60_000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+      refetchInterval: false,
     },
   },
 });
 
+const queryPersister = createSyncStoragePersister({
+  storage: typeof window !== "undefined" ? window.localStorage : undefined,
+  key: "amodb-query-cache-v1",
+  throttleTime: 1500,
+});
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{
+        persister: queryPersister,
+        maxAge: 24 * 60 * 60 * 1000,
+      }}
+    >
       <RealtimeProvider>
         <BrowserRouter>
           <App />
         </BrowserRouter>
       </RealtimeProvider>
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   </React.StrictMode>
 );

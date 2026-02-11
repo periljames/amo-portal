@@ -10,6 +10,12 @@ import {
   type CARStatus,
   type CARAttachmentOut,
 } from "../services/qms";
+import { getEvidenceAcceptString, isEvidenceFileAllowed } from "../services/notificationPreferences";
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+};
 
 type LoadState = "idle" | "loading" | "ready" | "error" | "submitted";
 
@@ -110,7 +116,7 @@ const PublicCarInvitePage: React.FC = () => {
     uploading: false,
   });
 
-  const loadInvite = async (tokenValue: string) => {
+  const loadInvite = React.useCallback(async (tokenValue: string) => {
     updateEntry(tokenValue, (entry) => ({ ...entry, state: "loading", error: null }));
     try {
       const data = await qmsGetCarInviteByToken(tokenValue);
@@ -121,14 +127,14 @@ const PublicCarInvitePage: React.FC = () => {
         attachments,
         state: "ready",
       }));
-    } catch (e: any) {
+    } catch (e: unknown) {
       updateEntry(tokenValue, (entry) => ({
         ...entry,
-        error: e?.message || "Failed to load CAR invite.",
+        error: getErrorMessage(e, "Failed to load CAR invite."),
         state: "error",
       }));
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -158,7 +164,7 @@ const PublicCarInvitePage: React.FC = () => {
     tokens.forEach((tokenValue) => {
       void loadInvite(tokenValue);
     });
-  }, [token]);
+  }, [token, loadInvite]);
 
   useEffect(() => {
     if (!selectedPreview) return;
@@ -197,10 +203,10 @@ const PublicCarInvitePage: React.FC = () => {
         target_closure_date: current.form.target_closure_date || null,
       });
       updateEntry(tokenValue, (entry) => ({ ...entry, state: "submitted" }));
-    } catch (e: any) {
+    } catch (e: unknown) {
       updateEntry(tokenValue, (entry) => ({
         ...entry,
-        error: e?.message || "Failed to submit CAR response.",
+        error: getErrorMessage(e, "Failed to submit CAR response."),
       }));
     }
   };
@@ -208,9 +214,17 @@ const PublicCarInvitePage: React.FC = () => {
   const handleUpload = (tokenValue: string) => async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
+    const uploads = Array.from(files).filter(isEvidenceFileAllowed);
+    if (uploads.length === 0) {
+      updateEntry(tokenValue, (entry) => ({
+        ...entry,
+        attachmentsError: "Selected files are blocked by multimedia policy settings.",
+      }));
+      event.target.value = "";
+      return;
+    }
     updateEntry(tokenValue, (entry) => ({ ...entry, uploading: true, attachmentsError: null }));
     try {
-      const uploads = Array.from(files);
       const results: CARAttachmentOut[] = [];
       for (const upload of uploads) {
         const uploaded = await qmsUploadCarInviteAttachment(tokenValue, upload);
@@ -221,11 +235,11 @@ const PublicCarInvitePage: React.FC = () => {
         attachments: [...entry.attachments, ...results],
         uploading: false,
       }));
-    } catch (e: any) {
+    } catch (e: unknown) {
       updateEntry(tokenValue, (entry) => ({
         ...entry,
         uploading: false,
-        attachmentsError: e?.message || "Failed to upload attachment.",
+        attachmentsError: getErrorMessage(e, "Failed to upload attachment."),
       }));
     } finally {
       event.target.value = "";
@@ -429,7 +443,7 @@ const PublicCarInvitePage: React.FC = () => {
                         type="file"
                         multiple
                         onChange={handleUpload(entry.token)}
-                        accept="image/*,.pdf"
+                        accept={getEvidenceAcceptString()}
                       />
                       {entry.uploading && <span className="text-muted">Uploading...</span>}
                       {entry.attachmentsError && (

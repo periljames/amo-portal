@@ -585,3 +585,94 @@ body[data-color-scheme="dark"] .qms-cockpit-shell {
   .qms-pro-grid--row2 { grid-template-columns: 1fr; }
   .qms-pro-grid--row4 { grid-template-columns: 1fr; }
 }
+
+.qms-dashboard-card {
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: var(--qms-card);
+  box-shadow: var(--sh-1);
+  padding: 14px;
+}
+
+.qms-dashboard-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.qms-dashboard-card__header h3 { margin: 0; color: var(--qms-text); font-size: 0.96rem; }
+.qms-dashboard-card__header p { margin: 4px 0 0; color: var(--qms-subtext); font-size: 0.8rem; }
+.qms-dashboard-card__body { min-height: 40px; }
+.qms-dashboard-card__state { color: var(--qms-subtext); font-size: 0.85rem; border: 1px dashed var(--border-subtle); border-radius: 10px; padding: 10px; }
+
+.qms-chart-host { height: 100%; }
+.qms-chart-skeleton { height: 100%; border-radius: 10px; background: linear-gradient(90deg, rgba(148,163,184,.15), rgba(148,163,184,.28), rgba(148,163,184,.15)); }
+
+.qms-cockpit-shell {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 8px;
+}
+
+.qms-cockpit-shell {
+  --qms-accent-info: #06b6d4;
+  --qms-accent-indigo: #6366f1;
+}
+
+.department-landing__header { margin-bottom: 8px; }
+
+.department-grid {
+  display: grid;
+  grid-template-columns: 3fr 6fr 3fr;
+  gap: 12px;
+}
+
+.department-grid__left,
+.department-grid__center,
+.department-grid__right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.department-metric-list {
+  display: grid;
+  gap: 8px;
+}
+
+.department-metric-list > div,
+.department-nav-btn {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-soft);
+  color: var(--text-primary);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.department-nav-btn { cursor: pointer; text-align: left; }
+.department-nav-btn:hover { border-color: var(--accent-primary); }
+
+.department-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.department-kpi {
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-soft);
+  padding: 10px;
+}
+
+.department-kpi span { display: block; color: var(--text-secondary); font-size: 12px; }
+.department-kpi strong { color: var(--text-primary); font-size: 1.1rem; }
+
+@media (max-width: 1200px) {
+  .department-grid { grid-template-columns: 1fr; }
+}
