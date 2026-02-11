@@ -505,3 +505,23 @@ Addressed user feedback that the mock cockpit appeared empty. Root cause was pri
 
 ### Security note
 - UI now only exposes OAuth entry points; secure FAA-level controls (PKCE, strict redirect URI allowlists, anti-replay/nonces, device/session risk checks, MFA policy) must be enforced on backend identity provider integrations before production enablement.
+
+## Update (2026-02-11) — Liquid Glass component standardization
+### What changed
+- Introduced reusable Liquid Glass wrapper layer:
+  - `GlassPanel`, `GlassCard`, `GlassButton`, `GlassLink`
+  - centralized presets in `frontend/src/ui/liquidGlass/presets.ts`
+- Added mandated base stylesheet import once in `src/main.tsx`:
+  - `@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css`
+- Converted login card to transparent layered shell with icon-only social controls and glass inputs.
+- Applied shared `GlassCard` wrapper to dashboard panel card primitive (`DashboardCard`) and KPI tiles in `DepartmentLandingScaffold` for consistent shell treatment.
+
+### Performance checks
+- Presets are imported constants (no inline object allocation churn in JSX).
+- Wrapper components memoized with `React.memo` and stable preset merge behavior.
+- Existing chart deferment and query-cache behavior preserved.
+
+### Verification checklist
+- [x] Login renders glass card with icon-only social controls.
+- [x] Dashboard cards render through shared glass wrapper without route/data-flow regressions.
+- [x] Build passes with TypeScript.

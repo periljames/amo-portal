@@ -1,6 +1,7 @@
 import React from "react";
 import { Activity, Gauge, ShieldCheck, Wrench } from "lucide-react";
 import DashboardCard from "./DashboardCard";
+import { GlassCard } from "../../ui/liquidGlass";
 
 type Props = {
   departmentLabel: string;
@@ -30,10 +31,10 @@ const DepartmentLandingScaffold: React.FC<Props> = ({ departmentLabel }) => {
         <div className="department-grid__center">
           <DashboardCard title="Department KPI Cluster" subtitle="No wasted space layout">
             <div className="department-kpi-row">
-              <div className="department-kpi"><span>Open Tasks</span><strong>24</strong></div>
-              <div className="department-kpi"><span>Due This Week</span><strong>11</strong></div>
-              <div className="department-kpi"><span>Blocked</span><strong>2</strong></div>
-              <div className="department-kpi"><span>Throughput</span><strong>92%</strong></div>
+              <GlassCard className="department-kpi" preset="kpiCard" padding={12}><span>Open Tasks</span><strong>24</strong></GlassCard>
+              <GlassCard className="department-kpi" preset="kpiCard" padding={12}><span>Due This Week</span><strong>11</strong></GlassCard>
+              <GlassCard className="department-kpi" preset="kpiCard" padding={12}><span>Blocked</span><strong>2</strong></GlassCard>
+              <GlassCard className="department-kpi" preset="kpiCard" padding={12}><span>Throughput</span><strong>92%</strong></GlassCard>
             </div>
           </DashboardCard>
         </div>

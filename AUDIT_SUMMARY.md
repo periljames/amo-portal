@@ -285,3 +285,8 @@
 - Implemented aviation-glass login presentation with responsive 4K wallpaper/video hooks.
 - Added Google/Outlook/Apple social sign-in buttons with env-gated URLs (disabled until configured).
 - Preserved auth routing behavior while reducing copy verbosity.
+
+## 2026-02-11 liquid-glass pass
+- Added standardized `@tinymomentum/liquid-glass-react` UI kit wrappers and centralized presets.
+- Login now uses transparent glass composition with icon-only social entry points.
+- Dashboard cards now consume shared glass wrappers to keep visual consistency and prevent prop churn.

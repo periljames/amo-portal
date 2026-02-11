@@ -190,3 +190,8 @@
 - [x] Wire multimedia (photo/video) preference toggles into upload component-level `accept`/validation enforcement paths.
 - [ ] Add automated perf smoke benchmark for cold boot (`time-to-first-chart-visible`) and fail CI when regressions exceed threshold.
 - [ ] Implement backend OAuth/OIDC hardening for Google/Outlook/Apple (PKCE, nonce/state replay protection, strict redirect allowlists, MFA/step-up policy, session binding) before production enablement.
+
+## Added follow-ups (2026-02-11 liquid-glass)
+- [ ] Implement backend OAuth callback hardening (PKCE/state/nonce/session binding) before enabling social providers in production.
+- [ ] Add route-level visual regression snapshots for login (desktop/tablet/mobile) to keep glass transparency and icon-only controls stable.
+- [ ] Expand glass wrapper usage to table/filter containers in high-traffic dashboards after baseline performance budget tracking is automated.

@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
+import '@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css';
 import App from "./App";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import "./styles/tokens.css";
@@ -21,6 +22,7 @@ import "./styles/components/toast.css";
 import "./styles/components/drawer.css";
 import "./styles/components/dashboard-cockpit.css";
 import "./styles/components/action-panel.css";
+import "./styles/components/liquid-glass.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

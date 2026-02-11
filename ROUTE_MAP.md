@@ -223,3 +223,11 @@
 - No route changes in this run; performance-only update adds client cache persistence/preload behavior without altering path contracts.
 - Login UX simplification (no route shape changes): AMO-scoped login now includes `Find your AMO` action navigating to `/login`.
 - Login flow enhancement (no route changes): `/login` and `/maintenance/:amoCode/login` now render social SSO entry controls (Google/Outlook/Apple) when configured via environment URLs; AMO discovery path remains `/login`.
+
+## Update (2026-02-11) — liquid glass UI kit adoption
+- Route contracts unchanged.
+- Login routes remain:
+  - `/login`
+  - `/maintenance/:amoCode/login`
+- `Find your AMO` route hop remains `/maintenance/:amoCode/login -> /login`.
+- Social SSO providers remain env-gated entry points; no additional routes introduced.
