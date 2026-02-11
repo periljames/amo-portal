@@ -57,6 +57,20 @@ const MOCK_COCKPIT_RESPONSE: QMSCockpitSnapshotOut & {
     { period_start: "2026-01-15", period_end: "2026-01-21", closed_count: 2, audit_ids: ["A-14", "A-15"] },
     { period_start: "2026-01-22", period_end: "2026-01-28", closed_count: 4, audit_ids: ["A-16", "A-17", "A-18", "A-19"] },
   ],
+  most_common_finding_trend_12m: [
+    { period_start: "2025-03-01", finding_type: "NON_CONFORMITY", count: 3 },
+    { period_start: "2025-04-01", finding_type: "NON_CONFORMITY", count: 2 },
+    { period_start: "2025-05-01", finding_type: "NON_CONFORMITY", count: 4 },
+    { period_start: "2025-06-01", finding_type: "NON_CONFORMITY", count: 6 },
+    { period_start: "2025-07-01", finding_type: "NON_CONFORMITY", count: 5 },
+    { period_start: "2025-08-01", finding_type: "NON_CONFORMITY", count: 7 },
+    { period_start: "2025-09-01", finding_type: "NON_CONFORMITY", count: 4 },
+    { period_start: "2025-10-01", finding_type: "NON_CONFORMITY", count: 8 },
+    { period_start: "2025-11-01", finding_type: "NON_CONFORMITY", count: 6 },
+    { period_start: "2025-12-01", finding_type: "NON_CONFORMITY", count: 5 },
+    { period_start: "2026-01-01", finding_type: "NON_CONFORMITY", count: 4 },
+    { period_start: "2026-02-01", finding_type: "NON_CONFORMITY", count: 3 },
+  ],
   action_queue: [
     { id: "1", kind: "CAR", title: "Q-2026-0011 · Missing cert linkage", status: "OPEN", priority: "HIGH", due_date: "2026-02-15", assignee_user_id: "eva" },
     { id: "2", kind: "CAR", title: "Q-2026-0012 · Training evidence gap", status: "IN_PROGRESS", priority: "MEDIUM", due_date: "2026-02-22", assignee_user_id: "mike" },
@@ -206,6 +220,17 @@ const DashboardCockpit: React.FC = () => {
       fatalErrorsByMonth: snapshot.audit_closure_trend.map((p) => ({ month: p.period_start.slice(5), value: p.closed_count, route: `/maintenance/${amoCode}/${department}/qms/audits?status=closed&closed_from=${p.period_start}&closed_to=${p.period_end}` })),
       samplesVsDefects: fatalErrorsBySupervisor.map((row, idx) => ({ name: row.name, samples: (idx + 1) * 8 + snapshot.documents_active, defects: row.value, route: row.route })),
       fatalErrorsByEmployee: fatalErrorsBySupervisor.sort((a, b) => b.value - a.value),
+      manpowerByRole: [
+        { name: "Engineers", value: snapshot.manpower_engineers_on_duty ?? Math.max(0, snapshot.cars_open_total), route: `/maintenance/${amoCode}/${department}/qms/tasks?role=engineer` },
+        { name: "Technicians", value: snapshot.manpower_technicians_on_duty ?? Math.max(0, snapshot.findings_open_total), route: `/maintenance/${amoCode}/${department}/qms/tasks?role=technician` },
+        { name: "Inspectors", value: snapshot.manpower_inspectors_on_duty ?? Math.max(0, snapshot.findings_overdue), route: `/maintenance/${amoCode}/${department}/qms/tasks?role=inspector` },
+      ].filter((role) => role.value > 0),
+      mostCommonFindingTrend: snapshot.most_common_finding_trend_12m?.map((row) => ({
+        month: new Date(row.period_start).toLocaleDateString(undefined, { month: "short", year: "2-digit" }),
+        value: row.count,
+        route: `/maintenance/${amoCode}/${department}/qms/audits?finding_type=${encodeURIComponent(row.finding_type)}&month=${row.period_start.slice(0, 7)}`
+      })) ?? [],
+      mostCommonFindingTypeLabel: snapshot.most_common_finding_trend_12m?.[0]?.finding_type ? snapshot.most_common_finding_trend_12m[0].finding_type.replaceAll("_", " ") : null,
       manpower: {
         on_duty_total: snapshot.manpower_on_duty_total ?? Math.max(0, snapshot.cars_open_total + snapshot.findings_open_total),
         engineers: snapshot.manpower_engineers_on_duty ?? Math.max(0, snapshot.cars_open_total),
@@ -221,7 +246,7 @@ const DashboardCockpit: React.FC = () => {
     <div className="qms-cockpit-shell">
       <header className="qms-cockpit-head">
         <div>
-          <h1>Quality Control Dashboard</h1>
+          <h1>Quality Dashboard</h1>
           <p>Operational controls, trend watch, and deterministic drilldowns.</p>
         </div>
         <div className="qms-cockpit-head__actions">

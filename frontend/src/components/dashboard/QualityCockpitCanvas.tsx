@@ -42,8 +42,11 @@ export type QualityCockpitVisualData = {
   fatalErrorsBySupervisor: NamedValue[];
   fatalErrorsByLocation: NamedValue[];
   fatalErrorsByMonth: TrendPoint[];
+  mostCommonFindingTrend: TrendPoint[];
+  mostCommonFindingTypeLabel: string | null;
   samplesVsDefects: ScatterPoint[];
   fatalErrorsByEmployee: NamedValue[];
+  manpowerByRole: NamedValue[];
   manpower: Manpower;
 };
 
@@ -108,6 +111,24 @@ const QualityCockpitCanvas: React.FC<Props> = ({ data, actionItems, activity, on
         </article>
 
         <article className="qms-pro-card">
+          <h3>Manpower Allocation (2D)</h3>
+          <div className="qms-chart-box">
+            {data.manpowerByRole.length ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie data={data.manpowerByRole} dataKey="value" nameKey="name" outerRadius={85} onClick={(v: any) => v?.payload?.route && window.dispatchEvent(new CustomEvent("qms-nav", { detail: v.payload.route }))}>
+                    {data.manpowerByRole.map((entry, index) => (
+                      <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<QmsTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : <Empty label="manpower allocation" />}
+          </div>
+        </article>
+
+        <article className="qms-pro-card">
           <h3>Fatal Errors by Supervisor</h3>
           <div className="qms-chart-box">
             {data.fatalErrorsBySupervisor.length ? (
@@ -146,11 +167,11 @@ const QualityCockpitCanvas: React.FC<Props> = ({ data, actionItems, activity, on
 
       <section className="qms-pro-grid qms-pro-grid--single">
         <article className="qms-pro-card">
-          <h3>Fatal Errors by Month</h3>
+          <h3>Most Common Finding Trend (12M)</h3>
           <div className="qms-chart-box">
-            {data.fatalErrorsByMonth.length ? (
+            {data.mostCommonFindingTrend.length ? (
               <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={data.fatalErrorsByMonth} onClick={(state: any) => state?.activePayload?.[0]?.payload?.route && window.dispatchEvent(new CustomEvent("qms-nav", { detail: state.activePayload[0].payload.route }))}>
+                <AreaChart data={data.mostCommonFindingTrend} onClick={(state: any) => state?.activePayload?.[0]?.payload?.route && window.dispatchEvent(new CustomEvent("qms-nav", { detail: state.activePayload[0].payload.route }))}>
                   <defs>
                     <linearGradient id="fatalGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor={ACCENT.rose} stopOpacity={0.35} />
@@ -161,10 +182,10 @@ const QualityCockpitCanvas: React.FC<Props> = ({ data, actionItems, activity, on
                   <XAxis dataKey="month" stroke="var(--qms-axis)" />
                   <YAxis stroke="var(--qms-axis)" />
                   <Tooltip content={<QmsTooltip />} />
-                  <Area type="monotone" dataKey="value" stroke={ACCENT.rose} fill="url(#fatalGrad)" />
+                  <Area type="monotone" dataKey="value" name={data.mostCommonFindingTypeLabel ?? "Most common finding"} stroke={ACCENT.rose} fill="url(#fatalGrad)" />
                 </AreaChart>
               </ResponsiveContainer>
-            ) : <Empty label="monthly trend" />}
+             ) : <Empty label="most common finding trend (12m)" />}
           </div>
         </article>
       </section>
