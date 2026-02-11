@@ -245,14 +245,17 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dic
     dashboard = get_dashboard(db, domain=domain)
     open_statuses = [CARStatus.OPEN, CARStatus.IN_PROGRESS, CARStatus.PENDING_VERIFICATION]
     cars_q = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.status.in_(open_statuses))
-    action_rows = (
-        cars_q.order_by(
-            models.CorrectiveActionRequest.due_date.asc().nulls_last(),
-            models.CorrectiveActionRequest.updated_at.desc(),
+    try:
+        action_rows = (
+            cars_q.order_by(
+                models.CorrectiveActionRequest.due_date.asc().nulls_last(),
+                models.CorrectiveActionRequest.updated_at.desc(),
+            )
+            .limit(COCKPIT_ACTION_QUEUE_LIMIT)
+            .all()
         )
-        .limit(COCKPIT_ACTION_QUEUE_LIMIT)
-        .all()
-    )
+    except SQLAlchemyError:
+        action_rows = []
 
     today = date.today()
     cars_open_total = _safe_count(cars_q)

@@ -2174,12 +2174,15 @@ def cancel_subscription(
 
 
 def list_invoices(db: Session, *, amo_id: str) -> List[models.BillingInvoice]:
-    return (
-        db.query(models.BillingInvoice)
-        .filter(models.BillingInvoice.amo_id == amo_id)
-        .order_by(models.BillingInvoice.issued_at.desc())
-        .all()
-    )
+    try:
+        return (
+            db.query(models.BillingInvoice)
+            .filter(models.BillingInvoice.amo_id == amo_id)
+            .order_by(models.BillingInvoice.issued_at.desc())
+            .all()
+        )
+    except (OperationalError, ProgrammingError):
+        return []
 
 
 def get_current_subscription(db: Session, *, amo_id: str) -> Optional[models.TenantLicense]:
