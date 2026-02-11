@@ -1,0 +1,24 @@
+<svg width="1024" height="768" viewBox="0 0 1024 768" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sky" x1="512" y1="0" x2="512" y2="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8E6284"/>
+      <stop offset="0.5" stop-color="#E6AE7C"/>
+      <stop offset="1" stop-color="#F3D6AD"/>
+    </linearGradient>
+    <linearGradient id="snow" x1="512" y1="380" x2="512" y2="768" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C8B9D7"/>
+      <stop offset="1" stop-color="#8E7DAE"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="768" fill="url(#sky)"/>
+  <circle cx="190" cy="262" r="90" fill="#F7EFCB" fill-opacity="0.9"/>
+  <rect y="380" width="1024" height="388" fill="url(#snow)"/>
+  <path d="M0 430C120 470 180 470 270 450C360 430 460 390 580 420C700 450 820 470 1024 430V768H0V430Z" fill="#A79ACB"/>
+  <path d="M300 500C420 540 520 530 620 500C720 470 820 450 1024 480V768H300V500Z" fill="#7F74AD" fill-opacity="0.95"/>
+  <path d="M640 410C720 390 780 370 860 380C930 390 980 430 1024 500V768H640V410Z" fill="#3F486E"/>
+  <path d="M430 575C470 610 490 640 505 700" stroke="#101827" stroke-width="6"/>
+  <path d="M560 560C585 590 600 620 610 700" stroke="#111A2A" stroke-width="6"/>
+  <path d="M680 545C700 575 715 620 720 700" stroke="#121B2C" stroke-width="6"/>
+  <path d="M780 560C800 600 810 640 812 700" stroke="#121B2C" stroke-width="6"/>
+  <path d="M454 603L440 620M466 620L446 640M570 592L552 612M580 614L560 636M694 586L678 604M705 611L686 632" stroke="#161F31" stroke-width="3"/>
+</svg>

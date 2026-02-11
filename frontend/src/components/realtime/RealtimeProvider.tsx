@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { getApiBaseUrl } from "../../services/config";
 import { getContext, getToken } from "../../services/auth";
+import { playNotificationChirp, pushDesktopNotification } from "../../services/notificationPreferences";
 
 export type RealtimeStatus = "live" | "syncing" | "offline";
 
@@ -70,31 +71,27 @@ const TARGETED_REFRESH_KEYS = [
   "activity-history",
 ] as const;
 
-function mapEventToInvalidations(type: string): string[] {
-  if (type.startsWith("qms.") || type.startsWith("qms_")) {
-    return [
-      "qms-dashboard",
-      "qms-documents",
-      "qms-audits",
-      "qms-cars",
-      "qms-change-requests",
-      "qms-distributions",
-      "activity-history",
-    ];
+function mapEventToInvalidations(event: Pick<ActivityEvent, "type" | "entityType" | "action">): string[] {
+  const envelope = `${event.entityType}.${event.action}`.toLowerCase();
+  if (envelope.startsWith("accounts.user")) {
+    return ["user-profile", "admin-users", "qms-dashboard", "dashboard", "activity-history"];
   }
-  if (type.startsWith("training.") || type.startsWith("training_")) {
-    return ["training-assignments", "training-dashboard", "training-events", "training-status", "activity-history"];
-  }
-  if (type.startsWith("tasks.task.")) {
+  if (envelope.startsWith("tasks.task")) {
     return ["tasks", "my-tasks", "qms-dashboard", "dashboard", "activity-history"];
   }
-  if (type.startsWith("tasks.") || type.startsWith("tasks_")) {
-    return ["tasks", "my-tasks", "activity-history"];
+  if (envelope.startsWith("qms.document")) {
+    return ["qms-documents", "qms-dashboard", "activity-history"];
   }
-  if (type.startsWith("accounts.") || type.startsWith("accounts_")) {
-    return ["admin-users", "user-profile", "qms-dashboard", "dashboard", "activity-history"];
+  if (envelope.startsWith("qms.audit")) {
+    return ["qms-audits", "qms-dashboard", "activity-history"];
   }
-  return ["dashboard", "activity-history"];
+  if (envelope.startsWith("qms.car")) {
+    return ["qms-cars", "qms-dashboard", "activity-history"];
+  }
+  if (envelope.startsWith("qms.training") || event.type.startsWith("training.")) {
+    return ["training-dashboard", "training-events", "training-status", "qms-dashboard", "activity-history"];
+  }
+  return ["activity-history"];
 }
 
 export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -105,6 +102,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const sourceRef = useRef<EventSource | null>(null);
   const invalidateTimer = useRef<number | null>(null);
   const reconnectTimer = useRef<number | null>(null);
+  const connectRef = useRef<() => void>(() => undefined);
   const retryCount = useRef(0);
   const staleIntervalRef = useRef<number | null>(null);
   const [staleSeconds, setStaleSeconds] = useState(0);
@@ -139,7 +137,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const next = [event, ...prev];
         return next.slice(0, MAX_ACTIVITY);
       });
-      scheduleInvalidations(mapEventToInvalidations(event.type));
+      playNotificationChirp();
+      void pushDesktopNotification("Realtime event", `${event.type} ${event.action}`);
+      scheduleInvalidations(mapEventToInvalidations(event));
     },
     [lastEventKey, scheduleInvalidations]
   );
@@ -186,9 +186,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       const retryDelay = Math.min(15000, 2000 * 2 ** retryCount.current);
       retryCount.current += 1;
-      reconnectTimer.current = window.setTimeout(() => connect(), retryDelay);
+      reconnectTimer.current = window.setTimeout(() => connectRef.current(), retryDelay);
     };
   }, [handleEvent, lastEventKey, scheduleInvalidations]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   useEffect(() => {
     connect();

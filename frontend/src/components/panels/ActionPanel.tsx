@@ -9,6 +9,7 @@ import type { AdminUserRead } from "../../services/adminUsers";
 import type { TrainingEventRead } from "../../types/training";
 import { updateAdminUser, deactivateAdminUser, type AccountRole } from "../../services/adminUsers";
 import { motionTokens } from "../../utils/motion";
+import { getEvidenceAcceptString, isEvidenceFileAllowed } from "../../services/notificationPreferences";
 
 export type ActionPanelContext =
   | { type: "car"; id: string; title: string; status?: CARStatus; ownerId?: string | null }
@@ -31,6 +32,7 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
   const [distributionUserId, setDistributionUserId] = useState<string>("");
   const [roleSelection, setRoleSelection] = useState<AccountRole | "">("");
   const [selectedEvidenceFile, setSelectedEvidenceFile] = useState<File | null>(null);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
 
   const { data: adminUsers = [] } = useQuery({
     queryKey: ["admin-users"],
@@ -100,7 +102,24 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
     setDistributionUserId("");
     setRoleSelection("");
     setSelectedEvidenceFile(null);
+    setEvidenceError(null);
     onClose();
+  };
+
+  const handleEvidenceSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) {
+      setSelectedEvidenceFile(null);
+      setEvidenceError(null);
+      return;
+    }
+    if (!isEvidenceFileAllowed(file)) {
+      setSelectedEvidenceFile(null);
+      setEvidenceError("File blocked by multimedia policy settings (photo/video/pdf).");
+      return;
+    }
+    setEvidenceError(null);
+    setSelectedEvidenceFile(file);
   };
 
   const assignees = useMemo(() => adminUsers, [adminUsers]);
@@ -213,7 +232,8 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
                 </div>
                 <div className="action-panel__section">
                   <div className="action-panel__label">Evidence</div>
-                  <input type="file" onChange={(event) => setSelectedEvidenceFile(event.target.files?.[0] ?? null)} />
+                  <input type="file" accept={getEvidenceAcceptString()} onChange={handleEvidenceSelection} />
+                  {evidenceError ? <div className="action-panel__label">{evidenceError}</div> : null}
                   <button type="button" className="btn btn-secondary" onClick={() => uploadEvidenceMutation.mutate()} disabled={!selectedEvidenceFile || uploadEvidenceMutation.isPending}>
                     Upload evidence
                   </button>
@@ -250,7 +270,8 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
                 </div>
                 <div className="action-panel__section">
                   <div className="action-panel__label">Evidence</div>
-                  <input type="file" onChange={(event) => setSelectedEvidenceFile(event.target.files?.[0] ?? null)} />
+                  <input type="file" accept={getEvidenceAcceptString()} onChange={handleEvidenceSelection} />
+                  {evidenceError ? <div className="action-panel__label">{evidenceError}</div> : null}
                   <button type="button" className="btn btn-secondary" onClick={() => uploadEvidenceMutation.mutate()} disabled={!selectedEvidenceFile || uploadEvidenceMutation.isPending}>
                     Upload evidence
                   </button>
