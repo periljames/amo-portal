@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Clock3, Info, Plane, RefreshCw, Users } from "lucide-react";
+import { Info, Plus, RefreshCw } from "lucide-react";
 import QMSLayout from "../components/QMS/QMSLayout";
 import Drawer from "../components/shared/Drawer";
 import { getContext } from "../services/auth";
@@ -19,6 +19,17 @@ type CalendarCell = {
   dateKey: string;
   dayOfMonth: number;
   isPlaceholder: boolean;
+};
+
+type CreateEventDraft = {
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  detail: string;
+  scope: WorkScope;
+  source: CalendarItem["source"];
+  location: string;
+  resourceGroup: string;
 };
 
 const severityOrder: Record<CalendarItem["severity"], number> = {
@@ -98,6 +109,17 @@ const buildMonthCells = (cursor: Date): CalendarCell[] => {
 
 const getEventEndDate = (event: CalendarItem): string => event.endDate ?? event.viewDate;
 
+const emptyCreateDraft = (): CreateEventDraft => ({
+  title: "",
+  startsAt: "09:00",
+  endsAt: "10:00",
+  detail: "",
+  scope: "Maintenance",
+  source: "Internal",
+  location: "",
+  resourceGroup: "",
+});
+
 const QMSEventsPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const navigate = useNavigate();
@@ -109,11 +131,14 @@ const QMSEventsPage: React.FC = () => {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("All");
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("All");
   const [helpOpen, setHelpOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>("");
+  const [selectedDate, setSelectedDate] = useState<string>(toDateKey(new Date()));
   const [monthCursor, setMonthCursor] = useState<Date>(new Date());
   const [draggingEventId, setDraggingEventId] = useState<string | null>(null);
   const [dateOverrides, setDateOverrides] = useState<Record<string, { viewDate: string; endDate?: string }>>({});
-  const fullDateViewRef = useRef<HTMLDivElement | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDate, setCreateDate] = useState<string>(toDateKey(new Date()));
+  const [createDraft, setCreateDraft] = useState<CreateEventDraft>(emptyCreateDraft);
+  const [localEvents, setLocalEvents] = useState<CalendarItem[]>([]);
 
   const { data = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ["maintenance-calendar", filters],
@@ -122,8 +147,10 @@ const QMSEventsPage: React.FC = () => {
     refetchOnWindowFocus: true,
   });
 
+  const merged = useMemo(() => [...data, ...localEvents], [data, localEvents]);
+
   const mapped = useMemo(() => {
-    return data.map((event) => {
+    return merged.map((event) => {
       const override = dateOverrides[event.id];
       if (!override) return event;
       return {
@@ -132,53 +159,15 @@ const QMSEventsPage: React.FC = () => {
         endDate: override.endDate,
       };
     });
-  }, [data, dateOverrides]);
+  }, [merged, dateOverrides]);
 
   const sourceScoped = useMemo(() => {
     return mapped.filter((event) => sourceFilter === "All" || event.source === sourceFilter);
   }, [mapped, sourceFilter]);
 
   const filtered = useMemo(() => {
-    return sourceScoped.filter((event) => {
-      const scopeOk = scopeFilter === "All" || event.scope === scopeFilter;
-      return scopeOk;
-    });
+    return sourceScoped.filter((event) => scopeFilter === "All" || event.scope === scopeFilter);
   }, [scopeFilter, sourceScoped]);
-
-  const dateList = useMemo(
-    () => [...new Set(filtered.map((item) => item.viewDate))].sort((a, b) => a.localeCompare(b)),
-    [filtered],
-  );
-
-  useEffect(() => {
-    if (!dateList.length) {
-      setSelectedDate("");
-      return;
-    }
-
-    if (!selectedDate || !dateList.includes(selectedDate)) {
-      setSelectedDate(dateList[0]);
-    }
-  }, [dateList, selectedDate]);
-
-  useEffect(() => {
-    if (selectedDate) setMonthCursor(fromDateKey(selectedDate));
-  }, [selectedDate]);
-
-  const grouped = useMemo(() => {
-    const sorted = [...filtered].sort((a, b) => {
-      if (a.viewDate !== b.viewDate) return a.viewDate.localeCompare(b.viewDate);
-      if (a.resourceGroup !== b.resourceGroup) return a.resourceGroup.localeCompare(b.resourceGroup);
-      return severityOrder[a.severity] - severityOrder[b.severity];
-    });
-
-    return sorted.reduce<Record<string, Record<string, CalendarItem[]>>>((acc, event) => {
-      const byDate = acc[event.viewDate] ?? {};
-      byDate[event.resourceGroup] = [...(byDate[event.resourceGroup] ?? []), event];
-      acc[event.viewDate] = byDate;
-      return acc;
-    }, {});
-  }, [filtered]);
 
   const eventsByDate = useMemo(() => {
     return filtered.reduce<Record<string, CalendarItem[]>>((acc, event) => {
@@ -191,13 +180,6 @@ const QMSEventsPage: React.FC = () => {
       return acc;
     }, {});
   }, [filtered]);
-
-  const fullDayEvents = useMemo(() => {
-    return [...(eventsByDate[selectedDate] ?? [])].sort((a, b) => {
-      if (a.startsAt !== b.startsAt) return a.startsAt.localeCompare(b.startsAt);
-      return severityOrder[a.severity] - severityOrder[b.severity];
-    });
-  }, [eventsByDate, selectedDate]);
 
   const scopeCounts = useMemo(() => {
     return sourceScoped.reduce<Record<WorkScope, number>>(
@@ -218,6 +200,14 @@ const QMSEventsPage: React.FC = () => {
 
   const monthCells = useMemo(() => buildMonthCells(monthCursor), [monthCursor]);
 
+  const monthStart = useMemo(() => toDateKey(new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1)), [monthCursor]);
+  const monthEnd = useMemo(() => toDateKey(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0)), [monthCursor]);
+
+  const criticalVisibleCount = useMemo(
+    () => filtered.filter((event) => event.severity === "critical" && event.viewDate >= monthStart && event.viewDate <= monthEnd).length,
+    [filtered, monthEnd, monthStart],
+  );
+
   const onDropEventToDate = (eventId: string, targetDateKey: string) => {
     const item = filtered.find((event) => event.id === eventId) ?? mapped.find((event) => event.id === eventId);
     if (!item) return;
@@ -235,6 +225,12 @@ const QMSEventsPage: React.FC = () => {
   };
 
   const getEventRoute = (event: CalendarItem): string => {
+    if (event.route) {
+      if (event.route.startsWith("/maintenance/")) return event.route;
+      if (event.route.startsWith("/qms/")) return `/maintenance/${amoSlug}/${department}${event.route}`;
+      if (event.route.startsWith("/")) return event.route;
+    }
+
     if (event.scope === "Maintenance" || event.scope === "Engineering") {
       return `/maintenance/${amoSlug}/${department}/work-orders`;
     }
@@ -262,6 +258,36 @@ const QMSEventsPage: React.FC = () => {
 
   const openEventRoute = (event: CalendarItem) => navigate(getEventRoute(event));
 
+  const startCreate = (dateKey: string) => {
+    setSelectedDate(dateKey);
+    setCreateDate(dateKey);
+    setCreateDraft(emptyCreateDraft());
+    setCreateOpen(true);
+  };
+
+  const submitCreateEvent = () => {
+    if (!createDraft.title.trim()) return;
+
+    const newEvent: CalendarItem = {
+      id: `local-${Date.now()}`,
+      title: createDraft.title.trim(),
+      startsAt: createDraft.startsAt,
+      endsAt: createDraft.endsAt,
+      viewDate: createDate,
+      assignedPersonnel: ["Current User"],
+      location: createDraft.location.trim() || "TBD",
+      detail: createDraft.detail.trim() || "Scheduled from calendar",
+      source: createDraft.source,
+      lastSyncedAt: new Date().toISOString(),
+      resourceGroup: createDraft.resourceGroup.trim() || "General Team",
+      severity: "standard",
+      scope: createDraft.scope,
+    };
+
+    setLocalEvents((prev) => [newEvent, ...prev]);
+    setCreateOpen(false);
+  };
+
   return (
     <QMSLayout
       amoCode={amoSlug}
@@ -286,6 +312,10 @@ const QMSEventsPage: React.FC = () => {
             <option value="Outlook">Outlook</option>
             <option value="Google">Google</option>
           </select>
+          <button type="button" className="primary-chip-btn" onClick={() => startCreate(selectedDate)}>
+            <Plus size={14} aria-hidden="true" />
+            <span>Create event</span>
+          </button>
           <button
             type="button"
             className="calendar-info-btn"
@@ -320,7 +350,7 @@ const QMSEventsPage: React.FC = () => {
         })}
       </section>
 
-      <section className="cockpit-card cockpit-card--mini-calendar" aria-label="Date picker with previews">
+      <section className="cockpit-card cockpit-card--mini-calendar" aria-label="Month calendar">
         <header className="calendar-mini__header">
           <button
             type="button"
@@ -331,14 +361,17 @@ const QMSEventsPage: React.FC = () => {
             ‹
           </button>
           <h3>{monthLabel(monthCursor)}</h3>
-          <button
-            type="button"
-            className="calendar-mini__nav"
-            onClick={() => setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
-            aria-label="Next month"
-          >
-            ›
-          </button>
+          <div className="calendar-mini__header-meta">
+            {criticalVisibleCount > 0 && <span className="calendar-critical-chip">{criticalVisibleCount} critical</span>}
+            <button
+              type="button"
+              className="calendar-mini__nav"
+              onClick={() => setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+              aria-label="Next month"
+            >
+              ›
+            </button>
+          </div>
         </header>
 
         <div className="calendar-mini__weekdays">
@@ -347,186 +380,210 @@ const QMSEventsPage: React.FC = () => {
           ))}
         </div>
 
-        <div className="calendar-mini__grid">
-          {monthCells.map((cell) => {
-            if (cell.isPlaceholder) return <div key={cell.dateKey} className="calendar-mini__blank" aria-hidden="true" />;
-
-            const dayEvents = (eventsByDate[cell.dateKey] ?? [])
-              .slice()
-              .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
-            const criticalCount = dayEvents.filter((item) => item.severity === "critical").length;
-            const isActive = selectedDate === cell.dateKey;
-
-            return (
-              <div
-                key={cell.dateKey}
-                role="button"
-                tabIndex={0}
-                className={`calendar-mini__day ${isActive ? "is-active" : ""}`}
-                onClick={() => {
-                  setSelectedDate(cell.dateKey);
-                  requestAnimationFrame(() => fullDateViewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-                }}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => {
-                  if (draggingEventId) onDropEventToDate(draggingEventId, cell.dateKey);
-                  setDraggingEventId(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setSelectedDate(cell.dateKey);
-                    requestAnimationFrame(() => fullDateViewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-                  }
-                }}
-              >
-                <div className="calendar-mini__day-head">
-                  <strong>{cell.dayOfMonth}</strong>
-                  {criticalCount > 0 && <small>{criticalCount}!</small>}
-                </div>
-
-                <div className="calendar-mini__events">
-                  {dayEvents.slice(0, 3).map((event) => {
-                    const multiDay = getEventEndDate(event) > event.viewDate;
-                    const startsToday = event.viewDate === cell.dateKey;
-                    const endsToday = getEventEndDate(event) === cell.dateKey;
-
-                    return (
-                      <button
-                        key={`${cell.dateKey}-${event.id}`}
-                        type="button"
-                        className={`calendar-mini__event calendar-mini__event--${event.severity} ${multiDay ? "is-span" : ""} ${
-                          startsToday ? "is-span-start" : ""
-                        } ${endsToday ? "is-span-end" : ""}`}
-                        draggable
-                        onDragStart={() => setDraggingEventId(event.id)}
-                        onDragEnd={() => setDraggingEventId(null)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEventRoute(event);
-                        }}
-                      >
-                        <span>{event.title}</span>
-                        <small>{event.detail}</small>
-                      </button>
-                    );
-                  })}
-                  {dayEvents.length > 3 && <em>+{dayEvents.length - 3} more</em>}
-                </div>
-
-                {!!dayEvents.length && (
-                  <div className="calendar-mini__hover-card" role="tooltip">
-                    <strong>{cell.dateKey}</strong>
-                    {dayEvents.slice(0, 5).map((event) => (
-                      <span key={`${event.id}-hover`}>
-                        {event.startsAt} {event.title}
-                      </span>
-                    ))}
-                    {dayEvents.length > 5 && <span>+{dayEvents.length - 5} more</span>}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <div className="cockpit-card cockpit-card--calendar">
-        <header className="calendar-board-header">
-          <h3>
-            <CalendarDays size={16} aria-hidden="true" /> Schedule
-          </h3>
-        </header>
-
         {isLoading ? (
           <p>Loading schedule…</p>
         ) : (
-          <div className="calendar-grid calendar-grid--month">
-            {Object.entries(grouped).map(([date, resources]) => (
-              <div key={date} className="calendar-cell">
-                <h4>{date}</h4>
-                {Object.entries(resources).map(([resource, events]) => (
-                  <section key={resource} className="calendar-resource-group">
-                    <div className="calendar-resource-group__title">
-                      <Users size={14} aria-hidden="true" />
-                      <span>{resource}</span>
-                    </div>
-                    {events.map((event) => (
+          <div className="calendar-mini__grid">
+            {monthCells.map((cell) => {
+              if (cell.isPlaceholder) return <div key={cell.dateKey} className="calendar-mini__blank" aria-hidden="true" />;
+
+              const dayEvents = (eventsByDate[cell.dateKey] ?? [])
+                .slice()
+                .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+              const criticalCount = dayEvents.filter((item) => item.severity === "critical").length;
+              const isActive = selectedDate === cell.dateKey;
+
+              return (
+                <div
+                  key={cell.dateKey}
+                  role="button"
+                  tabIndex={0}
+                  className={`calendar-mini__day ${isActive ? "is-active" : ""}`}
+                  onClick={() => setSelectedDate(cell.dateKey)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => {
+                    if (draggingEventId) onDropEventToDate(draggingEventId, cell.dateKey);
+                    setDraggingEventId(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedDate(cell.dateKey);
+                    }
+                  }}
+                >
+                  <div className="calendar-mini__day-head">
+                    <strong>{cell.dayOfMonth}</strong>
+                    <div className="calendar-mini__day-actions">
+                      {criticalCount > 0 && <small>{criticalCount}!</small>}
                       <button
-                        key={event.id}
                         type="button"
-                        className={`calendar-event calendar-event--${event.severity}`}
-                        onClick={() => openEventRoute(event)}
+                        className="calendar-mini__add"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startCreate(cell.dateKey);
+                        }}
+                        aria-label={`Create event on ${cell.dateKey}`}
                       >
-                        <strong>
-                          <Plane size={14} aria-hidden="true" />
-                          <span>{event.title}</span>
-                        </strong>
-                        <small className="calendar-event__desc">{event.detail}</small>
-                        <span>
-                          <Clock3 size={14} aria-hidden="true" />
-                          {event.startsAt} - {event.endsAt}
-                        </span>
-                        <small className="calendar-event__source">
-                          {event.scope} · {event.source}
-                        </small>
+                        <Plus size={12} aria-hidden="true" />
                       </button>
-                    ))}
-                  </section>
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                    </div>
+                  </div>
 
-      <section className="cockpit-card cockpit-card--calendar-day" ref={fullDateViewRef}>
-        <header className="calendar-board-header">
-          <h3>Full view · {selectedDate || "No date"}</h3>
-        </header>
+                  <div className="calendar-mini__events">
+                    {dayEvents.slice(0, 3).map((event) => {
+                      const multiDay = getEventEndDate(event) > event.viewDate;
+                      const startsToday = event.viewDate === cell.dateKey;
+                      const endsToday = getEventEndDate(event) === cell.dateKey;
 
-        {!fullDayEvents.length ? (
-          <p>No events for selected date.</p>
-        ) : (
-          <div className="calendar-day-list">
-            {fullDayEvents.map((event) => (
-              <button
-                key={event.id}
-                type="button"
-                className={`calendar-day-list__item calendar-day-list__item--${event.severity}`}
-                onClick={() => openEventRoute(event)}
-              >
-                <div>
-                  <strong>{event.title}</strong>
-                  <small>{event.detail}</small>
-                  <span>
-                    {event.startsAt} - {event.endsAt}
-                  </span>
-                  <small>{event.location}</small>
+                      return (
+                        <button
+                          key={`${cell.dateKey}-${event.id}`}
+                          type="button"
+                          className={`calendar-mini__event calendar-mini__event--${event.severity} ${multiDay ? "is-span" : ""} ${
+                            startsToday ? "is-span-start" : ""
+                          } ${endsToday ? "is-span-end" : ""}`}
+                          draggable
+                          onDragStart={() => setDraggingEventId(event.id)}
+                          onDragEnd={() => setDraggingEventId(null)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEventRoute(event);
+                          }}
+                        >
+                          <span>{event.title}</span>
+                          <small>{event.detail}</small>
+                        </button>
+                      );
+                    })}
+                    {dayEvents.length > 3 && <em>+{dayEvents.length - 3} more</em>}
+                  </div>
+
+                  {!!dayEvents.length && (
+                    <div className="calendar-mini__hover-card" role="tooltip">
+                      <strong>{cell.dateKey}</strong>
+                      {dayEvents.slice(0, 5).map((event) => (
+                        <span key={`${event.id}-hover`}>
+                          {event.startsAt} {event.title}
+                        </span>
+                      ))}
+                      {dayEvents.length > 5 && <span>+{dayEvents.length - 5} more</span>}
+                    </div>
+                  )}
                 </div>
-                <div className="calendar-day-list__meta">
-                  <span className={`calendar-scope-pill calendar-scope-pill--${event.scope.toLowerCase()}`}>
-                    {event.scope}
-                  </span>
-                  <small>{event.resourceGroup}</small>
-                </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
 
       <Drawer title="Calendar quick info" isOpen={helpOpen} onClose={() => setHelpOpen(false)}>
         <div className="calendar-help-drawer">
-          <p>Click an event to open its module.</p>
-          <p>Drag an event to a different date to reschedule.</p>
-          <p>Use source filter + scope tabs to narrow the board.</p>
+          <p>Click event cards to open their module.</p>
+          <p>Use scope tabs and source filter to narrow results.</p>
+          <p>Drag events onto another date to reschedule.</p>
           <div className="calendar-help-drawer__actions">
             <button type="button" className="calendar-help-drawer__collapse" onClick={() => setHelpOpen(false)}>
               Collapse panel
             </button>
           </div>
         </div>
+      </Drawer>
+
+      <Drawer title={`Create event · ${createDate}`} isOpen={createOpen} onClose={() => setCreateOpen(false)}>
+        <form
+          className="calendar-create-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitCreateEvent();
+          }}
+        >
+          <label>
+            <span>Title</span>
+            <input
+              value={createDraft.title}
+              onChange={(e) => setCreateDraft((prev) => ({ ...prev, title: e.target.value }))}
+              required
+            />
+          </label>
+          <div className="calendar-create-form__row">
+            <label>
+              <span>Start</span>
+              <input
+                type="time"
+                value={createDraft.startsAt}
+                onChange={(e) => setCreateDraft((prev) => ({ ...prev, startsAt: e.target.value }))}
+              />
+            </label>
+            <label>
+              <span>End</span>
+              <input
+                type="time"
+                value={createDraft.endsAt}
+                onChange={(e) => setCreateDraft((prev) => ({ ...prev, endsAt: e.target.value }))}
+              />
+            </label>
+          </div>
+          <div className="calendar-create-form__row">
+            <label>
+              <span>Scope</span>
+              <select
+                value={createDraft.scope}
+                onChange={(e) => setCreateDraft((prev) => ({ ...prev, scope: e.target.value as WorkScope }))}
+              >
+                {scopeOrder.filter((scope): scope is WorkScope => scope !== "All").map((scope) => (
+                  <option key={scope} value={scope}>
+                    {scope}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Source</span>
+              <select
+                value={createDraft.source}
+                onChange={(e) =>
+                  setCreateDraft((prev) => ({ ...prev, source: e.target.value as CalendarItem["source"] }))
+                }
+              >
+                <option value="Internal">Internal</option>
+                <option value="Outlook">Outlook</option>
+                <option value="Google">Google</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            <span>Location</span>
+            <input
+              value={createDraft.location}
+              onChange={(e) => setCreateDraft((prev) => ({ ...prev, location: e.target.value }))}
+            />
+          </label>
+          <label>
+            <span>Team / Resource</span>
+            <input
+              value={createDraft.resourceGroup}
+              onChange={(e) => setCreateDraft((prev) => ({ ...prev, resourceGroup: e.target.value }))}
+            />
+          </label>
+          <label>
+            <span>Description</span>
+            <textarea
+              rows={3}
+              value={createDraft.detail}
+              onChange={(e) => setCreateDraft((prev) => ({ ...prev, detail: e.target.value }))}
+            />
+          </label>
+
+          <div className="calendar-create-form__actions">
+            <button type="button" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="primary-chip-btn">
+              Save event
+            </button>
+          </div>
+        </form>
       </Drawer>
     </QMSLayout>
   );

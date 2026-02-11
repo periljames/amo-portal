@@ -1284,3 +1284,89 @@ button.qms-list__item:hover {
   padding: 0.35rem 0.7rem;
   cursor: pointer;
 }
+
+.calendar-mini__header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.calendar-critical-chip {
+  border: 1px solid color-mix(in srgb, #ef4444 45%, var(--surface-border));
+  background: color-mix(in srgb, #ef4444 14%, var(--surface));
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  font-size: 0.7rem;
+}
+
+.calendar-mini__day-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.calendar-mini__add {
+  width: 19px;
+  height: 19px;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.calendar-mini__add:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.calendar-create-form {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.calendar-create-form label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.calendar-create-form span {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.calendar-create-form input,
+.calendar-create-form textarea,
+.calendar-create-form select {
+  border: 1px solid var(--surface-border);
+  background: var(--surface);
+  color: var(--text-primary);
+  border-radius: 0.5rem;
+  padding: 0.42rem 0.55rem;
+}
+
+.calendar-create-form__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.calendar-create-form__actions {
+  margin-top: 0.35rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.calendar-create-form__actions button {
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-primary);
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+}

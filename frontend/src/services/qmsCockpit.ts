@@ -1,5 +1,6 @@
 import { authHeaders } from "./auth";
 import { apiGet, apiPost } from "./crs";
+import { qmsListAudits, type QMSAuditOut } from "./qms";
 
 export type DashboardFilter = {
   auditor: string;
@@ -58,6 +59,7 @@ export type CalendarItem = {
   resourceGroup: string;
   severity: "standard" | "priority" | "critical";
   scope: WorkScope;
+  route?: string;
 };
 
 const MOCK_COCKPIT: CockpitPayload = {
@@ -118,11 +120,51 @@ export async function fetchSerialNumber(): Promise<string> {
   }
 }
 
+const mapAuditToCalendarItem = (audit: QMSAuditOut): CalendarItem | null => {
+  if (!audit.planned_start) return null;
+
+  const statusSeverity: CalendarItem["severity"] =
+    audit.status === "CAP_OPEN" ? "critical" : audit.status === "IN_PROGRESS" ? "priority" : "standard";
+
+  return {
+    id: `audit-${audit.id}`,
+    title: audit.title || audit.audit_ref,
+    startsAt: "08:00",
+    endsAt: "17:00",
+    viewDate: audit.planned_start,
+    endDate: audit.planned_end || undefined,
+    assignedPersonnel: [audit.auditee || "Audit team"],
+    location: "Quality audit",
+    detail: audit.scope || audit.criteria || `Audit ${audit.audit_ref}`,
+    source: "Internal",
+    lastSyncedAt: audit.updated_at,
+    resourceGroup: "Audit Program",
+    severity: statusSeverity,
+    scope: "Quality",
+    route: `/qms/audits/${audit.id}`,
+  };
+};
+
 export async function fetchCalendarEvents(filters: DashboardFilter): Promise<CalendarItem[]> {
+  const params = new URLSearchParams({ auditor: filters.auditor, date_range: filters.dateRange });
+
   try {
-    const params = new URLSearchParams({ auditor: filters.auditor, date_range: filters.dateRange });
-    return await apiGet<CalendarItem[]>(`/qms/maintenance-calendar?${params.toString()}`, { headers: authHeaders() });
+    const [calendarEvents, audits] = await Promise.all([
+      apiGet<CalendarItem[]>(`/qms/maintenance-calendar?${params.toString()}`, { headers: authHeaders() }),
+      qmsListAudits({}),
+    ]);
+
+    const auditEvents = audits.map(mapAuditToCalendarItem).filter((item): item is CalendarItem => item !== null);
+    return [...calendarEvents, ...auditEvents];
   } catch {
+    let auditFallback: CalendarItem[] = [];
+    try {
+      const audits = await qmsListAudits({});
+      auditFallback = audits.map(mapAuditToCalendarItem).filter((item): item is CalendarItem => item !== null);
+    } catch {
+      auditFallback = [];
+    }
+
     return [
       {
         id: "1",
@@ -217,6 +259,7 @@ export async function fetchCalendarEvents(filters: DashboardFilter): Promise<Cal
         severity: "priority",
         scope: "Training",
       },
+      ...auditFallback,
     ];
   }
 }
