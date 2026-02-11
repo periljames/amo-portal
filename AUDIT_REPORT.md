@@ -390,3 +390,13 @@
 - After (light): `browser:/tmp/codex_browser_invocations/c0b4aa89d0345f1b/artifacts/artifacts/qms-dashboard-after-light.png`
 - Smoke results JSON: `browser:/tmp/codex_browser_invocations/c0b4aa89d0345f1b/artifacts/artifacts/qms-smoke-results.json`
 - Prior screenshot (before this redesign baseline): `browser:/tmp/codex_browser_invocations/7b2a02f9775e8e75/artifacts/artifacts/quality-cockpit-priority-dark.png`
+
+
+## Run narrative (2026-02-11) — Quality dashboard chart corrections
+This run focused on the requested Quality dashboard visuals and terminology correction. We implemented a proper 2D manpower pie chart per role and added a one-year “most common finding” trend line backed by real DB aggregation from `qms_audit_findings`. The heading was corrected to “Quality Dashboard”. Drilldowns are wired to canonical QMS routes with query filters.
+
+### Tradeoffs
+- We reused the existing Recharts-based cockpit implementation instead of introducing another chart stack to avoid bundle/perf regressions and preserve current rendering behavior.
+
+### Known issues/follow-ups
+- Frontend production build still reports an existing large chunk warning for `grid-vendor`; no regression introduced by this run.

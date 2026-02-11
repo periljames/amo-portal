@@ -142,3 +142,8 @@
 - No new SSE entity types/actions introduced in this run.
 - Cockpit enrichment uses existing data sources and existing emitted entity envelopes.
 - Tenant/cursor safety assumptions remain unchanged (amoCode scoping and cursor-safe replay behavior preserved).
+
+
+## Changed in this run (2026-02-11)
+- No event envelope/entity/action changes.
+- Dashboard data expansion uses existing Quality snapshot endpoint and does not emit new event types.

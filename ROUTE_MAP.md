@@ -194,3 +194,11 @@
   - `/maintenance/:amoCode/quality/qms/training`
   - `/maintenance/:amoCode/quality/qms/events`
   - `/maintenance/:amoCode/quality/qms/kpis`
+
+
+## Changed in this run (2026-02-11)
+- No route path changes.
+- Quality cockpit content update only: `/maintenance/:amoCode/quality` now shows:
+  - 2D manpower allocation pie chart by role (interactive drilldown to QMS tasks filters).
+  - 12-month trend for the most common finding type (interactive drilldown to audits filter).
+- Dashboard title corrected from “Quality Control Dashboard” to “Quality Dashboard”.

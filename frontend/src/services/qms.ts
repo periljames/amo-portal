@@ -368,6 +368,11 @@ export interface QMSCockpitSnapshotOut {
     closed_count: number;
     audit_ids: string[];
   }[];
+  most_common_finding_trend_12m: {
+    period_start: string;
+    finding_type: string;
+    count: number;
+  }[];
   action_queue: QMSCockpitActionItemOut[];
 }
 

@@ -187,6 +187,60 @@ def _build_audit_closure_trend(db: Session, window_days: int = 90, bucket_days: 
     return trend
 
 
+
+
+def _build_most_common_finding_trend_12m(db: Session) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(days=365)
+
+    top_finding = (
+        db.query(
+            models.QMSAuditFinding.finding_type,
+            func.count(models.QMSAuditFinding.id).label("finding_count"),
+        )
+        .filter(models.QMSAuditFinding.created_at >= window_start)
+        .group_by(models.QMSAuditFinding.finding_type)
+        .order_by(func.count(models.QMSAuditFinding.id).desc())
+        .first()
+    )
+
+    if not top_finding:
+        return []
+
+    top_finding_type = top_finding[0].value if hasattr(top_finding[0], "value") else str(top_finding[0])
+    finding_rows = (
+        db.query(models.QMSAuditFinding.created_at)
+        .filter(
+            models.QMSAuditFinding.created_at >= window_start,
+            models.QMSAuditFinding.finding_type == top_finding[0],
+        )
+        .all()
+    )
+
+    month_keys: list[date] = []
+    cursor = date(now.year, now.month, 1)
+    for _ in range(12):
+        month_keys.append(cursor)
+        cursor = date(cursor.year - 1, 12, 1) if cursor.month == 1 else date(cursor.year, cursor.month - 1, 1)
+    month_keys.reverse()
+
+    counts = {month_key: 0 for month_key in month_keys}
+    for (created_at,) in finding_rows:
+        if created_at is None:
+            continue
+        month_key = date(created_at.year, created_at.month, 1)
+        if month_key in counts:
+            counts[month_key] += 1
+
+    return [
+        {
+            "period_start": month_key,
+            "finding_type": top_finding_type,
+            "count": counts[month_key],
+        }
+        for month_key in month_keys
+    ]
+
 def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dict:
     dashboard = get_dashboard(db, domain=domain)
     open_statuses = [CARStatus.OPEN, CARStatus.IN_PROGRESS, CARStatus.PENDING_VERIFICATION]
@@ -246,6 +300,7 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dic
         "suppliers_active": suppliers_active,
         "suppliers_inactive": suppliers_inactive,
         "audit_closure_trend": _build_audit_closure_trend(db),
+        "most_common_finding_trend_12m": _build_most_common_finding_trend_12m(db),
         "action_queue": [
             {
                 "id": str(row.id),
