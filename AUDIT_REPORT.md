@@ -557,3 +557,10 @@ Addressed user feedback that the mock cockpit appeared empty. Root cause was pri
 - Added `GlassIconButton` typed helper in login layout so icon-size controls always pass explicit dimensions.
 - Verification artifact:
   - `browser:/tmp/codex_browser_invocations/dc8d4a39cf7383ae/artifacts/artifacts/login-fixed-glass-sizing.png`
+
+## Update (2026-02-11) — dynamic brief login subtitle
+- Replaced static login subtitle with a dynamic brief line (max 8 words) selected by:
+  1) `localStorage['amodb:login-focus']` when present,
+  2) `VITE_LOGIN_FOCUS_MESSAGE` when present,
+  3) time/payroll-window fallback messaging.
+- Added word-limit sanitizer so subtitle stays concise and non-verbose.

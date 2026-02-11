@@ -19,6 +19,33 @@ import { decodeAmoCertFromUrl } from "../utils/amo";
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PLATFORM_SUPPORT_SLUG = "system";
 
+const MAX_SUBTITLE_WORDS = 8;
+
+function sanitizeBriefMessage(message: string | null | undefined): string | null {
+  if (!message) return null;
+  const words = message.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return null;
+  return words.slice(0, MAX_SUBTITLE_WORDS).join(" ");
+}
+
+function getDynamicLoginSubtitle(now: Date): string {
+  const platformFocus = sanitizeBriefMessage(
+    typeof window !== "undefined" ? window.localStorage.getItem("amodb:login-focus") : null
+  );
+  if (platformFocus) return platformFocus;
+
+  const envFocus = sanitizeBriefMessage(import.meta.env.VITE_LOGIN_FOCUS_MESSAGE as string | undefined);
+  if (envFocus) return envFocus;
+
+  const day = now.getDate();
+  const hour = now.getHours();
+
+  if (day >= 25 || day <= 2) return "Payroll week: review dues and approvals";
+  if (hour < 10) return "Morning checks: review critical operations";
+  if (hour < 15) return "Priority updates require your quick review";
+  return "End-of-day: close pending critical items";
+}
+
 type LoginStep = "identify" | "password";
 type SocialProvider = "google" | "apple" | "facebook";
 
@@ -238,10 +265,12 @@ const LoginPage: React.FC = () => {
     import.meta.env.VITE_AUTH_WALLPAPER_IMAGE_DESKTOP ||
     "/login-illustration-placeholder.svg";
 
+  const subtitle = useMemo(() => getDynamicLoginSubtitle(new Date()), []);
+
   return (
     <LoginLayout
       title="Hello Again!"
-      subtitle="Let’s get started with your 30 days trial"
+      subtitle={subtitle}
       identifier={identifier}
       password={password}
       showPassword={showPassword}

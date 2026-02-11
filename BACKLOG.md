@@ -197,3 +197,4 @@
 - [ ] Expand glass wrapper usage to table/filter containers in high-traffic dashboards after baseline performance budget tracking is automated.
 - [ ] Add visual diff threshold checks for liquid login so accidental blob/overlap regressions fail CI screenshot checks.
 - [ ] Add environment docs for `VITE_AUTH_FACEBOOK_URL` and `VITE_AUTH_ILLUSTRATION_IMAGE` in deployment runbook.
+- [ ] Connect login subtitle source to live highest-priority incident feed once backend endpoint is available.
