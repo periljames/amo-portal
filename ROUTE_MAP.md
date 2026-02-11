@@ -231,3 +231,8 @@
   - `/maintenance/:amoCode/login`
 - `Find your AMO` route hop remains `/maintenance/:amoCode/login -> /login`.
 - Social SSO providers remain env-gated entry points; no additional routes introduced.
+
+## Update (2026-02-11) — login split-shell visual refactor
+- No route changes.
+- `/login` and `/maintenance/:amoCode/login` keep existing auth flow and AMO route semantics.
+- Social provider entry buttons now present as Google / Apple / Facebook icons with env-gated targets.

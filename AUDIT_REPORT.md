@@ -534,3 +534,17 @@ Addressed user feedback that the mock cockpit appeared empty. Root cause was pri
 - Preserved existing login flow, AMO discovery path, and env-gated social provider routing.
 - Captured fresh visual verification artifact:
   - `browser:/tmp/codex_browser_invocations/8dda570b665f766c/artifacts/artifacts/login-portal-adapted-liquid.png`
+
+## Update (2026-02-11) — split-shell login rebuild to match reference
+- Rebuilt login UI from centered glass card to split shell composition:
+  - left form panel on light surface
+  - right rounded illustration frame in same parent shell
+- Liquid Glass usage narrowed to subtle structural accents only:
+  - outer shell frame
+  - illustration frame
+  - social tiles
+  - primary sign-in button
+- Fixed social icon set to match requested reference hierarchy (Google / Apple / Facebook) with custom Apple glyph and Apple tile elevated state.
+- Preserved auth flow and routing behavior (identify → password → login, AMO discovery, reset password route).
+- Visual verification artifact:
+  - `browser:/tmp/codex_browser_invocations/004812650a46b765/artifacts/artifacts/login-split-shell-reference-match.png`

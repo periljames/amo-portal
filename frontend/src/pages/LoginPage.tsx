@@ -1,8 +1,7 @@
 // src/pages/LoginPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { Apple, Chrome, Mail } from "lucide-react";
-import AuthLayout from "../components/Layout/AuthLayout";
+import LoginLayout from "../features/auth/LoginLayout";
 import {
   fetchOnboardingStatus,
   getCachedUser,
@@ -16,24 +15,22 @@ import {
   type PortalUser,
 } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
-import { GlassButton, GlassCard } from "../ui/liquidGlass";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PLATFORM_SUPPORT_SLUG = "system";
 
 type LoginStep = "identify" | "password";
-type SocialProvider = "google" | "outlook" | "apple";
+type SocialProvider = "google" | "apple" | "facebook";
 
 type SocialConfig = {
-  icon: React.ComponentType<{ size?: number }>;
   url: string | undefined;
   title: string;
 };
 
 const SOCIAL_AUTH_CONFIG: Record<SocialProvider, SocialConfig> = {
-  google: { icon: Chrome, url: import.meta.env.VITE_AUTH_GOOGLE_URL, title: "Google" },
-  outlook: { icon: Mail, url: import.meta.env.VITE_AUTH_OUTLOOK_URL, title: "Outlook" },
-  apple: { icon: Apple, url: import.meta.env.VITE_AUTH_APPLE_URL, title: "Apple" },
+  google: { url: import.meta.env.VITE_AUTH_GOOGLE_URL, title: "Google" },
+  apple: { url: import.meta.env.VITE_AUTH_APPLE_URL, title: "Apple" },
+  facebook: { url: import.meta.env.VITE_AUTH_FACEBOOK_URL, title: "Facebook" },
 };
 
 function isAdminUser(u: PortalUser | null): boolean {
@@ -50,7 +47,7 @@ const LoginPage: React.FC = () => {
   const defaultIdentifier = import.meta.env.DEV && !amoCode ? "admin@amo.local" : "";
   const [identifier, setIdentifier] = useState(cachedIdentifier || defaultIdentifier);
   const [password, setPassword] = useState(import.meta.env.DEV ? "ChangeMe123!" : "");
-  const [rememberMe, setRememberMe] = useState(true);
+  const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [loadingContext, setLoadingContext] = useState(false);
@@ -90,6 +87,7 @@ const LoginPage: React.FC = () => {
       } catch (err) {
         console.warn("Onboarding status fetch failed:", err);
       }
+
       const requiresOnboarding = onboardingStatus ? !onboardingStatus.is_complete : !!u?.must_change_password;
       if (requiresOnboarding && !redirectedRef.current) {
         redirectedRef.current = true;
@@ -100,6 +98,7 @@ const LoginPage: React.FC = () => {
         navigate(fromState, { replace: true });
         return;
       }
+
       const landingDept = admin ? "admin" : (ctx.department || null);
       if (!admin && !landingDept) {
         setErrorMsg("Your account is missing a department assignment. Please contact the AMO Administrator or Quality/IT.");
@@ -109,23 +108,25 @@ const LoginPage: React.FC = () => {
     };
 
     void run();
+
     return () => {
       active = false;
     };
   }, [amoCode, effectiveAmoSlug, fromState, navigate]);
 
-  const handleIdentify = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleIdentify = async () => {
     setErrorMsg(null);
     const trimmedIdentifier = identifier.trim();
+
     if (!trimmedIdentifier) {
-      setErrorMsg("Enter your work email or staff ID.");
+      setErrorMsg("Enter your work email.");
       return;
     }
-    if (trimmedIdentifier.includes("@") && !emailRegex.test(trimmedIdentifier)) {
+    if (!emailRegex.test(trimmedIdentifier)) {
       setErrorMsg("Enter a valid email address.");
       return;
     }
+
     try {
       setLoadingContext(true);
       const context = await getLoginContext(trimmedIdentifier);
@@ -139,23 +140,21 @@ const LoginPage: React.FC = () => {
     }
   };
 
-  const resetContext = () => {
-    if (amoCode) return;
-    setLoginContext(null);
-    setStep("identify");
-    setPassword("");
-  };
-
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setErrorMsg(null);
 
-    const trimmedIdentifier = identifier.trim();
-    if (!trimmedIdentifier || !password) {
-      setErrorMsg("Enter your email or staff ID and password.");
+    if (step === "identify") {
+      await handleIdentify();
       return;
     }
-    if (trimmedIdentifier.includes("@") && !emailRegex.test(trimmedIdentifier)) {
+
+    setErrorMsg(null);
+    const trimmedIdentifier = identifier.trim();
+    if (!trimmedIdentifier || !password) {
+      setErrorMsg("Enter your email and password.");
+      return;
+    }
+    if (!emailRegex.test(trimmedIdentifier)) {
       setErrorMsg("Enter a valid email address.");
       return;
     }
@@ -175,6 +174,7 @@ const LoginPage: React.FC = () => {
       } catch (err) {
         console.warn("Onboarding status fetch failed:", err);
       }
+
       const requiresOnboarding = onboardingStatus ? !onboardingStatus.is_complete : !!auth.user?.must_change_password;
       if (requiresOnboarding && !redirectedRef.current) {
         redirectedRef.current = true;
@@ -214,8 +214,14 @@ const LoginPage: React.FC = () => {
     }
   };
 
+  const resetContext = () => {
+    if (amoCode) return;
+    setLoginContext(null);
+    setStep("identify");
+    setPassword("");
+  };
+
   const amoSlugForLabel = loginContext?.login_slug || amoCode || null;
-  const brandName = loginContext?.amo_name || (amoSlugForLabel ? decodeAmoCertFromUrl(amoSlugForLabel) : null);
 
   const handleSocialLogin = (provider: SocialProvider) => {
     const target = SOCIAL_AUTH_CONFIG[provider].url;
@@ -227,119 +233,40 @@ const LoginPage: React.FC = () => {
     window.location.assign(`${target}${amoHint}`);
   };
 
+  const illustrationSrc =
+    import.meta.env.VITE_AUTH_ILLUSTRATION_IMAGE ||
+    import.meta.env.VITE_AUTH_WALLPAPER_IMAGE_DESKTOP ||
+    "/login-illustration-placeholder.svg";
+
   return (
-    <AuthLayout title="Login" brandName={brandName} className="auth-layout--aviation auth-layout--liquid">
-      <GlassCard preset="loginCard" className="auth-liquid-card" padding={24}>
-        <form className="auth-form" onSubmit={step === "identify" ? handleIdentify : handleSubmit} noValidate>
-          {errorMsg ? <div className="auth-form__error" role="alert">{errorMsg}</div> : null}
-          <p className="auth-form__portal-note">Secure AMO access</p>
-
-          <div className="auth-form__field">
-            <label htmlFor="identifier" className="sr-only">Email or staff ID</label>
-            <input
-              id="identifier"
-              className="glass-input"
-              type="text"
-              autoComplete="username"
-              name="identifier"
-              placeholder="Email or staff ID"
-              value={identifier}
-              onChange={(event) => setIdentifier(event.target.value)}
-              required
-            />
-          </div>
-
-          {step === "password" ? (
-            <div className="auth-form__field">
-              <label htmlFor="password" className="sr-only">Password</label>
-              <input
-                id="password"
-                className="glass-input"
-                type="password"
-                autoComplete="current-password"
-                name="password"
-                placeholder="Password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-              />
-            </div>
-          ) : null}
-
-          <div className="auth-form__meta-row">
-            <label className="auth-form__remember">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(event) => setRememberMe(event.target.checked)}
-              />
-              <span>Remember</span>
-            </label>
-            <button
-              type="button"
-              className="auth-form__link"
-              onClick={() => {
-                const query = amoSlugForLabel ? `?amo=${amoSlugForLabel}` : "";
-                navigate(`/reset-password${query}`);
-              }}
-            >
-              Forgot password?
-            </button>
-          </div>
-
-          {step === "password" && !amoCode ? (
-            <button type="button" className="auth-form__link" onClick={resetContext} disabled={loading}>
-              Switch account
-            </button>
-          ) : null}
-
-          {amoCode ? (
-            <button
-              type="button"
-              className="auth-form__link"
-              onClick={() => navigate("/login")}
-              disabled={loading || loadingContext}
-            >
-              Find your AMO
-            </button>
-          ) : null}
-
-          <div className="auth-form__actions">
-            {step === "identify" ? (
-              <GlassButton type="submit" disabled={loadingContext} className="auth-form__primary" glassProps={{ width: 320, height: 52 }}>
-                {loadingContext ? "Checking…" : "Continue"}
-              </GlassButton>
-            ) : (
-              <GlassButton type="submit" disabled={loading} className="auth-form__primary" glassProps={{ width: 320, height: 52 }}>
-                {loading ? "Signing in…" : "Login"}
-              </GlassButton>
-            )}
-          </div>
-
-          <div className="login-social-icons" role="group" aria-label="Social sign in">
-            {(Object.keys(SOCIAL_AUTH_CONFIG) as SocialProvider[]).map((provider) => {
-              const item = SOCIAL_AUTH_CONFIG[provider];
-              const Icon = item.icon;
-              return (
-                <GlassButton
-                  key={provider}
-                  type="button"
-                  onClick={() => handleSocialLogin(provider)}
-                  title={item.url ? item.title : `${item.title} not configured`}
-                  aria-label={item.title}
-                  disabled={!item.url || loading || loadingContext}
-                  className="auth-social__icon-btn"
-                  glassProps={{ width: 44, height: 44, borderRadius: 22, glassTintOpacity: 36, noiseStrength: 46 }}
-                >
-                  <Icon size={18} />
-                </GlassButton>
-              );
-            })}
-          </div>
-
-        </form>
-      </GlassCard>
-    </AuthLayout>
+    <LoginLayout
+      title="Hello Again!"
+      subtitle="Let’s get started with your 30 days trial"
+      identifier={identifier}
+      password={password}
+      showPassword={showPassword}
+      showPasswordField={step === "password"}
+      errorMsg={errorMsg}
+      loading={loading}
+      loadingContext={loadingContext}
+      socialAvailability={{
+        google: !!SOCIAL_AUTH_CONFIG.google.url,
+        apple: !!SOCIAL_AUTH_CONFIG.apple.url,
+        facebook: !!SOCIAL_AUTH_CONFIG.facebook.url,
+      }}
+      illustrationSrc={illustrationSrc}
+      onIdentifierChange={setIdentifier}
+      onPasswordChange={setPassword}
+      onSubmit={handleSubmit}
+      onTogglePassword={() => setShowPassword((prev) => !prev)}
+      onForgotPassword={() => {
+        const query = amoSlugForLabel ? `?amo=${amoSlugForLabel}` : "";
+        navigate(`/reset-password${query}`);
+      }}
+      onSwitchAccount={step === "password" && !amoCode ? resetContext : undefined}
+      onFindAmo={amoCode ? () => navigate("/login") : undefined}
+      onSocialLogin={handleSocialLogin}
+    />
   );
 };
 

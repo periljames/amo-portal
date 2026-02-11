@@ -196,3 +196,4 @@
 - [ ] Add route-level visual regression snapshots for login (desktop/tablet/mobile) to keep glass transparency and icon-only controls stable.
 - [ ] Expand glass wrapper usage to table/filter containers in high-traffic dashboards after baseline performance budget tracking is automated.
 - [ ] Add visual diff threshold checks for liquid login so accidental blob/overlap regressions fail CI screenshot checks.
+- [ ] Add environment docs for `VITE_AUTH_FACEBOOK_URL` and `VITE_AUTH_ILLUSTRATION_IMAGE` in deployment runbook.

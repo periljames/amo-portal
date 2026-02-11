@@ -293,3 +293,6 @@
 
 ## 2026-02-11 portal adaptation pass
 - Adjusted liquid login visuals for portal fit (cleaner glass, icon-only social row, controlled button sizing) while preserving auth/routing behavior.
+
+## 2026-02-11 split-shell login update
+- Login now uses a reference-matched two-column shell layout (left form + right illustration) with restrained Liquid Glass usage and corrected social icon hierarchy.

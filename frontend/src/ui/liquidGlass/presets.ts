@@ -97,3 +97,51 @@ export const LIQUID_GLASS_PADDING: Record<GlassContainerPresetKey, number> = {
   kpiCard: 14,
   loginCard: 26,
 };
+
+export const outerShellPreset: LiquidGlassVisualProps = {
+  borderRadius: 32,
+  innerShadowColor: "rgba(255,255,255,0.55)",
+  innerShadowBlur: 18,
+  innerShadowSpread: -8,
+  glassTintColor: "#ffffff",
+  glassTintOpacity: 10,
+  frostBlurRadius: 1,
+  noiseFrequency: 0.009,
+  noiseStrength: 42,
+};
+
+export const illustrationFramePreset: LiquidGlassVisualProps = {
+  borderRadius: 28,
+  innerShadowColor: "rgba(255,255,255,0.5)",
+  innerShadowBlur: 16,
+  innerShadowSpread: -8,
+  glassTintColor: "#ffffff",
+  glassTintOpacity: 12,
+  frostBlurRadius: 1,
+  noiseFrequency: 0.009,
+  noiseStrength: 56,
+};
+
+export const socialButtonPreset: LiquidGlassVisualProps = {
+  borderRadius: 15,
+  innerShadowColor: "rgba(255,255,255,0.52)",
+  innerShadowBlur: 12,
+  innerShadowSpread: -5,
+  glassTintColor: "#ffffff",
+  glassTintOpacity: 14,
+  frostBlurRadius: 1,
+  noiseFrequency: 0.009,
+  noiseStrength: 64,
+};
+
+export const primaryButtonPreset: LiquidGlassVisualProps = {
+  borderRadius: 13,
+  innerShadowColor: "rgba(255,255,255,0.35)",
+  innerShadowBlur: 14,
+  innerShadowSpread: -6,
+  glassTintColor: "#a27384",
+  glassTintOpacity: 64,
+  frostBlurRadius: 1,
+  noiseFrequency: 0.0085,
+  noiseStrength: 32,
+};
