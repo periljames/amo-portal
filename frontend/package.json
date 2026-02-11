@@ -24,14 +24,14 @@
     "framer-motion": "^12.34.0",
     "lucide-react": "^0.452.0",
     "pdfjs-dist": "5.4.296",
-    "plotly.js-dist-min": "^3.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-pdf": "^10.2.0",
-    "react-plotly.js": "^2.6.0",
     "react-router-dom": "^7.9.6",
     "recharts": "^2.15.4",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "react-hook-form": "^7.62.0",
+    "@hookform/resolvers": "^3.9.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

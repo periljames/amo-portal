@@ -1,175 +1,159 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import QMSLayout from "../components/QMS/QMSLayout";
-import DashboardCockpit from "../dashboards/DashboardCockpit";
-import { getContext } from "../services/auth";
+import React, { useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, ClipboardList, FlaskConical, ShieldAlert } from "lucide-react";
 import {
-  qmsListAudits,
-  qmsListCars,
-  qmsListDocuments,
-  type QMSAuditOut,
-  type QMSDocumentOut,
-  type CAROut,
-} from "../services/qms";
-import { listTrainingEvents } from "../services/training";
-import type { TrainingEventRead } from "../types/training";
-import { isUiShellV2Enabled } from "../utils/featureFlags";
+  Area,
+  AreaChart,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  Legend,
+} from "recharts";
+import QMSLayout from "../components/QMS/QMSLayout";
+import { getContext } from "../services/auth";
+import { fetchCockpitData, type DashboardFilter } from "../services/qmsCockpit";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
+const DONUT_COLORS = ["#0ea5e9", "#6366f1", "#14b8a6", "#f97316", "#ef4444"];
 
 const QMSKpisPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
-  const navigate = useNavigate();
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
-  const uiShellV2 = isUiShellV2Enabled();
 
-  const [state, setState] = useState<LoadState>("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [audits, setAudits] = useState<QMSAuditOut[]>([]);
-  const [documents, setDocuments] = useState<QMSDocumentOut[]>([]);
-  const [cars, setCars] = useState<CAROut[]>([]);
-  const [events, setEvents] = useState<TrainingEventRead[]>([]);
+  const [filters, setFilters] = useState<DashboardFilter>({ auditor: "All", dateRange: "30d" });
 
-  const load = async () => {
-    setState("loading");
-    setError(null);
-    try {
-      const [auditData, docData, carData, eventData] = await Promise.all([
-        qmsListAudits({ domain: "AMO" }),
-        qmsListDocuments({ domain: "AMO" }),
-        qmsListCars(),
-        listTrainingEvents(),
-      ]);
-      setAudits(auditData);
-      setDocuments(docData);
-      setCars(carData);
-      setEvents(eventData);
-      setState("ready");
-    } catch (e: any) {
-      setError(e?.message || "Failed to load KPI metrics.");
-      setState("error");
-    }
-  };
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["qms-cockpit", filters],
+    queryFn: () => fetchCockpitData(filters),
+  });
 
-  useEffect(() => {
-    if (!uiShellV2) {
-      load();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uiShellV2]);
-
-  const kpis = useMemo(() => {
-    const totalAudits = audits.length;
-    const closedAudits = audits.filter((audit) => audit.status === "CLOSED").length;
-    const auditClosureRate = totalAudits
-      ? Math.round((closedAudits / totalAudits) * 100)
-      : 0;
-
-    const overdueCars = cars.filter((car) => {
-      if (!car.due_date) return false;
-      if (["CLOSED", "CANCELLED"].includes(car.status)) return false;
-      return new Date(car.due_date) < new Date();
-    }).length;
-
-    const docCurrencyRate = documents.length
-      ? Math.round(
-          (documents.filter((doc) => doc.status === "ACTIVE").length / documents.length) * 100
-        )
-      : 0;
-
-    const upcomingEvents = events.filter((event) => new Date(event.starts_on) > new Date())
-      .length;
-
-    return [
-      {
-        id: "audit-closure",
-        label: "Audit closure rate",
-        value: `${auditClosureRate}%`,
-        description: "Closed audits vs total programme.",
-        trend: auditClosureRate > 85 ? "On track" : "Needs attention",
-      },
-      {
-        id: "doc-currency",
-        label: "Document currency",
-        value: `${docCurrencyRate}%`,
-        description: "Active manuals and procedures.",
-        trend: docCurrencyRate > 90 ? "Healthy" : "Review draft backlog",
-      },
-      {
-        id: "car-overdue",
-        label: "Overdue CARs",
-        value: `${overdueCars}`,
-        description: "Corrective actions past due date.",
-        trend: overdueCars === 0 ? "On track" : "Escalate overdue items",
-      },
-      {
-        id: "events",
-        label: "Upcoming training events",
-        value: `${upcomingEvents}`,
-        description: "Scheduled sessions in the pipeline.",
-        trend: upcomingEvents > 0 ? "Planned" : "Schedule sessions",
-      },
-    ];
-  }, [audits, cars, documents, events]);
+  const kpiIcons = useMemo(
+    () => [ClipboardList, FlaskConical, AlertTriangle, ShieldAlert],
+    []
+  );
 
   return (
     <QMSLayout
       amoCode={amoSlug}
       department={department}
-      title="KPIs & Management Review"
-      subtitle="Quality performance indicators aligned with management review needs."
+      title="Interactive Cockpit"
+      subtitle="Live quality cockpit with responsive KPI, distribution, and trend analytics."
       actions={
-        uiShellV2 ? null : (
-          <button type="button" className="primary-chip-btn" onClick={load}>
-            Refresh KPIs
+        <div className="qms-cockpit-filters">
+          <select value={filters.auditor} onChange={(e) => setFilters((p) => ({ ...p, auditor: e.target.value }))}>
+            <option>All</option>
+            <option>Auditor A</option>
+            <option>Auditor B</option>
+          </select>
+          <select value={filters.dateRange} onChange={(e) => setFilters((p) => ({ ...p, dateRange: e.target.value }))}>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="90d">Last 90 days</option>
+          </select>
+          <button type="button" className="primary-chip-btn" onClick={() => refetch()}>
+            Refresh
           </button>
-        )
+        </div>
       }
     >
-      {uiShellV2 ? (
-        <DashboardCockpit />
-      ) : (
-        <>
-          <section className="qms-toolbar">
-            <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
-              Back
-            </button>
-          </section>
-
-          {state === "loading" && (
-            <div className="card card--info">
-              <p>Loading KPI dashboard…</p>
-            </div>
-          )}
-
-          {state === "error" && (
-            <div className="card card--error">
-              <p>{error}</p>
-              <button type="button" className="primary-chip-btn" onClick={load}>
-                Retry
-              </button>
-            </div>
-          )}
-
-          {state === "ready" && (
-            <section className="qms-grid">
-              {kpis.map((kpi) => (
-                <div key={kpi.id} className="qms-card">
-                  <div className="qms-card__header">
-                    <div>
-                      <h3 className="qms-card__title">{kpi.label}</h3>
-                      <p className="qms-card__subtitle">{kpi.description}</p>
-                    </div>
-                    <span className="qms-pill">{kpi.trend}</span>
-                  </div>
-                  <div className="qms-kpi__value qms-kpi__value--large">{kpi.value}</div>
+      {isLoading && <div className="qms-card">Loading cockpit metrics…</div>}
+      {error && <div className="qms-card">Unable to load cockpit data.</div>}
+      {data && (
+        <section className="cockpit-grid">
+          {data.kpis.map((kpi, index) => {
+            const Icon = kpiIcons[index] ?? ClipboardList;
+            return (
+              <article key={kpi.label} className="cockpit-card">
+                <div className="cockpit-kpi-top">
+                  <span>{kpi.label}</span>
+                  <Icon size={18} />
                 </div>
-              ))}
-            </section>
-          )}
-        </>
+                <p className="cockpit-kpi-value">{kpi.value}</p>
+                <p className={kpi.changePct >= 0 ? "cockpit-change up" : "cockpit-change down"}>
+                  {kpi.changePct >= 0 ? "+" : ""}
+                  {kpi.changePct}% vs previous period
+                </p>
+              </article>
+            );
+          })}
+
+          <article className="cockpit-card cockpit-card--gauge">
+            <h3>Quality Score</h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: "Score", value: data.qualityScore },
+                    { name: "Remaining", value: 100 - data.qualityScore },
+                  ]}
+                  startAngle={180}
+                  endAngle={0}
+                  cx="50%"
+                  cy="100%"
+                  innerRadius={70}
+                  outerRadius={95}
+                  dataKey="value"
+                >
+                  <Cell fill="#2563eb" />
+                  <Cell fill="#e2e8f0" />
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+            <p className="cockpit-gauge-score">{data.qualityScore}%</p>
+          </article>
+
+          <article className="cockpit-card cockpit-card--distribution">
+            <h3>Error Distribution</h3>
+            <div className="cockpit-donuts">
+              <div>
+                <h4>Fatal by Supervisor</h4>
+                <ResponsiveContainer width="100%" height={240}>
+                  <PieChart>
+                    <Pie data={data.fatalBySupervisor} innerRadius={48} outerRadius={80} dataKey="value" nameKey="name">
+                      {data.fatalBySupervisor.map((row, i) => (
+                        <Cell key={row.name} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div>
+                <h4>Fatal by Location</h4>
+                <ResponsiveContainer width="100%" height={240}>
+                  <PieChart>
+                    <Pie data={data.fatalByLocation} innerRadius={48} outerRadius={80} dataKey="value" nameKey="name">
+                      {data.fatalByLocation.map((row, i) => (
+                        <Cell key={row.name} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </article>
+
+          <article className="cockpit-card cockpit-card--trend">
+            <h3>Monthly Trend</h3>
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={data.trends}>
+                <Tooltip />
+                <Legend />
+                <Area type="monotone" dataKey="tasks" stroke="#2563eb" fill="#bfdbfe" strokeWidth={2} />
+                <Area type="monotone" dataKey="samples" stroke="#10b981" fill="#bbf7d0" strokeWidth={2} />
+                <Area type="monotone" dataKey="defects" stroke="#f97316" fill="#fed7aa" strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </article>
+        </section>
       )}
     </QMSLayout>
   );
