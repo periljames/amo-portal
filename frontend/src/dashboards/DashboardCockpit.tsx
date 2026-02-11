@@ -94,7 +94,8 @@ const DashboardCockpit: React.FC = () => {
 
   const { data: activityHistory } = useInfiniteQuery({
     queryKey: ["activity-history", amoCode, department],
-    queryFn: ({ pageParam }) => listEventHistory({ cursor: pageParam as string | undefined, limit: 50 }),
+    queryFn: ({ pageParam }) =>
+      listEventHistory({ cursor: pageParam as string | undefined, limit: 50 }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     initialPageParam: undefined as string | undefined,
   });
