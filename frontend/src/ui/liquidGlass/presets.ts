@@ -56,10 +56,10 @@ export const LIQUID_GLASS_CONTAINER_PRESETS: Record<GlassContainerPresetKey, Liq
     innerShadowBlur: 20,
     innerShadowSpread: -6,
     glassTintColor: "#ffffff",
-    glassTintOpacity: 16,
+    glassTintOpacity: 12,
     frostBlurRadius: 3,
     noiseFrequency: 0.009,
-    noiseStrength: 90,
+    noiseStrength: 54,
   },
 };
 
@@ -70,10 +70,10 @@ export const LIQUID_GLASS_BUTTON_PRESETS: Record<GlassButtonPresetKey, LiquidGla
     innerShadowBlur: 18,
     innerShadowSpread: -6,
     glassTintColor: "#ffffff",
-    glassTintOpacity: 45,
+    glassTintOpacity: 34,
     frostBlurRadius: 3,
     noiseFrequency: 0.009,
-    noiseStrength: 76,
+    noiseStrength: 52,
   },
 };
 
@@ -84,10 +84,10 @@ export const LIQUID_GLASS_LINK_PRESETS: Record<GlassLinkPresetKey, LiquidGlassVi
     innerShadowBlur: 16,
     innerShadowSpread: -6,
     glassTintColor: "#ffffff",
-    glassTintOpacity: 24,
+    glassTintOpacity: 18,
     frostBlurRadius: 2,
     noiseFrequency: 0.009,
-    noiseStrength: 68,
+    noiseStrength: 40,
   },
 };
 

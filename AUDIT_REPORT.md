@@ -525,3 +525,12 @@ Addressed user feedback that the mock cockpit appeared empty. Root cause was pri
 - [x] Login renders glass card with icon-only social controls.
 - [x] Dashboard cards render through shared glass wrapper without route/data-flow regressions.
 - [x] Build passes with TypeScript.
+
+## Update (2026-02-11) — portal-adapted liquid polish
+- Refined login Liquid Glass composition to match portal visual language and removed noisy overlapping blobs:
+  - lowered liquid noise/tint strengths in shared presets
+  - constrained button dimensions for deterministic rendering
+  - kept icon-only social providers while switching support links to lightweight portal-native controls
+- Preserved existing login flow, AMO discovery path, and env-gated social provider routing.
+- Captured fresh visual verification artifact:
+  - `browser:/tmp/codex_browser_invocations/8dda570b665f766c/artifacts/artifacts/login-portal-adapted-liquid.png`

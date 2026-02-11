@@ -195,3 +195,4 @@
 - [ ] Implement backend OAuth callback hardening (PKCE/state/nonce/session binding) before enabling social providers in production.
 - [ ] Add route-level visual regression snapshots for login (desktop/tablet/mobile) to keep glass transparency and icon-only controls stable.
 - [ ] Expand glass wrapper usage to table/filter containers in high-traffic dashboards after baseline performance budget tracking is automated.
+- [ ] Add visual diff threshold checks for liquid login so accidental blob/overlap regressions fail CI screenshot checks.

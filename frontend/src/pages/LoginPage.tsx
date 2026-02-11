@@ -16,7 +16,7 @@ import {
   type PortalUser,
 } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
-import { GlassButton, GlassCard, GlassLink } from "../ui/liquidGlass";
+import { GlassButton, GlassCard } from "../ui/liquidGlass";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PLATFORM_SUPPORT_SLUG = "system";
@@ -232,6 +232,7 @@ const LoginPage: React.FC = () => {
       <GlassCard preset="loginCard" className="auth-liquid-card" padding={24}>
         <form className="auth-form" onSubmit={step === "identify" ? handleIdentify : handleSubmit} noValidate>
           {errorMsg ? <div className="auth-form__error" role="alert">{errorMsg}</div> : null}
+          <p className="auth-form__portal-note">Secure AMO access</p>
 
           <div className="auth-form__field">
             <label htmlFor="identifier" className="sr-only">Email or staff ID</label>
@@ -274,17 +275,16 @@ const LoginPage: React.FC = () => {
               />
               <span>Remember</span>
             </label>
-            <GlassLink
-              href="#"
-              onClick={(event) => {
-                event.preventDefault();
+            <button
+              type="button"
+              className="auth-form__link"
+              onClick={() => {
                 const query = amoSlugForLabel ? `?amo=${amoSlugForLabel}` : "";
                 navigate(`/reset-password${query}`);
               }}
-              className="auth-form__glass-link"
             >
-              Forgot
-            </GlassLink>
+              Forgot password?
+            </button>
           </div>
 
           {step === "password" && !amoCode ? (
@@ -306,11 +306,11 @@ const LoginPage: React.FC = () => {
 
           <div className="auth-form__actions">
             {step === "identify" ? (
-              <GlassButton type="submit" disabled={loadingContext} className="auth-form__primary">
+              <GlassButton type="submit" disabled={loadingContext} className="auth-form__primary" glassProps={{ width: 320, height: 52 }}>
                 {loadingContext ? "Checking…" : "Continue"}
               </GlassButton>
             ) : (
-              <GlassButton type="submit" disabled={loading} className="auth-form__primary">
+              <GlassButton type="submit" disabled={loading} className="auth-form__primary" glassProps={{ width: 320, height: 52 }}>
                 {loading ? "Signing in…" : "Login"}
               </GlassButton>
             )}
@@ -329,6 +329,7 @@ const LoginPage: React.FC = () => {
                   aria-label={item.title}
                   disabled={!item.url || loading || loadingContext}
                   className="auth-social__icon-btn"
+                  glassProps={{ width: 44, height: 44, borderRadius: 22, glassTintOpacity: 36, noiseStrength: 46 }}
                 >
                   <Icon size={18} />
                 </GlassButton>
@@ -336,11 +337,6 @@ const LoginPage: React.FC = () => {
             })}
           </div>
 
-          <div className="auth-form__register-row">
-            <GlassLink href="/register" className="auth-form__glass-link" onClick={(event) => event.preventDefault()}>
-              Register
-            </GlassLink>
-          </div>
         </form>
       </GlassCard>
     </AuthLayout>

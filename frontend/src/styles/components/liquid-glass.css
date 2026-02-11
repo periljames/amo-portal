@@ -15,17 +15,18 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 42px;
-  min-width: 42px;
+  min-height: 40px;
+  min-width: 40px;
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
-  transition: transform 120ms ease, opacity 120ms ease;
+  transition: transform 120ms ease, opacity 120ms ease, box-shadow 120ms ease;
 }
 
 .glass-button:hover {
   transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.3);
 }
 
 .glass-button:focus-visible,
@@ -74,6 +75,7 @@
   display: flex;
   justify-content: center;
   gap: 10px;
+  margin-top: 6px;
 }
 
 .login-social-icons .glass-button {

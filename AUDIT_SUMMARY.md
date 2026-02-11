@@ -290,3 +290,6 @@
 - Added standardized `@tinymomentum/liquid-glass-react` UI kit wrappers and centralized presets.
 - Login now uses transparent glass composition with icon-only social entry points.
 - Dashboard cards now consume shared glass wrappers to keep visual consistency and prevent prop churn.
+
+## 2026-02-11 portal adaptation pass
+- Adjusted liquid login visuals for portal fit (cleaner glass, icon-only social row, controlled button sizing) while preserving auth/routing behavior.

@@ -4270,8 +4270,14 @@ body[data-color-scheme="light"] .planning-calendar-badge--leave {
 }
 
 .auth-liquid-card {
-  max-width: 420px;
+  max-width: 430px;
   margin: 0 auto;
+}
+
+.auth-liquid-card .glass-panel__inner {
+  background: linear-gradient(160deg, rgba(9, 14, 28, 0.52), rgba(15, 23, 42, 0.42));
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
 }
 
 .auth-form__meta-row {
@@ -4299,6 +4305,10 @@ body[data-color-scheme="light"] .planning-calendar-badge--leave {
   font-weight: 600;
 }
 
+.auth-form__primary.glass-button {
+  width: 100%;
+}
+
 .auth-form__glass-link {
   color: #c7e9ff;
   font-size: 12px;
@@ -4323,4 +4333,12 @@ body[data-color-scheme="light"] .planning-calendar-badge--leave {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+
+.auth-form__portal-note {
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.8);
 }
