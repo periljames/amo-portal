@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { Badge, Button, PageHeader, Panel, StatusPill } from "../components/UI/Admin";
+import { usePortalRuntimeMode } from "../hooks/usePortalRuntimeMode";
 import { getCachedUser, getContext } from "../services/auth";
 import {
   fetchOverviewSummary,
@@ -49,6 +50,7 @@ const AdminOverviewPage: React.FC = () => {
   const navigate = useNavigate();
 
   const currentUser = useMemo(() => getCachedUser(), []);
+  const { isGoLive } = usePortalRuntimeMode();
   const ctx = getContext();
 
   const isSuperuser = !!currentUser?.is_superuser;
@@ -235,6 +237,40 @@ const AdminOverviewPage: React.FC = () => {
         />
 
         <div className="admin-overview__grid admin-overview__grid--summary">
+          <Panel
+            title="Flight deck · Go Live"
+            subtitle="Garmin-style runtime confirmation"
+            actions={<Badge tone={isGoLive ? "success" : "warning"}>{isGoLive ? "LIVE" : "DEMO"}</Badge>}
+          >
+            <div className="go-live-radar">
+              <div className={`go-live-radar__scope ${isGoLive ? "is-live" : "is-demo"}`} aria-hidden="true">
+                <span className="go-live-radar__ring" />
+                <span className="go-live-radar__ring go-live-radar__ring--inner" />
+                <span className="go-live-radar__sweep" />
+              </div>
+              <div className="go-live-radar__stats">
+                <div>
+                  <p>Runtime mode</p>
+                  <strong>{isGoLive ? "LIVE / PRODUCTION" : "DEMO / SANDBOX"}</strong>
+                </div>
+                <div>
+                  <p>Data pipeline</p>
+                  <strong>{isGoLive ? "Direct DB/API" : "Mock fallback allowed"}</strong>
+                </div>
+                <div>
+                  <p>Last backend check</p>
+                  <strong>{lastUpdatedLabel}</strong>
+                </div>
+                <div>
+                  <p>Control</p>
+                  <Button type="button" variant="secondary" onClick={() => navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin-users`)}>
+                    Open Go Live master
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Panel>
+
           <Panel
             title="Needs attention"
             actions={

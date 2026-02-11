@@ -109,6 +109,15 @@ const buildMonthCells = (cursor: Date): CalendarCell[] => {
 
 const getEventEndDate = (event: CalendarItem): string => event.endDate ?? event.viewDate;
 
+const getSegmentState = (event: CalendarItem, dateKey: string): "single" | "start" | "middle" | "end" => {
+  const start = event.viewDate;
+  const end = getEventEndDate(event);
+  if (start === end) return "single";
+  if (dateKey === start) return "start";
+  if (dateKey === end) return "end";
+  return "middle";
+};
+
 const emptyCreateDraft = (): CreateEventDraft => ({
   title: "",
   startsAt: "09:00",
@@ -203,10 +212,18 @@ const QMSEventsPage: React.FC = () => {
   const monthStart = useMemo(() => toDateKey(new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1)), [monthCursor]);
   const monthEnd = useMemo(() => toDateKey(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0)), [monthCursor]);
 
-  const criticalVisibleCount = useMemo(
-    () => filtered.filter((event) => event.severity === "critical" && event.viewDate >= monthStart && event.viewDate <= monthEnd).length,
+  const criticalEventsInMonth = useMemo(
+    () =>
+      filtered
+        .filter((event) => event.severity === "critical" && event.viewDate >= monthStart && event.viewDate <= monthEnd)
+        .sort((a, b) => {
+          if (a.viewDate !== b.viewDate) return a.viewDate.localeCompare(b.viewDate);
+          return a.startsAt.localeCompare(b.startsAt);
+        }),
     [filtered, monthEnd, monthStart],
   );
+
+  const criticalVisibleCount = criticalEventsInMonth.length;
 
   const onDropEventToDate = (eventId: string, targetDateKey: string) => {
     const item = filtered.find((event) => event.id === eventId) ?? mapped.find((event) => event.id === eventId);
@@ -257,6 +274,13 @@ const QMSEventsPage: React.FC = () => {
   };
 
   const openEventRoute = (event: CalendarItem) => navigate(getEventRoute(event));
+
+  const openFirstCritical = () => {
+    const first = criticalEventsInMonth[0];
+    if (!first) return;
+    setSelectedDate(first.viewDate);
+    openEventRoute(first);
+  };
 
   const startCreate = (dateKey: string) => {
     setSelectedDate(dateKey);
@@ -362,7 +386,11 @@ const QMSEventsPage: React.FC = () => {
           </button>
           <h3>{monthLabel(monthCursor)}</h3>
           <div className="calendar-mini__header-meta">
-            {criticalVisibleCount > 0 && <span className="calendar-critical-chip">{criticalVisibleCount} critical</span>}
+            {criticalVisibleCount > 0 && (
+              <button type="button" className="calendar-critical-chip" onClick={openFirstCritical}>
+                {criticalVisibleCount} critical
+              </button>
+            )}
             <button
               type="button"
               className="calendar-mini__nav"
@@ -432,17 +460,16 @@ const QMSEventsPage: React.FC = () => {
 
                   <div className="calendar-mini__events">
                     {dayEvents.slice(0, 3).map((event) => {
-                      const multiDay = getEventEndDate(event) > event.viewDate;
-                      const startsToday = event.viewDate === cell.dateKey;
-                      const endsToday = getEventEndDate(event) === cell.dateKey;
+                      const segment = getSegmentState(event, cell.dateKey);
+                      const isStart = segment === "start" || segment === "single";
 
                       return (
                         <button
                           key={`${cell.dateKey}-${event.id}`}
                           type="button"
-                          className={`calendar-mini__event calendar-mini__event--${event.severity} ${multiDay ? "is-span" : ""} ${
-                            startsToday ? "is-span-start" : ""
-                          } ${endsToday ? "is-span-end" : ""}`}
+                          className={`calendar-mini__event calendar-mini__event--${event.severity} ${segment !== "single" ? "is-span" : ""} ${
+                            segment === "start" ? "is-span-start" : ""
+                          } ${segment === "end" ? "is-span-end" : ""} ${segment === "middle" ? "is-span-middle" : ""}`}
                           draggable
                           onDragStart={() => setDraggingEventId(event.id)}
                           onDragEnd={() => setDraggingEventId(null)}
@@ -451,8 +478,8 @@ const QMSEventsPage: React.FC = () => {
                             openEventRoute(event);
                           }}
                         >
-                          <span>{event.title}</span>
-                          <small>{event.detail}</small>
+                          <span>{isStart ? event.title : `↳ ${event.title}`}</span>
+                          {isStart ? <small>{event.detail}</small> : <small>Continues</small>}
                         </button>
                       );
                     })}

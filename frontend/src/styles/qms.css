@@ -1188,6 +1188,11 @@ button.qms-list__item:hover {
   border-bottom-right-radius: 0.7rem;
 }
 
+.calendar-mini__event.is-span-middle {
+  border-radius: 0.2rem;
+  border-left-width: 3px;
+}
+
 .calendar-mini__events em {
   color: var(--text-secondary);
   font-size: 0.64rem;
@@ -1298,6 +1303,12 @@ button.qms-list__item:hover {
   border-radius: 999px;
   padding: 0.12rem 0.5rem;
   font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.calendar-critical-chip:hover {
+  border-color: color-mix(in srgb, #ef4444 70%, var(--surface-border));
+  background: color-mix(in srgb, #ef4444 22%, var(--surface));
 }
 
 .calendar-mini__day-actions {

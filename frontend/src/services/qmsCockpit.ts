@@ -1,6 +1,7 @@
 import { authHeaders } from "./auth";
 import { apiGet, apiPost } from "./crs";
 import { qmsListAudits, type QMSAuditOut } from "./qms";
+import { shouldUseMockData } from "./runtimeMode";
 
 export type DashboardFilter = {
   auditor: string;
@@ -95,6 +96,7 @@ export async function fetchCockpitData(filters: DashboardFilter): Promise<Cockpi
     const params = new URLSearchParams({ auditor: filters.auditor, date_range: filters.dateRange });
     return await apiGet<CockpitPayload>(`/qms/cockpit?${params.toString()}`, { headers: authHeaders() });
   } catch {
+    if (!shouldUseMockData()) throw new Error("Live mode active: cockpit API unavailable.");
     return MOCK_COCKPIT;
   }
 }
@@ -103,6 +105,7 @@ export async function listAircraftOptions(): Promise<AircraftOption[]> {
   try {
     return await apiGet<AircraftOption[]>("/crs/aircraft/options", { headers: authHeaders() });
   } catch {
+    if (!shouldUseMockData()) throw new Error("Live mode active: aircraft options API unavailable.");
     return [
       { tailNumber: "5Y-SLA", engineHours: 1842, engineCycles: 1110 },
       { tailNumber: "5Y-SLB", engineHours: 2184, engineCycles: 1312 },
@@ -119,6 +122,31 @@ export async function fetchSerialNumber(): Promise<string> {
     return `CRS-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
   }
 }
+
+
+const toIsoDate = (value: string): string => {
+  if (!value) return "";
+  return value.length >= 10 ? value.slice(0, 10) : value;
+};
+
+const isCompletedOrRescheduled = (event: CalendarItem): boolean => {
+  const haystack = `${event.title} ${event.detail}`.toLowerCase();
+  return ["completed", "complete", "closed", "rescheduled", "done"].some((token) => haystack.includes(token));
+};
+
+const promoteOverdueToCritical = (events: CalendarItem[]): CalendarItem[] => {
+  const today = toIsoDate(new Date().toISOString());
+  return events.map((event) => {
+    const dueDate = toIsoDate(event.endDate || event.viewDate);
+    const overdue = Boolean(dueDate) && dueDate < today;
+    if (!overdue || isCompletedOrRescheduled(event)) return event;
+
+    return {
+      ...event,
+      severity: "critical",
+    };
+  });
+};
 
 const mapAuditToCalendarItem = (audit: QMSAuditOut): CalendarItem | null => {
   if (!audit.planned_start) return null;
@@ -155,8 +183,10 @@ export async function fetchCalendarEvents(filters: DashboardFilter): Promise<Cal
     ]);
 
     const auditEvents = audits.map(mapAuditToCalendarItem).filter((item): item is CalendarItem => item !== null);
-    return [...calendarEvents, ...auditEvents];
+    return promoteOverdueToCritical([...calendarEvents, ...auditEvents]);
   } catch {
+    if (!shouldUseMockData()) throw new Error("Live mode active: calendar API unavailable.");
+
     let auditFallback: CalendarItem[] = [];
     try {
       const audits = await qmsListAudits({});
@@ -165,7 +195,7 @@ export async function fetchCalendarEvents(filters: DashboardFilter): Promise<Cal
       auditFallback = [];
     }
 
-    return [
+    return promoteOverdueToCritical([
       {
         id: "1",
         title: "A-check - Dash 8",
@@ -260,7 +290,7 @@ export async function fetchCalendarEvents(filters: DashboardFilter): Promise<Cal
         scope: "Training",
       },
       ...auditFallback,
-    ];
+    ]);
   }
 }
 
