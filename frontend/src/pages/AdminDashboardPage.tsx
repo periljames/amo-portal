@@ -24,6 +24,7 @@ import {
   updateAdminDepartment,
   setAdminContext,
 } from "../services/adminUsers";
+import { isPortalGoLive, setPortalGoLive } from "../services/runtimeMode";
 import type {
   AdminAmoRead,
   AdminDepartmentCreatePayload,
@@ -84,6 +85,9 @@ const AdminDashboardPage: React.FC = () => {
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState<string | null>(null);
   const [lastRealAmoId, setLastRealAmoId] = useState<string | null>(null);
+  const [goLiveActive, setGoLiveActive] = useState<boolean>(() => isPortalGoLive());
+  const [goLiveSaving, setGoLiveSaving] = useState(false);
+  const [goLiveMessage, setGoLiveMessage] = useState<string | null>(null);
   const contextInitRef = useRef(false);
 
   type AmoFormState = {
@@ -221,6 +225,7 @@ const AdminDashboardPage: React.FC = () => {
         const ctx = await getAdminContext();
         setContextMode(ctx.data_mode);
         setLastRealAmoId(ctx.last_real_amo_id);
+        setGoLiveActive(isPortalGoLive());
         if (ctx.active_amo_id) {
           setActiveAmoId(ctx.active_amo_id);
           localStorage.setItem(LS_ACTIVE_AMO_ID, ctx.active_amo_id);
@@ -256,6 +261,7 @@ const AdminDashboardPage: React.FC = () => {
         setActiveAmoId(ctx.active_amo_id);
         setContextMode(ctx.data_mode);
         setLastRealAmoId(ctx.last_real_amo_id);
+        setGoLiveActive(isPortalGoLive());
         if (ctx.active_amo_id) {
           localStorage.setItem(LS_ACTIVE_AMO_ID, ctx.active_amo_id);
         }
@@ -637,6 +643,7 @@ const AdminDashboardPage: React.FC = () => {
         setActiveAmoId(ctx.active_amo_id);
         setContextMode(ctx.data_mode);
         setLastRealAmoId(ctx.last_real_amo_id);
+        setGoLiveActive(isPortalGoLive());
         if (ctx.active_amo_id) {
           localStorage.setItem(LS_ACTIVE_AMO_ID, ctx.active_amo_id);
         }
@@ -681,6 +688,7 @@ const AdminDashboardPage: React.FC = () => {
       .then((ctx) => {
         setContextMode(ctx.data_mode);
         setLastRealAmoId(ctx.last_real_amo_id);
+        setGoLiveActive(isPortalGoLive());
         setActiveAmoId(ctx.active_amo_id);
         if (ctx.active_amo_id) {
           localStorage.setItem(LS_ACTIVE_AMO_ID, ctx.active_amo_id);
@@ -690,6 +698,43 @@ const AdminDashboardPage: React.FC = () => {
         setContextError(err?.message || "Failed to update admin context.");
       })
       .finally(() => setContextLoading(false));
+  };
+
+
+  const handleGoLiveMasterSwitch = async () => {
+    const realCandidate =
+      (lastRealAmoId && amos.find((a) => a.id === lastRealAmoId && !a.is_demo)?.id) ||
+      (activeAmoId && amos.find((a) => a.id === activeAmoId && !a.is_demo)?.id) ||
+      (currentUser?.amo_id && amos.find((a) => a.id === currentUser.amo_id && !a.is_demo)?.id) ||
+      amos.find((a) => !a.is_demo)?.id ||
+      null;
+
+    if (!realCandidate) {
+      setGoLiveMessage("No real AMO found. Create/select a real AMO before going live.");
+      return;
+    }
+
+    setGoLiveSaving(true);
+    setContextError(null);
+    setGoLiveMessage(null);
+
+    try {
+      const ctx = await setAdminContext({ data_mode: "REAL", active_amo_id: realCandidate });
+      setContextMode(ctx.data_mode);
+      setLastRealAmoId(ctx.last_real_amo_id);
+      setActiveAmoId(ctx.active_amo_id);
+      if (ctx.active_amo_id) {
+        localStorage.setItem(LS_ACTIVE_AMO_ID, ctx.active_amo_id);
+      }
+      setPortalGoLive(true);
+      setGoLiveActive(true);
+      setGoLiveMessage("Portal is LIVE. Demo/mock fallback is now locked off for this session.");
+      navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin-users`, { replace: true });
+    } catch (err: any) {
+      setGoLiveMessage(err?.message || "Failed to enable Go Live mode.");
+    } finally {
+      setGoLiveSaving(false);
+    }
   };
 
   const handleAmoFormChange = (
@@ -819,11 +864,23 @@ const AdminDashboardPage: React.FC = () => {
                     type="checkbox"
                     checked={contextMode === "DEMO"}
                     onChange={(e) => handleContextToggle(e.target.checked)}
+                    disabled={goLiveActive || goLiveSaving}
                   />
                   <span>
-                    {contextMode === "DEMO" ? "Demo data" : "Real data"}
+                    {goLiveActive ? "Real data · Go Live locked" : contextMode === "DEMO" ? "Demo data" : "Real data"}
                   </span>
+                  <Button
+                    type="button"
+                    variant={goLiveActive ? "secondary" : "primary"}
+                    onClick={handleGoLiveMasterSwitch}
+                    disabled={goLiveActive || goLiveSaving || contextLoading}
+                  >
+                    {goLiveActive ? "Go Live active" : goLiveSaving ? "Switching…" : "Go Live (Master)"}
+                  </Button>
                 </div>
+                {goLiveMessage && (
+                  <p style={{ marginTop: 8, marginBottom: 0, opacity: 0.85 }}>{goLiveMessage}</p>
+                )}
 
                 <label htmlFor="amoSelect">Active AMO</label>
                 <select

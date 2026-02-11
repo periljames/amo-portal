@@ -347,3 +347,40 @@ body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active {
     display: none;
   }
 }
+
+
+/* Light mode readability fixes for sidebar */
+body[data-color-scheme="light"] .app-shell--v2 .app-shell__sidebar {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-color: rgba(148, 163, 184, 0.5);
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item,
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item-label,
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__brand-name,
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__amo {
+  color: #0f172a;
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__brand-subtitle,
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__app {
+  color: #64748b;
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item:hover {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.5);
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active,
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active .sidebar__item-label {
+  background: #1d4ed8;
+  color: #ffffff;
+  border-color: #1d4ed8;
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__collapse-btn {
+  background: rgba(15, 23, 42, 0.08);
+  border-color: rgba(148, 163, 184, 0.6);
+  color: #0f172a;
+}

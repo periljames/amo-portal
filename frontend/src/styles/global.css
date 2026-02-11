@@ -3980,3 +3980,19 @@ body[data-color-scheme="light"] .planning-calendar-badge--leave {
     transform: translateY(0);
   }
 }
+
+.theme-toggle-btn {
+  border: 1px solid var(--surface-border);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease;
+}
+
+.theme-toggle-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent-primary);
+}

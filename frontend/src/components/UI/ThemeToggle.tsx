@@ -3,16 +3,24 @@ import React from "react";
 import { useColorScheme } from "../../hooks/useColorScheme";
 
 const ThemeToggle: React.FC = () => {
-  const { scheme, toggle } = useColorScheme();
+  const { scheme, resolvedScheme, toggle } = useColorScheme();
+
+  const label =
+    scheme === "system"
+      ? `🖥️ System (${resolvedScheme})`
+      : scheme === "dark"
+        ? "🌙 Dark"
+        : "🌞 Light";
 
   return (
     <button
       type="button"
       onClick={toggle}
       className="theme-toggle-btn"
-      aria-label="Toggle light/dark theme"
+      aria-label="Cycle theme mode (dark, light, system)"
+      title="Cycle theme: dark → light → system"
     >
-      {scheme === "dark" ? "🌞 Light" : "🌙 Dark"}
+      {label}
     </button>
   );
 };
