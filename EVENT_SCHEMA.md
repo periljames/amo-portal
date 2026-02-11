@@ -137,3 +137,8 @@
 ## Changed in this run (2026-02-10)
 - No event schema changes.
 - Finance seed fix does not alter SSE/event envelopes.
+
+## Update (2026-02-10)
+- No new SSE entity types/actions introduced in this run.
+- Cockpit enrichment uses existing data sources and existing emitted entity envelopes.
+- Tenant/cursor safety assumptions remain unchanged (amoCode scoping and cursor-safe replay behavior preserved).

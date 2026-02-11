@@ -137,3 +137,60 @@
 ## Changed in this run (2026-02-10)
 - No route path or behavior contract changes in this run.
 - Fix is backend finance seeding reliability during module enable.
+
+## Update (2026-02-10) — Rendering rules + deterministic cockpit click map
+### Department rendering rules (paths unchanged)
+- `/maintenance/:amoCode/:department`
+  - `department=quality` and UI shell v2 cockpit route: render `DashboardCockpit`.
+  - other departments: render `DepartmentLandingScaffold` (no QMS cockpit leakage).
+- `/maintenance/:amoCode/:department/qms*`
+  - `department=quality`: render QMS layouts/pages.
+  - non-quality: redirect to `/maintenance/:amoCode/:department` with informational toast.
+
+### Modules launcher click map
+- All department/module sidebar buttons now navigate through a close-and-route handler.
+- Navigation closes launcher panel and edge-peek state on success.
+- Outside click closes launcher deterministically.
+
+### QMS cockpit KPI/click map
+- Overdue findings → `/maintenance/:amoCode/quality/qms/audits?status=in_progress&finding=overdue`
+- Open findings → `/maintenance/:amoCode/quality/qms/audits?status=cap_open`
+- Pending acknowledgements → `/maintenance/:amoCode/quality/qms/documents?ack=pending`
+- Pending doc approvals → `/maintenance/:amoCode/quality/qms/documents?status_=DRAFT`
+- Overdue CARs → `/maintenance/:amoCode/quality/qms/cars?status=overdue`
+- Training currency → `/maintenance/:amoCode/quality/qms/training?currency=expiring_30d`
+- Pending training controls → `/maintenance/:amoCode/quality/qms/training?verification=pending&deferral=pending`
+- Supplier quality hold → `/maintenance/:amoCode/quality/qms/events?entity=supplier&status=hold`
+- Audit chart point → `/maintenance/:amoCode/quality/qms/audits?status=closed&closed_from=<start>&closed_to=<end>&auditIds=<ids>`
+
+## Update (2026-02-10) — Quality Navigator + Priority Focus Gate
+### Quality Navigator destinations (always visible in quality cockpit)
+- `/maintenance/:amoCode/quality/qms`
+- `/maintenance/:amoCode/quality/qms/tasks`
+- `/maintenance/:amoCode/quality/qms/documents`
+- `/maintenance/:amoCode/quality/qms/audits`
+- `/maintenance/:amoCode/quality/qms/change-control`
+- `/maintenance/:amoCode/quality/qms/cars`
+- `/maintenance/:amoCode/quality/qms/training`
+- `/maintenance/:amoCode/quality/qms/events`
+- `/maintenance/:amoCode/quality/qms/kpis`
+
+### Priority Focus Gate rendering rule
+- If top-priority count > 0: show only `Quality Navigator` + top-priority card (`Resolve now` CTA).
+- If top-priority count == 0: show full cockpit sections (KPI grid, charts, action queue, activity feed).
+- Priority order: overdue findings → overdue CARs → expired/expiring training → pending doc approvals → pending acknowledgements → supplier hold → open findings fallback.
+
+## Update (2026-02-10) — visual cockpit redesign routing checks
+- Paths unchanged.
+- Cockpit still renders only for `department=quality` on `/maintenance/:amoCode/:department`.
+- Non-quality `/maintenance/:amoCode/:department/qms*` still redirects to `/maintenance/:amoCode/:department` with info toast.
+- Quality Navigator tile routes continue to map to:
+  - `/maintenance/:amoCode/quality/qms`
+  - `/maintenance/:amoCode/quality/qms/tasks`
+  - `/maintenance/:amoCode/quality/qms/documents`
+  - `/maintenance/:amoCode/quality/qms/audits`
+  - `/maintenance/:amoCode/quality/qms/change-control`
+  - `/maintenance/:amoCode/quality/qms/cars`
+  - `/maintenance/:amoCode/quality/qms/training`
+  - `/maintenance/:amoCode/quality/qms/events`
+  - `/maintenance/:amoCode/quality/qms/kpis`

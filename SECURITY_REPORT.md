@@ -104,3 +104,8 @@
 ## Changed in this run (2026-02-10)
 - Improved backend operational reliability for tenant module enable flows (finance seed no longer fails on enum cast mismatch).
 - No auth/RBAC policy changes.
+
+## Update (2026-02-10)
+- No new backend routes were introduced.
+- Existing `/quality/qms/cockpit-snapshot` response was expanded with additional aggregated counters and trend payloads only.
+- Auth model and authorization boundaries unchanged; no cross-tenant data path changes introduced.
