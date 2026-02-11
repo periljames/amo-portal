@@ -29,7 +29,9 @@ def test_cockpit_snapshot_returns_compact_dashboard_and_action_queue(db_session,
         "findings_overdue_total": 2,
         "findings_open_total": 7,
         "documents_active": 13,
+        "documents_draft": 2,
         "documents_obsolete": 1,
+        "change_requests_open": 4,
     })
 
     snapshot = quality_service.get_cockpit_snapshot(db_session)
@@ -38,5 +40,9 @@ def test_cockpit_snapshot_returns_compact_dashboard_and_action_queue(db_session,
     assert snapshot["pending_acknowledgements"] >= 0
     assert snapshot["audits_open"] >= 0
     assert snapshot["documents_active"] >= 0
+    assert snapshot["documents_draft"] == 2
+    assert snapshot["change_requests_open"] == 4
+    assert snapshot["cars_open_total"] == 30
+    assert "audit_closure_trend" in snapshot
     assert len(snapshot["action_queue"]) == 25
     assert snapshot["action_queue"][0]["kind"] == "CAR"

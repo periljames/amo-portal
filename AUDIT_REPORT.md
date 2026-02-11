@@ -249,3 +249,144 @@
 
 ### Commands executed
 - `cd backend && pytest amodb/apps/finance/tests/test_finance_posting.py amodb/apps/accounts/tests/test_module_gating.py -q`
+
+## Changed in this run (2026-02-10) — QMS cockpit scope, navigation reliability, contrast, and interactive controls
+### What changed
+- Strict cockpit scoping remains enforced: only `quality` routes render the QMS cockpit; all other departments render department landing scaffold on unchanged dashboard paths.
+- Modules launcher now uses deterministic navigation-close flow (`navigateFromLauncher`) for department/module clicks and closes on outside click to avoid lost-click/focus-trap behavior.
+- QMS cockpit upgraded from audit-only KPI set to broader operational controls (documents, CARs, training, suppliers) with deterministic drilldown routes.
+- Audit closure driver chart upgraded to interactive ECharts with tooltip + zoom (inside + slider) + point click drilldown to filtered audits.
+- Light/dark contrast hardening for status pills in cockpit cards: light theme now uses readable dark foregrounds.
+
+### Exact files changed
+- `frontend/src/components/Layout/DepartmentLayout.tsx`
+- `frontend/src/components/dashboard/DashboardScaffold.tsx`
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+- `frontend/src/styles/components/dashboard-cockpit.css`
+- `frontend/src/services/qms.ts`
+- `backend/amodb/apps/quality/service.py`
+- `backend/amodb/apps/quality/schemas.py`
+- `backend/amodb/apps/quality/tests/test_cockpit_snapshot.py`
+- `ROUTE_MAP.md`
+- `EVENT_SCHEMA.md`
+- `SECURITY_REPORT.md`
+- `AUDIT_SUMMARY.md`
+- `BACKLOG.md`
+- `AUDIT_REPORT.md`
+
+### Click map (deterministic drilldowns)
+- Overdue findings → `/maintenance/:amoCode/quality/qms/audits?status=in_progress&finding=overdue`
+- Open findings → `/maintenance/:amoCode/quality/qms/audits?status=cap_open`
+- Pending acknowledgements → `/maintenance/:amoCode/quality/qms/documents?ack=pending`
+- Pending doc approvals → `/maintenance/:amoCode/quality/qms/documents?status_=DRAFT`
+- Overdue CARs (`X/Total`) → `/maintenance/:amoCode/quality/qms/cars?status=overdue`
+- Training currency (`expired/30d`) → `/maintenance/:amoCode/quality/qms/training?currency=expiring_30d`
+- Pending training controls (`verify/deferral`) → `/maintenance/:amoCode/quality/qms/training?verification=pending&deferral=pending`
+- Supplier quality hold (`inactive/active`) → `/maintenance/:amoCode/quality/qms/events?entity=supplier&status=hold`
+- Audit closure chart point click → `/maintenance/:amoCode/quality/qms/audits?status=closed&closed_from=YYYY-MM-DD&closed_to=YYYY-MM-DD&auditIds=<ids>`
+
+### Manual verification / click test plan
+1. Open `/maintenance/demo/quality`, click topbar **Modules**, click `Planning`; verify route changes to `/maintenance/demo/planning` and launcher panel closes.
+2. Re-open launcher, click `Quality`; verify return to quality dashboard and launcher closes.
+3. On `/maintenance/demo/quality`, click each KPI tile listed above and confirm resulting filtered route/query params match click map.
+4. In the **Audit closure rate** chart:
+   - Hover line points (tooltip contains closed count + date window + audit-id count).
+   - Zoom via mouse wheel (inside zoom) and slider.
+   - Click a point to open closed audits filtered by that point window.
+5. Toggle dark/light theme and verify status-pill foreground remains readable against backgrounds.
+
+### Visual QA artifacts
+- Dark screenshot: `browser:/tmp/codex_browser_invocations/0345a7eecc746e8c/artifacts/artifacts/quality-cockpit-dark.png`
+- Light screenshot: `browser:/tmp/codex_browser_invocations/0345a7eecc746e8c/artifacts/artifacts/quality-cockpit-light.png`
+
+### Performance artifacts
+- `npm run perf:report` currently blocked because prod build stalls in this runner before `dist/` is emitted.
+- Dev-route network capture artifact (for sanity comparison quality vs planning route in local dev):
+  - `browser:/tmp/codex_browser_invocations/e69a89c3ea0e068a/artifacts/artifacts/network-metrics.json`
+
+### Performance budget notes
+- Budget target retained for quality cockpit authenticated first load in production: **< 2MB transferred**.
+- Route-level lazy loading remains in place; cockpit chart library (`echarts-for-react`) remains lazy-loaded inside cockpit scaffold and is not imported on non-cockpit department landing render path.
+
+## Quality Navigator + Priority Focus Gate (2026-02-10)
+### Implemented behavior
+- Added persistent **Quality Navigator** panel (always visible in cockpit/focus mode) with one interactive tile per QMS destination:
+  - `/maintenance/:amoCode/quality/qms`
+  - `/maintenance/:amoCode/quality/qms/tasks`
+  - `/maintenance/:amoCode/quality/qms/documents`
+  - `/maintenance/:amoCode/quality/qms/audits`
+  - `/maintenance/:amoCode/quality/qms/change-control`
+  - `/maintenance/:amoCode/quality/qms/cars`
+  - `/maintenance/:amoCode/quality/qms/training`
+  - `/maintenance/:amoCode/quality/qms/events`
+  - `/maintenance/:amoCode/quality/qms/kpis`
+- Added deterministic **Top Priority** focus gate ordering using snapshot fields:
+  1. `findings_overdue`
+  2. `cars_overdue`
+  3. `training_records_expired`, then `training_records_expiring_30d`
+  4. `documents_draft`
+  5. `pending_acknowledgements`
+  6. `suppliers_inactive`
+  7. fallback `findings_open_total`
+- While top-priority count > 0, cockpit renders only:
+  - Quality Navigator
+  - top-priority card with primary CTA **Resolve now**
+- When top-priority count reaches 0 on snapshot refresh/update, full cockpit sections re-render automatically.
+
+### Interactivity coverage
+- KPI tiles: clickable and route to canonical drilldowns.
+- Action queue rows: row click drills to CAR view; inline Act opens Action Panel.
+- Charts:
+  - Audit closure line chart supports hover tooltip + zoom/pan + click-through drilldown.
+  - Added ECharts pie/donut “QMS control mix” with hover tooltip + segment-click drilldown.
+
+### Verification steps
+1. Open `/maintenance/demo/quality` and confirm Quality Navigator shows all 9 routes.
+2. Click each navigator tile and verify URL matches route list above.
+3. If top-priority card visible, verify non-navigator cockpit sections are hidden and only CTA appears.
+4. Click **Resolve now** and verify navigation to that priority’s canonical drilldown route.
+5. With priority count zero in snapshot, verify full KPI/charts/action/activity sections reappear.
+6. Hover/click both charts and confirm tooltip + drilldown behavior.
+
+### Artifacts
+- Screenshot (current cockpit): `browser:/tmp/codex_browser_invocations/7b2a02f9775e8e75/artifacts/artifacts/quality-cockpit-priority-dark.png`
+
+## Visual redesign run (2026-02-10) — professional colorful QMS cockpit (Recharts)
+### What changed
+- Replaced cockpit content rendering with a new responsive, colorful layout:
+  - header with auditor segmented control + refresh
+  - compact manpower panel
+  - 4 KPI cards row
+  - gauge + two donuts row
+  - full-width monthly trend
+  - scatter + horizontal bar row
+  - action queue + activity sections with compact empty states
+- Kept Quality-only cockpit route invariants and non-quality `/qms` redirect behavior unchanged.
+- Kept module launcher deterministic navigation behavior and verified smoke path.
+- Charts migrated to **Recharts** for cockpit visuals (no Plotly introduced), with click tooltips/drilldowns and stable container heights to reduce flicker/remount behavior.
+- Added mock-response adapter path in cockpit:
+  - attempts live `/quality/qms/cockpit-snapshot`
+  - falls back to in-file mock data on error and shows dev-only “Using mock data” badge.
+
+### Files changed in this redesign run
+- `frontend/src/dashboards/DashboardCockpit.tsx`
+- `frontend/src/components/dashboard/QualityCockpitCanvas.tsx`
+- `frontend/src/styles/components/dashboard-cockpit.css`
+- `frontend/package.json`
+- `frontend/package-lock.json`
+- `AUDIT_REPORT.md`
+- `ROUTE_MAP.md`
+- `AUDIT_SUMMARY.md`
+- `BACKLOG.md`
+
+### Verification
+1. `/maintenance/demo/quality` shows cockpit with colorful KPI/grid/chart layout and navigator.
+2. `/maintenance/demo/planning/qms` redirects to `/maintenance/demo/planning`.
+3. Modules launcher opens and Planning switch changes URL.
+4. Navigator “Documents” tile routes to `/maintenance/demo/quality/qms/documents`.
+
+### Artifacts
+- After (dark): `browser:/tmp/codex_browser_invocations/c0b4aa89d0345f1b/artifacts/artifacts/qms-dashboard-after-dark.png`
+- After (light): `browser:/tmp/codex_browser_invocations/c0b4aa89d0345f1b/artifacts/artifacts/qms-dashboard-after-light.png`
+- Smoke results JSON: `browser:/tmp/codex_browser_invocations/c0b4aa89d0345f1b/artifacts/artifacts/qms-smoke-results.json`
+- Prior screenshot (before this redesign baseline): `browser:/tmp/codex_browser_invocations/7b2a02f9775e8e75/artifacts/artifacts/quality-cockpit-priority-dark.png`
