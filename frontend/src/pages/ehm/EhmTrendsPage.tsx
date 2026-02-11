@@ -1,6 +1,6 @@
 // src/pages/ehm/EhmTrendsPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import Plot from "react-plotly.js";
+import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-dist-min";
 import { useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
@@ -14,6 +14,8 @@ import {
 } from "../../services/ehm";
 import { decodeAmoCertFromUrl } from "../../utils/amo";
 import "../../styles/ehm.css";
+
+const Plot = createPlotlyComponent(Plotly as any);
 
 const EhmTrendsPage: React.FC = () => {
   const params = useParams<{ amoCode?: string }>();

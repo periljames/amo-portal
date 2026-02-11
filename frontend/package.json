@@ -30,8 +30,7 @@
     "react-pdf": "^10.2.0",
     "react-plotly.js": "^2.6.0",
     "react-router-dom": "^7.9.6",
-    "recharts": "^3.7.0",
-    "tailwind-merge": "^3.4.0",
+    "recharts": "^2.15.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
