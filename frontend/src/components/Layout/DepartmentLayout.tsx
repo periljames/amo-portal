@@ -11,6 +11,14 @@ import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
 import { usePortalRuntimeMode } from "../../hooks/usePortalRuntimeMode";
 import { isUiShellV2Enabled } from "../../utils/featureFlags";
+import {
+  getNotificationPreferences,
+  NOTIFICATION_PREFS_EVENT,
+  playNotificationChirp,
+  pushDesktopNotification,
+  setNotificationPreferences,
+  type NotificationPreferences,
+} from "../../services/notificationPreferences";
 import { fetchSubscription } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
 import { getCachedUser, getContext, logout, onSessionEvent } from "../../services/auth";
@@ -192,6 +200,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(() => getNotificationPreferences());
   const [idleWarningOpen, setIdleWarningOpen] = useState(false);
   const [idleCountdown, setIdleCountdown] = useState(IDLE_WARNING_MS / 1000);
   const [logoutReason, setLogoutReason] = useState<"idle" | "expired" | null>(
@@ -591,6 +600,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const lockedEventRef = useRef<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
+  const previousUnreadRef = useRef(0);
   const focusLauncherRef = useRef<HTMLDivElement | null>(null);
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
@@ -752,10 +762,17 @@ const DepartmentLayout: React.FC<Props> = ({
     const trainingPromise = handleModuleCall(
       listTrainingNotifications({ unread_only: true, limit: 100 }),
       (data) => {
-        setUnreadNotifications(data.length);
+        const nextUnread = data.length;
+        if (nextUnread > previousUnreadRef.current) {
+          playNotificationChirp();
+          void pushDesktopNotification("New training notifications", `${nextUnread - previousUnreadRef.current} new item(s) received.`);
+        }
+        previousUnreadRef.current = nextUnread;
+        setUnreadNotifications(nextUnread);
         writeLayoutCache(unreadCacheKey, data.length, cacheProfile.useMemory);
       },
       () => {
+        previousUnreadRef.current = 0;
         setUnreadNotifications(0);
         writeLayoutCache(unreadCacheKey, 0, cacheProfile.useMemory);
       }
@@ -815,11 +832,17 @@ const DepartmentLayout: React.FC<Props> = ({
           limit: 100,
         });
         if (unreadOnly) {
+          if (data.length > previousUnreadRef.current) {
+            playNotificationChirp();
+            void pushDesktopNotification("New notifications", `${data.length - previousUnreadRef.current} new item(s) received.`);
+          }
+          previousUnreadRef.current = data.length;
           setUnreadNotifications(data.length);
           writeLayoutCache(unreadCacheKey, data.length, cacheProfile.useMemory);
         } else {
           setNotifications(data);
           const unreadCount = data.filter((n) => !n.read_at).length;
+          previousUnreadRef.current = unreadCount;
           setUnreadNotifications(unreadCount);
           writeLayoutCache(unreadCacheKey, unreadCount, cacheProfile.useMemory);
         }
@@ -834,6 +857,23 @@ const DepartmentLayout: React.FC<Props> = ({
     },
     [cacheProfile.useMemory, currentUser, handlePollingFailure, unreadCacheKey]
   );
+
+  useEffect(() => {
+    const handlePrefsChange = () => {
+      setNotificationPrefs(getNotificationPreferences());
+    };
+    window.addEventListener(NOTIFICATION_PREFS_EVENT, handlePrefsChange);
+    return () => window.removeEventListener(NOTIFICATION_PREFS_EVENT, handlePrefsChange);
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const intervalMs = notificationPrefs.pollIntervalSeconds * 1000;
+    const id = window.setInterval(() => {
+      void refreshNotifications({ unreadOnly: true });
+    }, intervalMs);
+    return () => window.clearInterval(id);
+  }, [currentUser, notificationPrefs.pollIntervalSeconds, refreshNotifications]);
 
   useEffect(() => {
     if (notificationsOpen) {
@@ -1450,9 +1490,7 @@ const DepartmentLayout: React.FC<Props> = ({
                 <BrandHeader variant="topbar" />
                 <div className="app-shell__topbar-context">
                   <div className="app-shell__topbar-heading">{deptLabel}</div>
-                  <div className="app-shell__topbar-subtitle">
-                    {amoLabel} · Daily operations workspace
-                  </div>
+                  <div className="app-shell__topbar-subtitle">{amoLabel}</div>
                 </div>
               </div>
 
@@ -1460,7 +1498,7 @@ const DepartmentLayout: React.FC<Props> = ({
                 {uiShellV2 && <LiveStatusIndicator />}
                 {uiShellV2 && (
                   <span className={`app-shell__flight-chip ${isGoLive ? "app-shell__flight-chip--live" : "app-shell__flight-chip--demo"}`}>
-                    {isGoLive ? "LIVE · GARMIN LINK" : "DEMO · SIM MODE"}
+                    {isGoLive ? "LIVE" : "DEMO"}
                   </span>
                 )}
                 {focusMode && <span className="focus-launcher__hint">Ctrl/⌘ + \</span>}
@@ -1686,6 +1724,73 @@ const DepartmentLayout: React.FC<Props> = ({
                           ? "Switch to Light mode"
                           : "Switch to Dark mode"}
                       </button>
+
+                      {isSuperuser && (
+                        <>
+                          <div className="profile-drawer__divider" />
+                          <div className="profile-drawer__prefs">
+                            <div className="profile-drawer__prefs-title">Superuser Runtime Controls</div>
+                            <label className="profile-drawer__pref-row">
+                              <span>Audio chirper</span>
+                              <input
+                                type="checkbox"
+                                checked={notificationPrefs.audioEnabled}
+                                onChange={(event) => {
+                                  setNotificationPreferences({ audioEnabled: event.target.checked });
+                                  setNotificationPrefs(getNotificationPreferences());
+                                }}
+                              />
+                            </label>
+                            <label className="profile-drawer__pref-row">
+                              <span>Desktop alerts</span>
+                              <input
+                                type="checkbox"
+                                checked={notificationPrefs.desktopEnabled}
+                                onChange={(event) => {
+                                  setNotificationPreferences({ desktopEnabled: event.target.checked });
+                                  setNotificationPrefs(getNotificationPreferences());
+                                }}
+                              />
+                            </label>
+                            <label className="profile-drawer__pref-row">
+                              <span>Photo uploads</span>
+                              <input
+                                type="checkbox"
+                                checked={notificationPrefs.enablePhotoUploads}
+                                onChange={(event) => {
+                                  setNotificationPreferences({ enablePhotoUploads: event.target.checked });
+                                  setNotificationPrefs(getNotificationPreferences());
+                                }}
+                              />
+                            </label>
+                            <label className="profile-drawer__pref-row">
+                              <span>Video uploads</span>
+                              <input
+                                type="checkbox"
+                                checked={notificationPrefs.enableVideoUploads}
+                                onChange={(event) => {
+                                  setNotificationPreferences({ enableVideoUploads: event.target.checked });
+                                  setNotificationPrefs(getNotificationPreferences());
+                                }}
+                              />
+                            </label>
+                            <label className="profile-drawer__pref-row">
+                              <span>Notification poll (sec)</span>
+                              <input
+                                type="number"
+                                min={15}
+                                max={600}
+                                step={5}
+                                value={notificationPrefs.pollIntervalSeconds}
+                                onChange={(event) => {
+                                  setNotificationPreferences({ pollIntervalSeconds: Number(event.target.value) || 60 });
+                                  setNotificationPrefs(getNotificationPreferences());
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </>
+                      )}
 
                       <div className="profile-drawer__divider" />
 

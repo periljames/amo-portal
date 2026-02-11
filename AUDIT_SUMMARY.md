@@ -258,3 +258,30 @@
 
 ### Artifacts
 - `browser:/tmp/codex_browser_invocations/99a9e44c8dcfb9c0/artifacts/artifacts/quality-dashboard-mock-layout-filled.png`
+
+## 2026-02-11 follow-up summary
+- Dashboard layout density improved for quality and non-quality department landing shells with a shared card treatment and 3/6/3 grid composition.
+- Quality cockpit now uses memoized chart modules and deferred chart rendering to reduce first-paint overhead.
+- Periodic full-query refresh loop removed at QueryClient defaults; data refresh is SSE-targeted invalidation plus stale-while-revalidate.
+- Query key standardized to `qms-dashboard` for cockpit snapshot to match EVENT_SCHEMA invalidation map.
+
+## 2026-02-11 runtime-control + notifications follow-up
+- Added stable deep-equality utility (`frontend/src/utils/deepEqual.ts`) and replaced cockpit `JSON.stringify` cache guard.
+- Added superuser-configurable notification preferences in UI (audio chirper, desktop alerts, poll interval) plus multimedia platform toggles (photo/video enable flags).
+- Added scheduled unread notification refresh handler using configurable interval and event/audible chirp on new notifications.
+- Updated runtime behavior so forced mock cockpit cannot override Go-Live mode; Go-Live now hard-locks cockpit to real-data path.
+- Simplified topbar flight chip copy to `LIVE` / `DEMO` and reduced redundant subtitle verbosity.
+
+## 2026-02-11 acceleration follow-up (all-dashboard readiness)
+- Added persistent TanStack Query cache hydration for faster cold boot and rapid back-navigation rehydration.
+- Added idle chart-chunk preloading for Quality cockpit to accelerate first visualization paint.
+- Enforced multimedia policy toggles (photo/video) in actual upload components (ActionPanel + Public CAR Invite) using shared stable utility functions.
+
+## 2026-02-11 login-page polish
+- Reduced login verbosity to a minimal brand-first sign-in card.
+- Added explicit `Find your AMO` control on AMO-scoped login pages to return to global account discovery route.
+
+## 2026-02-11 login visual/security follow-up
+- Implemented aviation-glass login presentation with responsive 4K wallpaper/video hooks.
+- Added Google/Outlook/Apple social sign-in buttons with env-gated URLs (disabled until configured).
+- Preserved auth routing behavior while reducing copy verbosity.

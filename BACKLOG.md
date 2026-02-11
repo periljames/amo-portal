@@ -179,3 +179,14 @@
 ## Run update (2026-02-11)
 ### Closed
 - [x] Keep Quality charts visible in mock preview mode for layout validation while preserving live priority gate behavior.
+
+## Added follow-ups (2026-02-11 dashboard hardening)
+- Replace temporary deep-equal guard (`JSON.stringify`) with a shared stable deep-compare utility for large payloads.
+- Add Playwright regression test: verify no chart remount when cockpit snapshot response is unchanged.
+- Add keyboard-focus visible state tests for all Quality Navigator tiles.
+- Expand non-quality departmental dashboards from scaffold KPIs to live API-backed modules while preserving 3/6/3 shell grid.
+- [x] Replace cockpit `JSON.stringify` payload guard with stable recursive deep-equal utility (`frontend/src/utils/deepEqual.ts`).
+- [ ] Wire multimedia (photo/video) preference toggles into upload component-level `accept`/validation enforcement paths.
+- [x] Wire multimedia (photo/video) preference toggles into upload component-level `accept`/validation enforcement paths.
+- [ ] Add automated perf smoke benchmark for cold boot (`time-to-first-chart-visible`) and fail CI when regressions exceed threshold.
+- [ ] Implement backend OAuth/OIDC hardening for Google/Outlook/Apple (PKCE, nonce/state replay protection, strict redirect allowlists, MFA/step-up policy, session binding) before production enablement.

@@ -1,6 +1,7 @@
 // src/pages/LoginPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
+import { Apple, Chrome, Mail } from "lucide-react";
 import AuthLayout from "../components/Layout/AuthLayout";
 import TextField from "../components/UI/TextField";
 import Button from "../components/UI/Button";
@@ -12,6 +13,7 @@ import {
   getLoginContext,
   getLastLoginIdentifier,
   type LoginContextResponse,
+  type PortalUser,
   fetchOnboardingStatus,
   type OnboardingStatus,
 } from "../services/auth";
@@ -24,7 +26,15 @@ const PLATFORM_SUPPORT_SLUG = "system";
 
 type LoginStep = "identify" | "password";
 
-function isAdminUser(u: any): boolean {
+type SocialProvider = "google" | "outlook" | "apple";
+
+const SOCIAL_AUTH_CONFIG: Record<SocialProvider, { label: string; icon: React.ComponentType<{ size?: number }>; url: string | undefined }> = {
+  google: { label: "Google", icon: Chrome, url: import.meta.env.VITE_AUTH_GOOGLE_URL },
+  outlook: { label: "Outlook", icon: Mail, url: import.meta.env.VITE_AUTH_OUTLOOK_URL },
+  apple: { label: "Apple", icon: Apple, url: import.meta.env.VITE_AUTH_APPLE_URL },
+};
+
+function isAdminUser(u: PortalUser | null): boolean {
   if (!u) return false;
   return (
     !!u.is_superuser ||
@@ -274,32 +284,26 @@ const LoginPage: React.FC = () => {
 
   const amoSlugForLabel = loginContext?.login_slug || amoCode || null;
 
-  const humanAmoLabel = loginContext?.amo_name
-    ? loginContext.amo_name
-    : amoSlugForLabel
-      ? decodeAmoCertFromUrl(amoSlugForLabel)
-      : "AMO";
+  const handleSocialLogin = (provider: SocialProvider) => {
+    const target = SOCIAL_AUTH_CONFIG[provider].url;
+    if (!target) {
+      setErrorMsg(`${SOCIAL_AUTH_CONFIG[provider].label} login is not configured.`);
+      return;
+    }
+    const amoHint = amoSlugForLabel ? `?amo=${encodeURIComponent(amoSlugForLabel)}` : "";
+    window.location.assign(`${target}${amoHint}`);
+  };
 
-  const isPlatformLogin = !!loginContext?.is_platform;
+  const title = "Login";
 
-  const title = loginContext
-    ? isPlatformLogin
-      ? "Platform sign in"
-      : `AMO sign in (${humanAmoLabel})`
-    : "Find your sign-in";
-
-  const subtitle = loginContext
-    ? isPlatformLogin
-      ? "Superusers only. Use your platform credentials."
-      : `Use your AMO work email or staff ID and password for ${humanAmoLabel}.`
-    : "Enter your work email or staff ID and we will route you to the right portal.";
+  const subtitle = undefined;
 
   const brandName =
     loginContext?.amo_name ||
     (amoSlugForLabel ? decodeAmoCertFromUrl(amoSlugForLabel) : null);
 
   return (
-    <AuthLayout title={title} subtitle={subtitle} brandName={brandName}>
+    <AuthLayout title={title} subtitle={subtitle} brandName={brandName} className="auth-layout--aviation">
       <form
         className="auth-form"
         onSubmit={step === "identify" ? handleIdentify : handleSubmit}
@@ -308,7 +312,7 @@ const LoginPage: React.FC = () => {
         {errorMsg && <div className="auth-form__error">{errorMsg}</div>}
 
         <TextField
-          label="Work email or staff ID"
+          label="Email or staff ID"
           type="text"
           autoComplete="username"
           value={identifier}
@@ -353,9 +357,16 @@ const LoginPage: React.FC = () => {
           </button>
         )}
 
-        <p className="auth-form__smallprint">
-          Access is logged. Use only your personal account.
-        </p>
+        {amoCode && (
+          <button
+            type="button"
+            className="auth-form__link"
+            onClick={() => navigate("/login")}
+            disabled={loading || loadingContext}
+          >
+            Find your AMO
+          </button>
+        )}
 
         <div className="auth-form__actions">
           {step === "identify" ? (
@@ -371,6 +382,30 @@ const LoginPage: React.FC = () => {
               {loading ? "Signing in..." : "Sign in"}
             </Button>
           )}
+        </div>
+
+        <div className="auth-social__divider" aria-hidden>
+          <span>or</span>
+        </div>
+
+        <div className="auth-social__row" role="group" aria-label="Social sign in options">
+          {(Object.keys(SOCIAL_AUTH_CONFIG) as SocialProvider[]).map((provider) => {
+            const item = SOCIAL_AUTH_CONFIG[provider];
+            const Icon = item.icon;
+            return (
+              <button
+                key={provider}
+                type="button"
+                className="auth-social__btn"
+                onClick={() => handleSocialLogin(provider)}
+                title={item.url ? `Continue with ${item.label}` : `${item.label} not configured`}
+                disabled={!item.url || loading || loadingContext}
+              >
+                <Icon size={16} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </div>
       </form>
     </AuthLayout>

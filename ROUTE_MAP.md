@@ -207,3 +207,19 @@
 ## Changed in this run (2026-02-11, follow-up)
 - No route changes.
 - Rendering behavior refinement: in mock preview mode, top-priority card and charts are both visible for layout validation.
+
+## Changed in this run (2026-02-11) — dashboard shell + cache behavior
+- No route path changes.
+- Cockpit rendering remains deterministic and unchanged in order:
+  1. `GET /quality/qms/cockpit-snapshot`
+  2. `GET /api/events/history?limit=50`
+  3. `GET /api/events` SSE stream
+- Priority Focus Gate enforcement tightened: when top-priority count is non-zero, full cockpit charts are hidden and only `Quality Navigator` + deterministic top-priority card render.
+- Query key alignment update:
+  - Quality cockpit snapshot now uses `qms-dashboard` key namespace.
+  - Activity history remains under `activity-history`.
+- Cockpit mock mode support (UI/runtime only): `VITE_QMS_MOCK_COCKPIT=true` forces typed local snapshot while keeping route/click-map invariants unchanged.
+- Admin runtime mode switch sync: selecting DEMO/REAL from admin context now also synchronizes portal runtime lock (`setPortalGoLive`) so cockpit data source state matches selected mode.
+- No route changes in this run; performance-only update adds client cache persistence/preload behavior without altering path contracts.
+- Login UX simplification (no route shape changes): AMO-scoped login now includes `Find your AMO` action navigating to `/login`.
+- Login flow enhancement (no route changes): `/login` and `/maintenance/:amoCode/login` now render social SSO entry controls (Google/Outlook/Apple) when configured via environment URLs; AMO discovery path remains `/login`.

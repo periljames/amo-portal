@@ -640,6 +640,7 @@ const AdminDashboardPage: React.FC = () => {
     setContextError(null);
     setAdminContext({ active_amo_id: v, data_mode: nextMode })
       .then((ctx) => {
+        setPortalGoLive(nextMode === "REAL");
         setActiveAmoId(ctx.active_amo_id);
         setContextMode(ctx.data_mode);
         setLastRealAmoId(ctx.last_real_amo_id);
@@ -686,6 +687,7 @@ const AdminDashboardPage: React.FC = () => {
     setContextError(null);
     setAdminContext({ data_mode: targetMode, active_amo_id: targetAmoId })
       .then((ctx) => {
+        setPortalGoLive(targetMode === "REAL");
         setContextMode(ctx.data_mode);
         setLastRealAmoId(ctx.last_real_amo_id);
         setGoLiveActive(isPortalGoLive());
