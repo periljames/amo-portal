@@ -30,7 +30,6 @@ import {
   getAssignedDepartment,
   isAdminUser,
   isDepartmentId,
-  isQualityReadOnly,
 } from "../../utils/departmentAccess";
 
 type Props = {
@@ -227,7 +226,6 @@ const DepartmentLayout: React.FC<Props> = ({
   const isAdminArea = isAdminNavId(activeDepartment);
   const assignedDepartment = getAssignedDepartment(currentUser, getContext().department);
   const allowedDepartments = getAllowedDepartments(currentUser, assignedDepartment);
-  const qualityReadOnly = isQualityReadOnly(currentUser, assignedDepartment);
 
   // Admins/SUPERUSER can see all departments and the System Admin area.
   const canAccessAdmin = isAdminUser(currentUser);
@@ -1750,22 +1748,6 @@ const DepartmentLayout: React.FC<Props> = ({
                 <main className="app-shell__main">
                   {header}
 
-                  {qualityReadOnly && !isAdminArea && (
-                    <div
-                      className="info-banner info-banner--soft"
-                      role="status"
-                      style={{ margin: "12px 0" }}
-                    >
-                      <div>
-                        <strong>Quality access</strong>
-                        <p className="text-muted" style={{ margin: 0 }}>
-                          Quality users have read-only access outside their department. AMO
-                          admins can make updates.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
                   {showPollingErrorBanner && pollingError && (
                     <div
                       className="info-banner info-banner--warning"
@@ -1894,18 +1876,6 @@ const DepartmentLayout: React.FC<Props> = ({
                 header={header}
                 focusMode={focusMode}
               >
-                {qualityReadOnly && !isAdminArea && (
-                  <div className="info-banner info-banner--soft" role="status">
-                    <div>
-                      <strong>Quality access</strong>
-                      <p className="text-muted" style={{ margin: 0 }}>
-                        Quality users have read-only access outside their department. AMO admins
-                        can make updates.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
                 {isExpired && (
                   <div className={`card ${isReadOnly ? "card--error" : "card--warning"}`}>
                     <div className="card-header">
