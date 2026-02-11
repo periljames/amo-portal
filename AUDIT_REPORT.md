@@ -564,3 +564,12 @@ Addressed user feedback that the mock cockpit appeared empty. Root cause was pri
   2) `VITE_LOGIN_FOCUS_MESSAGE` when present,
   3) time/payroll-window fallback messaging.
 - Added word-limit sanitizer so subtitle stays concise and non-verbose.
+
+## Update (2026-02-11) — restored email-first login sequence and scale
+- Restored two-step backend-aligned login UX:
+  - Step 1: email entry + `Continue` (calls login-context)
+  - Step 2: password field revealed after context resolution
+- Reduced overall login shell/form scale to avoid oversized controls while keeping explicit liquid dimensions.
+- Improved social icon visibility (Apple icon forced high-contrast dark fill and stronger active tile styling).
+- Verification artifact:
+  - `browser:/tmp/codex_browser_invocations/aedeb2d38a803f50/artifacts/artifacts/login-restored-email-first-and-resized.png`

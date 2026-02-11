@@ -13,10 +13,10 @@ import {
 } from "../../ui/liquidGlass/presets";
 import styles from "./login.module.css";
 
-const LOGIN_BTN_H = 56;
-const RECOVERY_LINK_W = 140;
+const LOGIN_BTN_H = 52;
+const RECOVERY_LINK_W = 136;
 const RECOVERY_LINK_H = 28;
-const SOCIAL_BTN = 56;
+const SOCIAL_BTN = 52;
 const SOCIAL_RADIUS = 14;
 
 type SocialProvider = "google" | "apple" | "facebook";
@@ -61,7 +61,6 @@ function useElementWidth<T extends HTMLElement>() {
   useEffect(() => {
     if (!ref.current) return;
     const node = ref.current;
-
     const update = () => {
       const next = Math.max(0, Math.round(node.getBoundingClientRect().width));
       setWidth(next || null);
@@ -70,10 +69,7 @@ function useElementWidth<T extends HTMLElement>() {
     update();
     const observer = new ResizeObserver(update);
     observer.observe(node);
-
-    return () => {
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, []);
 
   return { ref, width };
@@ -90,7 +86,7 @@ const GlassIconButton: React.FC<GlassIconButtonProps> = ({
   children,
 }) => {
   return (
-    // Guardrail: do not use LiquidGlass interactive controls without explicit width/height.
+    // Guardrail: never render interactive liquid controls without explicit width/height.
     <LiquidGlassContainer
       {...socialButtonPreset}
       width={size}
@@ -113,19 +109,19 @@ const GlassIconButton: React.FC<GlassIconButtonProps> = ({
 };
 
 const GoogleIcon: React.FC = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden>
+  <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>
     <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.9-5.5 3.9-3.3 0-6.1-2.8-6.1-6.2s2.8-6.2 6.1-6.2c1.9 0 3.1.8 3.8 1.5l2.6-2.6C16.9 3 14.7 2 12 2 6.5 2 2 6.5 2 12s4.5 10 10 10c5.8 0 9.6-4 9.6-9.7 0-.7-.1-1.3-.2-1.8H12z" />
   </svg>
 );
 
 const AppleIcon: React.FC = () => (
-  <svg width="20" height="24" viewBox="0 0 24 24" aria-hidden>
-    <path fill="currentColor" d="M16.37 1.43c0 1.14-.46 2.2-1.26 3.01-.86.86-2.14 1.49-3.34 1.45-.16-1.12.33-2.32 1.09-3.1.84-.86 2.22-1.48 3.51-1.36zM20.89 17.61c-.5 1.16-.74 1.68-1.38 2.72-.9 1.44-2.17 3.24-3.74 3.26-1.39.02-1.75-.9-3.64-.89-1.89.01-2.28.9-3.67.88-1.57-.02-2.78-1.65-3.68-3.08-2.51-3.95-2.77-8.57-1.22-10.96 1.1-1.7 2.85-2.7 4.49-2.7 1.67 0 2.72.92 4.1.92 1.35 0 2.18-.92 4.08-.92 1.46 0 3.01.79 4.11 2.16-3.61 1.97-3.03 7.08.55 8.61z" />
+  <svg width="18" height="22" viewBox="0 0 24 24" aria-hidden>
+    <path fill="#0b0f16" d="M16.37 1.43c0 1.14-.46 2.2-1.26 3.01-.86.86-2.14 1.49-3.34 1.45-.16-1.12.33-2.32 1.09-3.1.84-.86 2.22-1.48 3.51-1.36zM20.89 17.61c-.5 1.16-.74 1.68-1.38 2.72-.9 1.44-2.17 3.24-3.74 3.26-1.39.02-1.75-.9-3.64-.89-1.89.01-2.28.9-3.67.88-1.57-.02-2.78-1.65-3.68-3.08-2.51-3.95-2.77-8.57-1.22-10.96 1.1-1.7 2.85-2.7 4.49-2.7 1.67 0 2.72.92 4.1.92 1.35 0 2.18-.92 4.08-.92 1.46 0 3.01.79 4.11 2.16-3.61 1.97-3.03 7.08.55 8.61z" />
   </svg>
 );
 
 const FacebookIcon: React.FC = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden>
+  <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>
     <circle cx="12" cy="12" r="11" fill="#1D9BF0" />
     <path fill="#fff" d="M13.27 20v-6.66h2.24l.34-2.6h-2.58V9.08c0-.75.2-1.27 1.28-1.27h1.37V5.48c-.24-.03-1.05-.1-2-.1-1.98 0-3.34 1.2-3.34 3.42v1.94H8.34v2.6h2.24V20h2.69z" />
   </svg>
@@ -159,7 +155,7 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
   onSocialLogin,
 }) => {
   const { ref: submitWrapRef, width: submitWrapWidth } = useElementWidth<HTMLDivElement>();
-  const submitButtonWidth = submitWrapWidth ?? 440;
+  const submitButtonWidth = submitWrapWidth ?? 420;
 
   return (
     <div className={styles.pageBg}>
@@ -185,40 +181,43 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                   required
                 />
 
-                <label htmlFor="password" className={styles.label}>Password</label>
-                <div className={styles.passwordWrap}>
-                  <input
-                    id="password"
-                    className={styles.passwordInput}
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    placeholder="Password"
-                    value={password}
-                    onChange={(event) => onPasswordChange(event.target.value)}
-                    required={showPasswordField}
-                    disabled={!showPasswordField}
-                  />
-                  <button type="button" className={styles.eyeBtn} aria-label="Toggle password visibility" onClick={onTogglePassword}>
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
+                {showPasswordField ? (
+                  <>
+                    <label htmlFor="password" className={styles.label}>Password</label>
+                    <div className={styles.passwordWrap}>
+                      <input
+                        id="password"
+                        className={styles.passwordInput}
+                        type={showPassword ? "text" : "password"}
+                        autoComplete="current-password"
+                        placeholder="Password"
+                        value={password}
+                        onChange={(event) => onPasswordChange(event.target.value)}
+                        required
+                      />
+                      <button type="button" className={styles.eyeBtn} aria-label="Toggle password visibility" onClick={onTogglePassword}>
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
 
-                <div className={styles.recoveryRow}>
-                  <LiquidGlassLink
-                    {...socialButtonPreset}
-                    width={RECOVERY_LINK_W}
-                    height={RECOVERY_LINK_H}
-                    borderRadius={10}
-                    href="#"
-                    className={styles.recoveryLink}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      onForgotPassword();
-                    }}
-                  >
-                    Recovery Password
-                  </LiquidGlassLink>
-                </div>
+                    <div className={styles.recoveryRow}>
+                      <LiquidGlassLink
+                        {...socialButtonPreset}
+                        width={RECOVERY_LINK_W}
+                        height={RECOVERY_LINK_H}
+                        borderRadius={10}
+                        href="#"
+                        className={styles.recoveryLink}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onForgotPassword();
+                        }}
+                      >
+                        Recovery Password
+                      </LiquidGlassLink>
+                    </div>
+                  </>
+                ) : null}
 
                 <div className={styles.submitButtonWrap} ref={submitWrapRef}>
                   <LiquidGlassButton
@@ -230,7 +229,7 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                     className={styles.submitButton}
                     disabled={loading || loadingContext}
                   >
-                    {loading ? "Signing In..." : loadingContext ? "Checking..." : "Sign In"}
+                    {showPasswordField ? (loading ? "Signing In..." : "Sign In") : (loadingContext ? "Checking..." : "Continue")}
                   </LiquidGlassButton>
                 </div>
 
