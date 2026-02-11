@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
 from sqlalchemy.exc import ProgrammingError
 
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg2://test:test@localhost:5432/testdb")
@@ -27,9 +28,9 @@ class _InvoiceDbStub:
         return _RaisingInvoicesQuery()
 
 
-def test_list_invoices_returns_empty_when_table_missing():
-    invoices = account_services.list_invoices(_InvoiceDbStub(), amo_id="amo-1")
-    assert invoices == []
+def test_list_invoices_does_not_hide_programming_error():
+    with pytest.raises(ProgrammingError):
+        account_services.list_invoices(_InvoiceDbStub(), amo_id="amo-1")
 
 
 class _RaisingCarsQuery:
@@ -45,27 +46,13 @@ class _RaisingCarsQuery:
     def all(self):
         raise ProgrammingError("SELECT * FROM quality_cars", {}, Exception("missing table"))
 
-    def count(self):
-        raise ProgrammingError("SELECT count(*) FROM quality_cars", {}, Exception("missing table"))
-
-
-class _SafeCountQuery:
-    def filter(self, *_args, **_kwargs):
-        return self
-
-    def count(self):
-        return 0
-
 
 class _SnapshotDbStub:
-    def query(self, model, *_args, **_kwargs):
-        model_name = getattr(model, "__name__", "")
-        if model_name == "CorrectiveActionRequest":
-            return _RaisingCarsQuery()
-        return _SafeCountQuery()
+    def query(self, *_args, **_kwargs):
+        return _RaisingCarsQuery()
 
 
-def test_get_cockpit_snapshot_survives_missing_car_table(monkeypatch):
+def test_get_cockpit_snapshot_does_not_hide_programming_error(monkeypatch):
     monkeypatch.setattr(
         quality_service,
         "get_dashboard",
@@ -81,11 +68,6 @@ def test_get_cockpit_snapshot_survives_missing_car_table(monkeypatch):
             "change_requests_open": 0,
         },
     )
-    monkeypatch.setattr(quality_service, "_build_audit_closure_trend", lambda db: [])
-    monkeypatch.setattr(quality_service, "_build_most_common_finding_trend_12m", lambda db: [])
 
-    snapshot = quality_service.get_cockpit_snapshot(_SnapshotDbStub())
-
-    assert snapshot["cars_open_total"] == 0
-    assert snapshot["cars_overdue"] == 0
-    assert snapshot["action_queue"] == []
+    with pytest.raises(ProgrammingError):
+        quality_service.get_cockpit_snapshot(_SnapshotDbStub())
