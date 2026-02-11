@@ -1,6 +1,6 @@
-import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   BarChart3,
@@ -16,12 +16,16 @@ import {
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getContext } from "../services/auth";
 import { qmsGetCockpitSnapshot, type CARStatus, type QMSCockpitSnapshotOut } from "../services/qms";
+import { isPortalGoLive } from "../services/runtimeMode";
 import { useRealtime } from "../components/realtime/RealtimeProvider";
 import { listEventHistory } from "../services/events";
 import type { ActionItem, ActivityItem } from "../components/dashboard/DashboardScaffold";
 import type { QualityCockpitVisualData } from "../components/dashboard/QualityCockpitCanvas";
+import { deepEqual } from "../utils/deepEqual";
 
 const LazyQualityCockpitCanvas = lazy(() => import("../components/dashboard/QualityCockpitCanvas"));
+
+const ENV_FORCE_MOCK_COCKPIT = import.meta.env.VITE_QMS_MOCK_COCKPIT === "true";
 
 const MOCK_COCKPIT_RESPONSE: QMSCockpitSnapshotOut & {
   manpower_on_duty_total: number;
@@ -102,9 +106,10 @@ const DashboardCockpit: React.FC = () => {
   const { activity } = useRealtime();
   const [selectedAuditor, setSelectedAuditor] = useState<"Eva" | "Mike" | "Smith">("Eva");
   const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
+  const queryClient = useQueryClient();
+  const useMockCockpit = ENV_FORCE_MOCK_COCKPIT && !isPortalGoLive();
 
   const qmsEnabled = department === "quality";
-  const isDev = (import.meta as any).env?.DEV;
 
   const { data: activityHistory } = useInfiniteQuery({
     queryKey: ["activity-history", amoCode, department],
@@ -115,17 +120,26 @@ const DashboardCockpit: React.FC = () => {
   });
 
   const snapshotQuery = useQuery({
-    queryKey: ["qms-cockpit-snapshot", amoCode],
-    queryFn: () => qmsGetCockpitSnapshot(),
-    enabled: qmsEnabled,
-    staleTime: 15_000,
+    queryKey: ["qms-dashboard", amoCode, department],
+    queryFn: async () => {
+      const next = await qmsGetCockpitSnapshot();
+      const cached = queryClient.getQueryData<QMSCockpitSnapshotOut>(["qms-dashboard", amoCode, department]);
+      if (cached && deepEqual(cached, next)) {
+        return cached;
+      }
+      return next;
+    },
+    enabled: qmsEnabled && !useMockCockpit,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnMount: "always",
     retry: 1,
   });
 
-  const usingMockData = !snapshotQuery.data && snapshotQuery.isError;
-  const snapshot = (snapshotQuery.data ?? MOCK_COCKPIT_RESPONSE) as QMSCockpitSnapshotOut & Partial<typeof MOCK_COCKPIT_RESPONSE>;
+  const usingMockData = useMockCockpit || (!snapshotQuery.data && snapshotQuery.isError);
+  const snapshot = (useMockCockpit ? MOCK_COCKPIT_RESPONSE : (snapshotQuery.data ?? MOCK_COCKPIT_RESPONSE)) as QMSCockpitSnapshotOut & Partial<typeof MOCK_COCKPIT_RESPONSE>;
 
-  const nav = (to: string) => navigate(to);
+  const nav = useCallback((to: string) => navigate(to), [navigate]);
 
   useEffect(() => {
     const onNav = (event: Event) => {
@@ -135,6 +149,18 @@ const DashboardCockpit: React.FC = () => {
     window.addEventListener("qms-nav", onNav as EventListener);
     return () => window.removeEventListener("qms-nav", onNav as EventListener);
   }, [navigate]);
+
+  useEffect(() => {
+    const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+    if (idle) {
+      const id = idle(() => void import("../components/dashboard/charts/QualityCockpitCharts"));
+      return () => {
+        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id);
+      };
+    }
+    const timeout = window.setTimeout(() => void import("../components/dashboard/charts/QualityCockpitCharts"), 700);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   const navigatorTiles = useMemo<NavigatorTile[]>(() => {
     const base = `/maintenance/${amoCode}/${department}/qms`;
@@ -238,10 +264,10 @@ const DashboardCockpit: React.FC = () => {
         inspectors: snapshot.manpower_inspectors_on_duty ?? Math.max(0, snapshot.findings_overdue),
       },
     };
-  }, [snapshot, amoCode, department, selectedAuditor]);
+  }, [snapshot, amoCode, department, nav]);
 
   const loading = snapshotQuery.isLoading;
-  const shouldGateSecondary = Boolean(topPriority) && !usingMockData;
+  const shouldGateSecondary = Boolean(topPriority);
 
   return (
     <div className="qms-cockpit-shell">
@@ -258,10 +284,10 @@ const DashboardCockpit: React.FC = () => {
               </button>
             ))}
           </div>
-          <button type="button" className="secondary-chip-btn" onClick={() => snapshotQuery.refetch()}>
+          <button type="button" className="secondary-chip-btn" onClick={() => { if (!useMockCockpit) void snapshotQuery.refetch(); }} disabled={useMockCockpit}>
             Refresh
           </button>
-          {isDev && usingMockData ? <span className="qms-mock-pill">Using mock data</span> : null}
+          {usingMockData ? <span className="qms-mock-pill">Using mock data</span> : null}
         </div>
       </header>
 
@@ -306,7 +332,6 @@ const DashboardCockpit: React.FC = () => {
           <div className="priority-gate__eyebrow">Top priority</div>
           <h2 className="priority-gate__title">{topPriority.title}</h2>
           <p className="priority-gate__description">{topPriority.description}</p>
-          {usingMockData ? <p className="priority-gate__note">Preview mode: mock data keeps charts visible below for layout validation.</p> : null}
           <div className="priority-gate__actions">
             <span className="priority-gate__count">Count: {topPriority.count}</span>
             <button type="button" className="btn btn-primary" onClick={() => nav(topPriority.route)}>

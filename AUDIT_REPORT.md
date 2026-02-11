@@ -404,3 +404,163 @@ This run focused on the requested Quality dashboard visuals and terminology corr
 
 ## Run narrative (2026-02-11) — non-empty mock layout
 Addressed user feedback that the mock cockpit appeared empty. Root cause was priority-gate behavior hiding secondary content when mock snapshot had overdue findings. The cockpit now keeps charts visible in mock preview mode while preserving strict priority gating for live data.
+
+## Update (2026-02-11) — dashboard performance regressions fixed
+### Frontend architecture changes
+- Rebuilt quality cockpit chart area into modular cards using reusable `DashboardCard` wrapper (`frontend/src/components/dashboard/DashboardCard.tsx`).
+- Split chart rendering into memoized Recharts components and deferred chart hydration with IntersectionObserver + requestIdleCallback (`frontend/src/components/dashboard/charts/QualityCockpitCharts.tsx`).
+- Added fixed chart container heights and disabled heavy chart animations (`isAnimationActive={false}`) to eliminate remount/reflow flicker.
+
+### Cache + invalidation strategy
+- Removed global periodic query refresh defaults from React Query client; dashboard updates are now cached-first with stale-while-revalidate and targeted invalidation.
+- Quality snapshot query key moved to `qms-dashboard` with deep-equal guard (`JSON.stringify` compare against cache) so unchanged payloads reuse cached reference and do not retrigger chart animation.
+- SSE invalidation map narrowed to EVENT_SCHEMA entity/action mapping in `RealtimeProvider`:
+  - `accounts.user*` -> `user-profile`, `admin-users`, `qms-dashboard`, `dashboard`, `activity-history`
+  - `tasks.task*` -> `tasks`, `my-tasks`, `qms-dashboard`, `dashboard`, `activity-history`
+  - `qms.document*` / `qms.audit*` / `qms.car*` / `qms.training*` -> module key + `qms-dashboard` + `activity-history`
+  - fallback is `activity-history` only (no global invalidate)
+
+### Verification checklist
+1. Open `/maintenance/:amoCode/quality` and confirm first paint appears immediately with cached KPI/header shell.
+2. Navigate away and back; verify dashboard rehydrates instantly from cache.
+3. Trigger SSE event for unrelated entity and verify only mapped keys invalidate.
+4. Trigger snapshot fetch with unchanged payload and confirm no chart flicker/remount.
+5. Confirm priority gate hides full cockpit whenever top-priority count > 0.
+
+## Update (2026-02-11) — follow-up hardening after review
+- Added explicit mock-mode toggle `VITE_QMS_MOCK_COCKPIT` in `DashboardCockpit` so switching between mock/live data is a single env flag.
+- Mock data indicator now displays whenever mock mode is active (not only in dev), matching cockpit operator visibility requirement.
+- Refresh action is disabled while forced mock mode is active to avoid confusing no-op network behavior.
+- Removed non-functional `selectedAuditor` dependency from visual-data memo to avoid unnecessary chart recomputation churn.
+
+## Update (2026-02-11) — runtime controls, schedule handlers, multimedia toggles
+### Stability/runtime
+- Replaced cockpit payload compare from `JSON.stringify` to stable recursive `deepEqual` utility (`frontend/src/utils/deepEqual.ts`).
+- Mock cockpit env override now respects Go-Live lock (`VITE_QMS_MOCK_COCKPIT` is ignored when portal is live).
+- Admin data-mode switches now synchronize `setPortalGoLive(...)` so moving to DEMO correctly releases live lock and moving to REAL enforces real mode.
+
+### Notifications/events
+- Added centralized `notificationPreferences` service for front-end configurable preferences:
+  - audio chirper
+  - desktop browser notifications
+  - notification poll interval schedule (15s..600s)
+  - multimedia enable toggles (photo/video)
+- Added interval scheduler in `DepartmentLayout` to refresh unread notifications using configured cadence.
+- Added chirp + desktop notification trigger for:
+  - new unread training notifications
+  - realtime SSE events handled by `RealtimeProvider`
+
+### UX cleanup
+- Topbar flight chip now displays compact labels only: `LIVE` or `DEMO`.
+- Reduced topbar subtitle verbosity from "Daily operations workspace" to AMO label only.
+
+## Update (2026-02-11) — cold-boot acceleration + multimedia enforcement
+### Performance acceleration (cold boot)
+- Added TanStack Query persistent cache hydration in `main.tsx` using:
+  - `PersistQueryClientProvider`
+  - `createSyncStoragePersister`
+  - localStorage key `amodb-query-cache-v1`
+- Result: first render after hard reload can reuse prior cached query payloads before background refresh, reducing cold-start flicker.
+- Added idle preloading of heavy Quality chart chunk from `DashboardCockpit` to improve first chart visibility during initial cockpit visit.
+
+### Multimedia policy enforcement
+- Added stable utility helpers in `notificationPreferences`:
+  - `getEvidenceAcceptString()`
+  - `isEvidenceFileAllowed(file)`
+- Wired these controls into upload entry points:
+  - `ActionPanel` evidence uploads (CAR + training)
+  - `PublicCarInvitePage` attachment uploads
+- Upload inputs now respect superuser photo/video toggle policies and show blocked-file errors when policy disallows selected media.
+
+### Additional notes
+- This closes the backlog item for wiring multimedia preference toggles into component upload accept/validation paths.
+
+## Update (2026-02-11) — login UX simplification
+- Simplified login page presentation to a minimal professional layout:
+  - title reduced to `Login`
+  - removed verbose explanatory subtitle text
+  - concise field label (`Email or staff ID`)
+  - removed compliance smallprint line
+- Added direct `Find your AMO` path from AMO-specific login routes back to global `/login` discovery.
+- Authentication flow/routing contracts remain unchanged (admin/non-admin landing logic preserved).
+
+## Update (2026-02-11) — aviation glass login + social SSO entry points
+### UI/UX
+- Upgraded login screen to aviation-themed glassmorphism layout with layered scene background:
+  - animated aurora overlay
+  - optional high-res wallpaper/video sources
+  - responsive wallpaper handling for desktop/tablet/mobile
+- Added social sign-in buttons for Google, Outlook, and Apple in login card.
+
+### Config/ops
+- Social login endpoints are environment-driven and disabled by default until configured:
+  - `VITE_AUTH_GOOGLE_URL`
+  - `VITE_AUTH_OUTLOOK_URL`
+  - `VITE_AUTH_APPLE_URL`
+- Wallpaper assets are also environment-driven:
+  - `VITE_AUTH_WALLPAPER_VIDEO`
+  - `VITE_AUTH_WALLPAPER_IMAGE_DESKTOP`
+  - `VITE_AUTH_WALLPAPER_IMAGE_TABLET`
+  - `VITE_AUTH_WALLPAPER_IMAGE_MOBILE`
+
+### Security note
+- UI now only exposes OAuth entry points; secure FAA-level controls (PKCE, strict redirect URI allowlists, anti-replay/nonces, device/session risk checks, MFA policy) must be enforced on backend identity provider integrations before production enablement.
+
+## Update (2026-02-11) — Liquid Glass component standardization
+### What changed
+- Introduced reusable Liquid Glass wrapper layer:
+  - `GlassPanel`, `GlassCard`, `GlassButton`, `GlassLink`
+  - centralized presets in `frontend/src/ui/liquidGlass/presets.ts`
+- Added mandated base stylesheet import once in `src/main.tsx`:
+  - `@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css`
+- Converted login card to transparent layered shell with icon-only social controls and glass inputs.
+- Applied shared `GlassCard` wrapper to dashboard panel card primitive (`DashboardCard`) and KPI tiles in `DepartmentLandingScaffold` for consistent shell treatment.
+
+### Performance checks
+- Presets are imported constants (no inline object allocation churn in JSX).
+- Wrapper components memoized with `React.memo` and stable preset merge behavior.
+- Existing chart deferment and query-cache behavior preserved.
+
+### Verification checklist
+- [x] Login renders glass card with icon-only social controls.
+- [x] Dashboard cards render through shared glass wrapper without route/data-flow regressions.
+- [x] Build passes with TypeScript.
+
+## Update (2026-02-11) — portal-adapted liquid polish
+- Refined login Liquid Glass composition to match portal visual language and removed noisy overlapping blobs:
+  - lowered liquid noise/tint strengths in shared presets
+  - constrained button dimensions for deterministic rendering
+  - kept icon-only social providers while switching support links to lightweight portal-native controls
+- Preserved existing login flow, AMO discovery path, and env-gated social provider routing.
+- Captured fresh visual verification artifact:
+  - `browser:/tmp/codex_browser_invocations/8dda570b665f766c/artifacts/artifacts/login-portal-adapted-liquid.png`
+
+## Update (2026-02-11) — split-shell login rebuild to match reference
+- Rebuilt login UI from centered glass card to split shell composition:
+  - left form panel on light surface
+  - right rounded illustration frame in same parent shell
+- Liquid Glass usage narrowed to subtle structural accents only:
+  - outer shell frame
+  - illustration frame
+  - social tiles
+  - primary sign-in button
+- Fixed social icon set to match requested reference hierarchy (Google / Apple / Facebook) with custom Apple glyph and Apple tile elevated state.
+- Preserved auth flow and routing behavior (identify → password → login, AMO discovery, reset password route).
+- Visual verification artifact:
+  - `browser:/tmp/codex_browser_invocations/004812650a46b765/artifacts/artifacts/login-split-shell-reference-match.png`
+
+## Update (2026-02-11) — hard width/height enforcement for liquid login controls
+- Enforced explicit width/height on login interactive Liquid Glass primitives to avoid package default `300x200` rendering:
+  - Sign In button now measured to form width and fixed height `56px`.
+  - Recovery link constrained to `140x28`.
+  - Social icon tiles constrained to `56x56`.
+- Added `GlassIconButton` typed helper in login layout so icon-size controls always pass explicit dimensions.
+- Verification artifact:
+  - `browser:/tmp/codex_browser_invocations/dc8d4a39cf7383ae/artifacts/artifacts/login-fixed-glass-sizing.png`
+
+## Update (2026-02-11) — dynamic brief login subtitle
+- Replaced static login subtitle with a dynamic brief line (max 8 words) selected by:
+  1) `localStorage['amodb:login-focus']` when present,
+  2) `VITE_LOGIN_FOCUS_MESSAGE` when present,
+  3) time/payroll-window fallback messaging.
+- Added word-limit sanitizer so subtitle stays concise and non-verbose.
