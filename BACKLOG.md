@@ -174,3 +174,8 @@
 - [x] Add interactive 2D manpower allocation pie chart (per-role) to Quality dashboard.
 - [x] Add one-year “most common finding” trend chart with deterministic drilldown filters.
 - [x] Correct cockpit heading to “Quality Dashboard” (not “Quality Control”).
+
+
+## Run update (2026-02-11)
+### Closed
+- [x] Keep Quality charts visible in mock preview mode for layout validation while preserving live priority gate behavior.

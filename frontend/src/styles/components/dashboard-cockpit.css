@@ -390,6 +390,12 @@ body[data-color-scheme="light"] .status-pill--closed {
   margin: 10px 0;
 }
 
+.priority-gate__note {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
 .priority-gate__actions {
   display: flex;
   justify-content: space-between;

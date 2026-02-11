@@ -244,3 +244,17 @@
 
 ### Screenshots/artifacts
 - `browser:/tmp/codex_browser_invocations/4b1fee0fe42bdb46/artifacts/artifacts/quality-dashboard-charts.png`
+
+
+## Run update (2026-02-11) — mock layout visibility fix
+### What changed
+- Fixed mock preview behavior so charts remain visible even when a top-priority item exists.
+- Kept deterministic priority gate for live data; only mock preview bypasses secondary-content hiding.
+- Added preview note text in the priority card for clarity.
+
+### Verification
+1. `cd frontend && npx tsc -b`
+2. Open `/maintenance/demo/quality` in mock mode and confirm charts render below priority card.
+
+### Artifacts
+- `browser:/tmp/codex_browser_invocations/99a9e44c8dcfb9c0/artifacts/artifacts/quality-dashboard-mock-layout-filled.png`

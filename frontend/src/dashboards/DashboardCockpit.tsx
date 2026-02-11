@@ -241,6 +241,7 @@ const DashboardCockpit: React.FC = () => {
   }, [snapshot, amoCode, department, selectedAuditor]);
 
   const loading = snapshotQuery.isLoading;
+  const shouldGateSecondary = Boolean(topPriority) && !usingMockData;
 
   return (
     <div className="qms-cockpit-shell">
@@ -305,6 +306,7 @@ const DashboardCockpit: React.FC = () => {
           <div className="priority-gate__eyebrow">Top priority</div>
           <h2 className="priority-gate__title">{topPriority.title}</h2>
           <p className="priority-gate__description">{topPriority.description}</p>
+          {usingMockData ? <p className="priority-gate__note">Preview mode: mock data keeps charts visible below for layout validation.</p> : null}
           <div className="priority-gate__actions">
             <span className="priority-gate__count">Count: {topPriority.count}</span>
             <button type="button" className="btn btn-primary" onClick={() => nav(topPriority.route)}>
@@ -312,7 +314,9 @@ const DashboardCockpit: React.FC = () => {
             </button>
           </div>
         </section>
-      ) : (
+      ) : null}
+
+      {!shouldGateSecondary ? (
         <Suspense fallback={<div className="qms-skeleton-block">Loading charts…</div>}>
           <LazyQualityCockpitCanvas
             data={visualData}
@@ -325,7 +329,7 @@ const DashboardCockpit: React.FC = () => {
             }}
           />
         </Suspense>
-      )}
+      ) : null}
 
       <ActionPanel isOpen={!!panelContext} context={panelContext} onClose={() => setPanelContext(null)} />
     </div>

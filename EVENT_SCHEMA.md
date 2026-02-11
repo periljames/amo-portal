@@ -147,3 +147,7 @@
 ## Changed in this run (2026-02-11)
 - No event envelope/entity/action changes.
 - Dashboard data expansion uses existing Quality snapshot endpoint and does not emit new event types.
+
+
+## Changed in this run (2026-02-11, follow-up)
+- No event schema changes.

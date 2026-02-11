@@ -400,3 +400,7 @@ This run focused on the requested Quality dashboard visuals and terminology corr
 
 ### Known issues/follow-ups
 - Frontend production build still reports an existing large chunk warning for `grid-vendor`; no regression introduced by this run.
+
+
+## Run narrative (2026-02-11) — non-empty mock layout
+Addressed user feedback that the mock cockpit appeared empty. Root cause was priority-gate behavior hiding secondary content when mock snapshot had overdue findings. The cockpit now keeps charts visible in mock preview mode while preserving strict priority gating for live data.

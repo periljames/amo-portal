@@ -202,3 +202,8 @@
   - 2D manpower allocation pie chart by role (interactive drilldown to QMS tasks filters).
   - 12-month trend for the most common finding type (interactive drilldown to audits filter).
 - Dashboard title corrected from “Quality Control Dashboard” to “Quality Dashboard”.
+
+
+## Changed in this run (2026-02-11, follow-up)
+- No route changes.
+- Rendering behavior refinement: in mock preview mode, top-priority card and charts are both visible for layout validation.

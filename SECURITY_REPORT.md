@@ -115,3 +115,7 @@
 - Security controls unchanged.
 - No auth bypass, route guard, or role-policy change introduced.
 - Quality chart enhancements consume existing authenticated endpoint (`/quality/qms/cockpit-snapshot`) and preserve current module gating.
+
+
+## Update (2026-02-11, follow-up)
+- No security model changes; mock preview visibility change is frontend-only rendering behavior.
