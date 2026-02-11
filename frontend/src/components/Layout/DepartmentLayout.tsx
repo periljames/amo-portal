@@ -9,6 +9,7 @@ import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
 import { useToast } from "../feedback/ToastProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
+import { usePortalRuntimeMode } from "../../hooks/usePortalRuntimeMode";
 import { isUiShellV2Enabled } from "../../utils/featureFlags";
 import { fetchSubscription } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
@@ -221,6 +222,7 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [uiShellV2]);
 
   const currentUser = getCachedUser();
+  const { isGoLive } = usePortalRuntimeMode();
   const isSuperuser = !!currentUser?.is_superuser;
   const isTenantAdmin = isSuperuser || !!currentUser?.is_amo_admin;
   const isAdminArea = isAdminNavId(activeDepartment);
@@ -1456,6 +1458,11 @@ const DepartmentLayout: React.FC<Props> = ({
 
               <div className="app-shell__topbar-actions">
                 {uiShellV2 && <LiveStatusIndicator />}
+                {uiShellV2 && (
+                  <span className={`app-shell__flight-chip ${isGoLive ? "app-shell__flight-chip--live" : "app-shell__flight-chip--demo"}`}>
+                    {isGoLive ? "LIVE · GARMIN LINK" : "DEMO · SIM MODE"}
+                  </span>
+                )}
                 {focusMode && <span className="focus-launcher__hint">Ctrl/⌘ + \</span>}
                 {trialChipVisible && (
                   <div ref={trialMenuRef} style={{ position: "relative" }}>

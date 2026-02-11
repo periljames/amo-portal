@@ -3996,3 +3996,77 @@ body[data-color-scheme="light"] .planning-calendar-badge--leave {
   transform: translateY(-1px);
   border-color: var(--accent-primary);
 }
+
+.go-live-radar {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 1rem;
+  align-items: center;
+}
+
+.go-live-radar__scope {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  border: 1px solid var(--surface-border);
+  overflow: hidden;
+}
+
+.go-live-radar__scope.is-live {
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.2), transparent 65%);
+}
+
+.go-live-radar__scope.is-demo {
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.2), transparent 65%);
+}
+
+.go-live-radar__ring {
+  position: absolute;
+  inset: 16px;
+  border: 1px solid color-mix(in srgb, var(--surface-border) 65%, transparent);
+  border-radius: 50%;
+}
+
+.go-live-radar__ring--inner {
+  inset: 40px;
+}
+
+.go-live-radar__sweep {
+  position: absolute;
+  inset: -10%;
+  background: conic-gradient(from 0deg, rgba(16, 185, 129, 0), rgba(16, 185, 129, 0.55), rgba(16, 185, 129, 0));
+  animation: go-live-sweep 4s linear infinite;
+}
+
+.go-live-radar__scope.is-demo .go-live-radar__sweep {
+  background: conic-gradient(from 0deg, rgba(245, 158, 11, 0), rgba(245, 158, 11, 0.55), rgba(245, 158, 11, 0));
+}
+
+.go-live-radar__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem 1rem;
+}
+
+.go-live-radar__stats p {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.go-live-radar__stats strong {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+@keyframes go-live-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 880px) {
+  .go-live-radar {
+    grid-template-columns: 1fr;
+  }
+}

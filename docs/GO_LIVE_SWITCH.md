@@ -20,3 +20,14 @@
 ## Notes for production
 - This switch is **frontend global** for the active browser session/profile.
 - To revert locally (for non-production testing), clear `amodb_portal_go_live` in browser storage or set it to `0`.
+
+
+## Portal-wide confirmation surfaces
+- Top bar now shows runtime chip on all pages:
+  - `LIVE · GARMIN LINK` when Go Live is active.
+  - `DEMO · SIM MODE` when demo runtime is active.
+- Superuser Overview includes a Garmin-style flight deck panel with runtime mode, pipeline state, last backend check, and a direct link to the Go Live master control.
+
+## Engineering rule for future changes
+- Any new frontend service that currently returns mock/demo fallback **must** gate that fallback behind `shouldUseMockData()`.
+- Any new superuser operational dashboard should expose the current runtime mode from `runtimeMode` (or `usePortalRuntimeMode`) to avoid ambiguous environments.
