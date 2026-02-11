@@ -58,9 +58,6 @@ export default defineConfig(({ mode }) => {
             if (id.includes('node_modules/react-pdf') || id.includes('node_modules/pdfjs-dist')) {
               return 'pdf-vendor'
             }
-            if (id.includes('node_modules/react-plotly.js') || id.includes('node_modules/plotly.js-dist-min')) {
-              return 'plotly-vendor'
-            }
           },
         },
       },
