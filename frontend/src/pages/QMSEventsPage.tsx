@@ -1,161 +1,105 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import React, { useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import QMSLayout from "../components/QMS/QMSLayout";
 import { getContext } from "../services/auth";
-import { qmsListAudits, type QMSAuditOut } from "../services/qms";
-import { listTrainingCourses, listTrainingEvents } from "../services/training";
-import type { TrainingCourseRead, TrainingEventRead } from "../types/training";
+import { fetchCalendarEvents, type CalendarItem, type DashboardFilter } from "../services/qmsCockpit";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
-
-type EventItem = {
-  id: string;
-  date: string;
-  title: string;
-  type: "Audit" | "Training";
-  meta?: string;
-  location?: string | null;
-};
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString();
-}
+type CalendarView = "day" | "week" | "month";
 
 const QMSEventsPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
-  const navigate = useNavigate();
   const ctx = getContext();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
 
-  const [state, setState] = useState<LoadState>("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [audits, setAudits] = useState<QMSAuditOut[]>([]);
-  const [trainingEvents, setTrainingEvents] = useState<TrainingEventRead[]>([]);
-  const [courses, setCourses] = useState<TrainingCourseRead[]>([]);
-  const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState<DashboardFilter>({ auditor: "All", dateRange: "30d" });
+  const [view, setView] = useState<CalendarView>("week");
+  const [active, setActive] = useState<CalendarItem | null>(null);
 
-  const load = async () => {
-    setState("loading");
-    setError(null);
-    try {
-      const [auditData, eventData, courseData] = await Promise.all([
-        qmsListAudits({ domain: "AMO" }),
-        listTrainingEvents(),
-        listTrainingCourses({ include_inactive: false }),
-      ]);
-      setAudits(auditData);
-      setTrainingEvents(eventData);
-      setCourses(courseData);
-      setState("ready");
-    } catch (e: any) {
-      setError(e?.message || "Failed to load quality events.");
-      setState("error");
-    }
-  };
+  const { data = [], isLoading, refetch } = useQuery({
+    queryKey: ["maintenance-calendar", filters],
+    queryFn: () => fetchCalendarEvents(filters),
+    refetchInterval: 30_000,
+  });
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const events = useMemo(() => {
-    const auditEvents: EventItem[] = audits
-      .filter((audit) => audit.planned_start)
-      .map((audit) => ({
-        id: audit.id,
-        date: audit.planned_start as string,
-        title: audit.title,
-        type: "Audit",
-        meta: audit.audit_ref,
-      }));
-    const trainingEventItems: EventItem[] = trainingEvents.map((event) => ({
-      id: event.id,
-      date: event.starts_on,
-      title: event.title,
-      type: "Training",
-      meta: courses.find((course) => course.id === event.course_id)?.course_name,
-      location: event.location,
-    }));
-    return [...auditEvents, ...trainingEventItems].sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-  }, [audits, courses, trainingEvents]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return events;
-    return events.filter(
-      (event) =>
-        event.title.toLowerCase().includes(q) ||
-        (event.meta || "").toLowerCase().includes(q)
-    );
-  }, [events, query]);
+  const grouped = useMemo(() => {
+    return data.reduce<Record<string, CalendarItem[]>>((acc, event) => {
+      acc[event.viewDate] = [...(acc[event.viewDate] ?? []), event];
+      return acc;
+    }, {});
+  }, [data]);
 
   return (
     <QMSLayout
       amoCode={amoSlug}
       department={department}
-      title="Quality Events"
-      subtitle="Single calendar view of audits, training, and compliance milestones."
+      title="Maintenance Schedule"
+      subtitle="Live synchronized planning board for quality and maintenance events."
       actions={
-        <button type="button" className="primary-chip-btn" onClick={load}>
-          Refresh events
-        </button>
-      }
-    >
-      <section className="qms-toolbar">
-        <label className="qms-field qms-field--grow">
-          <span>Search events</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search by event or course"
-          />
-        </label>
-        <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
-          Back
-        </button>
-      </section>
-
-      {state === "loading" && (
-        <div className="card card--info">
-          <p>Loading quality events…</p>
-        </div>
-      )}
-
-      {state === "error" && (
-        <div className="card card--error">
-          <p>{error}</p>
-          <button type="button" className="primary-chip-btn" onClick={load}>
-            Retry
+        <div className="qms-cockpit-filters">
+          <select value={filters.auditor} onChange={(e) => setFilters((p) => ({ ...p, auditor: e.target.value }))}>
+            <option>All</option>
+            <option>Auditor A</option>
+            <option>Auditor B</option>
+          </select>
+          <select value={filters.dateRange} onChange={(e) => setFilters((p) => ({ ...p, dateRange: e.target.value }))}>
+            <option value="7d">7 days</option>
+            <option value="30d">30 days</option>
+            <option value="90d">90 days</option>
+          </select>
+          <div className="calendar-view-switch">
+            {(["day", "week", "month"] as CalendarView[]).map((item) => (
+              <button key={item} type="button" className={view === item ? "active" : ""} onClick={() => setView(item)}>
+                {item}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="primary-chip-btn" onClick={() => refetch()}>
+            Refresh
           </button>
         </div>
-      )}
-
-      {state === "ready" && (
-        <div className="qms-card">
-          <div className="qms-list">
-            {filtered.map((event) => (
-              <div key={`${event.type}-${event.id}`} className="qms-list__item">
-                <div>
-                  <strong>{event.title}</strong>
-                  <span className="qms-list__meta">
-                    {event.type} · {formatDate(event.date)}
-                    {event.location ? ` · ${event.location}` : ""}
-                  </span>
-                </div>
-                <span className="qms-pill">
-                  {event.meta || event.type}
-                </span>
+      }
+    >
+      <div className="cockpit-card">
+        {isLoading ? (
+          <p>Loading live schedule…</p>
+        ) : (
+          <div className={`calendar-grid calendar-grid--${view}`}>
+            {Object.entries(grouped).map(([date, events]) => (
+              <div key={date} className="calendar-cell">
+                <h4>{date}</h4>
+                {events.map((event) => (
+                  <button key={event.id} type="button" className="calendar-event" onClick={() => setActive(event)}>
+                    <strong>{event.title}</strong>
+                    <span>
+                      {event.startsAt} - {event.endsAt}
+                    </span>
+                  </button>
+                ))}
               </div>
             ))}
-            {filtered.length === 0 && (
-              <p className="text-muted">No events match the search.</p>
-            )}
+          </div>
+        )}
+      </div>
+
+      {active && (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setActive(null)}>
+          <div className="dialog-card" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h3>{active.title}</h3>
+            <p>{active.detail}</p>
+            <p>
+              <strong>Time:</strong> {active.viewDate} · {active.startsAt} - {active.endsAt}
+            </p>
+            <p>
+              <strong>Location:</strong> {active.location}
+            </p>
+            <p>
+              <strong>Assigned:</strong> {active.assignedPersonnel.join(", ")}
+            </p>
+            <button type="button" className="primary-chip-btn" onClick={() => setActive(null)}>
+              Close
+            </button>
           </div>
         </div>
       )}

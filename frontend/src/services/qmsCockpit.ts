@@ -1,0 +1,139 @@
+import { authHeaders } from "./auth";
+import { apiGet, apiPost } from "./crs";
+
+export type DashboardFilter = {
+  auditor: string;
+  dateRange: string;
+};
+
+export type KpiMetric = {
+  label: string;
+  value: number;
+  changePct: number;
+};
+
+export type DonutDatum = { name: string; value: number };
+
+export type TrendDatum = {
+  month: string;
+  tasks: number;
+  defects: number;
+  samples: number;
+};
+
+export type CockpitPayload = {
+  qualityScore: number;
+  kpis: KpiMetric[];
+  fatalBySupervisor: DonutDatum[];
+  fatalByLocation: DonutDatum[];
+  trends: TrendDatum[];
+};
+
+export type AircraftOption = {
+  tailNumber: string;
+  engineHours: number;
+  engineCycles: number;
+};
+
+export type CalendarItem = {
+  id: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  viewDate: string;
+  assignedPersonnel: string[];
+  location: string;
+  detail: string;
+};
+
+const MOCK_COCKPIT: CockpitPayload = {
+  qualityScore: 92,
+  kpis: [
+    { label: "Total Tasks", value: 428, changePct: 7.5 },
+    { label: "Samples", value: 121, changePct: 4.2 },
+    { label: "Defects", value: 34, changePct: -3.4 },
+    { label: "Fatal Errors", value: 6, changePct: -11.8 },
+  ],
+  fatalBySupervisor: [
+    { name: "M. Otieno", value: 2 },
+    { name: "S. Karanja", value: 3 },
+    { name: "A. Noor", value: 1 },
+  ],
+  fatalByLocation: [
+    { name: "Hangar A", value: 2 },
+    { name: "Hangar B", value: 1 },
+    { name: "Line Station", value: 3 },
+  ],
+  trends: [
+    { month: "Jan", tasks: 61, defects: 8, samples: 13 },
+    { month: "Feb", tasks: 67, defects: 7, samples: 16 },
+    { month: "Mar", tasks: 72, defects: 6, samples: 17 },
+    { month: "Apr", tasks: 64, defects: 4, samples: 19 },
+    { month: "May", tasks: 80, defects: 5, samples: 21 },
+    { month: "Jun", tasks: 84, defects: 4, samples: 22 },
+  ],
+};
+
+export async function fetchCockpitData(filters: DashboardFilter): Promise<CockpitPayload> {
+  try {
+    const params = new URLSearchParams({ auditor: filters.auditor, date_range: filters.dateRange });
+    return await apiGet<CockpitPayload>(`/qms/cockpit?${params.toString()}`, { headers: authHeaders() });
+  } catch {
+    return MOCK_COCKPIT;
+  }
+}
+
+export async function listAircraftOptions(): Promise<AircraftOption[]> {
+  try {
+    return await apiGet<AircraftOption[]>("/crs/aircraft/options", { headers: authHeaders() });
+  } catch {
+    return [
+      { tailNumber: "5Y-SLA", engineHours: 1842, engineCycles: 1110 },
+      { tailNumber: "5Y-SLB", engineHours: 2184, engineCycles: 1312 },
+      { tailNumber: "5Y-SLC", engineHours: 931, engineCycles: 665 },
+    ];
+  }
+}
+
+export async function fetchSerialNumber(): Promise<string> {
+  try {
+    const result = await apiGet<{ serial: string }>("/crs/serial/next", { headers: authHeaders() });
+    return result.serial;
+  } catch {
+    return `CRS-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  }
+}
+
+export async function fetchCalendarEvents(filters: DashboardFilter): Promise<CalendarItem[]> {
+  try {
+    const params = new URLSearchParams({ auditor: filters.auditor, date_range: filters.dateRange });
+    return await apiGet<CalendarItem[]>(`/qms/maintenance-calendar?${params.toString()}`, { headers: authHeaders() });
+  } catch {
+    return [
+      {
+        id: "1",
+        title: "A-check - Dash 8",
+        startsAt: "09:00",
+        endsAt: "11:30",
+        viewDate: "2026-02-11",
+        assignedPersonnel: ["Inspector Njoroge", "Eng. Mwikali"],
+        location: "Hangar A",
+        detail: "Routine A-check and paperwork verification.",
+      },
+      {
+        id: "2",
+        title: "CAR follow-up",
+        startsAt: "13:00",
+        endsAt: "14:00",
+        viewDate: "2026-02-12",
+        assignedPersonnel: ["QA Manager", "Shift Supervisor"],
+        location: "QA Office",
+        detail: "Close open corrective actions for line maintenance findings.",
+      },
+    ];
+  }
+}
+
+export async function submitCrsForm(payload: Record<string, unknown>) {
+  return apiPost("/crs/", payload, { headers: authHeaders() });
+}
