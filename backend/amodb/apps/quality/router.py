@@ -196,16 +196,33 @@ def get_actor() -> Optional[str]:
     return get_current_actor_id()
 
 
+def _ensure_qms_notification_assets(db: Session) -> None:
+    bind = db.get_bind()
+    models.QMSNotification.__table__.create(bind=bind, checkfirst=True)
+
+
 def _notify_user(db: Session, user_id: Optional[str], message: str, severity=models.QMSNotificationSeverity):
     if not user_id:
         return
-    note = models.QMSNotification(
-        user_id=user_id,
-        message=message,
-        severity=severity,
-        created_by_user_id=get_actor(),
-    )
-    db.add(note)
+
+    def _insert_notification() -> None:
+        note = models.QMSNotification(
+            user_id=user_id,
+            message=message,
+            severity=severity,
+            created_by_user_id=get_actor(),
+        )
+        with db.begin_nested():
+            db.add(note)
+            db.flush()
+
+    try:
+        _insert_notification()
+    except (OperationalError, ProgrammingError) as exc:
+        if not _is_missing_table_error(exc):
+            raise
+        _ensure_qms_notification_assets(db)
+        _insert_notification()
 
 
 def _is_quality_admin(current_user: account_models.User) -> bool:
