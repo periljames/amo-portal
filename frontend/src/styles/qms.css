@@ -1381,3 +1381,25 @@ button.qms-list__item:hover {
   padding: 0.35rem 0.75rem;
   cursor: pointer;
 }
+
+.spreadsheet-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.table--wrap td,
+.table--wrap th {
+  white-space: normal;
+}
+
+.table-row--compact td,
+.table-row--compact th {
+  padding: 8px 10px;
+}
+
+.table-row--comfortable td,
+.table-row--comfortable th {
+  padding: 12px 12px;
+}

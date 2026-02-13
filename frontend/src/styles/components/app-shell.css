@@ -281,6 +281,26 @@
   padding: 6px 10px;
 }
 
+.sidebar__qms-node {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar__qms-subnav {
+  margin-left: 10px;
+  padding-left: 8px;
+  border-left: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar__item--sub {
+  font-size: 11px;
+  opacity: 0.92;
+}
+
 @supports not (backdrop-filter: blur(18px)) {
   .app-shell--v2 .app-shell__topbar {
     background: rgba(15, 23, 42, 0.9);
