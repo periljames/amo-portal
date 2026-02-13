@@ -567,6 +567,42 @@ export const AppRouter: React.FC = () => {
           </RequireAuth>
         }
       />
+      <Route
+        path="/maintenance/:amoCode/:department/qms/audits/schedules/calendar"
+        element={<RequireAuth><QualityAuditPlannerCalendarPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/qms/audits/schedules/list"
+        element={<RequireAuth><QualityAuditPlannerListPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/qms/audits/schedules/:scheduleId"
+        element={<RequireAuth><QualityAuditScheduleDetailPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/qms/audits/closeout/findings"
+        element={<RequireAuth><QualityCloseoutFindingsPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/qms/audits/closeout/cars"
+        element={<RequireAuth><QualityCloseoutCarsPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/qms/audits/:auditId"
+        element={<RequireAuth><QualityAuditRunHubPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/qms/audits/:auditId/evidence"
+        element={<RequireAuth><QualityAuditEvidencePage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/qms/evidence"
+        element={<RequireAuth><QualityEvidenceLibraryPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/:department/qms/evidence/:evidenceId"
+        element={<RequireAuth><QualityEvidenceViewerPage /></RequireAuth>}
+      />
 
       <Route
         path="/maintenance/:amoCode/:department/qms/change-control"
