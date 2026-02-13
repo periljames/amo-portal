@@ -679,3 +679,40 @@ body[data-color-scheme="dark"] .qms-cockpit-shell {
 @media (max-width: 1200px) {
   .department-grid { grid-template-columns: 1fr; }
 }
+
+
+/* 12-column cockpit planner layout */
+.qms-cockpit-shell {
+  width: min(1440px, 100% - 2rem);
+  margin: 0 auto;
+  padding: 12px 0 16px;
+}
+.qms-pro-dashboard {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+.qms-pro-kpis, .qms-pro-grid--row2, .qms-pro-grid--row4, .qms-pro-grid--single {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+.qms-pro-kpi { grid-column: span 3; min-height: 96px; }
+.qms-pro-grid--row2 > * { grid-column: span 6; }
+.qms-pro-grid--row4 > :first-child { grid-column: span 8; }
+.qms-pro-grid--row4 > :last-child { grid-column: span 4; }
+.qms-pro-grid--single > * { grid-column: span 12; }
+.qms-manpower-card { grid-column: span 4; }
+.quality-navigator { grid-column: span 8; }
+.priority-gate { grid-column: 1 / -1; }
+@media (max-width: 1024px) {
+  .qms-cockpit-shell { width: min(100%, 100% - 1rem); }
+  .qms-pro-dashboard, .qms-pro-kpis, .qms-pro-grid--row2, .qms-pro-grid--row4, .qms-pro-grid--single { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qms-pro-kpi, .qms-pro-grid--row2 > *, .qms-pro-grid--row4 > *, .qms-pro-grid--single > *, .quality-navigator, .qms-manpower-card { grid-column: span 1; }
+  .priority-gate { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .qms-pro-dashboard, .qms-pro-kpis, .qms-pro-grid--row2, .qms-pro-grid--row4, .qms-pro-grid--single { grid-template-columns: 1fr; }
+  .qms-pro-kpi, .qms-pro-grid--row2 > *, .qms-pro-grid--row4 > *, .qms-pro-grid--single > *, .quality-navigator, .qms-manpower-card { grid-column: span 1; }
+}

@@ -69,7 +69,7 @@
 }
 
 .shell {
-  width: min(92vw, 1180px);
+  width: min(92vw, 1120px);
   max-width: 1180px;
   margin-inline: auto;
   box-sizing: border-box;
@@ -213,7 +213,8 @@
 }
 
 .submitButtonWrap {
-  width: 100%;
+  width: min(100%, 420px);
+  margin-inline: auto;
 }
 
 .submitButton {

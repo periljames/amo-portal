@@ -148,7 +148,15 @@ app.add_middleware(
 
 @app.middleware("http")
 async def meter_api_calls(request: Request, call_next):
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except RuntimeError as exc:
+        # Starlette can raise this when the client disconnects mid-flight
+        # (common with long-poll/SSE reconnect churn). We treat it as a
+        # non-fatal disconnect to avoid bubbling noisy ExceptionGroups.
+        if "No response returned" in str(exc):
+            return Response(status_code=499)
+        raise
     auth_header = request.headers.get("Authorization") or ""
     if " " in auth_header:
         scheme, token = auth_header.split(" ", 1)
@@ -185,7 +193,12 @@ async def enforce_request_size_limit(request: Request, call_next):
                 limit = int(cached.max_request_body_bytes)
         if limit > 0 and int(content_length) > limit:
             return Response(status_code=413, content="Request body too large.")
-    return await call_next(request)
+    try:
+        return await call_next(request)
+    except RuntimeError as exc:
+        if "No response returned" in str(exc):
+            return Response(status_code=499)
+        raise
 
 
 @app.get("/", tags=["health"])
