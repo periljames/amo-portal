@@ -142,10 +142,28 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
 
 
 
+def _rollback_session(db: Session) -> None:
+    in_transaction = getattr(db, "in_transaction", None)
+    rollback = getattr(db, "rollback", None)
+
+    if not callable(rollback):
+        return
+
+    if callable(in_transaction):
+        try:
+            if not in_transaction():
+                return
+        except SQLAlchemyError:
+            return
+
+    rollback()
+
+
 def _safe_count(query) -> int:
     try:
         return query.count()
     except SQLAlchemyError:
+        _rollback_session(query.session)
         return 0
 
 
@@ -159,6 +177,7 @@ def _build_audit_closure_trend(db: Session, window_days: int = 90, bucket_days: 
             .all()
         )
     except SQLAlchemyError:
+        _rollback_session(db)
         return []
 
     buckets: dict[date, list[str]] = defaultdict(list)
@@ -193,29 +212,37 @@ def _build_most_common_finding_trend_12m(db: Session) -> list[dict]:
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(days=365)
 
-    top_finding = (
-        db.query(
-            models.QMSAuditFinding.finding_type,
-            func.count(models.QMSAuditFinding.id).label("finding_count"),
+    try:
+        top_finding = (
+            db.query(
+                models.QMSAuditFinding.finding_type,
+                func.count(models.QMSAuditFinding.id).label("finding_count"),
+            )
+            .filter(models.QMSAuditFinding.created_at >= window_start)
+            .group_by(models.QMSAuditFinding.finding_type)
+            .order_by(func.count(models.QMSAuditFinding.id).desc())
+            .first()
         )
-        .filter(models.QMSAuditFinding.created_at >= window_start)
-        .group_by(models.QMSAuditFinding.finding_type)
-        .order_by(func.count(models.QMSAuditFinding.id).desc())
-        .first()
-    )
+    except SQLAlchemyError:
+        _rollback_session(db)
+        return []
 
     if not top_finding:
         return []
 
     top_finding_type = top_finding[0].value if hasattr(top_finding[0], "value") else str(top_finding[0])
-    finding_rows = (
-        db.query(models.QMSAuditFinding.created_at)
-        .filter(
-            models.QMSAuditFinding.created_at >= window_start,
-            models.QMSAuditFinding.finding_type == top_finding[0],
+    try:
+        finding_rows = (
+            db.query(models.QMSAuditFinding.created_at)
+            .filter(
+                models.QMSAuditFinding.created_at >= window_start,
+                models.QMSAuditFinding.finding_type == top_finding[0],
+            )
+            .all()
         )
-        .all()
-    )
+    except SQLAlchemyError:
+        _rollback_session(db)
+        return []
 
     month_keys: list[date] = []
     cursor = date(now.year, now.month, 1)
@@ -255,6 +282,7 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dic
             .all()
         )
     except SQLAlchemyError:
+        _rollback_session(db)
         action_rows = []
 
     today = date.today()
