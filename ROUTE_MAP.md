@@ -270,4 +270,5 @@
 - Planner routes (`.../audits/schedules/calendar|list`) now render one shared page component with in-page Calendar/List/Content view modes.
 - Closeout routes (`.../audits/closeout/findings|cars`) now render one shared Register component with route-selected default tab.
 - Audits landing, planner, and register now share a uniform spreadsheet toolbar model (density/wrap/filter-row/column toggles) without route changes.
-
+- Runtime stability hardening: middleware now gracefully handles client disconnects (`No response returned`) as non-fatal 499 responses; no route shape change.
+- Realtime client no longer opens `/api/events` when JWT token is absent, reducing unauthorized SSE churn/noise.

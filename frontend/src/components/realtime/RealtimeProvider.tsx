@@ -138,11 +138,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (sourceRef.current) {
       sourceRef.current.close();
     }
-    setStatus("syncing");
     const token = getToken();
+    if (!token) {
+      setStatus("offline");
+      return;
+    }
+    setStatus("syncing");
     const persisted = typeof window !== "undefined" ? window.localStorage.getItem(lastEventKey) : null;
     const qs = new URLSearchParams();
-    if (token) qs.set("token", token);
+    qs.set("token", token);
     if (persisted) qs.set("lastEventId", persisted);
     const url = `${getApiBaseUrl()}/api/events?${qs.toString()}`;
     const source = new EventSource(url, { withCredentials: true });
