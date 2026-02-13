@@ -61,13 +61,16 @@ const UpsellPage = lazy(() => import("./pages/UpsellPage"));
 const UserWidgetsPage = lazy(() => import("./pages/UserWidgetsPage"));
 const OnboardingPasswordPage = lazy(() => import("./pages/OnboardingPasswordPage"));
 
+const QualityAuditPlannerPage = lazy(() => import("./pages/QualityAuditPlannerPage"));
 const QualityAuditPlannerCalendarPage = lazy(() => import("./pages/QualityAuditPlannerCalendarPage"));
 const QualityAuditPlannerListPage = lazy(() => import("./pages/QualityAuditPlannerListPage"));
 const QualityAuditScheduleDetailPage = lazy(() => import("./pages/QualityAuditScheduleDetailPage"));
 const QualityAuditRunHubPage = lazy(() => import("./pages/QualityAuditRunHubPage"));
+const QualityCloseoutHubPage = lazy(() => import("./pages/QualityCloseoutHubPage"));
 const QualityCloseoutFindingsPage = lazy(() => import("./pages/QualityCloseoutFindingsPage"));
 const QualityCloseoutCarsPage = lazy(() => import("./pages/QualityCloseoutCarsPage"));
 const QualityAuditEvidencePage = lazy(() => import("./pages/QualityAuditEvidencePage"));
+const QualityAuditRegisterPage = lazy(() => import("./pages/QualityAuditRegisterPage"));
 const QualityEvidenceLibraryPage = lazy(() => import("./pages/QualityEvidenceLibraryPage"));
 const QualityEvidenceViewerPage = lazy(() => import("./pages/QualityEvidenceViewerPage"));
 
@@ -578,6 +581,13 @@ export const AppRouter: React.FC = () => {
           </RequireAuth>
         }
       />
+      <Route path="/maintenance/:amoCode/:department/qms/audits/plan" element={<RequireAuth><QualityAuditPlannerPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/audits/register" element={<RequireAuth><QualityAuditRegisterPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/audits/closeout" element={<RequireAuth><QualityCloseoutHubPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/audits/closeout/:auditId" element={<RequireAuth><QualityCloseoutHubPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/audits/closeout/findings/:findingId" element={<RequireAuth><QualityCloseoutFindingsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/audits/closeout/cars/:carId" element={<RequireAuth><QualityCloseoutCarsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/audits/:auditId/findings" element={<RequireAuth><QualityCloseoutFindingsPage /></RequireAuth>} />
       <Route
         path="/maintenance/:amoCode/:department/qms/audits/schedules/calendar"
         element={<RequireAuth><QualityAuditPlannerCalendarPage /></RequireAuth>}
@@ -669,18 +679,12 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      <Route
-        path="/maintenance/:amoCode/quality/audits"
-        element={<RequireAuth><QualityAliasRedirect suffix="/audits" /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/quality/audits/schedules/calendar"
-        element={<RequireAuth><QualityAliasRedirect suffix="/audits/schedules/calendar" /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/quality/audits/schedules/list"
-        element={<RequireAuth><QualityAliasRedirect suffix="/audits/schedules/list" /></RequireAuth>}
-      />
+      <Route path="/maintenance/:amoCode/quality/audits" element={<RequireAuth><QualityAliasRedirect suffix="/audits" /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/plan" element={<RequireAuth><QualityAliasRedirect suffix="/audits/plan" /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/register" element={<RequireAuth><QualityAliasRedirect suffix="/audits/register" /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/closeout" element={<RequireAuth><QualityAliasRedirect suffix="/audits/closeout" /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/schedules/calendar" element={<RequireAuth><QualityAliasRedirect suffix="/audits/plan" /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/schedules/list" element={<RequireAuth><QualityAliasRedirect suffix="/audits/plan" /></RequireAuth>} />
       <Route
         path="/maintenance/:amoCode/quality/audits/schedules/:scheduleId"
         element={<RequireAuth><QualityAuditScheduleDetailPage /></RequireAuth>}

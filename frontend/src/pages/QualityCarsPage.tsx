@@ -55,6 +55,7 @@ type CarFormState = {
   target_closure_date: string;
   assigned_department_id: string;
   assigned_to_user_id: string;
+  finding_id: string;
 };
 
 const QualityCarsPage: React.FC = () => {
@@ -82,6 +83,7 @@ const QualityCarsPage: React.FC = () => {
     target_closure_date: "",
     assigned_department_id: "",
     assigned_to_user_id: "",
+    finding_id: "",
   });
 
   const [assignees, setAssignees] = useState<CARAssignee[]>([]);
@@ -218,7 +220,7 @@ const QualityCarsPage: React.FC = () => {
 
   const handleSubmit = (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (!form.title.trim() || !form.summary.trim()) return;
+    if (!form.title.trim() || !form.summary.trim() || !form.finding_id.trim()) return;
     setPreviewOpen(true);
   };
 
@@ -234,6 +236,7 @@ const QualityCarsPage: React.FC = () => {
         due_date: form.due_date || null,
         target_closure_date: form.target_closure_date || null,
         assigned_to_user_id: form.assigned_to_user_id || null,
+        finding_id: form.finding_id.trim(),
       });
       setForm({
         title: "",
@@ -244,6 +247,7 @@ const QualityCarsPage: React.FC = () => {
         target_closure_date: "",
         assigned_department_id: "",
         assigned_to_user_id: "",
+        finding_id: "",
       });
       setPreviewOpen(false);
       await load();
@@ -290,6 +294,7 @@ const QualityCarsPage: React.FC = () => {
       target_closure_date: car.target_closure_date || "",
       assigned_department_id: assigneeLookup.get(car.assigned_to_user_id || "")?.department_id || "",
       assigned_to_user_id: car.assigned_to_user_id || "",
+      finding_id: car.finding_id || "",
     });
   };
 
@@ -481,6 +486,17 @@ const QualityCarsPage: React.FC = () => {
               />
             </label>
 
+
+            <label className="form-control form-control--full">
+              <span>Finding ID (NC finding)</span>
+              <input
+                type="text"
+                value={form.finding_id}
+                onChange={(e) => setForm((f) => ({ ...f, finding_id: e.target.value }))}
+                placeholder="Paste non-conformity finding ID"
+                required
+              />
+            </label>
             <label className="form-control">
               <span>Target closure date</span>
               <input

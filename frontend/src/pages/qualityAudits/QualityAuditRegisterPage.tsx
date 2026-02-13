@@ -46,7 +46,7 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
     staleTime: 60_000,
   });
 
-  const selectedAuditId = audits.data?.find((a) => a.status !== "CLOSED")?.id ?? audits.data?.[0]?.id;
+  const selectedAuditId = audits.data?.find((a) => a.status === "CLOSED")?.id ?? audits.data?.[0]?.id;
 
   const findings = useQuery({
     queryKey: ["qms-findings", "register", selectedAuditId],
@@ -200,7 +200,7 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
                                     <td>{car.status}</td>
                                     <td>{car.due_date ?? "—"}</td>
                                     <td>
-                                      <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${car.id}`)}>
+                                      <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/closeout/cars/${car.id}`)}>
                                         Open CAR
                                       </button>
                                     </td>
