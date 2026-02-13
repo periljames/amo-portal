@@ -1,5 +1,5 @@
 import { getApiBaseUrl } from "./config";
-import { getToken, handleAuthFailure } from "./auth";
+import { getToken } from "./auth";
 
 export type ActivityEventRead = {
   id: string;
@@ -45,9 +45,12 @@ export async function listEventHistory(params?: {
   timeStart?: string;
   timeEnd?: string;
 }): Promise<ActivityHistoryResponse> {
-  const path = historyPath(params);
-  const fullUrl = `${getApiBaseUrl()}${path}`;
   const token = getToken();
+  const path = historyPath(params);
+  const pathWithToken = token
+    ? `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
+    : path;
+  const fullUrl = `${getApiBaseUrl()}${pathWithToken}`;
   const cached = etagCache.get(path);
   const res = await fetch(fullUrl, {
     method: "GET",
@@ -63,8 +66,10 @@ export async function listEventHistory(params?: {
   }
 
   if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
+    // History is auxiliary data for cockpit context; do not force global logout
+    // from this endpoint because token propagation races can otherwise cause
+    // login/logout loops on quality pages.
+    return cached?.payload ?? { items: [], next_cursor: null };
   }
 
   if (!res.ok) {

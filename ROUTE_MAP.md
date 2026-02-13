@@ -272,3 +272,4 @@
 - Audits landing, planner, and register now share a uniform spreadsheet toolbar model (density/wrap/filter-row/column toggles) without route changes.
 - Runtime stability hardening: middleware now gracefully handles client disconnects (`No response returned`) as non-fatal 499 responses; no route shape change.
 - Realtime client no longer opens `/api/events` when JWT token is absent, reducing unauthorized SSE churn/noise.
+- Events history client now uses token query fallback and treats history 401 as non-fatal empty/cached response to prevent auth-loop regressions on Quality pages.
