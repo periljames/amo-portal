@@ -21,15 +21,15 @@ const QualityAuditRunHubPage: React.FC = () => {
 
   const openTab = (tab: (typeof tabs)[number]["key"]) => {
     if (tab === "evidence") {
-      navigate(`/maintenance/${amoCode}/quality/audits/${auditId}/evidence`);
+      navigate(`/maintenance/${amoCode}/quality/qms/audits/${auditId}/evidence`);
       return;
     }
     if (tab === "cars") {
-      navigate(`/maintenance/${amoCode}/quality/qms/cars`);
+      navigate(`/maintenance/${amoCode}/quality/qms/audits/closeout/cars`);
       return;
     }
     if (tab === "findings") {
-      navigate(`/maintenance/${amoCode}/quality/audits/closeout/findings`);
+      navigate(`/maintenance/${amoCode}/quality/qms/audits/${auditId}/findings`);
       return;
     }
   };

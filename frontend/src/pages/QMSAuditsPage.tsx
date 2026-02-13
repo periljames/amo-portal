@@ -163,11 +163,14 @@ const QMSAuditsPage: React.FC = () => {
       subtitle="Recent audits with operational filters and direct drilldown to run hubs."
       actions={
         <div className="qms-header__actions">
-          <button type="button" className="btn btn-primary" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/schedules/calendar`)}>
-            Plan / Schedule audits
+          <button type="button" className="btn btn-primary" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/plan`)}>
+            Plan audit
           </button>
-          <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/events?entity=qms.audit`)}>
-            View activity history
+          <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/closeout`)}>
+            Closeout
+          </button>
+          <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/register`)}>
+            Register
           </button>
         </div>
       }

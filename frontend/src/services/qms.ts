@@ -170,6 +170,15 @@ export interface CAROut {
   submitted_by_name?: string | null;
   submitted_by_email?: string | null;
   submitted_at?: string | null;
+  root_cause_text?: string | null;
+  root_cause_status?: string;
+  root_cause_review_note?: string | null;
+  capa_text?: string | null;
+  capa_status?: string;
+  capa_review_note?: string | null;
+  evidence_required?: boolean;
+  evidence_received_at?: string | null;
+  evidence_verified_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -612,7 +621,8 @@ export async function qmsCreateCar(payload: {
   due_date?: string | null;
   target_closure_date?: string | null;
   assigned_to_user_id?: string | null;
-  finding_id?: string | null;
+  finding_id: string;
+  evidence_required?: boolean;
 }): Promise<CAROut> {
   return sendJson<CAROut>("/quality/cars", "POST", payload);
 }
@@ -685,6 +695,8 @@ export async function qmsSubmitCarInvite(
     evidence_ref?: string | null;
     due_date?: string | null;
     target_closure_date?: string | null;
+    root_cause_text?: string | null;
+    capa_text?: string | null;
   }
 ): Promise<CAROut> {
   return sendJson<CAROut>(`/quality/cars/invite/${token}`, "PATCH", payload);

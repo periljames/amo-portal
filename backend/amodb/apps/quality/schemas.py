@@ -515,7 +515,8 @@ class CARCreate(BaseModel):
     due_date: Optional[date] = None
     target_closure_date: Optional[date] = None
     assigned_to_user_id: Optional[str] = None
-    finding_id: Optional[UUID] = None
+    finding_id: UUID
+    evidence_required: bool = True
 
 
 class CARUpdate(BaseModel):
@@ -547,7 +548,7 @@ class CAROut(BaseModel):
     target_closure_date: Optional[date]
     closed_at: Optional[datetime]
     escalated_at: Optional[datetime]
-    finding_id: Optional[UUID]
+    finding_id: UUID
     requested_by_user_id: Optional[str]
     assigned_to_user_id: Optional[str]
     invite_token: str
@@ -561,6 +562,15 @@ class CAROut(BaseModel):
     submitted_by_name: Optional[str] = None
     submitted_by_email: Optional[str] = None
     submitted_at: Optional[datetime] = None
+    root_cause_text: Optional[str] = None
+    root_cause_status: str
+    root_cause_review_note: Optional[str] = None
+    capa_text: Optional[str] = None
+    capa_status: str
+    capa_review_note: Optional[str] = None
+    evidence_required: bool
+    evidence_received_at: Optional[datetime] = None
+    evidence_verified_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -616,12 +626,16 @@ class CARInviteUpdate(BaseModel):
     due_date: Optional[date] = None
     submitted_by_name: Optional[str] = Field(default=None, max_length=255)
     submitted_by_email: Optional[str] = Field(default=None, max_length=255)
+    root_cause_text: Optional[str] = None
+    capa_text: Optional[str] = None
 
 
 class CARReviewUpdate(BaseModel):
     root_cause_status: Optional[str] = None
-    cap_status: Optional[str] = None
+    capa_status: Optional[str] = None
     message: Optional[str] = None
+    root_cause_review_note: Optional[str] = None
+    capa_review_note: Optional[str] = None
 
 
 class CARAttachmentOut(BaseModel):

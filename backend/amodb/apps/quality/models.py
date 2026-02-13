@@ -616,6 +616,16 @@ class CorrectiveActionRequest(Base):
     submitted_by_email = Column(String(255), nullable=True)
     submitted_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
+    root_cause_text = Column(Text, nullable=True)
+    root_cause_status = Column(String(32), nullable=False, default="PENDING", index=True)
+    root_cause_review_note = Column(Text, nullable=True)
+    capa_text = Column(Text, nullable=True)
+    capa_status = Column(String(32), nullable=False, default="PENDING", index=True)
+    capa_review_note = Column(Text, nullable=True)
+    evidence_required = Column(Boolean, nullable=False, default=True)
+    evidence_received_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    evidence_verified_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
     due_date = Column(Date, nullable=True, index=True)
     target_closure_date = Column(Date, nullable=True, index=True)
     closed_at = Column(DateTime(timezone=True), nullable=True, index=True)

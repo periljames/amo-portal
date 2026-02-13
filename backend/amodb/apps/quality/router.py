@@ -243,6 +243,22 @@ def _is_quality_admin(current_user: account_models.User) -> bool:
     )
 
 
+def _is_quality_scheduler(current_user: account_models.User) -> bool:
+    role_value = getattr(current_user, "role", None)
+    role_value = getattr(role_value, "value", role_value)
+    return _is_quality_admin(current_user) or role_value in {
+        account_models.AccountRole.AUDITOR,
+        account_models.AccountRole.QUALITY_INSPECTOR,
+        "AUDITOR",
+        "QUALITY_INSPECTOR",
+    }
+
+
+def _require_quality_scheduler(current_user: account_models.User) -> None:
+    if not _is_quality_scheduler(current_user):
+        raise HTTPException(status_code=403, detail="Only Quality team roles can schedule audits or issue CARs")
+
+
 def _audit_allows_user(db: Session, finding_id: Optional[UUID], user_id: str) -> bool:
     if not finding_id:
         return False
@@ -748,6 +764,7 @@ def create_audit(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _require_quality_scheduler(current_user)
     audit = models.QMSAudit(
         domain=payload.domain,
         kind=payload.kind,
@@ -821,6 +838,7 @@ def create_audit_schedule(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _require_quality_scheduler(current_user)
     schedule = models.QMSAuditSchedule(
         domain=payload.domain,
         kind=payload.kind,
@@ -1029,6 +1047,7 @@ def export_audit_evidence_pack(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _require_quality_scheduler(current_user)
     audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
     if not audit:
         raise HTTPException(status_code=404, detail="Audit not found")
@@ -1180,6 +1199,7 @@ def update_audit(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _require_quality_scheduler(current_user)
     audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
     if not audit:
         raise HTTPException(status_code=404, detail="Audit not found")
@@ -1204,6 +1224,25 @@ def update_audit(
     if planned_start_changed:
         audit.upcoming_notice_sent_at = None
         audit.day_of_notice_sent_at = None
+
+    if payload.status == QMSAuditStatus.CLOSED:
+        findings = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.audit_id == audit.id).all()
+        nc_findings = [f for f in findings if f.finding_type == models.QMSFindingType.NON_CONFORMITY]
+        if not nc_findings:
+            if not audit.report_file_ref or not audit.checklist_file_ref:
+                raise HTTPException(status_code=400, detail="Audit report and checklist are required to close an audit with no NC findings")
+        else:
+            finding_ids = [f.id for f in nc_findings]
+            cars = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.finding_id.in_(finding_ids)).all()
+            car_by_finding = {car.finding_id: car for car in cars}
+            missing = [str(fid) for fid in finding_ids if fid not in car_by_finding]
+            if missing:
+                raise HTTPException(status_code=400, detail="All NC findings must have an issued CAR before audit closure")
+            for car in cars:
+                if car.root_cause_status != "ACCEPTED" or car.capa_status != "ACCEPTED":
+                    raise HTTPException(status_code=400, detail="All CAR root cause and CAPA reviews must be accepted before audit closure")
+                if car.evidence_required and not car.evidence_verified_at:
+                    raise HTTPException(status_code=400, detail="Evidence verification is required for all CARs before audit closure")
 
     # If closing, set retention_until = +5 years (if not already set)
     if payload.status == QMSAuditStatus.CLOSED and audit.retention_until is None:
@@ -1266,6 +1305,7 @@ def add_finding(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _require_quality_scheduler(current_user)
     audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
     if not audit:
         raise HTTPException(status_code=404, detail="Audit not found")
@@ -1621,7 +1661,16 @@ def create_car_request(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _require_quality_scheduler(current_user)
     _require_car_write_access(db, current_user, payload.finding_id)
+    finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == payload.finding_id).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    if finding.finding_type != models.QMSFindingType.NON_CONFORMITY:
+        raise HTTPException(status_code=400, detail="CARs may only be issued for non-conformity findings")
+    existing_car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.finding_id == payload.finding_id).first()
+    if existing_car:
+        raise HTTPException(status_code=409, detail="A CAR already exists for this finding")
     try:
         car = create_car(
             db=db,
@@ -1635,6 +1684,7 @@ def create_car_request(
             target_closure_date=payload.target_closure_date,
             finding_id=payload.finding_id,
         )
+        car.evidence_required = payload.evidence_required
         if car.assigned_to_user_id:
             invite_url = build_car_invite_link(car)
             _notify_user(
@@ -2096,7 +2146,23 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, db: Sess
         if val is not None:
             setattr(car, field, val)
 
+    if payload.root_cause_text is not None:
+        car.root_cause_text = payload.root_cause_text
+    if payload.capa_text is not None:
+        car.capa_text = payload.capa_text
+
+    if not (car.root_cause_text or car.root_cause):
+        raise HTTPException(status_code=400, detail="Root cause is required for CAR response")
+    if not (car.capa_text or car.corrective_action):
+        raise HTTPException(status_code=400, detail="CAPA is required for CAR response")
+
+    attachment_count = db.query(models.CARAttachment).filter(models.CARAttachment.car_id == car.id).count()
+    if car.evidence_required and not car.evidence_ref and attachment_count == 0:
+        raise HTTPException(status_code=400, detail="Evidence is required before submitting CAR response")
+
     car.submitted_at = func.now()
+    if car.evidence_ref or db.query(models.CARAttachment).filter(models.CARAttachment.car_id == car.id).count() > 0:
+        car.evidence_received_at = func.now()
     if car.status in (models.CARStatus.OPEN, models.CARStatus.DRAFT):
         car.status = models.CARStatus.IN_PROGRESS
 
@@ -2189,6 +2255,7 @@ def upload_car_invite_attachment(
         sha256=sha256,
     )
     db.add(attachment)
+    car.evidence_received_at = func.now()
     db.commit()
     db.refresh(attachment)
     return _serialize_attachment(invite_token, attachment)
@@ -2360,6 +2427,7 @@ def review_car_response(
     car = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.id == car_id).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR not found")
+    _require_quality_scheduler(current_user)
     if not (_is_quality_admin(current_user) or _audit_allows_user(db, car.finding_id, current_user.id)):
         raise HTTPException(status_code=403, detail="Insufficient privileges to review CARs")
 
@@ -2374,26 +2442,37 @@ def review_car_response(
 
     note_msg = None
     status_update = None
-    if payload.root_cause_status == "REJECTED":
-        latest_response.status = models.CARResponseStatus.ROOT_CAUSE_REJECTED
-        note_msg = (
-            f"Root cause rejected for CAR {car.car_number}. "
-            "CAP/PAP rejected automatically. Please resubmit with corrections."
-        )
+
+    if payload.root_cause_status:
+        if payload.root_cause_status == "REJECTED" and not (payload.root_cause_review_note or "").strip():
+            raise HTTPException(status_code=400, detail="Root cause rejection requires a reason note")
+        car.root_cause_status = payload.root_cause_status
+        car.root_cause_review_note = (payload.root_cause_review_note or "").strip() or None
+
+    if payload.capa_status:
+        if payload.capa_status in {"REJECTED", "NEEDS_EVIDENCE"} and not (payload.capa_review_note or "").strip():
+            raise HTTPException(status_code=400, detail="CAPA rejection/needs evidence requires a reason note")
+        car.capa_status = payload.capa_status
+        car.capa_review_note = (payload.capa_review_note or "").strip() or None
+
+    if car.root_cause_status == "REJECTED" or car.capa_status == "REJECTED":
+        latest_response.status = models.CARResponseStatus.CAP_REJECTED
+        note_msg = f"CAR {car.car_number} response was rejected with review notes."
         status_update = models.CARStatus.IN_PROGRESS
-    elif payload.root_cause_status == "ACCEPTED":
+    elif car.root_cause_status == "ACCEPTED" and car.capa_status == "NEEDS_EVIDENCE":
         latest_response.status = models.CARResponseStatus.ROOT_CAUSE_ACCEPTED
-        note_msg = f"Root cause accepted for CAR {car.car_number}."
-        if payload.cap_status == "REJECTED":
-            latest_response.status = models.CARResponseStatus.CAP_REJECTED
-            note_msg = (
-                f"CAP/PAP rejected for CAR {car.car_number}. "
-                "Please resubmit the CAR response with corrections."
-            )
+        note_msg = f"CAR {car.car_number} requires more evidence before CAPA acceptance."
+        status_update = models.CARStatus.IN_PROGRESS
+    elif car.root_cause_status == "ACCEPTED" and car.capa_status == "ACCEPTED":
+        latest_response.status = models.CARResponseStatus.CAP_ACCEPTED
+        has_evidence = bool(car.evidence_ref) or db.query(models.CARAttachment).filter(models.CARAttachment.car_id == car.id).count() > 0
+        if car.evidence_required and not has_evidence:
+            note_msg = f"CAR {car.car_number} CAPA accepted pending evidence verification."
             status_update = models.CARStatus.IN_PROGRESS
-        elif payload.cap_status == "ACCEPTED":
-            latest_response.status = models.CARResponseStatus.CAP_ACCEPTED
-            note_msg = f"CAP/PAP accepted for CAR {car.car_number}."
+        else:
+            if has_evidence:
+                car.evidence_verified_at = func.now()
+            note_msg = f"CAR {car.car_number} CAPA accepted."
             status_update = models.CARStatus.PENDING_VERIFICATION
 
     if status_update and car.status != status_update:
