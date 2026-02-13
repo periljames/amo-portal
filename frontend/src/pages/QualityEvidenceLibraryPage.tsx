@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import QMSLayout from "../components/QMS/QMSLayout";
+import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
 import { getContext } from "../services/auth";
 import { qmsListCars, qmsListCarAttachments } from "../services/qms";
 
@@ -15,7 +15,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   const attachments = useQuery({ queryKey: ["car-attachments", carId], queryFn: () => qmsListCarAttachments(carId || ""), enabled: !!carId });
 
   return (
-    <QMSLayout amoCode={amoCode} department="quality" title="Evidence Library" subtitle="Global quality evidence with direct viewer handoff.">
+    <QualityAuditsSectionLayout title="Evidence Library" subtitle="Global quality evidence with direct viewer handoff.">
       <div className="qms-card">
         {(attachments.data ?? []).map((file) => (
           <div key={file.id} className="qms-dashboard-card" style={{ marginBottom: 8 }}>
@@ -25,7 +25,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
           </div>
         ))}
       </div>
-    </QMSLayout>
+    </QualityAuditsSectionLayout>
   );
 };
 

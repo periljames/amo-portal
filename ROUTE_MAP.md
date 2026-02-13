@@ -260,4 +260,4 @@
 - Quality cockpit now uses a max-width 12-column responsive grid (desktop 12 cols, tablet 2, mobile 1).
 - Event history bootstrap uses reduced limit (`25`) and ETag-aware client fetches to avoid redundant payload parsing on `304 Not Modified`.
 - Sidebar Quality > Audits & Inspections now exposes nested subpages (Planner calendar/list, Closeout findings/CARs, Evidence library) under the existing Audit tree.
-- Added QMS-alias paths for planner/viewer pages under `/maintenance/:amoCode/:department/qms/audits/*` and `/maintenance/:amoCode/:department/qms/evidence*` to keep navigation in-tree while preserving quality canonical paths.
+- Added QMS in-tree planner/viewer paths under `/maintenance/:amoCode/:department/qms/audits/*` and `/maintenance/:amoCode/:department/qms/evidence*`; canonical `/maintenance/:amoCode/quality/*` planner/viewer paths now act as aliases/redirects to the in-tree structure to remove duplicated page wiring.

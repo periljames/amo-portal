@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import QMSLayout from "../components/QMS/QMSLayout";
+import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
 import { getContext } from "../services/auth";
 
 const tabs = [
@@ -35,7 +35,7 @@ const QualityAuditRunHubPage: React.FC = () => {
   };
 
   return (
-    <QMSLayout amoCode={amoCode} department="quality" title="Audit Run Hub" subtitle="Single place for checklist execution, findings, CARs, evidence and closeout logs.">
+    <QualityAuditsSectionLayout title="Audit Run Hub" subtitle="Single place for checklist execution, findings, CARs, evidence and closeout logs.">
       <div className="qms-nav__items">
         {tabs.map((tab) => (
           <button type="button" key={tab.key} className="qms-nav__link" onClick={() => openTab(tab.key)}>{tab.label}</button>
@@ -44,7 +44,7 @@ const QualityAuditRunHubPage: React.FC = () => {
       <div className="qms-card">
         <p>Select a tab to continue. Checklist, report, and closeout entries use existing audit data while Evidence routes to the first-class evidence page.</p>
       </div>
-    </QMSLayout>
+    </QualityAuditsSectionLayout>
   );
 };
 

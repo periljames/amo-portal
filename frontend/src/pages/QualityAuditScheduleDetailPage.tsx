@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import QMSLayout from "../components/QMS/QMSLayout";
+import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
 import EmptyState from "../components/shared/EmptyState";
 import { getContext } from "../services/auth";
 import { qmsListAuditSchedules } from "../services/qms";
@@ -16,7 +16,7 @@ const QualityAuditScheduleDetailPage: React.FC = () => {
   const schedule = (query.data ?? []).find((row) => row.id === scheduleId);
 
   return (
-    <QMSLayout amoCode={amoCode} department="quality" title="Schedule Detail" subtitle="Scope, assignment and conflict insights for planners.">
+    <QualityAuditsSectionLayout title="Schedule Detail" subtitle="Scope, assignment and conflict insights for planners.">
       {!schedule ? <EmptyState title="Schedule not found" description="The schedule is missing or inactive." action={<button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/schedules/list`)}>Back to list</button>} /> : (
         <div className="qms-card">
           <h3>{schedule.title}</h3>
@@ -27,7 +27,7 @@ const QualityAuditScheduleDetailPage: React.FC = () => {
           <p><strong>Assistant:</strong> {schedule.assistant_auditor_user_id ?? "None"}</p>
         </div>
       )}
-    </QMSLayout>
+    </QualityAuditsSectionLayout>
   );
 };
 

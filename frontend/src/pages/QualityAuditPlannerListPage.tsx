@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import QMSLayout from "../components/QMS/QMSLayout";
+import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
 import { getContext } from "../services/auth";
 import { qmsListAuditSchedules } from "../services/qms";
 
@@ -13,7 +13,7 @@ const QualityAuditPlannerListPage: React.FC = () => {
   const query = useQuery({ queryKey: ["qms-audit-schedules", amoCode], queryFn: () => qmsListAuditSchedules({ domain: "AMO", active: true }), staleTime: 60_000 });
 
   return (
-    <QMSLayout amoCode={amoCode} department="quality" title="Audit Planner · List" subtitle="Schedules sorted for operational planning.">
+    <QualityAuditsSectionLayout title="Audit Planner · List" subtitle="Schedules sorted for operational planning.">
       <div className="qms-header__actions">
         <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/schedules/calendar`)}>Calendar</button>
       </div>
@@ -27,7 +27,7 @@ const QualityAuditPlannerListPage: React.FC = () => {
           </tbody>
         </table>
       </div>
-    </QMSLayout>
+    </QualityAuditsSectionLayout>
   );
 };
 

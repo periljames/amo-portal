@@ -6,7 +6,7 @@
 // - Uses RequireAuth wrapper to redirect unauthenticated users back to login.
 
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 
 
 import {
@@ -77,6 +77,17 @@ type RequireAuthProps = {
 
 type RequireTenantAdminProps = {
   children: React.ReactElement;
+};
+
+
+type QualityAliasRedirectProps = {
+  suffix: string;
+};
+
+const QualityAliasRedirect: React.FC<QualityAliasRedirectProps> = ({ suffix }) => {
+  const { amoCode } = useParams<{ amoCode?: string }>();
+  const target = `/maintenance/${amoCode ?? "UNKNOWN"}/quality/qms${suffix}`;
+  return <Navigate to={target} replace />;
 };
 
 function inferAmoCodeFromPath(pathname: string): string | null {
@@ -660,19 +671,15 @@ export const AppRouter: React.FC = () => {
 
       <Route
         path="/maintenance/:amoCode/quality/audits"
-        element={
-          <RequireAuth>
-            <QMSAuditsPage />
-          </RequireAuth>
-        }
+        element={<RequireAuth><QualityAliasRedirect suffix="/audits" /></RequireAuth>}
       />
       <Route
         path="/maintenance/:amoCode/quality/audits/schedules/calendar"
-        element={<RequireAuth><QualityAuditPlannerCalendarPage /></RequireAuth>}
+        element={<RequireAuth><QualityAliasRedirect suffix="/audits/schedules/calendar" /></RequireAuth>}
       />
       <Route
         path="/maintenance/:amoCode/quality/audits/schedules/list"
-        element={<RequireAuth><QualityAuditPlannerListPage /></RequireAuth>}
+        element={<RequireAuth><QualityAliasRedirect suffix="/audits/schedules/list" /></RequireAuth>}
       />
       <Route
         path="/maintenance/:amoCode/quality/audits/schedules/:scheduleId"
@@ -688,15 +695,15 @@ export const AppRouter: React.FC = () => {
       />
       <Route
         path="/maintenance/:amoCode/quality/audits/closeout/findings"
-        element={<RequireAuth><QualityCloseoutFindingsPage /></RequireAuth>}
+        element={<RequireAuth><QualityAliasRedirect suffix="/audits/closeout/findings" /></RequireAuth>}
       />
       <Route
         path="/maintenance/:amoCode/quality/audits/closeout/cars"
-        element={<RequireAuth><QualityCloseoutCarsPage /></RequireAuth>}
+        element={<RequireAuth><QualityAliasRedirect suffix="/audits/closeout/cars" /></RequireAuth>}
       />
       <Route
         path="/maintenance/:amoCode/quality/evidence"
-        element={<RequireAuth><QualityEvidenceLibraryPage /></RequireAuth>}
+        element={<RequireAuth><QualityAliasRedirect suffix="/evidence" /></RequireAuth>}
       />
       <Route
         path="/maintenance/:amoCode/quality/evidence/:evidenceId"

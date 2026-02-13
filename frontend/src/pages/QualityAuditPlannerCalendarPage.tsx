@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import QMSLayout from "../components/QMS/QMSLayout";
+import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
 import EmptyState from "../components/shared/EmptyState";
 import { getContext } from "../services/auth";
 import { qmsListAuditSchedules } from "../services/qms";
@@ -37,7 +37,7 @@ const QualityAuditPlannerCalendarPage: React.FC = () => {
   };
 
   return (
-    <QMSLayout amoCode={amoCode} department="quality" title="Audit Planner · Calendar" subtitle="Drag-drop for planning previews, assignment checks, and conflict warnings.">
+    <QualityAuditsSectionLayout title="Audit Planner · Calendar" subtitle="Drag-drop for planning previews, assignment checks, and conflict warnings.">
       <div className="qms-header__actions">
         <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/schedules/list`)}>List view</button>
       </div>
@@ -64,7 +64,7 @@ const QualityAuditPlannerCalendarPage: React.FC = () => {
           </section>
         ))}
       </div>
-    </QMSLayout>
+    </QualityAuditsSectionLayout>
   );
 };
 
