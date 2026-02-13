@@ -61,6 +61,16 @@ const UpsellPage = lazy(() => import("./pages/UpsellPage"));
 const UserWidgetsPage = lazy(() => import("./pages/UserWidgetsPage"));
 const OnboardingPasswordPage = lazy(() => import("./pages/OnboardingPasswordPage"));
 
+const QualityAuditPlannerCalendarPage = lazy(() => import("./pages/QualityAuditPlannerCalendarPage"));
+const QualityAuditPlannerListPage = lazy(() => import("./pages/QualityAuditPlannerListPage"));
+const QualityAuditScheduleDetailPage = lazy(() => import("./pages/QualityAuditScheduleDetailPage"));
+const QualityAuditRunHubPage = lazy(() => import("./pages/QualityAuditRunHubPage"));
+const QualityCloseoutFindingsPage = lazy(() => import("./pages/QualityCloseoutFindingsPage"));
+const QualityCloseoutCarsPage = lazy(() => import("./pages/QualityCloseoutCarsPage"));
+const QualityAuditEvidencePage = lazy(() => import("./pages/QualityAuditEvidencePage"));
+const QualityEvidenceLibraryPage = lazy(() => import("./pages/QualityEvidenceLibraryPage"));
+const QualityEvidenceViewerPage = lazy(() => import("./pages/QualityEvidenceViewerPage"));
+
 type RequireAuthProps = {
   children: React.ReactElement;
 };
@@ -610,6 +620,51 @@ export const AppRouter: React.FC = () => {
             <QMSKpisPage />
           </RequireAuth>
         }
+      />
+
+      <Route
+        path="/maintenance/:amoCode/quality/audits"
+        element={
+          <RequireAuth>
+            <QMSAuditsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/quality/audits/schedules/calendar"
+        element={<RequireAuth><QualityAuditPlannerCalendarPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/quality/audits/schedules/list"
+        element={<RequireAuth><QualityAuditPlannerListPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/quality/audits/schedules/:scheduleId"
+        element={<RequireAuth><QualityAuditScheduleDetailPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/quality/audits/:auditId"
+        element={<RequireAuth><QualityAuditRunHubPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/quality/audits/:auditId/evidence"
+        element={<RequireAuth><QualityAuditEvidencePage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/quality/audits/closeout/findings"
+        element={<RequireAuth><QualityCloseoutFindingsPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/quality/audits/closeout/cars"
+        element={<RequireAuth><QualityCloseoutCarsPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/quality/evidence"
+        element={<RequireAuth><QualityEvidenceLibraryPage /></RequireAuth>}
+      />
+      <Route
+        path="/maintenance/:amoCode/quality/evidence/:evidenceId"
+        element={<RequireAuth><QualityEvidenceViewerPage /></RequireAuth>}
       />
 
       {/* Catch-all → login */}

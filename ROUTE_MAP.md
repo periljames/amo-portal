@@ -240,3 +240,22 @@
 ## Update (2026-02-11) — dashboard layout mode rollback
 - No route changes.
 - Dashboard presentation rolled back from glass card treatment to full-width non-glass card surfaces.
+
+
+## Changed in this run (2026-02-13)
+### New Quality planner/viewer routes
+- `/maintenance/:amoCode/quality/audits`
+- `/maintenance/:amoCode/quality/audits/schedules/calendar` (planner default)
+- `/maintenance/:amoCode/quality/audits/schedules/list`
+- `/maintenance/:amoCode/quality/audits/schedules/:scheduleId`
+- `/maintenance/:amoCode/quality/audits/:auditId` (Audit Run Hub)
+- `/maintenance/:amoCode/quality/audits/:auditId/evidence`
+- `/maintenance/:amoCode/quality/audits/closeout/findings`
+- `/maintenance/:amoCode/quality/audits/closeout/cars`
+- `/maintenance/:amoCode/quality/evidence`
+- `/maintenance/:amoCode/quality/evidence/:evidenceId`
+
+### Behavior notes
+- Cockpit and all Quality audit/evidence planner routes are department-scoped to Quality only.
+- Quality cockpit now uses a max-width 12-column responsive grid (desktop 12 cols, tablet 2, mobile 1).
+- Event history bootstrap uses reduced limit (`25`) and ETag-aware client fetches to avoid redundant payload parsing on `304 Not Modified`.

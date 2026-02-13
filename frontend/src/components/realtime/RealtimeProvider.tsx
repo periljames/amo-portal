@@ -52,46 +52,36 @@ const eventSchema = z.object({
 const MAX_ACTIVITY = 1500;
 const STALE_AFTER_SECONDS = 45;
 
-const TARGETED_REFRESH_KEYS = [
-  "dashboard",
-  "qms-dashboard",
-  "qms-documents",
-  "qms-audits",
-  "qms-cars",
-  "qms-change-requests",
-  "qms-distributions",
-  "training-assignments",
-  "training-dashboard",
-  "training-events",
-  "training-status",
-  "tasks",
-  "my-tasks",
-  "admin-users",
-  "user-profile",
-  "activity-history",
-] as const;
+function eventAmoCode(event: ActivityEvent, fallbackAmo: string): string {
+  const meta = event.metadata as Record<string, unknown> | undefined;
+  const fromMeta = meta?.amoCode ?? meta?.amo_code ?? meta?.amoId;
+  return typeof fromMeta === "string" && fromMeta.trim() ? fromMeta : fallbackAmo;
+}
 
-function mapEventToInvalidations(event: Pick<ActivityEvent, "type" | "entityType" | "action">): string[] {
+function mapEventToInvalidations(event: ActivityEvent, amoCode: string, department: string): Array<readonly [string, ...string[]]> {
   const envelope = `${event.entityType}.${event.action}`.toLowerCase();
+  const scopedAmo = eventAmoCode(event, amoCode);
+  const baseKeys: Array<readonly [string, ...string[]]> = [["activity-history", scopedAmo, department]];
+
   if (envelope.startsWith("accounts.user")) {
-    return ["user-profile", "admin-users", "qms-dashboard", "dashboard", "activity-history"];
+    return [...baseKeys, ["user-profile"], ["admin-users"], ["qms-dashboard", scopedAmo, "quality"], ["dashboard", scopedAmo, "quality"]];
   }
   if (envelope.startsWith("tasks.task")) {
-    return ["tasks", "my-tasks", "qms-dashboard", "dashboard", "activity-history"];
+    return [...baseKeys, ["tasks"], ["my-tasks"], ["qms-dashboard", scopedAmo, "quality"], ["dashboard", scopedAmo, "quality"]];
   }
   if (envelope.startsWith("qms.document")) {
-    return ["qms-documents", "qms-dashboard", "activity-history"];
+    return [...baseKeys, ["qms-documents"], ["qms-dashboard", scopedAmo, "quality"]];
   }
   if (envelope.startsWith("qms.audit")) {
-    return ["qms-audits", "qms-dashboard", "activity-history"];
+    return [...baseKeys, ["qms-audits"], ["qms-dashboard", scopedAmo, "quality"]];
   }
   if (envelope.startsWith("qms.car")) {
-    return ["qms-cars", "qms-dashboard", "activity-history"];
+    return [...baseKeys, ["qms-cars"], ["qms-dashboard", scopedAmo, "quality"]];
   }
   if (envelope.startsWith("qms.training") || event.type.startsWith("training.")) {
-    return ["training-dashboard", "training-events", "training-status", "qms-dashboard", "activity-history"];
+    return [...baseKeys, ["training-dashboard"], ["training-events"], ["training-status"], ["qms-dashboard", scopedAmo, "quality"]];
   }
-  return ["activity-history"];
+  return baseKeys;
 }
 
 export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -112,12 +102,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const isStale = status !== "live" || staleSeconds > STALE_AFTER_SECONDS;
 
   const scheduleInvalidations = useCallback(
-    (keys: string[]) => {
+    (keys: Array<readonly [string, ...string[]]>) => {
       if (invalidateTimer.current) {
         window.clearTimeout(invalidateTimer.current);
       }
       invalidateTimer.current = window.setTimeout(() => {
-        keys.forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
+        keys.forEach((key) => queryClient.invalidateQueries({ queryKey: [...key] }));
       }, 350);
     },
     [queryClient]
@@ -139,9 +129,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
       playNotificationChirp();
       void pushDesktopNotification("Realtime event", `${event.type} ${event.action}`);
-      scheduleInvalidations(mapEventToInvalidations(event));
+      scheduleInvalidations(mapEventToInvalidations(event, ctx.amoCode || "unknown", ctx.department || "quality"));
     },
-    [lastEventKey, scheduleInvalidations]
+    [ctx.amoCode, ctx.department, lastEventKey, scheduleInvalidations]
   );
 
   const connect = useCallback(() => {
@@ -175,7 +165,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     source.addEventListener("reset", () => {
       window.localStorage.removeItem(lastEventKey);
-      scheduleInvalidations(["activity-history", "dashboard", "qms-dashboard"]);
+      const amo = ctx.amoCode || "unknown";
+      const dept = ctx.department || "quality";
+      scheduleInvalidations([
+        ["activity-history", amo, dept],
+        ["dashboard", amo, dept],
+        ["qms-dashboard", amo, "quality"],
+      ]);
     });
 
     source.onerror = () => {
@@ -215,10 +211,20 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const refreshData = useCallback(() => {
     setStatus("syncing");
-    TARGETED_REFRESH_KEYS.forEach((key) => {
-      queryClient.invalidateQueries({ queryKey: [key] });
-    });
-  }, [queryClient]);
+    const amo = ctx.amoCode || "unknown";
+    const dept = ctx.department || "quality";
+    const refreshKeys: Array<readonly [string, ...string[]]> = [
+      ["qms-dashboard", amo, "quality"],
+      ["dashboard", amo, dept],
+      ["activity-history", amo, dept],
+      ["qms-audits"],
+      ["qms-cars"],
+      ["qms-documents"],
+      ["my-tasks"],
+      ["tasks"],
+    ];
+    refreshKeys.forEach((key) => queryClient.invalidateQueries({ queryKey: [...key] }));
+  }, [ctx.amoCode, ctx.department, queryClient]);
 
   const triggerSync = useCallback(() => {
     refreshData();
