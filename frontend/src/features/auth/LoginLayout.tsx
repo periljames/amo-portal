@@ -7,16 +7,18 @@ import {
 } from "@tinymomentum/liquid-glass-react";
 import {
   illustrationFramePreset,
-  outerShellPreset,
   primaryButtonPreset,
   socialButtonPreset,
 } from "../../ui/liquidGlass/presets";
 import styles from "./login.module.css";
 
-const LOGIN_BTN_H = 52;
+const DESKTOP_BTN_H = 56;
+const MOBILE_BTN_H = 52;
 const RECOVERY_LINK_W = 136;
 const RECOVERY_LINK_H = 28;
-const SOCIAL_BTN = 52;
+const DESKTOP_SOCIAL_BTN = 52;
+const PHONE_SOCIAL_BTN = 48;
+const XS_SOCIAL_BTN = 44;
 const SOCIAL_RADIUS = 14;
 
 type SocialProvider = "google" | "apple" | "facebook";
@@ -75,6 +77,24 @@ function useElementWidth<T extends HTMLElement>() {
   return { ref, width };
 }
 
+function useResponsiveLoginSizing() {
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1280
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setViewportWidth(window.innerWidth);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  const buttonHeight = viewportWidth <= 640 ? MOBILE_BTN_H : DESKTOP_BTN_H;
+  const socialButtonSize = viewportWidth <= 400 ? XS_SOCIAL_BTN : viewportWidth <= 640 ? PHONE_SOCIAL_BTN : DESKTOP_SOCIAL_BTN;
+  return { buttonHeight, socialButtonSize, viewportWidth };
+}
+
 const GlassIconButton: React.FC<GlassIconButtonProps> = ({
   size,
   radius,
@@ -86,7 +106,6 @@ const GlassIconButton: React.FC<GlassIconButtonProps> = ({
   children,
 }) => {
   return (
-    // Guardrail: never render interactive liquid controls without explicit width/height.
     <LiquidGlassContainer
       {...socialButtonPreset}
       width={size}
@@ -155,13 +174,22 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
   onSocialLogin,
 }) => {
   const { ref: submitWrapRef, width: submitWrapWidth } = useElementWidth<HTMLDivElement>();
-  const submitButtonWidth = submitWrapWidth ?? 420;
+  const { ref: illustrationWrapRef, width: illustrationWidth } = useElementWidth<HTMLDivElement>();
+  const { buttonHeight, socialButtonSize, viewportWidth } = useResponsiveLoginSizing();
+  const submitButtonWidth = submitWrapWidth ?? Math.min(420, Math.max(220, Math.round(viewportWidth * 0.82)));
 
   return (
     <div className={styles.pageBg}>
-      <LiquidGlassContainer {...outerShellPreset} className={styles.shell} style={{ width: "100%" }}>
-        <div className={styles.shellSurface}>
-          <div className={styles.shellInnerGrid}>
+      <div className={styles.bgOrbs} aria-hidden="true">
+        <span className={`${styles.blob} ${styles.blobOne}`} />
+        <span className={`${styles.blob} ${styles.blobTwo}`} />
+        <span className={`${styles.blob} ${styles.blobThree}`} />
+      </div>
+
+      <div className={styles.viewportContent}>
+        <div className={styles.shell}>
+          <div className={styles.shellSurface}>
+            <div className={styles.shellInnerGrid}>
             <section className={styles.left}>
               <h1 className={styles.title}>{title}</h1>
               <p className={styles.subtitle}>{subtitle}</p>
@@ -223,7 +251,7 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                   <LiquidGlassButton
                     {...primaryButtonPreset}
                     width={submitButtonWidth}
-                    height={LOGIN_BTN_H}
+                    height={buttonHeight}
                     borderRadius={12}
                     type="submit"
                     className={styles.submitButton}
@@ -243,7 +271,7 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                   {(Object.keys(SOCIAL_META) as SocialProvider[]).map((provider) => (
                     <GlassIconButton
                       key={provider}
-                      size={SOCIAL_BTN}
+                      size={socialButtonSize}
                       radius={SOCIAL_RADIUS}
                       className={provider === "apple" ? styles.socialButtonActive : ""}
                       title={SOCIAL_META[provider].label}
@@ -265,11 +293,11 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
               </form>
             </section>
 
-            <aside className={styles.right}>
+            <aside className={styles.right} ref={illustrationWrapRef}>
               <LiquidGlassContainer
                 {...illustrationFramePreset}
                 className={styles.illustrationFrame}
-                style={{ width: "100%", height: "100%" }}
+                width={illustrationWidth ?? Math.min(520, Math.max(260, Math.round(viewportWidth * 0.84)))}
               >
                 <img src={illustrationSrc} alt="Winter landscape illustration" className={styles.illustration} />
                 <div className={styles.illustrationOverlay}>
@@ -285,9 +313,10 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                 </div>
               </LiquidGlassContainer>
             </aside>
+            </div>
           </div>
         </div>
-      </LiquidGlassContainer>
+      </div>
     </div>
   );
 };
