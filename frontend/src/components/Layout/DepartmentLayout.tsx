@@ -566,24 +566,19 @@ const DepartmentLayout: React.FC<Props> = ({
         matchPrefixes: [`/maintenance/${amoCode}/quality/audits`],
         children: [
           {
-            id: "qms-audits-planner-calendar",
-            label: "Planner · Calendar",
+            id: "qms-audits-plan-schedule",
+            label: "Plan / Schedule",
             path: `/maintenance/${amoCode}/quality/audits/schedules/calendar`,
+            matchPrefixes: [
+              `/maintenance/${amoCode}/quality/audits/schedules/list`,
+              `/maintenance/${amoCode}/quality/audits/schedules/`,
+            ],
           },
           {
-            id: "qms-audits-planner-list",
-            label: "Planner · List",
-            path: `/maintenance/${amoCode}/quality/audits/schedules/list`,
-          },
-          {
-            id: "qms-audits-closeout-findings",
-            label: "Closeout · Findings",
+            id: "qms-audits-register",
+            label: "Register",
             path: `/maintenance/${amoCode}/quality/audits/closeout/findings`,
-          },
-          {
-            id: "qms-audits-closeout-cars",
-            label: "Closeout · CARs",
-            path: `/maintenance/${amoCode}/quality/audits/closeout/cars`,
+            matchPrefixes: [`/maintenance/${amoCode}/quality/audits/closeout/cars`],
           },
           {
             id: "qms-audits-evidence-library",

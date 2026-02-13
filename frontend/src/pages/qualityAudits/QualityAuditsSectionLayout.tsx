@@ -27,24 +27,19 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
   const links = useMemo<SubpageLink[]>(
     () => [
       {
-        id: "planner-calendar",
-        label: "Planner · Calendar",
+        id: "plan-schedule",
+        label: "Plan / Schedule",
         to: `/maintenance/${amoCode}/${department}/qms/audits/schedules/calendar`,
+        prefixes: [
+          `/maintenance/${amoCode}/${department}/qms/audits/schedules/list`,
+          `/maintenance/${amoCode}/${department}/qms/audits/schedules/`,
+        ],
       },
       {
-        id: "planner-list",
-        label: "Planner · List",
-        to: `/maintenance/${amoCode}/${department}/qms/audits/schedules/list`,
-      },
-      {
-        id: "closeout-findings",
-        label: "Closeout · Findings",
+        id: "register",
+        label: "Register",
         to: `/maintenance/${amoCode}/${department}/qms/audits/closeout/findings`,
-      },
-      {
-        id: "closeout-cars",
-        label: "Closeout · CARs",
-        to: `/maintenance/${amoCode}/${department}/qms/audits/closeout/cars`,
+        prefixes: [`/maintenance/${amoCode}/${department}/qms/audits/closeout/cars`],
       },
       {
         id: "evidence-library",
