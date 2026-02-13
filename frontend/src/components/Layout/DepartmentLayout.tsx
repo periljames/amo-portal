@@ -529,7 +529,20 @@ const DepartmentLayout: React.FC<Props> = ({
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [closeLauncher, focusMenuOpen]);
 
-  const qmsNavItems = useMemo(
+  type QmsNavItem = {
+    id: string;
+    label: string;
+    path: string;
+    matchPrefixes?: string[];
+    children?: Array<{ id: string; label: string; path: string; matchPrefixes?: string[] }>;
+  };
+
+  const isPathMatch = (pathname: string, path: string, prefixes?: string[]) => {
+    if (pathname.startsWith(path)) return true;
+    return (prefixes ?? []).some((prefix) => pathname.startsWith(prefix));
+  };
+
+  const qmsNavItems = useMemo<QmsNavItem[]>(
     () => [
       {
         id: "qms-dashboard",
@@ -550,6 +563,35 @@ const DepartmentLayout: React.FC<Props> = ({
         id: "qms-audits",
         label: "Audits & Inspections",
         path: `/maintenance/${amoCode}/${activeDepartment}/qms/audits`,
+        matchPrefixes: [`/maintenance/${amoCode}/quality/audits`],
+        children: [
+          {
+            id: "qms-audits-planner-calendar",
+            label: "Planner · Calendar",
+            path: `/maintenance/${amoCode}/quality/audits/schedules/calendar`,
+          },
+          {
+            id: "qms-audits-planner-list",
+            label: "Planner · List",
+            path: `/maintenance/${amoCode}/quality/audits/schedules/list`,
+          },
+          {
+            id: "qms-audits-closeout-findings",
+            label: "Closeout · Findings",
+            path: `/maintenance/${amoCode}/quality/audits/closeout/findings`,
+          },
+          {
+            id: "qms-audits-closeout-cars",
+            label: "Closeout · CARs",
+            path: `/maintenance/${amoCode}/quality/audits/closeout/cars`,
+          },
+          {
+            id: "qms-audits-evidence-library",
+            label: "Evidence Library",
+            path: `/maintenance/${amoCode}/quality/evidence`,
+            matchPrefixes: [`/maintenance/${amoCode}/quality/evidence/`],
+          },
+        ],
       },
       {
         id: "qms-change",
@@ -1382,20 +1424,41 @@ const DepartmentLayout: React.FC<Props> = ({
                     {isQmsRoute && (
                       <div className="sidebar__qms-nav" aria-label="QMS modules">
                         {qmsNavItems.map((item) => {
-                          const isActive = location.pathname.startsWith(item.path);
+                          const isActive = isPathMatch(location.pathname, item.path, item.matchPrefixes);
                           return (
-                            <button
-                              key={item.id}
-                              type="button"
-                              onClick={() => navigateFromLauncher(item.path)}
-                              className={
-                                "sidebar__item" +
-                                (isActive ? " sidebar__item--active" : "")
-                              }
-                            >
-                              <span className="sidebar__item-label">{item.label}</span>
-                            </button>
-                          );
+                              <div key={item.id} className="sidebar__qms-node">
+                                <button
+                                  type="button"
+                                  onClick={() => navigateFromLauncher(item.path)}
+                                  className={
+                                    "sidebar__item" +
+                                    (isActive ? " sidebar__item--active" : "")
+                                  }
+                                >
+                                  <span className="sidebar__item-label">{item.label}</span>
+                                </button>
+                                {isActive && item.children?.length ? (
+                                  <div className="sidebar__qms-subnav" aria-label={`${item.label} subpages`}>
+                                    {item.children.map((child) => {
+                                      const childActive = isPathMatch(location.pathname, child.path, child.matchPrefixes);
+                                      return (
+                                        <button
+                                          key={child.id}
+                                          type="button"
+                                          onClick={() => navigateFromLauncher(child.path)}
+                                          className={
+                                            "sidebar__item sidebar__item--sub" +
+                                            (childActive ? " sidebar__item--active" : "")
+                                          }
+                                        >
+                                          <span className="sidebar__item-label">{child.label}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
                         })}
                       </div>
                     )}
