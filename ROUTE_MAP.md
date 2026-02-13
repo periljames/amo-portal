@@ -240,3 +240,34 @@
 ## Update (2026-02-11) — dashboard layout mode rollback
 - No route changes.
 - Dashboard presentation rolled back from glass card treatment to full-width non-glass card surfaces.
+
+
+## Changed in this run (2026-02-13)
+### New Quality planner/viewer routes
+- `/maintenance/:amoCode/quality/audits`
+- `/maintenance/:amoCode/quality/audits/schedules/calendar` (planner default)
+- `/maintenance/:amoCode/quality/audits/schedules/list`
+- `/maintenance/:amoCode/quality/audits/schedules/:scheduleId`
+- `/maintenance/:amoCode/quality/audits/:auditId` (Audit Run Hub)
+- `/maintenance/:amoCode/quality/audits/:auditId/evidence`
+- `/maintenance/:amoCode/quality/audits/closeout/findings`
+- `/maintenance/:amoCode/quality/audits/closeout/cars`
+- `/maintenance/:amoCode/quality/evidence`
+- `/maintenance/:amoCode/quality/evidence/:evidenceId`
+
+### Behavior notes
+- Cockpit and all Quality audit/evidence planner routes are department-scoped to Quality only.
+- Quality cockpit now uses a max-width 12-column responsive grid (desktop 12 cols, tablet 2, mobile 1).
+- Event history bootstrap uses reduced limit (`25`) and ETag-aware client fetches to avoid redundant payload parsing on `304 Not Modified`.
+- Sidebar Quality > Audits & Inspections now exposes nested subpages (Planner calendar/list, Closeout findings/CARs, Evidence library) under the existing Audit tree.
+- Added QMS in-tree planner/viewer paths under `/maintenance/:amoCode/:department/qms/audits/*` and `/maintenance/:amoCode/:department/qms/evidence*`; canonical `/maintenance/:amoCode/quality/*` planner/viewer paths now act as aliases/redirects to the in-tree structure to remove duplicated page wiring.
+
+
+## Changed in this run (2026-02-13) — Audits UX consolidation
+- No route contract changes.
+- Canonical `/maintenance/:amoCode/quality/*` and in-tree `/maintenance/:amoCode/:department/qms/*` audit/planner/register aliases remain intact.
+- Audits landing (`.../qms/audits`) now shows a filterable **Recent audits** table (10 rows), CTA to planner, and explicit link to activity history evidence feed.
+- Planner routes (`.../audits/schedules/calendar|list`) now render one shared page component with in-page Calendar/List/Content view modes.
+- Closeout routes (`.../audits/closeout/findings|cars`) now render one shared Register component with route-selected default tab.
+- Audits landing, planner, and register now share a uniform spreadsheet toolbar model (density/wrap/filter-row/column toggles) without route changes.
+

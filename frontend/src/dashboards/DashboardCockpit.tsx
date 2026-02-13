@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   BarChart3,
@@ -114,9 +114,11 @@ const DashboardCockpit: React.FC = () => {
   const { data: activityHistory } = useInfiniteQuery({
     queryKey: ["activity-history", amoCode, department],
     queryFn: ({ pageParam }) =>
-      listEventHistory({ cursor: pageParam as string | undefined, limit: 50 }),
+      listEventHistory({ cursor: pageParam as string | undefined, limit: 25 }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     initialPageParam: undefined as string | undefined,
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
 
   const snapshotQuery = useQuery({
@@ -130,9 +132,10 @@ const DashboardCockpit: React.FC = () => {
       return next;
     },
     enabled: qmsEnabled && !useMockCockpit,
-    staleTime: 30_000,
-    gcTime: 5 * 60_000,
-    refetchOnMount: "always",
+    staleTime: 60_000,
+    gcTime: 15 * 60_000,
+    placeholderData: keepPreviousData,
+    refetchOnMount: false,
     retry: 1,
   });
 
@@ -168,11 +171,13 @@ const DashboardCockpit: React.FC = () => {
       { id: "qms-home", label: "QMS Home", icon: Home, to: base },
       { id: "qms-tasks", label: "My Tasks", icon: ListChecks, to: `${base}/tasks`, badge: snapshot.action_queue.length },
       { id: "qms-documents", label: "Documents", icon: NotebookTabs, to: `${base}/documents`, badge: snapshot.pending_acknowledgements },
-      { id: "qms-audits", label: "Audits", icon: FileSearch, to: `${base}/audits`, badge: snapshot.findings_overdue },
+      { id: "qms-audits", label: "Audits Hub", icon: FileSearch, to: `/maintenance/${amoCode}/quality/audits`, badge: snapshot.findings_overdue },
+      { id: "qms-planner", label: "Planner", icon: ClipboardList, to: `/maintenance/${amoCode}/quality/audits/schedules/calendar` },
       { id: "qms-change", label: "Change Control", icon: ClipboardList, to: `${base}/change-control`, badge: snapshot.change_requests_open },
       { id: "qms-cars", label: "CAR Register", icon: Wrench, to: `${base}/cars`, badge: snapshot.cars_overdue },
       { id: "qms-training", label: "Training", icon: GraduationCap, to: `${base}/training`, badge: snapshot.training_records_expired },
       { id: "qms-events", label: "Quality Events", icon: AlertTriangle, to: `${base}/events`, badge: snapshot.suppliers_inactive },
+      { id: "qms-evidence", label: "Evidence Library", icon: NotebookTabs, to: `/maintenance/${amoCode}/quality/evidence` },
       { id: "qms-kpis", label: "KPIs & Review", icon: BarChart3, to: `${base}/kpis`, badge: snapshot.findings_open_total },
     ];
   }, [amoCode, department, snapshot]);
