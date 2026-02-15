@@ -412,6 +412,14 @@ export const AppRouter: React.FC = () => {
         }
       />
       <Route
+        path="/maintenance/:amoCode/:department/tasks"
+        element={
+          <RequireAuth>
+            <MyTasksPage />
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/maintenance/:amoCode/:department/tasks/:taskId"
         element={
           <RequireAuth>

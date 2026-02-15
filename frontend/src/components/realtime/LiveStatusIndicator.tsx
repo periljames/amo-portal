@@ -12,7 +12,7 @@ const statusLabel = (status: string): string => {
     case "live":
       return "Live";
     case "syncing":
-      return "Reconnecting";
+      return "Stream reconnecting";
     case "offline":
       return "Offline";
     default:
@@ -21,11 +21,11 @@ const statusLabel = (status: string): string => {
 };
 
 const LiveStatusIndicator: React.FC = () => {
-  const { status, lastUpdated, isStale, staleSeconds, refreshData, triggerSync } = useRealtime();
+  const { status, lastUpdated, isStale, staleSeconds, isOnline, clockSource, refreshData, triggerSync } = useRealtime();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const label = useMemo(() => statusLabel(status), [status]);
-  const isConnectionIssue = isStale;
+  const isConnectionIssue = isStale || !isOnline;
   const isLongConnectionIssue = isConnectionIssue && staleSeconds >= 180;
 
   return (
@@ -56,6 +56,7 @@ const LiveStatusIndicator: React.FC = () => {
               Connection issue for {Math.floor(staleSeconds / 60)}m {staleSeconds % 60}s.
             </div>
           )}
+          <div className="live-status__meta">Clock source: {clockSource === "server" ? "server-synced" : "local"}</div>
           <button type="button" onClick={() => refreshData()}>
             Refresh data
           </button>

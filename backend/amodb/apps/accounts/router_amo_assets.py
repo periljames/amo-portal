@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -93,8 +93,8 @@ def _ensure_safe_path(path: Path) -> Path:
     resolved = path.resolve()
     if not str(resolved).startswith(str(_AMO_ASSET_UPLOAD_DIR)):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid asset path.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asset path unavailable.",
         )
     return resolved
 
@@ -279,16 +279,22 @@ def download_crs_logo(
     target_amo_id = _resolve_target_amo_id(current_user, amo_id)
     asset = _get_latest_asset(db, target_amo_id, models.AMOAssetKind.CRS_LOGO)
     if not asset or not asset.storage_path:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No logo uploaded for this AMO.")
+        return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"Cache-Control": "private, max-age=60"})
 
     path = _ensure_safe_path(Path(asset.storage_path))
     if not path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Logo asset not found.")
+        return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"Cache-Control": "private, max-age=60"})
 
+    stat = path.stat()
+    etag = f'W/"{target_amo_id}:{int(stat.st_mtime)}:{stat.st_size}"'
     return FileResponse(
         path=str(path),
         media_type=asset.content_type or "application/octet-stream",
         filename=asset.original_filename or path.name,
+        headers={
+            "ETag": etag,
+            "Cache-Control": "private, max-age=300",
+        },
     )
 
 

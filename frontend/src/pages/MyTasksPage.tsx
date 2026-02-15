@@ -59,6 +59,12 @@ const MyTasksPage: React.FC = () => {
 
   const currentUser = getCachedUser();
 
+  const canViewOthers = Boolean(
+    currentUser?.is_superuser ||
+      currentUser?.is_amo_admin ||
+      currentUser?.role === "QUALITY_MANAGER"
+  );
+
   const myTasksQuery = useQuery({
     queryKey: ["my-tasks"],
     queryFn: listMyTasks,
@@ -70,10 +76,12 @@ const MyTasksPage: React.FC = () => {
     queryFn: () => listTasks(),
     staleTime: 30_000,
     retry: false,
+    enabled: canViewOthers && tab === "others",
   });
 
   const myTasks = useMemo(() => filterByRouteQuery(myTasksQuery.data ?? [], searchParams), [myTasksQuery.data, searchParams]);
   const assignedToOthers = useMemo(() => {
+    if (!canViewOthers) return [];
     const raw = allTasksQuery.data ?? [];
     const mine = new Set((myTasksQuery.data ?? []).map((task) => task.id));
     const ownerId = currentUser?.id;
@@ -81,7 +89,7 @@ const MyTasksPage: React.FC = () => {
       raw.filter((task) => !mine.has(task.id) && (!ownerId || task.owner_user_id !== ownerId)),
       searchParams
     );
-  }, [allTasksQuery.data, currentUser?.id, myTasksQuery.data, searchParams]);
+  }, [allTasksQuery.data, canViewOthers, currentUser?.id, myTasksQuery.data, searchParams]);
 
   const activeRows = tab === "mine" ? myTasks : assignedToOthers;
 
@@ -103,11 +111,15 @@ const MyTasksPage: React.FC = () => {
   const handleMarkDone = async (taskId: string) => {
     await updateTask(taskId, { status: "DONE" });
     await myTasksQuery.refetch();
-    await allTasksQuery.refetch();
+    if (canViewOthers) await allTasksQuery.refetch();
   };
 
-  const loading = myTasksQuery.isLoading || (tab === "others" && allTasksQuery.isLoading);
-  const error = myTasksQuery.error instanceof Error ? myTasksQuery.error.message : allTasksQuery.error instanceof Error ? allTasksQuery.error.message : null;
+  const loading = myTasksQuery.isLoading || (tab === "others" && canViewOthers && allTasksQuery.isLoading);
+  const error = myTasksQuery.error instanceof Error
+    ? myTasksQuery.error.message
+    : tab === "others" && canViewOthers && allTasksQuery.error instanceof Error
+      ? allTasksQuery.error.message
+      : null;
 
   return (
     <QMSLayout amoCode={amoCode} department={department} title="Tasks" subtitle="Assigned to me and team workload routed from existing Quality task services.">
@@ -133,6 +145,7 @@ const MyTasksPage: React.FC = () => {
         {loading ? <p>Loading tasks…</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
 
+        {!loading && tab === "others" && !canViewOthers ? <p className="text-muted">Assigned to others is available for Quality Manager, AMO Admin, and Superuser roles.</p> : null}
         {!loading && !filteredRows.length ? <p>No tasks for this tab/filter.</p> : null}
 
         {!!filteredRows.length && (

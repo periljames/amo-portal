@@ -47,10 +47,7 @@ export async function listEventHistory(params?: {
 }): Promise<ActivityHistoryResponse> {
   const token = getToken();
   const path = historyPath(params);
-  const pathWithToken = token
-    ? `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
-    : path;
-  const fullUrl = `${getApiBaseUrl()}${pathWithToken}`;
+  const fullUrl = `${getApiBaseUrl()}${path}`;
   const cached = etagCache.get(path);
   const res = await fetch(fullUrl, {
     method: "GET",

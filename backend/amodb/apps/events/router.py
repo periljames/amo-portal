@@ -76,11 +76,16 @@ def _get_user_from_token(token: str, db: Session) -> account_models.User:
     return user
 
 
-def get_current_active_user_from_query(
+def get_current_active_user_from_transport(
     request: Request,
     db: Session = Depends(get_db),
 ) -> account_models.User:
-    token = request.query_params.get("token")
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    token = None
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.query_params.get("token")
     if not token:
         raise _credentials_exception()
     return _get_user_from_token(token, db)
@@ -197,7 +202,7 @@ async def _event_generator(
 async def stream_events(
     request: Request,
     db: Session = Depends(get_db),
-    user: account_models.User = Depends(get_current_active_user_from_query),
+    user: account_models.User = Depends(get_current_active_user_from_transport),
 ) -> StreamingResponse:
     return StreamingResponse(
         _event_generator(request, user, db),
@@ -248,7 +253,7 @@ def list_event_history(
     timeStart: Optional[datetime] = None,
     timeEnd: Optional[datetime] = None,
     db: Session = Depends(get_db),
-    user: account_models.User = Depends(get_current_active_user_from_query),
+    user: account_models.User = Depends(get_current_active_user_from_transport),
 ) -> ActivityHistoryResponse:
     effective_amo_id = getattr(user, "effective_amo_id", None) or user.amo_id
     query = db.query(audit_models.AuditEvent).filter(audit_models.AuditEvent.amo_id == effective_amo_id)
