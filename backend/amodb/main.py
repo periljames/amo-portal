@@ -209,6 +209,17 @@ def read_root():
 def health():
     return {"status": "ok"}
 
+@app.get("/time", tags=["health"])
+def server_time():
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    return {
+        "utc": now.isoformat(),
+        "epoch_ms": int(now.timestamp() * 1000),
+        "source": "server",
+    }
+
 app.include_router(accounts_public_router)
 app.include_router(accounts_admin_router)
 app.include_router(accounts_modules_router)
