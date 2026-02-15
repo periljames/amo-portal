@@ -114,7 +114,7 @@ const DashboardCockpit: React.FC = () => {
   const { data: activityHistory } = useInfiniteQuery({
     queryKey: ["activity-history", amoCode, department],
     queryFn: ({ pageParam }) =>
-      listEventHistory({ cursor: pageParam as string | undefined, limit: 25 }),
+      listEventHistory({ cursor: pageParam as string | undefined, limit: 50 }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     initialPageParam: undefined as string | undefined,
     staleTime: 30_000,
@@ -166,21 +166,19 @@ const DashboardCockpit: React.FC = () => {
   }, []);
 
   const navigatorTiles = useMemo<NavigatorTile[]>(() => {
-    const base = `/maintenance/${amoCode}/${department}/qms`;
+    const base = `/maintenance/${amoCode}/quality/qms`;
     return [
-      { id: "qms-home", label: "QMS Home", icon: Home, to: base },
-      { id: "qms-tasks", label: "My Tasks", icon: ListChecks, to: `${base}/tasks`, badge: snapshot.action_queue.length },
+      { id: "qms-home", label: "QMS", icon: Home, to: base },
+      { id: "qms-tasks", label: "Tasks", icon: ListChecks, to: `${base}/tasks`, badge: snapshot.action_queue.length },
       { id: "qms-documents", label: "Documents", icon: NotebookTabs, to: `${base}/documents`, badge: snapshot.pending_acknowledgements },
-      { id: "qms-audits", label: "Audits Hub", icon: FileSearch, to: `/maintenance/${amoCode}/quality/audits`, badge: snapshot.findings_overdue },
-      { id: "qms-planner", label: "Planner", icon: ClipboardList, to: `/maintenance/${amoCode}/quality/audits/schedules/calendar` },
+      { id: "qms-audits", label: "Audits & Inspections", icon: FileSearch, to: `${base}/audits`, badge: snapshot.findings_overdue },
       { id: "qms-change", label: "Change Control", icon: ClipboardList, to: `${base}/change-control`, badge: snapshot.change_requests_open },
-      { id: "qms-cars", label: "CAR Register", icon: Wrench, to: `${base}/cars`, badge: snapshot.cars_overdue },
+      { id: "qms-cars", label: "CARs", icon: Wrench, to: `${base}/cars`, badge: snapshot.cars_overdue },
       { id: "qms-training", label: "Training", icon: GraduationCap, to: `${base}/training`, badge: snapshot.training_records_expired },
-      { id: "qms-events", label: "Quality Events", icon: AlertTriangle, to: `${base}/events`, badge: snapshot.suppliers_inactive },
-      { id: "qms-evidence", label: "Evidence Library", icon: NotebookTabs, to: `/maintenance/${amoCode}/quality/evidence` },
-      { id: "qms-kpis", label: "KPIs & Review", icon: BarChart3, to: `${base}/kpis`, badge: snapshot.findings_open_total },
+      { id: "qms-events", label: "Events", icon: AlertTriangle, to: `${base}/events`, badge: snapshot.suppliers_inactive },
+      { id: "qms-kpis", label: "KPIs", icon: BarChart3, to: `${base}/kpis`, badge: snapshot.findings_open_total },
     ];
-  }, [amoCode, department, snapshot]);
+  }, [amoCode, snapshot]);
 
   const topPriority = useMemo<PriorityItem | null>(() => {
     if (snapshot.findings_overdue > 0) return { id: "a", title: "Overdue findings", description: `${snapshot.findings_overdue} overdue findings require immediate closure.`, count: snapshot.findings_overdue, route: `/maintenance/${amoCode}/${department}/qms/audits?status=in_progress&finding=overdue` };
@@ -210,20 +208,34 @@ const DashboardCockpit: React.FC = () => {
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     const fromHistory = (activityHistory?.pages ?? []).flatMap((page) => page.items ?? []);
-    return [...activity, ...fromHistory].slice(0, 40).map((item) => ({
-      id: item.id,
-      summary: `${item.type} ${item.action}`,
-      timestamp: new Date(item.timestamp).toLocaleString(),
-      onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/events?entity=${item.entityType}&id=${item.entityId}`),
-    }));
+    return [...activity, ...fromHistory].slice(0, 40).map((item) => {
+      const entityType = item.entityType.toLowerCase();
+      const destination = (() => {
+        if (entityType.startsWith("user") || entityType.startsWith("accounts.user")) {
+          return item.entityId ? `/maintenance/${amoCode}/admin/users/${item.entityId}` : `/maintenance/${amoCode}/admin/users`;
+        }
+        if (entityType.startsWith("tasks.task")) {
+          return item.entityId
+            ? `/maintenance/${amoCode}/${department}/tasks/${item.entityId}`
+            : `/maintenance/${amoCode}/${department}/tasks`;
+        }
+        if (entityType.startsWith("qms.document")) return `/maintenance/${amoCode}/${department}/qms/documents?docId=${encodeURIComponent(item.entityId)}`;
+        if (entityType.startsWith("qms.audit")) return `/maintenance/${amoCode}/${department}/qms/audits?auditId=${encodeURIComponent(item.entityId)}`;
+        if (entityType.startsWith("qms.car") || entityType.startsWith("qms.capa")) return `/maintenance/${amoCode}/${department}/qms/cars?carId=${encodeURIComponent(item.entityId)}`;
+        if (entityType.startsWith("qms.training") || entityType.startsWith("training")) return `/maintenance/${amoCode}/${department}/qms/training?userId=${encodeURIComponent(item.entityId)}`;
+        return `/maintenance/${amoCode}/${department}/qms/events?entity=${encodeURIComponent(item.entityType)}&id=${encodeURIComponent(item.entityId)}`;
+      })();
+      return {
+        id: item.id,
+        summary: `${item.type} ${item.action}`,
+        timestamp: new Date(item.timestamp).toLocaleString(),
+        onClick: () => navigate(destination),
+      };
+    });
   }, [activityHistory?.pages, activity, navigate, amoCode, department]);
 
   const visualData = useMemo<QualityCockpitVisualData>(() => {
-    const totalTasks = snapshot.action_queue.length + snapshot.findings_open_total + snapshot.pending_acknowledgements;
-    const samples = snapshot.documents_active + snapshot.audits_total;
-    const defects = snapshot.findings_open_total;
-    const fatalErrors = snapshot.findings_overdue + snapshot.cars_overdue;
-    const qualityScore = Math.max(40, Math.min(99.9, 100 - (fatalErrors * 2 + defects * 0.6)));
+    const qualityScore = Math.max(40, Math.min(99.9, 100 - ((snapshot.findings_overdue + snapshot.cars_overdue) * 2 + snapshot.findings_open_total * 0.6)));
 
     const supervisorMap = new Map<string, number>();
     snapshot.action_queue.forEach((row) => {
@@ -240,10 +252,10 @@ const DashboardCockpit: React.FC = () => {
 
     return {
       kpis: [
-        { id: "total_tasks", label: "Total Tasks", value: totalTasks, accent: "navy", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/tasks`) },
-        { id: "samples", label: "Samples", value: samples, accent: "green", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/documents`) },
-        { id: "defects", label: "Defects", value: defects, accent: "amber", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/audits?status=cap_open`) },
-        { id: "fatal_errors", label: "Fatal Errors", value: fatalErrors, accent: "rose", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue`) },
+        { id: "overdue_tasks", label: "Overdue tasks", value: snapshot.findings_overdue, accent: "rose", onClick: () => nav(`/maintenance/${amoCode}/${department}/tasks?status=overdue&dueWindow=now`) },
+        { id: "due_this_week", label: "Due this week", value: snapshot.action_queue.length, accent: "amber", onClick: () => nav(`/maintenance/${amoCode}/${department}/tasks?status=open&dueWindow=week`) },
+        { id: "pending_acks", label: "Pending acknowledgements", value: snapshot.pending_acknowledgements, accent: "navy", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
+        { id: "open_findings", label: "Open findings", value: snapshot.findings_open_total, accent: "green", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/audits?status=cap_open`) },
       ],
       qualityScore,
       fatalErrorsBySupervisor,

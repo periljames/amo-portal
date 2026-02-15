@@ -1,153 +1,202 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import QMSLayout from "../components/QMS/QMSLayout";
-import { listMyTasks, updateTask, type TaskItem } from "../services/tasks";
+import DataTableShell from "../components/shared/DataTableShell";
+import SpreadsheetToolbar from "../components/shared/SpreadsheetToolbar";
+import { getCachedUser } from "../services/auth";
+import { listMyTasks, listTasks, updateTask, type TaskItem } from "../services/tasks";
+
+type TasksTab = "mine" | "others";
+
+function filterByRouteQuery(rows: TaskItem[], searchParams: URLSearchParams): TaskItem[] {
+  const status = searchParams.get("status");
+  const dueWindow = searchParams.get("dueWindow");
+  const now = new Date();
+
+  return rows.filter((task) => {
+    if (status) {
+      const normalized = task.status.toLowerCase();
+      if (status === "overdue") {
+        if (!task.due_at) return false;
+        const due = new Date(task.due_at);
+        if (Number.isNaN(due.getTime())) return false;
+        if (["done", "cancelled"].includes(normalized)) return false;
+        if (due >= now) return false;
+      } else if (normalized !== status.toLowerCase()) {
+        return false;
+      }
+    }
+
+    if (dueWindow) {
+      if (!task.due_at) return false;
+      const due = new Date(task.due_at);
+      if (Number.isNaN(due.getTime())) return false;
+      if (dueWindow === "now") {
+        return due <= now;
+      }
+      if (dueWindow === "week") {
+        const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        return diff >= 0 && diff <= 7;
+      }
+    }
+
+    return true;
+  });
+}
 
 const MyTasksPage: React.FC = () => {
   const navigate = useNavigate();
   const { amoCode = "UNKNOWN", department = "quality" } = useParams();
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<TasksTab>("mine");
+  const [density, setDensity] = useState<"compact" | "comfortable">("compact");
+  const [wrapText, setWrapText] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
+  const [showAssignee, setShowAssignee] = useState(true);
+  const [filters, setFilters] = useState({ status: "", task: "", context: "", assignee: "" });
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    listMyTasks()
-      .then((data) => {
-        if (!active) return;
-        setTasks(data);
-        setError(null);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setError(err?.message || "Failed to load tasks.");
-      })
-      .finally(() => {
-        if (!active) return;
-        setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const currentUser = getCachedUser();
 
-  const rows = useMemo(() => {
-    const dueWindow = searchParams.get("dueWindow");
-    const now = new Date();
-    return [...tasks]
-      .filter((task) => {
-        if (!dueWindow) return true;
-        if (!task.due_at) return false;
-        const due = new Date(task.due_at);
-        if (dueWindow === "today") {
-          return due.toDateString() === now.toDateString();
-        }
-        if (dueWindow === "week") {
-          const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-          return diff >= 0 && diff <= 7;
-        }
-        if (dueWindow === "month") {
-          const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-          return diff >= 0 && diff <= 30;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        const aDue = a.due_at ? Date.parse(a.due_at) : Number.POSITIVE_INFINITY;
-        const bDue = b.due_at ? Date.parse(b.due_at) : Number.POSITIVE_INFINITY;
-        return aDue - bDue;
-      });
-  }, [tasks, searchParams]);
+  const myTasksQuery = useQuery({
+    queryKey: ["my-tasks"],
+    queryFn: listMyTasks,
+    staleTime: 30_000,
+  });
+
+  const allTasksQuery = useQuery({
+    queryKey: ["tasks"],
+    queryFn: () => listTasks(),
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  const myTasks = useMemo(() => filterByRouteQuery(myTasksQuery.data ?? [], searchParams), [myTasksQuery.data, searchParams]);
+  const assignedToOthers = useMemo(() => {
+    const raw = allTasksQuery.data ?? [];
+    const mine = new Set((myTasksQuery.data ?? []).map((task) => task.id));
+    const ownerId = currentUser?.id;
+    return filterByRouteQuery(
+      raw.filter((task) => !mine.has(task.id) && (!ownerId || task.owner_user_id !== ownerId)),
+      searchParams
+    );
+  }, [allTasksQuery.data, currentUser?.id, myTasksQuery.data, searchParams]);
+
+  const activeRows = tab === "mine" ? myTasks : assignedToOthers;
+
+  const filteredRows = useMemo(
+    () =>
+      activeRows
+        .filter((task) => task.status.toLowerCase().includes(filters.status.toLowerCase()))
+        .filter((task) => task.title.toLowerCase().includes(filters.task.toLowerCase()))
+        .filter((task) => `${task.entity_type ?? ""} ${task.entity_id ?? ""}`.toLowerCase().includes(filters.context.toLowerCase()))
+        .filter((task) => (task.owner_user_id ?? "").toLowerCase().includes(filters.assignee.toLowerCase()))
+        .sort((a, b) => {
+          const aDue = a.due_at ? Date.parse(a.due_at) : Number.POSITIVE_INFINITY;
+          const bDue = b.due_at ? Date.parse(b.due_at) : Number.POSITIVE_INFINITY;
+          return aDue - bDue;
+        }),
+    [activeRows, filters.assignee, filters.context, filters.status, filters.task]
+  );
 
   const handleMarkDone = async (taskId: string) => {
-    try {
-      const updated = await updateTask(taskId, { status: "DONE" });
-      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)));
-    } catch (err: any) {
-      setError(err?.message || "Failed to update task.");
-    }
+    await updateTask(taskId, { status: "DONE" });
+    await myTasksQuery.refetch();
+    await allTasksQuery.refetch();
   };
 
-  const goToEntity = (task: TaskItem) => {
-    if (!amoCode || !department) return;
-    const base = `/maintenance/${amoCode}/${department}`;
-    switch (task.entity_type) {
-      case "qms_document":
-      case "qms_document_distribution":
-        navigate(`${base}/qms/documents`);
-        return;
-      case "qms_audit":
-      case "qms_finding":
-      case "qms_cap":
-        navigate(`${base}/qms/audits`);
-        return;
-      case "qms_car":
-        navigate(`${base}/qms/cars`);
-        return;
-      default:
-        navigate(`${base}/qms`);
-    }
-  };
+  const loading = myTasksQuery.isLoading || (tab === "others" && allTasksQuery.isLoading);
+  const error = myTasksQuery.error instanceof Error ? myTasksQuery.error.message : allTasksQuery.error instanceof Error ? allTasksQuery.error.message : null;
 
   return (
-    <QMSLayout
-      amoCode={amoCode}
-      department={department}
-      title="My Tasks"
-      subtitle="Due-date driven tasks from QMS, training, and FRACAS workflows."
-    >
-      {loading && <p>Loading tasks…</p>}
-      {error && <p className="error-text">{error}</p>}
+    <QMSLayout amoCode={amoCode} department={department} title="Tasks" subtitle="Assigned to me and team workload routed from existing Quality task services.">
+      <DataTableShell
+        title="QMS Task Register"
+        actions={
+          <div className="qms-segmented" role="tablist" aria-label="Task assignment tabs">
+            <button type="button" className={tab === "mine" ? "is-active" : ""} onClick={() => setTab("mine")}>Assigned to me</button>
+            <button type="button" className={tab === "others" ? "is-active" : ""} onClick={() => setTab("others")}>Assigned to others</button>
+          </div>
+        }
+      >
+        <SpreadsheetToolbar
+          density={density}
+          onDensityChange={setDensity}
+          wrapText={wrapText}
+          onWrapTextChange={setWrapText}
+          showFilters={showFilters}
+          onShowFiltersChange={setShowFilters}
+          columnToggles={[{ id: "assignee", label: "Assignee", checked: showAssignee, onToggle: () => setShowAssignee((v) => !v) }]}
+        />
 
-      {!loading && !rows.length && <p>No tasks assigned right now.</p>}
+        {loading ? <p>Loading tasks…</p> : null}
+        {error ? <p className="error-text">{error}</p> : null}
 
-      {!!rows.length && (
-        <div className="qms-table-wrapper">
-          <table className="qms-table">
+        {!loading && !filteredRows.length ? <p>No tasks for this tab/filter.</p> : null}
+
+        {!!filteredRows.length && (
+          <table className={`table ${density === "compact" ? "table-row--compact" : "table-row--comfortable"} ${wrapText ? "table--wrap" : ""}`}>
             <thead>
               <tr>
-                <th>Title</th>
                 <th>Status</th>
-                <th>Due</th>
-                <th>Entity</th>
+                <th>Task</th>
+                <th>Record / Context</th>
+                <th>Assigned date</th>
+                <th>Due date</th>
+                {showAssignee ? <th>Assignee</th> : null}
                 <th>Actions</th>
               </tr>
+              {showFilters ? (
+                <tr>
+                  <th><input className="input" style={{ height: 30 }} placeholder="Status" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))} /></th>
+                  <th><input className="input" style={{ height: 30 }} placeholder="Task" value={filters.task} onChange={(e) => setFilters((prev) => ({ ...prev, task: e.target.value }))} /></th>
+                  <th><input className="input" style={{ height: 30 }} placeholder="Record/context" value={filters.context} onChange={(e) => setFilters((prev) => ({ ...prev, context: e.target.value }))} /></th>
+                  <th></th>
+                  <th></th>
+                  {showAssignee ? <th><input className="input" style={{ height: 30 }} placeholder="Assignee" value={filters.assignee} onChange={(e) => setFilters((prev) => ({ ...prev, assignee: e.target.value }))} /></th> : null}
+                  <th></th>
+                </tr>
+              ) : null}
             </thead>
             <tbody>
-              {rows.map((task) => (
+              {filteredRows.map((task) => (
                 <tr key={task.id}>
+                  <td>{task.status}</td>
                   <td>
                     <strong>{task.title}</strong>
-                    {task.description && <div className="table-subtext">{task.description}</div>}
+                    {task.description ? <div className="table-subtext">{task.description}</div> : null}
                   </td>
-                  <td>{task.status}</td>
-                  <td>{task.due_at ? new Date(task.due_at).toLocaleString() : "—"}</td>
                   <td>
-                    <div className="table-subtext">{task.entity_type || "—"}</div>
-                    <div className="table-subtext">{task.entity_id || "—"}</div>
+                    <div className="table-subtext">{task.entity_type ?? "—"}</div>
+                    <div className="table-subtext">{task.entity_id ?? "—"}</div>
                   </td>
-                  <td className="table-actions">
+                  <td>{new Date(task.created_at).toLocaleDateString()}</td>
+                  <td>{task.due_at ? new Date(task.due_at).toLocaleString() : "—"}</td>
+                  {showAssignee ? <td>{task.owner_user_id ?? "Unassigned"}</td> : null}
+                  <td>
                     <button
                       type="button"
-                      className="primary-btn"
-                      onClick={() => handleMarkDone(task.id)}
+                      className="secondary-chip-btn"
+                      onClick={() => navigate(`/maintenance/${amoCode}/${department}/tasks/${task.id}`)}
+                    >
+                      Open
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-chip-btn"
+                      onClick={() => void handleMarkDone(task.id)}
                       disabled={task.status === "DONE" || task.status === "CANCELLED"}
                     >
                       Mark done
-                    </button>
-                    <button type="button" className="secondary-btn" onClick={() => goToEntity(task)}>
-                      Open entity
                     </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </DataTableShell>
     </QMSLayout>
   );
 };

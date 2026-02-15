@@ -50,7 +50,6 @@ const eventSchema = z.object({
 });
 
 const MAX_ACTIVITY = 1500;
-const STALE_AFTER_SECONDS = 45;
 
 function eventAmoCode(event: ActivityEvent, fallbackAmo: string): string {
   const meta = event.metadata as Record<string, unknown> | undefined;
@@ -99,7 +98,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const ctx = getContext();
   const lastEventKey = `amo:last-event-id:${ctx.amoCode || "unknown"}`;
 
-  const isStale = status !== "live" || staleSeconds > STALE_AFTER_SECONDS;
+  const isStale = status !== "live";
 
   const scheduleInvalidations = useCallback(
     (keys: Array<readonly [string, ...string[]]>) => {
@@ -114,12 +113,16 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 
   const handleEvent = useCallback(
-    (raw: unknown) => {
+    (raw: unknown, transportCursor?: string) => {
       const parsed = eventSchema.safeParse(raw);
       if (!parsed.success) return;
 
       const event = parsed.data;
-      window.localStorage.setItem(lastEventKey, event.id);
+      const cursor = transportCursor?.trim() || event.id?.trim();
+      if (!cursor) {
+        return;
+      }
+      window.localStorage.setItem(lastEventKey, cursor);
       setStatus("live");
       setLastUpdated(new Date(event.timestamp));
       setStaleSeconds(0);
@@ -155,13 +158,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     source.onopen = () => {
       retryCount.current = 0;
       setStatus("live");
+      setLastUpdated(new Date());
       setStaleSeconds(0);
     };
 
     source.onmessage = (evt) => {
       try {
         const payload = JSON.parse(evt.data);
-        handleEvent(payload);
+        const transportCursor = typeof evt.lastEventId === "string" ? evt.lastEventId : "";
+        handleEvent(payload, transportCursor);
       } catch {
         // ignore malformed payloads
       }
@@ -176,6 +181,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ["dashboard", amo, dept],
         ["qms-dashboard", amo, "quality"],
       ]);
+      source.close();
+      setStatus("syncing");
+      if (reconnectTimer.current) {
+        window.clearTimeout(reconnectTimer.current);
+      }
+      reconnectTimer.current = window.setTimeout(() => connectRef.current(), 250);
     });
 
     source.onerror = () => {
@@ -188,16 +199,25 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       retryCount.current += 1;
       reconnectTimer.current = window.setTimeout(() => connectRef.current(), retryDelay);
     };
-  }, [handleEvent, lastEventKey, scheduleInvalidations]);
+  }, [ctx.amoCode, ctx.department, handleEvent, lastEventKey, scheduleInvalidations]);
 
   useEffect(() => {
     connectRef.current = connect;
   }, [connect]);
 
+  const reconnectNow = useCallback(() => {
+    if (reconnectTimer.current) {
+      window.clearTimeout(reconnectTimer.current);
+    }
+    retryCount.current = 0;
+    sourceRef.current?.close();
+    connectRef.current();
+  }, []);
+
   useEffect(() => {
     connect();
     staleIntervalRef.current = window.setInterval(() => {
-      setStaleSeconds((prev) => prev + 1);
+      setStaleSeconds((prev) => (status === "live" ? 0 : prev + 1));
     }, 1000);
     return () => {
       sourceRef.current?.close();
@@ -211,7 +231,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         window.clearInterval(staleIntervalRef.current);
       }
     };
-  }, [connect]);
+  }, [connect, status]);
 
   const refreshData = useCallback(() => {
     setStatus("syncing");
@@ -228,7 +248,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ["tasks"],
     ];
     refreshKeys.forEach((key) => queryClient.invalidateQueries({ queryKey: [...key] }));
-  }, [ctx.amoCode, ctx.department, queryClient]);
+    reconnectNow();
+  }, [ctx.amoCode, ctx.department, queryClient, reconnectNow]);
 
   const triggerSync = useCallback(() => {
     refreshData();

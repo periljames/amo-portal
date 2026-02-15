@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { WifiOff } from "lucide-react";
 import { useRealtime } from "./RealtimeProvider";
 
 const formatTime = (value: Date | null): string => {
@@ -11,7 +12,7 @@ const statusLabel = (status: string): string => {
     case "live":
       return "Live";
     case "syncing":
-      return "Syncing";
+      return "Reconnecting";
     case "offline":
       return "Offline";
     default:
@@ -23,10 +24,9 @@ const LiveStatusIndicator: React.FC = () => {
   const { status, lastUpdated, isStale, staleSeconds, refreshData, triggerSync } = useRealtime();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const label = useMemo(() => {
-    if (isStale && status === "live") return "Stale";
-    return statusLabel(status);
-  }, [isStale, status]);
+  const label = useMemo(() => statusLabel(status), [status]);
+  const isConnectionIssue = isStale;
+  const isLongConnectionIssue = isConnectionIssue && staleSeconds >= 180;
 
   return (
     <div className="live-status" onBlur={() => setMenuOpen(false)}>
@@ -35,6 +35,15 @@ const LiveStatusIndicator: React.FC = () => {
         className={`live-status__chip live-status__chip--${isStale ? "offline" : status}`}
         onClick={() => setMenuOpen((prev) => !prev)}
       >
+        {isConnectionIssue ? (
+          <span
+            className={`live-status__connection-icon ${isLongConnectionIssue ? "is-critical" : ""}`}
+            aria-hidden="true"
+            title="Network connection issue"
+          >
+            <WifiOff size={12} />
+          </span>
+        ) : null}
         <span className="live-status__dot" />
         {label}
         <span className="live-status__time">{formatTime(lastUpdated)}</span>
@@ -42,7 +51,11 @@ const LiveStatusIndicator: React.FC = () => {
       {menuOpen && (
         <div className="live-status__menu" role="menu">
           <div className="live-status__meta">Last update: {formatTime(lastUpdated)}</div>
-          {isStale && <div className="live-status__meta">Stream stale for {staleSeconds}s.</div>}
+          {isConnectionIssue && (
+            <div className="live-status__meta">
+              Connection issue for {Math.floor(staleSeconds / 60)}m {staleSeconds % 60}s.
+            </div>
+          )}
           <button type="button" onClick={() => refreshData()}>
             Refresh data
           </button>

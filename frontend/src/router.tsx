@@ -683,8 +683,8 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/audits/plan" element={<RequireAuth><QualityAliasRedirect suffix="/audits/plan" /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/register" element={<RequireAuth><QualityAliasRedirect suffix="/audits/register" /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/closeout" element={<RequireAuth><QualityAliasRedirect suffix="/audits/closeout" /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/schedules/calendar" element={<RequireAuth><QualityAliasRedirect suffix="/audits/plan" /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/schedules/list" element={<RequireAuth><QualityAliasRedirect suffix="/audits/plan" /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/schedules/calendar" element={<RequireAuth><QualityAliasRedirect suffix="/audits/schedules/calendar" /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/schedules/list" element={<RequireAuth><QualityAliasRedirect suffix="/audits/schedules/list" /></RequireAuth>} />
       <Route
         path="/maintenance/:amoCode/quality/audits/schedules/:scheduleId"
         element={<RequireAuth><QualityAuditScheduleDetailPage /></RequireAuth>}
