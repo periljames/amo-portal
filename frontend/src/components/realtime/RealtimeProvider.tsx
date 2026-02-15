@@ -217,7 +217,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     connect();
     staleIntervalRef.current = window.setInterval(() => {
-      setStaleSeconds((prev) => prev + 1);
+      setStaleSeconds((prev) => (status === "live" ? 0 : prev + 1));
     }, 1000);
     return () => {
       sourceRef.current?.close();
@@ -231,7 +231,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         window.clearInterval(staleIntervalRef.current);
       }
     };
-  }, [connect]);
+  }, [connect, status]);
 
   const refreshData = useCallback(() => {
     setStatus("syncing");

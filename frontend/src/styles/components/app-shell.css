@@ -217,6 +217,41 @@
   cursor: pointer;
 }
 
+
+.live-status__connection-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--text-secondary) 70%, var(--accent-danger) 30%);
+  background: color-mix(in srgb, var(--surface) 80%, var(--accent-danger) 20%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 70%, var(--accent-danger) 30%);
+}
+
+.live-status__connection-icon.is-critical {
+  color: var(--accent-danger);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent-danger) 50%, var(--border) 50%),
+    0 0 0 0 rgba(220, 38, 38, 0.35);
+  animation: live-status-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes live-status-breathe {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent-danger) 50%, var(--border) 50%),
+      0 0 0 0 rgba(220, 38, 38, 0.12);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent-danger) 50%, var(--border) 50%),
+      0 0 0 5px rgba(220, 38, 38, 0.22);
+  }
+}
+
 .live-status__dot {
   width: 8px;
   height: 8px;
