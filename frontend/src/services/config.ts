@@ -22,11 +22,15 @@ export function getApiBaseUrl(): string {
   }
   if (typeof window !== "undefined") {
     const { protocol, hostname, port } = window.location;
+
+    // In Vite dev (5173/4173), prefer same-origin API paths so the dev proxy can
+    // forward requests (for example to a Tailscale-reachable backend host).
+    if (port === "5173" || port === "4173") {
+      return "";
+    }
+
     if (hostname && !["localhost", "127.0.0.1"].includes(hostname)) {
       const portSuffix = port ? `:${port}` : "";
-      if (port === "5173" || port === "4173") {
-        return normaliseBaseUrl(`${protocol}//${hostname}:8080`);
-      }
       return normaliseBaseUrl(`${protocol}//${hostname}${portSuffix}`);
     }
   }
