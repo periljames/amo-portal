@@ -15,6 +15,7 @@ type PlatformLogoCacheEntry = {
 
 let platformLogoCache: PlatformLogoCacheEntry | null = null;
 let platformLogoInflight: Promise<Blob | null> | null = null;
+let platformLogoRequestGeneration = 0;
 
 export type PlatformSettings = {
   id: number;
@@ -108,6 +109,7 @@ export async function uploadPlatformLogo(file: File): Promise<PlatformSettings> 
 }
 
 export function invalidatePlatformLogoBlobCache() {
+  platformLogoRequestGeneration += 1;
   platformLogoCache = null;
   platformLogoInflight = null;
 }
@@ -121,6 +123,8 @@ export async function fetchPlatformLogoBlob(): Promise<Blob | null> {
   if (platformLogoInflight) {
     return platformLogoInflight;
   }
+
+  const requestGeneration = platformLogoRequestGeneration;
 
   const request = (async () => {
     const controller = new AbortController();
@@ -158,10 +162,12 @@ export async function fetchPlatformLogoBlob(): Promise<Blob | null> {
     }
   })()
     .then((blob) => {
-      platformLogoCache = {
-        blob,
-        expiresAt: Date.now() + PLATFORM_LOGO_CACHE_TTL_MS,
-      };
+      if (requestGeneration === platformLogoRequestGeneration) {
+        platformLogoCache = {
+          blob,
+          expiresAt: Date.now() + PLATFORM_LOGO_CACHE_TTL_MS,
+        };
+      }
       return blob;
     })
     .finally(() => {

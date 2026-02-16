@@ -13,6 +13,7 @@ type LogoCacheEntry = {
 
 const amoLogoCache = new Map<string, LogoCacheEntry>();
 const amoLogoInflight = new Map<string, Promise<Blob | null>>();
+const amoLogoRequestGeneration = new Map<string, number>();
 
 export type AmoAssetRead = {
   amo_id: string;
@@ -206,6 +207,7 @@ function getAmoLogoCacheKey(amoId?: string | null): string {
 
 export function invalidateAmoLogoBlobCache(amoId?: string | null) {
   const key = getAmoLogoCacheKey(amoId);
+  amoLogoRequestGeneration.set(key, (amoLogoRequestGeneration.get(key) ?? 0) + 1);
   amoLogoCache.delete(key);
   amoLogoInflight.delete(key);
 }
@@ -222,6 +224,8 @@ export async function fetchAmoLogoBlob(amoId?: string | null): Promise<Blob | nu
   if (existingInflight) {
     return existingInflight;
   }
+
+  const requestGeneration = amoLogoRequestGeneration.get(key) ?? 0;
 
   const request = (async () => {
     const controller = new AbortController();
@@ -262,10 +266,12 @@ export async function fetchAmoLogoBlob(amoId?: string | null): Promise<Blob | nu
     }
   })()
     .then((blob) => {
-      amoLogoCache.set(key, {
-        blob,
-        expiresAt: Date.now() + AMO_LOGO_CACHE_TTL_MS,
-      });
+      if ((amoLogoRequestGeneration.get(key) ?? 0) === requestGeneration) {
+        amoLogoCache.set(key, {
+          blob,
+          expiresAt: Date.now() + AMO_LOGO_CACHE_TTL_MS,
+        });
+      }
       return blob;
     })
     .finally(() => {

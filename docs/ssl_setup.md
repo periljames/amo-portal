@@ -180,6 +180,9 @@ Notes:
   likely received Vite HTML instead of API JSON. Ensure backend is reachable by the frontend host
   (for example `http://megatron:8080` on Tailscale), set `VITE_API_PROXY_TARGET` accordingly, and
   restart Vite so dev proxy forwarding is active.
+- If QMS endpoints (for example `/qms/cockpit` or `/qms/maintenance-calendar`) return HTML
+  (`<!doctype html>`) in dev, your request hit Vite instead of backend proxy. Ensure your frontend
+  is on updated proxy config (includes `/qms` prefix), then restart Vite.
 - Repeated `404` calls for optional logo endpoints (`/accounts/amo-assets/logo` or
   `/accounts/admin/platform-assets/logo`) now degrade gracefully in the frontend (they resolve to
   “no custom logo”). If you still see `404` in Network, it means no logo exists on the backend for
