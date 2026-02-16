@@ -200,3 +200,8 @@
 - [ ] Connect login subtitle source to live highest-priority incident feed once backend endpoint is available.
 - [ ] Pull highest-priority issue snippet directly from backend status API for login subtitle source precedence.
 - [ ] Validate one-page no-scroll dashboard mode against smallest supported laptop viewport and tune card/chart heights per department.
+
+## Realtime backlog delivery note (2026-02-16)
+- Implemented first-class MQTT interactive channel for chat/presence/ack while keeping SSE cockpit stream stable.
+- Added REST bootstrap + sync endpoints to support offline-first delivery and replay.
+- Added receipt persistence model for delivered/read/actioned state progression.

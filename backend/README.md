@@ -17,3 +17,17 @@ This README highlights operational runbooks and data-model context for billing, 
 - Subscription + billing services: `amodb/apps/accounts/services.py` (idempotency helpers, trials, purchases, cancellations, usage meters, webhooks).
 - Billing API surface: `amodb/apps/accounts/router_billing.py` (all `/billing/*` routes).
 - Data schemas/models: `amodb/apps/accounts/models.py` and `amodb/apps/accounts/schemas.py` (ResolvedEntitlement, Trial/Purchase/Cancel requests, PaymentMethod DTOs).
+
+## Realtime broker ops (MQTT/WSS)
+Set these environment variables:
+- `REALTIME_ENABLED=true`
+- `MQTT_BROKER_WS_URL=wss://<broker-host>/mqtt`
+- `MQTT_BROKER_INTERNAL_URL=tcp://<broker-host>:1883`
+- `MQTT_AUTH_MODE=jwt|username_password`
+- `REALTIME_CONNECT_TOKEN_TTL_SECONDS=300`
+- `REALTIME_PAYLOAD_MAX_BYTES=8192`
+
+Operational notes:
+- Keep SSE endpoints (`/api/events`, `/api/events/history`) enabled for cockpit/global updates.
+- Terminate TLS before browser MQTT traffic (WSS mandatory in production).
+- Use `/healthz` for combined DB + broker checks.

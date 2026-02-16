@@ -60,3 +60,9 @@ These are useful defaults for upload and response tuning (adjust per environment
 - [ ] Frontend uses responsive images + lazy loading.
 - [ ] API responses compressed and paginated.
 - [ ] Retries/backoff for unreliable networks.
+
+## Realtime reconnect and offline-first guidance (2026-02-16)
+- Browser MQTT reconnect uses exponential backoff with jitter and `keepalive=30s`.
+- Offline queue stores outbound MQTT envelopes in IndexedDB and flushes in-order after reconnect.
+- `GET /api/realtime/sync?since=<epoch_ms>` is the reconciliation path after transport gaps.
+- Keep SSE reconnection behavior/cursor replay as-is for cockpit updates to avoid broad cache churn.
