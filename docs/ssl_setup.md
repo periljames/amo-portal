@@ -87,19 +87,18 @@ If you want access from the open internet (without adding users to your tailnet)
 **Tailscale Funnel**. A plain `https://<device>.<tailnet>.ts.net` URL is usually only reachable by
 tailnet members unless Funnel is enabled for that route.
 
-Typical setup for a local frontend running on `5173`:
+Typical setup for a local frontend running on `5173` (current Tailscale CLI):
 
 ```bash
 # On the machine running the app
-tailscale serve --https=443 http://127.0.0.1:5173
-tailscale funnel 443 on
+tailscale funnel --bg --https=443 http://127.0.0.1:5173
 ```
 
 Then verify status:
 
 ```bash
-tailscale serve status
 tailscale funnel status
+tailscale status
 ```
 
 ### Windows CMD full script (copy/paste)
@@ -113,6 +112,7 @@ setlocal
 
 REM 1) Set your local frontend path (edit this for your machine)
 set "FRONTEND_DIR=C:\path\to\amo-portal\frontend"
+REM    IMPORTANT: keep both opening and closing quote characters above.
 
 REM 2) Start Vite so it listens on all interfaces
 cd /d "%FRONTEND_DIR%" || (
@@ -121,22 +121,21 @@ cd /d "%FRONTEND_DIR%" || (
 )
 start "AMO Portal Frontend" cmd /k "npm run dev -- --host 0.0.0.0 --port 5173"
 
-REM 3) Publish local port through Tailscale HTTPS and enable Funnel
+REM 3) Publish local port to the internet with Funnel
 REM    (run in an elevated cmd if required by your system policy)
-tailscale serve --bg --https=443 http://127.0.0.1:5173
-tailscale funnel 443 on
+tailscale funnel --bg --https=443 http://127.0.0.1:5173
 
 REM 4) Show status and the URL to test
 echo.
-echo ===== tailscale serve status =====
-tailscale serve status
-echo.
 echo ===== tailscale funnel status =====
 tailscale funnel status
+echo.
+echo ===== tailscale status =====
+tailscale status
 
 echo.
 echo Test from a network NOT logged into your tailnet using the URL shown by:
-echo   tailscale serve status
+echo   tailscale funnel status
 
 echo.
 echo If it still fails, run these checks:
@@ -145,8 +144,7 @@ echo   tailscale netcheck
 
 echo.
 echo To disable public access later:
-echo   tailscale funnel 443 off
-echo   tailscale serve reset
+echo   tailscale funnel reset
 
 endlocal
 ```
@@ -156,7 +154,7 @@ Notes:
 - For a stable production endpoint, prefer running a built frontend + reverse proxy rather than a
   dev server.
 - If you are testing with Vite, run it with host binding (for example, `--host 0.0.0.0`) and use
-  the same local port you publish through `tailscale serve`.
+  the same local port you publish through `tailscale funnel`.
 
 ### Example: Nginx + Let’s Encrypt (proxying to Uvicorn)
 
