@@ -62,6 +62,7 @@ const AdminOverviewPage: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [activityExpanded, setActivityExpanded] = useState(false);
+  const summaryRef = useRef<OverviewSummary | null>(null);
 
   const pollingTimerRef = useRef<number | null>(null);
   const pollingRetriesRef = useRef(0);
@@ -124,7 +125,7 @@ const AdminOverviewPage: React.FC = () => {
       if (pollingInFlightRef.current) return;
       pollingInFlightRef.current = true;
       clearPollingTimer();
-      const isInitial = summary === null;
+      const isInitial = summaryRef.current === null;
       if (isInitial) {
         setLoading(true);
       } else {
@@ -134,6 +135,7 @@ const AdminOverviewPage: React.FC = () => {
       try {
         const data = await fetchOverviewSummary();
         setSummary(data);
+        summaryRef.current = data;
         setRefreshError(null);
         pollingRetriesRef.current = 0;
         pollingStoppedRef.current = false;
@@ -152,7 +154,7 @@ const AdminOverviewPage: React.FC = () => {
         setRefreshing(false);
       }
     },
-    [handlePollingFailure, pollIntervalMs, summary]
+    [handlePollingFailure, pollIntervalMs]
   );
 
   pollingRunnerRef.current = runPolling;

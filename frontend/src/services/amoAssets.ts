@@ -202,7 +202,7 @@ export async function fetchAmoLogoBlob(amoId?: string | null): Promise<Blob | nu
     throw new Error("Session expired. Please sign in again.");
   }
 
-  if (res.status === 404) {
+  if (res.status === 404 || res.status === 204) {
     return null;
   }
 
