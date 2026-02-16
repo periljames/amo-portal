@@ -155,6 +155,9 @@ Notes:
   dev server.
 - If you are testing with Vite, run it with host binding (for example, `--host 0.0.0.0`) and use
   the same local port you publish through `tailscale funnel`.
+- If Vite shows `Blocked request. This host (...) is not allowed.`, allow your hostname in
+  `server.allowedHosts` (this repo defaults to allowing `.ts.net`) or set
+  `VITE_ALLOWED_HOSTS` (comma-separated), for example: `VITE_ALLOWED_HOSTS=.ts.net,localhost`.
 
 ### Example: Nginx + Let’s Encrypt (proxying to Uvicorn)
 
