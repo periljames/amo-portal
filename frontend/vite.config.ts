@@ -7,6 +7,33 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 const truthyValues = new Set(['1', 'true', 'yes', 'on'])
 
+
+const resolveAllowedHosts = (env: Record<string, string>): true | string[] => {
+  const configured = env.VITE_ALLOWED_HOSTS
+    ?.split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+
+  if (configured && configured.length > 0) {
+    return configured
+  }
+
+  // Allow Tailscale HTTPS hostnames (e.g. <device>.<tailnet>.ts.net) during dev.
+  return ['.ts.net']
+}
+
+const resolveDevProxy = (env: Record<string, string>) => {
+  const target = env.VITE_API_PROXY_TARGET?.trim() || 'http://127.0.0.1:8080'
+
+  return {
+    '^/(auth|accounts|admin|billing|aircraft|work-orders|crs|training|quality|reliability|audit|bootstrap|integrations|api|notifications|email-logs|tasks|health|time)(/|$)': {
+      target,
+      changeOrigin: true,
+      secure: false,
+    },
+  }
+}
+
 const resolveHttpsConfig = (env: Record<string, string>): ServerOptions | undefined => {
   const httpsFlag = env.VITE_HTTPS?.toLowerCase()
   if (!httpsFlag || !truthyValues.has(httpsFlag)) {
@@ -38,11 +65,15 @@ const resolveHttpsConfig = (env: Record<string, string>): ServerOptions | undefi
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const https = resolveHttpsConfig(env)
+  const allowedHosts = resolveAllowedHosts(env)
+  const proxy = resolveDevProxy(env)
 
   return {
     plugins: [react()],
     server: {
       https,
+      allowedHosts,
+      proxy,
     },
     build: {
       sourcemap: false,
