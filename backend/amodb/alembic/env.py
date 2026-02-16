@@ -49,7 +49,7 @@ from amodb.apps.quality import models as quality_models  # noqa: F401, E402
 from amodb.apps.reliability import models as reliability_models  # noqa: F401, E402
 from amodb.apps.inventory import models as inventory_models  # noqa: F401, E402
 from amodb.apps.finance import models as finance_models  # noqa: F401, E402
-from amodb.apps.realtime import models as realtime_models  # noqa: F401, E402
+import amodb.apps.realtime.models as realtime_models  # noqa: F401, E402
 
 # Target metadata for 'autogenerate'
 target_metadata = Base.metadata
