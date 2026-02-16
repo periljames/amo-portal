@@ -194,6 +194,9 @@ Notes:
 - For snappier remote-dev UX over Funnel, keep API calls local to Tailscale and avoid WAN backhauls:
   run frontend on one tailnet node, backend on another, and set
   `VITE_API_PROXY_TARGET=http://<backend-tailnet-host>:8080`.
+- Reliability report downloads now return a clear `404` if the DB record exists but the PDF file
+  is missing on disk (instead of a server `500`). If you see this, regenerate the report and ensure
+  backend runs from the same repo/storage location used when report artifacts were generated.
 
 ### Example: Nginx + Let’s Encrypt (proxying to Uvicorn)
 

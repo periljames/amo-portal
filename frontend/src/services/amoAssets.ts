@@ -233,7 +233,7 @@ export async function fetchAmoLogoBlob(amoId?: string | null): Promise<Blob | nu
 
     try {
       const res = await fetch(
-        `${getApiBaseUrl()}/accounts/amo-assets/logo`,
+        withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/logo`, amoId),
         {
           method: "GET",
           headers: authHeaders(),

@@ -1216,7 +1216,15 @@ def download_report(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     if not report.file_ref:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Report is not ready.")
-    return FileResponse(report.file_ref, filename=f"reliability_report_{report.id}.pdf")
+
+    report_path = Path(report.file_ref)
+    if not report_path.exists() or not report_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Generated report file is missing. Regenerate the report and retry.",
+        )
+
+    return FileResponse(str(report_path), filename=f"reliability_report_{report.id}.pdf")
 
 
 @router.post(
