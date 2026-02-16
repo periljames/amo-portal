@@ -81,6 +81,83 @@ need a valid cert + key pair from a CA (Let’s Encrypt or another provider) and
    export VITE_API_BASE_URL="https://api.example.com"
    ```
 
+## Tailscale HTTPS and public internet access
+
+If you want access from the open internet (without adding users to your tailnet), use
+**Tailscale Funnel**. A plain `https://<device>.<tailnet>.ts.net` URL is usually only reachable by
+tailnet members unless Funnel is enabled for that route.
+
+Typical setup for a local frontend running on `5173`:
+
+```bash
+# On the machine running the app
+tailscale serve --https=443 http://127.0.0.1:5173
+tailscale funnel 443 on
+```
+
+Then verify status:
+
+```bash
+tailscale serve status
+tailscale funnel status
+```
+
+### Windows CMD full script (copy/paste)
+
+Use this if your frontend runs on port `5173` and you want it reachable from the public internet
+without inviting users to your tailnet.
+
+```bat
+@echo off
+setlocal
+
+REM 1) Set your local frontend path (edit this for your machine)
+set "FRONTEND_DIR=C:\path\to\amo-portal\frontend"
+
+REM 2) Start Vite so it listens on all interfaces
+cd /d "%FRONTEND_DIR%" || (
+  echo ERROR: FRONTEND_DIR does not exist. Edit the script and retry.
+  exit /b 1
+)
+start "AMO Portal Frontend" cmd /k "npm run dev -- --host 0.0.0.0 --port 5173"
+
+REM 3) Publish local port through Tailscale HTTPS and enable Funnel
+REM    (run in an elevated cmd if required by your system policy)
+tailscale serve --bg --https=443 http://127.0.0.1:5173
+tailscale funnel 443 on
+
+REM 4) Show status and the URL to test
+echo.
+echo ===== tailscale serve status =====
+tailscale serve status
+echo.
+echo ===== tailscale funnel status =====
+tailscale funnel status
+
+echo.
+echo Test from a network NOT logged into your tailnet using the URL shown by:
+echo   tailscale serve status
+
+echo.
+echo If it still fails, run these checks:
+echo   tailscale status
+echo   tailscale netcheck
+
+echo.
+echo To disable public access later:
+echo   tailscale funnel 443 off
+echo   tailscale serve reset
+
+endlocal
+```
+
+Notes:
+- Funnel publishes your service publicly; anyone with the URL can reach it.
+- For a stable production endpoint, prefer running a built frontend + reverse proxy rather than a
+  dev server.
+- If you are testing with Vite, run it with host binding (for example, `--host 0.0.0.0`) and use
+  the same local port you publish through `tailscale serve`.
+
 ### Example: Nginx + Let’s Encrypt (proxying to Uvicorn)
 
 ```nginx
