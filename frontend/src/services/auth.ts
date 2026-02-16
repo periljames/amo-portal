@@ -116,7 +116,7 @@ export interface LoginContextResponse {
 }
 
 export type SessionEventDetail = {
-  type: "expired" | "idle-warning" | "idle-logout";
+  type: "expired" | "idle-warning" | "idle-logout" | "authenticated";
   reason?: string;
 };
 
@@ -378,6 +378,7 @@ export async function login(
   }
 
   saveLastLoginIdentifier(trimmedIdentifier);
+  emitSessionEvent({ type: "authenticated" });
 
   return data;
 }

@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { getApiBaseUrl } from "../../services/config";
-import { getContext, getToken } from "../../services/auth";
+import { getContext, getToken, onSessionEvent } from "../../services/auth";
 import { playNotificationChirp, pushDesktopNotification } from "../../services/notificationPreferences";
 import { fetchHealthz, fetchServerTime, RealtimeHttpError } from "../../services/realtime/api";
 import { RealtimeMqttClient } from "../../services/realtime/mqtt";
@@ -166,7 +166,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             if (parsedBlock?.event === "reset") {
               window.localStorage.removeItem(lastEventKey);
             } else if (parsedBlock) {
-              try { handleEvent(JSON.parse(parsedBlock.data), parsedBlock.id); } catch {}
+              try { handleEvent(JSON.parse(parsedBlock.data), parsedBlock.id); } catch { /* noop */ }
             }
             splitIndex = buffer.indexOf("\n\n");
           }
@@ -197,21 +197,59 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   useEffect(() => {
-    connectRef.current = connectSse;
-    connectSse();
-    mqttRef.current = new RealtimeMqttClient({
-      onState: (state) => {
-        setBrokerState(state);
-        if (state === "connected") {
-          frozenClockRef.current = null;
-          void syncServerTime();
-        } else if (frozenClockRef.current === null) {
-          frozenClockRef.current = Date.now() + clockOffsetMsRef.current;
-        }
-      },
-      onMessage: () => setLastUpdated(serverNow()),
+    return onSessionEvent((detail) => {
+      if (detail.type === "authenticated") {
+        retryCount.current = 0;
+        mqttRef.current?.disconnect();
+        mqttRef.current = new RealtimeMqttClient({
+          onState: (state) => {
+            setBrokerState(state);
+            if (state === "connected") {
+              frozenClockRef.current = null;
+              void syncServerTime();
+            } else if (frozenClockRef.current === null) {
+              frozenClockRef.current = Date.now() + clockOffsetMsRef.current;
+            }
+          },
+          onMessage: () => setLastUpdated(serverNow()),
+        });
+        void mqttRef.current.connect();
+        reconnectNow();
+      }
+
+      if (detail.type === "expired" || detail.type === "idle-logout") {
+        controllerRef.current?.abort();
+        mqttRef.current?.disconnect();
+        mqttRef.current = null;
+        setStatus("offline");
+        setBrokerState("offline");
+      }
     });
-    void mqttRef.current.connect();
+  }, [reconnectNow, serverNow, syncServerTime]);
+
+  useEffect(() => {
+    connectRef.current = connectSse;
+
+    if (getToken()) {
+      connectSse();
+      mqttRef.current = new RealtimeMqttClient({
+        onState: (state) => {
+          setBrokerState(state);
+          if (state === "connected") {
+            frozenClockRef.current = null;
+            void syncServerTime();
+          } else if (frozenClockRef.current === null) {
+            frozenClockRef.current = Date.now() + clockOffsetMsRef.current;
+          }
+        },
+        onMessage: () => setLastUpdated(serverNow()),
+      });
+      void mqttRef.current.connect();
+    } else {
+      setStatus("offline");
+      setBrokerState("offline");
+    }
+
     return () => {
       controllerRef.current?.abort();
       mqttRef.current?.disconnect();
