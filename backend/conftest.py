@@ -27,6 +27,7 @@ from amodb.apps.tasks import models as task_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
 from amodb.apps.integrations import models as integration_models  # noqa: E402
 from amodb.apps.maintenance_program import models as maintenance_program_models  # noqa: E402
+from amodb.apps.realtime import models as realtime_models  # noqa: E402
 
 
 @pytest.fixture()
@@ -80,6 +81,15 @@ def db_session():
             integration_models.IntegrationConfig.__table__,
             integration_models.IntegrationOutboundEvent.__table__,
             integration_models.IntegrationInboundEvent.__table__,
+            realtime_models.ChatThread.__table__,
+            realtime_models.ChatThreadMember.__table__,
+            realtime_models.ChatMessage.__table__,
+            realtime_models.MessageReceipt.__table__,
+            realtime_models.Prompt.__table__,
+            realtime_models.PromptDelivery.__table__,
+            realtime_models.PresenceState.__table__,
+            realtime_models.RealtimeOutbox.__table__,
+            realtime_models.RealtimeConnectToken.__table__,
         ],
     )
     TestingSession = sessionmaker(

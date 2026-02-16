@@ -38,6 +38,8 @@ from .apps.accounts.router_billing import router as billing_router
 from .apps.bootstrap.router import router as bootstrap_router
 from .apps.integrations.router import router as integrations_router
 from .apps.events.router import router as events_router
+from .apps.realtime.router import router as realtime_router
+from .apps.realtime.gateway import gateway as realtime_gateway
 from .apps.accounts import services as account_services
 
 
@@ -167,6 +169,7 @@ def _enforce_schema_head_sync_if_configured() -> None:
 @app.on_event("startup")
 def _schema_preflight() -> None:
     _enforce_schema_head_sync_if_configured()
+    realtime_gateway.connect()
 
 app.add_middleware(
     CORSMiddleware,
@@ -246,6 +249,21 @@ def read_root():
 def health():
     return {"status": "ok"}
 
+@app.get("/healthz", tags=["health"])
+def healthz():
+    db_ok = True
+    try:
+        db = WriteSessionLocal()
+        db.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+    return {"status": "ok" if db_ok else "degraded", "db": db_ok, "broker": realtime_gateway.health()}
+
 @app.get("/time", tags=["health"])
 def server_time():
     from datetime import datetime, timezone
@@ -278,3 +296,4 @@ app.include_router(tasks_router)
 app.include_router(bootstrap_router)
 app.include_router(integrations_router)
 app.include_router(events_router)
+app.include_router(realtime_router)

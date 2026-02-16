@@ -151,3 +151,41 @@
 
 ## Changed in this run (2026-02-11, follow-up)
 - No event schema changes.
+
+## MQTT envelope (MessagePack, schema `v=1`)
+Realtime interactive events now use MessagePack over MQTT/WebSocket while SSE remains the cockpit/global bus.
+
+Envelope fields:
+- `v` (int)
+- `id` (string, idempotency key)
+- `ts` (epoch ms)
+- `amoId` (tenant id)
+- `userId` (actor id)
+- `kind` (enum)
+- `payload` (map)
+
+### Server -> client kinds
+- `chat.message`
+- `chat.message.edited`
+- `chat.message.deleted`
+- `chat.thread.created`
+- `prompt.authorization`
+- `prompt.task_assigned`
+- `presence.snapshot`
+
+### Client -> server kinds
+- `chat.send`
+- `chat.edit`
+- `chat.delete`
+- `ack.delivered`
+- `ack.read`
+- `ack.actioned`
+- `presence.online`
+- `presence.away`
+- `presence.typing`
+
+### ACK semantics
+- `SENT`: item persisted server-side.
+- `DELIVERED`: recipient decoded and stored item locally (`ack.delivered`).
+- `READ`: recipient actually opened/visible (`ack.read`).
+- `ACTIONED`: recipient completed required prompt action (`ack.actioned`).
