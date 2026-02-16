@@ -258,7 +258,7 @@ export async function fetchAmoLogoBlob(amoId?: string | null): Promise<Blob | nu
       return await res.blob();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        return null;
+        throw new Error("AMO logo request timed out. Retrying without cache.");
       }
       throw error;
     } finally {

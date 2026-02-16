@@ -154,7 +154,7 @@ export async function fetchPlatformLogoBlob(): Promise<Blob | null> {
       return await res.blob();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        return null;
+        throw new Error("Platform logo request timed out. Retrying without cache.");
       }
       throw error;
     } finally {

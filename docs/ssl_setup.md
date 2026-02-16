@@ -187,6 +187,8 @@ Notes:
   `/accounts/admin/platform-assets/logo`) now degrade gracefully in the frontend (they resolve to
   “no custom logo”). If you still see `404` in Network, it means no logo exists on the backend for
   that scope, not a frontend crash.
+- Slow logo responses are now treated as transient timeouts (not cached as missing), so a
+  temporary network spike will not hide an existing logo for the full cache TTL.
 - If `/aircraft/document-alerts` returns `404` on older backend deployments, frontend now treats it
   as “feature unavailable” and falls back to an empty list instead of hard-failing the page.
 - For snappier remote-dev UX over Funnel, keep API calls local to Tailscale and avoid WAN backhauls:
