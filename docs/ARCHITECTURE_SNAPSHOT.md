@@ -36,3 +36,15 @@
 - **QMS task runner:** `python -m amodb.jobs.qms_task_runner` (safe to run via cron for reminders/escalations).
 
 This snapshot should be refreshed after major structural, security, or data-model changes.
+
+## Realtime split architecture update (2026-02-16)
+- **SSE (`/api/events` + `/api/events/history`) stays unchanged** and remains the default stream for cockpit/global invalidation.
+- **MQTT/WSS is added for user-interactive realtime paths only**:
+  - bidirectional chat,
+  - user presence,
+  - ack workflows (`delivered/read/actioned`) for chat + prompts/tasks.
+- Backend now includes a `realtime` module with:
+  - strict MessagePack envelope validation (`v=1`),
+  - short-lived realtime connect token issuance,
+  - tenant/topic guard rails,
+  - durable outbox table for broker publish retries.

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { WifiOff } from "lucide-react";
-import { useRealtime } from "./RealtimeProvider";
+import { useRealtime } from "./realtimeContext";
 
 const formatTime = (value: Date | null): string => {
   if (!value) return "--";
@@ -21,7 +21,7 @@ const statusLabel = (status: string): string => {
 };
 
 const LiveStatusIndicator: React.FC = () => {
-  const { status, lastUpdated, isStale, staleSeconds, isOnline, clockSource, refreshData, triggerSync } = useRealtime();
+  const { status, brokerState, backendHealth, lastGoodServerTime, lastUpdated, isStale, staleSeconds, isOnline, clockSource, refreshData, triggerSync } = useRealtime();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const label = useMemo(() => statusLabel(status), [status]);
@@ -51,6 +51,9 @@ const LiveStatusIndicator: React.FC = () => {
       {menuOpen && (
         <div className="live-status__menu" role="menu">
           <div className="live-status__meta">Last update: {formatTime(lastUpdated)}</div>
+          <div className="live-status__meta">Broker: {brokerState}</div>
+          <div className="live-status__meta">Backend: {backendHealth}</div>
+          <div className="live-status__meta">Last good server time: {formatTime(lastGoodServerTime)}</div>
           {isConnectionIssue && (
             <div className="live-status__meta">
               Connection issue for {Math.floor(staleSeconds / 60)}m {staleSeconds % 60}s.

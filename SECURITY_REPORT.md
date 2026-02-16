@@ -119,3 +119,13 @@
 
 ## Update (2026-02-11, follow-up)
 - No security model changes; mock preview visibility change is frontend-only rendering behavior.
+
+## Realtime threat model additions (2026-02-16)
+- MQTT auth avoids query-string JWTs; browser receives a short-lived scoped connect token via `POST /api/realtime/token`.
+- Topic ACL enforced by namespace and actor scope (`amo/{amoId}/user/{userId}/...`, allowed thread topics only).
+- All inbound MQTT payloads are server-validated (schema version, kind enum, payload limits).
+- Broker token/session logs exclude secret token values.
+- Idempotency protections:
+  - chat retries dedupe by `sender_id + client_msg_id`,
+  - envelope `id` preserved for QoS 1 replay safety.
+- Durable outbox guarantees eventual publish when broker has transient outages.

@@ -300,3 +300,8 @@
 - Login subtitle now changes dynamically with an enforced 8-word maximum (platform focus override, env override, then time/payroll fallback).
 - Restored email-first then password login progression and reduced login visual scale; Apple social icon visibility corrected.
 - Dashboard/cockpit surfaces now use non-glass cards with full-width, viewport-filling one-page layout defaults.
+
+## Realtime audit summary update (2026-02-16)
+- Chat/prompt receipt transitions are now persisted (`message_receipts`, `prompt_deliveries`) for explicit evidence trails.
+- Presence updates captured in `presence_state` for operational observability.
+- Realtime outbox provides broker outage tolerance with retriable publication state.

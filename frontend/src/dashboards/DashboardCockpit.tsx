@@ -17,7 +17,7 @@ import ActionPanel, { type ActionPanelContext } from "../components/panels/Actio
 import { getContext } from "../services/auth";
 import { qmsGetCockpitSnapshot, type CARStatus, type QMSCockpitSnapshotOut } from "../services/qms";
 import { isPortalGoLive } from "../services/runtimeMode";
-import { useRealtime } from "../components/realtime/RealtimeProvider";
+import { useRealtime } from "../components/realtime/realtimeContext";
 import { listEventHistory } from "../services/events";
 import type { ActionItem, ActivityItem } from "../components/dashboard/DashboardScaffold";
 import type { QualityCockpitVisualData } from "../components/dashboard/QualityCockpitCanvas";
