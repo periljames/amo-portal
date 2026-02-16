@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getApiBaseUrl } from "../../services/config";
 import { getContext, getToken } from "../../services/auth";
 import { playNotificationChirp, pushDesktopNotification } from "../../services/notificationPreferences";
-import { fetchHealthz, fetchServerTime } from "../../services/realtime/api";
+import { fetchHealthz, fetchServerTime, RealtimeHttpError } from "../../services/realtime/api";
 import { RealtimeMqttClient } from "../../services/realtime/mqtt";
 import type { BrokerState } from "../../services/realtime/types";
 import { RealtimeContext } from "./realtimeContext";
@@ -117,7 +117,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const connectSse = useCallback(() => {
     controllerRef.current?.abort();
     const token = getToken();
-    if (!token) return setStatus("offline");
+    if (!token) {
+      setStatus("offline");
+      return;
+    }
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       setStatus("offline");
       setIsOnline(false);
@@ -140,7 +143,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           credentials: "include",
           headers: { Accept: "text/event-stream", Authorization: `Bearer ${token}`, "Cache-Control": "no-cache" },
         });
-        if (!res.ok || !res.body) throw new Error(`SSE connect failed: ${res.status}`);
+        if (!res.ok || !res.body) throw new RealtimeHttpError(`SSE connect failed: ${res.status}`, res.status);
 
         retryCount.current = 0;
         setStatus("live");
@@ -173,9 +176,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           setStatus("offline");
           reconnectTimer.current = window.setTimeout(() => connectRef.current(), 1500);
         }
-      } catch {
+      } catch (err) {
         if (controller.signal.aborted) return;
         setStatus("offline");
+        if (err instanceof RealtimeHttpError && (err.status === 401 || err.status === 403)) {
+          reconnectTimer.current = window.setTimeout(() => connectRef.current(), 30_000);
+          return;
+        }
         const retryDelay = Math.min(15000, 2000 * 2 ** retryCount.current);
         retryCount.current += 1;
         reconnectTimer.current = window.setTimeout(() => connectRef.current(), retryDelay);

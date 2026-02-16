@@ -1,5 +1,5 @@
 import { getActiveAmoId, getCachedUser, getContext } from "../auth";
-import { fetchRealtimeToken } from "./api";
+import { fetchRealtimeToken, RealtimeHttpError } from "./api";
 import { loadOutbound, queueOutbound, removeOutbound } from "./queue";
 import type { BrokerState, RealtimeEnvelope } from "./types";
 
@@ -169,6 +169,12 @@ export class RealtimeMqttClient {
       });
     } catch (err) {
       this.handlers.onState("offline");
+      if (err instanceof RealtimeHttpError && (err.status === 401 || err.status === 403)) {
+        this.attempt = 6;
+        console.info("[realtime] mqtt auth unavailable; backing off reconnect attempts");
+        this.scheduleReconnect("auth");
+        return;
+      }
       console.warn("[realtime] token fetch/connect failed", err);
       this.scheduleReconnect("token");
     }
