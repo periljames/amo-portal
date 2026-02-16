@@ -3,6 +3,17 @@
 import { getApiBaseUrl } from "./config";
 import { authHeaders, getToken, handleAuthFailure } from "./auth";
 
+const AMO_LOGO_CACHE_TTL_MS = 5 * 60 * 1000;
+const AMO_LOGO_FETCH_TIMEOUT_MS = 4000;
+
+type LogoCacheEntry = {
+  blob: Blob | null;
+  expiresAt: number;
+};
+
+const amoLogoCache = new Map<string, LogoCacheEntry>();
+const amoLogoInflight = new Map<string, Promise<Blob | null>>();
+
 export type AmoAssetRead = {
   amo_id: string;
   crs_logo_filename?: string | null;
@@ -134,6 +145,7 @@ export function uploadAmoLogo(
   amoId?: string | null,
   onProgress?: (progress: TransferProgress) => void
 ): Promise<AmoAssetRead> {
+  invalidateAmoLogoBlobCache(amoId);
   return uploadAmoAsset(file, "logo", amoId, onProgress);
 }
 
@@ -188,28 +200,78 @@ export async function downloadAmoAsset(
   });
 }
 
-export async function fetchAmoLogoBlob(_amoId?: string | null): Promise<Blob | null> {
-  const res = await fetch(
-    `${getApiBaseUrl()}/accounts/amo-assets/logo`,
-    {
-      method: "GET",
-      headers: authHeaders(),
+function getAmoLogoCacheKey(amoId?: string | null): string {
+  return amoId?.trim() || "self";
+}
+
+export function invalidateAmoLogoBlobCache(amoId?: string | null) {
+  const key = getAmoLogoCacheKey(amoId);
+  amoLogoCache.delete(key);
+  amoLogoInflight.delete(key);
+}
+
+export async function fetchAmoLogoBlob(amoId?: string | null): Promise<Blob | null> {
+  const key = getAmoLogoCacheKey(amoId);
+  const now = Date.now();
+  const cached = amoLogoCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.blob;
+  }
+
+  const existingInflight = amoLogoInflight.get(key);
+  if (existingInflight) {
+    return existingInflight;
+  }
+
+  const request = (async () => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), AMO_LOGO_FETCH_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(
+        `${getApiBaseUrl()}/accounts/amo-assets/logo`,
+        {
+          method: "GET",
+          headers: authHeaders(),
+          signal: controller.signal,
+        }
+      );
+
+      if (res.status === 401) {
+        handleAuthFailure("expired");
+        throw new Error("Session expired. Please sign in again.");
+      }
+
+      if (res.status === 404 || res.status === 204) {
+        return null;
+      }
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Request failed (${res.status})`);
+      }
+
+      return await res.blob();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return null;
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
     }
-  );
+  })()
+    .then((blob) => {
+      amoLogoCache.set(key, {
+        blob,
+        expiresAt: Date.now() + AMO_LOGO_CACHE_TTL_MS,
+      });
+      return blob;
+    })
+    .finally(() => {
+      amoLogoInflight.delete(key);
+    });
 
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
-
-  if (res.status === 404 || res.status === 204) {
-    return null;
-  }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-
-  return await res.blob();
+  amoLogoInflight.set(key, request);
+  return request;
 }

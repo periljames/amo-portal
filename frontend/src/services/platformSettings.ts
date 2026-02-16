@@ -5,6 +5,17 @@ import { authHeaders, getToken, handleAuthFailure } from "./auth";
 import { apiGet, apiPut } from "./crs";
 import { getApiBaseUrl } from "./config";
 
+const PLATFORM_LOGO_CACHE_TTL_MS = 5 * 60 * 1000;
+const PLATFORM_LOGO_FETCH_TIMEOUT_MS = 4000;
+
+type PlatformLogoCacheEntry = {
+  blob: Blob | null;
+  expiresAt: number;
+};
+
+let platformLogoCache: PlatformLogoCacheEntry | null = null;
+let platformLogoInflight: Promise<Blob | null> | null = null;
+
 export type PlatformSettings = {
   id: number;
   api_base_url?: string | null;
@@ -72,6 +83,8 @@ function buildAuthHeader(): HeadersInit {
 }
 
 export async function uploadPlatformLogo(file: File): Promise<PlatformSettings> {
+  invalidatePlatformLogoBlobCache();
+
   const form = new FormData();
   form.append("file", file);
 
@@ -94,25 +107,67 @@ export async function uploadPlatformLogo(file: File): Promise<PlatformSettings> 
   return (await res.json()) as PlatformSettings;
 }
 
+export function invalidatePlatformLogoBlobCache() {
+  platformLogoCache = null;
+  platformLogoInflight = null;
+}
+
 export async function fetchPlatformLogoBlob(): Promise<Blob | null> {
-  const res = await fetch(`${getApiBaseUrl()}/accounts/admin/platform-assets/logo`, {
-    method: "GET",
-    headers: authHeaders(),
-  });
-
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
+  const now = Date.now();
+  if (platformLogoCache && platformLogoCache.expiresAt > now) {
+    return platformLogoCache.blob;
   }
 
-  if (res.status === 404) {
-    return null;
+  if (platformLogoInflight) {
+    return platformLogoInflight;
   }
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `Request failed (${res.status})`);
-  }
+  const request = (async () => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), PLATFORM_LOGO_FETCH_TIMEOUT_MS);
 
-  return await res.blob();
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/accounts/admin/platform-assets/logo`, {
+        method: "GET",
+        headers: authHeaders(),
+        signal: controller.signal,
+      });
+
+      if (res.status === 401) {
+        handleAuthFailure("expired");
+        throw new Error("Session expired. Please sign in again.");
+      }
+
+      if (res.status === 404 || res.status === 204) {
+        return null;
+      }
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Request failed (${res.status})`);
+      }
+
+      return await res.blob();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return null;
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  })()
+    .then((blob) => {
+      platformLogoCache = {
+        blob,
+        expiresAt: Date.now() + PLATFORM_LOGO_CACHE_TTL_MS,
+      };
+      return blob;
+    })
+    .finally(() => {
+      platformLogoInflight = null;
+    });
+
+  platformLogoInflight = request;
+  return request;
 }

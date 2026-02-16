@@ -81,6 +81,19 @@ need a valid cert + key pair from a CA (Let’s Encrypt or another provider) and
    export VITE_API_BASE_URL="https://api.example.com"
    ```
 
+## Production hardening (must-do before go-live)
+
+1. **Do not expose Vite dev server to production traffic.** Build the frontend (`npm run build`) and
+   serve static assets behind Nginx/Traefik/CDN.
+2. **Terminate TLS with managed certificates** (Let's Encrypt, ACM, Cloudflare Origin certs) and
+   enforce HTTPS redirects.
+3. **Restrict backend ingress** so only your reverse proxy can reach app ports (8000/8080).
+4. **Set strong cookie/session policy** (`Secure`, `HttpOnly`, `SameSite`) and rotate secrets.
+5. **Enable request/response compression and caching at proxy level** for JS/CSS bundles to improve
+   page transition latency.
+6. **Monitor p95 latency for key endpoints** (`/me`, `/stats`, `/tasks`, `/aircraft/document-alerts`)
+   and keep each under ~500ms on your LAN/Tailscale baseline before opening public traffic.
+
 ## Tailscale HTTPS and public internet access
 
 If you want access from the open internet (without adding users to your tailnet), use
@@ -167,6 +180,15 @@ Notes:
   likely received Vite HTML instead of API JSON. Ensure backend is reachable by the frontend host
   (for example `http://megatron:8080` on Tailscale), set `VITE_API_PROXY_TARGET` accordingly, and
   restart Vite so dev proxy forwarding is active.
+- Repeated `404` calls for optional logo endpoints (`/accounts/amo-assets/logo` or
+  `/accounts/admin/platform-assets/logo`) now degrade gracefully in the frontend (they resolve to
+  “no custom logo”). If you still see `404` in Network, it means no logo exists on the backend for
+  that scope, not a frontend crash.
+- If `/aircraft/document-alerts` returns `404` on older backend deployments, frontend now treats it
+  as “feature unavailable” and falls back to an empty list instead of hard-failing the page.
+- For snappier remote-dev UX over Funnel, keep API calls local to Tailscale and avoid WAN backhauls:
+  run frontend on one tailnet node, backend on another, and set
+  `VITE_API_PROXY_TARGET=http://<backend-tailnet-host>:8080`.
 
 ### Example: Nginx + Let’s Encrypt (proxying to Uvicorn)
 
