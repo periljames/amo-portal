@@ -188,9 +188,9 @@ export async function downloadAmoAsset(
   });
 }
 
-export async function fetchAmoLogoBlob(amoId?: string | null): Promise<Blob | null> {
+export async function fetchAmoLogoBlob(_amoId?: string | null): Promise<Blob | null> {
   const res = await fetch(
-    withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/logo`, amoId),
+    `${getApiBaseUrl()}/accounts/amo-assets/logo`,
     {
       method: "GET",
       headers: authHeaders(),
