@@ -32,6 +32,7 @@ export type RealtimeTokenResponse = {
   token: string;
   broker_ws_url: string;
   client_id: string;
+  amo_id: string;
   expires_at: string;
   ttl_seconds: number;
 };

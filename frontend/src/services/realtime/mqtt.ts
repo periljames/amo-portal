@@ -1,4 +1,4 @@
-import { getCachedUser, getContext } from "../auth";
+import { getActiveAmoId, getCachedUser, getContext } from "../auth";
 import { fetchRealtimeToken } from "./api";
 import { loadOutbound, queueOutbound, removeOutbound } from "./queue";
 import type { BrokerState, RealtimeEnvelope } from "./types";
@@ -50,21 +50,65 @@ async function getMsgpack(): Promise<MsgpackModule | null> {
   return msgpackPromise;
 }
 
+function backoffMs(attempt: number): number {
+  const capped = Math.min(6, Math.max(0, attempt));
+  const base = 1000 * 2 ** capped;
+  const jitter = Math.floor(Math.random() * 500);
+  return Math.min(30_000, base + jitter);
+}
+
 export class RealtimeMqttClient {
   private client: MqttLikeClient | null = null;
   private handlers: Handlers;
   private userId: string;
   private amoId: string;
   private msgpack: MsgpackModule | null = null;
+  private reconnectTimer: number | null = null;
+  private stopped = false;
+  private attempt = 0;
 
   constructor(handlers: Handlers) {
     const ctx = getContext();
     this.userId = getCachedUser()?.id || "anonymous";
-    this.amoId = ctx.amoCode || "unknown";
+    this.amoId = getActiveAmoId() || ctx.amoCode || "unknown";
     this.handlers = handlers;
   }
 
   async connect(): Promise<void> {
+    this.stopped = false;
+    await this.connectOnce();
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private scheduleReconnect(reason: string): void {
+    if (this.stopped) return;
+    this.clearReconnectTimer();
+    this.handlers.onState("reconnecting");
+    const wait = backoffMs(this.attempt++);
+    console.warn(`[realtime] mqtt reconnect scheduled in ${wait}ms (${reason})`);
+    this.reconnectTimer = window.setTimeout(() => {
+      void this.connectOnce();
+    }, wait);
+  }
+
+  private teardownClient(): void {
+    if (this.client) {
+      try {
+        this.client.end(true);
+      } catch {
+        // noop
+      }
+      this.client = null;
+    }
+  }
+
+  private async connectOnce(): Promise<void> {
     const [mqttLib, msgpack] = await Promise.all([getMqttLib(), getMsgpack()]);
     if (!mqttLib || !msgpack) {
       this.handlers.onState("offline");
@@ -73,41 +117,61 @@ export class RealtimeMqttClient {
     }
     this.msgpack = msgpack;
 
-    const tokenData = await fetchRealtimeToken();
-    this.handlers.onState("reconnecting");
+    try {
+      const tokenData = await fetchRealtimeToken();
+      this.amoId = tokenData.amo_id || this.amoId;
+      this.handlers.onState("reconnecting");
 
-    this.client = mqttLib.connect(tokenData.broker_ws_url, {
-      clientId: tokenData.client_id,
-      username: this.userId,
-      password: tokenData.token,
-      reconnectPeriod: 2000,
-      keepalive: 30,
-      clean: false,
-      connectTimeout: 10_000,
-    });
+      this.teardownClient();
+      this.client = mqttLib.connect(tokenData.broker_ws_url, {
+        clientId: tokenData.client_id,
+        username: this.userId,
+        password: tokenData.token,
+        reconnectPeriod: 0,
+        keepalive: 30,
+        clean: true,
+        connectTimeout: 10_000,
+      });
 
-    this.client.on("connect", () => {
-      this.handlers.onState("connected");
-      const inbox = `amo/${this.amoId}/user/${this.userId}/inbox`;
-      const ack = `amo/${this.amoId}/user/${this.userId}/ack`;
-      this.client?.subscribe([inbox, ack], { qos: 1 });
-      void this.flushQueue();
-    });
+      this.client.on("connect", () => {
+        this.attempt = 0;
+        this.clearReconnectTimer();
+        this.handlers.onState("connected");
+        const inbox = `amo/${this.amoId}/user/${this.userId}/inbox`;
+        const ack = `amo/${this.amoId}/user/${this.userId}/ack`;
+        this.client?.subscribe([inbox, ack], { qos: 1 });
+        void this.flushQueue();
+      });
 
-    this.client.on("reconnect", () => this.handlers.onState("reconnecting"));
-    this.client.on("offline", () => this.handlers.onState("offline"));
-    this.client.on("close", () => this.handlers.onState("offline"));
+      this.client.on("offline", () => {
+        this.handlers.onState("offline");
+        this.scheduleReconnect("offline");
+      });
+      this.client.on("close", () => {
+        this.handlers.onState("offline");
+        this.scheduleReconnect("close");
+      });
+      this.client.on("error", (err) => {
+        this.handlers.onState("offline");
+        console.warn("[realtime] mqtt error", err);
+        this.scheduleReconnect("error");
+      });
 
-    this.client.on("message", (topic, payload) => {
-      if (!this.msgpack) return;
-      try {
-        const packet = payload as Packet;
-        const decoded = this.msgpack.decode(packet) as RealtimeEnvelope;
-        this.handlers.onMessage(decoded, String(topic));
-      } catch {
-        // swallow malformed packet
-      }
-    });
+      this.client.on("message", (topic, payload) => {
+        if (!this.msgpack) return;
+        try {
+          const packet = payload as Packet;
+          const decoded = this.msgpack.decode(packet) as RealtimeEnvelope;
+          this.handlers.onMessage(decoded, String(topic));
+        } catch {
+          // swallow malformed packet
+        }
+      });
+    } catch (err) {
+      this.handlers.onState("offline");
+      console.warn("[realtime] token fetch/connect failed", err);
+      this.scheduleReconnect("token");
+    }
   }
 
   async publish(envelope: RealtimeEnvelope): Promise<void> {
@@ -131,8 +195,9 @@ export class RealtimeMqttClient {
   }
 
   disconnect(): void {
-    this.client?.end(true);
-    this.client = null;
+    this.stopped = true;
+    this.clearReconnectTimer();
+    this.teardownClient();
     this.handlers.onState("offline");
   }
 }

@@ -50,6 +50,7 @@ def issue_connect_token(db: Session, *, user: account_models.User) -> schemas.Re
         token=raw,
         broker_ws_url=broker_url,
         client_id=f"amo-{amo_id}-user-{user.id}-{session_id[:8]}",
+        amo_id=amo_id,
         expires_at=expires_at,
         ttl_seconds=ttl,
     )

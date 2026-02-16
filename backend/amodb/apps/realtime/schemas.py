@@ -49,6 +49,7 @@ class RealtimeTokenResponse(BaseModel):
     token: str
     broker_ws_url: str
     client_id: str
+    amo_id: str
     expires_at: datetime
     ttl_seconds: int
 

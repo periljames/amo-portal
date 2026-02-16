@@ -31,3 +31,16 @@ Operational notes:
 - Keep SSE endpoints (`/api/events`, `/api/events/history`) enabled for cockpit/global updates.
 - Terminate TLS before browser MQTT traffic (WSS mandatory in production).
 - Use `/healthz` for combined DB + broker checks.
+
+### Realtime broker troubleshooting (direct run steps)
+If client keeps reconnecting/offline:
+1. Confirm token endpoint returns reachable broker URL:
+   - `curl -i -X POST http://127.0.0.1:8080/api/realtime/token -H "Authorization: Bearer <JWT>"`
+2. Ensure backend env points to reachable broker websocket URL:
+   - `MQTT_BROKER_WS_URL=wss://<public-broker-host>/mqtt`
+3. Ensure broker websocket listener is up and reachable from browser network.
+4. Use `/healthz` to verify backend broker connectivity state.
+
+Client reconnect behavior:
+- Frontend now fetches a **fresh realtime token on each reconnect attempt** (prevents stale token reconnect loops).
+- Frontend uses exponential backoff with jitter up to 30s and logs reconnect cause in console.
