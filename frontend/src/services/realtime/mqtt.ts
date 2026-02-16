@@ -1,21 +1,61 @@
-import mqtt from "mqtt";
-import { decode, encode } from "@msgpack/msgpack";
-
 import { getCachedUser, getContext } from "../auth";
 import { fetchRealtimeToken } from "./api";
 import { loadOutbound, queueOutbound, removeOutbound } from "./queue";
 import type { BrokerState, RealtimeEnvelope } from "./types";
+
+type Packet = Uint8Array;
+
+type PublishOpts = { qos?: number; retain?: boolean };
+
+type MqttLikeClient = {
+  connected: boolean;
+  on: (event: string, cb: (...args: unknown[]) => void) => void;
+  subscribe: (topics: string[] | string, opts?: PublishOpts) => void;
+  publish: (topic: string, payload: Uint8Array, opts: PublishOpts, cb?: () => void) => void;
+  end: (force?: boolean) => void;
+};
+
+type MqttModule = {
+  connect: (url: string, options: Record<string, unknown>) => MqttLikeClient;
+};
+
+type MsgpackModule = {
+  encode: (value: unknown) => Packet;
+  decode: (value: Uint8Array) => unknown;
+};
 
 type Handlers = {
   onState: (state: BrokerState) => void;
   onMessage: (msg: RealtimeEnvelope, topic: string) => void;
 };
 
+let mqttLibPromise: Promise<MqttModule | null> | null = null;
+let msgpackPromise: Promise<MsgpackModule | null> | null = null;
+
+async function getMqttLib(): Promise<MqttModule | null> {
+  if (!mqttLibPromise) {
+    mqttLibPromise = import("mqtt")
+      .then((mod) => mod.default as unknown as MqttModule)
+      .catch(() => null);
+  }
+  return mqttLibPromise;
+}
+
+async function getMsgpack(): Promise<MsgpackModule | null> {
+  if (!msgpackPromise) {
+    msgpackPromise = import("@msgpack/msgpack")
+      .then((mod) => ({ encode: mod.encode, decode: mod.decode }))
+      .catch(() => null);
+  }
+  return msgpackPromise;
+}
+
 export class RealtimeMqttClient {
-  private client: mqtt.MqttClient | null = null;
+  private client: MqttLikeClient | null = null;
   private handlers: Handlers;
   private userId: string;
   private amoId: string;
+  private msgpack: MsgpackModule | null = null;
 
   constructor(handlers: Handlers) {
     const ctx = getContext();
@@ -25,10 +65,18 @@ export class RealtimeMqttClient {
   }
 
   async connect(): Promise<void> {
+    const [mqttLib, msgpack] = await Promise.all([getMqttLib(), getMsgpack()]);
+    if (!mqttLib || !msgpack) {
+      this.handlers.onState("offline");
+      console.warn("Realtime MQTT dependencies are unavailable. Run: npm install");
+      return;
+    }
+    this.msgpack = msgpack;
+
     const tokenData = await fetchRealtimeToken();
     this.handlers.onState("reconnecting");
 
-    this.client = mqtt.connect(tokenData.broker_ws_url, {
+    this.client = mqttLib.connect(tokenData.broker_ws_url, {
       clientId: tokenData.client_id,
       username: this.userId,
       password: tokenData.token,
@@ -51,9 +99,11 @@ export class RealtimeMqttClient {
     this.client.on("close", () => this.handlers.onState("offline"));
 
     this.client.on("message", (topic, payload) => {
+      if (!this.msgpack) return;
       try {
-        const decoded = decode(payload) as RealtimeEnvelope;
-        this.handlers.onMessage(decoded, topic);
+        const packet = payload as Packet;
+        const decoded = this.msgpack.decode(packet) as RealtimeEnvelope;
+        this.handlers.onMessage(decoded, String(topic));
       } catch {
         // swallow malformed packet
       }
@@ -61,13 +111,13 @@ export class RealtimeMqttClient {
   }
 
   async publish(envelope: RealtimeEnvelope): Promise<void> {
-    if (!this.client || !this.client.connected) {
+    if (!this.client || !this.client.connected || !this.msgpack) {
       await queueOutbound(envelope);
       return;
     }
     const topic = `amo/${this.amoId}/user/${this.userId}/outbox`;
     await new Promise<void>((resolve) => {
-      this.client?.publish(topic, Buffer.from(encode(envelope)), { qos: 1 }, () => resolve());
+      this.client?.publish(topic, this.msgpack!.encode(envelope), { qos: 1 }, () => resolve());
     });
   }
 

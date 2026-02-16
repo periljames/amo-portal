@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 
@@ -8,6 +8,7 @@ import { playNotificationChirp, pushDesktopNotification } from "../../services/n
 import { fetchHealthz, fetchServerTime } from "../../services/realtime/api";
 import { RealtimeMqttClient } from "../../services/realtime/mqtt";
 import type { BrokerState } from "../../services/realtime/types";
+import { RealtimeContext } from "./realtimeContext";
 
 export type RealtimeStatus = "live" | "syncing" | "offline";
 export type BackendHealth = "ok" | "degraded";
@@ -23,22 +24,6 @@ export type ActivityEvent = {
   metadata?: Record<string, unknown>;
 };
 
-type RealtimeContextValue = {
-  status: RealtimeStatus;
-  brokerState: BrokerState;
-  backendHealth: BackendHealth;
-  lastGoodServerTime: Date | null;
-  lastUpdated: Date | null;
-  activity: ActivityEvent[];
-  isStale: boolean;
-  staleSeconds: number;
-  isOnline: boolean;
-  clockSource: "server" | "local";
-  refreshData: () => void;
-  triggerSync: () => void;
-};
-
-const RealtimeContext = createContext<RealtimeContextValue | null>(null);
 
 const eventSchema = z.object({
   id: z.string(),
@@ -300,9 +285,3 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 };
-
-export function useRealtime() {
-  const ctx = useContext(RealtimeContext);
-  if (!ctx) throw new Error("useRealtime must be used within RealtimeProvider");
-  return ctx;
-}

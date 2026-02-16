@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { WifiOff } from "lucide-react";
-import { useRealtime } from "./RealtimeProvider";
+import { useRealtime } from "./realtimeContext";
 
 const formatTime = (value: Date | null): string => {
   if (!value) return "--";
