@@ -273,3 +273,13 @@
 - Runtime stability hardening: middleware now gracefully handles client disconnects (`No response returned`) as non-fatal 499 responses; no route shape change.
 - Realtime client no longer opens `/api/events` when JWT token is absent, reducing unauthorized SSE churn/noise.
 - Events history client now uses token query fallback and treats history 401 as non-fatal empty/cached response to prevent auth-loop regressions on Quality pages.
+
+## Realtime API additions (2026-02-16)
+- `POST /api/realtime/token` – issues short-lived MQTT connect token, broker URL, and client ID.
+- `GET /api/realtime/bootstrap` – returns thread memberships, unread counts, presence snapshot, and pending prompts.
+- `GET /api/realtime/sync?since=<epoch_ms>` – returns missed chat/prompt/receipt updates for offline replay.
+- `POST /api/chat/threads` – create a chat thread and initial memberships.
+- `GET /api/chat/threads` – list current user threads.
+- `GET /api/chat/threads/{id}/messages` – list thread messages with tenant/member enforcement.
+- `POST /api/prompts/{id}/action` – REST fallback for offline queued prompt actions.
+- `GET /healthz` – health probe including DB and broker connectivity.
