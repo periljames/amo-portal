@@ -1,12 +1,17 @@
 # backend/amodb/main.py
 import os
 import time
+import logging
+from pathlib import Path
 from typing import List
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from jose import JWTError, jwt
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from sqlalchemy import text
 
 from .database import Base, engine, WriteSessionLocal  
 from .security import JWT_ALGORITHM, SECRET_KEY
@@ -34,6 +39,9 @@ from .apps.bootstrap.router import router as bootstrap_router
 from .apps.integrations.router import router as integrations_router
 from .apps.events.router import router as events_router
 from .apps.accounts import services as account_services
+
+
+logger = logging.getLogger(__name__)
 
 
 def _allowed_origins() -> List[str]:
@@ -130,6 +138,35 @@ def _get_platform_settings_cached() -> accounts_models.PlatformSettings | None:
 
 
 _load_platform_performance_settings()
+
+
+def _enforce_schema_head_sync_if_configured() -> None:
+    if os.getenv("SCHEMA_STRICT", "0").strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+
+    script = ScriptDirectory.from_config(Config(str(Path(__file__).resolve().parent / "alembic.ini")))
+    repo_heads = set(script.get_heads())
+
+    db = WriteSessionLocal()
+    try:
+        rows = db.execute(text("SELECT version_num FROM alembic_version")).fetchall()
+    finally:
+        db.close()
+
+    db_versions = {str(row[0]) for row in rows}
+    if db_versions != repo_heads:
+        logger.error(
+            "Schema strict mode failed: database alembic versions %s do not match repository heads %s. "
+            "Run 'alembic -c backend/amodb/alembic.ini upgrade heads' before starting the API.",
+            sorted(db_versions),
+            sorted(repo_heads),
+        )
+        raise RuntimeError("Database schema is not at repository Alembic head(s).")
+
+
+@app.on_event("startup")
+def _schema_preflight() -> None:
+    _enforce_schema_head_sync_if_configured()
 
 app.add_middleware(
     CORSMiddleware,
