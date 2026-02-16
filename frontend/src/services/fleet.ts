@@ -102,6 +102,13 @@ export type TransferProgress = {
 type QueryVal = string | number | boolean | null | undefined;
 
 const API_BASE = getApiBaseUrl();
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const DOCUMENT_ALERTS_TIMEOUT_MS = 4_000;
+
+type FetchJsonOptions<T> = {
+  timeoutMs?: number;
+  fallbackOnNotFound?: T;
+};
 
 function toQuery(params: Record<string, QueryVal>): string {
   const qs = new URLSearchParams();
@@ -113,27 +120,45 @@ function toQuery(params: Record<string, QueryVal>): string {
   return s ? `?${s}` : "";
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
+async function fetchJson<T>(path: string, options?: FetchJsonOptions<T>): Promise<T> {
   const token = getToken();
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: "include",
-  });
+  const controller = new AbortController();
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
+  try {
+    const res = await fetch(`${getApiBaseUrl()}${path}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: "include",
+      signal: controller.signal,
+    });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Fleet API ${res.status}: ${text || res.statusText}`);
+    if (res.status === 401) {
+      handleAuthFailure("expired");
+      throw new Error("Session expired. Please sign in again.");
+    }
+
+    if (res.status === 404 && options && "fallbackOnNotFound" in options) {
+      return options.fallbackOnNotFound as T;
+    }
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Fleet API ${res.status}: ${text || res.statusText}`);
+    }
+    return (await res.json()) as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Fleet API timeout after ${timeoutMs}ms: ${path}`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
-  return (await res.json()) as T;
 }
 
 async function sendJson<T>(path: string, method: "POST" | "PUT", body: unknown): Promise<T> {
@@ -181,7 +206,11 @@ function buildSpeed(
 
 export async function listDocumentAlerts(params?: { due_within_days?: number }): Promise<AircraftDocument[]> {
   return fetchJson<AircraftDocument[]>(
-    `/aircraft/document-alerts${toQuery(params ?? {})}`
+    `/aircraft/document-alerts${toQuery(params ?? {})}`,
+    {
+      timeoutMs: DOCUMENT_ALERTS_TIMEOUT_MS,
+      fallbackOnNotFound: [],
+    }
   );
 }
 
