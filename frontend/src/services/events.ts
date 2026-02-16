@@ -19,6 +19,10 @@ export type ActivityHistoryResponse = {
 
 const etagCache = new Map<string, { etag: string; payload: ActivityHistoryResponse }>();
 
+function historyCacheKey(path: string, token: string | null): string {
+  return `${path}::${token ?? "anon"}`;
+}
+
 function historyPath(params?: {
   cursor?: string;
   limit?: number;
@@ -48,7 +52,8 @@ export async function listEventHistory(params?: {
   const token = getToken();
   const path = historyPath(params);
   const fullUrl = `${getApiBaseUrl()}${path}`;
-  const cached = etagCache.get(path);
+  const cacheKey = historyCacheKey(path, token);
+  const cached = etagCache.get(cacheKey);
   const res = await fetch(fullUrl, {
     method: "GET",
     credentials: "include",
@@ -77,7 +82,7 @@ export async function listEventHistory(params?: {
   const payload = (await res.json()) as ActivityHistoryResponse;
   const etag = res.headers.get("etag");
   if (etag) {
-    etagCache.set(path, { etag, payload });
+    etagCache.set(cacheKey, { etag, payload });
   }
   return payload;
 }

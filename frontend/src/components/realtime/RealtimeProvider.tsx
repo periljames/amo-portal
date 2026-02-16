@@ -169,7 +169,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       window.localStorage.setItem(lastEventKey, cursor);
       setStatus("live");
       const parsedTs = Date.parse(event.timestamp);
-      setLastUpdated(Number.isNaN(parsedTs) ? serverNow() : new Date(parsedTs + clockOffsetMsRef.current));
+      setLastUpdated(Number.isNaN(parsedTs) ? serverNow() : new Date(parsedTs));
       setStaleSeconds(0);
       setActivity((prev) => [event, ...prev].slice(0, MAX_ACTIVITY));
       playNotificationChirp();
