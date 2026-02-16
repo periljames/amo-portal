@@ -23,7 +23,7 @@ const resolveAllowedHosts = (env: Record<string, string>): true | string[] => {
 }
 
 const resolveDevProxy = (env: Record<string, string>) => {
-  const target = env.VITE_API_PROXY_TARGET?.trim() || 'http://127.0.0.1:8080'
+  const target = env.VITE_API_PROXY_TARGET?.trim() || env.VITE_API_BASE_URL?.trim() || 'http://127.0.0.1:8080'
 
   return {
     '^/(auth|accounts|admin|billing|aircraft|work-orders|crs|training|quality|reliability|audit|bootstrap|integrations|api|notifications|email-logs|tasks|health|time)(/|$)': {

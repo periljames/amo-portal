@@ -121,8 +121,8 @@ cd /d "%FRONTEND_DIR%" || (
   exit /b 1
 )
 
-REM    Optional: if backend is not on 127.0.0.1:8080, set VITE_API_PROXY_TARGET before starting Vite
-REM    Example: set "VITE_API_PROXY_TARGET=http://127.0.0.1:9000"
+REM    Optional: if backend is on another host (for example megatron), set proxy target before Vite
+REM    Example: set "VITE_API_PROXY_TARGET=http://megatron:8080"
 
 start "AMO Portal Frontend" cmd /k "npm run dev -- --host 0.0.0.0 --port 5173"
 
@@ -164,8 +164,9 @@ Notes:
   `server.allowedHosts` (this repo defaults to allowing `.ts.net`) or set
   `VITE_ALLOWED_HOSTS` (comma-separated), for example: `VITE_ALLOWED_HOSTS=.ts.net,localhost`.
 - If login fails with `Unexpected token '<'` and a 404 for `/auth/login-context`, your frontend
-  likely received Vite HTML instead of API JSON. Ensure backend is running locally (default
-  `http://127.0.0.1:8080`) and restart Vite so dev proxy forwarding is active.
+  likely received Vite HTML instead of API JSON. Ensure backend is reachable by the frontend host
+  (for example `http://megatron:8080` on Tailscale), set `VITE_API_PROXY_TARGET` accordingly, and
+  restart Vite so dev proxy forwarding is active.
 
 ### Example: Nginx + Let’s Encrypt (proxying to Uvicorn)
 
