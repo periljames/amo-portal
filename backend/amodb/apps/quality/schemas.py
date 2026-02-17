@@ -478,6 +478,38 @@ class MostCommonFindingTrendPointOut(BaseModel):
     count: int
 
 
+
+
+class QMSManpowerAvailabilityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: str
+    status: str
+    effective_from: datetime
+    effective_to: Optional[datetime] = None
+    note: Optional[str] = None
+    updated_by_user_id: Optional[str] = None
+    updated_at: datetime
+
+
+class QMSManpowerAvailabilityUpsert(BaseModel):
+    user_id: str
+    status: str
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    note: Optional[str] = None
+
+
+class QMSManpowerOut(BaseModel):
+    scope: str
+    total_employees: int
+    by_role: dict[str, int]
+    availability: Optional[dict[str, int]] = None
+    by_department: Optional[list[dict[str, int | str]]] = None
+    updated_at: datetime
+
+
 class QMSCockpitSnapshotOut(BaseModel):
     generated_at: datetime
     pending_acknowledgements: int
@@ -497,6 +529,12 @@ class QMSCockpitSnapshotOut(BaseModel):
     training_deferrals_pending: int
     suppliers_active: int
     suppliers_inactive: int
+    tasks_due_today: int = 0
+    tasks_overdue: int = 0
+    change_control_pending_approvals: int = 0
+    events_hold_count: int = 0
+    events_new_count: int = 0
+    manpower: Optional[QMSManpowerOut] = None
     audit_closure_trend: list[AuditClosureTrendPointOut]
     most_common_finding_trend_12m: list[MostCommonFindingTrendPointOut]
     action_queue: list[CockpitActionItemOut]

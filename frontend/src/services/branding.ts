@@ -6,6 +6,10 @@ export type BrandContext = {
   accent?: string | null;
   accentSoft?: string | null;
   accentSecondary?: string | null;
+  logoUrl?: string | null;
+  logoUrlDark?: string | null;
+  logoUrlLight?: string | null;
+  updatedAt?: string | null;
 };
 
 const BRAND_STORAGE_KEY = "amo_brand_context";

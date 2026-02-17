@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session
 from . import models
 from ..finance import models as finance_models
 from ..training import models as training_models
+from ..accounts import models as account_models
+from ..tasks import models as task_models
+from ..audit import models as audit_models
 from .enums import (
     CARActionType,
     CARPriority,
@@ -268,7 +271,69 @@ def _build_most_common_finding_trend_12m(db: Session) -> list[dict]:
         for month_key in month_keys
     ]
 
-def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dict:
+def _build_manpower_snapshot(db: Session, amo_id: Optional[str], department_code: Optional[str] = None) -> dict:
+    users_q = db.query(account_models.User).filter(account_models.User.is_active.is_(True))
+    if amo_id:
+        users_q = users_q.filter(account_models.User.amo_id == amo_id)
+
+    if department_code and amo_id:
+        dept = db.query(account_models.Department.id).filter(
+            account_models.Department.amo_id == amo_id,
+            account_models.Department.code == department_code,
+        ).first()
+        if dept:
+            users_q = users_q.filter(account_models.User.department_id == dept.id)
+
+    users = users_q.all()
+    by_role: dict[str, int] = {}
+    for user in users:
+        role_key = getattr(getattr(user, "role", None), "value", getattr(user, "role", "UNKNOWN")) or "UNKNOWN"
+        by_role[role_key] = by_role.get(role_key, 0) + 1
+
+    by_department_rows = []
+    if amo_id:
+        by_department_rows = (
+            db.query(account_models.Department.name, func.count(account_models.User.id))
+            .join(account_models.User, account_models.User.department_id == account_models.Department.id, isouter=True)
+            .filter(account_models.Department.amo_id == amo_id, account_models.User.is_active.is_(True))
+            .group_by(account_models.Department.name)
+            .all()
+        )
+
+    now = datetime.now(timezone.utc)
+    availability = {"on_duty": 0, "away": 0, "on_leave": 0}
+    try:
+        availability_q = db.query(models.UserAvailability)
+        if amo_id:
+            availability_q = availability_q.filter(models.UserAvailability.amo_id == amo_id)
+        availability_rows = availability_q.filter(
+            models.UserAvailability.effective_from <= now,
+            or_(models.UserAvailability.effective_to.is_(None), models.UserAvailability.effective_to >= now),
+        ).all()
+    except SQLAlchemyError:
+        _rollback_session(db)
+        availability_rows = []
+
+    for row in availability_rows:
+        state = getattr(getattr(row, "status", None), "value", getattr(row, "status", ""))
+        if state == "ON_DUTY":
+            availability["on_duty"] += 1
+        elif state == "AWAY":
+            availability["away"] += 1
+        elif state == "ON_LEAVE":
+            availability["on_leave"] += 1
+
+    return {
+        "scope": "department" if department_code else "tenant",
+        "total_employees": len(users),
+        "by_role": by_role,
+        "availability": availability if availability_rows else None,
+        "by_department": [{"department": name or "Unassigned", "count": int(count or 0)} for name, count in by_department_rows] if by_department_rows else None,
+        "updated_at": now,
+    }
+
+
+def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optional[str] = None, department_code: Optional[str] = None) -> dict:
     dashboard = get_dashboard(db, domain=domain)
     open_statuses = [CARStatus.OPEN, CARStatus.IN_PROGRESS, CARStatus.PENDING_VERIFICATION]
     cars_q = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.status.in_(open_statuses))
@@ -292,36 +357,60 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dic
         models.CorrectiveActionRequest.due_date < today,
     ))
 
-    training_expiring_30d = _safe_count(db.query(training_models.TrainingRecord).filter(
+    training_q = db.query(training_models.TrainingRecord)
+    deferral_q = db.query(training_models.TrainingDeferralRequest)
+    if amo_id and hasattr(training_models.TrainingRecord, "amo_id"):
+        training_q = training_q.filter(training_models.TrainingRecord.amo_id == amo_id)
+    if amo_id and hasattr(training_models.TrainingDeferralRequest, "amo_id"):
+        deferral_q = deferral_q.filter(training_models.TrainingDeferralRequest.amo_id == amo_id)
+
+    training_expiring_30d = _safe_count(training_q.filter(
         training_models.TrainingRecord.valid_until.is_not(None),
         training_models.TrainingRecord.valid_until >= today,
         training_models.TrainingRecord.valid_until <= today + timedelta(days=30),
     ))
-    training_expired = _safe_count(db.query(training_models.TrainingRecord).filter(
+    training_expired = _safe_count(training_q.filter(
         training_models.TrainingRecord.valid_until.is_not(None),
         training_models.TrainingRecord.valid_until < today,
     ))
-    training_unverified = _safe_count(db.query(training_models.TrainingRecord).filter(
+    training_unverified = _safe_count(training_q.filter(
         training_models.TrainingRecord.verification_status == training_models.TrainingRecordVerificationStatus.PENDING,
     ))
-    training_deferrals_pending = _safe_count(db.query(training_models.TrainingDeferralRequest).filter(
+    training_deferrals_pending = _safe_count(deferral_q.filter(
         training_models.TrainingDeferralRequest.status == training_models.DeferralStatus.PENDING,
     ))
 
-    suppliers_active = _safe_count(db.query(finance_models.Vendor).filter(finance_models.Vendor.is_active.is_(True)))
-    suppliers_inactive = _safe_count(db.query(finance_models.Vendor).filter(finance_models.Vendor.is_active.is_(False)))
+    suppliers_q = db.query(finance_models.Vendor)
+    if amo_id and hasattr(finance_models.Vendor, "amo_id"):
+        suppliers_q = suppliers_q.filter(finance_models.Vendor.amo_id == amo_id)
+    suppliers_active = _safe_count(suppliers_q.filter(finance_models.Vendor.is_active.is_(True)))
+    suppliers_inactive = _safe_count(suppliers_q.filter(finance_models.Vendor.is_active.is_(False)))
+
+    tasks_q = db.query(task_models.Task).filter(task_models.Task.status.in_([task_models.TaskStatus.OPEN, task_models.TaskStatus.IN_PROGRESS]))
+    if amo_id:
+        tasks_q = tasks_q.filter(task_models.Task.amo_id == amo_id)
+    tasks_due_today = _safe_count(tasks_q.filter(func.date(task_models.Task.due_at) == today))
+    tasks_overdue = _safe_count(tasks_q.filter(task_models.Task.due_at.is_not(None), func.date(task_models.Task.due_at) < today))
+
+    events_hold_count = 0
+    events_new_count = 0
+    if amo_id:
+        events_hold_count = _safe_count(db.query(audit_models.AuditEvent).filter(audit_models.AuditEvent.amo_id == amo_id, audit_models.AuditEvent.action.ilike("%hold%")))
+        events_new_count = _safe_count(db.query(audit_models.AuditEvent).filter(audit_models.AuditEvent.amo_id == amo_id, audit_models.AuditEvent.occurred_at >= datetime.now(timezone.utc) - timedelta(days=1)))
+
+    manpower = _build_manpower_snapshot(db, amo_id=amo_id, department_code=department_code)
 
     return {
         "generated_at": datetime.now(timezone.utc),
-        "pending_acknowledgements": dashboard["distributions_pending_ack"],
-        "audits_open": dashboard["audits_open"],
-        "audits_total": dashboard["audits_total"],
-        "findings_overdue": dashboard["findings_overdue_total"],
-        "findings_open_total": dashboard["findings_open_total"],
-        "documents_active": dashboard["documents_active"],
-        "documents_draft": dashboard["documents_draft"],
-        "documents_obsolete": dashboard["documents_obsolete"],
-        "change_requests_open": dashboard["change_requests_open"],
+        "pending_acknowledgements": dashboard.get("distributions_pending_ack", 0),
+        "audits_open": dashboard.get("audits_open", 0),
+        "audits_total": dashboard.get("audits_total", 0),
+        "findings_overdue": dashboard.get("findings_overdue_total", 0),
+        "findings_open_total": dashboard.get("findings_open_total", 0),
+        "documents_active": dashboard.get("documents_active", 0),
+        "documents_draft": dashboard.get("documents_draft", 0),
+        "documents_obsolete": dashboard.get("documents_obsolete", 0),
+        "change_requests_open": dashboard.get("change_requests_open", 0),
         "cars_open_total": cars_open_total,
         "cars_overdue": cars_overdue,
         "training_records_expiring_30d": training_expiring_30d,
@@ -330,6 +419,12 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None) -> dic
         "training_deferrals_pending": training_deferrals_pending,
         "suppliers_active": suppliers_active,
         "suppliers_inactive": suppliers_inactive,
+        "tasks_due_today": tasks_due_today,
+        "tasks_overdue": tasks_overdue,
+        "change_control_pending_approvals": dashboard.get("change_requests_open", 0),
+        "events_hold_count": events_hold_count,
+        "events_new_count": events_new_count,
+        "manpower": manpower,
         "audit_closure_trend": _build_audit_closure_trend(db),
         "most_common_finding_trend_12m": _build_most_common_finding_trend_12m(db),
         "action_queue": [

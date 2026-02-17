@@ -37,6 +37,10 @@ export function useColorScheme() {
 
   useEffect(() => {
     if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    root.dataset.colorScheme = resolvedScheme;
+    root.dataset.colorSchemeMode = scheme;
+    root.style.colorScheme = resolvedScheme;
     document.body.dataset.colorScheme = resolvedScheme;
     document.body.dataset.colorSchemeMode = scheme;
     window.localStorage.setItem(STORAGE_KEY, scheme);

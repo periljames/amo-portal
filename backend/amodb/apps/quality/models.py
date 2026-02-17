@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import datetime, timezone
 
@@ -760,3 +761,32 @@ class CARAttachment(Base):
 
     def __repr__(self) -> str:
         return f"<CARAttachment id={self.id} car={self.car_id} filename={self.filename}>"
+
+
+class UserAvailabilityStatus(str, enum.Enum):
+    ON_DUTY = "ON_DUTY"
+    AWAY = "AWAY"
+    ON_LEAVE = "ON_LEAVE"
+
+
+class UserAvailability(Base):
+    __tablename__ = "user_availability"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(SAEnum(UserAvailabilityStatus, name="user_availability_status_enum", native_enum=False), nullable=False, index=True)
+    effective_from = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    effective_to = Column(DateTime(timezone=True), nullable=True)
+    note = Column(Text, nullable=True)
+    updated_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        Index("ix_user_availability_amo_status", "amo_id", "status"),
+        Index("ix_user_availability_amo_user", "amo_id", "user_id"),
+        Index("ix_user_availability_amo_updated", "amo_id", "updated_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserAvailability user={self.user_id} status={self.status}>"

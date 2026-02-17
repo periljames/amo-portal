@@ -90,7 +90,15 @@ export interface AmoContext {
   contact_email?: string | null;
   contact_phone?: string | null;
   time_zone?: string | null;
+  branding?: AmoBranding | null;
 }
+
+export type AmoBranding = {
+  logoUrl?: string | null;
+  logoUrlDark?: string | null;
+  logoUrlLight?: string | null;
+  updatedAt?: string | null;
+};
 
 export interface DepartmentContext {
   id: string;
@@ -116,7 +124,7 @@ export interface LoginContextResponse {
 }
 
 export type SessionEventDetail = {
-  type: "expired" | "idle-warning" | "idle-logout";
+  type: "expired" | "idle-warning" | "idle-logout" | "authenticated" | "activity" | "manual-logout";
   reason?: string;
 };
 
@@ -364,6 +372,10 @@ export async function login(
     );
     setBrandContext({
       name: data.amo.name,
+      logoUrl: data.amo.branding?.logoUrl,
+      logoUrlDark: data.amo.branding?.logoUrlDark,
+      logoUrlLight: data.amo.branding?.logoUrlLight,
+      updatedAt: data.amo.branding?.updatedAt,
     });
     // Track currently active AMO id (useful later for SUPERUSER support workflows)
     setActiveAmoId(data.amo.id);
@@ -378,6 +390,9 @@ export async function login(
   }
 
   saveLastLoginIdentifier(trimmedIdentifier);
+  emitSessionEvent({ type: "authenticated" });
+  emitSessionEvent({ type: "activity", reason: "login" });
+  void sendPresenceBeacon("online", "login");
 
   return data;
 }
@@ -532,10 +547,31 @@ export async function fetchOnboardingStatus(options?: {
   return status;
 }
 
+async function sendPresenceBeacon(state: "online" | "away", reason?: string): Promise<void> {
+  const token = getToken();
+  if (!token) return;
+
+  try {
+    await fetch(`${getApiBaseUrl()}/api/realtime/presence`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      keepalive: true,
+      body: JSON.stringify({ state, reason }),
+    });
+  } catch {
+    // best-effort only
+  }
+}
+
 /**
  * Clear all local auth/session state.
  */
 export function logout(): void {
+
   clearToken();
   clearContext();
   clearCachedUser();
@@ -563,7 +599,18 @@ export function onSessionEvent(
   return () => window.removeEventListener(SESSION_EVENT_KEY, listener);
 }
 
+export function markSessionActivity(reason = "interaction"): void {
+  emitSessionEvent({ type: "activity", reason });
+}
+
+export function endSession(reason: "manual" | "idle" = "manual"): void {
+  void sendPresenceBeacon("away", reason);
+  logout();
+  emitSessionEvent({ type: reason === "idle" ? "idle-logout" : "manual-logout", reason });
+}
+
 export function handleAuthFailure(reason = "expired"): void {
+  void sendPresenceBeacon("away", reason);
   logout();
   emitSessionEvent({ type: "expired", reason });
 }
