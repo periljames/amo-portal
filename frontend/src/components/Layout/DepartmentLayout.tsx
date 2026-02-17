@@ -1,5 +1,5 @@
 // src/components/Layout/DepartmentLayout.tsx
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { BrandContext } from "../Brand/BrandContext";
 import { BrandHeader } from "../Brand/BrandHeader";
@@ -9,6 +9,7 @@ import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
 import { useToast } from "../feedback/ToastProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
+import { useColorScheme } from "../../hooks/useColorScheme";
 import { usePortalRuntimeMode } from "../../hooks/usePortalRuntimeMode";
 import { isUiShellV2Enabled } from "../../utils/featureFlags";
 import {
@@ -69,7 +70,6 @@ const ADMIN_NAV_ITEMS: Array<{ id: AdminNavId; label: string }> = [
   { id: "admin-email-settings", label: "Email Server" },
 ];
 
-type ColorScheme = "dark" | "light";
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const IDLE_WARNING_MS = 3 * 60 * 1000;
@@ -186,14 +186,10 @@ const DepartmentLayout: React.FC<Props> = ({
   showPollingErrorBanner = true,
 }) => {
   const theme = useTimeOfDayTheme();
-  const [collapsed, setCollapsed] = useState(false);
-  const [colorScheme, setColorScheme] = useState<ColorScheme>(() => {
-    if (typeof window === "undefined") return "dark";
-    const stored = window.localStorage.getItem("amo_color_scheme") as
-      | ColorScheme
-      | null;
-    return stored === "light" || stored === "dark" ? stored : "dark";
-  });
+  const { scheme: colorScheme, toggle: toggleColorScheme } = useColorScheme();
+  const [sidebarPinned, setSidebarPinned] = useState(false);
+  const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
+  const [isDesktopSidebar, setIsDesktopSidebar] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<TrainingNotificationRead[]>([]);
@@ -230,7 +226,29 @@ const DepartmentLayout: React.FC<Props> = ({
     };
   }, [uiShellV2]);
 
+  useEffect(() => {
+    if (!uiShellV2 || typeof window === "undefined") return;
+    const media = window.matchMedia("(min-width: 1025px)");
+    const apply = () => setIsDesktopSidebar(media.matches);
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [uiShellV2]);
+
   const currentUser = getCachedUser();
+  const sidebarStorageKey = `amo_sidebar_pinned:${currentUser?.id || "anon"}:${currentUser?.amo_id || amoCode}`;
+
+  useEffect(() => {
+    if (!uiShellV2 || typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(sidebarStorageKey);
+    setSidebarPinned(stored === "1");
+  }, [sidebarStorageKey, uiShellV2]);
+
+  useEffect(() => {
+    if (!uiShellV2 || typeof window === "undefined") return;
+    window.localStorage.setItem(sidebarStorageKey, sidebarPinned ? "1" : "0");
+    if (sidebarPinned) setSidebarDrawerOpen(false);
+  }, [sidebarPinned, sidebarStorageKey, uiShellV2]);
   const { isGoLive } = usePortalRuntimeMode();
   const isSuperuser = !!currentUser?.is_superuser;
   const isTenantAdmin = isSuperuser || !!currentUser?.is_amo_admin;
@@ -309,15 +327,6 @@ const DepartmentLayout: React.FC<Props> = ({
     document.body.dataset.theme = theme;
   }, [theme]);
 
-  useLayoutEffect(() => {
-    if (typeof document === "undefined" || typeof window === "undefined") return;
-    document.body.dataset.colorScheme = colorScheme;
-    window.localStorage.setItem("amo_color_scheme", colorScheme);
-  }, [colorScheme]);
-
-  const toggleColorScheme = () => {
-    setColorScheme((prev) => (prev === "dark" ? "light" : "dark"));
-  };
 
   const closeLauncher = useCallback(() => {
     setFocusMenuOpen(false);
@@ -456,7 +465,8 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const amoLabel = (amoCode || "AMO").toUpperCase();
   const shellBase = uiShellV2 ? "app-shell app-shell--v2" : "app-shell";
-  const shellClassName = collapsed ? `${shellBase} app-shell--collapsed` : shellBase;
+  const sidebarOpen = sidebarPinned || sidebarDrawerOpen;
+  const shellClassName = `${shellBase}${uiShellV2 ? ` app-shell--${sidebarPinned ? "pinned" : "drawer"}${sidebarOpen ? " app-shell--drawer-open" : ""}` : ""}`;
   const isBillingRoute = useMemo(() => {
     return location.pathname.includes("/billing");
   }, [location.pathname]);
@@ -528,6 +538,63 @@ const DepartmentLayout: React.FC<Props> = ({
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [closeLauncher, focusMenuOpen]);
+
+  useEffect(() => {
+    if (!uiShellV2 || !isDesktopSidebar || sidebarPinned) return;
+
+    const clearCloseTimer = () => {
+      if (sidebarCloseTimerRef.current) {
+        window.clearTimeout(sidebarCloseTimerRef.current);
+        sidebarCloseTimerRef.current = null;
+      }
+    };
+
+    const openDrawer = () => {
+      clearCloseTimer();
+      setSidebarDrawerOpen(true);
+    };
+
+    const scheduleClose = () => {
+      clearCloseTimer();
+      sidebarCloseTimerRef.current = window.setTimeout(() => {
+        setSidebarDrawerOpen(false);
+      }, 160);
+    };
+
+    let rafId = 0;
+    const onPointerMove = (event: PointerEvent) => {
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        if (event.clientX <= 8) {
+          openDrawer();
+        }
+      });
+    };
+
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    const sidebarEl = sidebarRef.current;
+    const hotzoneEl = sidebarHotzoneRef.current;
+    sidebarEl?.addEventListener("pointerenter", openDrawer);
+    sidebarEl?.addEventListener("pointerleave", scheduleClose);
+    hotzoneEl?.addEventListener("pointerenter", openDrawer);
+    hotzoneEl?.addEventListener("pointerleave", scheduleClose);
+
+    return () => {
+      clearCloseTimer();
+      if (rafId) window.cancelAnimationFrame(rafId);
+      window.removeEventListener("pointermove", onPointerMove);
+      sidebarEl?.removeEventListener("pointerenter", openDrawer);
+      sidebarEl?.removeEventListener("pointerleave", scheduleClose);
+      hotzoneEl?.removeEventListener("pointerenter", openDrawer);
+      hotzoneEl?.removeEventListener("pointerleave", scheduleClose);
+    };
+  }, [isDesktopSidebar, sidebarPinned, uiShellV2]);
+
+  useEffect(() => {
+    if (!isDesktopSidebar || sidebarPinned) return;
+    setSidebarDrawerOpen(false);
+  }, [isDesktopSidebar, sidebarPinned]);
 
   type QmsNavItem = {
     id: string;
@@ -646,6 +713,9 @@ const DepartmentLayout: React.FC<Props> = ({
   const pollingInFlightRef = useRef(false);
   const trialMenuRef = useRef<HTMLDivElement | null>(null);
   const lastPollingToastRef = useRef<string | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const sidebarHotzoneRef = useRef<HTMLDivElement | null>(null);
+  const sidebarCloseTimerRef = useRef<number | null>(null);
 
   const isForbiddenError = useCallback((err: unknown): boolean => {
     const message = err instanceof Error ? err.message : String(err);
@@ -1248,14 +1318,17 @@ const DepartmentLayout: React.FC<Props> = ({
               <div className="sidebar__header">
                 <BrandHeader variant="sidebar" />
 
-                <button
-                  type="button"
-                  className="sidebar__collapse-btn"
-                  onClick={() => setCollapsed((c) => !c)}
-                  aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                >
-                  {collapsed ? "›" : "‹"}
-                </button>
+                {uiShellV2 && (
+                  <button
+                    type="button"
+                    className="sidebar__pin-btn"
+                    onClick={() => setSidebarPinned((prev) => !prev)}
+                    aria-label={sidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+                    title={sidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+                  >
+                    {sidebarPinned ? "Unpin" : "Pin"}
+                  </button>
+                )}
               </div>
 
               <nav className="sidebar__nav">
@@ -1518,7 +1591,7 @@ const DepartmentLayout: React.FC<Props> = ({
             </>
           );
 
-          const sidebar = <aside className="app-shell__sidebar">{sidebarContent}</aside>;
+          const sidebar = <aside ref={sidebarRef} className="app-shell__sidebar">{sidebarContent}</aside>;
           const focusSidebar = (
             <aside className="app-shell__sidebar app-shell__sidebar--focus">
               {sidebarContent}
@@ -1782,9 +1855,11 @@ const DepartmentLayout: React.FC<Props> = ({
                           toggleColorScheme();
                         }}
                       >
-                        {colorScheme === "dark"
-                          ? "Switch to Light mode"
-                          : "Switch to Dark mode"}
+                        {colorScheme === "system"
+                          ? "Theme: System (switch to dark)"
+                          : colorScheme === "dark"
+                            ? "Theme: Dark (switch to light)"
+                            : "Theme: Light (switch to system)"}
                       </button>
 
                       {isSuperuser && (
@@ -2029,6 +2104,9 @@ const DepartmentLayout: React.FC<Props> = ({
 
           return (
             <>
+              {uiShellV2 && isDesktopSidebar && !sidebarPinned && (
+                <div ref={sidebarHotzoneRef} className="app-shell__edge-hotzone" aria-hidden="true" />
+              )}
               {focusMode && (
                 <button
                   type="button"

@@ -90,7 +90,15 @@ export interface AmoContext {
   contact_email?: string | null;
   contact_phone?: string | null;
   time_zone?: string | null;
+  branding?: AmoBranding | null;
 }
+
+export type AmoBranding = {
+  logoUrl?: string | null;
+  logoUrlDark?: string | null;
+  logoUrlLight?: string | null;
+  updatedAt?: string | null;
+};
 
 export interface DepartmentContext {
   id: string;
@@ -364,6 +372,10 @@ export async function login(
     );
     setBrandContext({
       name: data.amo.name,
+      logoUrl: data.amo.branding?.logoUrl,
+      logoUrlDark: data.amo.branding?.logoUrlDark,
+      logoUrlLight: data.amo.branding?.logoUrlLight,
+      updatedAt: data.amo.branding?.updatedAt,
     });
     // Track currently active AMO id (useful later for SUPERUSER support workflows)
     setActiveAmoId(data.amo.id);
