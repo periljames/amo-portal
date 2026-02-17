@@ -573,63 +573,6 @@ const DepartmentLayout: React.FC<Props> = ({
     setSidebarDrawerOpen(false);
   }, [isDesktopSidebar, sidebarPinned]);
 
-  useEffect(() => {
-    if (!uiShellV2 || !isDesktopSidebar || sidebarPinned) return;
-
-    const clearCloseTimer = () => {
-      if (sidebarCloseTimerRef.current) {
-        window.clearTimeout(sidebarCloseTimerRef.current);
-        sidebarCloseTimerRef.current = null;
-      }
-    };
-
-    const openDrawer = () => {
-      clearCloseTimer();
-      setSidebarDrawerOpen(true);
-    };
-
-    const scheduleClose = () => {
-      clearCloseTimer();
-      sidebarCloseTimerRef.current = window.setTimeout(() => {
-        setSidebarDrawerOpen(false);
-      }, 280);
-    };
-
-    let rafId = 0;
-    const onPointerMove = (event: PointerEvent) => {
-      if (rafId) return;
-      rafId = window.requestAnimationFrame(() => {
-        rafId = 0;
-        if (event.clientX <= 8) {
-          openDrawer();
-        }
-      });
-    };
-
-    window.addEventListener("pointermove", onPointerMove, { passive: true });
-    const sidebarEl = sidebarRef.current;
-    const hotzoneEl = sidebarHotzoneRef.current;
-    sidebarEl?.addEventListener("pointerenter", openDrawer);
-    sidebarEl?.addEventListener("pointerleave", scheduleClose);
-    hotzoneEl?.addEventListener("pointerenter", openDrawer);
-    hotzoneEl?.addEventListener("pointerleave", scheduleClose);
-
-    return () => {
-      clearCloseTimer();
-      if (rafId) window.cancelAnimationFrame(rafId);
-      window.removeEventListener("pointermove", onPointerMove);
-      sidebarEl?.removeEventListener("pointerenter", openDrawer);
-      sidebarEl?.removeEventListener("pointerleave", scheduleClose);
-      hotzoneEl?.removeEventListener("pointerenter", openDrawer);
-      hotzoneEl?.removeEventListener("pointerleave", scheduleClose);
-    };
-  }, [isDesktopSidebar, sidebarPinned, uiShellV2]);
-
-  useEffect(() => {
-    if (!isDesktopSidebar || sidebarPinned) return;
-    setSidebarDrawerOpen(false);
-  }, [isDesktopSidebar, sidebarPinned]);
-
   type QmsNavItem = {
     id: string;
     label: string;

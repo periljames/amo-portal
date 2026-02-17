@@ -67,8 +67,6 @@ const AdminDashboardPage: React.FC = () => {
     defaultRoute: "",
     sortOrder: "",
   });
-  const lastUsersRequestKey = useRef<string | null>(null);
-  const lastUsersFetchAt = useRef<number>(0);
   const usersRequestRef = useRef<{
     key: string;
     controller: AbortController;
@@ -308,13 +306,6 @@ const AdminDashboardPage: React.FC = () => {
         return;
       }
 
-      if (lastUsersRequestKey.current === usersRequestKey) {
-        const now = Date.now();
-        if (now - lastUsersFetchAt.current < 1000) {
-          return;
-        }
-      }
-
       if (usersRequestRef.current?.key === usersRequestKey) {
         return;
       }
@@ -327,8 +318,6 @@ const AdminDashboardPage: React.FC = () => {
       try {
         const controller = new AbortController();
         usersRequestRef.current = { key: usersRequestKey, controller };
-        lastUsersRequestKey.current = usersRequestKey;
-        lastUsersFetchAt.current = Date.now();
         setLoading(true);
 
         const data = await listAdminUsers(
@@ -344,7 +333,6 @@ const AdminDashboardPage: React.FC = () => {
         );
 
         setUsers(data);
-        lastUsersRequestKey.current = usersRequestKey;
       } catch (err: any) {
         if (err?.name === "AbortError") {
           return;
