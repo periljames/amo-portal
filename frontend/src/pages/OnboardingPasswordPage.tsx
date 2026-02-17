@@ -7,7 +7,7 @@ import {
   changePassword,
   getCachedUser,
   getContext,
-  logout,
+  endSession,
 } from "../services/auth";
 
 const PASSWORD_MIN_LENGTH = 12;
@@ -69,7 +69,7 @@ const OnboardingPasswordPage: React.FC = () => {
         : (ctx.department || null);
 
       if (!landing) {
-        logout();
+        endSession("manual");
         navigate("/login", { replace: true });
         return;
       }
