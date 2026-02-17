@@ -331,14 +331,16 @@ const DepartmentLayout: React.FC<Props> = ({
   const closeLauncher = useCallback(() => {
     setFocusMenuOpen(false);
     setEdgePeekOpen(false);
-  }, []);
+    if (!sidebarPinned) setSidebarDrawerOpen(false);
+  }, [sidebarPinned]);
 
   const navigateFromLauncher = useCallback(
     (path: string, options?: { replace?: boolean; state?: unknown }) => {
       closeLauncher();
+      if (!sidebarPinned) setSidebarDrawerOpen(false);
       navigate(path, options as never);
     },
-    [closeLauncher, navigate]
+    [closeLauncher, navigate, sidebarPinned]
   );
 
   const handleNav = (deptId: DepartmentId) => {
@@ -517,7 +519,7 @@ const DepartmentLayout: React.FC<Props> = ({
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === "\\") {
         event.preventDefault();
-        setFocusMenuOpen((prev) => !prev);
+        if (!sidebarPinned) setSidebarDrawerOpen(true);
       }
       if (event.key === "Escape") {
         setFocusMenuOpen(false);
@@ -526,7 +528,7 @@ const DepartmentLayout: React.FC<Props> = ({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [focusMode]);
+  }, [focusMode, sidebarPinned]);
 
   useEffect(() => {
     if (!focusMenuOpen) return;
@@ -558,7 +560,7 @@ const DepartmentLayout: React.FC<Props> = ({
       clearCloseTimer();
       sidebarCloseTimerRef.current = window.setTimeout(() => {
         setSidebarDrawerOpen(false);
-      }, 160);
+      }, 280);
     };
 
     let rafId = 0;
@@ -1604,7 +1606,7 @@ const DepartmentLayout: React.FC<Props> = ({
           const header = (
             <header className="app-shell__topbar">
               <div className="app-shell__topbar-title">
-                {uiShellV2 && (
+                {uiShellV2 && !isDesktopSidebar && (
                   <div
                     ref={focusLauncherRef}
                     className="focus-launcher focus-launcher--topbar"
@@ -1630,13 +1632,22 @@ const DepartmentLayout: React.FC<Props> = ({
               </div>
 
               <div className="app-shell__topbar-actions">
+                {uiShellV2 && !isDesktopSidebar && !sidebarPinned && (
+                  <button
+                    type="button"
+                    className="focus-launcher__toggle"
+                    onClick={() => setSidebarDrawerOpen((prev) => !prev)}
+                    aria-label="Toggle navigation"
+                  >
+                    Menu
+                  </button>
+                )}
                 {uiShellV2 && <LiveStatusIndicator />}
                 {uiShellV2 && (
                   <span className={`app-shell__flight-chip ${isGoLive ? "app-shell__flight-chip--live" : "app-shell__flight-chip--demo"}`}>
                     {isGoLive ? "LIVE" : "DEMO"}
                   </span>
                 )}
-                {focusMode && <span className="focus-launcher__hint">Ctrl/⌘ + \</span>}
                 {trialChipVisible && (
                   <div ref={trialMenuRef} style={{ position: "relative" }}>
                     <button

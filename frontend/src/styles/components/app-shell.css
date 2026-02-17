@@ -524,3 +524,16 @@ body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active .sidebar__
     transition-duration: 1ms;
   }
 }
+
+.brand-header__topbar-fallback {
+  color: var(--text-primary);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
+@media (min-width: 1025px) {
+  .focus-launcher--topbar {
+    display: none;
+  }
+}

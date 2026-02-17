@@ -42,6 +42,26 @@ export const BrandHeader: React.FC<BrandHeaderProps> = ({
 
   const showFullTopbarLogo = variant === "topbar" && preferredLogo && !logoFailed;
 
+  if (variant === "topbar") {
+    return (
+      <div className={`brand-header brand-header--${variant} ${className || ""}`.trim()}>
+        {showFullTopbarLogo ? (
+          <div className="brand-header__topbar-logo-wrap">
+            <img
+              src={preferredLogo}
+              alt={`${brand.name} logo`}
+              className="brand-header__topbar-logo"
+              onLoad={() => setLogoFailed(false)}
+              onError={() => setLogoFailed(true)}
+            />
+          </div>
+        ) : (
+          <span className="brand-header__topbar-fallback">{(brand.name || "safarilink").toLowerCase()}</span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={`brand-header brand-header--${variant} ${className || ""}`.trim()}>
       {showFullTopbarLogo ? (
