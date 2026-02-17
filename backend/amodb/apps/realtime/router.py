@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -10,6 +11,12 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user, get_current_user
 
 from . import schemas, services
+
+# Backwards-compat alias: some local/dev copies referenced
+# get_current_active_realtime_user in Depends(...).
+# Keep this alias to avoid runtime import crashes during hot-reload
+# if stale code paths still reference the older symbol.
+get_current_active_realtime_user = get_current_active_user
 
 router = APIRouter(prefix="/api", tags=["realtime"])
 realtime_bearer = HTTPBearer(auto_error=False)
@@ -36,9 +43,7 @@ def issue_realtime_token(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.RealtimeTokenResponse:
-    scheme = "wss" if request.url.scheme == "https" else "ws"
-    fallback_origin = f"{scheme}://{request.url.netloc}"
-    return services.issue_connect_token(db, user=current_user, broker_ws_url=fallback_origin)
+    return services.issue_connect_token(db, user=current_user, request=request)
 
 
 @router.get("/realtime/bootstrap", response_model=schemas.RealtimeBootstrapResponse)
