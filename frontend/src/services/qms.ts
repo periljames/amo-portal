@@ -342,6 +342,29 @@ export async function qmsGetDashboard(params?: {
 }
 
 
+
+export type QMSAvailabilityStatus = "ON_DUTY" | "AWAY" | "ON_LEAVE";
+
+export interface QMSManpowerAvailabilityItem {
+  id: string;
+  user_id: string;
+  status: QMSAvailabilityStatus;
+  effective_from: string;
+  effective_to: string | null;
+  note: string | null;
+  updated_by_user_id: string | null;
+  updated_at: string;
+}
+
+export interface QMSManpowerOut {
+  scope: "tenant" | "department";
+  total_employees: number;
+  by_role: Record<string, number>;
+  availability: { on_duty: number; away: number; on_leave: number } | null;
+  by_department: Array<{ department: string; count: number }> | null;
+  updated_at: string;
+}
+
 export interface QMSCockpitActionItemOut {
   id: string;
   kind: string;
@@ -371,6 +394,12 @@ export interface QMSCockpitSnapshotOut {
   training_deferrals_pending: number;
   suppliers_active: number;
   suppliers_inactive: number;
+  tasks_due_today?: number;
+  tasks_overdue?: number;
+  change_control_pending_approvals?: number;
+  events_hold_count?: number;
+  events_new_count?: number;
+  manpower?: QMSManpowerOut | null;
   audit_closure_trend: {
     period_start: string;
     period_end: string;
@@ -389,6 +418,20 @@ export async function qmsGetCockpitSnapshot(params?: {
   domain?: string;
 }): Promise<QMSCockpitSnapshotOut> {
   return fetchJson<QMSCockpitSnapshotOut>(`/quality/qms/cockpit-snapshot${toQuery(params ?? {})}`);
+}
+
+export async function qmsListManpowerAvailability(params?: { department?: string }): Promise<QMSManpowerAvailabilityItem[]> {
+  return fetchJson<QMSManpowerAvailabilityItem[]>(`/quality/qms/manpower/availability${toQuery(params ?? {})}`);
+}
+
+export async function qmsSetManpowerAvailability(payload: {
+  user_id: string;
+  status: QMSAvailabilityStatus;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  note?: string | null;
+}): Promise<QMSManpowerAvailabilityItem> {
+  return sendJson<QMSManpowerAvailabilityItem>("/quality/qms/manpower/availability", "POST", payload);
 }
 export async function qmsListDocuments(params?: {
   status_?: QMSDocumentStatus;

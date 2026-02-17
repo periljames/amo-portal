@@ -40,7 +40,10 @@ function resolveBrandTheme(
     accent: (stored.accent || DEFAULT_BRAND.accent).trim(),
     accentSoft: (stored.accentSoft || DEFAULT_BRAND.accentSoft).trim(),
     accentSecondary: (stored.accentSecondary || DEFAULT_BRAND.accentSecondary).trim(),
-    logoUrl: logoUrlOverride || null,
+    logoUrl: logoUrlOverride || stored.logoUrl || null,
+    logoUrlDark: stored.logoUrlDark || null,
+    logoUrlLight: stored.logoUrlLight || null,
+    updatedAt: stored.updatedAt || null,
   };
 }
 
@@ -62,6 +65,8 @@ export const BrandProvider: React.FC<BrandProviderProps> = ({
 }) => {
   const [brandVersion, setBrandVersion] = useState(0);
   const [logoUrl, setLogoUrl] = useState<string | null>(logoUrlOverride || null);
+  const [logoUrlDark, setLogoUrlDark] = useState<string | null>(null);
+  const [logoUrlLight, setLogoUrlLight] = useState<string | null>(null);
   const [hasCustomLogo, setHasCustomLogo] = useState(false);
   const logoUrlRef = useRef<string | null>(null);
   const platformBrandLoadedRef = useRef(false);
@@ -84,8 +89,15 @@ export const BrandProvider: React.FC<BrandProviderProps> = ({
   }, [brandTheme]);
 
   useEffect(() => {
+    setLogoUrlDark(brandTheme.logoUrlDark || null);
+    setLogoUrlLight(brandTheme.logoUrlLight || null);
+  }, [brandTheme.logoUrlDark, brandTheme.logoUrlLight]);
+
+  useEffect(() => {
     if (logoUrlOverride) {
       setLogoUrl(logoUrlOverride);
+      setLogoUrlDark(null);
+      setLogoUrlLight(null);
       setHasCustomLogo(true);
       return;
     }
@@ -97,6 +109,8 @@ export const BrandProvider: React.FC<BrandProviderProps> = ({
         logoUrlRef.current = null;
       }
       setLogoUrl(null);
+      setLogoUrlDark(null);
+      setLogoUrlLight(null);
       setHasCustomLogo(false);
       return;
     }
@@ -112,6 +126,8 @@ export const BrandProvider: React.FC<BrandProviderProps> = ({
         if (!blob) {
           if (mounted) {
             setLogoUrl(null);
+            setLogoUrlDark(null);
+            setLogoUrlLight(null);
             setHasCustomLogo(false);
           }
           return;
@@ -128,6 +144,8 @@ export const BrandProvider: React.FC<BrandProviderProps> = ({
       } catch {
         if (mounted) {
           setLogoUrl(null);
+          setLogoUrlDark(null);
+          setLogoUrlLight(null);
           setHasCustomLogo(false);
         }
       }
@@ -191,6 +209,8 @@ export const BrandProvider: React.FC<BrandProviderProps> = ({
   const value: BrandContextValue = {
     ...brandTheme,
     logoUrl,
+    logoUrlDark,
+    logoUrlLight,
     hasCustomLogo,
   };
 

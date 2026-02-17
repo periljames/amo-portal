@@ -1,101 +1,115 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  BarChart3,
   ClipboardList,
   FileSearch,
   GraduationCap,
-  Home,
   ListChecks,
   NotebookTabs,
-  Wrench,
+  RefreshCcw,
+  ShieldAlert,
+  Siren,
 } from "lucide-react";
+import { Pie, PieChart, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { useNavigate, useParams } from "react-router-dom";
 
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getContext } from "../services/auth";
-import { qmsGetCockpitSnapshot, type CARStatus, type QMSCockpitSnapshotOut } from "../services/qms";
-import { isPortalGoLive } from "../services/runtimeMode";
-import { useRealtime } from "../components/realtime/realtimeContext";
 import { listEventHistory } from "../services/events";
+import { useRealtime } from "../components/realtime/realtimeContext";
+import { qmsGetCockpitSnapshot, type CARStatus, type QMSCockpitSnapshotOut } from "../services/qms";
 import type { ActionItem, ActivityItem } from "../components/dashboard/DashboardScaffold";
 import type { QualityCockpitVisualData } from "../components/dashboard/QualityCockpitCanvas";
 import { deepEqual } from "../utils/deepEqual";
+import { isPortalGoLive } from "../services/runtimeMode";
 
 const LazyQualityCockpitCanvas = lazy(() => import("../components/dashboard/QualityCockpitCanvas"));
-
 const ENV_FORCE_MOCK_COCKPIT = import.meta.env.VITE_QMS_MOCK_COCKPIT === "true";
+const ENV_QMS_DEMO_SEED = import.meta.env.VITE_QMS_DEMO_SEED === "true";
 
-const MOCK_COCKPIT_RESPONSE: QMSCockpitSnapshotOut & {
-  manpower_on_duty_total: number;
-  manpower_engineers_on_duty: number;
-  manpower_technicians_on_duty: number;
-  manpower_inspectors_on_duty: number;
-} = {
-  generated_at: new Date().toISOString(),
-  pending_acknowledgements: 8,
-  audits_open: 6,
-  audits_total: 22,
-  findings_overdue: 4,
-  findings_open_total: 13,
-  documents_active: 48,
-  documents_draft: 7,
-  documents_obsolete: 3,
-  change_requests_open: 5,
-  cars_open_total: 11,
-  cars_overdue: 3,
-  training_records_expiring_30d: 9,
-  training_records_expired: 2,
-  training_records_unverified: 6,
-  training_deferrals_pending: 2,
-  suppliers_active: 16,
-  suppliers_inactive: 2,
-  manpower_on_duty_total: 18,
-  manpower_engineers_on_duty: 6,
-  manpower_technicians_on_duty: 9,
-  manpower_inspectors_on_duty: 3,
-  audit_closure_trend: [
-    { period_start: "2026-01-01", period_end: "2026-01-07", closed_count: 2, audit_ids: ["A-11", "A-12"] },
-    { period_start: "2026-01-08", period_end: "2026-01-14", closed_count: 1, audit_ids: ["A-13"] },
-    { period_start: "2026-01-15", period_end: "2026-01-21", closed_count: 2, audit_ids: ["A-14", "A-15"] },
-    { period_start: "2026-01-22", period_end: "2026-01-28", closed_count: 4, audit_ids: ["A-16", "A-17", "A-18", "A-19"] },
-  ],
-  most_common_finding_trend_12m: [
-    { period_start: "2025-03-01", finding_type: "NON_CONFORMITY", count: 3 },
-    { period_start: "2025-04-01", finding_type: "NON_CONFORMITY", count: 2 },
-    { period_start: "2025-05-01", finding_type: "NON_CONFORMITY", count: 4 },
-    { period_start: "2025-06-01", finding_type: "NON_CONFORMITY", count: 6 },
-    { period_start: "2025-07-01", finding_type: "NON_CONFORMITY", count: 5 },
-    { period_start: "2025-08-01", finding_type: "NON_CONFORMITY", count: 7 },
-    { period_start: "2025-09-01", finding_type: "NON_CONFORMITY", count: 4 },
-    { period_start: "2025-10-01", finding_type: "NON_CONFORMITY", count: 8 },
-    { period_start: "2025-11-01", finding_type: "NON_CONFORMITY", count: 6 },
-    { period_start: "2025-12-01", finding_type: "NON_CONFORMITY", count: 5 },
-    { period_start: "2026-01-01", finding_type: "NON_CONFORMITY", count: 4 },
-    { period_start: "2026-02-01", finding_type: "NON_CONFORMITY", count: 3 },
-  ],
-  action_queue: [
-    { id: "1", kind: "CAR", title: "Q-2026-0011 · Missing cert linkage", status: "OPEN", priority: "HIGH", due_date: "2026-02-15", assignee_user_id: "eva" },
-    { id: "2", kind: "CAR", title: "Q-2026-0012 · Training evidence gap", status: "IN_PROGRESS", priority: "MEDIUM", due_date: "2026-02-22", assignee_user_id: "mike" },
-  ],
-};
+const PIE_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6"];
 
-type NavigatorTile = {
+type TileDef = {
   id: string;
   label: string;
   icon: React.ComponentType<{ size?: number }>;
-  to: string;
-  badge?: number;
+  route: string;
+  value: number | null;
+  lines: string[];
 };
 
-type PriorityItem = {
-  id: string;
-  title: string;
-  description: string;
-  count: number;
-  route: string;
-};
+type PriorityState = "normal" | "due-soon" | "overdue";
+type CockpitSnapshotView = QMSCockpitSnapshotOut & { __demo?: boolean };
+
+const numberOrDash = (n: number | null | undefined) => (typeof n === "number" ? String(n) : "—");
+const isMissingNumber = (n: number | null | undefined) => typeof n !== "number";
+
+function useReducedMotionPref(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => setReduced(media.matches);
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, []);
+  return reduced;
+}
+
+function applyDemoSeed(snapshot: QMSCockpitSnapshotOut | undefined, options: { enabled: boolean }): CockpitSnapshotView | undefined {
+  if (!snapshot) return snapshot;
+  if (!options.enabled) return snapshot;
+
+  const seeded: CockpitSnapshotView = { ...snapshot };
+  let usedDemo = false;
+
+  if (!seeded.manpower) {
+    seeded.manpower = {
+      scope: "department",
+      total_employees: 16,
+      by_role: { ENGINEER: 5, TECHNICIAN: 7, QUALITY_INSPECTOR: 2, QUALITY_MANAGER: 2 },
+      availability: { on_duty: 11, away: 3, on_leave: 2 },
+      by_department: [{ department: "Quality", count: 16 }],
+      updated_at: new Date().toISOString(),
+    };
+    usedDemo = true;
+  } else {
+    if (!seeded.manpower.by_role || Object.keys(seeded.manpower.by_role).length === 0) {
+      seeded.manpower.by_role = { ENGINEER: 5, TECHNICIAN: 7, QUALITY_INSPECTOR: 2, QUALITY_MANAGER: 2 };
+      usedDemo = true;
+    }
+    if (!seeded.manpower.availability) {
+      seeded.manpower.availability = { on_duty: 11, away: 3, on_leave: 2 };
+      usedDemo = true;
+    }
+    if (!seeded.manpower.by_department || seeded.manpower.by_department.length === 0) {
+      seeded.manpower.by_department = [{ department: "Quality", count: seeded.manpower.total_employees || 16 }];
+      usedDemo = true;
+    }
+  }
+
+  if (isMissingNumber(seeded.tasks_due_today)) {
+    seeded.tasks_due_today = 4;
+    usedDemo = true;
+  }
+  if (isMissingNumber(seeded.tasks_overdue)) {
+    seeded.tasks_overdue = 3;
+    usedDemo = true;
+  }
+  if (isMissingNumber(seeded.events_hold_count)) {
+    seeded.events_hold_count = 1;
+    usedDemo = true;
+  }
+  if (isMissingNumber(seeded.events_new_count)) {
+    seeded.events_new_count = 6;
+    usedDemo = true;
+  }
+
+  if (usedDemo) seeded.__demo = true;
+  return seeded;
+}
 
 const DashboardCockpit: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
@@ -103,18 +117,21 @@ const DashboardCockpit: React.FC = () => {
   const ctx = getContext();
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
-  const { activity } = useRealtime();
-  const [selectedAuditor, setSelectedAuditor] = useState<"Eva" | "Mike" | "Smith">("Eva");
-  const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
-  const queryClient = useQueryClient();
-  const useMockCockpit = ENV_FORCE_MOCK_COCKPIT && !isPortalGoLive();
-
   const qmsEnabled = department === "quality";
+  const queryClient = useQueryClient();
+  useRealtime();
+  const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
+  const [manpowerSlide, setManpowerSlide] = useState(0);
+  const [manpowerPaused, setManpowerPaused] = useState(false);
+  const [manpowerTickSeed, setManpowerTickSeed] = useState(0);
+  const touchResumeTimerRef = useRef<number | null>(null);
+  const reducedMotion = useReducedMotionPref();
+
+  const useMockCockpit = ENV_FORCE_MOCK_COCKPIT && !isPortalGoLive();
 
   const { data: activityHistory } = useInfiniteQuery({
     queryKey: ["activity-history", amoCode, department],
-    queryFn: ({ pageParam }) =>
-      listEventHistory({ cursor: pageParam as string | undefined, limit: 50 }),
+    queryFn: ({ pageParam }) => listEventHistory({ cursor: pageParam as string | undefined, limit: 50 }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     initialPageParam: undefined as string | undefined,
     staleTime: 30_000,
@@ -126,9 +143,7 @@ const DashboardCockpit: React.FC = () => {
     queryFn: async () => {
       const next = await qmsGetCockpitSnapshot();
       const cached = queryClient.getQueryData<QMSCockpitSnapshotOut>(["qms-dashboard", amoCode, department]);
-      if (cached && deepEqual(cached, next)) {
-        return cached;
-      }
+      if (cached && deepEqual(cached, next)) return cached;
       return next;
     },
     enabled: qmsEnabled && !useMockCockpit,
@@ -139,226 +154,351 @@ const DashboardCockpit: React.FC = () => {
     retry: 1,
   });
 
-  const usingMockData = useMockCockpit || (!snapshotQuery.data && snapshotQuery.isError);
-  const snapshot = (useMockCockpit ? MOCK_COCKPIT_RESPONSE : (snapshotQuery.data ?? MOCK_COCKPIT_RESPONSE)) as QMSCockpitSnapshotOut & Partial<typeof MOCK_COCKPIT_RESPONSE>;
-
-  const nav = useCallback((to: string) => navigate(to), [navigate]);
-
-  useEffect(() => {
-    const onNav = (event: Event) => {
-      const route = (event as CustomEvent<string>).detail;
-      if (route) navigate(route);
-    };
-    window.addEventListener("qms-nav", onNav as EventListener);
-    return () => window.removeEventListener("qms-nav", onNav as EventListener);
-  }, [navigate]);
+  const rawSnapshot = snapshotQuery.data;
+  const demoAllowed = ENV_QMS_DEMO_SEED && !isPortalGoLive() && (amoCode.toLowerCase() === "demo" || !isPortalGoLive());
+  const snapshot = useMemo(() => applyDemoSeed(rawSnapshot, { enabled: demoAllowed }), [demoAllowed, rawSnapshot]);
 
   useEffect(() => {
-    const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
-    if (idle) {
-      const id = idle(() => void import("../components/dashboard/charts/QualityCockpitCharts"));
-      return () => {
-        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id);
+    if (!qmsEnabled) {
+      navigate(`/maintenance/${amoCode}/${department}`, { replace: true });
+    }
+  }, [amoCode, department, navigate, qmsEnabled]);
+
+  const nav = (route: string) => navigate(route);
+
+  const navigatorTiles = useMemo<TileDef[]>(() => {
+    if (!snapshot) return [];
+    const refresh = snapshot.generated_at ? new Date(snapshot.generated_at).toLocaleTimeString() : "—";
+    return [
+      {
+        id: "documents",
+        label: "Documents",
+        icon: FileSearch,
+        route: `/maintenance/${amoCode}/${department}/qms/documents`,
+        value: snapshot.documents_active,
+        lines: [`Drafts: ${numberOrDash(snapshot.documents_draft)}`, `Pending ack: ${numberOrDash(snapshot.pending_acknowledgements)}`],
+      },
+      {
+        id: "audits",
+        label: "Audits",
+        icon: NotebookTabs,
+        route: `/maintenance/${amoCode}/${department}/qms/audits`,
+        value: snapshot.audits_open,
+        lines: [`In progress/open: ${numberOrDash(snapshot.audits_open)}`, `Overdue findings: ${numberOrDash(snapshot.findings_overdue)}`],
+      },
+      {
+        id: "cars",
+        label: "CARs / CAPA",
+        icon: ShieldAlert,
+        route: `/maintenance/${amoCode}/${department}/qms/cars`,
+        value: snapshot.cars_open_total,
+        lines: [`Overdue: ${numberOrDash(snapshot.cars_overdue)}`, `Open total: ${numberOrDash(snapshot.cars_open_total)}`],
+      },
+      {
+        id: "training",
+        label: "Training",
+        icon: GraduationCap,
+        route: `/maintenance/${amoCode}/${department}/qms/training`,
+        value: snapshot.training_records_expired,
+        lines: [`Expired: ${numberOrDash(snapshot.training_records_expired)}`, `Expiring 30d: ${numberOrDash(snapshot.training_records_expiring_30d)}`],
+      },
+      {
+        id: "change",
+        label: "Change control",
+        icon: ClipboardList,
+        route: `/maintenance/${amoCode}/${department}/qms/change-requests`,
+        value: snapshot.change_requests_open,
+        lines: [
+          `Pending approvals: ${numberOrDash(snapshot.change_control_pending_approvals ?? snapshot.change_requests_open)}`,
+          `Open requests: ${numberOrDash(snapshot.change_requests_open)}`,
+        ],
+      },
+      {
+        id: "tasks",
+        label: "Tasks",
+        icon: ListChecks,
+        route: `/maintenance/${amoCode}/${department}/tasks`,
+        value: snapshot.tasks_overdue ?? null,
+        lines: [`Due today: ${numberOrDash(snapshot.tasks_due_today)}`, `Overdue: ${numberOrDash(snapshot.tasks_overdue)}`],
+      },
+      {
+        id: "events",
+        label: "Events",
+        icon: Siren,
+        route: `/maintenance/${amoCode}/${department}/qms/events`,
+        value: snapshot.events_hold_count ?? null,
+        lines: [`Holds: ${numberOrDash(snapshot.events_hold_count)}`, `New: ${numberOrDash(snapshot.events_new_count)}`],
+      },
+      {
+        id: "kpis",
+        label: "KPIs",
+        icon: AlertTriangle,
+        route: `/maintenance/${amoCode}/${department}/qms/kpis`,
+        value: snapshot.findings_overdue,
+        lines: [`Overdue findings: ${numberOrDash(snapshot.findings_overdue)}`, `Last refresh: ${refresh}`],
+      },
+    ];
+  }, [amoCode, department, snapshot]);
+
+  const priority = useMemo(() => {
+    if (!snapshot) return null;
+    if (snapshot.cars_overdue > 0) {
+      return { label: "CAR overdue", route: `/maintenance/${amoCode}/${department}/qms/cars?status=overdue`, count: snapshot.cars_overdue, state: "overdue" as PriorityState };
+    }
+    if (snapshot.findings_overdue > 0) {
+      return { label: "Findings overdue", route: `/maintenance/${amoCode}/${department}/qms/audits?finding=overdue`, count: snapshot.findings_overdue, state: "overdue" as PriorityState };
+    }
+    if ((snapshot.training_records_expiring_30d ?? 0) > 0) {
+      return { label: "Training due soon", route: `/maintenance/${amoCode}/${department}/qms/training?window=30d`, count: snapshot.training_records_expiring_30d, state: "due-soon" as PriorityState };
+    }
+    return { label: "System stable", route: `/maintenance/${amoCode}/${department}/qms/kpis`, count: 0, state: "normal" as PriorityState };
+  }, [amoCode, department, snapshot]);
+
+  const visualData: QualityCockpitVisualData = useMemo(() => {
+    if (!snapshot) {
+      return {
+        kpis: [], qualityScore: 0, fatalErrorsBySupervisor: [], fatalErrorsByLocation: [], fatalErrorsByMonth: [],
+        mostCommonFindingTrend: [], mostCommonFindingTypeLabel: null, samplesVsDefects: [], fatalErrorsByEmployee: [], manpowerByRole: [],
+        manpower: { on_duty_total: 0, engineers: 0, technicians: 0, inspectors: 0 },
       };
     }
-    const timeout = window.setTimeout(() => void import("../components/dashboard/charts/QualityCockpitCharts"), 700);
-    return () => window.clearTimeout(timeout);
-  }, []);
-
-  const navigatorTiles = useMemo<NavigatorTile[]>(() => {
-    const base = `/maintenance/${amoCode}/quality/qms`;
-    return [
-      { id: "qms-home", label: "QMS", icon: Home, to: base },
-      { id: "qms-tasks", label: "Tasks", icon: ListChecks, to: `${base}/tasks`, badge: snapshot.action_queue.length },
-      { id: "qms-documents", label: "Documents", icon: NotebookTabs, to: `${base}/documents`, badge: snapshot.pending_acknowledgements },
-      { id: "qms-audits", label: "Audits & Inspections", icon: FileSearch, to: `${base}/audits`, badge: snapshot.findings_overdue },
-      { id: "qms-change", label: "Change Control", icon: ClipboardList, to: `${base}/change-control`, badge: snapshot.change_requests_open },
-      { id: "qms-cars", label: "CARs", icon: Wrench, to: `${base}/cars`, badge: snapshot.cars_overdue },
-      { id: "qms-training", label: "Training", icon: GraduationCap, to: `${base}/training`, badge: snapshot.training_records_expired },
-      { id: "qms-events", label: "Events", icon: AlertTriangle, to: `${base}/events`, badge: snapshot.suppliers_inactive },
-      { id: "qms-kpis", label: "KPIs", icon: BarChart3, to: `${base}/kpis`, badge: snapshot.findings_open_total },
-    ];
-  }, [amoCode, snapshot]);
-
-  const topPriority = useMemo<PriorityItem | null>(() => {
-    if (snapshot.findings_overdue > 0) return { id: "a", title: "Overdue findings", description: `${snapshot.findings_overdue} overdue findings require immediate closure.`, count: snapshot.findings_overdue, route: `/maintenance/${amoCode}/${department}/qms/audits?status=in_progress&finding=overdue` };
-    if (snapshot.cars_overdue > 0) return { id: "b", title: "Overdue CARs", description: `${snapshot.cars_overdue} corrective actions are overdue.`, count: snapshot.cars_overdue, route: `/maintenance/${amoCode}/${department}/qms/cars?status=overdue` };
-    if (snapshot.training_records_expired > 0) return { id: "c1", title: "Expired training", description: `${snapshot.training_records_expired} training records have expired.`, count: snapshot.training_records_expired, route: `/maintenance/${amoCode}/${department}/qms/training?currency=expired` };
-    if (snapshot.training_records_expiring_30d > 0) return { id: "c2", title: "Training expiring soon", description: `${snapshot.training_records_expiring_30d} records expire in 30 days.`, count: snapshot.training_records_expiring_30d, route: `/maintenance/${amoCode}/${department}/qms/training?currency=expiring_30d` };
-    if (snapshot.documents_draft > 0) return { id: "d", title: "Pending document approvals", description: `${snapshot.documents_draft} documents are awaiting approval.`, count: snapshot.documents_draft, route: `/maintenance/${amoCode}/${department}/qms/documents?status_=DRAFT` };
-    if (snapshot.pending_acknowledgements > 0) return { id: "e", title: "Pending acknowledgements", description: `${snapshot.pending_acknowledgements} acknowledgements are pending.`, count: snapshot.pending_acknowledgements, route: `/maintenance/${amoCode}/${department}/qms/documents?ack=pending` };
-    if (snapshot.suppliers_inactive > 0) return { id: "f", title: "Supplier hold indicators", description: `${snapshot.suppliers_inactive} suppliers are currently hold-tracked.`, count: snapshot.suppliers_inactive, route: `/maintenance/${amoCode}/${department}/qms/events?entity=supplier&status=hold` };
-    if (snapshot.findings_open_total > 0) return { id: "g", title: "Open findings", description: `${snapshot.findings_open_total} findings remain open.`, count: snapshot.findings_open_total, route: `/maintenance/${amoCode}/${department}/qms/audits?status=cap_open` };
-    return null;
-  }, [snapshot, amoCode, department]);
-
-  const actionItems = useMemo<ActionItem[]>(() => (snapshot.action_queue ?? []).map((item) => ({
-    id: item.id,
-    type: item.kind,
-    title: item.title,
-    owner: item.assignee_user_id ?? "Unassigned",
-    ownerId: item.assignee_user_id,
-    onOwnerClick: item.assignee_user_id ? () => navigate(`/maintenance/${amoCode}/admin/users/${item.assignee_user_id}`) : undefined,
-    due: item.due_date ?? "—",
-    status: item.status as CARStatus,
-    priority: item.priority,
-    onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${item.id}`),
-    action: () => setPanelContext({ type: "car", id: item.id, title: item.title, status: item.status as CARStatus, ownerId: item.assignee_user_id }),
-  })), [snapshot.action_queue, navigate, amoCode, department]);
-
-  const activityItems = useMemo<ActivityItem[]>(() => {
-    const fromHistory = (activityHistory?.pages ?? []).flatMap((page) => page.items ?? []);
-    return [...activity, ...fromHistory].slice(0, 40).map((item) => {
-      const entityType = item.entityType.toLowerCase();
-      const destination = (() => {
-        if (entityType.startsWith("user") || entityType.startsWith("accounts.user")) {
-          return item.entityId ? `/maintenance/${amoCode}/admin/users/${item.entityId}` : `/maintenance/${amoCode}/admin/users`;
-        }
-        if (entityType.startsWith("tasks.task")) {
-          return item.entityId
-            ? `/maintenance/${amoCode}/${department}/tasks/${item.entityId}`
-            : `/maintenance/${amoCode}/${department}/tasks`;
-        }
-        if (entityType.startsWith("qms.document")) return `/maintenance/${amoCode}/${department}/qms/documents?docId=${encodeURIComponent(item.entityId)}`;
-        if (entityType.startsWith("qms.audit")) return `/maintenance/${amoCode}/${department}/qms/audits?auditId=${encodeURIComponent(item.entityId)}`;
-        if (entityType.startsWith("qms.car") || entityType.startsWith("qms.capa")) return `/maintenance/${amoCode}/${department}/qms/cars?carId=${encodeURIComponent(item.entityId)}`;
-        if (entityType.startsWith("qms.training") || entityType.startsWith("training")) return `/maintenance/${amoCode}/${department}/qms/training?userId=${encodeURIComponent(item.entityId)}`;
-        return `/maintenance/${amoCode}/${department}/qms/events?entity=${encodeURIComponent(item.entityType)}&id=${encodeURIComponent(item.entityId)}`;
-      })();
-      return {
-        id: item.id,
-        summary: `${item.type} ${item.action}`,
-        timestamp: new Date(item.timestamp).toLocaleString(),
-        onClick: () => navigate(destination),
-      };
-    });
-  }, [activityHistory?.pages, activity, navigate, amoCode, department]);
-
-  const visualData = useMemo<QualityCockpitVisualData>(() => {
-    const qualityScore = Math.max(40, Math.min(99.9, 100 - ((snapshot.findings_overdue + snapshot.cars_overdue) * 2 + snapshot.findings_open_total * 0.6)));
-
-    const supervisorMap = new Map<string, number>();
-    snapshot.action_queue.forEach((row) => {
-      const k = row.assignee_user_id || "Unassigned";
-      supervisorMap.set(k, (supervisorMap.get(k) ?? 0) + 1);
-    });
-
-    const fatalErrorsBySupervisor = Array.from(supervisorMap.entries()).map(([name, value]) => ({ name, value, route: `/maintenance/${amoCode}/${department}/qms/cars?assignee=${encodeURIComponent(name)}` }));
-    const fatalErrorsByLocation = [
-      { name: "Hangar", value: Math.max(0, snapshot.cars_overdue), route: `/maintenance/${amoCode}/${department}/qms/cars?status=overdue` },
-      { name: "Line", value: Math.max(0, snapshot.findings_overdue), route: `/maintenance/${amoCode}/${department}/qms/audits?finding=overdue` },
-      { name: "Stores", value: Math.max(0, snapshot.suppliers_inactive), route: `/maintenance/${amoCode}/${department}/qms/events?entity=supplier&status=hold` },
-    ].filter((x) => x.value > 0);
-
     return {
       kpis: [
-        { id: "overdue_tasks", label: "Overdue tasks", value: snapshot.findings_overdue, accent: "rose", onClick: () => nav(`/maintenance/${amoCode}/${department}/tasks?status=overdue&dueWindow=now`) },
-        { id: "due_this_week", label: "Due this week", value: snapshot.action_queue.length, accent: "amber", onClick: () => nav(`/maintenance/${amoCode}/${department}/tasks?status=open&dueWindow=week`) },
-        { id: "pending_acks", label: "Pending acknowledgements", value: snapshot.pending_acknowledgements, accent: "navy", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
-        { id: "open_findings", label: "Open findings", value: snapshot.findings_open_total, accent: "green", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/audits?status=cap_open`) },
+        { id: "pending_ack", label: "Pending acknowledgements", value: snapshot.pending_acknowledgements, accent: "amber", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
+        { id: "cars_overdue", label: "CAR overdue", value: snapshot.cars_overdue, accent: "rose", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue`) },
+        { id: "findings", label: "Open findings", value: snapshot.findings_open_total, accent: "navy", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/audits`) },
       ],
-      qualityScore,
-      fatalErrorsBySupervisor,
-      fatalErrorsByLocation,
-      fatalErrorsByMonth: snapshot.audit_closure_trend.map((p) => ({ month: p.period_start.slice(5), value: p.closed_count, route: `/maintenance/${amoCode}/${department}/qms/audits?status=closed&closed_from=${p.period_start}&closed_to=${p.period_end}` })),
-      samplesVsDefects: fatalErrorsBySupervisor.map((row, idx) => ({ name: row.name, samples: (idx + 1) * 8 + snapshot.documents_active, defects: row.value, route: row.route })),
-      fatalErrorsByEmployee: fatalErrorsBySupervisor.sort((a, b) => b.value - a.value),
-      manpowerByRole: [
-        { name: "Engineers", value: snapshot.manpower_engineers_on_duty ?? Math.max(0, snapshot.cars_open_total), route: `/maintenance/${amoCode}/${department}/qms/tasks?role=engineer` },
-        { name: "Technicians", value: snapshot.manpower_technicians_on_duty ?? Math.max(0, snapshot.findings_open_total), route: `/maintenance/${amoCode}/${department}/qms/tasks?role=technician` },
-        { name: "Inspectors", value: snapshot.manpower_inspectors_on_duty ?? Math.max(0, snapshot.findings_overdue), route: `/maintenance/${amoCode}/${department}/qms/tasks?role=inspector` },
-      ].filter((role) => role.value > 0),
-      mostCommonFindingTrend: snapshot.most_common_finding_trend_12m?.map((row) => ({
-        month: new Date(row.period_start).toLocaleDateString(undefined, { month: "short", year: "2-digit" }),
-        value: row.count,
-        route: `/maintenance/${amoCode}/${department}/qms/audits?finding_type=${encodeURIComponent(row.finding_type)}&month=${row.period_start.slice(0, 7)}`
-      })) ?? [],
-      mostCommonFindingTypeLabel: snapshot.most_common_finding_trend_12m?.[0]?.finding_type ? snapshot.most_common_finding_trend_12m[0].finding_type.replaceAll("_", " ") : null,
+      qualityScore: Math.max(0, 100 - snapshot.findings_overdue * 2 - snapshot.cars_overdue * 3),
+      fatalErrorsBySupervisor: [],
+      fatalErrorsByLocation: [],
+      fatalErrorsByMonth: [],
+      mostCommonFindingTrend:
+        snapshot.most_common_finding_trend_12m?.map((row) => ({
+          month: new Date(row.period_start).toLocaleDateString(undefined, { month: "short", year: "2-digit" }),
+          value: row.count,
+          route: `/maintenance/${amoCode}/${department}/qms/audits?finding_type=${encodeURIComponent(row.finding_type)}`,
+        })) ?? [],
+      mostCommonFindingTypeLabel: snapshot.most_common_finding_trend_12m?.[0]?.finding_type?.replaceAll("_", " ") ?? null,
+      samplesVsDefects: [],
+      fatalErrorsByEmployee: [],
+      manpowerByRole: Object.entries(snapshot.manpower?.by_role || {}).map(([name, value]) => ({ name, value, route: `/maintenance/${amoCode}/${department}/qms/training` })),
       manpower: {
-        on_duty_total: snapshot.manpower_on_duty_total ?? Math.max(0, snapshot.cars_open_total + snapshot.findings_open_total),
-        engineers: snapshot.manpower_engineers_on_duty ?? Math.max(0, snapshot.cars_open_total),
-        technicians: snapshot.manpower_technicians_on_duty ?? Math.max(0, snapshot.findings_open_total),
-        inspectors: snapshot.manpower_inspectors_on_duty ?? Math.max(0, snapshot.findings_overdue),
+        on_duty_total: snapshot.manpower?.availability?.on_duty ?? 0,
+        engineers: snapshot.manpower?.by_role?.ENGINEER ?? 0,
+        technicians: snapshot.manpower?.by_role?.TECHNICIAN ?? 0,
+        inspectors: snapshot.manpower?.by_role?.QUALITY_INSPECTOR ?? 0,
       },
     };
-  }, [snapshot, amoCode, department, nav]);
+  }, [amoCode, department, snapshot]);
 
-  const loading = snapshotQuery.isLoading;
-  const shouldGateSecondary = Boolean(topPriority);
+  const actionItems = useMemo<ActionItem[]>(
+    () =>
+      (snapshot?.action_queue || []).map((item) => ({
+        id: item.id,
+        type: item.kind,
+        title: item.title,
+        status: item.status,
+        ownerId: item.assignee_user_id || undefined,
+        onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/cars?carId=${item.id}`),
+      })),
+    [amoCode, department, snapshot]
+  );
+
+  const historyRows = activityHistory?.pages.flatMap((p) => p.items || []) || [];
+  const activityItems = useMemo<ActivityItem[]>(() => {
+    return historyRows.slice(0, 24).map((row) => ({
+      id: `${row.id}`,
+      summary: row.action || row.entityType || "Activity",
+      timestamp: row.timestamp || "",
+      occurredAt: row.timestamp || undefined,
+      onClick: () => {},
+    }));
+  }, [historyRows]);
+
+  const manpower = snapshot?.manpower;
+  const roleSlices = useMemo(() => Object.entries(manpower?.by_role || {}).map(([name, value]) => ({ name, value })), [manpower?.by_role]);
+  const availability = manpower?.availability;
+  const deptDistribution = manpower?.by_department || [];
+
+  const slides = useMemo(
+    () => [
+      {
+        key: "on-duty",
+        title: "On duty",
+        body: (
+          <>
+            <div className="qms-manpower-module__stat">{numberOrDash(availability?.on_duty)}</div>
+            <div className="qms-manpower-module__sub">Total currently on duty</div>
+            <div className="qms-manpower-module__chart">
+              {roleSlices.length ? (
+                <ResponsiveContainer width="100%" height={160}>
+                  <PieChart>
+                    <Pie data={roleSlices} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={60} isAnimationActive={false}>
+                      {roleSlices.map((entry, index) => (
+                        <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <span className="qms-na">Not available</span>
+              )}
+            </div>
+          </>
+        ),
+      },
+      {
+        key: "away",
+        title: "Away",
+        body: (
+          <>
+            <div className="qms-manpower-module__stat">{numberOrDash(availability?.away)}</div>
+            <div className="qms-manpower-module__sub">Users currently away</div>
+          </>
+        ),
+      },
+      {
+        key: "leave",
+        title: "On leave",
+        body: (
+          <>
+            <div className="qms-manpower-module__stat">{numberOrDash(availability?.on_leave)}</div>
+            <div className="qms-manpower-module__sub">Users currently on leave</div>
+          </>
+        ),
+      },
+      {
+        key: "dept",
+        title: "Department distribution",
+        body: (
+          <div className="qms-manpower-module__dept-list">
+            {deptDistribution.length ? (
+              deptDistribution.map((row) => (
+                <div key={row.department} className="qms-manpower-module__dept-row">
+                  <span>{row.department}</span>
+                  <strong>{row.count}</strong>
+                </div>
+              ))
+            ) : (
+              <span className="qms-na">Not available</span>
+            )}
+          </div>
+        ),
+      },
+    ],
+    [availability?.away, availability?.on_duty, availability?.on_leave, deptDistribution, roleSlices]
+  );
+
+  useEffect(() => {
+    if (reducedMotion || manpowerPaused || slides.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setManpowerSlide((prev) => (prev + 1) % slides.length);
+    }, 6000);
+    return () => window.clearInterval(timer);
+  }, [manpowerPaused, manpowerTickSeed, reducedMotion, slides.length]);
+
+  useEffect(() => {
+    return () => {
+      if (touchResumeTimerRef.current) {
+        window.clearTimeout(touchResumeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const goToSlide = (next: number) => {
+    setManpowerSlide(next);
+    setManpowerTickSeed((seed) => seed + 1);
+  };
 
   return (
-    <div className="qms-cockpit-shell">
-      <header className="qms-cockpit-head">
-        <div>
-          <h1>Quality Dashboard</h1>
-          <p>Operational controls, trend watch, and deterministic drilldowns.</p>
-        </div>
-        <div className="qms-cockpit-head__actions">
-          <div className="qms-segmented" role="tablist" aria-label="Auditor selection">
-            {(["Eva", "Mike", "Smith"] as const).map((auditor) => (
-              <button key={auditor} type="button" role="tab" aria-selected={selectedAuditor === auditor} className={selectedAuditor === auditor ? "is-active" : ""} onClick={() => setSelectedAuditor(auditor)}>
-                {auditor}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="secondary-chip-btn" onClick={() => { if (!useMockCockpit) void snapshotQuery.refetch(); }} disabled={useMockCockpit}>
-            Refresh
-          </button>
-          {usingMockData ? <span className="qms-mock-pill">Using mock data</span> : null}
-        </div>
-      </header>
+    <div className="qms-cockpit-shell qms-cockpit-shell--onepage">
+      <div
+        className={`qms-priority-pill qms-priority-pill--${priority?.state || "normal"}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => priority && nav(priority.route)}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && priority && nav(priority.route)}
+      >
+        <span>{priority?.label || "System stable"}</span>
+        <strong>{priority?.count ?? 0}</strong>
+      </div>
 
-      <section className="qms-manpower-card" aria-label="Current manpower on duty">
-        <div>
-          <strong>Manpower On Duty</strong>
-          <p>{visualData.manpower.on_duty_total}</p>
-        </div>
-        <div className="qms-manpower-card__split">
-          <span>Engineers {visualData.manpower.engineers}</span>
-          <span>Technicians {visualData.manpower.technicians}</span>
-          <span>Inspectors {visualData.manpower.inspectors}</span>
-        </div>
-      </section>
-
-      <section className="quality-navigator" aria-label="Quality Navigator">
-        <div className="quality-navigator__header">
-          <h2 className="quality-navigator__title">Quality Navigator</h2>
-          <span className="quality-navigator__subtitle">All QMS destinations</span>
-        </div>
-        <div className="quality-navigator__grid">
+      <section className="quality-navigator quality-navigator--operational" aria-label="Quality Navigator">
+        <div className="quality-navigator__grid quality-navigator__grid--dense">
           {navigatorTiles.map((tile) => {
             const Icon = tile.icon;
             return (
-              <button key={tile.id} type="button" className="quality-navigator__tile" onClick={() => nav(tile.to)} aria-label={`Open ${tile.label}`}>
-                <div className="quality-navigator__tile-top">
-                  <Icon size={16} />
-                  {typeof tile.badge === "number" ? <span className="quality-navigator__badge">{tile.badge}</span> : null}
+              <button key={tile.id} type="button" className="quality-op-tile" onClick={() => nav(tile.route)}>
+                <div className="quality-op-tile__header">
+                  <Icon size={15} />
+                  <span>{tile.label}</span>
                 </div>
-                <span>{tile.label}</span>
+                <div className="quality-op-tile__value">{numberOrDash(tile.value)}</div>
+                {tile.lines.map((line) => (
+                  <div className="quality-op-tile__line" key={line}>
+                    {line}
+                  </div>
+                ))}
               </button>
             );
           })}
         </div>
       </section>
 
-      {loading ? <div className="qms-skeleton-row"><div /><div /><div /><div /></div> : null}
-      {snapshotQuery.isError && !usingMockData ? <div className="alert alert-error">Unable to load cockpit snapshot.</div> : null}
-
-      {topPriority ? (
-        <section className="priority-gate" aria-live="polite">
-          <div className="priority-gate__eyebrow">Top priority</div>
-          <h2 className="priority-gate__title">{topPriority.title}</h2>
-          <p className="priority-gate__description">{topPriority.description}</p>
-          <div className="priority-gate__actions">
-            <span className="priority-gate__count">Count: {topPriority.count}</span>
-            <button type="button" className="btn btn-primary" onClick={() => nav(topPriority.route)}>
-              Resolve now
+      <section
+        className="qms-manpower-module"
+        aria-label="Manpower module"
+        onMouseEnter={() => setManpowerPaused(true)}
+        onMouseLeave={() => setManpowerPaused(false)}
+        onTouchStart={() => {
+          if (touchResumeTimerRef.current) window.clearTimeout(touchResumeTimerRef.current);
+          setManpowerPaused(true);
+        }}
+        onTouchEnd={() => {
+          if (touchResumeTimerRef.current) window.clearTimeout(touchResumeTimerRef.current);
+          touchResumeTimerRef.current = window.setTimeout(() => setManpowerPaused(false), 1000);
+        }}
+      >
+        <div className="qms-manpower-module__head">
+          <div>
+            <h3>Manpower</h3>
+            <p>{manpower?.scope === "tenant" ? "Tenant scope" : "Department scope"}</p>
+          </div>
+          <div className="qms-manpower-module__controls">
+            {snapshot?.__demo ? <span className="qms-demo-badge">DEMO DATA</span> : null}
+            <button type="button" onClick={() => goToSlide((manpowerSlide - 1 + slides.length) % slides.length)} aria-label="Previous manpower slide">
+              ‹
+            </button>
+            <button type="button" onClick={() => goToSlide((manpowerSlide + 1) % slides.length)} aria-label="Next manpower slide">
+              ›
             </button>
           </div>
-        </section>
-      ) : null}
+        </div>
+        <div className="qms-manpower-module__viewport">
+          <div className="qms-manpower-module__track" style={{ transform: `translateX(-${manpowerSlide * 100}%)` }}>
+            {slides.map((slide) => (
+              <article key={slide.key} className="qms-manpower-module__slide">
+                <h4>{slide.title}</h4>
+                {slide.body}
+              </article>
+            ))}
+          </div>
+        </div>
+        <div className="qms-manpower-module__dots">
+          {slides.map((slide, idx) => (
+            <button
+              key={slide.key}
+              type="button"
+              className={idx === manpowerSlide ? "is-active" : ""}
+              onClick={() => goToSlide(idx)}
+              aria-label={`Show ${slide.title} slide`}
+            />
+          ))}
+        </div>
+      </section>
 
-      {!shouldGateSecondary ? (
+      <div className="qms-cockpit-main-grid">
         <Suspense fallback={<div className="qms-skeleton-block">Loading charts…</div>}>
           <LazyQualityCockpitCanvas
             data={visualData}
@@ -371,7 +511,13 @@ const DashboardCockpit: React.FC = () => {
             }}
           />
         </Suspense>
-      ) : null}
+      </div>
+
+      <div className="qms-cockpit-refresh">
+        <button type="button" className="secondary-chip-btn" onClick={() => void snapshotQuery.refetch()} disabled={snapshotQuery.isFetching}>
+          <RefreshCcw size={14} /> Refresh
+        </button>
+      </div>
 
       <ActionPanel isOpen={!!panelContext} context={panelContext} onClose={() => setPanelContext(null)} />
     </div>

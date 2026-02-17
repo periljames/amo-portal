@@ -41,6 +41,8 @@ from .schemas import (
     QMSNotificationOut,
     QMSDashboardOut,
     QMSCockpitSnapshotOut,
+    QMSManpowerAvailabilityOut,
+    QMSManpowerAvailabilityUpsert,
     QMSDocumentCreate, QMSDocumentUpdate, QMSDocumentOut,
     QMSDocumentRevisionCreate, QMSDocumentRevisionOut, QMSPublishRevision,
     QMSDistributionCreate, QMSDistributionOut,
@@ -350,8 +352,61 @@ def qms_dashboard(
 def qms_cockpit_snapshot(
     db: Session = Depends(get_db),
     domain: Optional[QMSDomain] = Query(default=None),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    return get_cockpit_snapshot(db, domain=domain)
+    return get_cockpit_snapshot(
+        db,
+        domain=domain,
+        amo_id=getattr(current_user, "effective_amo_id", None) or current_user.amo_id,
+        department_code="quality",
+    )
+
+
+@router.get("/qms/manpower/availability", response_model=List[QMSManpowerAvailabilityOut])
+def list_manpower_availability(
+    department: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    amo_id = getattr(current_user, "effective_amo_id", None) or current_user.amo_id
+    qs = db.query(models.UserAvailability).filter(models.UserAvailability.amo_id == amo_id)
+    if department:
+        dept = db.query(account_models.Department.id).filter(
+            account_models.Department.amo_id == amo_id,
+            account_models.Department.code == department,
+        ).first()
+        if dept:
+            qs = qs.join(account_models.User, account_models.User.id == models.UserAvailability.user_id).filter(account_models.User.department_id == dept.id)
+    return qs.order_by(models.UserAvailability.updated_at.desc()).all()
+
+
+@router.post("/qms/manpower/availability", response_model=QMSManpowerAvailabilityOut, status_code=status.HTTP_201_CREATED)
+def upsert_manpower_availability(
+    payload: QMSManpowerAvailabilityUpsert,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    if not _is_quality_scheduler(current_user):
+        raise HTTPException(status_code=403, detail="Insufficient privileges to set manpower availability")
+
+    amo_id = getattr(current_user, "effective_amo_id", None) or current_user.amo_id
+    user = db.query(account_models.User).filter(account_models.User.id == payload.user_id, account_models.User.amo_id == amo_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in tenant scope")
+
+    item = models.UserAvailability(
+        amo_id=amo_id,
+        user_id=payload.user_id,
+        status=models.UserAvailabilityStatus(payload.status),
+        effective_from=payload.effective_from or datetime.now(timezone.utc),
+        effective_to=payload.effective_to,
+        note=payload.note,
+        updated_by_user_id=current_user.id,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
 
 
 # -----------------------------
