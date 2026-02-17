@@ -73,7 +73,7 @@ body[data-color-scheme="dark"] {
   gap: 12px;
   padding: 16px;
   border-radius: 16px;
-  background: #ffffff;
+  background: var(--surface);
   border: 1px solid #e2e8f0;
   box-shadow: var(--qms-shadow-card);
   margin-bottom: 24px;
@@ -93,7 +93,7 @@ body[data-color-scheme="dark"] {
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid transparent;
-  background: #f8fafc;
+  background: var(--surface-soft);
   color: #0f172a;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease,
     background 0.2s ease;
@@ -168,7 +168,7 @@ body[data-color-scheme="dark"] {
 }
 
 .qms-card {
-  background: #ffffff;
+  background: var(--surface);
   border-radius: 18px;
   border: 1px solid #e2e8f0;
   padding: 20px;
@@ -185,7 +185,7 @@ body[data-color-scheme="dark"] {
 
 .qms-card--attention {
   border-color: #fecaca;
-  background: linear-gradient(135deg, #fff7f7 0%, #fff 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--surface) 85%, var(--accent-danger) 15%) 0%, var(--surface) 100%);
 }
 
 .qms-card__header {
@@ -233,7 +233,7 @@ body[data-color-scheme="dark"] {
   width: 108px;
   height: 108px;
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--surface);
   display: grid;
   place-items: center;
   text-align: center;
@@ -262,7 +262,7 @@ body[data-color-scheme="dark"] {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 12px;
-  background: #f8fafc;
+  background: var(--surface-soft);
   text-align: left;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease,
@@ -308,7 +308,7 @@ body[data-color-scheme="dark"] {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 12px;
-  background: #f8fafc;
+  background: var(--surface-soft);
   display: grid;
   gap: 6px;
   text-align: left;
@@ -388,7 +388,7 @@ body[data-color-scheme="dark"] {
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
-  background: #f8fafc;
+  background: var(--surface-soft);
   text-align: left;
 }
 
@@ -450,7 +450,7 @@ button.qms-list__item:hover {
   border: 1px solid #e2e8f0;
   border-radius: 14px;
   padding: 14px;
-  background: #ffffff;
+  background: var(--surface);
   text-align: left;
   display: grid;
   gap: 6px;
@@ -534,7 +534,7 @@ button.qms-list__item:hover {
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid #cbd5f5;
-  background: #ffffff;
+  background: var(--surface);
   color: #0f172a;
 }
 
@@ -549,7 +549,7 @@ button.qms-list__item:hover {
 }
 
 .qms-table__row:hover {
-  background: #f8fafc;
+  background: var(--surface-soft);
 }
 
 .qms-link {
@@ -567,7 +567,7 @@ button.qms-list__item:hover {
   gap: 16px;
   padding: 20px;
   border-radius: 16px;
-  background: #ffffff;
+  background: var(--surface);
   border: 1px solid #e2e8f0;
 }
 
@@ -618,7 +618,7 @@ button.qms-list__item:hover {
 
 .cockpit-card {
   grid-column: span 3;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid #e2e8f0;
   border-radius: 0.75rem;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
@@ -845,10 +845,10 @@ button.qms-list__item:hover {
   }
 }
 
-.paper-shell { display: flex; justify-content: center; padding: 1.5rem; background: #f8fafc; }
+.paper-shell { display: flex; justify-content: center; padding: 1.5rem; background: var(--surface-soft); }
 .paper-card {
   width: min(900px, 100%);
-  background: #fff;
+  background: var(--surface);
   border: 1px solid #e2e8f0;
   border-radius: 0.75rem;
   box-shadow: 0 24px 40px rgba(15, 23, 42, 0.2);

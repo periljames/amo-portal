@@ -1,11 +1,13 @@
 :root {
-  color-scheme: dark light;
+  color-scheme: light dark;
 }
 
+html[data-color-scheme="dark"],
 body[data-color-scheme="dark"] {
   color-scheme: dark;
 }
 
+html[data-color-scheme="light"],
 body[data-color-scheme="light"] {
   color-scheme: light;
 }
@@ -17,6 +19,12 @@ body[data-color-scheme="light"] {
 :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+html,
+body,
+#root {
+  background: var(--bg-base);
 }
 
 body {
