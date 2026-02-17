@@ -1,5 +1,5 @@
 // src/services/reliability.ts
-import { getToken, handleAuthFailure } from "./auth";
+import { getToken, handleAuthFailure, markSessionActivity } from "./auth";
 import { getApiBaseUrl } from "./config";
 
 const API_BASE = getApiBaseUrl();
@@ -53,6 +53,7 @@ export async function createReliabilityReport(
   windowEnd: string
 ): Promise<ReliabilityReportRead> {
   const token = getToken();
+  markSessionActivity("reliability-report-create");
   const res = await fetch(`${API_BASE}/reliability/reports`, {
     method: "POST",
     headers: {
@@ -80,6 +81,7 @@ export async function createReliabilityReport(
 
 export async function listReliabilityReports(): Promise<ReliabilityReportRead[]> {
   const token = getToken();
+  markSessionActivity("reliability-report-list");
   const res = await fetch(`${API_BASE}/reliability/reports`, {
     method: "GET",
     headers: {
@@ -107,6 +109,7 @@ export async function downloadReliabilityReport(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const startedAt = performance.now();
+    markSessionActivity("reliability-report-download");
     xhr.open("GET", `${API_BASE}/reliability/reports/${reportId}/download`);
     const headers = buildAuthHeader();
     Object.entries(headers).forEach(([key, value]) => {
@@ -117,6 +120,7 @@ export async function downloadReliabilityReport(
     xhr.addEventListener("progress", (event) => {
       if (!onProgress) return;
       const total = event.lengthComputable ? event.total : undefined;
+      markSessionActivity("reliability-report-download-progress");
       onProgress(buildSpeed(event.loaded, total, startedAt));
     });
 
@@ -145,6 +149,7 @@ export async function downloadReliabilityReport(
 export async function downloadFracasEvidencePack(caseId: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    markSessionActivity("fracas-export");
     xhr.open("GET", `${API_BASE}/reliability/fracas/${caseId}/evidence-pack`);
     const headers = buildAuthHeader();
     Object.entries(headers).forEach(([key, value]) => {

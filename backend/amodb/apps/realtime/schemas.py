@@ -95,3 +95,17 @@ class RealtimeSyncResponse(BaseModel):
     prompt_deliveries: list[dict[str, Any]] = Field(default_factory=list)
     receipt_updates: list[dict[str, Any]] = Field(default_factory=list)
     cursor: str
+
+
+class PresenceStateUpdateRequest(BaseModel):
+    state: str = Field(pattern="^(online|away)$")
+    reason: str | None = Field(default=None, max_length=64)
+
+
+class PresenceStateRead(BaseModel):
+    user_id: str
+    amo_id: str
+    state: str
+    last_seen_at: datetime
+    updated_at: datetime
+    reason: str | None = None

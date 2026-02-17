@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -11,15 +12,25 @@ from amodb.security import get_current_active_user
 
 from . import schemas, services
 
+# Backwards-compat alias: some local/dev copies referenced
+# get_current_active_realtime_user in Depends(...).
+# Keep this alias to avoid runtime import crashes during hot-reload
+# if stale code paths still reference the older symbol.
+get_current_active_realtime_user = get_current_active_user
+
 router = APIRouter(prefix="/api", tags=["realtime"])
+realtime_bearer = HTTPBearer(auto_error=False)
 
 
 @router.post("/realtime/token", response_model=schemas.RealtimeTokenResponse)
 def issue_realtime_token(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ) -> schemas.RealtimeTokenResponse:
-    return services.issue_connect_token(db, user=current_user)
+    scheme = "wss" if request.url.scheme == "https" else "ws"
+    fallback_origin = f"{scheme}://{request.url.netloc}"
+    return services.issue_connect_token(db, user=current_user, broker_ws_url=fallback_origin)
 
 
 @router.get("/realtime/bootstrap", response_model=schemas.RealtimeBootstrapResponse)
@@ -41,6 +52,15 @@ def realtime_sync(
     except ValueError:
         since_ms = int(time.time() * 1000) - 60_000
     return services.sync_since(db, user=current_user, since_ts_ms=since_ms)
+
+
+@router.post("/realtime/presence", response_model=schemas.PresenceStateRead)
+def realtime_presence_update(
+    payload: schemas.PresenceStateUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+) -> schemas.PresenceStateRead:
+    return services.update_presence_state(db, user=current_user, payload=payload)
 
 
 @router.post("/chat/threads", response_model=schemas.ThreadRead)
