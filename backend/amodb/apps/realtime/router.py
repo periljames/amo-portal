@@ -12,6 +12,12 @@ from amodb.security import get_current_active_user, get_current_user
 
 from . import schemas, services
 
+# Backwards-compat alias: some local/dev copies referenced
+# get_current_active_realtime_user in Depends(...).
+# Keep this alias to avoid runtime import crashes during hot-reload
+# if stale code paths still reference the older symbol.
+get_current_active_realtime_user = get_current_active_user
+
 router = APIRouter(prefix="/api", tags=["realtime"])
 realtime_bearer = HTTPBearer(auto_error=False)
 
