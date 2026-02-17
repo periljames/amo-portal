@@ -14,6 +14,10 @@ export class RealtimeHttpError extends Error {
 
 export async function fetchRealtimeToken(): Promise<RealtimeTokenResponse> {
   const token = getToken();
+  if (!token) {
+    throw new RealtimeHttpError("token request skipped (no session token)", 401);
+  }
+
   const res = await fetch(`${getApiBaseUrl()}/api/realtime/token`, {
     method: "POST",
     headers: {

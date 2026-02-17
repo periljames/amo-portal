@@ -64,11 +64,24 @@ export const BrandHeader: React.FC<BrandHeaderProps> = ({
 
   return (
     <div className={`brand-header brand-header--${variant} ${className || ""}`.trim()}>
-      <BrandLogo size={variant === "auth" ? 48 : 32} className="brand-header__logo" />
-      <div className="brand-header__text">
-        <span className="brand-header__name">{brand.name}</span>
-        <span className="brand-header__subtitle">{resolvedSubtitle}</span>
-      </div>
+      {showFullTopbarLogo ? (
+        <div className="brand-header__topbar-logo-wrap">
+          <img
+            src={preferredLogo}
+            alt={`${brand.name} logo`}
+            className="brand-header__topbar-logo"
+            onError={() => setLogoFailed(true)}
+          />
+        </div>
+      ) : (
+        <>
+          <BrandLogo size={variant === "auth" ? 48 : 32} className="brand-header__logo" />
+          <div className="brand-header__text">
+            <span className="brand-header__name">{brand.name}</span>
+            <span className="brand-header__subtitle">{resolvedSubtitle}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 };
