@@ -125,6 +125,45 @@ def build_bootstrap(db: Session, *, user: account_models.User) -> schemas.Realti
     )
 
 
+def update_presence_state(
+    db: Session,
+    *,
+    user: account_models.User,
+    payload: schemas.PresenceStateUpdateRequest,
+) -> schemas.PresenceStateRead:
+    amo_id = effective_amo_id(user)
+    now = utcnow()
+
+    row = (
+        db.query(models.PresenceState)
+        .filter(models.PresenceState.amo_id == amo_id, models.PresenceState.user_id == str(user.id))
+        .first()
+    )
+    if not row:
+        row = models.PresenceState(
+            amo_id=amo_id,
+            user_id=str(user.id),
+            state=models.PresenceKind.ONLINE,
+            last_seen_at=now,
+        )
+        db.add(row)
+
+    row.state = models.PresenceKind.ONLINE if payload.state == "online" else models.PresenceKind.AWAY
+    row.last_seen_at = now
+    row.updated_at = now
+    db.commit()
+    db.refresh(row)
+
+    return schemas.PresenceStateRead(
+        user_id=row.user_id,
+        amo_id=row.amo_id,
+        state=row.state.value,
+        last_seen_at=row.last_seen_at,
+        updated_at=row.updated_at,
+        reason=payload.reason,
+    )
+
+
 def create_thread(db: Session, *, user: account_models.User, payload: schemas.ThreadCreateRequest) -> schemas.ThreadRead:
     amo_id = effective_amo_id(user)
     thread = models.ChatThread(amo_id=amo_id, title=payload.title, created_by=str(user.id))

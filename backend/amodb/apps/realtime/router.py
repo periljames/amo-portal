@@ -60,6 +60,15 @@ def realtime_sync(
     return services.sync_since(db, user=current_user, since_ts_ms=since_ms)
 
 
+@router.post("/realtime/presence", response_model=schemas.PresenceStateRead)
+def realtime_presence_update(
+    payload: schemas.PresenceStateUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+) -> schemas.PresenceStateRead:
+    return services.update_presence_state(db, user=current_user, payload=payload)
+
+
 @router.post("/chat/threads", response_model=schemas.ThreadRead)
 def create_thread(
     payload: schemas.ThreadCreateRequest,
