@@ -125,3 +125,48 @@ def test_cockpit_snapshot_manpower_and_tenant_scoping(db_session, monkeypatch):
     assert snapshot_b["manpower"]["total_employees"] == 1
     assert snapshot_b["manpower"]["availability"]["on_leave"] == 1
     assert snapshot_b["manpower"]["availability"]["on_duty"] == 0
+
+
+def test_cockpit_snapshot_demo_seed_guard(db_session, monkeypatch):
+    amo_demo, _dept, _user = _seed_amo_user(db_session, "DEMO", "user-demo", account_models.AccountRole.QUALITY_MANAGER)
+    amo_demo.is_demo = True
+    db_session.commit()
+
+    monkeypatch.setenv("ENABLE_DEMO_SEED", "true")
+    monkeypatch.setattr(quality_service, "get_dashboard", lambda *_args, **_kwargs: {
+        "distributions_pending_ack": 0,
+        "audits_open": 0,
+        "audits_total": 0,
+        "findings_overdue_total": 0,
+        "findings_open_total": 0,
+        "documents_active": 0,
+        "documents_draft": 0,
+        "documents_obsolete": 0,
+        "change_requests_open": 0,
+    })
+
+    snapshot = quality_service.get_cockpit_snapshot(db_session, amo_id=amo_demo.id, department_code="quality")
+    assert snapshot["manpower"] is not None
+    assert snapshot["manpower"]["availability"] is not None
+
+
+def test_cockpit_snapshot_demo_seed_not_applied_to_real_tenant(db_session, monkeypatch):
+    amo_real, _dept, _user = _seed_amo_user(db_session, "REAL1", "user-real", account_models.AccountRole.QUALITY_MANAGER)
+    amo_real.is_demo = False
+    db_session.commit()
+
+    monkeypatch.setenv("ENABLE_DEMO_SEED", "true")
+    monkeypatch.setattr(quality_service, "get_dashboard", lambda *_args, **_kwargs: {
+        "distributions_pending_ack": 0,
+        "audits_open": 0,
+        "audits_total": 0,
+        "findings_overdue_total": 0,
+        "findings_open_total": 0,
+        "documents_active": 0,
+        "documents_draft": 0,
+        "documents_obsolete": 0,
+        "change_requests_open": 0,
+    })
+
+    snapshot = quality_service.get_cockpit_snapshot(db_session, amo_id=amo_real.id, department_code="quality")
+    assert snapshot["manpower"]["availability"] is None

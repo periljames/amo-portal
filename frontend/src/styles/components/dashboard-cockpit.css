@@ -834,3 +834,16 @@ body[data-color-scheme="dark"] .qms-cockpit-shell {
   .qms-priority-pill::before,
   .qms-manpower-module__track { animation: none !important; transition-duration: 1ms !important; }
 }
+
+.qms-demo-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 60%, var(--surface-border));
+  color: var(--accent-warning);
+  background: color-mix(in srgb, var(--accent-warning) 15%, var(--surface));
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}

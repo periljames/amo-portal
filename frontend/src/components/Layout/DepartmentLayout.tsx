@@ -209,8 +209,6 @@ const DepartmentLayout: React.FC<Props> = ({
   const [overviewSummaryUnavailable, setOverviewSummaryUnavailable] = useState(false);
   const [trialMenuOpen, setTrialMenuOpen] = useState(false);
   const [trialChipHidden, setTrialChipHidden] = useState(false);
-  const [focusMenuOpen, setFocusMenuOpen] = useState(false);
-  const [edgePeekOpen, setEdgePeekOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -328,19 +326,25 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [theme]);
 
 
-  const closeLauncher = useCallback(() => {
-    setFocusMenuOpen(false);
-    setEdgePeekOpen(false);
+  const openSidebarDrawer = useCallback((options?: { source?: "edge" | "kbd" | "mobile" }) => {
+    if (sidebarPinned) return;
+    if (import.meta.env.DEV) {
+      console.debug(`[sidebar] open drawer source=${options?.source ?? "unknown"}`);
+    }
+    setSidebarDrawerOpen(true);
+  }, [sidebarPinned]);
+
+  const closeSidebarDrawer = useCallback(() => {
     if (!sidebarPinned) setSidebarDrawerOpen(false);
   }, [sidebarPinned]);
 
-  const navigateFromLauncher = useCallback(
+  const navigateWithSidebarClose = useCallback(
     (path: string, options?: { replace?: boolean; state?: unknown }) => {
-      closeLauncher();
+      closeSidebarDrawer();
       if (!sidebarPinned) setSidebarDrawerOpen(false);
       navigate(path, options as never);
     },
-    [closeLauncher, navigate, sidebarPinned]
+    [closeSidebarDrawer, navigate, sidebarPinned]
   );
 
   const handleNav = (deptId: DepartmentId) => {
@@ -363,18 +367,18 @@ const DepartmentLayout: React.FC<Props> = ({
         canAccessDepartment(currentUser, assignedDepartment, deptId) &&
         isDepartmentId(deptId)
       ) {
-        navigateFromLauncher(targetPath);
+        navigateWithSidebarClose(targetPath);
       }
       return;
     }
 
     // System Admin is NOT a normal department dashboard; route is explicit.
     if (deptId === "admin") {
-      navigateFromLauncher(`/maintenance/${amoCode}/admin/overview`);
+      navigateWithSidebarClose(`/maintenance/${amoCode}/admin/overview`);
       return;
     }
 
-    navigateFromLauncher(targetPath);
+    navigateWithSidebarClose(targetPath);
   };
 
   const handleAdminNav = (navId: AdminNavId, overrideRoute?: string) => {
@@ -387,34 +391,34 @@ const DepartmentLayout: React.FC<Props> = ({
     }
 
     if (overrideRoute) {
-      navigateFromLauncher(`/maintenance/${amoCode}${overrideRoute}`);
+      navigateWithSidebarClose(`/maintenance/${amoCode}${overrideRoute}`);
       return;
     }
 
     switch (navId) {
       case "admin-overview":
-        navigateFromLauncher(`/maintenance/${amoCode}/admin/overview`);
+        navigateWithSidebarClose(`/maintenance/${amoCode}/admin/overview`);
         break;
       case "admin-amos":
-        navigateFromLauncher(`/maintenance/${amoCode}/admin/amos`);
+        navigateWithSidebarClose(`/maintenance/${amoCode}/admin/amos`);
         break;
       case "admin-users":
-        navigateFromLauncher(`/maintenance/${amoCode}/admin/users`);
+        navigateWithSidebarClose(`/maintenance/${amoCode}/admin/users`);
         break;
       case "admin-assets":
-        navigateFromLauncher(`/maintenance/${amoCode}/admin/amo-assets`);
+        navigateWithSidebarClose(`/maintenance/${amoCode}/admin/amo-assets`);
         break;
       case "admin-billing":
-        navigateFromLauncher(`/maintenance/${amoCode}/admin/billing`);
+        navigateWithSidebarClose(`/maintenance/${amoCode}/admin/billing`);
         break;
       case "admin-settings":
-        navigateFromLauncher(`/maintenance/${amoCode}/admin/settings`);
+        navigateWithSidebarClose(`/maintenance/${amoCode}/admin/settings`);
         break;
       case "admin-email-logs":
-        navigateFromLauncher(`/maintenance/${amoCode}/admin/email-logs`);
+        navigateWithSidebarClose(`/maintenance/${amoCode}/admin/email-logs`);
         break;
       case "admin-email-settings":
-        navigateFromLauncher(`/maintenance/${amoCode}/admin/email-settings`);
+        navigateWithSidebarClose(`/maintenance/${amoCode}/admin/email-settings`);
         break;
       default:
         break;
@@ -441,7 +445,7 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const gotoMyTraining = () => {
     const dept = resolveDeptForTraining();
-    navigateFromLauncher(`/maintenance/${amoCode}/${dept}/training`);
+    navigateWithSidebarClose(`/maintenance/${amoCode}/${dept}/training`);
   };
 
   const resolveLoginSlug = (): string => {
@@ -501,45 +505,73 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/qms");
   }, [location.pathname]);
 
-  const isCockpitRoute = useMemo(() => {
-    const base = `/maintenance/${amoCode}/${activeDepartment}`;
-    const normalized = location.pathname.replace(/\/$/, "");
-    return (
-      normalized === base ||
-      normalized === `${base}/qms` ||
-      normalized === `${base}/qms/kpis`
-    );
-  }, [activeDepartment, amoCode, location.pathname]);
-
-  const focusMode = uiShellV2 && activeDepartment === "quality" && isCockpitRoute;
-
-
   useEffect(() => {
-    if (!focusMode) return;
+    if (!uiShellV2) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === "\\") {
+      if (event.isComposing || event.key === "Process") return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isTextTarget =
+        !!target && (target.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT");
+      const matchesOpenCombo = (event.ctrlKey || event.metaKey) && event.key === "\\";
+      if (matchesOpenCombo) {
         event.preventDefault();
-        if (!sidebarPinned) setSidebarDrawerOpen(true);
+        openSidebarDrawer({ source: "kbd" });
+        return;
       }
-      if (event.key === "Escape") {
-        setFocusMenuOpen(false);
-        setEdgePeekOpen(false);
+      if (isTextTarget && !event.ctrlKey && !event.metaKey) {
+        return;
+      }
+      if (event.key === "Escape" && !sidebarPinned) {
+        setSidebarDrawerOpen(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [focusMode, sidebarPinned]);
+  }, [openSidebarDrawer, sidebarPinned, uiShellV2]);
 
   useEffect(() => {
-    if (!focusMenuOpen) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!focusLauncherRef.current?.contains(event.target as Node)) {
-        closeLauncher();
+    if (!uiShellV2 || !isDesktopSidebar || sidebarPinned) return;
+
+    const clearCloseTimer = () => {
+      if (sidebarCloseTimerRef.current) {
+        window.clearTimeout(sidebarCloseTimerRef.current);
+        sidebarCloseTimerRef.current = null;
       }
     };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [closeLauncher, focusMenuOpen]);
+
+    const openDrawer = () => {
+      clearCloseTimer();
+      openSidebarDrawer({ source: "edge" });
+    };
+
+    const scheduleClose = () => {
+      clearCloseTimer();
+      sidebarCloseTimerRef.current = window.setTimeout(() => {
+        setSidebarDrawerOpen(false);
+      }, 280);
+    };
+
+    const sidebarEl = sidebarRef.current;
+    const hotzoneEl = sidebarHotzoneRef.current;
+    sidebarEl?.addEventListener("pointerenter", openDrawer);
+    sidebarEl?.addEventListener("pointerleave", scheduleClose);
+    hotzoneEl?.addEventListener("pointerenter", openDrawer);
+    hotzoneEl?.addEventListener("pointerleave", scheduleClose);
+
+    return () => {
+      clearCloseTimer();
+      sidebarEl?.removeEventListener("pointerenter", openDrawer);
+      sidebarEl?.removeEventListener("pointerleave", scheduleClose);
+      hotzoneEl?.removeEventListener("pointerenter", openDrawer);
+      hotzoneEl?.removeEventListener("pointerleave", scheduleClose);
+    };
+  }, [isDesktopSidebar, openSidebarDrawer, sidebarPinned, uiShellV2]);
+
+  useEffect(() => {
+    if (!isDesktopSidebar || sidebarPinned) return;
+    setSidebarDrawerOpen(false);
+  }, [isDesktopSidebar, sidebarPinned]);
 
   useEffect(() => {
     if (!uiShellV2 || !isDesktopSidebar || sidebarPinned) return;
@@ -707,7 +739,6 @@ const DepartmentLayout: React.FC<Props> = ({
   const profileRef = useRef<HTMLDivElement | null>(null);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
   const previousUnreadRef = useRef(0);
-  const focusLauncherRef = useRef<HTMLDivElement | null>(null);
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
   const idleCountdownIntervalRef = useRef<number | null>(null);
@@ -1333,7 +1364,7 @@ const DepartmentLayout: React.FC<Props> = ({
                 )}
               </div>
 
-              <nav className="sidebar__nav">
+              <nav id="app-shell-sidebar-nav" className="sidebar__nav">
                 {visibleAdminNav.map((nav) => {
                   const isActive = nav.id === activeDepartment;
                   const badge = adminBadgeMap[nav.id];
@@ -1393,7 +1424,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigateFromLauncher(`/maintenance/${amoCode}/planning/aircraft-import`)
+                        navigateWithSidebarClose(`/maintenance/${amoCode}/planning/aircraft-import`)
                       }
                       className={
                         "sidebar__item" +
@@ -1407,7 +1438,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigateFromLauncher(`/maintenance/${amoCode}/planning/component-import`)
+                        navigateWithSidebarClose(`/maintenance/${amoCode}/planning/component-import`)
                       }
                       className={
                         "sidebar__item" +
@@ -1421,7 +1452,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigateFromLauncher(`/maintenance/${amoCode}/planning/aircraft-documents`)
+                        navigateWithSidebarClose(`/maintenance/${amoCode}/planning/aircraft-documents`)
                       }
                       className={
                         "sidebar__item" +
@@ -1435,7 +1466,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigateFromLauncher(`/maintenance/${amoCode}/planning/work-orders`)
+                        navigateWithSidebarClose(`/maintenance/${amoCode}/planning/work-orders`)
                       }
                       className={
                         "sidebar__item" +
@@ -1455,7 +1486,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        navigateFromLauncher(`/maintenance/${amoCode}/${activeDepartment}/work-orders`)
+                        navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/work-orders`)
                       }
                       className={
                         "sidebar__item" +
@@ -1486,7 +1517,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   <>
                     <button
                       type="button"
-                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/quality/qms`)}
+                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/quality/qms`)}
                       className={
                         "sidebar__item" + (isQmsRoute ? " sidebar__item--active" : "")
                       }
@@ -1503,7 +1534,7 @@ const DepartmentLayout: React.FC<Props> = ({
                               <div key={item.id} className="sidebar__qms-node">
                                 <button
                                   type="button"
-                                  onClick={() => navigateFromLauncher(item.path)}
+                                  onClick={() => navigateWithSidebarClose(item.path)}
                                   className={
                                     "sidebar__item" +
                                     (isActive ? " sidebar__item--active" : "")
@@ -1519,7 +1550,7 @@ const DepartmentLayout: React.FC<Props> = ({
                                         <button
                                           key={child.id}
                                           type="button"
-                                          onClick={() => navigateFromLauncher(child.path)}
+                                          onClick={() => navigateWithSidebarClose(child.path)}
                                           className={
                                             "sidebar__item sidebar__item--sub" +
                                             (childActive ? " sidebar__item--active" : "")
@@ -1543,7 +1574,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   <>
                     <button
                       type="button"
-                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/reliability`)}
+                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/reliability`)}
                       className={
                         "sidebar__item" +
                         (isReliabilityRoute ? " sidebar__item--active" : "")
@@ -1555,7 +1586,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/ehm/dashboard`)}
+                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/ehm/dashboard`)}
                       className={
                         "sidebar__item" +
                         (isEhmDashboardRoute ? " sidebar__item--active" : "")
@@ -1567,7 +1598,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/ehm/trends`)}
+                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/ehm/trends`)}
                       className={
                         "sidebar__item" + (isEhmTrendsRoute ? " sidebar__item--active" : "")
                       }
@@ -1578,7 +1609,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigateFromLauncher(`/maintenance/${amoCode}/ehm/uploads`)}
+                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/ehm/uploads`)}
                       className={
                         "sidebar__item" + (isEhmUploadsRoute ? " sidebar__item--active" : "")
                       }
@@ -1594,36 +1625,12 @@ const DepartmentLayout: React.FC<Props> = ({
           );
 
           const sidebar = <aside ref={sidebarRef} className="app-shell__sidebar">{sidebarContent}</aside>;
-          const focusSidebar = (
-            <aside className="app-shell__sidebar app-shell__sidebar--focus">
-              {sidebarContent}
-            </aside>
-          );
-
           const trialChipVisible =
             uiShellV2 && isTrialing && subscription?.trial_ends_at && !trialChipHidden;
 
           const header = (
             <header className="app-shell__topbar">
               <div className="app-shell__topbar-title">
-                {uiShellV2 && !isDesktopSidebar && (
-                  <div
-                    ref={focusLauncherRef}
-                    className="focus-launcher focus-launcher--topbar"
-                  >
-                    <button
-                      type="button"
-                      className="focus-launcher__toggle"
-                      onClick={() => setFocusMenuOpen((prev) => !prev)}
-                      aria-label="Open modules and departments"
-                    >
-                      Modules
-                    </button>
-                    {focusMenuOpen && (
-                      <div className="focus-launcher__panel focus-launcher__panel--left">{focusSidebar}</div>
-                    )}
-                  </div>
-                )}
                 <BrandHeader variant="topbar" />
                 <div className="app-shell__topbar-context">
                   <div className="app-shell__topbar-heading">{deptLabel}</div>
@@ -1635,9 +1642,11 @@ const DepartmentLayout: React.FC<Props> = ({
                 {uiShellV2 && !isDesktopSidebar && !sidebarPinned && (
                   <button
                     type="button"
-                    className="focus-launcher__toggle"
-                    onClick={() => setSidebarDrawerOpen((prev) => !prev)}
+                    className="sidebar-mobile-toggle"
+                    onClick={() => (sidebarDrawerOpen ? setSidebarDrawerOpen(false) : openSidebarDrawer({ source: "mobile" }))}
                     aria-label="Toggle navigation"
+                    aria-expanded={sidebarDrawerOpen}
+                    aria-controls="app-shell-sidebar-nav"
                   >
                     Menu
                   </button>
@@ -1679,7 +1688,7 @@ const DepartmentLayout: React.FC<Props> = ({
                           type="button"
                           onClick={() => {
                             setTrialMenuOpen(false);
-                            navigateFromLauncher(`/maintenance/${amoCode}/admin/billing`);
+                            navigateWithSidebarClose(`/maintenance/${amoCode}/admin/billing`);
                           }}
                         >
                           Convert to paid
@@ -2118,26 +2127,19 @@ const DepartmentLayout: React.FC<Props> = ({
               {uiShellV2 && isDesktopSidebar && !sidebarPinned && (
                 <div ref={sidebarHotzoneRef} className="app-shell__edge-hotzone" aria-hidden="true" />
               )}
-              {focusMode && (
+              {uiShellV2 && !isDesktopSidebar && !sidebarPinned && sidebarDrawerOpen && (
                 <button
                   type="button"
-                  className={`focus-edge-peek${edgePeekOpen ? " is-open" : ""}`}
-                  onMouseEnter={() => setEdgePeekOpen(true)}
-                  onMouseLeave={() => setEdgePeekOpen(false)}
-                  onFocus={() => setEdgePeekOpen(true)}
-                  onBlur={() => setEdgePeekOpen(false)}
-                  onClick={() => setFocusMenuOpen((prev) => !prev)}
-                  aria-label="Open module launcher"
-                  title="Open module launcher (Ctrl/⌘ + \)"
-                >
-                  <span>Modules</span>
-                </button>
+                  className="app-shell__mobile-scrim"
+                  aria-label="Close navigation menu"
+                  onClick={() => setSidebarDrawerOpen(false)}
+                />
               )}
               <AppShellV2
                 className={shellClassName}
                 sidebar={sidebar}
                 header={header}
-                focusMode={focusMode}
+                focusMode={false}
               >
                 {isExpired && (
                   <div className={`card ${isReadOnly ? "card--error" : "card--warning"}`}>

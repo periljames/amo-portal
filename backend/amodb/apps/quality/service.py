@@ -47,6 +47,59 @@ CAR_LEVEL_REMINDER_DAYS: dict[FindingLevel, int] = {
 }
 
 
+
+
+def _truthy_env(name: str) -> bool:
+    return (os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"})
+
+
+def _is_demo_tenant(db: Session, amo_id: Optional[str]) -> bool:
+    if not amo_id:
+        return False
+    amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
+    if not amo:
+        return False
+    return bool(getattr(amo, "is_demo", False) or str(getattr(amo, "amo_code", "")).lower() == "demo")
+
+
+def _apply_demo_seed(snapshot: dict, db: Session, amo_id: Optional[str]) -> dict:
+    if not _truthy_env("ENABLE_DEMO_SEED"):
+        return snapshot
+    if not _is_demo_tenant(db, amo_id):
+        return snapshot
+
+    manpower = snapshot.get("manpower") or {}
+    by_role = manpower.get("by_role") or {}
+    availability = manpower.get("availability")
+    by_department = manpower.get("by_department")
+
+    if not by_role:
+        by_role = {"ENGINEER": 5, "TECHNICIAN": 7, "QUALITY_INSPECTOR": 2, "QUALITY_MANAGER": 2}
+    if not availability:
+        availability = {"on_duty": 11, "away": 3, "on_leave": 2}
+    if not by_department:
+        by_department = [{"department": "Quality", "count": manpower.get("total_employees") or 16}]
+
+    snapshot["manpower"] = {
+        "scope": manpower.get("scope") or "department",
+        "total_employees": manpower.get("total_employees") or 16,
+        "by_role": by_role,
+        "availability": availability,
+        "by_department": by_department,
+        "updated_at": manpower.get("updated_at") or datetime.now(timezone.utc),
+    }
+
+    if snapshot.get("tasks_due_today") is None:
+        snapshot["tasks_due_today"] = 4
+    if snapshot.get("tasks_overdue") is None:
+        snapshot["tasks_overdue"] = 3
+    if snapshot.get("events_hold_count") is None:
+        snapshot["events_hold_count"] = 1
+    if snapshot.get("events_new_count") is None:
+        snapshot["events_new_count"] = 6
+
+    return snapshot
+
 def compute_target_close_date(level: FindingLevel, base: Optional[date] = None) -> date:
     base_date = base or date.today()
     return base_date + timedelta(days=FINDING_LEVEL_DUE_DAYS[level])
@@ -400,7 +453,7 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
 
     manpower = _build_manpower_snapshot(db, amo_id=amo_id, department_code=department_code)
 
-    return {
+    snapshot = {
         "generated_at": datetime.now(timezone.utc),
         "pending_acknowledgements": dashboard.get("distributions_pending_ack", 0),
         "audits_open": dashboard.get("audits_open", 0),
@@ -440,6 +493,8 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
             for row in action_rows
         ],
     }
+
+    return _apply_demo_seed(snapshot, db=db, amo_id=amo_id)
 
 
 # -----------------------------
