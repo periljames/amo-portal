@@ -28,7 +28,24 @@ def effective_amo_id(user: account_models.User) -> str:
     return str(getattr(user, "effective_amo_id", None) or user.amo_id)
 
 
-def issue_connect_token(db: Session, *, user: account_models.User) -> schemas.RealtimeTokenResponse:
+def resolve_broker_ws_url(*, fallback_origin: str | None = None) -> str:
+    configured = (os.getenv("MQTT_BROKER_WS_URL") or "").strip()
+    if configured:
+        return configured
+
+    origin = (fallback_origin or "").strip().rstrip("/")
+    if origin:
+        return f"{origin}/mqtt"
+
+    return "wss://localhost:8084/mqtt"
+
+
+def issue_connect_token(
+    db: Session,
+    *,
+    user: account_models.User,
+    broker_ws_url: str | None = None,
+) -> schemas.RealtimeTokenResponse:
     amo_id = effective_amo_id(user)
     ttl = max(30, DEFAULT_TOKEN_TTL_SECONDS)
     expires_at = utcnow() + timedelta(seconds=ttl)
@@ -45,7 +62,7 @@ def issue_connect_token(db: Session, *, user: account_models.User) -> schemas.Re
         )
     )
     db.commit()
-    broker_url = os.getenv("MQTT_BROKER_WS_URL", "wss://localhost:8084/mqtt")
+    broker_url = resolve_broker_ws_url(fallback_origin=broker_ws_url)
     return schemas.RealtimeTokenResponse(
         token=raw,
         broker_ws_url=broker_url,
@@ -122,6 +139,45 @@ def build_bootstrap(db: Session, *, user: account_models.User) -> schemas.Realti
             }
             for delivery, prompt in pending_prompts
         ],
+    )
+
+
+def update_presence_state(
+    db: Session,
+    *,
+    user: account_models.User,
+    payload: schemas.PresenceStateUpdateRequest,
+) -> schemas.PresenceStateRead:
+    amo_id = effective_amo_id(user)
+    now = utcnow()
+
+    row = (
+        db.query(models.PresenceState)
+        .filter(models.PresenceState.amo_id == amo_id, models.PresenceState.user_id == str(user.id))
+        .first()
+    )
+    if not row:
+        row = models.PresenceState(
+            amo_id=amo_id,
+            user_id=str(user.id),
+            state=models.PresenceKind.ONLINE,
+            last_seen_at=now,
+        )
+        db.add(row)
+
+    row.state = models.PresenceKind.ONLINE if payload.state == "online" else models.PresenceKind.AWAY
+    row.last_seen_at = now
+    row.updated_at = now
+    db.commit()
+    db.refresh(row)
+
+    return schemas.PresenceStateRead(
+        user_id=row.user_id,
+        amo_id=row.amo_id,
+        state=row.state.value,
+        last_seen_at=row.last_seen_at,
+        updated_at=row.updated_at,
+        reason=payload.reason,
     )
 
 
