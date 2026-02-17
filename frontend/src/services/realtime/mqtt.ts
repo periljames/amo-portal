@@ -98,6 +98,7 @@ export class RealtimeMqttClient {
   private reconnectTimer: number | null = null;
   private stopped = false;
   private attempt = 0;
+  private authBlocked = false;
 
   constructor(handlers: Handlers) {
     const ctx = getContext();
@@ -108,6 +109,7 @@ export class RealtimeMqttClient {
 
   async connect(): Promise<void> {
     this.stopped = false;
+    this.authBlocked = false;
     await this.connectOnce();
   }
 
@@ -141,6 +143,11 @@ export class RealtimeMqttClient {
   }
 
   private async connectOnce(): Promise<void> {
+    if (this.authBlocked) {
+      this.handlers.onState("offline");
+      return;
+    }
+
     const [mqttLib, msgpack] = await Promise.all([getMqttLib(), getMsgpack()]);
     if (!mqttLib || !msgpack) {
       this.handlers.onState("offline");
@@ -207,9 +214,10 @@ export class RealtimeMqttClient {
     } catch (err) {
       this.handlers.onState("offline");
       if (err instanceof RealtimeHttpError && (err.status === 401 || err.status === 403)) {
-        this.attempt = 6;
-        console.info("[realtime] mqtt auth unavailable; backing off reconnect attempts");
-        this.scheduleReconnect("auth");
+        this.authBlocked = true;
+        this.clearReconnectTimer();
+        this.handlers.onState("offline");
+        console.info("[realtime] mqtt auth unavailable; reconnect paused until next authenticated session");
         return;
       }
       console.warn("[realtime] token fetch/connect failed", err);
