@@ -217,7 +217,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         reconnectNow();
       }
 
-      if (detail.type === "expired" || detail.type === "idle-logout") {
+      if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
         controllerRef.current?.abort();
         mqttRef.current?.disconnect();
         mqttRef.current = null;

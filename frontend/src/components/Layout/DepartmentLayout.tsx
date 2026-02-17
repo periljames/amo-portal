@@ -21,7 +21,7 @@ import {
 } from "../../services/notificationPreferences";
 import { fetchSubscription } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
-import { getCachedUser, getContext, logout, onSessionEvent } from "../../services/auth";
+import { endSession, getCachedUser, getContext, markSessionActivity, onSessionEvent } from "../../services/auth";
 import { listDocumentAlerts } from "../../services/fleet";
 import { fetchOverviewSummary, type OverviewSummary } from "../../services/adminOverview";
 import { qmsListNotifications } from "../../services/qms";
@@ -443,7 +443,7 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const handleLogout = () => {
-    logout();
+    endSession("manual");
 
     // Keep AMO context when logging out
     const code = resolveLoginSlug().trim();
@@ -670,7 +670,10 @@ const DepartmentLayout: React.FC<Props> = ({
 
   useEffect(() => {
     return onSessionEvent((detail) => {
-      if (detail.type === "expired" || detail.type === "idle-logout") {
+      if (detail.type === "activity") {
+        resetIdleTimers();
+      }
+      if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
         clearLayoutCache(`${LAYOUT_CACHE_PREFIX}:`);
       }
     });
@@ -991,7 +994,7 @@ const DepartmentLayout: React.FC<Props> = ({
     }, warningDelay);
 
     idleLogoutTimeoutRef.current = window.setTimeout(() => {
-      logout();
+      endSession("idle");
       setIdleWarningOpen(false);
       setLogoutReason("idle");
     }, IDLE_TIMEOUT_MS);
@@ -1032,6 +1035,7 @@ const DepartmentLayout: React.FC<Props> = ({
       const now = Date.now();
       if (now - lastActivityRef.current < 1000) return;
       lastActivityRef.current = now;
+      markSessionActivity("interaction");
       resetIdleTimers();
     };
 
@@ -1214,7 +1218,7 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const handleIdleLogout = () => {
-    logout();
+    endSession("idle");
     clearIdleTimers();
     setIdleWarningOpen(false);
     setLogoutReason("idle");
