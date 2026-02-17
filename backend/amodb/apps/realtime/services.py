@@ -5,9 +5,11 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import msgpack
 from fastapi import HTTPException
+from starlette.requests import Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -28,7 +30,50 @@ def effective_amo_id(user: account_models.User) -> str:
     return str(getattr(user, "effective_amo_id", None) or user.amo_id)
 
 
-def issue_connect_token(db: Session, *, user: account_models.User) -> schemas.RealtimeTokenResponse:
+def _infer_public_hostname(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    forwarded_host = (request.headers.get("x-forwarded-host") or "").strip()
+    if forwarded_host:
+        # Can be a list in multi-proxy setups: "host1, host2"
+        first = forwarded_host.split(",", 1)[0].strip()
+        return first.split(":", 1)[0].strip() or None
+
+    if request.url.hostname:
+        return request.url.hostname
+    host = (request.headers.get("host") or "").strip()
+    if not host:
+        return None
+    return host.split(":", 1)[0].strip() or None
+
+
+def resolve_broker_ws_url(request: Request | None) -> str:
+    configured = (os.getenv("MQTT_BROKER_WS_URL") or "").strip()
+    public_host = _infer_public_hostname(request)
+
+    if configured:
+        parsed = urlparse(configured)
+        host = (parsed.hostname or "").lower()
+        if public_host and host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
+            port = f":{parsed.port}" if parsed.port else ""
+            return f"{parsed.scheme}://{public_host}{port}{parsed.path or '/mqtt'}"
+        return configured
+
+    scheme = "wss"
+    if request and (request.url.scheme or "").lower() == "http":
+        scheme = "ws"
+    host = public_host or "localhost"
+    default_port = os.getenv("MQTT_BROKER_WS_PORT", "8084").strip()
+    port_segment = f":{default_port}" if default_port else ""
+    return f"{scheme}://{host}{port_segment}/mqtt"
+
+
+def issue_connect_token(
+    db: Session,
+    *,
+    user: account_models.User,
+    request: Request | None = None,
+) -> schemas.RealtimeTokenResponse:
     amo_id = effective_amo_id(user)
     ttl = max(30, DEFAULT_TOKEN_TTL_SECONDS)
     expires_at = utcnow() + timedelta(seconds=ttl)
@@ -45,7 +90,7 @@ def issue_connect_token(db: Session, *, user: account_models.User) -> schemas.Re
         )
     )
     db.commit()
-    broker_url = os.getenv("MQTT_BROKER_WS_URL", "wss://localhost:8084/mqtt")
+    broker_url = resolve_broker_ws_url(request)
     return schemas.RealtimeTokenResponse(
         token=raw,
         broker_ws_url=broker_url,
