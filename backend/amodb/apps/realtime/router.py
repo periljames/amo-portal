@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_db
-from amodb.security import get_current_active_user
+from amodb.security import get_current_active_user, get_current_user
 
 from . import schemas, services
 
@@ -20,7 +20,7 @@ realtime_bearer = HTTPBearer(auto_error=False)
 def issue_realtime_token(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.RealtimeTokenResponse:
     scheme = "wss" if request.url.scheme == "https" else "ws"
     fallback_origin = f"{scheme}://{request.url.netloc}"
