@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <title>AMO Portal</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function () {
+        try {
+          var storedMode = localStorage.getItem("amo_color_scheme");
+          var mode = storedMode === "dark" || storedMode === "light" || storedMode === "system" ? storedMode : "system";
+          var isLight = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+          var resolved = mode === "system" ? (isLight ? "light" : "dark") : mode;
+          document.documentElement.dataset.colorSchemeMode = mode;
+          document.documentElement.dataset.colorScheme = resolved;
+          document.documentElement.style.colorScheme = resolved;
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
