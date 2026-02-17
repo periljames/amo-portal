@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -33,10 +32,13 @@ def get_current_active_realtime_user(
 
 @router.post("/realtime/token", response_model=schemas.RealtimeTokenResponse)
 def issue_realtime_token(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.RealtimeTokenResponse:
-    return services.issue_connect_token(db, user=current_user)
+    scheme = "wss" if request.url.scheme == "https" else "ws"
+    fallback_origin = f"{scheme}://{request.url.netloc}"
+    return services.issue_connect_token(db, user=current_user, broker_ws_url=fallback_origin)
 
 
 @router.get("/realtime/bootstrap", response_model=schemas.RealtimeBootstrapResponse)

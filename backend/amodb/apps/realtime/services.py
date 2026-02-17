@@ -28,7 +28,24 @@ def effective_amo_id(user: account_models.User) -> str:
     return str(getattr(user, "effective_amo_id", None) or user.amo_id)
 
 
-def issue_connect_token(db: Session, *, user: account_models.User) -> schemas.RealtimeTokenResponse:
+def resolve_broker_ws_url(*, fallback_origin: str | None = None) -> str:
+    configured = (os.getenv("MQTT_BROKER_WS_URL") or "").strip()
+    if configured:
+        return configured
+
+    origin = (fallback_origin or "").strip().rstrip("/")
+    if origin:
+        return f"{origin}/mqtt"
+
+    return "wss://localhost:8084/mqtt"
+
+
+def issue_connect_token(
+    db: Session,
+    *,
+    user: account_models.User,
+    broker_ws_url: str | None = None,
+) -> schemas.RealtimeTokenResponse:
     amo_id = effective_amo_id(user)
     ttl = max(30, DEFAULT_TOKEN_TTL_SECONDS)
     expires_at = utcnow() + timedelta(seconds=ttl)
@@ -45,7 +62,7 @@ def issue_connect_token(db: Session, *, user: account_models.User) -> schemas.Re
         )
     )
     db.commit()
-    broker_url = os.getenv("MQTT_BROKER_WS_URL", "wss://localhost:8084/mqtt")
+    broker_url = resolve_broker_ws_url(fallback_origin=broker_ws_url)
     return schemas.RealtimeTokenResponse(
         token=raw,
         broker_ws_url=broker_url,

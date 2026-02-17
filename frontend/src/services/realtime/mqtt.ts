@@ -50,6 +50,38 @@ async function getMsgpack(): Promise<MsgpackModule | null> {
   return msgpackPromise;
 }
 
+function isLikelyLocalBrokerUrl(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    return u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function isLocalAppHost(): boolean {
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function resolveBrokerUrl(rawUrl: string): string {
+  if (!isLikelyLocalBrokerUrl(rawUrl) || isLocalAppHost()) {
+    return rawUrl;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    const app = window.location;
+    url.hostname = app.hostname;
+    if (!url.port && app.port) {
+      url.port = app.port;
+    }
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 function backoffMs(attempt: number): number {
   const capped = Math.min(6, Math.max(0, attempt));
   const base = 1000 * 2 ** capped;
@@ -122,15 +154,20 @@ export class RealtimeMqttClient {
       this.amoId = tokenData.amo_id || this.amoId;
       this.handlers.onState("reconnecting");
 
+      const brokerUrl = resolveBrokerUrl(tokenData.broker_ws_url);
+      if (brokerUrl !== tokenData.broker_ws_url) {
+        console.warn(`[realtime] MQTT broker URL ${tokenData.broker_ws_url} was rewritten to ${brokerUrl} for non-local app host`);
+      }
+
       this.teardownClient();
-      this.client = mqttLib.connect(tokenData.broker_ws_url, {
+      this.client = mqttLib.connect(brokerUrl, {
         clientId: tokenData.client_id,
         username: this.userId,
         password: tokenData.token,
         reconnectPeriod: 0,
         keepalive: 30,
         clean: true,
-        connectTimeout: 10_000,
+        connectTimeout: 4_000,
       });
 
       this.client.on("connect", () => {
