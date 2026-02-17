@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -13,21 +14,6 @@ from . import schemas, services
 
 router = APIRouter(prefix="/api", tags=["realtime"])
 realtime_bearer = HTTPBearer(auto_error=False)
-
-
-def get_current_active_realtime_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(realtime_bearer),
-    db: Session = Depends(get_db),
-) -> account_models.User:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Bearer token. Send header: Authorization: Bearer <JWT>",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    current_user = get_current_user(token=credentials.credentials, db=db)
-    return get_current_active_user(current_user=current_user, db=db)
 
 
 @router.post("/realtime/token", response_model=schemas.RealtimeTokenResponse)
