@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createRevisionExport, listRevisionExports, type ManualExportPayload } from "../../services/manuals";
 import { useManualRouteContext } from "./context";
+import ManualsPageLayout from "./ManualsPageLayout";
 
 export default function ManualExportsPage() {
   const { tenant, manualId, revId } = useManualRouteContext();
@@ -18,8 +19,7 @@ export default function ManualExportsPage() {
   }, [tenant, manualId, revId]);
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">Export Artifacts</h1>
+    <ManualsPageLayout title="Export Artifacts">
       <div className="rounded border p-3 space-y-2 text-sm">
         <label className="flex items-center justify-between"><span>UNCONTROLLED WHEN PRINTED watermark</span><input type="checkbox" checked={watermark} onChange={(e) => setWatermark(e.target.checked)} /></label>
         <label className="flex items-center justify-between"><span>CONTROLLED HARD COPY</span><input type="checkbox" checked={controlled} onChange={(e) => setControlled(e.target.checked)} /></label>
@@ -50,6 +50,6 @@ export default function ManualExportsPage() {
           ))}
         </ul>
       </div>
-    </div>
+    </ManualsPageLayout>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getRevisionDiff, getRevisionRead } from "../../services/manuals";
 import { useManualRouteContext } from "./context";
+import ManualsPageLayout from "./ManualsPageLayout";
 
 export default function ManualDiffPage() {
   const { tenant, manualId, revId } = useManualRouteContext();
@@ -19,8 +20,7 @@ export default function ManualDiffPage() {
   const active = useMemo(() => changes[cursor] || null, [changes, cursor]);
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">Revision Diff</h1>
+    <ManualsPageLayout title="Revision Diff">
       <div className="rounded border p-3 text-sm">
         <div>Changed sections: {summary.changed_sections || 0}</div>
         <div>Changed blocks: {summary.changed_blocks || 0}</div>
@@ -42,6 +42,6 @@ export default function ManualDiffPage() {
           {active ? <p className="text-sm">#{active.index} — {active.text}</p> : <p className="text-sm text-slate-500">No changes indexed.</p>}
         </div>
       </div>
-    </div>
+    </ManualsPageLayout>
   );
 }

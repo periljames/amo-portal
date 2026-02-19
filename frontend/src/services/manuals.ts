@@ -156,3 +156,40 @@ export async function runOcr(tenantSlug: string, manualId: string, revId: string
 export async function generateOutline(tenantSlug: string, manualId: string, revId: string) {
   return request<{ status: string; generated: number }>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/outline/generate`, { method: "POST", body: JSON.stringify({}) });
 }
+
+
+export async function uploadDocxRevision(
+  tenantSlug: string,
+  payload: {
+    code: string;
+    title: string;
+    rev_number: string;
+    issue_number?: string;
+    manual_type?: string;
+    owner_role?: string;
+    file: File;
+  },
+) {
+  const token = getToken();
+  const body = new FormData();
+  body.append("code", payload.code);
+  body.append("title", payload.title);
+  body.append("rev_number", payload.rev_number);
+  if (payload.issue_number) body.append("issue_number", payload.issue_number);
+  if (payload.manual_type) body.append("manual_type", payload.manual_type);
+  if (payload.owner_role) body.append("owner_role", payload.owner_role);
+  body.append("file", payload.file);
+
+  const resp = await fetch(`${API_BASE}/manuals/t/${tenantSlug}/upload-docx`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body,
+  });
+  if (!resp.ok) {
+    if (resp.status === 401) handleAuthFailure();
+    throw new Error(`Request failed: ${resp.status}`);
+  }
+  return (await resp.json()) as { manual_id: string; revision_id: string; status: string; paragraphs: number };
+}

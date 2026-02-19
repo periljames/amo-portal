@@ -736,13 +736,13 @@ export const AppRouter: React.FC = () => {
         path="/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view"
         element={<RequireAuth><ManualReaderPage /></RequireAuth>}
       />
-      <Route path="/maintenance/:amoCode/:department/manuals" element={<RequireAuth><ManualsDashboardPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/manuals/master-list" element={<RequireAuth><ManualMasterListPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/manuals/:manualId" element={<RequireAuth><ManualOverviewPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/manuals/:manualId/rev/:revId/read" element={<RequireAuth><ManualReaderPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/manuals/:manualId/rev/:revId/diff" element={<RequireAuth><ManualDiffPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/manuals/:manualId/rev/:revId/workflow" element={<RequireAuth><ManualWorkflowPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/manuals/:manualId/rev/:revId/exports" element={<RequireAuth><ManualExportsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals" element={<RequireAuth><ManualsDashboardPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/master-list" element={<RequireAuth><ManualMasterListPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId" element={<RequireAuth><ManualOverviewPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/read" element={<RequireAuth><ManualReaderPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/diff" element={<RequireAuth><ManualDiffPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/workflow" element={<RequireAuth><ManualWorkflowPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/exports" element={<RequireAuth><ManualExportsPage /></RequireAuth>} />
 
       <Route path="/t/:tenantSlug/manuals" element={<RequireAuth><ManualsDashboardPage /></RequireAuth>} />
       <Route path="/t/:tenantSlug/manuals/master-list" element={<RequireAuth><ManualMasterListPage /></RequireAuth>} />

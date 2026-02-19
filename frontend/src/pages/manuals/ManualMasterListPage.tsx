@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getMasterList } from "../../services/manuals";
 import { useManualRouteContext } from "./context";
+import ManualsPageLayout from "./ManualsPageLayout";
 
 export default function ManualMasterListPage() {
   const { tenant, basePath } = useManualRouteContext();
@@ -13,8 +14,7 @@ export default function ManualMasterListPage() {
   }, [tenant]);
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">Manual Master List</h1>
+    <ManualsPageLayout title="Manual Master List">
       <div className="overflow-x-auto rounded border">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left">
@@ -39,6 +39,6 @@ export default function ManualMasterListPage() {
           </tbody>
         </table>
       </div>
-    </div>
+    </ManualsPageLayout>
   );
 }

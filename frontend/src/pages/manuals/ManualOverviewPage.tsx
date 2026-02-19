@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getManual, listRevisions, type ManualRevision, type ManualSummary } from "../../services/manuals";
 import { useManualRouteContext } from "./context";
+import ManualsPageLayout from "./ManualsPageLayout";
 
 export default function ManualOverviewPage() {
   const { tenant, manualId, basePath } = useManualRouteContext();
@@ -20,8 +21,7 @@ export default function ManualOverviewPage() {
   );
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">Manual Overview</h1>
+    <ManualsPageLayout title="Manual Overview">
       <div className="rounded border p-3 text-sm">
         <div><b>Code:</b> {manual?.code ?? "-"}</div>
         <div><b>Title:</b> {manual?.title ?? "-"}</div>
@@ -48,6 +48,6 @@ export default function ManualOverviewPage() {
           ))}
         </div>
       </div>
-    </div>
+    </ManualsPageLayout>
   );
 }

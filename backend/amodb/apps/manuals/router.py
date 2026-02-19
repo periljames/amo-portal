@@ -3,8 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import hashlib
 from uuid import uuid4
+from html import escape
+import re
+import zipfile
+from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -28,6 +32,24 @@ from .schemas import (
 
 router = APIRouter(prefix="/manuals", tags=["Manuals"], dependencies=[Depends(get_current_active_user)])
 
+
+
+
+def _extract_docx_paragraphs(content: bytes) -> list[str]:
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as zf:
+            xml = zf.read("word/document.xml").decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+    xml = re.sub(r"</w:p>", "\n", xml)
+    xml = re.sub(r"<[^>]+>", "", xml)
+    parts = [p.strip() for p in xml.splitlines() if p.strip()]
+    return parts
+
+
+def _slugify_heading(value: str, fallback: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or fallback
 
 def _tenant_by_slug(db: Session, tenant_slug: str) -> models.Tenant:
     tenant = db.query(models.Tenant).filter(models.Tenant.slug == tenant_slug).first()
@@ -82,6 +104,84 @@ def get_manual(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
     return manual
 
 
+
+
+
+
+@router.post("/t/{tenant_slug}/upload-docx")
+async def upload_docx_revision(
+    tenant_slug: str,
+    request: Request,
+    code: str = Form(...),
+    title: str = Form(...),
+    rev_number: str = Form(...),
+    manual_type: str = Form("GENERAL"),
+    owner_role: str = Form("Library"),
+    issue_number: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    if not file.filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported in this endpoint")
+
+    manual = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id, models.Manual.code == code.strip()).first()
+    if not manual:
+        manual = models.Manual(
+            tenant_id=tenant.id,
+            code=code.strip(),
+            title=title.strip(),
+            manual_type=manual_type.strip() or "GENERAL",
+            owner_role=owner_role.strip() or "Library",
+        )
+        db.add(manual)
+        db.flush()
+
+    content = await file.read()
+    paragraphs = _extract_docx_paragraphs(content)
+
+    rev = models.ManualRevision(
+        manual_id=manual.id,
+        rev_number=rev_number.strip(),
+        issue_number=issue_number,
+        created_by=get_current_actor_id(),
+        status_enum=models.ManualRevisionStatus.DRAFT,
+        notes=f"Uploaded source: {file.filename}",
+    )
+    db.add(rev)
+    db.flush()
+
+    heading = paragraphs[0] if paragraphs else f"{manual.code} Revision {rev.rev_number}"
+    section = models.ManualSection(
+        revision_id=rev.id,
+        order_index=1,
+        heading=heading[:255],
+        anchor_slug=_slugify_heading(heading, "section-1"),
+        level=1,
+        metadata_json={"source": "docx-upload", "filename": file.filename},
+    )
+    db.add(section)
+    db.flush()
+
+    if not paragraphs:
+        paragraphs = ["No extractable DOCX text found. Upload processed and ready for manual editing."]
+
+    for idx, para in enumerate(paragraphs[:500], start=1):
+        safe_text = para.strip()
+        html_text = f"<p>{escape(safe_text)}</p>"
+        hash_source = f"{rev.id}:{idx}:{safe_text}".encode("utf-8")
+        db.add(models.ManualBlock(
+            section_id=section.id,
+            order_index=idx,
+            block_type="paragraph",
+            html_sanitized=html_text,
+            text_plain=safe_text,
+            change_hash=hashlib.sha256(hash_source).hexdigest(),
+        ))
+
+    _audit(db, tenant.id, get_current_actor_id(), "revision.docx_uploaded", "manual_revision", rev.id, request, {"filename": file.filename, "paragraphs": len(paragraphs)})
+    db.commit()
+    return {"manual_id": manual.id, "revision_id": rev.id, "status": rev.status_enum.value, "paragraphs": len(paragraphs)}
 
 
 @router.get("/t/{tenant_slug}/{manual_id}/revisions", response_model=list[RevisionOut])

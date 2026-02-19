@@ -1450,7 +1450,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/manuals`)
+                      navigateWithSidebarClose(`/maintenance/${amoCode}/manuals`)
                     }
                     className={
                       "sidebar__item" + (isManualsRoute ? " sidebar__item--active" : "")

@@ -25,7 +25,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 export default function ManualReaderPage() {
-  const { tenant, manualId, revId, amoCode, department } = useManualRouteContext();
+  const { tenant, manualId, revId, amoCode } = useManualRouteContext();
   const [payload, setPayload] = useState<ManualReadPayload | null>(null);
   const [workflowStatus, setWorkflowStatus] = useState("Loading");
   const [diffSummary, setDiffSummary] = useState<Record<string, number>>({});
@@ -152,7 +152,7 @@ export default function ManualReaderPage() {
     </div>
   );
 
-  const fallbackPath = amoCode && department ? `/maintenance/${amoCode}/${department}/qms/documents` : `/t/${tenant || ""}/manuals`;
+  const fallbackPath = amoCode ? `/maintenance/${amoCode}/manuals` : `/t/${tenant || ""}/manuals`;
 
   return (
     <TenantBrandingProvider tenantSlug={tenant || "default"}>

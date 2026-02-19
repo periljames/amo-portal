@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getRevisionWorkflow, transitionRevision, type ManualWorkflowPayload } from "../../services/manuals";
 import { useManualRouteContext } from "./context";
+import ManualsPageLayout from "./ManualsPageLayout";
 
 const actions = [
   { id: "submit_department_review", label: "Submit Department Review" },
@@ -25,8 +26,7 @@ export default function ManualWorkflowPage() {
   }, [tenant, manualId, revId]);
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">Workflow Trail</h1>
+    <ManualsPageLayout title="Workflow Trail">
       <div className="rounded border p-3 text-sm">
         <div><b>Status:</b> {workflow?.status || "-"}</div>
         <div><b>Authority approval required:</b> {workflow?.requires_authority_approval ? "Yes" : "No"}</div>
@@ -63,6 +63,6 @@ export default function ManualWorkflowPage() {
           ))}
         </ul>
       </div>
-    </div>
+    </ManualsPageLayout>
   );
 }
