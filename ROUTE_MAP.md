@@ -283,3 +283,8 @@
 - `GET /api/chat/threads/{id}/messages` – list thread messages with tenant/member enforcement.
 - `POST /api/prompts/{id}/action` – REST fallback for offline queued prompt actions.
 - `GET /healthz` – health probe including DB and broker connectivity.
+
+
+## Manuals reader route update (2026-02-19)
+- Added deterministic viewer route: `/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view`
+- Existing manuals routes remain intact under `/t/:tenantSlug/manuals/...` and `/maintenance/:amoCode/:department/manuals/...`.

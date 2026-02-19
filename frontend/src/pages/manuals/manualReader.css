@@ -1,0 +1,78 @@
+.manual-reader-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 320px;
+  gap: 1rem;
+}
+
+.manual-reader-pane,
+.manual-reader-aside,
+.manual-reader-toc {
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.75rem;
+  background: var(--paper, #fff);
+}
+
+.manual-reader-content a {
+  color: rgb(3 105 161);
+  text-decoration: underline;
+}
+
+.manual-reader-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 0.875rem;
+}
+
+.manual-reader-content th,
+.manual-reader-content td {
+  border: 1px solid rgb(203 213 225);
+  padding: 0.4rem;
+  vertical-align: top;
+}
+
+.manual-reader-content img {
+  max-width: 100%;
+  height: auto;
+}
+
+.manual-reader-content p,
+.manual-reader-content li {
+  line-height: 1.55;
+  color: var(--ink, #0f172a);
+}
+
+.manual-paged-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.manual-page {
+  background: var(--paper, #fff);
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.75rem;
+  min-height: 840px;
+  padding: 0.75rem;
+}
+
+.manual-page-header,
+.manual-page-footer {
+  font-size: 0.72rem;
+  color: rgb(71 85 105);
+  border-bottom: 1px solid rgb(226 232 240);
+  padding-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.manual-page-footer {
+  border-top: 1px solid rgb(226 232 240);
+  border-bottom: none;
+  margin-top: 0.5rem;
+  padding-top: 0.25rem;
+}
+
+@media (max-width: 1279px) {
+  .manual-reader-layout {
+    grid-template-columns: 1fr;
+  }
+}

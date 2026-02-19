@@ -28,6 +28,7 @@ from amodb.apps.quality import models as quality_models  # noqa: E402
 from amodb.apps.integrations import models as integration_models  # noqa: E402
 from amodb.apps.maintenance_program import models as maintenance_program_models  # noqa: E402
 from amodb.apps.realtime import models as realtime_models  # noqa: E402
+from amodb.apps.manuals import models as manuals_models  # noqa: E402
 
 
 @pytest.fixture()
@@ -90,6 +91,20 @@ def db_session():
             realtime_models.PresenceState.__table__,
             realtime_models.RealtimeOutbox.__table__,
             realtime_models.RealtimeConnectToken.__table__,
+            manuals_models.Tenant.__table__,
+            manuals_models.Manual.__table__,
+            manuals_models.ManualRevision.__table__,
+            manuals_models.ManualSection.__table__,
+            manuals_models.ManualBlock.__table__,
+            manuals_models.RevisionDiffIndex.__table__,
+            manuals_models.Acknowledgement.__table__,
+            manuals_models.PrintExport.__table__,
+            manuals_models.PrintLog.__table__,
+            manuals_models.ManualAuditLog.__table__,
+            manuals_models.RegulationCatalog.__table__,
+            manuals_models.RegulationRequirement.__table__,
+            manuals_models.ManualRequirementLink.__table__,
+            manuals_models.ManualAIHookEvent.__table__,
         ],
     )
     TestingSession = sessionmaker(
