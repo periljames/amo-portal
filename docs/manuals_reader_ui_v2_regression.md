@@ -25,3 +25,10 @@
 
 ## Known implementation caveat
 - Paged mode currently uses virtualized page cards and not full Paged.js pagination fragments yet.
+
+
+## Header/spacing fixes in this pass
+- Removed stacked status rows and moved status chip to single app bar.
+- Replaced malformed placeholders (`- -`) with metadata warning chip + missing fields tooltip.
+- Ensured workspace consumes `calc(100vh - header)` with independent panel/viewer scrolling (`min-h-0` behavior).
+- Added inspector tabs, loading skeletons, and explicit empty states for TOC/viewer.
