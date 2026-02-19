@@ -1,141 +1,84 @@
-.manual-reader-workspace {
-  height: 100%;
-  display: grid;
-  grid-template-columns: 320px minmax(0, 1fr) 360px;
-  gap: 0.75rem;
-}
-
-.manual-reader-viewer,
-.manual-reader-pane,
-.manual-reader-aside,
-.manual-reader-toc {
-  border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
-  border-radius: 0.75rem;
-  background: var(--paper, #fff);
-}
-
-.manual-reader-content a {
-  color: color-mix(in srgb, var(--tenant-accent) 85%, #0f172a 15%);
-  text-decoration: underline;
-}
-
-.manual-reader-content table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 0.5rem 0;
-  font-size: 0.875rem;
-}
-
-.manual-reader-content th,
-.manual-reader-content td {
-  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
-  padding: 0.4rem;
-  vertical-align: top;
-}
-
-.manual-reader-content img {
-  max-width: 100%;
-  height: auto;
-}
-
-.manual-reader-content p,
-.manual-reader-content li {
-  line-height: 1.55;
-  color: var(--ink, #0f172a);
-}
-
-.manual-paged-grid {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.manual-page {
-  background: var(--paper, #fff);
-  border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
-  border-radius: 0.75rem;
-  min-height: 840px;
-  padding: 0.75rem;
-  box-shadow: 0 10px 20px rgba(2, 6, 23, 0.07);
-}
-
-.manual-page-header,
-.manual-page-footer {
-  font-size: 0.72rem;
-  color: color-mix(in srgb, var(--ink) 64%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
-  padding-bottom: 0.25rem;
-  margin-bottom: 0.5rem;
-}
-
-.manual-page-footer {
-  border-top: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
-  border-bottom: none;
-  margin-top: 0.5rem;
-  padding-top: 0.25rem;
-}
-
-.manual-skeleton {
-  border-radius: 0.65rem;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--ink) 6%, transparent), color-mix(in srgb, var(--ink) 12%, transparent), color-mix(in srgb, var(--ink) 6%, transparent));
-  background-size: 200% 100%;
-  animation: manualPulse 1.4s infinite;
-}
-
-@keyframes manualPulse {
-  from { background-position: 0% 50%; }
-  to { background-position: 100% 50%; }
-}
-
-.manual-empty {
-  height: 100%;
-  display: grid;
-  place-items: center;
-  color: color-mix(in srgb, var(--ink) 70%, transparent);
-  font-size: 0.95rem;
-}
-
-.manual-switch-row {
+.manual-reader-root {
+  height: 100vh;
   display: flex;
+  flex-direction: column;
+  background: var(--tenant-bg);
+  color: var(--ink);
+}
+
+.manual-reader-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: 64px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 520px) minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  font-size: 0.75rem;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  background: color-mix(in srgb, var(--paper) 90%, transparent);
+  backdrop-filter: blur(8px);
+}
+.manual-reader-topbar-cluster { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.manual-reader-topbar-search { display: flex; align-items: center; gap: 0.4rem; }
+.manual-reader-search-input, .manual-input, .manual-textarea {
+  width: 100%; border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  background: color-mix(in srgb, var(--paper) 96%, transparent); color: var(--ink); border-radius: 0.5rem; padding: 0.35rem 0.6rem;
+}
+.manual-reader-location-label, .manual-reader-meta-pill { font-size: 0.75rem; color: color-mix(in srgb, var(--ink) 70%, transparent); }
+.manual-reader-brand-logo { width: 1.75rem; height: 1.75rem; border-radius: 999px; object-fit: cover; }
+.manual-reader-brand-name { font-weight: 600; font-size: 0.85rem; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.manual-reader-manual-chip { font-size: 0.75rem; border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent); border-radius: 999px; padding: 0.2rem 0.5rem; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.manual-reader-icon-btn {
+  min-height: 36px; min-width: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  border-radius: 0.5rem; padding: 0.35rem 0.55rem; font-size: 0.75rem;
+}
+.manual-reader-icon-btn:hover { background: color-mix(in srgb, var(--tenant-accent) 18%, var(--paper) 82%); }
+
+.manual-reader-main { flex: 1; min-height: 0; overflow: hidden; }
+.manual-reader-workspace { height: 100%; min-height: 0; display: grid; grid-template-columns: 320px minmax(0,1fr) 360px; gap: 0.75rem; padding: 0.75rem; }
+.manual-reader-toc, .manual-reader-viewer, .manual-reader-aside {
+  min-height: 0; overflow: auto; border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  background: color-mix(in srgb, var(--paper) 97%, transparent);
+}
+.manual-reader-viewer { padding: 0.75rem; }
+.manual-panel-title { font-size: 0.75rem; font-weight: 700; padding: 0.75rem; border-bottom: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); }
+.manual-panel-empty { padding: 0.75rem; display: grid; gap: 0.5rem; font-size: 0.8rem; }
+.manual-toc-item { display: block; font-size: 0.8rem; padding: 0.35rem 0.5rem; border-radius: 0.45rem; }
+.manual-toc-item.active { background: color-mix(in srgb, var(--tenant-accent) 22%, transparent); }
+
+.manual-reader-pane { max-width: 1100px; margin: 0 auto; }
+.manual-reader-section { border-left: 3px solid color-mix(in srgb, var(--tenant-accent) 20%, transparent); padding: 0.4rem 0.8rem; margin: 0 0 0.75rem; }
+.manual-reader-content a { color: color-mix(in srgb, var(--tenant-accent) 76%, var(--ink) 24%); text-decoration: underline; }
+.manual-reader-content table { width: 100%; border-collapse: collapse; }
+.manual-reader-content th, .manual-reader-content td { border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent); padding: 0.4rem; }
+.manual-reader-content img { max-width: 100%; height: auto; }
+
+.manual-paged-grid { display: grid; gap: 0.75rem; }
+.manual-page {
+  min-height: 840px; border-radius: 0.75rem; padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  background: color-mix(in srgb, var(--paper) 98%, transparent);
+  box-shadow: 0 8px 16px color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
-.manual-switch {
-  width: 42px;
-  height: 24px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
-  position: relative;
-  background: #e2e8f0;
-}
+.manual-empty-hub { max-width: 640px; margin: 2rem auto; display: grid; gap: 0.75rem; text-align: center; }
+.manual-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; }
+.manual-upload-caption { font-size: 0.75rem; color: color-mix(in srgb, var(--ink) 72%, transparent); }
 
-.manual-switch::after {
-  content: "";
-  position: absolute;
-  width: 18px;
-  height: 18px;
-  top: 2px;
-  left: 2px;
-  border-radius: 999px;
-  background: #fff;
-  transition: transform 0.2s ease;
-}
+.manual-tabs { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); padding: 0.5rem; gap: 0.35rem; }
+.manual-tab { border-radius: 0.5rem; font-size: 0.72rem; padding: 0.35rem 0.4rem; border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent); }
+.manual-tab.active { background: color-mix(in srgb, var(--tenant-accent) 22%, var(--paper) 78%); }
+.manual-card { margin: 0.5rem; border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent); border-radius: 0.65rem; padding: 0.65rem; display: grid; gap: 0.5rem; font-size: 0.82rem; }
+.manual-switch-row, .manual-check { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.manual-reader-fullscreen-hint { position: fixed; right: 1rem; top: 4.5rem; z-index: 50; background: color-mix(in srgb, var(--ink) 88%, transparent); color: var(--paper); border-radius: 999px; padding: 0.25rem 0.6rem; font-size: 0.72rem; }
 
-.manual-switch.on {
-  background: var(--tenant-accent);
-}
-
-.manual-switch.on::after {
-  transform: translateX(18px);
-}
-
-.manual-switch:disabled {
-  opacity: 0.55;
-}
-
-@media (max-width: 1279px) {
-  .manual-reader-workspace {
-    grid-template-columns: 1fr;
-  }
+@media (max-width: 1280px) {
+  .manual-reader-topbar { grid-template-columns: 1fr; height: auto; }
+  .manual-reader-workspace { grid-template-columns: 1fr; }
 }

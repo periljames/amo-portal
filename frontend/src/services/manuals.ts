@@ -132,3 +132,27 @@ export async function createRevisionExport(
     body: JSON.stringify(payload),
   });
 }
+
+
+export type ManualProcessingStatus = {
+  revision_id: string;
+  stage: string;
+  actor_id?: string | null;
+  at?: string | null;
+};
+
+export async function getProcessingStatus(tenantSlug: string, manualId: string, revId: string) {
+  return request<ManualProcessingStatus>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/processing/status`);
+}
+
+export async function runProcessor(tenantSlug: string, manualId: string, revId: string) {
+  return request<{ status: string; job_id: string }>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/processing/run`, { method: "POST", body: JSON.stringify({ mode: "processor" }) });
+}
+
+export async function runOcr(tenantSlug: string, manualId: string, revId: string) {
+  return request<{ status: string; job_id: string }>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/ocr/run`, { method: "POST", body: JSON.stringify({ mode: "ocr" }) });
+}
+
+export async function generateOutline(tenantSlug: string, manualId: string, revId: string) {
+  return request<{ status: string; generated: number }>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/outline/generate`, { method: "POST", body: JSON.stringify({}) });
+}

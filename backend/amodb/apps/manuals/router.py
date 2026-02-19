@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import hashlib
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -283,3 +284,41 @@ def master_list(tenant_slug: str, db: Session = Depends(get_db)):
             pending = db.query(models.Acknowledgement).filter(models.Acknowledgement.revision_id == manual.current_published_rev_id, models.Acknowledgement.status_enum != "ACKNOWLEDGED").count()
         result.append(MasterListEntry(manual_id=manual.id, code=manual.code, title=manual.title, current_revision=current_rev.rev_number if current_rev else None, current_status=current_rev.status_enum.value if current_rev else "NO_PUBLISHED_REV", pending_ack_count=pending))
     return result
+
+
+@router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/processing/run")
+def run_processor(tenant_slug: str, manual_id: str, rev_id: str, request: Request, db: Session = Depends(get_db)):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    actor_id = get_current_actor_id()
+    _audit(db, tenant.id, actor_id, "revision.processing.run", "manual_revision", rev_id, request, {"stage": "queued"})
+    db.commit()
+    return {"status": "queued", "job_id": str(uuid4())}
+
+
+@router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/ocr/run")
+def run_ocr(tenant_slug: str, manual_id: str, rev_id: str, request: Request, db: Session = Depends(get_db)):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    actor_id = get_current_actor_id()
+    _audit(db, tenant.id, actor_id, "revision.ocr.run", "manual_revision", rev_id, request, {"stage": "queued"})
+    db.commit()
+    return {"status": "queued", "job_id": str(uuid4())}
+
+
+@router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/processing/status")
+def processing_status(tenant_slug: str, manual_id: str, rev_id: str, db: Session = Depends(get_db)):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    _ = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
+    row = db.query(models.ManualAuditLog).filter(models.ManualAuditLog.entity_id == rev_id, models.ManualAuditLog.action.in_(["revision.processing.run", "revision.ocr.run"]))        .order_by(models.ManualAuditLog.at.desc()).first()
+    if not row:
+        return {"revision_id": rev_id, "stage": "idle", "actor_id": None, "at": None}
+    return {"revision_id": rev_id, "stage": row.diff_json.get("stage", "queued"), "actor_id": row.actor_id, "at": row.at}
+
+
+@router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/outline/generate")
+def generate_outline(tenant_slug: str, manual_id: str, rev_id: str, request: Request, db: Session = Depends(get_db)):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    actor_id = get_current_actor_id()
+    count = db.query(models.ManualSection).filter(models.ManualSection.revision_id == rev_id).count()
+    _audit(db, tenant.id, actor_id, "revision.outline.generated", "manual_revision", rev_id, request, {"generated": count})
+    db.commit()
+    return {"status": "ok", "generated": count}

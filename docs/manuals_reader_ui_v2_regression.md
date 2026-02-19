@@ -32,3 +32,5 @@
 - Replaced malformed placeholders (`- -`) with metadata warning chip + missing fields tooltip.
 - Ensured workspace consumes `calc(100vh - header)` with independent panel/viewer scrolling (`min-h-0` behavior).
 - Added inspector tabs, loading skeletons, and explicit empty states for TOC/viewer.
+
+- Added empty-state and processing/OCR hook implementation notes in `docs/manuals_reader_ui_v2_empty_state_and_processing.md`.
