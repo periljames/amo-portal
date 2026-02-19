@@ -501,6 +501,10 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/work-orders") || location.pathname.includes("/tasks/");
   }, [location.pathname]);
 
+  const isManualsRoute = useMemo(() => {
+    return location.pathname.includes("/manuals");
+  }, [location.pathname]);
+
   const isQmsRoute = useMemo(() => {
     return location.pathname.includes("/qms");
   }, [location.pathname]);
@@ -1441,6 +1445,22 @@ const DepartmentLayout: React.FC<Props> = ({
                       <span className="sidebar__item-label">Work Orders</span>
                     </button>
                   )}
+
+                {!isAdminArea && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigateWithSidebarClose(`/maintenance/${amoCode}/manuals`)
+                    }
+                    className={
+                      "sidebar__item" + (isManualsRoute ? " sidebar__item--active" : "")
+                    }
+                    aria-label="Manuals"
+                    title="Manuals"
+                  >
+                    <span className="sidebar__item-label">Manuals</span>
+                  </button>
+                )}
 
                 {!isAdminArea && (
                   <button

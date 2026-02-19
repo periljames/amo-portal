@@ -71,3 +71,21 @@ export default defineConfig([
   },
 ])
 ```
+
+
+## Manuals Reader plugin (UI V2)
+
+This repo now includes a standalone-capable Manuals Reader plugin package under:
+- `src/packages/manuals-reader/`
+
+Exports:
+- `ManualsReaderApp`
+- `ManualsReaderRoutes`
+- `ManualsReaderShell`
+- `TenantBrandingProvider`
+
+Standalone entry scaffold:
+- `src/standalone/manuals-main.tsx`
+
+Branding endpoint expected by the plugin:
+- `GET /api/tenants/:tenantSlug/branding`
