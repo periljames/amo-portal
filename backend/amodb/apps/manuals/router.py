@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
+from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.models import AMO
 
 from . import models
@@ -115,8 +116,11 @@ async def preview_docx_upload(
     tenant_slug: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
     _ = _tenant_by_slug(db, tenant_slug)
+    if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
+        raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     if not file.filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only DOCX uploads are supported in preview")
     content = await file.read()
@@ -144,8 +148,11 @@ async def upload_docx_revision(
     issue_number: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
     tenant = _tenant_by_slug(db, tenant_slug)
+    if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
+        raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     if not file.filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only DOCX uploads are supported in this endpoint")
 

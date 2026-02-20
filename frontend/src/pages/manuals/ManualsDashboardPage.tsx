@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { getCachedUser } from "../../services/auth";
 import {
   getMasterList,
   listManuals,
@@ -18,6 +19,7 @@ type PreviewPayload = {
 };
 
 export default function ManualsDashboardPage() {
+  const navigate = useNavigate();
   const { tenant, basePath } = useManualRouteContext();
   const [manuals, setManuals] = useState<ManualSummary[]>([]);
   const [masterRows, setMasterRows] = useState<any[]>([]);
@@ -28,9 +30,19 @@ export default function ManualsDashboardPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
-  const [uploadResult, setUploadResult] = useState<{ manual_id: string; revision_id: string } | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string>("");
+  const [errorMessage, setErrorMessage] = useState<string>("");
+
+  const user = getCachedUser();
+  const role = String((user as any)?.role || "");
+  const canWrite =
+    !!user?.is_superuser ||
+    !!user?.is_amo_admin ||
+    role === "QUALITY_MANAGER" ||
+    role === "QUALITY_INSPECTOR" ||
+    role === "DOCUMENT_CONTROL_OFFICER" ||
+    role !== "VIEW_ONLY";
 
   const refresh = () => {
     if (!tenant) return;
@@ -45,17 +57,13 @@ export default function ManualsDashboardPage() {
   useEffect(() => {
     if (!tenant || !file) {
       setPreview(null);
-      setPreviewError(null);
       return;
     }
     setPreviewLoading(true);
-    setPreviewError(null);
+    setErrorMessage("");
     previewDocxUpload(tenant, file)
       .then(setPreview)
-      .catch((e) => {
-        setPreview(null);
-        setPreviewError(e instanceof Error ? e.message : "Preview failed");
-      })
+      .catch((e) => setErrorMessage(e instanceof Error ? e.message : "Preview failed"))
       .finally(() => setPreviewLoading(false));
   }, [tenant, file]);
 
@@ -69,26 +77,38 @@ export default function ManualsDashboardPage() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <div className="rounded border p-3 text-sm"><div className="text-slate-500">Manuals</div><div className="text-xl font-semibold">{manuals.length}</div></div>
         <div className="rounded border p-3 text-sm"><div className="text-slate-500">Pending acknowledgements</div><div className="text-xl font-semibold">{pendingTotal}</div></div>
-        <div className="rounded border p-3 text-sm"><div className="text-slate-500">Reader type</div><div className="font-semibold">Structured HTML reader</div></div>
+        <div className="rounded border p-3 text-sm"><div className="text-slate-500">Distribution owner</div><div className="font-semibold">Document Control Officer</div></div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="rounded border p-4 space-y-3">
           <h2 className="font-medium">Upload DOCX Revision</h2>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-            <input className="rounded border px-3 py-2 text-sm" placeholder="Manual code (e.g. MTM-001)" value={code} onChange={(e) => setCode(e.target.value)} />
-            <input className="rounded border px-3 py-2 text-sm" placeholder="Manual title" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <input className="rounded border px-3 py-2 text-sm" placeholder="Issue number (required)" value={issue} onChange={(e) => setIssue(e.target.value)} />
-            <input className="rounded border px-3 py-2 text-sm" placeholder="Revision number" value={rev} onChange={(e) => setRev(e.target.value)} />
-            <input className="rounded border px-3 py-2 text-sm md:col-span-2" type="file" accept=".docx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <label className="text-xs text-slate-500">Manual Code</label>
+            <label className="text-xs text-slate-500">Manual Title</label>
+            <input className="rounded border px-3 py-2 text-sm" placeholder="e.g. MTM-001" value={code} onChange={(e) => setCode(e.target.value)} disabled={!canWrite} />
+            <input className="rounded border px-3 py-2 text-sm" placeholder="Manual title" value={title} onChange={(e) => setTitle(e.target.value)} disabled={!canWrite} />
+            <label className="text-xs text-slate-500">Issue Number</label>
+            <label className="text-xs text-slate-500">Revision Number</label>
+            <input className="rounded border px-3 py-2 text-sm" placeholder="Required" value={issue} onChange={(e) => setIssue(e.target.value)} disabled={!canWrite} />
+            <input className="rounded border px-3 py-2 text-sm" placeholder="e.g. 0" value={rev} onChange={(e) => setRev(e.target.value)} disabled={!canWrite} />
+            <label className="text-xs text-slate-500 md:col-span-2">DOCX File</label>
+            <input className="rounded border px-3 py-2 text-sm md:col-span-2" type="file" accept=".docx" onChange={(e) => setFile(e.target.files?.[0] || null)} disabled={!canWrite} />
           </div>
+
+          {!canWrite ? <p className="text-xs text-amber-600">Read-only role. Document Control Officer and quality roles can upload revisions.</p> : null}
+          {errorMessage ? <p className="text-xs text-rose-600">{errorMessage}</p> : null}
+          {statusMessage ? <p className="text-xs text-emerald-600">{statusMessage}</p> : null}
+
           <div className="flex items-center gap-3">
             <button
               className="rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-60"
-              disabled={uploading || !tenant || !code || !title || !issue || !rev || !file}
+              disabled={uploading || !canWrite || !tenant || !code || !title || !issue || !rev || !file}
               onClick={async () => {
                 if (!tenant || !file) return;
                 setUploading(true);
+                setErrorMessage("");
+                setStatusMessage("");
                 try {
                   const out = await uploadDocxRevision(tenant, {
                     code,
@@ -96,11 +116,14 @@ export default function ManualsDashboardPage() {
                     issue_number: issue,
                     rev_number: rev,
                     manual_type: "GENERAL",
-                    owner_role: "Library",
+                    owner_role: "Document Control Officer",
                     file,
                   });
-                  setUploadResult(out);
+                  setStatusMessage("Upload successful. Opening manual revision…");
                   refresh();
+                  navigate(`${basePath}/${out.manual_id}/rev/${out.revision_id}/read`);
+                } catch (e) {
+                  setErrorMessage(e instanceof Error ? e.message : "Upload failed");
                 } finally {
                   setUploading(false);
                 }
@@ -108,31 +131,25 @@ export default function ManualsDashboardPage() {
             >
               {uploading ? "Uploading..." : "Upload DOCX"}
             </button>
-            {uploadResult ? (
-              <Link className="text-sm underline" to={`${basePath}/${uploadResult.manual_id}/rev/${uploadResult.revision_id}/read`}>
-                Open reader for uploaded revision
-              </Link>
-            ) : null}
           </div>
         </div>
 
-        <div className="rounded border p-4 space-y-2">
-          <h2 className="font-medium">Automatic Preview</h2>
-          {!file ? <p className="text-sm text-slate-500">Select a DOCX file to preview extracted content.</p> : null}
-          {previewLoading ? <p className="text-sm">Generating preview…</p> : null}
-          {previewError ? <p className="text-sm text-rose-600">{previewError}</p> : null}
+        <div className="rounded border p-4">
+          {previewLoading ? <p className="text-sm">Loading…</p> : null}
           {preview ? (
             <div className="space-y-2 text-sm">
-              <div><b>File:</b> {preview.filename}</div>
-              <div><b>Heading:</b> {preview.heading}</div>
-              <div><b>Extracted paragraphs:</b> {preview.paragraph_count}</div>
-              <div className="max-h-64 overflow-auto rounded border p-2">
+              <div className="text-xs text-slate-500">{preview.filename}</div>
+              <div className="font-medium">{preview.heading}</div>
+              <div className="text-xs text-slate-500">{preview.paragraph_count} extracted lines</div>
+              <div className="max-h-72 overflow-auto rounded border p-2">
                 {preview.sample.map((line, idx) => (
                   <p key={`${idx}-${line.slice(0, 8)}`} className="mb-1">{line}</p>
                 ))}
               </div>
             </div>
-          ) : null}
+          ) : (
+            <p className="text-sm text-slate-500">Select a DOCX file to show preview.</p>
+          )}
         </div>
       </div>
 
@@ -140,8 +157,12 @@ export default function ManualsDashboardPage() {
         <h2 className="mb-2 font-medium">Manuals</h2>
         <ul className="space-y-2">
           {manuals.map((manual) => (
-            <li key={manual.id} className="rounded border p-3">
-              <Link className="font-medium underline" to={`${basePath}/${manual.id}`}>{manual.code} — {manual.title}</Link>
+            <li
+              key={manual.id}
+              className="cursor-pointer rounded border p-3 transition hover:bg-slate-50"
+              onClick={() => navigate(`${basePath}/${manual.id}`)}
+            >
+              <div className="font-medium">{manual.code} — {manual.title}</div>
               <div className="text-xs text-slate-600">Status: {manual.status}</div>
             </li>
           ))}
