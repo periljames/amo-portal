@@ -164,7 +164,7 @@ export async function uploadDocxRevision(
     code: string;
     title: string;
     rev_number: string;
-    issue_number?: string;
+    issue_number: string;
     manual_type?: string;
     owner_role?: string;
     file: File;
@@ -192,4 +192,29 @@ export async function uploadDocxRevision(
     throw new Error(`Request failed: ${resp.status}`);
   }
   return (await resp.json()) as { manual_id: string; revision_id: string; status: string; paragraphs: number };
+}
+
+
+export async function previewDocxUpload(tenantSlug: string, file: File) {
+  const token = getToken();
+  const body = new FormData();
+  body.append("file", file);
+
+  const resp = await fetch(`${API_BASE}/manuals/t/${tenantSlug}/upload-docx/preview`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body,
+  });
+  if (!resp.ok) {
+    if (resp.status === 401) handleAuthFailure();
+    throw new Error(`Preview request failed: ${resp.status}`);
+  }
+  return (await resp.json()) as {
+    filename: string;
+    heading: string;
+    paragraph_count: number;
+    sample: string[];
+  };
 }

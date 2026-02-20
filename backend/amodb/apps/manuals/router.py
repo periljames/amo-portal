@@ -108,6 +108,30 @@ def get_manual(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
 
 
 
+
+
+@router.post("/t/{tenant_slug}/upload-docx/preview")
+async def preview_docx_upload(
+    tenant_slug: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    _ = _tenant_by_slug(db, tenant_slug)
+    if not file.filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported in preview")
+    content = await file.read()
+    paragraphs = _extract_docx_paragraphs(content)
+    if not paragraphs:
+        paragraphs = ["No extractable text found in DOCX."]
+    heading = paragraphs[0][:255]
+    return {
+        "filename": file.filename,
+        "heading": heading,
+        "paragraph_count": len(paragraphs),
+        "sample": paragraphs[:20],
+    }
+
+
 @router.post("/t/{tenant_slug}/upload-docx")
 async def upload_docx_revision(
     tenant_slug: str,
@@ -117,7 +141,7 @@ async def upload_docx_revision(
     rev_number: str = Form(...),
     manual_type: str = Form("GENERAL"),
     owner_role: str = Form("Library"),
-    issue_number: str | None = Form(None),
+    issue_number: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
@@ -143,7 +167,7 @@ async def upload_docx_revision(
     rev = models.ManualRevision(
         manual_id=manual.id,
         rev_number=rev_number.strip(),
-        issue_number=issue_number,
+        issue_number=issue_number.strip(),
         created_by=get_current_actor_id(),
         status_enum=models.ManualRevisionStatus.DRAFT,
         notes=f"Uploaded source: {file.filename}",
