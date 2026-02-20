@@ -242,18 +242,6 @@ export const AppRouter: React.FC = () => {
       <Route path="/doc-control/registers" element={<RequireAuth><DocControlPages.DocControlRegistersPage /></RequireAuth>} />
       <Route path="/doc-control/settings" element={<RequireAuth><DocControlPages.DocControlSettingsPage /></RequireAuth>} />
 
-
-      <Route path="/quality/training" element={<RequireAuth><QMSTrainingPage /></RequireAuth>} />
-      <Route path="/quality/training/catalog" element={<RequireAuth><QMSTrainingPage /></RequireAuth>} />
-      <Route path="/quality/training/catalog/:courseId" element={<RequireAuth><QMSTrainingPage /></RequireAuth>} />
-      <Route path="/quality/training/sessions" element={<RequireAuth><QMSTrainingPage /></RequireAuth>} />
-      <Route path="/quality/training/sessions/:sessionId" element={<RequireAuth><QMSTrainingPage /></RequireAuth>} />
-      <Route path="/quality/training/staff" element={<RequireAuth><QMSTrainingPage /></RequireAuth>} />
-      <Route path="/quality/training/staff/:staffId" element={<RequireAuth><QMSTrainingUserPage /></RequireAuth>} />
-      <Route path="/quality/training/matrix" element={<RequireAuth><QMSTrainingPage /></RequireAuth>} />
-      <Route path="/quality/training/reports" element={<RequireAuth><QMSTrainingPage /></RequireAuth>} />
-      <Route path="/quality/training/settings" element={<RequireAuth><QMSTrainingPage /></RequireAuth>} />
-
       {/* Root → login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
 

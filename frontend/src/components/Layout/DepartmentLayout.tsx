@@ -509,6 +509,10 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/qms");
   }, [location.pathname]);
 
+  const isDocControlRoute = useMemo(() => {
+    return location.pathname.startsWith("/doc-control");
+  }, [location.pathname]);
+
   useEffect(() => {
     if (!uiShellV2) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1495,14 +1499,14 @@ const DepartmentLayout: React.FC<Props> = ({
                       type="button"
                       onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/quality/qms`)}
                       className={
-                        "sidebar__item" + (isQmsRoute ? " sidebar__item--active" : "")
+                        "sidebar__item" + ((isQmsRoute || isDocControlRoute) ? " sidebar__item--active" : "")
                       }
                       aria-label="Quality Management System"
                       title="Quality Management System"
                     >
                       <span className="sidebar__item-label">QMS Overview</span>
                     </button>
-                    {isQmsRoute && (
+                    {(isQmsRoute || isDocControlRoute) && (
                       <div className="sidebar__qms-nav" aria-label="QMS modules">
                         {qmsNavItems.map((item) => {
                           const isActive = isPathMatch(location.pathname, item.path, item.matchPrefixes);
