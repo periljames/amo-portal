@@ -661,6 +661,19 @@ const DepartmentLayout: React.FC<Props> = ({
         label: "KPIs & Review",
         path: `/maintenance/${amoCode}/${activeDepartment}/qms/kpis`,
       },
+      {
+        id: "qms-governance",
+        label: "Governance",
+        path: `/doc-control`,
+        children: [
+          {
+            id: "qms-governance-doc-control",
+            label: "Document Control",
+            path: `/doc-control`,
+            matchPrefixes: ["/doc-control"],
+          },
+        ],
+      },
     ],
     [activeDepartment, amoCode]
   );
