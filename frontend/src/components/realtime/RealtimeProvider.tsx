@@ -60,6 +60,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [brokerState, setBrokerState] = useState<BrokerState>("offline");
   const [backendHealth, setBackendHealth] = useState<BackendHealth>("ok");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [lastGoodServerTime, setLastGoodServerTime] = useState<Date | null>(null);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const controllerRef = useRef<AbortController | null>(null);
@@ -89,11 +90,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       clockOffsetMsRef.current = data.epoch_ms - Date.now();
       frozenClockRef.current = null;
       setClockSource("server");
-      setLastGoodServerTime(new Date(data.epoch_ms));
-      setBackendHealth("ok");
+      const syncedTime = new Date(data.epoch_ms);
+      setLastGoodServerTime(syncedTime);
+      setCurrentTime(syncedTime);
     } catch {
       if (frozenClockRef.current === null) frozenClockRef.current = Date.now() + clockOffsetMsRef.current;
-      setBackendHealth("degraded");
     }
   }, []);
 
@@ -269,6 +270,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, [isStale]);
 
+
+  useEffect(() => {
+    setCurrentTime(serverNow());
+    const timer = window.setInterval(() => setCurrentTime(serverNow()), 1000);
+    return () => window.clearInterval(timer);
+  }, [serverNow, clockSource]);
+
   useEffect(() => {
     const onOnline = () => {
       setIsOnline(true);
@@ -291,14 +299,19 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [reconnectNow, syncServerTime]);
 
   useEffect(() => {
-    void syncServerTime();
-    const timer = window.setInterval(async () => {
+    const refreshHealth = async () => {
       try {
         const health = await fetchHealthz();
         setBackendHealth(health.status === "ok" ? "ok" : "degraded");
       } catch {
         setBackendHealth("degraded");
       }
+    };
+
+    void syncServerTime();
+    void refreshHealth();
+    const timer = window.setInterval(() => {
+      void refreshHealth();
     }, 180_000);
     return () => window.clearInterval(timer);
   }, [syncServerTime]);
@@ -317,6 +330,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       backendHealth,
       lastGoodServerTime,
       lastUpdated,
+      currentTime,
       activity,
       isStale,
       staleSeconds,
@@ -325,7 +339,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       refreshData,
       triggerSync,
     }),
-    [status, brokerState, backendHealth, lastGoodServerTime, lastUpdated, activity, isStale, staleSeconds, isOnline, clockSource, refreshData, triggerSync]
+    [status, brokerState, backendHealth, lastGoodServerTime, lastUpdated, currentTime, activity, isStale, staleSeconds, isOnline, clockSource, refreshData, triggerSync]
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

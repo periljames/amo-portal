@@ -21,21 +21,22 @@ const statusLabel = (status: string): string => {
 };
 
 const LiveStatusIndicator: React.FC = () => {
-  const { status, brokerState, backendHealth, lastGoodServerTime, lastUpdated, isStale, staleSeconds, isOnline, clockSource, refreshData, triggerSync } = useRealtime();
+  const { status, brokerState, backendHealth, lastGoodServerTime, lastUpdated, currentTime, staleSeconds, isOnline, clockSource, refreshData, triggerSync } = useRealtime();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const label = useMemo(() => statusLabel(status), [status]);
-  const isConnectionIssue = isStale || !isOnline;
-  const isLongConnectionIssue = isConnectionIssue && staleSeconds >= 180;
+  const hasTransportIssue = status !== "live" || !isOnline;
+  const chipState = hasTransportIssue ? "offline" : status;
+  const isLongConnectionIssue = hasTransportIssue && staleSeconds >= 180;
 
   return (
     <div className="live-status" onBlur={() => setMenuOpen(false)}>
       <button
         type="button"
-        className={`live-status__chip live-status__chip--${isStale ? "offline" : status}`}
+        className={`live-status__chip live-status__chip--${chipState}`}
         onClick={() => setMenuOpen((prev) => !prev)}
       >
-        {isConnectionIssue ? (
+        {hasTransportIssue ? (
           <span
             className={`live-status__connection-icon ${isLongConnectionIssue ? "is-critical" : ""}`}
             aria-hidden="true"
@@ -46,7 +47,7 @@ const LiveStatusIndicator: React.FC = () => {
         ) : null}
         <span className="live-status__dot" />
         {label}
-        <span className="live-status__time">{formatTime(lastUpdated)}</span>
+        <span className="live-status__time">{formatTime(currentTime)}</span>
       </button>
       {menuOpen && (
         <div className="live-status__menu" role="menu">
@@ -54,10 +55,13 @@ const LiveStatusIndicator: React.FC = () => {
           <div className="live-status__meta">Broker: {brokerState}</div>
           <div className="live-status__meta">Backend: {backendHealth}</div>
           <div className="live-status__meta">Last good server time: {formatTime(lastGoodServerTime)}</div>
-          {isConnectionIssue && (
+          {hasTransportIssue && (
             <div className="live-status__meta">
               Connection issue for {Math.floor(staleSeconds / 60)}m {staleSeconds % 60}s.
             </div>
+          )}
+          {!hasTransportIssue && brokerState !== "connected" && (
+            <div className="live-status__meta">Broker reconnecting in background. Live stream remains active.</div>
           )}
           <div className="live-status__meta">Clock source: {clockSource === "server" ? "server-synced" : "local"}</div>
           <button type="button" onClick={() => refreshData()}>

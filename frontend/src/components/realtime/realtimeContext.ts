@@ -9,6 +9,7 @@ export type RealtimeContextValue = {
   backendHealth: BackendHealth;
   lastGoodServerTime: Date | null;
   lastUpdated: Date | null;
+  currentTime: Date;
   activity: ActivityEvent[];
   isStale: boolean;
   staleSeconds: number;
