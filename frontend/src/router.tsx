@@ -7,7 +7,7 @@
 
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
-
+import * as DocControlPages from "./pages/DocControlPages";
 
 import {
   fetchOnboardingStatus,
@@ -223,6 +223,25 @@ export const AppRouter: React.FC = () => {
   return (
     <Suspense fallback={<div className="page-loading">Loading…</div>}>
     <Routes>
+
+      <Route path="/doc-control" element={<RequireAuth><DocControlPages.DocControlDashboardPage /></RequireAuth>} />
+      <Route path="/doc-control/library" element={<RequireAuth><DocControlPages.DocControlLibraryPage /></RequireAuth>} />
+      <Route path="/doc-control/library/:docId" element={<RequireAuth><DocControlPages.DocControlDocumentDetailPage /></RequireAuth>} />
+      <Route path="/doc-control/drafts" element={<RequireAuth><DocControlPages.DocControlDraftsPage /></RequireAuth>} />
+      <Route path="/doc-control/drafts/:draftId" element={<RequireAuth><DocControlPages.DocControlDraftDetailPage /></RequireAuth>} />
+      <Route path="/doc-control/change-proposals" element={<RequireAuth><DocControlPages.DocControlChangeProposalPage /></RequireAuth>} />
+      <Route path="/doc-control/change-proposals/:proposalId" element={<RequireAuth><DocControlPages.DocControlChangeProposalDetailPage /></RequireAuth>} />
+      <Route path="/doc-control/revisions/:docId" element={<RequireAuth><DocControlPages.DocControlRevisionsPage /></RequireAuth>} />
+      <Route path="/doc-control/lep/:docId" element={<RequireAuth><DocControlPages.DocControlLEPPage /></RequireAuth>} />
+      <Route path="/doc-control/tr" element={<RequireAuth><DocControlPages.DocControlTRPage /></RequireAuth>} />
+      <Route path="/doc-control/tr/:trId" element={<RequireAuth><DocControlPages.DocControlTRDetailPage /></RequireAuth>} />
+      <Route path="/doc-control/distribution" element={<RequireAuth><DocControlPages.DocControlDistributionPage /></RequireAuth>} />
+      <Route path="/doc-control/distribution/:eventId" element={<RequireAuth><DocControlPages.DocControlDistributionDetailPage /></RequireAuth>} />
+      <Route path="/doc-control/archive" element={<RequireAuth><DocControlPages.DocControlArchivePage /></RequireAuth>} />
+      <Route path="/doc-control/reviews" element={<RequireAuth><DocControlPages.DocControlReviewsPage /></RequireAuth>} />
+      <Route path="/doc-control/registers" element={<RequireAuth><DocControlPages.DocControlRegistersPage /></RequireAuth>} />
+      <Route path="/doc-control/settings" element={<RequireAuth><DocControlPages.DocControlSettingsPage /></RequireAuth>} />
+
       {/* Root → login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
 
