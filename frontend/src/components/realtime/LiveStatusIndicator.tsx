@@ -21,7 +21,7 @@ const statusLabel = (status: string): string => {
 };
 
 const LiveStatusIndicator: React.FC = () => {
-  const { status, brokerState, backendHealth, lastGoodServerTime, lastUpdated, staleSeconds, isOnline, clockSource, refreshData, triggerSync } = useRealtime();
+  const { status, brokerState, backendHealth, lastGoodServerTime, lastUpdated, currentTime, staleSeconds, isOnline, clockSource, refreshData, triggerSync } = useRealtime();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const label = useMemo(() => statusLabel(status), [status]);
@@ -47,7 +47,7 @@ const LiveStatusIndicator: React.FC = () => {
         ) : null}
         <span className="live-status__dot" />
         {label}
-        <span className="live-status__time">{formatTime(lastUpdated)}</span>
+        <span className="live-status__time">{formatTime(currentTime)}</span>
       </button>
       {menuOpen && (
         <div className="live-status__menu" role="menu">
