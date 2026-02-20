@@ -70,12 +70,12 @@ function daysLabel(days: number | null): string {
 }
 
 const QMSTrainingUserPage: React.FC = () => {
-  const params = useParams<{ amoCode?: string; department?: string; userId?: string }>();
+  const params = useParams<{ amoCode?: string; department?: string; userId?: string; staffId?: string }>();
   const ctx = getContext();
   const navigate = useNavigate();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
-  const userId = params.userId;
+  const userId = params.userId ?? params.staffId;
 
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
