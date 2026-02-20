@@ -74,6 +74,14 @@ const QualityAuditRegisterPage = lazy(() => import("./pages/QualityAuditRegister
 const QualityEvidenceLibraryPage = lazy(() => import("./pages/QualityEvidenceLibraryPage"));
 const QualityEvidenceViewerPage = lazy(() => import("./pages/QualityEvidenceViewerPage"));
 
+const ManualsDashboardPage = lazy(() => import("./pages/manuals/ManualsDashboardPage"));
+const ManualOverviewPage = lazy(() => import("./pages/manuals/ManualOverviewPage"));
+const ManualReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
+const ManualDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
+const ManualWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
+const ManualExportsPage = lazy(() => import("./pages/manuals/ManualExportsPage"));
+const ManualMasterListPage = lazy(() => import("./pages/manuals/ManualMasterListPage"));
+
 type RequireAuthProps = {
   children: React.ReactElement;
 };
@@ -721,6 +729,28 @@ export const AppRouter: React.FC = () => {
         path="/maintenance/:amoCode/quality/evidence/:evidenceId"
         element={<RequireAuth><QualityEvidenceViewerPage /></RequireAuth>}
       />
+
+
+
+      <Route
+        path="/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view"
+        element={<RequireAuth><ManualReaderPage /></RequireAuth>}
+      />
+      <Route path="/maintenance/:amoCode/manuals" element={<RequireAuth><ManualsDashboardPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/master-list" element={<RequireAuth><ManualMasterListPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId" element={<RequireAuth><ManualOverviewPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/read" element={<RequireAuth><ManualReaderPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/diff" element={<RequireAuth><ManualDiffPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/workflow" element={<RequireAuth><ManualWorkflowPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/exports" element={<RequireAuth><ManualExportsPage /></RequireAuth>} />
+
+      <Route path="/t/:tenantSlug/manuals" element={<RequireAuth><ManualsDashboardPage /></RequireAuth>} />
+      <Route path="/t/:tenantSlug/manuals/master-list" element={<RequireAuth><ManualMasterListPage /></RequireAuth>} />
+      <Route path="/t/:tenantSlug/manuals/:manualId" element={<RequireAuth><ManualOverviewPage /></RequireAuth>} />
+      <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/read" element={<RequireAuth><ManualReaderPage /></RequireAuth>} />
+      <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/diff" element={<RequireAuth><ManualDiffPage /></RequireAuth>} />
+      <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/workflow" element={<RequireAuth><ManualWorkflowPage /></RequireAuth>} />
+      <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/exports" element={<RequireAuth><ManualExportsPage /></RequireAuth>} />
 
       {/* Catch-all → login */}
       <Route path="*" element={<Navigate to="/login" replace />} />

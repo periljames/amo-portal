@@ -1,0 +1,16 @@
+{
+  "name": "AMO Manuals Reader",
+  "short_name": "Manuals",
+  "start_url": "/t/demo/manuals",
+  "display": "standalone",
+  "display_override": ["fullscreen", "minimal-ui", "standalone"],
+  "background_color": "#0B1220",
+  "theme_color": "#0EA5E9",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}
