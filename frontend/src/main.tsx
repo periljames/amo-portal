@@ -24,6 +24,14 @@ import "./styles/components/dashboard-cockpit.css";
 import "./styles/components/action-panel.css";
 import "./styles/components/liquid-glass.css";
 
+
+if (typeof document !== "undefined" && import.meta.env.VITE_MANUALS_PWA_ENABLED === "1") {
+  const link = document.createElement("link");
+  link.rel = "manifest";
+  link.href = "/manuals-reader.webmanifest";
+  document.head.appendChild(link);
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
