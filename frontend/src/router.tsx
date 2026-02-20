@@ -73,6 +73,7 @@ const QualityAuditEvidencePage = lazy(() => import("./pages/QualityAuditEvidence
 const QualityAuditRegisterPage = lazy(() => import("./pages/QualityAuditRegisterPage"));
 const QualityEvidenceLibraryPage = lazy(() => import("./pages/QualityEvidenceLibraryPage"));
 const QualityEvidenceViewerPage = lazy(() => import("./pages/QualityEvidenceViewerPage"));
+const QualityTrainingModulePage = lazy(() => import("./pages/QualityTrainingModulePage"));
 
 const ManualsDashboardPage = lazy(() => import("./pages/manuals/ManualsDashboardPage"));
 const ManualOverviewPage = lazy(() => import("./pages/manuals/ManualOverviewPage"));
@@ -241,6 +242,18 @@ export const AppRouter: React.FC = () => {
       <Route path="/doc-control/reviews" element={<RequireAuth><DocControlPages.DocControlReviewsPage /></RequireAuth>} />
       <Route path="/doc-control/registers" element={<RequireAuth><DocControlPages.DocControlRegistersPage /></RequireAuth>} />
       <Route path="/doc-control/settings" element={<RequireAuth><DocControlPages.DocControlSettingsPage /></RequireAuth>} />
+
+
+      <Route path="/quality/training" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
+      <Route path="/quality/training/catalog" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
+      <Route path="/quality/training/catalog/:courseId" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
+      <Route path="/quality/training/sessions" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
+      <Route path="/quality/training/sessions/:sessionId" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
+      <Route path="/quality/training/staff" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
+      <Route path="/quality/training/staff/:staffId" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
+      <Route path="/quality/training/matrix" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
+      <Route path="/quality/training/reports" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
+      <Route path="/quality/training/settings" element={<RequireAuth><QualityTrainingModulePage /></RequireAuth>} />
 
       {/* Root → login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
