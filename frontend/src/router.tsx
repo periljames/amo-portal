@@ -8,6 +8,7 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import * as DocControlPages from "./pages/DocControlPages";
+import * as TechnicalRecordsPages from "./pages/TechnicalRecordsPages";
 
 import {
   fetchOnboardingStatus,
@@ -81,6 +82,7 @@ const ManualDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
 const ManualWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
 const ManualExportsPage = lazy(() => import("./pages/manuals/ManualExportsPage"));
 const ManualMasterListPage = lazy(() => import("./pages/manuals/ManualMasterListPage"));
+
 
 type RequireAuthProps = {
   children: React.ReactElement;
@@ -770,6 +772,28 @@ export const AppRouter: React.FC = () => {
       <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/diff" element={<RequireAuth><ManualDiffPage /></RequireAuth>} />
       <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/workflow" element={<RequireAuth><ManualWorkflowPage /></RequireAuth>} />
       <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/exports" element={<RequireAuth><ManualExportsPage /></RequireAuth>} />
+
+
+      <Route path="/records" element={<RequireAuth><TechnicalRecordsPages.TechnicalRecordsDashboardPage /></RequireAuth>} />
+      <Route path="/records/aircraft" element={<RequireAuth><TechnicalRecordsPages.AircraftRecordsPage /></RequireAuth>} />
+      <Route path="/records/aircraft/:tailId" element={<RequireAuth><TechnicalRecordsPages.AircraftRecordDetailPage /></RequireAuth>} />
+      <Route path="/records/logbooks" element={<RequireAuth><TechnicalRecordsPages.LogbooksPage /></RequireAuth>} />
+      <Route path="/records/logbooks/:tailId" element={<RequireAuth><TechnicalRecordsPages.LogbookByTailPage /></RequireAuth>} />
+      <Route path="/records/deferrals" element={<RequireAuth><TechnicalRecordsPages.DeferralsPage /></RequireAuth>} />
+      <Route path="/records/deferrals/:deferralId" element={<RequireAuth><TechnicalRecordsPages.DeferralDetailPage /></RequireAuth>} />
+      <Route path="/records/maintenance-records" element={<RequireAuth><TechnicalRecordsPages.MaintenanceRecordsPage /></RequireAuth>} />
+      <Route path="/records/maintenance-records/:recordId" element={<RequireAuth><TechnicalRecordsPages.MaintenanceRecordDetailPage /></RequireAuth>} />
+      <Route path="/records/airworthiness" element={<RequireAuth><TechnicalRecordsPages.AirworthinessPage /></RequireAuth>} />
+      <Route path="/records/airworthiness/ad" element={<RequireAuth><TechnicalRecordsPages.ADRegisterPage /></RequireAuth>} />
+      <Route path="/records/airworthiness/ad/:adId" element={<RequireAuth><TechnicalRecordsPages.ADDetailPage /></RequireAuth>} />
+      <Route path="/records/airworthiness/sb" element={<RequireAuth><TechnicalRecordsPages.SBRegisterPage /></RequireAuth>} />
+      <Route path="/records/airworthiness/sb/:sbId" element={<RequireAuth><TechnicalRecordsPages.SBDetailPage /></RequireAuth>} />
+      <Route path="/records/llp" element={<RequireAuth><TechnicalRecordsPages.LLPPage /></RequireAuth>} />
+      <Route path="/records/components" element={<RequireAuth><TechnicalRecordsPages.ComponentsPage /></RequireAuth>} />
+      <Route path="/records/reconciliation" element={<RequireAuth><TechnicalRecordsPages.ReconciliationPage /></RequireAuth>} />
+      <Route path="/records/traceability" element={<RequireAuth><TechnicalRecordsPages.TraceabilityPage /></RequireAuth>} />
+      <Route path="/records/packs" element={<RequireAuth><TechnicalRecordsPages.PacksPage /></RequireAuth>} />
+      <Route path="/records/settings" element={<RequireAuth><TechnicalRecordsPages.TechnicalRecordsSettingsPage /></RequireAuth>} />
 
       {/* Catch-all → login */}
       <Route path="*" element={<Navigate to="/login" replace />} />

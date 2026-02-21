@@ -15,7 +15,7 @@ export const DEPARTMENT_ITEMS: Array<{ id: DepartmentId; label: string }> = [
   { id: "planning", label: "Planning" },
   {
     id: "production",
-    label: "Production (Technical Records & Maintenance)",
+    label: "Production",
   },
   { id: "quality", label: "Quality & Compliance" },
   { id: "reliability", label: "Reliability" },
