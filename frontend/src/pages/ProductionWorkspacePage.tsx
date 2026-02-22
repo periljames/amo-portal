@@ -21,6 +21,7 @@ import {
   type UsageRow,
 } from "../services/production";
 import "../styles/production-workspace.css";
+import AvionicsTabs from "../components/production/AvionicsTabs";
 
 type TabKey = "fleet" | "logbooks" | "compliance" | "inspections" | "mods" | "components" | "missing";
 const TABS: Array<{ key: TabKey; label: string }> = [
@@ -206,26 +207,14 @@ const ProductionWorkspacePage: React.FC = () => {
       <div className="page production-workspace">
         <PageHeader title="Production" subtitle="Worksheet workspace for fleet, compliance, and records views." />
 
-        <section className="page-section">
-          <div className="qms-segmented production-workspace__tabs" role="tablist" aria-label="Production worksheets">
-            {TABS.map((t, idx) => (
-              <button
-                key={t.key}
-                role="tab"
-                aria-selected={tab === t.key}
-                className={tab === t.key ? "is-active" : ""}
-                onClick={() => switchTab(t.key)}
-                onKeyDown={(e) => {
-                  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-                  const next = e.key === "ArrowRight" ? (idx + 1) % TABS.length : (idx - 1 + TABS.length) % TABS.length;
-                  switchTab(TABS[next].key);
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </section>
+        <div className="production-workspace__tabs-wrap">
+          <AvionicsTabs
+            tabs={TABS.map((t) => ({ id: t.key, label: t.label }))}
+            value={tab}
+            onChange={(value) => switchTab(value as TabKey)}
+            ariaLabel="Production worksheets"
+          />
+        </div>
 
         <section className="page-section production-workspace__tab-panel" key={tab} data-tab={activeTabIndex}>
           {tab === "fleet" && (
