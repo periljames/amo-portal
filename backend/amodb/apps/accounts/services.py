@@ -2477,7 +2477,7 @@ def handle_webhook(
 def seed_default_departments(db: Session, *, amo_id: str) -> List[models.Department]:
     defaults = [
         ("planning", "Planning", "/maintenance/planning"),
-        ("production", "Production (Technical Records & Maintenance)", "/maintenance/production"),
+        ("production", "Production", "/maintenance/production"),
         ("engineering", "Engineering (Tasks)", "/maintenance/engineering"),
         ("reliability", "Reliability", "/maintenance/reliability"),
         ("quality", "Quality & Compliance", "/maintenance/quality"),

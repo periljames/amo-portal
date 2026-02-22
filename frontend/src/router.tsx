@@ -96,6 +96,8 @@ const ManualDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
 const ManualWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
 const ManualExportsPage = lazy(() => import("./pages/manuals/ManualExportsPage"));
 const ManualMasterListPage = lazy(() => import("./pages/manuals/ManualMasterListPage"));
+const ProductionWorkspacePage = lazy(() => import("./pages/ProductionWorkspacePage"));
+
 
 
 type RequireAuthProps = {
@@ -437,21 +439,43 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      <Route path="/maintenance" element={<RequireAuth><MaintenanceDashboardPage /></RequireAuth>} />
-      <Route path="/maintenance/work-orders" element={<RequireAuth><MaintenanceWorkOrdersPage /></RequireAuth>} />
-      <Route path="/maintenance/work-orders/:woId" element={<RequireAuth><MaintenanceWorkOrderDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/work-packages" element={<RequireAuth><MaintenanceWorkPackagesPage /></RequireAuth>} />
-      <Route path="/maintenance/work-packages/:wpId" element={<RequireAuth><MaintenanceWorkPackagesPage /></RequireAuth>} />
-      <Route path="/maintenance/defects" element={<RequireAuth><MaintenanceDefectsPage /></RequireAuth>} />
-      <Route path="/maintenance/defects/:defectId" element={<RequireAuth><MaintenanceDefectDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/non-routines" element={<RequireAuth><MaintenanceNonRoutinesPage /></RequireAuth>} />
-      <Route path="/maintenance/non-routines/:nrId" element={<RequireAuth><MaintenanceNonRoutineDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/inspections" element={<RequireAuth><MaintenanceInspectionsPage /></RequireAuth>} />
-      <Route path="/maintenance/inspections/:inspectionId" element={<RequireAuth><MaintenanceInspectionDetailPage /></RequireAuth>} />
-      <Route path="/maintenance/parts-tools" element={<RequireAuth><MaintenancePartsToolsPage /></RequireAuth>} />
-      <Route path="/maintenance/closeout" element={<RequireAuth><MaintenanceCloseoutPage /></RequireAuth>} />
-      <Route path="/maintenance/reports" element={<RequireAuth><MaintenanceReportsPage /></RequireAuth>} />
-      <Route path="/maintenance/settings" element={<RequireAuth><MaintenanceSettingsPage /></RequireAuth>} />
+
+      <Route
+        path="/maintenance/:amoCode/production"
+        element={
+          <RequireAuth>
+            <Navigate to="workspace" replace />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/production/workspace"
+        element={
+          <RequireAuth>
+            <ProductionWorkspacePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/production/fleet"
+        element={
+          <RequireAuth>
+            <ProductionWorkspacePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/maintenance/:amoCode/production/fleet/:tailId"
+        element={
+          <RequireAuth>
+            <ProductionWorkspacePage />
+          </RequireAuth>
+        }
+      />
+
+      <Route path="/production" element={<RequireAuth><ProductionWorkspacePage /></RequireAuth>} />
+      <Route path="/production/fleet" element={<RequireAuth><ProductionWorkspacePage /></RequireAuth>} />
+      <Route path="/production/fleet/:tailId" element={<RequireAuth><ProductionWorkspacePage /></RequireAuth>} />
 
       {/* Work orders */}
       <Route
