@@ -3,6 +3,9 @@ import { getToken, handleAuthFailure, markSessionActivity } from "./auth";
 import { getApiBaseUrl } from "./config";
 
 const API_BASE = getApiBaseUrl();
+const REPORTS_CACHE_TTL_MS = 8000;
+
+let reportsCache: { data: ReliabilityReportRead[]; expiresAt: number } | null = null;
 
 export type ReliabilityReportStatus = "PENDING" | "READY" | "FAILED";
 
@@ -76,10 +79,14 @@ export async function createReliabilityReport(
     const text = await res.text();
     throw new Error(text || `Request failed (${res.status})`);
   }
+  reportsCache = null;
   return (await res.json()) as ReliabilityReportRead;
 }
 
-export async function listReliabilityReports(): Promise<ReliabilityReportRead[]> {
+export async function listReliabilityReports(options?: { force?: boolean }): Promise<ReliabilityReportRead[]> {
+  if (!options?.force && reportsCache && reportsCache.expiresAt > Date.now()) {
+    return reportsCache.data;
+  }
   const token = getToken();
   markSessionActivity("reliability-report-list");
   const res = await fetch(`${API_BASE}/reliability/reports`, {
@@ -99,7 +106,12 @@ export async function listReliabilityReports(): Promise<ReliabilityReportRead[]>
     const text = await res.text();
     throw new Error(text || `Request failed (${res.status})`);
   }
-  return (await res.json()) as ReliabilityReportRead[];
+  const data = (await res.json()) as ReliabilityReportRead[];
+  reportsCache = {
+    data,
+    expiresAt: Date.now() + REPORTS_CACHE_TTL_MS,
+  };
+  return data;
 }
 
 export async function downloadReliabilityReport(
