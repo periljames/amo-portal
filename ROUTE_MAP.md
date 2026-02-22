@@ -311,3 +311,21 @@
   - DEMO: demo/local maintenance datasets enabled.
   - LIVE: demo/local maintenance edits disabled (read-only/operational-safe behavior).
 - Existing department-scoped routes remain unchanged and continue to be available.
+
+## Changed in this run (2026-02-22)
+### Routing/auth behavior fixes
+- Work orders collection endpoints now support both `/work-orders` and `/work-orders/` without redirect dependence; clients are aligned to use trailing-slash collection calls to avoid 307/401 redirect edge cases.
+- Reliability report endpoints now consistently scope list/get/download by effective AMO context (`effective_amo_id`) to match create behavior in support/switch scenarios.
+
+### Reliability reports UI/network behavior
+- Polling for pending reliability reports is now guarded against overlap and runs on an 8s cadence.
+- Report list fetches use a short client TTL cache to reduce repeated identical fetches on navigation.
+
+### Files changed
+- `backend/amodb/apps/work/router.py`
+- `frontend/src/services/workOrders.ts`
+- `backend/amodb/apps/reliability/router.py`
+- `backend/amodb/apps/reliability/services.py`
+- `frontend/src/services/reliability.ts`
+- `frontend/src/pages/ReliabilityReportsPage.tsx`
+- `ROUTE_MAP.md`

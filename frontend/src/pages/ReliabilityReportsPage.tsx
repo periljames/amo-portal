@@ -1,5 +1,5 @@
 // src/pages/ReliabilityReportsPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
@@ -32,6 +32,7 @@ const ReliabilityReportsPage: React.FC = () => {
   const [downloadProgress, setDownloadProgress] = useState<DownloadState | null>(null);
   const [fracasCaseId, setFracasCaseId] = useState("");
   const [fracasExporting, setFracasExporting] = useState(false);
+  const loadingRef = useRef(false);
 
   const hasPending = useMemo(
     () => reports.some((report) => report.status === "PENDING"),
@@ -47,29 +48,32 @@ const ReliabilityReportsPage: React.FC = () => {
     setWindowEnd(end);
   }, []);
 
-  const loadReports = async () => {
+  const loadReports = async (options?: { force?: boolean }) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setError(null);
     setLoading(true);
     try {
-      const data = await listReliabilityReports();
+      const data = await listReliabilityReports({ force: options?.force });
       setReports(data);
     } catch (e: any) {
       console.error("Failed to load reliability reports", e);
       setError(e?.message || "Could not load reliability reports.");
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   };
 
   useEffect(() => {
-    loadReports();
+    loadReports({ force: true });
   }, []);
 
   useEffect(() => {
     if (!hasPending) return;
     const interval = window.setInterval(() => {
-      loadReports();
-    }, 5000);
+      loadReports({ force: true });
+    }, 8000);
     return () => window.clearInterval(interval);
   }, [hasPending]);
 
@@ -82,7 +86,7 @@ const ReliabilityReportsPage: React.FC = () => {
     setError(null);
     try {
       await createReliabilityReport(windowStart, windowEnd);
-      await loadReports();
+      await loadReports({ force: true });
     } catch (e: any) {
       console.error("Failed to generate report", e);
       setError(e?.message || "Could not generate report.");
