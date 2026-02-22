@@ -8,7 +8,9 @@ const MaintenanceNonRoutinesPage: React.FC = () => {
   const [form, setForm] = useState({ tail: "", woId: "", taskId: "", description: "", dispositionRequired: true });
   const submit = () => {
     const item: NonRoutineItem = { id: crypto.randomUUID(), tail: form.tail, woId: Number(form.woId), taskId: form.taskId ? Number(form.taskId) : undefined, description: form.description, dispositionRequired: form.dispositionRequired, status: "DRAFT", evidence: [], createdAt: new Date().toISOString() };
-    saveNonRoutine(item); setRows(listNonRoutines());
+    const ok = saveNonRoutine(item);
+    if (!ok) { alert("Go Live is active. Demo/local NR editing is disabled."); return; }
+    setRows(listNonRoutines());
   };
   return <MaintenancePageShell title="Non-Routines">
     <div className="card" style={{ display:"grid", gap:8, marginBottom: 12 }}>

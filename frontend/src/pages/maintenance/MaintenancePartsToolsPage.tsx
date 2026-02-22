@@ -6,10 +6,11 @@ const MaintenancePartsToolsPage: React.FC = () => {
   const [rows, setRows] = useState(listPartToolRequests());
   const [form, setForm] = useState({ woId: "", itemType: "Part", description: "", qty: "1", requestedBy: "" });
   const add = () => {
-    savePartToolRequest({ id: crypto.randomUUID(), woId: Number(form.woId), itemType: form.itemType as any, description: form.description, qty: Number(form.qty), status: "REQUESTED", requestedBy: form.requestedBy, requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    const ok = savePartToolRequest({ id: crypto.randomUUID(), woId: Number(form.woId), itemType: form.itemType as any, description: form.description, qty: Number(form.qty), status: "REQUESTED", requestedBy: form.requestedBy, requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    if (!ok) { alert("Go Live is active. Demo/local parts-tools editing is disabled."); return; }
     setRows(listPartToolRequests());
   };
-  const update = (id: string, status: PartToolStatus) => { const row = rows.find((r)=>r.id===id); if (!row) return; savePartToolRequest({ ...row, status, updatedAt: new Date().toISOString()}); setRows(listPartToolRequests()); };
+  const update = (id: string, status: PartToolStatus) => { const row = rows.find((r)=>r.id===id); if (!row) return; const ok = savePartToolRequest({ ...row, status, updatedAt: new Date().toISOString()}); if (!ok) { alert("Go Live is active. Demo/local parts-tools editing is disabled."); return; } setRows(listPartToolRequests()); };
   return <MaintenancePageShell title="Parts & Tools Requests">
     <div className="card" style={{display:"grid", gap:8, marginBottom:12}}>
       <h3>New request</h3>

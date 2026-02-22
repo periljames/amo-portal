@@ -288,3 +288,26 @@
 ## Manuals reader route update (2026-02-19)
 - Added deterministic viewer route: `/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view`
 - Existing manuals routes remain intact under `/t/:tenantSlug/manuals/...` and `/maintenance/:amoCode/:department/manuals/...`.
+
+## Changed in this run (Maintenance runtime-mode hardening)
+### Route behavior notes
+- Added full functional pages for exact maintenance routes:
+  - `/maintenance`
+  - `/maintenance/work-orders`
+  - `/maintenance/work-orders/:woId`
+  - `/maintenance/work-packages`
+  - `/maintenance/work-packages/:wpId`
+  - `/maintenance/defects`
+  - `/maintenance/defects/:defectId`
+  - `/maintenance/non-routines`
+  - `/maintenance/non-routines/:nrId`
+  - `/maintenance/inspections`
+  - `/maintenance/inspections/:inspectionId`
+  - `/maintenance/parts-tools`
+  - `/maintenance/closeout`
+  - `/maintenance/reports`
+  - `/maintenance/settings`
+- Runtime behavior for maintenance pages is now deterministic with portal mode:
+  - DEMO: demo/local maintenance datasets enabled.
+  - LIVE: demo/local maintenance edits disabled (read-only/operational-safe behavior).
+- Existing department-scoped routes remain unchanged and continue to be available.

@@ -14,8 +14,8 @@ const MaintenanceInspectionDetailPage: React.FC = () => {
       <div>WO {inspection.woId} · Tail {inspection.tail}</div>
       <select className="input" value={status} onChange={(e)=>setStatus(e.target.value as InspectionStatus)}>{["REQUESTED","SCHEDULED","DONE","FAILED"].map((s)=><option key={s}>{s}</option>)}</select>
       <textarea className="input" value={findings} onChange={(e)=>setFindings(e.target.value)} placeholder="Findings"/>
-      <label><input type="checkbox" checked={inspection.holdFlag} onChange={(e)=>saveInspection({ ...inspection, holdFlag: e.target.checked, status, findings })}/> Hold flag</label>
-      <button className="btn btn-primary" onClick={()=>{ saveInspection({ ...inspection, status, findings }); alert('Inspection updated'); }}>Save inspection</button>
+      <label><input type="checkbox" checked={inspection.holdFlag} onChange={(e)=>{ const ok = saveInspection({ ...inspection, holdFlag: e.target.checked, status, findings }); if (!ok) alert("Go Live is active. Demo/local inspection editing is disabled."); }}/> Hold flag</label>
+      <button className="btn btn-primary" onClick={()=>{ const ok = saveInspection({ ...inspection, status, findings }); if (!ok) { alert("Go Live is active. Demo/local inspection editing is disabled."); return; } alert('Inspection updated'); }}>Save inspection</button>
     </div>
   </MaintenancePageShell>;
 };

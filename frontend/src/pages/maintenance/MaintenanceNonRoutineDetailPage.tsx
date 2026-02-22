@@ -15,7 +15,8 @@ const MaintenanceNonRoutineDetailPage: React.FC = () => {
     if (settings.nrApprovalRequired && status === "CLOSED" && item.status !== "APPROVED") {
       alert("NR approval is required before closing."); return;
     }
-    saveNonRoutine({ ...item, status, dispositionText, approver });
+    const ok = saveNonRoutine({ ...item, status, dispositionText, approver });
+    if (!ok) { alert("Go Live is active. Demo/local NR editing is disabled."); return; }
     alert("NR updated");
   };
   if (!item) return <MaintenancePageShell title="NR not found"><div className="card">NR not found.</div></MaintenancePageShell>;

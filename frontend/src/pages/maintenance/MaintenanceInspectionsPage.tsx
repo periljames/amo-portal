@@ -6,7 +6,7 @@ import { MaintenancePageShell } from "./components";
 const MaintenanceInspectionsPage: React.FC = () => {
   const [rows, setRows] = useState<InspectionItem[]>(listInspections());
   const [form, setForm] = useState({ woId: "", tail: "", inspectionType: "", requiredByRole: "QUALITY", holdFlag: true });
-  const add = () => { saveInspection({ id: crypto.randomUUID(), woId: Number(form.woId), tail: form.tail, inspectionType: form.inspectionType, requiredByRole: form.requiredByRole, status: "REQUESTED", findings: "", evidence: [], holdFlag: form.holdFlag }); setRows(listInspections()); };
+  const add = () => { const ok = saveInspection({ id: crypto.randomUUID(), woId: Number(form.woId), tail: form.tail, inspectionType: form.inspectionType, requiredByRole: form.requiredByRole, status: "REQUESTED", findings: "", evidence: [], holdFlag: form.holdFlag }); if (!ok) { alert("Go Live is active. Demo/local inspection editing is disabled."); return; } setRows(listInspections()); };
   return <MaintenancePageShell title="Inspections & Holds">
     <div className="card" style={{display:"grid", gap:8, marginBottom:12}}>
       <h3>Create inspection</h3>
