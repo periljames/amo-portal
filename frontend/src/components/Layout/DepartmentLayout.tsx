@@ -1463,6 +1463,33 @@ const DepartmentLayout: React.FC<Props> = ({
                     </button>
                   )}
 
+                {!isAdminArea && activeDepartment === "production" && (
+                  <div className="sidebar__qms-nav" aria-label="Production worksheets">
+                    {[
+                      { id: "p-home", label: "Production Workspace", path: `/maintenance/${amoCode}/production/workspace` },
+                      { id: "p-fleet", label: "Fleet Hours", path: `/maintenance/${amoCode}/production/fleet?tab=fleet` },
+                      { id: "p-logbooks", label: "Logbooks", path: `/maintenance/${amoCode}/production/fleet?tab=logbooks` },
+                      { id: "p-compliance", label: "Compliance (AD/SB)", path: `/maintenance/${amoCode}/production/fleet?tab=compliance` },
+                      { id: "p-inspections", label: "Inspections & Hard Time", path: `/maintenance/${amoCode}/production/fleet?tab=inspections` },
+                      { id: "p-mods", label: "Modifications", path: `/maintenance/${amoCode}/production/fleet?tab=mods` },
+                      { id: "p-components", label: "Components (OC/CM)", path: `/maintenance/${amoCode}/production/fleet?tab=components` },
+                      { id: "p-missing", label: "Missing/Backfill", path: `/maintenance/${amoCode}/production/fleet?tab=missing` },
+                    ].map((item) => {
+                      const active = location.pathname.startsWith(`/maintenance/${amoCode}/production`) && location.search.includes(item.path.split("?")[1] || "");
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => navigateWithSidebarClose(item.path)}
+                          className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "")}
+                        >
+                          <span className="sidebar__item-label">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {!isAdminArea && (
                   <button
                     type="button"

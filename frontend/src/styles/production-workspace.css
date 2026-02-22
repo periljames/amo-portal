@@ -1,0 +1,103 @@
+.production-workspace__tabs-wrap {
+  border-top: 1px solid var(--panel-divider);
+  border-bottom: 1px solid var(--panel-divider);
+  padding: 0.4rem 0;
+  margin-bottom: 0.6rem;
+}
+
+.production-avionics-tabs {
+  display: flex;
+  gap: 0.55rem;
+  overflow-x: auto;
+  padding: 0.1rem 0.2rem;
+  white-space: nowrap;
+}
+
+.production-avionics-tabs__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.42rem 0.8rem 0.5rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--surface-elevated) 42%, transparent);
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%, 8px 50%);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.production-avionics-tabs__tab:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.production-avionics-tabs__tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 45%, transparent);
+}
+
+.production-avionics-tabs__tab.is-active {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-subtle));
+  background: color-mix(in srgb, var(--surface-elevated) 78%, var(--surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary) 35%, transparent);
+  transform: translateY(-1px);
+}
+
+.production-avionics-tabs__tab::after {
+  content: "";
+  position: absolute;
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: 0.14rem;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background-color 0.2s ease;
+}
+
+.production-avionics-tabs__tab.is-active::after {
+  background: color-mix(in srgb, var(--accent-primary) 75%, var(--text-primary));
+}
+
+.production-avionics-tabs__led {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 70%, var(--surface-elevated));
+  box-shadow: 0 0 0 4px transparent;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.production-avionics-tabs__tab.is-active .production-avionics-tabs__led {
+  background: color-mix(in srgb, var(--accent-primary) 80%, var(--text-primary));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-primary) 20%, transparent);
+}
+
+.production-workspace__tab-panel {
+  animation: production-fade-in 0.2s ease;
+}
+
+@keyframes production-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.production-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.production-grid__sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface-elevated);
+}
+
+.production-grid thead .production-grid__sticky { z-index: 3; }
+.production-workspace .input { min-width: 92px; }
+.production-workspace__actions { margin-top: 0.75rem; display: flex; justify-content: flex-end; gap: 0.5rem; }
