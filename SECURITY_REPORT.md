@@ -129,3 +129,21 @@
   - chat retries dedupe by `sender_id + client_msg_id`,
   - envelope `id` preserved for QoS 1 replay safety.
 - Durable outbox guarantees eventual publish when broker has transient outages.
+
+## Update (2026-02-22)
+### Security/authorization and reliability posture
+- Tenant scoping consistency improved for reliability reports by using effective AMO scope for list/get/download, removing mixed-scope behavior risk.
+- Reliability report generation now fails closed (`PENDING` -> `FAILED`) on unhandled generation errors, preventing indefinite pending states that can mask backend faults.
+- Stale report recovery added:
+  - `PENDING` -> `READY` when artifact exists,
+  - `PENDING` -> `FAILED` when stale beyond threshold.
+
+### Session/auth loop hardening
+- Work-order collection path handling now avoids redirect-dependent auth behavior that could trigger downstream logout loops when auth headers are not preserved across redirects in some client flows.
+
+### Files changed
+- `backend/amodb/apps/reliability/router.py`
+- `backend/amodb/apps/reliability/services.py`
+- `backend/amodb/apps/work/router.py`
+- `frontend/src/services/workOrders.ts`
+- `SECURITY_REPORT.md`
