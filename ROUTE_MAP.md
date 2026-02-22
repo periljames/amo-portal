@@ -288,3 +288,69 @@
 ## Manuals reader route update (2026-02-19)
 - Added deterministic viewer route: `/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view`
 - Existing manuals routes remain intact under `/t/:tenantSlug/manuals/...` and `/maintenance/:amoCode/:department/manuals/...`.
+
+## Changed in this run (Maintenance runtime-mode hardening)
+### Route behavior notes
+- Added full functional pages for exact maintenance routes:
+  - `/maintenance`
+  - `/maintenance/work-orders`
+  - `/maintenance/work-orders/:woId`
+  - `/maintenance/work-packages`
+  - `/maintenance/work-packages/:wpId`
+  - `/maintenance/defects`
+  - `/maintenance/defects/:defectId`
+  - `/maintenance/non-routines`
+  - `/maintenance/non-routines/:nrId`
+  - `/maintenance/inspections`
+  - `/maintenance/inspections/:inspectionId`
+  - `/maintenance/parts-tools`
+  - `/maintenance/closeout`
+  - `/maintenance/reports`
+  - `/maintenance/settings`
+- Runtime behavior for maintenance pages is now deterministic with portal mode:
+  - DEMO: demo/local maintenance datasets enabled.
+  - LIVE: demo/local maintenance edits disabled (read-only/operational-safe behavior).
+- Existing department-scoped routes remain unchanged and continue to be available.
+
+## Changed in this run (2026-02-22)
+### Routing/auth behavior fixes
+- Work orders collection endpoints now support both `/work-orders` and `/work-orders/` without redirect dependence; clients are aligned to use trailing-slash collection calls to avoid 307/401 redirect edge cases.
+- Reliability report endpoints now consistently scope list/get/download by effective AMO context (`effective_amo_id`) to match create behavior in support/switch scenarios.
+
+### Reliability reports UI/network behavior
+- Polling for pending reliability reports is now guarded against overlap and runs on an 8s cadence.
+- Report list fetches use a short client TTL cache to reduce repeated identical fetches on navigation.
+
+### Files changed
+- `backend/amodb/apps/work/router.py`
+- `frontend/src/services/workOrders.ts`
+- `backend/amodb/apps/reliability/router.py`
+- `backend/amodb/apps/reliability/services.py`
+- `frontend/src/services/reliability.ts`
+- `frontend/src/pages/ReliabilityReportsPage.tsx`
+- `ROUTE_MAP.md`
+
+## Changed in this run (2026-02-22 aircraft route hardening)
+### Route/behavior fixes
+- `/aircraft/document-alerts` now resolves deterministically (no longer shadowed by `/{serial_number}` dynamic route matching).
+- Aircraft collection endpoints now support both `/aircraft` and `/aircraft/` for GET/POST without redirect dependence.
+- Frontend fleet list now calls `/aircraft/` for collection reads to avoid `307 -> 401` redirect chains.
+
+### Authorization scope fixes
+- Aircraft list and document alerts now scope by `effective_amo_id` so support/switch contexts remain tenant-correct.
+
+### Files changed
+- `backend/amodb/apps/fleet/router.py`
+- `frontend/src/services/fleet.ts`
+- `ROUTE_MAP.md`
+
+## Changed in this run (2026-02-22 endpoint regression coverage)
+### Verification coverage additions
+- Added regression tests that lock route-shape expectations for aircraft endpoints:
+  - static alerts route remains present (`/aircraft/document-alerts`, `/aircraft/document-alerts/`)
+  - slash-safe collection handlers remain present (`/aircraft`, `/aircraft/` for GET/POST)
+- Added explicit check that aircraft collection handler continues using effective AMO context.
+
+### Files changed
+- `backend/amodb/apps/fleet/tests/test_router_auth_scoping.py`
+- `ROUTE_MAP.md`

@@ -274,11 +274,27 @@ def login(
 
     token, expires_in = services.issue_access_token_for_user(user)
 
+    response_amo = user.amo
+    if user.is_superuser:
+        requested_slug = (payload.amo_slug or "").strip()
+        if requested_slug and requested_slug.lower() not in {"system", "root"}:
+            target_amo = services.resolve_amo_by_slug_or_code(db, requested_slug)
+            if target_amo:
+                target_mode = models.DataMode.DEMO if target_amo.is_demo else models.DataMode.REAL
+                services.set_user_active_context(
+                    db,
+                    user=user,
+                    active_amo_id=target_amo.id,
+                    data_mode=target_mode,
+                )
+                db.commit()
+                response_amo = target_amo
+
     return schemas.Token(
         access_token=token,
         expires_in=expires_in,
         user=user,
-        amo=user.amo,
+        amo=response_amo,
         department=user.department,
     )
 
@@ -352,14 +368,28 @@ def login_context(
             detail=str(exc),
         )
 
-    if not user or not user.amo:
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No active account found for this identifier.",
         )
 
     amo = user.amo
-    is_platform = bool(user.is_superuser) or amo.login_slug == "system"
+    if user.is_superuser:
+        return schemas.LoginContextResponse(
+            login_slug=(amo.login_slug if amo else "system"),
+            amo_code=(amo.amo_code if amo else "ROOT"),
+            amo_name=(amo.name if amo else "Platform Root"),
+            is_platform=True,
+        )
+
+    if not amo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active account found for this identifier.",
+        )
+
+    is_platform = amo.login_slug == "system"
 
     return schemas.LoginContextResponse(
         login_slug=amo.login_slug,

@@ -95,7 +95,8 @@ def _ensure_aircraft_documents_clear(db: Session, aircraft_serial_number: str, a
 # ---------------------------------------------------------------------------
 
 
-@router.get("/", response_model=List[schemas.WorkOrderRead])
+@router.get("", response_model=List[schemas.WorkOrderRead])
+@router.get("/", response_model=List[schemas.WorkOrderRead], include_in_schema=False)
 def list_work_orders(
     skip: int = 0,
     limit: int = 100,
@@ -164,9 +165,15 @@ def get_work_order_by_number(
 
 
 @router.post(
+    "",
+    response_model=schemas.WorkOrderRead,
+    status_code=status.HTTP_201_CREATED,
+)
+@router.post(
     "/",
     response_model=schemas.WorkOrderRead,
     status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
 )
 def create_work_order(
     payload: schemas.WorkOrderCreate,

@@ -129,3 +129,44 @@
   - chat retries dedupe by `sender_id + client_msg_id`,
   - envelope `id` preserved for QoS 1 replay safety.
 - Durable outbox guarantees eventual publish when broker has transient outages.
+
+## Update (2026-02-22)
+### Security/authorization and reliability posture
+- Tenant scoping consistency improved for reliability reports by using effective AMO scope for list/get/download, removing mixed-scope behavior risk.
+- Reliability report generation now fails closed (`PENDING` -> `FAILED`) on unhandled generation errors, preventing indefinite pending states that can mask backend faults.
+- Stale report recovery added:
+  - `PENDING` -> `READY` when artifact exists,
+  - `PENDING` -> `FAILED` when stale beyond threshold.
+
+### Session/auth loop hardening
+- Work-order collection path handling now avoids redirect-dependent auth behavior that could trigger downstream logout loops when auth headers are not preserved across redirects in some client flows.
+
+### Files changed
+- `backend/amodb/apps/reliability/router.py`
+- `backend/amodb/apps/reliability/services.py`
+- `backend/amodb/apps/work/router.py`
+- `frontend/src/services/workOrders.ts`
+- `SECURITY_REPORT.md`
+
+## Update (2026-02-22 aircraft auth/route follow-up)
+### Security and auth fixes
+- Closed a tenant data exposure gap: document alerts now require authenticated user context and filter by effective AMO scope.
+- Aircraft collection reads now use effective AMO scope for consistency with support/switch tenant context.
+
+### Session-loop hardening
+- Eliminated aircraft collection redirect dependency (`/aircraft` vs `/aircraft/`) that could result in auth-header drop and false session-expiry handling in some client flows.
+
+### Files changed
+- `backend/amodb/apps/fleet/router.py`
+- `frontend/src/services/fleet.ts`
+- `SECURITY_REPORT.md`
+
+## Update (2026-02-22 authorization regression tests)
+### Security verification additions
+- Added backend regression tests to detect accidental rollback of:
+  - effective-AMO scoping in aircraft list handler,
+  - route registration guarantees for aircraft static/document-alert and slash-safe collection paths.
+
+### Files changed
+- `backend/amodb/apps/fleet/tests/test_router_auth_scoping.py`
+- `SECURITY_REPORT.md`

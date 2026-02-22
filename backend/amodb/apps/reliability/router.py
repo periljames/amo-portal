@@ -1183,7 +1183,7 @@ def list_reports(
     current_user: account_models.User = Depends(get_current_active_user),
     db: Session = Depends(get_write_db),
 ):
-    return services.list_reports(db, amo_id=current_user.amo_id)
+    return services.list_reports(db, amo_id=current_user.effective_amo_id)
 
 
 @router.get(
@@ -1196,7 +1196,7 @@ def get_report(
     db: Session = Depends(get_write_db),
 ):
     try:
-        return services.get_report(db, amo_id=current_user.amo_id, report_id=report_id)
+        return services.get_report(db, amo_id=current_user.effective_amo_id, report_id=report_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1211,7 +1211,7 @@ def download_report(
     db: Session = Depends(get_write_db),
 ):
     try:
-        report = services.get_report(db, amo_id=current_user.amo_id, report_id=report_id)
+        report = services.get_report(db, amo_id=current_user.effective_amo_id, report_id=report_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     if not report.file_ref:
