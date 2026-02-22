@@ -195,13 +195,13 @@ export async function listWorkOrders(params?: {
   skip?: number;
   limit?: number;
 }): Promise<WorkOrderRead[]> {
-  return fetchJson<WorkOrderRead[]>(`/work-orders${toQuery(params ?? {})}`);
+  return fetchJson<WorkOrderRead[]>(`/work-orders/${toQuery(params ?? {})}`);
 }
 
 export async function createWorkOrder(
   payload: WorkOrderCreatePayload
 ): Promise<WorkOrderRead> {
-  return sendJson<WorkOrderRead>("/work-orders", "POST", payload);
+  return sendJson<WorkOrderRead>("/work-orders/", "POST", payload);
 }
 
 export async function getWorkOrder(id: number): Promise<WorkOrderRead> {
