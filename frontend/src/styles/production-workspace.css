@@ -1,0 +1,46 @@
+.production-workspace__tabs {
+  overflow-x: auto;
+  white-space: nowrap;
+  padding-bottom: 0.25rem;
+}
+
+.production-workspace__tabs button {
+  transition: all 0.2s ease;
+}
+
+.production-workspace__tab-panel {
+  animation: production-fade-in 0.2s ease;
+}
+
+@keyframes production-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.production-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.production-grid__sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel, rgba(16, 18, 27, 0.88));
+}
+
+.production-grid thead .production-grid__sticky {
+  z-index: 3;
+}
+
+.production-workspace .input {
+  min-width: 92px;
+}
+
+.production-workspace__actions {
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
