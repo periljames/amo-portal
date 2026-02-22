@@ -147,3 +147,26 @@
 - `backend/amodb/apps/work/router.py`
 - `frontend/src/services/workOrders.ts`
 - `SECURITY_REPORT.md`
+
+## Update (2026-02-22 aircraft auth/route follow-up)
+### Security and auth fixes
+- Closed a tenant data exposure gap: document alerts now require authenticated user context and filter by effective AMO scope.
+- Aircraft collection reads now use effective AMO scope for consistency with support/switch tenant context.
+
+### Session-loop hardening
+- Eliminated aircraft collection redirect dependency (`/aircraft` vs `/aircraft/`) that could result in auth-header drop and false session-expiry handling in some client flows.
+
+### Files changed
+- `backend/amodb/apps/fleet/router.py`
+- `frontend/src/services/fleet.ts`
+- `SECURITY_REPORT.md`
+
+## Update (2026-02-22 authorization regression tests)
+### Security verification additions
+- Added backend regression tests to detect accidental rollback of:
+  - effective-AMO scoping in aircraft list handler,
+  - route registration guarantees for aircraft static/document-alert and slash-safe collection paths.
+
+### Files changed
+- `backend/amodb/apps/fleet/tests/test_router_auth_scoping.py`
+- `SECURITY_REPORT.md`

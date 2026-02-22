@@ -223,7 +223,53 @@ def _cleanup_expired_preview_sessions() -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/", response_model=List[schemas.AircraftRead])
+def _list_document_alerts_impl(
+    db: Session,
+    *,
+    amo_id: str,
+    due_within_days: int,
+) -> List[schemas.AircraftDocumentRead]:
+    alerts: List[schemas.AircraftDocumentRead] = []
+    docs = (
+        db.query(models.AircraftDocument)
+        .join(models.Aircraft)
+        .filter(models.Aircraft.amo_id == amo_id)
+        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
+        .all()
+    )
+    today = date.today()
+    for doc in docs:
+        evaluation = services.evaluate_document(doc, today=today)
+        days_to_expiry = evaluation.days_to_expiry
+        if evaluation.status in {
+            models.AircraftDocumentStatus.OVERDUE,
+            models.AircraftDocumentStatus.DUE_SOON,
+        } or (
+            evaluation.status == models.AircraftDocumentStatus.CURRENT
+            and days_to_expiry is not None
+            and days_to_expiry <= due_within_days
+        ):
+            schema_doc = _document_to_schema(doc, evaluation)
+            alerts.append(schema_doc)
+    return alerts
+
+
+@router.get("/document-alerts", response_model=List[schemas.AircraftDocumentRead])
+@router.get("/document-alerts/", response_model=List[schemas.AircraftDocumentRead], include_in_schema=False)
+def list_document_alerts(
+    due_within_days: int = 45,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    return _list_document_alerts_impl(
+        db,
+        amo_id=current_user.effective_amo_id,
+        due_within_days=due_within_days,
+    )
+
+
+@router.get("", response_model=List[schemas.AircraftRead])
+@router.get("/", response_model=List[schemas.AircraftRead], include_in_schema=False)
 def list_aircraft(
     skip: int = 0,
     limit: int = 100,
@@ -231,7 +277,7 @@ def list_aircraft(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    query = db.query(models.Aircraft).filter(models.Aircraft.amo_id == current_user.amo_id)
+    query = db.query(models.Aircraft).filter(models.Aircraft.amo_id == current_user.effective_amo_id)
     if only_active:
         query = query.filter(models.Aircraft.is_active.is_(True))
     return (
@@ -262,9 +308,15 @@ def get_aircraft(
 
 
 @router.post(
+    "",
+    response_model=schemas.AircraftRead,
+    status_code=status.HTTP_201_CREATED,
+)
+@router.post(
     "/",
     response_model=schemas.AircraftRead,
     status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
 )
 def create_aircraft(
     payload: schemas.AircraftCreate,
@@ -800,37 +852,6 @@ def get_aircraft_compliance_summary(
         overrides=overrides,
         documents=all_docs,
     )
-
-
-@router.get(
-    "/document-alerts",
-    response_model=List[schemas.AircraftDocumentRead],
-)
-def list_document_alerts(
-    due_within_days: int = 45,
-    db: Session = Depends(get_db),
-):
-    alerts: List[schemas.AircraftDocumentRead] = []
-    docs = (
-        db.query(models.AircraftDocument)
-        .order_by(models.AircraftDocument.expires_on.asc().nullslast())
-        .all()
-    )
-    today = date.today()
-    for doc in docs:
-        evaluation = services.evaluate_document(doc, today=today)
-        days_to_expiry = evaluation.days_to_expiry
-        if evaluation.status in {
-            models.AircraftDocumentStatus.OVERDUE,
-            models.AircraftDocumentStatus.DUE_SOON,
-        } or (
-            evaluation.status == models.AircraftDocumentStatus.CURRENT
-            and days_to_expiry is not None
-            and days_to_expiry <= due_within_days
-        ):
-            schema_doc = _document_to_schema(doc, evaluation)
-            alerts.append(schema_doc)
-    return alerts
 
 
 # ---------------------------------------------------------------------------

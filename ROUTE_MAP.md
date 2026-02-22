@@ -329,3 +329,28 @@
 - `frontend/src/services/reliability.ts`
 - `frontend/src/pages/ReliabilityReportsPage.tsx`
 - `ROUTE_MAP.md`
+
+## Changed in this run (2026-02-22 aircraft route hardening)
+### Route/behavior fixes
+- `/aircraft/document-alerts` now resolves deterministically (no longer shadowed by `/{serial_number}` dynamic route matching).
+- Aircraft collection endpoints now support both `/aircraft` and `/aircraft/` for GET/POST without redirect dependence.
+- Frontend fleet list now calls `/aircraft/` for collection reads to avoid `307 -> 401` redirect chains.
+
+### Authorization scope fixes
+- Aircraft list and document alerts now scope by `effective_amo_id` so support/switch contexts remain tenant-correct.
+
+### Files changed
+- `backend/amodb/apps/fleet/router.py`
+- `frontend/src/services/fleet.ts`
+- `ROUTE_MAP.md`
+
+## Changed in this run (2026-02-22 endpoint regression coverage)
+### Verification coverage additions
+- Added regression tests that lock route-shape expectations for aircraft endpoints:
+  - static alerts route remains present (`/aircraft/document-alerts`, `/aircraft/document-alerts/`)
+  - slash-safe collection handlers remain present (`/aircraft`, `/aircraft/` for GET/POST)
+- Added explicit check that aircraft collection handler continues using effective AMO context.
+
+### Files changed
+- `backend/amodb/apps/fleet/tests/test_router_auth_scoping.py`
+- `ROUTE_MAP.md`
