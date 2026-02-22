@@ -33,6 +33,20 @@ const WorkOrderSearchPage = lazy(() => import("./pages/work/WorkOrderSearchPage"
 const WorkOrderDetailPage = lazy(() => import("./pages/work/WorkOrderDetailPage"));
 const TaskSummaryPage = lazy(() => import("./pages/work/TaskSummaryPage"));
 const TaskPrintPage = lazy(() => import("./pages/work/TaskPrintPage"));
+const MaintenanceDashboardPage = lazy(() => import("./pages/maintenance/MaintenanceDashboardPage"));
+const MaintenanceWorkOrdersPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrdersPage"));
+const MaintenanceWorkOrderDetailPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrderDetailPage"));
+const MaintenanceWorkPackagesPage = lazy(() => import("./pages/maintenance/MaintenanceWorkPackagesPage"));
+const MaintenanceDefectsPage = lazy(() => import("./pages/maintenance/MaintenanceDefectsPage"));
+const MaintenanceDefectDetailPage = lazy(() => import("./pages/maintenance/MaintenanceDefectDetailPage"));
+const MaintenanceNonRoutinesPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutinesPage"));
+const MaintenanceNonRoutineDetailPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutineDetailPage"));
+const MaintenanceInspectionsPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionsPage"));
+const MaintenanceInspectionDetailPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionDetailPage"));
+const MaintenancePartsToolsPage = lazy(() => import("./pages/maintenance/MaintenancePartsToolsPage"));
+const MaintenanceCloseoutPage = lazy(() => import("./pages/maintenance/MaintenanceCloseoutPage"));
+const MaintenanceReportsPage = lazy(() => import("./pages/maintenance/MaintenanceReportsPage"));
+const MaintenanceSettingsPage = lazy(() => import("./pages/maintenance/MaintenanceSettingsPage"));
 const AdminUserNewPage = lazy(() => import("./pages/AdminUserNewPage"));
 const AdminUserDetailPage = lazy(() => import("./pages/AdminUserDetailPage"));
 const AdminDashboardPage = lazy(() => import("./pages/AdminDashboardPage"));
@@ -83,6 +97,7 @@ const ManualWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage
 const ManualExportsPage = lazy(() => import("./pages/manuals/ManualExportsPage"));
 const ManualMasterListPage = lazy(() => import("./pages/manuals/ManualMasterListPage"));
 const ProductionWorkspacePage = lazy(() => import("./pages/ProductionWorkspacePage"));
+
 
 
 type RequireAuthProps = {

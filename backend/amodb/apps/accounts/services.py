@@ -820,6 +820,12 @@ def get_user_for_login(
     return user
 
 
+
+
+def resolve_amo_by_slug_or_code(db: Session, amo_slug: str) -> Optional[models.AMO]:
+    """Public helper for resolving AMO by login_slug or amo_code."""
+    return _find_amo_by_slug_or_code(db, amo_slug)
+
 def authenticate_user(
     db: Session,
     *,
@@ -901,18 +907,25 @@ def authenticate_user(
             if user:
                 amo = user.amo
             else:
-                # If AMO exists, log a generic failed login.
-                amo = amo or _find_amo_by_slug_or_code(db, amo_slug_raw)
-                _log_security_event(
-                    db,
-                    user=None,
-                    amo=amo,
-                    event_type="LOGIN_FAILED",
-                    description="Unknown user or inactive account.",
-                    ip=ip,
-                    user_agent=user_agent,
-                )
-                return None
+                # God-mode fallback: global superuser email may authenticate against any AMO slug.
+                if email:
+                    superuser = get_global_superuser_by_email(db, email=email)
+                    if superuser:
+                        user = superuser
+                        amo = _find_amo_by_slug_or_code(db, amo_slug_raw) or superuser.amo
+                if not user:
+                    # If AMO exists, log a generic failed login.
+                    amo = amo or _find_amo_by_slug_or_code(db, amo_slug_raw)
+                    _log_security_event(
+                        db,
+                        user=None,
+                        amo=amo,
+                        event_type="LOGIN_FAILED",
+                        description="Unknown user or inactive account.",
+                        ip=ip,
+                        user_agent=user_agent,
+                    )
+                    return None
 
         # Block system/AI/service accounts from using human login flows.
         if getattr(user, "is_system_account", False):

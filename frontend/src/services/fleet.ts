@@ -219,7 +219,7 @@ export async function listAircraft(params?: {
   status?: string;
   is_active?: boolean;
 }): Promise<AircraftRead[]> {
-  return fetchJson<AircraftRead[]>(`/aircraft${toQuery(params ?? {})}`);
+  return fetchJson<AircraftRead[]>(`/aircraft/${toQuery(params ?? {})}`);
 }
 
 export async function listAircraftDocuments(serialNumber: string): Promise<AircraftDocument[]> {
