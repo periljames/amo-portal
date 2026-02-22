@@ -33,6 +33,20 @@ const WorkOrderSearchPage = lazy(() => import("./pages/work/WorkOrderSearchPage"
 const WorkOrderDetailPage = lazy(() => import("./pages/work/WorkOrderDetailPage"));
 const TaskSummaryPage = lazy(() => import("./pages/work/TaskSummaryPage"));
 const TaskPrintPage = lazy(() => import("./pages/work/TaskPrintPage"));
+const MaintenanceDashboardPage = lazy(() => import("./pages/maintenance/MaintenanceDashboardPage"));
+const MaintenanceWorkOrdersPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrdersPage"));
+const MaintenanceWorkOrderDetailPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrderDetailPage"));
+const MaintenanceWorkPackagesPage = lazy(() => import("./pages/maintenance/MaintenanceWorkPackagesPage"));
+const MaintenanceDefectsPage = lazy(() => import("./pages/maintenance/MaintenanceDefectsPage"));
+const MaintenanceDefectDetailPage = lazy(() => import("./pages/maintenance/MaintenanceDefectDetailPage"));
+const MaintenanceNonRoutinesPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutinesPage"));
+const MaintenanceNonRoutineDetailPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutineDetailPage"));
+const MaintenanceInspectionsPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionsPage"));
+const MaintenanceInspectionDetailPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionDetailPage"));
+const MaintenancePartsToolsPage = lazy(() => import("./pages/maintenance/MaintenancePartsToolsPage"));
+const MaintenanceCloseoutPage = lazy(() => import("./pages/maintenance/MaintenanceCloseoutPage"));
+const MaintenanceReportsPage = lazy(() => import("./pages/maintenance/MaintenanceReportsPage"));
+const MaintenanceSettingsPage = lazy(() => import("./pages/maintenance/MaintenanceSettingsPage"));
 const AdminUserNewPage = lazy(() => import("./pages/AdminUserNewPage"));
 const AdminUserDetailPage = lazy(() => import("./pages/AdminUserDetailPage"));
 const AdminDashboardPage = lazy(() => import("./pages/AdminDashboardPage"));
@@ -422,6 +436,22 @@ export const AppRouter: React.FC = () => {
           </RequireAuth>
         }
       />
+
+      <Route path="/maintenance" element={<RequireAuth><MaintenanceDashboardPage /></RequireAuth>} />
+      <Route path="/maintenance/work-orders" element={<RequireAuth><MaintenanceWorkOrdersPage /></RequireAuth>} />
+      <Route path="/maintenance/work-orders/:woId" element={<RequireAuth><MaintenanceWorkOrderDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/work-packages" element={<RequireAuth><MaintenanceWorkPackagesPage /></RequireAuth>} />
+      <Route path="/maintenance/work-packages/:wpId" element={<RequireAuth><MaintenanceWorkPackagesPage /></RequireAuth>} />
+      <Route path="/maintenance/defects" element={<RequireAuth><MaintenanceDefectsPage /></RequireAuth>} />
+      <Route path="/maintenance/defects/:defectId" element={<RequireAuth><MaintenanceDefectDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/non-routines" element={<RequireAuth><MaintenanceNonRoutinesPage /></RequireAuth>} />
+      <Route path="/maintenance/non-routines/:nrId" element={<RequireAuth><MaintenanceNonRoutineDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/inspections" element={<RequireAuth><MaintenanceInspectionsPage /></RequireAuth>} />
+      <Route path="/maintenance/inspections/:inspectionId" element={<RequireAuth><MaintenanceInspectionDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/parts-tools" element={<RequireAuth><MaintenancePartsToolsPage /></RequireAuth>} />
+      <Route path="/maintenance/closeout" element={<RequireAuth><MaintenanceCloseoutPage /></RequireAuth>} />
+      <Route path="/maintenance/reports" element={<RequireAuth><MaintenanceReportsPage /></RequireAuth>} />
+      <Route path="/maintenance/settings" element={<RequireAuth><MaintenanceSettingsPage /></RequireAuth>} />
 
       {/* Work orders */}
       <Route
