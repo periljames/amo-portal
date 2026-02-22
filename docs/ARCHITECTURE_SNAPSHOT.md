@@ -48,3 +48,10 @@ This snapshot should be refreshed after major structural, security, or data-mode
   - short-lived realtime connect token issuance,
   - tenant/topic guard rails,
   - durable outbox table for broker publish retries.
+
+## Superuser "god mode" and platform AMOs (clarification)
+- `system`/`root` platform AMO records are bootstrap control tenants used to anchor platform-level users (including superuser) and system configuration.
+- They are expected seed/control-plane tenants; they do not replace customer AMOs.
+- Superuser can now authenticate against any AMO slug path (e.g. `/maintenance/<amoSlug>/login`) using the same superuser email/password.
+- During superuser login with a target AMO slug, backend now aligns active admin context to that AMO automatically, so API scope follows the selected tenant immediately.
+- `/login` now includes **Use Demo Access** quick action to auto-fill demo credentials/slug via environment defaults.

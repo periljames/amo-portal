@@ -31,3 +31,10 @@
 ## Engineering rule for future changes
 - Any new frontend service that currently returns mock/demo fallback **must** gate that fallback behind `shouldUseMockData()`.
 - Any new superuser operational dashboard should expose the current runtime mode from `runtimeMode` (or `usePortalRuntimeMode`) to avoid ambiguous environments.
+
+## Maintenance module runtime-mode alignment (this run)
+- `/maintenance/*` pages now honor the existing portal runtime switch:
+  - `DEMO` mode (`amodb_portal_go_live=0`): maintenance demo/local datasets are visible for Non-Routines, Inspections/Holds, Parts/Tools and demo defect fallback.
+  - `LIVE` mode (`amodb_portal_go_live=1`): demo/local mutation is disabled on maintenance forms so operational users do not mix sandbox values into live workflows.
+- Maintenance header now shows explicit runtime pill (`DEMO DATA MODE` / `LIVE DATA MODE`) and a guidance banner in demo mode.
+- No new runtime flag was introduced; implementation reuses `shouldUseMockData()` and `usePortalRuntimeMode()`.

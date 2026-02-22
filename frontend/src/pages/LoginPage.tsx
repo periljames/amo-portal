@@ -19,6 +19,10 @@ import { decodeAmoCertFromUrl } from "../utils/amo";
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PLATFORM_SUPPORT_SLUG = "system";
 
+const DEMO_AMO_SLUG = (import.meta.env.VITE_DEMO_AMO_SLUG || "demo-amo").trim();
+const DEMO_LOGIN_EMAIL = (import.meta.env.VITE_DEMO_LOGIN_EMAIL || "admin@demo.example.com").trim();
+const DEMO_LOGIN_PASSWORD = (import.meta.env.VITE_DEMO_LOGIN_PASSWORD || "ChangeMe123!").trim();
+
 const MAX_SUBTITLE_WORDS = 8;
 
 function sanitizeBriefMessage(message: string | null | undefined): string | null {
@@ -260,6 +264,19 @@ const LoginPage: React.FC = () => {
     window.location.assign(`${target}${amoHint}`);
   };
 
+  const handleDemoQuickAccess = () => {
+    setLoginContext({
+      login_slug: DEMO_AMO_SLUG,
+      amo_code: "DEMO",
+      amo_name: "Demo AMO",
+      is_platform: false,
+    });
+    setIdentifier(DEMO_LOGIN_EMAIL);
+    setPassword(DEMO_LOGIN_PASSWORD);
+    setStep("password");
+    setErrorMsg(null);
+  };
+
   const illustrationSrc =
     import.meta.env.VITE_AUTH_ILLUSTRATION_IMAGE ||
     import.meta.env.VITE_AUTH_WALLPAPER_IMAGE_DESKTOP ||
@@ -295,6 +312,7 @@ const LoginPage: React.FC = () => {
       onSwitchAccount={step === "password" && !amoCode ? resetContext : undefined}
       onFindAmo={amoCode ? () => navigate("/login") : undefined}
       onSocialLogin={handleSocialLogin}
+      onDemoQuickAccess={!amoCode ? handleDemoQuickAccess : undefined}
     />
   );
 };

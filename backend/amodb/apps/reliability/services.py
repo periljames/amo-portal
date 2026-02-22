@@ -1981,122 +1981,152 @@ def generate_reliability_report(
     db.commit()
     db.refresh(report)
 
-    if importlib.util.find_spec("reportlab") is None:
+    try:
+        if importlib.util.find_spec("reportlab") is None:
+            report.status = models.ReliabilityReportStatusEnum.FAILED
+            db.add(report)
+            db.commit()
+            return report
+
+        from reportlab.lib.pagesizes import letter  # type: ignore[import-not-found]
+        from reportlab.pdfgen import canvas  # type: ignore[import-not-found]
+        from reportlab.lib.utils import ImageReader  # type: ignore[import-not-found]
+
+        file_path = _reports_dir() / f"reliability_report_{report.id}.pdf"
+        canvas_obj = canvas.Canvas(str(file_path), pagesize=letter)
+        width, height = letter
+
+        amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
+        logo_asset = (
+            db.query(account_models.AMOAsset)
+            .filter(
+                account_models.AMOAsset.amo_id == amo_id,
+                account_models.AMOAsset.kind == account_models.AMOAssetKind.CRS_LOGO,
+                account_models.AMOAsset.is_active.is_(True),
+            )
+            .order_by(account_models.AMOAsset.created_at.desc())
+            .first()
+        )
+        if logo_asset:
+            try:
+                canvas_obj.drawImage(
+                    ImageReader(logo_asset.storage_path),
+                    40,
+                    height - 80,
+                    width=120,
+                    height=40,
+                    preserveAspectRatio=True,
+                    mask="auto",
+                )
+            except FileNotFoundError:
+                pass
+
+        canvas_obj.setFont("Helvetica-Bold", 14)
+        canvas_obj.drawString(200, height - 50, "Reliability Report")
+        canvas_obj.setFont("Helvetica", 10)
+        canvas_obj.drawString(200, height - 65, f"AMO: {amo.name if amo else amo_id}")
+        canvas_obj.drawString(200, height - 80, f"Window: {window_start} to {window_end}")
+
+        kpis = (
+            db.query(models.ReliabilityKPI)
+            .filter(
+                models.ReliabilityKPI.amo_id == amo_id,
+                models.ReliabilityKPI.window_start >= window_start,
+                models.ReliabilityKPI.window_end <= window_end,
+            )
+            .order_by(models.ReliabilityKPI.kpi_code.asc())
+            .all()
+        )
+        alerts = (
+            db.query(models.ReliabilityAlert)
+            .filter(
+                models.ReliabilityAlert.amo_id == amo_id,
+                models.ReliabilityAlert.triggered_at >= datetime.combine(window_start, time.min),
+                models.ReliabilityAlert.triggered_at < datetime.combine(window_end + timedelta(days=1), time.min),
+            )
+            .order_by(models.ReliabilityAlert.triggered_at.desc())
+            .all()
+        )
+
+        y = height - 120
+        canvas_obj.setFont("Helvetica-Bold", 11)
+        canvas_obj.drawString(40, y, "KPI Summary")
+        y -= 15
+        canvas_obj.setFont("Helvetica", 9)
+        canvas_obj.drawString(40, y, "KPI Code")
+        canvas_obj.drawString(200, y, "Value")
+        canvas_obj.drawString(260, y, "Unit")
+        canvas_obj.drawString(320, y, "Scope")
+        y -= 12
+
+        for kpi in kpis[:30]:
+            canvas_obj.drawString(40, y, kpi.kpi_code)
+            canvas_obj.drawString(200, y, f"{kpi.value:.3f}")
+            canvas_obj.drawString(260, y, kpi.unit or "-")
+            canvas_obj.drawString(320, y, kpi.scope_type.value)
+            y -= 12
+            if y < 120:
+                canvas_obj.showPage()
+                y = height - 60
+
+        if y < 140:
+            canvas_obj.showPage()
+            y = height - 60
+
+        canvas_obj.setFont("Helvetica-Bold", 11)
+        canvas_obj.drawString(40, y, "Alerts Summary")
+        y -= 15
+        canvas_obj.setFont("Helvetica", 9)
+        canvas_obj.drawString(40, y, "Alert Code")
+        canvas_obj.drawString(200, y, "Severity")
+        canvas_obj.drawString(260, y, "Triggered At")
+        y -= 12
+        for alert in alerts[:30]:
+            canvas_obj.drawString(40, y, alert.alert_code)
+            canvas_obj.drawString(200, y, alert.severity.value)
+            canvas_obj.drawString(260, y, alert.triggered_at.strftime("%Y-%m-%d"))
+            y -= 12
+            if y < 80:
+                canvas_obj.showPage()
+                y = height - 60
+
+        canvas_obj.save()
+
+        report.status = models.ReliabilityReportStatusEnum.READY
+        report.file_ref = str(file_path)
+        db.add(report)
+        db.commit()
+        db.refresh(report)
+        return report
+    except Exception:
+        db.rollback()
         report.status = models.ReliabilityReportStatusEnum.FAILED
         db.add(report)
         db.commit()
+        db.refresh(report)
         return report
 
-    from reportlab.lib.pagesizes import letter  # type: ignore[import-not-found]
-    from reportlab.pdfgen import canvas  # type: ignore[import-not-found]
-    from reportlab.lib.utils import ImageReader  # type: ignore[import-not-found]
 
-    file_path = _reports_dir() / f"reliability_report_{report.id}.pdf"
-    canvas_obj = canvas.Canvas(str(file_path), pagesize=letter)
-    width, height = letter
+def _recover_stale_report_state(db: Session, report: models.ReliabilityReport) -> bool:
+    if report.status != models.ReliabilityReportStatusEnum.PENDING:
+        return False
 
-    amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
-    logo_asset = (
-        db.query(account_models.AMOAsset)
-        .filter(
-            account_models.AMOAsset.amo_id == amo_id,
-            account_models.AMOAsset.kind == account_models.AMOAssetKind.CRS_LOGO,
-            account_models.AMOAsset.is_active.is_(True),
-        )
-        .order_by(account_models.AMOAsset.created_at.desc())
-        .first()
-    )
-    if logo_asset:
-        try:
-            canvas_obj.drawImage(
-                ImageReader(logo_asset.storage_path),
-                40,
-                height - 80,
-                width=120,
-                height=40,
-                preserveAspectRatio=True,
-                mask="auto",
-            )
-        except FileNotFoundError:
-            pass
+    expected_path = _reports_dir() / f"reliability_report_{report.id}.pdf"
+    if expected_path.exists() and expected_path.is_file():
+        report.status = models.ReliabilityReportStatusEnum.READY
+        report.file_ref = str(expected_path)
+        db.add(report)
+        return True
 
-    canvas_obj.setFont("Helvetica-Bold", 14)
-    canvas_obj.drawString(200, height - 50, "Reliability Report")
-    canvas_obj.setFont("Helvetica", 10)
-    canvas_obj.drawString(200, height - 65, f"AMO: {amo.name if amo else amo_id}")
-    canvas_obj.drawString(200, height - 80, f"Window: {window_start} to {window_end}")
+    created_at = report.created_at
+    if created_at and created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
 
-    kpis = (
-        db.query(models.ReliabilityKPI)
-        .filter(
-            models.ReliabilityKPI.amo_id == amo_id,
-            models.ReliabilityKPI.window_start >= window_start,
-            models.ReliabilityKPI.window_end <= window_end,
-        )
-        .order_by(models.ReliabilityKPI.kpi_code.asc())
-        .all()
-    )
-    alerts = (
-        db.query(models.ReliabilityAlert)
-        .filter(
-            models.ReliabilityAlert.amo_id == amo_id,
-            models.ReliabilityAlert.triggered_at >= datetime.combine(window_start, time.min),
-            models.ReliabilityAlert.triggered_at < datetime.combine(window_end + timedelta(days=1), time.min),
-        )
-        .order_by(models.ReliabilityAlert.triggered_at.desc())
-        .all()
-    )
-
-    y = height - 120
-    canvas_obj.setFont("Helvetica-Bold", 11)
-    canvas_obj.drawString(40, y, "KPI Summary")
-    y -= 15
-    canvas_obj.setFont("Helvetica", 9)
-    canvas_obj.drawString(40, y, "KPI Code")
-    canvas_obj.drawString(200, y, "Value")
-    canvas_obj.drawString(260, y, "Unit")
-    canvas_obj.drawString(320, y, "Scope")
-    y -= 12
-
-    for kpi in kpis[:30]:
-        canvas_obj.drawString(40, y, kpi.kpi_code)
-        canvas_obj.drawString(200, y, f"{kpi.value:.3f}")
-        canvas_obj.drawString(260, y, kpi.unit or "-")
-        canvas_obj.drawString(320, y, kpi.scope_type.value)
-        y -= 12
-        if y < 120:
-            canvas_obj.showPage()
-            y = height - 60
-
-    if y < 140:
-        canvas_obj.showPage()
-        y = height - 60
-
-    canvas_obj.setFont("Helvetica-Bold", 11)
-    canvas_obj.drawString(40, y, "Alerts Summary")
-    y -= 15
-    canvas_obj.setFont("Helvetica", 9)
-    canvas_obj.drawString(40, y, "Alert Code")
-    canvas_obj.drawString(200, y, "Severity")
-    canvas_obj.drawString(260, y, "Triggered At")
-    y -= 12
-    for alert in alerts[:30]:
-        canvas_obj.drawString(40, y, alert.alert_code)
-        canvas_obj.drawString(200, y, alert.severity.value)
-        canvas_obj.drawString(260, y, alert.triggered_at.strftime("%Y-%m-%d"))
-        y -= 12
-        if y < 80:
-            canvas_obj.showPage()
-            y = height - 60
-
-    canvas_obj.save()
-
-    report.status = models.ReliabilityReportStatusEnum.READY
-    report.file_ref = str(file_path)
-    db.add(report)
-    db.commit()
-    db.refresh(report)
-    return report
+    if created_at and created_at < datetime.now(timezone.utc) - timedelta(minutes=10):
+        report.status = models.ReliabilityReportStatusEnum.FAILED
+        db.add(report)
+        return True
+    return False
 
 
 def list_reports(
@@ -2104,12 +2134,18 @@ def list_reports(
     *,
     amo_id: str,
 ) -> Sequence[models.ReliabilityReport]:
-    return (
+    reports = (
         db.query(models.ReliabilityReport)
         .filter(models.ReliabilityReport.amo_id == amo_id)
         .order_by(models.ReliabilityReport.created_at.desc())
         .all()
     )
+    changed = False
+    for report in reports:
+        changed = _recover_stale_report_state(db, report) or changed
+    if changed:
+        db.commit()
+    return reports
 
 
 def get_report(
@@ -2125,4 +2161,7 @@ def get_report(
     )
     if not report:
         raise ValueError("Report not found.")
+    if _recover_stale_report_state(db, report):
+        db.commit()
+        db.refresh(report)
     return report

@@ -43,6 +43,7 @@ type LoginLayoutProps = {
   onSwitchAccount?: () => void;
   onFindAmo?: () => void;
   onSocialLogin: (provider: SocialProvider) => void;
+  onDemoQuickAccess?: () => void;
 };
 
 type GlassIconButtonProps = {
@@ -172,6 +173,7 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
   onSwitchAccount,
   onFindAmo,
   onSocialLogin,
+  onDemoQuickAccess,
 }) => {
   const { ref: submitWrapRef, width: submitWrapWidth } = useElementWidth<HTMLDivElement>();
   const { ref: illustrationWrapRef, width: illustrationWidth } = useElementWidth<HTMLDivElement>();
@@ -284,10 +286,11 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                   ))}
                 </div>
 
-                {(onSwitchAccount || onFindAmo) ? (
+                {(onSwitchAccount || onFindAmo || onDemoQuickAccess) ? (
                   <div className={styles.switchRow}>
                     {onSwitchAccount ? <button type="button" className={styles.switchBtn} onClick={onSwitchAccount}>Use a different account</button> : <span />}
                     {onFindAmo ? <button type="button" className={styles.switchBtn} onClick={onFindAmo}>Find your AMO</button> : null}
+                    {onDemoQuickAccess ? <button type="button" className={styles.switchBtn} onClick={onDemoQuickAccess}>Use Demo Access</button> : null}
                   </div>
                 ) : null}
               </form>
