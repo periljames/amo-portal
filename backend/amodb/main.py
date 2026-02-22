@@ -44,6 +44,7 @@ from .apps.accounts import services as account_services
 from .apps.manuals.router import router as manuals_router
 from .apps.manuals.router_branding import router as manuals_branding_router
 from .apps.doc_control.router import router as doc_control_router
+from .apps.technical_records.router import router as technical_records_router
 
 
 logger = logging.getLogger(__name__)
@@ -303,3 +304,4 @@ app.include_router(realtime_router)
 app.include_router(manuals_router)
 app.include_router(manuals_branding_router)
 app.include_router(doc_control_router)
+app.include_router(technical_records_router)
