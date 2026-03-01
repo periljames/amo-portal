@@ -29,11 +29,139 @@ from .schemas import (
     RevisionOut,
     TransitionRequest,
     WorkflowOut,
+    LifecycleTransitionRequest,
+    LifecycleTransitionOut,
 )
 
 router = APIRouter(prefix="/manuals", tags=["Manuals"], dependencies=[Depends(get_current_active_user)])
 
 
+def _role_value(current_user: account_models.User) -> str:
+    role = getattr(current_user, "role", None)
+    return getattr(role, "value", str(role))
+
+
+def _is_manual_control_user(current_user: account_models.User) -> bool:
+    role_value = _role_value(current_user)
+    return bool(
+        getattr(current_user, "is_superuser", False)
+        or role_value in {
+            "AMO_ADMIN",
+            "QUALITY_MANAGER",
+            "QUALITY_INSPECTOR",
+            "DOCUMENT_CONTROL_OFFICER",
+        }
+    )
+
+
+def _require_manual_control_user(current_user: account_models.User) -> None:
+    if not _is_manual_control_user(current_user):
+        raise HTTPException(status_code=403, detail="Manual control privileges required")
+
+
+def _apply_lifecycle_transition(
+    *,
+    rev: models.ManualRevision,
+    manual: models.Manual | None,
+    tenant: models.Tenant,
+    action: str,
+    actor_id: str | None,
+    db: Session,
+) -> tuple[models.ManualRevisionStatus, bool]:
+    previous = rev.status_enum
+    approval_chain_reset = False
+
+    if action == "save_draft":
+        rev.status_enum = models.ManualRevisionStatus.DRAFT
+    elif action == "submit_for_review":
+        if rev.status_enum != models.ManualRevisionStatus.DRAFT:
+            raise HTTPException(status_code=400, detail="Only draft revisions can be staged")
+        rev.status_enum = models.ManualRevisionStatus.DEPARTMENT_REVIEW
+    elif action == "verify_compliance":
+        if rev.status_enum != models.ManualRevisionStatus.DEPARTMENT_REVIEW:
+            raise HTTPException(status_code=400, detail="Revision must be staged before compliance review")
+        rev.status_enum = models.ManualRevisionStatus.QUALITY_APPROVAL
+    elif action == "sign_approval":
+        if rev.status_enum != models.ManualRevisionStatus.QUALITY_APPROVAL:
+            raise HTTPException(status_code=400, detail="Revision must be in-review before approval")
+        rev.status_enum = models.ManualRevisionStatus.REGULATOR_SIGNOFF
+        rev.authority_approval_ref = f"e-sign:{actor_id or 'system'}:{datetime.utcnow().isoformat()}"
+    elif action == "publish":
+        if rev.status_enum != models.ManualRevisionStatus.REGULATOR_SIGNOFF:
+            raise HTTPException(status_code=400, detail="Revision must be approved before publication")
+        rev.status_enum = models.ManualRevisionStatus.PUBLISHED
+        rev.published_at = datetime.utcnow()
+        rev.immutable_locked = True
+        previous_published = None
+        if manual and manual.current_published_rev_id:
+            previous_published = db.query(models.ManualRevision).filter(models.ManualRevision.id == manual.current_published_rev_id).first()
+        if previous_published:
+            previous_published.status_enum = models.ManualRevisionStatus.SUPERSEDED
+            previous_published.superseded_by_rev_id = rev.id
+        if manual:
+            manual.current_published_rev_id = rev.id
+        due_days = int((tenant.settings_json or {}).get("ack_due_days", 10))
+        db.add(models.Acknowledgement(revision_id=rev.id, holder_user_id=rev.created_by, due_at=datetime.utcnow() + timedelta(days=due_days)))
+        db.add(models.ManualAIHookEvent(tenant_id=tenant.id, revision_id=rev.id, event_name="revision.published", payload_json={"manual_id": rev.manual_id}))
+    elif action == "reject_to_draft":
+        if rev.status_enum not in {
+            models.ManualRevisionStatus.DEPARTMENT_REVIEW,
+            models.ManualRevisionStatus.QUALITY_APPROVAL,
+            models.ManualRevisionStatus.REGULATOR_SIGNOFF,
+        }:
+            raise HTTPException(status_code=400, detail="Only staged/in-review/approved revisions can be rejected")
+        rev.status_enum = models.ManualRevisionStatus.DRAFT
+        rev.authority_approval_ref = None
+        rev.published_at = None
+        rev.immutable_locked = False
+        approval_chain_reset = True
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported lifecycle action")
+
+    return previous, approval_chain_reset
+
+
+def _extract_docx_header_metadata(content: bytes) -> dict[str, str | None]:
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as zf:
+            header = zf.read("word/header1.xml").decode("utf-8", errors="ignore")
+    except Exception:
+        return {"revision_number": None, "effectivity_date": None, "manual_title": None}
+
+    plain = re.sub(r"<[^>]+>", " ", header)
+    plain = re.sub(r"\s+", " ", plain).strip()
+
+    rev_match = re.search(r"(?:rev(?:ision)?\s*(?:no\.?|number)?\s*[:#-]?\s*)([A-Za-z0-9._-]+)", plain, flags=re.IGNORECASE)
+    date_match = re.search(r"(?:effectivity|effective\s*date)\s*[:#-]?\s*(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})", plain, flags=re.IGNORECASE)
+    title_match = re.search(r"(?:manual\s*title|title)\s*[:#-]?\s*([A-Za-z0-9 ,()/._-]{4,255})", plain, flags=re.IGNORECASE)
+
+    return {
+        "revision_number": rev_match.group(1).strip() if rev_match else None,
+        "effectivity_date": date_match.group(1).strip() if date_match else None,
+        "manual_title": title_match.group(1).strip() if title_match else None,
+    }
+
+
+def _build_prosemirror_json(paragraphs: list[str]) -> dict:
+    content = []
+    section_index = 0
+    for para in paragraphs:
+        text = (para or "").strip()
+        if not text:
+            continue
+        if re.match(r"^(?:\d+(?:\.\d+)*\s+)?[A-Z][A-Za-z0-9 ()/_-]{2,}$", text) and len(text) <= 120:
+            section_index += 1
+            content.append({
+                "type": "heading",
+                "attrs": {"level": 2, "section_id": f"sec-{section_index:03d}"},
+                "content": [{"type": "text", "text": text}],
+            })
+        else:
+            content.append({
+                "type": "paragraph",
+                "content": [{"type": "text", "text": text}],
+            })
+    return {"type": "doc", "content": content}
 
 
 def _extract_docx_paragraphs(content: bytes) -> list[str]:
@@ -170,10 +298,14 @@ async def upload_docx_revision(
 
     content = await file.read()
     paragraphs = _extract_docx_paragraphs(content)
+    header_meta = _extract_docx_header_metadata(content)
+
+    if header_meta.get("manual_title"):
+        manual.title = str(header_meta["manual_title"])[:255]
 
     rev = models.ManualRevision(
         manual_id=manual.id,
-        rev_number=rev_number.strip(),
+        rev_number=(header_meta.get("revision_number") or rev_number).strip(),
         issue_number=issue_number.strip(),
         created_by=get_current_actor_id(),
         status_enum=models.ManualRevisionStatus.DRAFT,
@@ -209,6 +341,45 @@ async def upload_docx_revision(
             text_plain=safe_text,
             change_hash=hashlib.sha256(hash_source).hexdigest(),
         ))
+    prose_json = _build_prosemirror_json(paragraphs)
+    checksum = hashlib.sha256(str(prose_json).encode("utf-8")).hexdigest()
+    previous_version = (
+        db.query(models.DocumentVersion)
+        .filter(models.DocumentVersion.document_id == manual.id)
+        .order_by(models.DocumentVersion.created_at.desc())
+        .first()
+    )
+    if previous_version:
+        previous_version.is_active = False
+
+    current_version = models.DocumentVersion(
+        document_id=manual.id,
+        revision_id=rev.id,
+        version_label=f"Rev {rev.rev_number}",
+        content_json=prose_json,
+        delta_patch={
+            "from_version_id": previous_version.id if previous_version else None,
+            "changed_nodes": len(prose_json.get("content", [])),
+        },
+        checksum_sha256=checksum,
+        state="Draft",
+        is_active=True,
+    )
+    db.add(current_version)
+    db.flush()
+
+    section_nodes = [n for n in prose_json.get("content", []) if n.get("type") == "heading"]
+    for n in section_nodes:
+        heading = ((n.get("content") or [{}])[0].get("text") or "Section").strip()
+        words = max(1, len(heading.split()))
+        db.add(models.DocumentSection(
+            document_version_id=current_version.id,
+            section_id=(n.get("attrs") or {}).get("section_id") or _slugify_heading(heading, "section"),
+            heading=heading[:255],
+            word_count=words,
+            min_reading_time=max(1, words // 180),
+        ))
+
 
     _audit(db, tenant.id, get_current_actor_id(), "revision.docx_uploaded", "manual_revision", rev.id, request, {"filename": file.filename, "paragraphs": len(paragraphs)})
     db.commit()
@@ -292,6 +463,43 @@ def transition_revision(tenant_slug: str, manual_id: str, rev_id: str, payload: 
 
     history = db.query(models.ManualAuditLog).filter(models.ManualAuditLog.entity_id == rev.id).order_by(models.ManualAuditLog.at.desc()).limit(20).all()
     return WorkflowOut(revision_id=rev.id, status=rev.status_enum.value, requires_authority_approval=rev.requires_authority_approval_bool, history=[{"action": item.action, "at": item.at.isoformat(), "actor_id": item.actor_id} for item in history])
+
+
+
+
+@router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/lifecycle/transition", response_model=LifecycleTransitionOut)
+def transition_revision_lifecycle(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    payload: LifecycleTransitionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_manual_control_user(current_user)
+    tenant = _tenant_by_slug(db, tenant_slug)
+    rev = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
+
+    previous, reset = _apply_lifecycle_transition(
+        rev=rev,
+        manual=manual,
+        tenant=tenant,
+        action=payload.action,
+        actor_id=get_current_actor_id(),
+        db=db,
+    )
+    _audit(db, tenant.id, get_current_actor_id(), f"revision.lifecycle.{payload.action}", "manual_revision", rev.id, request, {"comment": payload.comment})
+    db.commit()
+    return LifecycleTransitionOut(
+        revision_id=rev.id,
+        state=rev.status_enum.value,
+        previous_state=previous.value,
+        approval_chain_reset=reset,
+    )
 
 
 @router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/read")

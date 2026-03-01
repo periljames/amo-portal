@@ -108,6 +108,23 @@ export default function ManualsDashboardPage() {
   const inputClasses =
     "w-full rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60";
 
+  const handleSelectedFile = (selectedFile: File | null) => {
+    setErrorMessage("");
+    if (!selectedFile) {
+      setFile(null);
+      return;
+    }
+    const looksLikeDocx =
+      selectedFile.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      selectedFile.name.toLowerCase().endsWith(".docx");
+    if (!looksLikeDocx) {
+      setFile(null);
+      setErrorMessage("Please upload a DOCX file.");
+      return;
+    }
+    setFile(selectedFile);
+  };
+
   return (
     <ManualsPageLayout
       title="Manuals Dashboard"
