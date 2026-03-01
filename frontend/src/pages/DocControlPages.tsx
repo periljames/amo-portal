@@ -1,9 +1,11 @@
 import React from "react";
-import { Link, Navigate, useLocation, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import PageHeader from "../components/shared/PageHeader";
 import SectionCard from "../components/shared/SectionCard";
 import DataTableShell from "../components/shared/DataTableShell";
 import { getContext } from "../services/auth";
+import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { decodeAmoCertFromUrl } from "../utils/amo";
 
 type DocRecord = {
   id: string;
@@ -63,7 +65,11 @@ function useDocControlContext() {
 }
 
 function DocControlShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const context = getContext();
   const { amoCode, basePath, department } = useDocControlContext();
+  const resolvedAmoCode = amoCode || context.amoCode || "system";
+  const amoDisplay = decodeAmoCertFromUrl(resolvedAmoCode);
   const navItems = [
     ["Overview", basePath],
     ["Controlled library", `${basePath}/library`],
@@ -78,30 +84,47 @@ function DocControlShell({ title, subtitle, children }: { title: string; subtitl
   ] as const;
 
   return (
-    <section className="page">
-      <PageHeader
-        title={title}
-        subtitle={subtitle}
-        breadcrumbs={[
-          { label: "Maintenance", to: amoCode ? `/maintenance/${amoCode}/${department === "document-control" ? "planning" : department}` : "/doc-control" },
-          { label: "Document Control" },
-        ]}
-        actions={<button className="btn btn-primary">Create controlled document</button>}
-      />
+    <DepartmentLayout amoCode={resolvedAmoCode} activeDepartment={department}>
+      <div className="qms-shell">
+        <PageHeader
+          title={title}
+          subtitle={subtitle}
+          breadcrumbs={[
+            {
+              label: `Document Control · ${amoDisplay}`,
+              to: basePath,
+            },
+            { label: title },
+          ]}
+          actions={
+            <div className="qms-header__actions">
+              <button className="btn btn-primary">Create controlled document</button>
+              <button
+                type="button"
+                className="secondary-chip-btn"
+                onClick={() => navigate(`/maintenance/${resolvedAmoCode}/${department === "document-control" ? "planning" : department}`)}
+              >
+                Back to department dashboard
+              </button>
+            </div>
+          }
+        />
 
+        <div className="qms-content">
+          <SectionCard title="Document control workbench" subtitle="Separated from Quality & Compliance but fully integrated for traceability.">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+              {navItems.map(([label, to]) => (
+                <Link key={label} to={to} className="card" style={{ padding: 12, border: "1px solid var(--border-subtle)", borderRadius: 10 }}>
+                  <strong>{label}</strong>
+                </Link>
+              ))}
+            </div>
+          </SectionCard>
 
-      <SectionCard title="Document control workbench" subtitle="Separated from Quality & Compliance but fully integrated for traceability.">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
-          {navItems.map(([label, to]) => (
-            <Link key={label} to={to} className="card" style={{ padding: 12, border: "1px solid var(--border-subtle)", borderRadius: 10 }}>
-              <strong>{label}</strong>
-            </Link>
-          ))}
+          {children}
         </div>
-      </SectionCard>
-
-      {children}
-    </section>
+      </div>
+    </DepartmentLayout>
   );
 }
 
@@ -111,9 +134,11 @@ export const LegacyDocControlRedirectPage: React.FC = () => {
   const context = getContext();
   const suffix = location.pathname.replace(/^\/doc-control/, "") || "";
   const targetAmo = amoCode || context.amoCode || "system";
-  const targetPath = department === "document-control"
+  const targetPath = !amoCode
     ? `/maintenance/${targetAmo}/document-control${suffix}`
-    : `/maintenance/${targetAmo}/${department || "quality"}/doc-control${suffix}`;
+    : department === "document-control"
+      ? `/maintenance/${targetAmo}/document-control${suffix}`
+      : `/maintenance/${targetAmo}/${department || "quality"}/doc-control${suffix}`;
   return <Navigate to={`${targetPath}${location.search}`} replace />;
 };
 
