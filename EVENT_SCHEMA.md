@@ -189,3 +189,20 @@ Envelope fields:
 - `DELIVERED`: recipient decoded and stored item locally (`ack.delivered`).
 - `READ`: recipient actually opened/visible (`ack.read`).
 - `ACTIONED`: recipient completed required prompt action (`ack.actioned`).
+
+## AeroDoc Hybrid-DMS events (2026-03-01)
+Additional entityType prefixes emitted through audit_events:
+- `qms.document.revision` (upload/create lifecycle)
+- `qms.physical_copy` (issuance/void/replacement flows)
+- `qms.custody` (check-out/check-in/damage chain)
+
+Frontend invalidation guidance:
+- Invalidate document revision queries for `qms.document.revision.*`
+- Invalidate physical copy inventory for `qms.physical_copy.*`
+- Invalidate custody timelines for `qms.custody.*`
+- `qms.document.revision.issued`
+- `qms.document.revision.integrity_mismatch`
+- `qms.physical_copy.damaged`
+- `qms.document.revision.archived_cold_storage`
+- `qms.document.revision.replication_warning`
+- `qms.physical_copy.verify_public.rate_limited`
