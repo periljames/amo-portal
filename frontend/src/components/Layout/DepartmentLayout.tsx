@@ -189,6 +189,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const { scheme: colorScheme, toggle: toggleColorScheme } = useColorScheme();
   const [sidebarPinned, setSidebarPinned] = useState(false);
   const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
+  const [sidebarPinnedPreferenceStorageKey, setSidebarPinnedPreferenceStorageKey] = useState<string | null>(null);
   const [isDesktopSidebar, setIsDesktopSidebar] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -241,13 +242,15 @@ const DepartmentLayout: React.FC<Props> = ({
     if (!uiShellV2 || typeof window === "undefined") return;
     const stored = window.localStorage.getItem(sidebarStorageKey);
     setSidebarPinned(stored === "1");
+    setSidebarPinnedPreferenceStorageKey(sidebarStorageKey);
   }, [sidebarStorageKey, uiShellV2]);
 
   useEffect(() => {
     if (!uiShellV2 || typeof window === "undefined") return;
+    if (sidebarPinnedPreferenceStorageKey !== sidebarStorageKey) return;
     window.localStorage.setItem(sidebarStorageKey, sidebarPinned ? "1" : "0");
     if (sidebarPinned) setSidebarDrawerOpen(false);
-  }, [sidebarPinned, sidebarStorageKey, uiShellV2]);
+  }, [sidebarPinned, sidebarPinnedPreferenceStorageKey, sidebarStorageKey, uiShellV2]);
   const { isGoLive } = usePortalRuntimeMode();
   const isSuperuser = !!currentUser?.is_superuser;
   const isTenantAdmin = isSuperuser || !!currentUser?.is_amo_admin;
