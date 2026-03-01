@@ -25,6 +25,42 @@ class QMSDocStatus(str, enum.Enum):
     OBSOLETE = "OBSOLETE"
 
 
+class QMSSecurityLevel(str, enum.Enum):
+    PUBLIC = "PUBLIC"
+    INTERNAL = "INTERNAL"
+    CONFIDENTIAL = "CONFIDENTIAL"
+    RESTRICTED = "RESTRICTED"
+
+
+class QMSRetentionCategory(str, enum.Enum):
+    MAINT_RECORD_5Y = "MAINT_RECORD_5Y"
+    UNTIL_WITHDRAWN = "UNTIL_WITHDRAWN"
+
+
+class QMSRevisionLifecycleStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    IN_REVIEW = "IN_REVIEW"
+    APPROVED = "APPROVED"
+    SUPERSEDED = "SUPERSEDED"
+    OBSOLETE = "OBSOLETE"
+
+
+class QMSPhysicalCopyStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    LOST = "LOST"
+    DESTROYED = "DESTROYED"
+    RECALL_PENDING = "RECALL_PENDING"
+
+
+class QMSCustodyAction(str, enum.Enum):
+    CHECK_OUT = "CHECK_OUT"
+    CHECK_IN = "CHECK_IN"
+    DESTROYED = "DESTROYED"
+    LOST = "LOST"
+    DAMAGED = "DAMAGED"
+    INSPECTED = "INSPECTED"
+
+
 class QMSDistributionFormat(str, enum.Enum):
     HARD_COPY = "HARD_COPY"
     SOFT_COPY = "SOFT_COPY"

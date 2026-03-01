@@ -170,3 +170,20 @@
 ### Files changed
 - `backend/amodb/apps/fleet/tests/test_router_auth_scoping.py`
 - `SECURITY_REPORT.md`
+
+## AeroDoc Hybrid-DMS security delta (2026-03-01)
+- Added module gate enforcement for new hybrid DMS endpoints via `require_module("aerodoc_hybrid_dms")`.
+- Added upload hardening on AeroDoc revision upload endpoint:
+  - MIME allowlist
+  - extension allowlist
+  - max size cap (50 MB)
+  - SHA-256 generation and immutable audit event emission.
+- Added tenant scoping for physical controlled copy and custody operations using `amo_id` filter on new entities.
+- Added public verify endpoint with minimal payload (`serial/status/current/approved_version`) and mandatory `amo_id` + module subscription check.
+- Added integrity re-hash check on revision open/download path with explicit compromise flag header.
+- Added public verify rate limiting per IP/tenant via in-memory limiter.
+- Added replication failure observability via explicit `replication_warning` audit events on upload.
+- Public verify now fails closed when AeroDoc module subscription is not explicitly enabled for the tenant.
+- Added rate-limit telemetry audit event for public verify abuse attempts.
+
+- Added restricted verify rate-limit stats endpoint for admin/quality roles for abuse monitoring.

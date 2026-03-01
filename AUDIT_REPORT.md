@@ -580,3 +580,110 @@ Addressed user feedback that the mock cockpit appeared empty. Root cause was pri
 - Reduced cockpit chart/list heights to keep dashboard content in a single-page viewport layout without external page scroll.
 - Visual verification artifact:
   - `browser:/tmp/codex_browser_invocations/98ad9f0f622a9352/artifacts/artifacts/dashboard-fullwidth-no-glass.png`
+
+## AeroDoc Hybrid-DMS run (2026-03-01)
+### Discovery notes (pre-schema)
+- Required contract files were requested under `/mnt/data/*.md`, but those paths do not exist in this workspace; equivalent contracts were read from `docs/AI_AGENT_CONTRACT.md`, `docs/ARCHITECTURE_SNAPSHOT.md`, `ROUTE_MAP.md`, `EVENT_SCHEMA.md`, `SECURITY_REPORT.md`, `docs/SECURITY_BASELINE.md`, `AUDIT_REPORT.md`, and `BACKLOG.md`.
+- Existing document master/revision entities are `qms_documents` and `qms_document_revisions` in `backend/amodb/apps/quality/models.py`.
+- Existing upload/checksum implementation pattern exists in quality CAR attachment upload (`_store_car_attachment`) and manuals endpoints.
+- Existing module gating primitive is `require_module(...)` in `backend/amodb/entitlements.py`; quality router already applies `require_module("quality")` globally.
+- Existing audit event pipeline is `amodb.apps.audit.services.log_event` publishing canonical envelopes through events broker and `/api/events`.
+- Stable viewer route exists in frontend router: `/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view`.
+
+### Files changed
+- `backend/amodb/apps/quality/enums.py`
+- `backend/amodb/apps/quality/models.py`
+- `backend/amodb/apps/quality/schemas.py`
+- `backend/amodb/apps/quality/router.py`
+- `backend/amodb/apps/accounts/router_modules_admin.py`
+- `backend/amodb/alembic/versions/aerodoc_hybrid_dms_additions.py`
+- `ROUTE_MAP.md`
+- `EVENT_SCHEMA.md`
+- `SECURITY_REPORT.md`
+- `BACKLOG.md`
+- `AUDIT_REPORT.md`
+
+### Commands executed
+- `pwd && rg --files -g 'AGENTS.md'`
+- `cat /mnt/data/AI_AGENT_CONTRACT.md ...` (failed: files absent)
+- `find /workspace -maxdepth 3 -name '*.md' | head -n 50`
+- `cat docs/AI_AGENT_CONTRACT.md ... BACKLOG.md`
+- `rg -n "require_module|module|documents|revision|audit_events|viewer|qms" backend/amodb | head -n 200`
+- `rg -n "class QMSDocument|qms_documents|revisions|viewer|upload|module" backend/amodb/apps/quality -g '*.py'`
+- `sed -n` inspections across quality models/schemas/router and entitlements
+- `alembic -c backend/amodb/alembic.ini heads`
+- `python -m py_compile backend/amodb/apps/quality/router.py backend/amodb/apps/quality/models.py backend/amodb/apps/quality/schemas.py backend/amodb/apps/quality/enums.py backend/amodb/alembic/versions/aerodoc_hybrid_dms_additions.py backend/amodb/apps/accounts/router_modules_admin.py`
+
+### Verification status
+- Added additive AeroDoc module gating key (`aerodoc_hybrid_dms`) for module admin toggles.
+- Added schema/model support for document security/retention, revision integrity metadata, and physical copy + custody entities.
+- Added additive hybrid DMS endpoints for upload/hash, physical-copy issuance, custody check-in/out, and copy verification.
+- Added migration with resilience checks and non-destructive downgrade note.
+
+### Known issues / follow-ups
+- Frontend module-gated screens for Hangar Dashboard / Compliance map / Audit mode are not yet implemented in this run.
+- Public unauthenticated verify path and binder zip export are pending.
+- LTREE path type + GIST index are deferred; current implementation stores location path as string.
+
+## AeroDoc Hybrid-DMS gap-closure run (2026-03-01)
+### Additional closure work completed
+- Added revision issuance (`/quality/qms/revisions/issue`) with supersede behavior and audit event emission.
+- Added integrity-on-open endpoint (`/quality/qms/documents/{doc_id}/revisions/{rev_id}/open`) that recomputes SHA-256 and returns `X-Document-Integrity` header plus mismatch audit event.
+- Added damage/replace flow (`/quality/qms/physical-copies/{copy_id}/report-damage`) that voids old copy, creates replacement, links `replaced_by_copy_id`, and appends custody logs.
+- Added inspector binder streaming export endpoint (`/quality/qms/audit-mode/binder`) as chunked zip response.
+- Added additive public verify route (`/aerodoc/public/verify/{serial}?amo_id=...`) with minimal response and module subscription check.
+- Added daily retention runner job module `backend/amodb/jobs/aerodoc_retention_runner.py` to transition aged 5Y revisions to cold storage marker and emit archival audit events.
+- Added frontend module-gated AeroDoc pages/routes for Hangar Dashboard, Compliance Health, and Audit Mode.
+- Added backend tests covering upload hash + audit event, verify green/red behavior, and damage replacement workflow.
+
+### Commands executed (gap-closure)
+- `python -m py_compile backend/amodb/apps/quality/router.py backend/amodb/apps/aerodoc_router.py backend/amodb/jobs/aerodoc_retention_runner.py backend/amodb/main.py backend/amodb/apps/quality/schemas.py`
+- `cd backend && pytest amodb/apps/quality/tests/test_aerodoc_hybrid_dms.py -q`
+- `cd frontend && npx tsc -b`
+- `alembic -c backend/amodb/alembic.ini heads`
+
+### Remaining items
+- Full offline PWA caching and QR camera scanner library lazy-load still require dedicated frontend iteration.
+- Cross-cloud replication (AWS/Azure/SFTP) remains an integration follow-up pending infra credentials and adapters.
+
+## AeroDoc Hybrid-DMS hard-close run (2026-03-01)
+### Completion work
+- Added public verify in-memory rate limiting (`AERODOC_VERIFY_RATE_LIMIT_*`) keyed by client IP + tenant.
+- Added lightweight three-target replication adapter for revision uploads (AWS mirror path, Azure mirror path, on-prem mirror path) with audit `replication_warning` emission.
+- Added frontend service-worker registration (`VITE_AERODOC_PWA_ENABLED=1`) plus `frontend/public/aerodoc-sw.js` caching for AeroDoc/manual viewer assets and routes.
+- Added new migration `b1a2e3r4o5d6_add_ltree_for_physical_copy_paths.py` to enable PostgreSQL `ltree` extension and GIST index for `physical_controlled_copies.storage_location_path`.
+- Added tests for public verify minimal output and rate-limit behavior.
+
+### Commands executed
+- `python -m py_compile backend/amodb/apps/aerodoc_router.py backend/amodb/apps/quality/storage_replication.py backend/amodb/apps/quality/router.py backend/amodb/alembic/versions/b1a2e3r4o5d6_add_ltree_for_physical_copy_paths.py backend/amodb/apps/quality/tests/test_aerodoc_public_verify.py`
+- `cd backend && pytest amodb/apps/quality/tests/test_aerodoc_hybrid_dms.py amodb/apps/quality/tests/test_aerodoc_public_verify.py -q`
+- `cd frontend && npx tsc -b`
+- `alembic -c backend/amodb/alembic.ini heads`
+- Enforced fail-closed module gating for public verify: endpoint now requires explicit active `aerodoc_hybrid_dms` module subscription (403 otherwise).
+- Added verify rate-limit telemetry audit event emission (`qms.physical_copy.verify_public.rate_limited`) and tests for module-disabled behavior.
+
+
+## AeroDoc Hybrid-DMS final-completion run (2026-03-01)
+- Added fail-closed public verify gate + rate-limit stats endpoint for operations visibility.
+- Upgraded replication adapters to support optional boto3 (S3), azure-storage-blob (Azure), and paramiko SFTP with retries and env-driven secrets.
+- Added Playwright e2e scaffold (`frontend/playwright.config.ts`, `frontend/tests/e2e/aerodoc.spec.ts`) and npm script `test:e2e`.
+- Added final closure for AeroDoc follow-ups: fail-closed verify gate, telemetry dashboard endpoint, optional production adapters for S3/Azure/SFTP with retries, and Playwright route-smoke scaffold.
+- Attempted `npm run test:e2e` after installing Playwright + Chromium; execution failed in this runner due missing native shared library `libatk-1.0.so.0`.
+
+
+## AeroDoc Hybrid-DMS step-closure run (2026-03-01)
+### Scope completed in this pass
+- Closed Step 6/7 hardening coverage by adding explicit tenant-isolation tests for physical-copy verify and damage replacement flows.
+- Verified module fail-closed behavior remains in place for public verify (`403` when subscription missing) and retained rate-limit telemetry test coverage.
+- Re-validated migration head discipline and frontend build after the manual-reader integrity warning UX update.
+
+### Commands executed
+- `cd backend && pytest amodb/apps/quality/tests/test_aerodoc_hybrid_dms.py amodb/apps/quality/tests/test_aerodoc_public_verify.py -q`
+- `cd frontend && npx tsc -b`
+- `cd backend && alembic -c amodb/alembic.ini heads`
+
+### Outcomes
+- Backend AeroDoc tests: pass (`8 passed`).
+- Frontend type build: pass.
+- Alembic: single head `b1a2e3r4o5d6` confirmed.
+- Remaining non-code limitation: Playwright runtime dependency (`libatk-1.0.so.0`) is infra-level and unchanged.

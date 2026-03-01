@@ -14,6 +14,8 @@ import {
   type ManualReadPayload,
   type ManualProcessingStatus,
 } from "../../services/manuals";
+import { authHeaders } from "../../services/auth";
+import { getApiBaseUrl } from "../../services/config";
 import { useManualRouteContext } from "./context";
 import "./manualReader.css";
 import { ManualsReaderShell, TenantBrandingProvider } from "../../packages/manuals-reader";
@@ -43,6 +45,7 @@ export default function ManualReaderPage() {
   const [processing, setProcessing] = useState<ManualProcessingStatus | null>(null);
   const [busy, setBusy] = useState<"processor" | "ocr" | "outline" | null>(null);
   const [uploadName, setUploadName] = useState("");
+  const [integrityCompromised, setIntegrityCompromised] = useState(false);
 
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const pagedParentRef = useRef<HTMLDivElement | null>(null);
@@ -56,6 +59,41 @@ export default function ManualReaderPage() {
   };
 
   useEffect(() => { refresh(); }, [tenant, manualId, revId]);
+
+  useEffect(() => {
+    if (!manualId || !revId) {
+      setIntegrityCompromised(false);
+      return;
+    }
+
+    let alive = true;
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/quality/qms/documents/${manualId}/revisions/${revId}/open`, {
+          method: "GET",
+          headers: {
+            ...authHeaders(),
+            Range: "bytes=0-0",
+          },
+          signal: controller.signal,
+        });
+        const integrity = (response.headers.get("X-Document-Integrity") || "").toLowerCase();
+        if (alive) setIntegrityCompromised(integrity === "compromised");
+      } catch {
+        if (alive) setIntegrityCompromised(false);
+      } finally {
+        controller.abort();
+      }
+    })();
+
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [manualId, revId]);
+
   useEffect(() => { localStorage.setItem("manuals.layout", layout); localStorage.setItem("manuals.zoom", String(zoom)); }, [layout, zoom]);
 
   useEffect(() => {
@@ -174,6 +212,12 @@ export default function ManualReaderPage() {
         onZoomOut={() => setZoom((z) => Math.max(60, z - 10))}
         onZoomReset={() => setZoom(100)}
       >
+        {integrityCompromised ? (
+          <div className="manual-card" style={{ borderColor: "var(--danger, #d9534f)", background: "rgba(217, 83, 79, 0.12)", marginBottom: 12 }}>
+            <strong>CRITICAL: DOCUMENT INTEGRITY COMPROMISED</strong>
+            <p>This revision hash does not match the immutable record. Stop use and notify Quality Management immediately.</p>
+          </div>
+        ) : null}
         <div className="manual-reader-workspace">
           {tocOpen ? (
             <aside className="manual-reader-toc">
