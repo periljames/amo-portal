@@ -11,10 +11,30 @@
 
 body[data-color-scheme="light"] {
   --qms-shadow-card: 0 10px 20px rgba(15, 23, 42, 0.08);
+  --qms-nav-border: #e2e8f0;
+  --qms-nav-link-bg: var(--surface-soft);
+  --qms-nav-link-color: #0f172a;
+  --qms-nav-link-hover-border: #cbd5f5;
+  --qms-nav-link-hover-bg: #eef2ff;
+  --qms-nav-link-hover-shadow: 0 12px 20px rgba(15, 23, 42, 0.08);
+  --qms-nav-link-active-border: #1d4ed8;
+  --qms-nav-link-active-bg: #e0e7ff;
+  --qms-nav-meta-color: #64748b;
+  --qms-nav-active-color: #475569;
 }
 
 body[data-color-scheme="dark"] {
   --qms-shadow-card: 0 12px 24px rgba(2, 6, 23, 0.55);
+  --qms-nav-border: #334155;
+  --qms-nav-link-bg: #0f172a;
+  --qms-nav-link-color: #e2e8f0;
+  --qms-nav-link-hover-border: #64748b;
+  --qms-nav-link-hover-bg: #1e293b;
+  --qms-nav-link-hover-shadow: 0 12px 20px rgba(2, 6, 23, 0.45);
+  --qms-nav-link-active-border: #60a5fa;
+  --qms-nav-link-active-bg: #1d4ed8;
+  --qms-nav-meta-color: #94a3b8;
+  --qms-nav-active-color: #cbd5e1;
 }
 
 .qms-shell {
@@ -74,7 +94,7 @@ body[data-color-scheme="dark"] {
   padding: 16px;
   border-radius: 16px;
   background: var(--surface);
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--qms-nav-border);
   box-shadow: var(--qms-shadow-card);
   margin-bottom: 24px;
 }
@@ -93,22 +113,22 @@ body[data-color-scheme="dark"] {
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid transparent;
-  background: var(--surface-soft);
-  color: #0f172a;
+  background: var(--qms-nav-link-bg);
+  color: var(--qms-nav-link-color);
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease,
     background 0.2s ease;
 }
 
 .qms-nav__link:hover {
-  border-color: #cbd5f5;
-  background: #eef2ff;
+  border-color: var(--qms-nav-link-hover-border);
+  background: var(--qms-nav-link-hover-bg);
   transform: scale(1.02);
-  box-shadow: 0 12px 20px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--qms-nav-link-hover-shadow);
 }
 
 .qms-nav__link--active {
-  border-color: #1d4ed8;
-  background: #e0e7ff;
+  border-color: var(--qms-nav-link-active-border);
+  background: var(--qms-nav-link-active-bg);
 }
 
 .qms-nav__label {
@@ -117,12 +137,12 @@ body[data-color-scheme="dark"] {
 
 .qms-nav__meta {
   font-size: 0.75rem;
-  color: #64748b;
+  color: var(--qms-nav-meta-color);
 }
 
 .qms-nav__active {
   font-size: 0.85rem;
-  color: #475569;
+  color: var(--qms-nav-active-color);
   display: flex;
   gap: 8px;
   align-items: baseline;

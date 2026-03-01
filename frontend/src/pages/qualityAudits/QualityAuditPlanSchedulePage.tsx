@@ -82,7 +82,12 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
       subtitle="Single planning surface with calendar, list, and content modes."
     >
       <div className="qms-header__actions">
-        <div className="qms-segmented" role="tablist" aria-label="Planner view mode">
+        <div
+          className="qms-segmented"
+          role="tablist"
+          aria-label="Planner view mode"
+          style={{ "--segment-count": 3, "--segment-active-index": view === "calendar" ? 0 : view === "list" ? 1 : 2 } as React.CSSProperties}
+        >
           {([
             ["calendar", "Calendar view"],
             ["list", "List view"],

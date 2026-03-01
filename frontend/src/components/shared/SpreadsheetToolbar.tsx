@@ -32,7 +32,12 @@ const SpreadsheetToolbar: React.FC<Props> = ({
 }) => {
   return (
     <div className="spreadsheet-toolbar">
-      <div className="qms-segmented" role="tablist" aria-label="Row density">
+      <div
+        className="qms-segmented"
+        role="tablist"
+        aria-label="Row density"
+        style={{ "--segment-count": 2, "--segment-active-index": density === "compact" ? 0 : 1 } as React.CSSProperties}
+      >
         <button type="button" className={density === "compact" ? "is-active" : ""} onClick={() => onDensityChange("compact")}>
           Compact
         </button>
