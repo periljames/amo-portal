@@ -269,3 +269,70 @@ def test_request_physical_copy_requires_control_role(db_session):
         assert False, "expected role gate"
     except HTTPException as exc:
         assert exc.status_code == 403
+
+
+
+def test_add_revision_persists_new_metadata_fields(db_session):
+    _ensure_tables(db_session)
+    amo = account_models.AMO(amo_code=f"AMO-{uuid4().hex[:6]}", name="AMO", login_slug=f"amo-{uuid4().hex[:6]}")
+    db_session.add(amo)
+    db_session.commit()
+    user = _user(db_session, amo.id)
+    doc = _doc(db_session)
+
+    out = quality_router.add_revision(
+        doc_id=doc.id,
+        payload=quality_schemas.QMSDocumentRevisionCreate(
+            issue_no=1,
+            rev_no=2,
+            version_semver="1.2.3",
+            lifecycle_status=quality_models.QMSRevisionLifecycleStatus.APPROVED,
+            sha256="a" * 64,
+            primary_storage_provider="s3",
+            primary_storage_key="bucket/key.pdf",
+            primary_storage_etag="etag-1",
+            byte_size=1234,
+            mime_type="application/pdf",
+        ),
+        request=_request(),
+        db=db_session,
+        current_user=user,
+    )
+
+    assert out.version_semver == "1.2.3"
+    assert out.lifecycle_status == quality_models.QMSRevisionLifecycleStatus.APPROVED
+    assert out.sha256 == "a" * 64
+    assert out.primary_storage_provider == "s3"
+    assert out.primary_storage_key == "bucket/key.pdf"
+    assert out.primary_storage_etag == "etag-1"
+    assert out.byte_size == 1234
+    assert out.mime_type == "application/pdf"
+
+
+
+def test_request_physical_copy_continues_serial_sequence(db_session):
+    _ensure_tables(db_session)
+    amo = account_models.AMO(amo_code=f"AMO-{uuid4().hex[:6]}", name="AMO", login_slug=f"amo-{uuid4().hex[:6]}")
+    db_session.add(amo)
+    db_session.commit()
+    user = _user(db_session, amo.id)
+    doc = _doc(db_session)
+    rev = quality_models.QMSDocumentRevision(document_id=doc.id, issue_no=1, rev_no=0)
+    db_session.add(rev)
+    db_session.commit()
+
+    first = quality_router.request_physical_copy(
+        payload=quality_schemas.QMSPhysicalCopyRequest(revision_id=rev.id, count=2, base_serial="OPS-MAN-009"),
+        request=_request(),
+        db=db_session,
+        current_user=user,
+    )
+    second = quality_router.request_physical_copy(
+        payload=quality_schemas.QMSPhysicalCopyRequest(revision_id=rev.id, count=2, base_serial="OPS-MAN-009"),
+        request=_request(),
+        db=db_session,
+        current_user=user,
+    )
+
+    assert [c.copy_serial_number for c in first] == ["OPS-MAN-009-COPY-001", "OPS-MAN-009-COPY-002"]
+    assert [c.copy_serial_number for c in second] == ["OPS-MAN-009-COPY-003", "OPS-MAN-009-COPY-004"]

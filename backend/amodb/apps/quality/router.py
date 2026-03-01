@@ -553,6 +553,14 @@ def add_revision(
         is_temporary=payload.is_temporary,
         temporary_expires_on=payload.temporary_expires_on,
         file_ref=payload.file_ref,
+        version_semver=payload.version_semver,
+        lifecycle_status=payload.lifecycle_status,
+        sha256=payload.sha256,
+        primary_storage_provider=payload.primary_storage_provider,
+        primary_storage_key=payload.primary_storage_key,
+        primary_storage_etag=payload.primary_storage_etag,
+        byte_size=payload.byte_size,
+        mime_type=payload.mime_type,
         approved_by_authority=payload.approved_by_authority,
         authority_ref=payload.authority_ref,
         approved_by_user_id=payload.approved_by_user_id,
@@ -2840,13 +2848,36 @@ def request_physical_copy(payload: QMSPhysicalCopyRequest, request: Request, db:
     if not rev:
         raise HTTPException(status_code=404, detail="Revision not found")
     created = []
-    for i in range(1, payload.count + 1):
-        serial = f"{payload.base_serial}-COPY-{i:03d}"
-        row = models.QMSPhysicalControlledCopy(amo_id=current_user.amo_id, digital_revision_id=rev.id, copy_serial_number=serial, storage_location_path=payload.storage_location_path, copy_number=i)
+    existing = (
+        db.query(models.QMSPhysicalControlledCopy)
+        .filter(
+            models.QMSPhysicalControlledCopy.amo_id == current_user.amo_id,
+            models.QMSPhysicalControlledCopy.copy_serial_number.like(f"{payload.base_serial}-COPY-%"),
+        )
+        .all()
+    )
+    next_num = 1
+    for row in existing:
+        serial = row.copy_serial_number or ""
+        if serial.startswith(f"{payload.base_serial}-COPY-"):
+            suffix = serial.rsplit("-COPY-", 1)[-1]
+            if suffix.isdigit():
+                next_num = max(next_num, int(suffix) + 1)
+
+    for _ in range(payload.count):
+        serial = f"{payload.base_serial}-COPY-{next_num:03d}"
+        row = models.QMSPhysicalControlledCopy(
+            amo_id=current_user.amo_id,
+            digital_revision_id=rev.id,
+            copy_serial_number=serial,
+            storage_location_path=payload.storage_location_path,
+            copy_number=next_num,
+        )
         db.add(row)
         db.flush()
         created.append(row)
         audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.physical_copy", entity_id=str(row.id), action="created", after={"serial": serial, "revision_id": str(rev.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+        next_num += 1
     db.commit()
     return created
 
