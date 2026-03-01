@@ -205,3 +205,18 @@
 - Implemented first-class MQTT interactive channel for chat/presence/ack while keeping SSE cockpit stream stable.
 - Added REST bootstrap + sync endpoints to support offline-first delivery and replay.
 - Added receipt persistence model for delivered/read/actioned state progression.
+
+## AeroDoc Hybrid-DMS follow-ups (2026-03-01)
+- Implement frontend module-gated Hangar Dashboard (mobile QR scan), Compliance Health Map, and Inspector Audit Mode UX.
+- Implement unauthenticated minimal verify endpoint variant with strict anti-enumeration controls.
+- Add binder streaming export endpoint for last-24-month compliance package.
+- Upgrade storage_location_path to Postgres LTREE + GIST index and add extension migration guard.
+- Add daily retention archival runner (cold storage transition, no delete) and tests.
+- [x] Implement production-grade public verify anti-enumeration limiter (IP/token bucket) and telemetry dashboard.
+- [x] Implement AWS S3 + Azure Blob + on-prem SFTP replication adapters with idempotent retries and operational secrets wiring.
+- [x] Add Playwright route smoke for AeroDoc module pages and mock verify scan flow in CI.
+- [x] Implement production baseline public verify limiter and telemetry event emission path.
+- [x] Add light-weight replication adapter integration hooks for AWS/Azure/on-prem mirrors.
+- [x] Add AeroDoc service-worker caching scaffolding for offline-first manual/verify routes.
+- [x] Enforce fail-closed public verify module gate (deny when subscription missing/disabled).
+- [x] AeroDoc follow-up closure delivered in-code; environment runtime deps for Playwright system libraries remain infrastructure concern.

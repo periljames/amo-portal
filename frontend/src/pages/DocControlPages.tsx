@@ -1,5 +1,20 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { getMasterList, listManuals, type ManualSummary } from "../services/manuals";
+import { useManualRouteContext } from "./manuals/context";
+
+type DocRecord = {
+  docId: string;
+  title: string;
+  type: string;
+  issue: string;
+  revision: string;
+  effectiveDate: string;
+  status: string;
+  regulated: string;
+  restricted: string;
+  ownerDepartment: string;
+};
 
 const tiles = [
   ["Pending internal approvals", "/doc-control/drafts?status=Review"],
@@ -24,12 +39,89 @@ export const DocControlDashboardPage: React.FC = () => (
   </section>
 );
 
-export const DocControlLibraryPage: React.FC = () => (
-  <section className="page doc-control-page">
-    <h1>Controlled Library</h1>
-    <table><thead><tr><th>Doc ID</th><th>Title</th><th>Type</th><th>Issue</th><th>Revision</th><th>Effective date</th><th>Status</th><th>Regulated</th><th>Restricted</th><th>Owner department</th></tr></thead><tbody /></table>
-  </section>
-);
+export const DocControlLibraryPage: React.FC = () => {
+  const { tenant } = useManualRouteContext();
+  const [manuals, setManuals] = useState<ManualSummary[]>([]);
+  const [masterRows, setMasterRows] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!tenant) return;
+    listManuals(tenant).then(setManuals).catch(() => setManuals([]));
+    getMasterList(tenant).then(setMasterRows).catch(() => setMasterRows([]));
+  }, [tenant]);
+
+  const libraryRows = useMemo<DocRecord[]>(() => {
+    const manualRows: DocRecord[] = manuals.map((m) => ({
+      docId: m.code || m.id,
+      title: m.title || "Untitled",
+      type: m.manual_type || "GENERAL",
+      issue: "-",
+      revision: "-",
+      effectiveDate: "-",
+      status: m.status || "UNKNOWN",
+      regulated: "-",
+      restricted: "-",
+      ownerDepartment: "Document Control",
+    }));
+
+    const masterOnlyRows: DocRecord[] =
+      manuals.length === 0
+        ? masterRows.map((r: any) => ({
+            docId: r.code || r.manual_id || "-",
+            title: r.title || "Untitled",
+            type: "MANUAL",
+            issue: "-",
+            revision: r.current_revision || "-",
+            effectiveDate: "-",
+            status: r.current_status || "UNKNOWN",
+            regulated: "-",
+            restricted: "-",
+            ownerDepartment: "Document Control",
+          }))
+        : [];
+
+    const out = [...manualRows, ...masterOnlyRows];
+    const seen = new Set<string>();
+    return out.filter((row) => {
+      const key = `${row.docId}::${row.title}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [manuals, masterRows]);
+
+  return (
+    <section className="page doc-control-page">
+      <h1>Controlled Library</h1>
+      <table>
+        <thead>
+          <tr>
+            <th>Doc ID</th><th>Title</th><th>Type</th><th>Issue</th><th>Revision</th><th>Effective date</th><th>Status</th><th>Regulated</th><th>Restricted</th><th>Owner department</th>
+          </tr>
+        </thead>
+        <tbody>
+          {libraryRows.map((row) => (
+            <tr key={`${row.docId}-${row.title}`}>
+              <td>{row.docId}</td>
+              <td>{row.title}</td>
+              <td>{row.type}</td>
+              <td>{row.issue}</td>
+              <td>{row.revision}</td>
+              <td>{row.effectiveDate}</td>
+              <td>{row.status}</td>
+              <td>{row.regulated}</td>
+              <td>{row.restricted}</td>
+              <td>{row.ownerDepartment}</td>
+            </tr>
+          ))}
+          {libraryRows.length === 0 ? (
+            <tr><td colSpan={10}>No library records available.</td></tr>
+          ) : null}
+        </tbody>
+      </table>
+    </section>
+  );
+};
 
 export const DocControlDocumentDetailPage: React.FC = () => {
   const { docId } = useParams();

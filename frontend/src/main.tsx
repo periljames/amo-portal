@@ -67,3 +67,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     </PersistQueryClientProvider>
   </React.StrictMode>
 );
+
+if (typeof window !== "undefined" && "serviceWorker" in navigator && import.meta.env.VITE_AERODOC_PWA_ENABLED === "1") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/aerodoc-sw.js").catch(() => {});
+  });
+}

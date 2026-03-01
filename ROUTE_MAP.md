@@ -354,3 +354,23 @@
 ### Files changed
 - `backend/amodb/apps/fleet/tests/test_router_auth_scoping.py`
 - `ROUTE_MAP.md`
+
+## AeroDoc Hybrid-DMS additive API routes (2026-03-01)
+- `POST /quality/qms/documents/{doc_id}/revisions/upload` (module-gated: `aerodoc_hybrid_dms` + quality)
+- `POST /quality/qms/physical-copies`
+- `POST /quality/qms/physical-copies/{copy_id}/checkout`
+- `POST /quality/qms/physical-copies/{copy_id}/checkin`
+- `GET /quality/qms/physical-copies/verify/{serial}`
+
+Stable viewer route retained: `/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view`.
+- `POST /quality/qms/revisions/issue`
+- `GET /quality/qms/documents/{doc_id}/revisions/{rev_id}/open`
+- `POST /quality/qms/physical-copies/{copy_id}/report-damage`
+- `GET /quality/qms/audit-mode/binder`
+- `GET /aerodoc/public/verify/{serial}` (query: `amo_id`)
+- `GET /maintenance/:amoCode/:department/qms/aerodoc/hangar`
+- `GET /maintenance/:amoCode/:department/qms/aerodoc/compliance`
+- `GET /maintenance/:amoCode/:department/qms/aerodoc/audit-mode`
+- Service worker enabled route support for AeroDoc/manual viewer cache when `VITE_AERODOC_PWA_ENABLED=1`.
+
+- `GET /aerodoc/public/verify/rate-limit/stats`
