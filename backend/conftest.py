@@ -96,6 +96,8 @@ def db_session():
             manuals_models.ManualRevision.__table__,
             manuals_models.ManualSection.__table__,
             manuals_models.ManualBlock.__table__,
+            manuals_models.DocumentVersion.__table__,
+            manuals_models.DocumentSection.__table__,
             manuals_models.RevisionDiffIndex.__table__,
             manuals_models.Acknowledgement.__table__,
             manuals_models.PrintExport.__table__,

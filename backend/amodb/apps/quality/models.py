@@ -30,6 +30,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -50,6 +51,11 @@ from .enums import (
     QMSDocType,
     QMSDocStatus,
     QMSDistributionFormat,
+    QMSRetentionCategory,
+    QMSRevisionLifecycleStatus,
+    QMSSecurityLevel,
+    QMSPhysicalCopyStatus,
+    QMSCustodyAction,
     QMSChangeRequestStatus,
     QMSAuditKind,
     QMSAuditStatus,
@@ -101,6 +107,17 @@ class QMSDocument(Base):
     effective_date = Column(Date, nullable=True)
 
     restricted_access = Column(Boolean, nullable=False, default=False)
+    security_level = Column(
+        SAEnum(QMSSecurityLevel, name="qms_security_level", native_enum=False),
+        nullable=False,
+        default=QMSSecurityLevel.INTERNAL,
+    )
+    retention_category = Column(
+        SAEnum(QMSRetentionCategory, name="qms_retention_category", native_enum=False),
+        nullable=False,
+        default=QMSRetentionCategory.MAINT_RECORD_5Y,
+    )
+    owner_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     current_file_ref = Column(String(512), nullable=True)
 
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
@@ -162,11 +179,26 @@ class QMSDocumentRevision(Base):
     temporary_expires_on = Column(Date, nullable=True)
 
     file_ref = Column(String(512), nullable=True)
+    version_semver = Column(String(32), nullable=True)
+    lifecycle_status = Column(
+        SAEnum(QMSRevisionLifecycleStatus, name="qms_revision_lifecycle_status", native_enum=False),
+        nullable=False,
+        default=QMSRevisionLifecycleStatus.DRAFT,
+        index=True,
+    )
+    sha256 = Column(String(64), nullable=True, index=True)
+    primary_storage_provider = Column(String(32), nullable=True)
+    primary_storage_key = Column(String(1024), nullable=True)
+    primary_storage_etag = Column(String(128), nullable=True)
+    byte_size = Column(Integer, nullable=True)
+    mime_type = Column(String(255), nullable=True)
 
     approved_by_authority = Column(Boolean, nullable=False, default=False)
     authority_ref = Column(String(255), nullable=True)
     approved_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
+    superseded_at = Column(DateTime(timezone=True), nullable=True)
+    obsolete_at = Column(DateTime(timezone=True), nullable=True)
 
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -187,6 +219,66 @@ class QMSDocumentRevision(Base):
 
     def __repr__(self) -> str:
         return f"<QMSDocumentRevision id={self.id} doc_id={self.document_id} issue={self.issue_no} rev={self.rev_no}>"
+
+
+class QMSPhysicalControlledCopy(Base):
+    __tablename__ = "physical_controlled_copies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    digital_revision_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("qms_document_revisions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    copy_serial_number = Column(String(128), nullable=False)
+    current_holder_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    storage_location_path = Column(String(512), nullable=True)
+    last_inspected_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(
+        SAEnum(QMSPhysicalCopyStatus, name="qms_physical_copy_status", native_enum=False),
+        nullable=False,
+        default=QMSPhysicalCopyStatus.ACTIVE,
+        index=True,
+    )
+    is_controlled_copy = Column(Boolean, nullable=False, default=True)
+    copy_number = Column(Integer, nullable=False, default=1)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    replaced_by_copy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("physical_controlled_copies.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("amo_id", "copy_serial_number", name="uq_physical_controlled_copy_serial"),
+        Index("ix_physical_copy_amo_revision", "amo_id", "digital_revision_id"),
+    )
+
+
+class QMSCustodyLog(Base):
+    __tablename__ = "custody_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    physical_copy_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("physical_controlled_copies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    action = Column(SAEnum(QMSCustodyAction, name="qms_custody_action", native_enum=False), nullable=False, index=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    gps_lat = Column(Numeric(10, 7), nullable=True)
+    gps_lng = Column(Numeric(10, 7), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_custody_logs_amo_copy_occurred", "amo_id", "physical_copy_id", "occurred_at"),
+    )
 
 
 class QMSDocumentDistribution(Base):

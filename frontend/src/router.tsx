@@ -33,20 +33,6 @@ const WorkOrderSearchPage = lazy(() => import("./pages/work/WorkOrderSearchPage"
 const WorkOrderDetailPage = lazy(() => import("./pages/work/WorkOrderDetailPage"));
 const TaskSummaryPage = lazy(() => import("./pages/work/TaskSummaryPage"));
 const TaskPrintPage = lazy(() => import("./pages/work/TaskPrintPage"));
-const MaintenanceDashboardPage = lazy(() => import("./pages/maintenance/MaintenanceDashboardPage"));
-const MaintenanceWorkOrdersPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrdersPage"));
-const MaintenanceWorkOrderDetailPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrderDetailPage"));
-const MaintenanceWorkPackagesPage = lazy(() => import("./pages/maintenance/MaintenanceWorkPackagesPage"));
-const MaintenanceDefectsPage = lazy(() => import("./pages/maintenance/MaintenanceDefectsPage"));
-const MaintenanceDefectDetailPage = lazy(() => import("./pages/maintenance/MaintenanceDefectDetailPage"));
-const MaintenanceNonRoutinesPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutinesPage"));
-const MaintenanceNonRoutineDetailPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutineDetailPage"));
-const MaintenanceInspectionsPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionsPage"));
-const MaintenanceInspectionDetailPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionDetailPage"));
-const MaintenancePartsToolsPage = lazy(() => import("./pages/maintenance/MaintenancePartsToolsPage"));
-const MaintenanceCloseoutPage = lazy(() => import("./pages/maintenance/MaintenanceCloseoutPage"));
-const MaintenanceReportsPage = lazy(() => import("./pages/maintenance/MaintenanceReportsPage"));
-const MaintenanceSettingsPage = lazy(() => import("./pages/maintenance/MaintenanceSettingsPage"));
 const AdminUserNewPage = lazy(() => import("./pages/AdminUserNewPage"));
 const AdminUserDetailPage = lazy(() => import("./pages/AdminUserDetailPage"));
 const AdminDashboardPage = lazy(() => import("./pages/AdminDashboardPage"));
@@ -69,6 +55,9 @@ const QMSTrainingPage = lazy(() => import("./pages/QMSTrainingPage"));
 const QMSTrainingUserPage = lazy(() => import("./pages/QMSTrainingUserPage"));
 const QMSEventsPage = lazy(() => import("./pages/QMSEventsPage"));
 const QMSKpisPage = lazy(() => import("./pages/QMSKpisPage"));
+const AeroDocAuditModePage = lazy(() => import("./pages/AeroDocAuditModePage"));
+const AeroDocComplianceHealthPage = lazy(() => import("./pages/AeroDocComplianceHealthPage"));
+const AeroDocHangarDashboardPage = lazy(() => import("./pages/AeroDocHangarDashboardPage"));
 const QualityCarsPage = lazy(() => import("./pages/QualityCarsPage"));
 const PublicCarInvitePage = lazy(() => import("./pages/PublicCarInvitePage"));
 const SubscriptionManagementPage = lazy(() => import("./pages/SubscriptionManagementPage"));
@@ -768,6 +757,10 @@ export const AppRouter: React.FC = () => {
           </RequireAuth>
         }
       />
+
+      <Route path="/maintenance/:amoCode/:department/qms/aerodoc/hangar" element={<RequireAuth><AeroDocHangarDashboardPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/aerodoc/compliance" element={<RequireAuth><AeroDocComplianceHealthPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/aerodoc/audit-mode" element={<RequireAuth><AeroDocAuditModePage /></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/quality/audits" element={<RequireAuth><QualityAliasRedirect suffix="/audits" /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/plan" element={<RequireAuth><QualityAliasRedirect suffix="/audits/plan" /></RequireAuth>} />

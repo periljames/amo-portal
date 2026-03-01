@@ -32,6 +32,7 @@ def _require_superuser(current_user: models.User) -> models.User:
     return current_user
 
 ALLOWED_MODULES = {
+    "aerodoc_hybrid_dms",
     "finance_inventory",
     "fleet",
     "maintenance_program",
