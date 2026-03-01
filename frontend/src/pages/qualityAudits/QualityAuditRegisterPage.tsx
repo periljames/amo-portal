@@ -110,7 +110,12 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
         title="Closeout Register"
         actions={
           <div className="qms-header__actions">
-            <div className="qms-segmented" role="tablist" aria-label="Register tab">
+            <div
+              className="qms-segmented"
+              role="tablist"
+              aria-label="Register tab"
+              style={{ "--segment-count": 2, "--segment-active-index": tab === "findings" ? 0 : 1 } as React.CSSProperties}
+            >
               <button type="button" className={tab === "findings" ? "is-active" : ""} onClick={() => setTab("findings")}>Findings</button>
               <button type="button" className={tab === "cars" ? "is-active" : ""} onClick={() => setTab("cars")}>CARs</button>
             </div>

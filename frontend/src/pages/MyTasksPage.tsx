@@ -126,7 +126,12 @@ const MyTasksPage: React.FC = () => {
       <DataTableShell
         title="QMS Task Register"
         actions={
-          <div className="qms-segmented" role="tablist" aria-label="Task assignment tabs">
+          <div
+            className="qms-segmented"
+            role="tablist"
+            aria-label="Task assignment tabs"
+            style={{ "--segment-count": 2, "--segment-active-index": tab === "mine" ? 0 : 1 } as React.CSSProperties}
+          >
             <button type="button" className={tab === "mine" ? "is-active" : ""} onClick={() => setTab("mine")}>Assigned to me</button>
             <button type="button" className={tab === "others" ? "is-active" : ""} onClick={() => setTab("others")}>Assigned to others</button>
           </div>

@@ -3,6 +3,7 @@ import { normalizeDepartmentCode, type PortalUser } from "../services/auth";
 export type DepartmentId =
   | "planning"
   | "production"
+  | "document-control"
   | "quality"
   | "reliability"
   | "safety"
@@ -17,6 +18,7 @@ export const DEPARTMENT_ITEMS: Array<{ id: DepartmentId; label: string }> = [
     id: "production",
     label: "Production",
   },
+  { id: "document-control", label: "Document Control" },
   { id: "quality", label: "Quality & Compliance" },
   { id: "reliability", label: "Reliability" },
   { id: "safety", label: "Safety Management" },
