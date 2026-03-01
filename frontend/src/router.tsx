@@ -233,6 +233,24 @@ export const AppRouter: React.FC = () => {
       <Route path="/doc-control" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
       <Route path="/doc-control/*" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
 
+      <Route path="/maintenance/:amoCode/document-control" element={<RequireAuth><DocControlPages.DocControlDashboardPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/library" element={<RequireAuth><DocControlPages.DocControlLibraryPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<RequireAuth><DocControlPages.DocControlDocumentDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/drafts" element={<RequireAuth><DocControlPages.DocControlDraftsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/drafts/:draftId" element={<RequireAuth><DocControlPages.DocControlDraftDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/change-proposals" element={<RequireAuth><DocControlPages.DocControlChangeProposalPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/change-proposals/:proposalId" element={<RequireAuth><DocControlPages.DocControlChangeProposalDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/revisions/:docId" element={<RequireAuth><DocControlPages.DocControlRevisionsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/lep/:docId" element={<RequireAuth><DocControlPages.DocControlLEPPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/tr" element={<RequireAuth><DocControlPages.DocControlTRPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/tr/:trId" element={<RequireAuth><DocControlPages.DocControlTRDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/distribution" element={<RequireAuth><DocControlPages.DocControlDistributionPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/distribution/:eventId" element={<RequireAuth><DocControlPages.DocControlDistributionDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/archive" element={<RequireAuth><DocControlPages.DocControlArchivePage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/reviews" element={<RequireAuth><DocControlPages.DocControlReviewsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/registers" element={<RequireAuth><DocControlPages.DocControlRegistersPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/document-control/settings" element={<RequireAuth><DocControlPages.DocControlSettingsPage /></RequireAuth>} />
+
       <Route path="/maintenance/:amoCode/:department/doc-control" element={<RequireAuth><DocControlPages.DocControlDashboardPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/doc-control/library" element={<RequireAuth><DocControlPages.DocControlLibraryPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/doc-control/library/:docId" element={<RequireAuth><DocControlPages.DocControlDocumentDetailPage /></RequireAuth>} />

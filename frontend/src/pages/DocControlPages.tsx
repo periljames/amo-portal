@@ -1,8 +1,9 @@
 import React from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import PageHeader from "../components/shared/PageHeader";
 import SectionCard from "../components/shared/SectionCard";
 import DataTableShell from "../components/shared/DataTableShell";
+import { getContext } from "../services/auth";
 
 type DocRecord = {
   id: string;
@@ -50,14 +51,19 @@ const changeProposals = [
 
 function useDocControlContext() {
   const { amoCode, department, docId, draftId, proposalId, trId, eventId } = useParams();
-  const tenant = (amoCode || "system").toUpperCase();
-  const activeDepartment = department || "quality";
-  const basePath = amoCode ? `/maintenance/${amoCode}/${activeDepartment}/doc-control` : "/doc-control";
-  return { amoCode, department: activeDepartment, tenant, basePath, docId, draftId, proposalId, trId, eventId };
+  const location = useLocation();
+  const isStandaloneNamespace = location.pathname.startsWith(`/maintenance/${amoCode}/document-control`);
+  const activeDepartment = department || (isStandaloneNamespace ? "document-control" : "quality");
+  const basePath = !amoCode
+    ? "/doc-control"
+    : activeDepartment === "document-control"
+      ? `/maintenance/${amoCode}/document-control`
+      : `/maintenance/${amoCode}/${activeDepartment}/doc-control`;
+  return { amoCode, department: activeDepartment, basePath, docId, draftId, proposalId, trId, eventId };
 }
 
 function DocControlShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
-  const { amoCode, basePath, tenant, department } = useDocControlContext();
+  const { amoCode, basePath, department } = useDocControlContext();
   const navItems = [
     ["Overview", basePath],
     ["Controlled library", `${basePath}/library`],
@@ -77,22 +83,12 @@ function DocControlShell({ title, subtitle, children }: { title: string; subtitl
         title={title}
         subtitle={subtitle}
         breadcrumbs={[
-          { label: "Maintenance", to: amoCode ? `/maintenance/${amoCode}/${department}` : "/doc-control" },
+          { label: "Maintenance", to: amoCode ? `/maintenance/${amoCode}/${department === "document-control" ? "planning" : department}` : "/doc-control" },
           { label: "Document Control" },
         ]}
         actions={<button className="btn btn-primary">Create controlled document</button>}
       />
 
-      <SectionCard
-        title="Tenant isolation"
-        subtitle="All records and acknowledgements shown below are scoped to this AMO tenant and role context."
-      >
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <span className="badge">Tenant: {tenant}</span>
-          <span className="badge">Module: Document Control</span>
-          <span className="badge">Department context: {department}</span>
-        </div>
-      </SectionCard>
 
       <SectionCard title="Document control workbench" subtitle="Separated from Quality & Compliance but fully integrated for traceability.">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
@@ -111,10 +107,14 @@ function DocControlShell({ title, subtitle, children }: { title: string; subtitl
 
 export const LegacyDocControlRedirectPage: React.FC = () => {
   const { amoCode, department } = useDocControlContext();
-  if (!amoCode) {
-    return <DocControlDashboardPage />;
-  }
-  return <Navigate to={`/maintenance/${amoCode}/${department || "quality"}/doc-control`} replace />;
+  const location = useLocation();
+  const context = getContext();
+  const suffix = location.pathname.replace(/^\/doc-control/, "") || "";
+  const targetAmo = amoCode || context.amoCode || "system";
+  const targetPath = department === "document-control"
+    ? `/maintenance/${targetAmo}/document-control${suffix}`
+    : `/maintenance/${targetAmo}/${department || "quality"}/doc-control${suffix}`;
+  return <Navigate to={`${targetPath}${location.search}`} replace />;
 };
 
 export const DocControlDashboardPage: React.FC = () => {
