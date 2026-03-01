@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getCachedUser } from "../../services/auth";
 import {
@@ -34,6 +34,8 @@ export default function ManualsDashboardPage() {
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [isDragActive, setIsDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const user = getCachedUser();
   const role = String((user as any)?.role || "");
@@ -84,6 +86,23 @@ export default function ManualsDashboardPage() {
 
   const pendingTotal = useMemo(() => masterRows.reduce((acc, r) => acc + Number(r.pending_ack_count || 0), 0), [masterRows]);
 
+  const handleSelectedFile = (selectedFile: File | null) => {
+    setErrorMessage("");
+    if (!selectedFile) {
+      setFile(null);
+      return;
+    }
+    const looksLikeDocx =
+      selectedFile.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      selectedFile.name.toLowerCase().endsWith(".docx");
+    if (!looksLikeDocx) {
+      setFile(null);
+      setErrorMessage("Please upload a DOCX file.");
+      return;
+    }
+    setFile(selectedFile);
+  };
+
   return (
     <ManualsPageLayout
       title="Manuals Dashboard"
@@ -108,7 +127,45 @@ export default function ManualsDashboardPage() {
             <input className="rounded border px-3 py-2 text-sm" placeholder="Required" value={issue} onChange={(e) => setIssue(e.target.value)} disabled={!canWrite} />
             <input className="rounded border px-3 py-2 text-sm" placeholder="e.g. 0" value={rev} onChange={(e) => setRev(e.target.value)} disabled={!canWrite} />
             <label className="text-xs text-slate-500 md:col-span-2">DOCX File</label>
-            <input className="rounded border px-3 py-2 text-sm md:col-span-2" type="file" accept=".docx" onChange={(e) => setFile(e.target.files?.[0] || null)} disabled={!canWrite} />
+            <div
+              className={`rounded border-2 border-dashed px-3 py-4 text-sm md:col-span-2 ${isDragActive ? "border-emerald-500 bg-emerald-50/30" : "border-slate-300"} ${!canWrite ? "opacity-60" : "cursor-pointer"}`}
+              onClick={() => {
+                if (!canWrite) return;
+                fileInputRef.current?.click();
+              }}
+              onDragOver={(e) => {
+                if (!canWrite) return;
+                e.preventDefault();
+                setIsDragActive(true);
+              }}
+              onDragEnter={(e) => {
+                if (!canWrite) return;
+                e.preventDefault();
+                setIsDragActive(true);
+              }}
+              onDragLeave={(e) => {
+                if (!canWrite) return;
+                e.preventDefault();
+                setIsDragActive(false);
+              }}
+              onDrop={(e) => {
+                if (!canWrite) return;
+                e.preventDefault();
+                setIsDragActive(false);
+                handleSelectedFile(e.dataTransfer.files?.[0] || null);
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                className="hidden"
+                type="file"
+                accept=".docx"
+                onChange={(e) => handleSelectedFile(e.target.files?.[0] || null)}
+                disabled={!canWrite}
+              />
+              <p className="text-sm">Drag and drop a DOCX here, or <span className="font-medium underline">browse</span>.</p>
+              <p className="mt-1 text-xs text-slate-500">{file ? `Selected: ${file.name}` : "No file selected"}</p>
+            </div>
           </div>
 
           {!canWrite ? <p className="text-xs text-amber-600">Read-only role. Document Control Officer and quality roles can upload revisions.</p> : null}
