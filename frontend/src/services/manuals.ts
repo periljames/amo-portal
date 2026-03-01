@@ -3,6 +3,55 @@ import { getToken, handleAuthFailure } from "./auth";
 
 const API_BASE = getApiBaseUrl();
 
+const MANUALS_UPDATED_EVENT = "amo:manuals-updated";
+const MANUALS_UPDATED_STORAGE_KEY = "amo_manuals_updated";
+
+type ManualsUpdatedDetail = {
+  tenantSlug: string;
+  reason: string;
+  at: number;
+};
+
+export function emitManualsUpdated(tenantSlug: string, reason: string): void {
+  if (typeof window === "undefined") return;
+  const detail: ManualsUpdatedDetail = { tenantSlug, reason, at: Date.now() };
+  window.dispatchEvent(new CustomEvent<ManualsUpdatedDetail>(MANUALS_UPDATED_EVENT, { detail }));
+  try {
+    window.localStorage.setItem(MANUALS_UPDATED_STORAGE_KEY, JSON.stringify(detail));
+  } catch {
+    // ignore storage write issues
+  }
+}
+
+export function subscribeManualsUpdated(
+  callback: (detail: { tenantSlug: string; reason: string; at: number }) => void,
+): () => void {
+  if (typeof window === "undefined") return () => {};
+
+  const onCustom = (event: Event) => {
+    const customEvent = event as CustomEvent<ManualsUpdatedDetail>;
+    if (customEvent.detail) callback(customEvent.detail);
+  };
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== MANUALS_UPDATED_STORAGE_KEY || !event.newValue) return;
+    try {
+      const parsed = JSON.parse(event.newValue) as ManualsUpdatedDetail;
+      callback(parsed);
+    } catch {
+      // ignore parse errors
+    }
+  };
+
+  window.addEventListener(MANUALS_UPDATED_EVENT, onCustom as EventListener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(MANUALS_UPDATED_EVENT, onCustom as EventListener);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+
 export type ManualSummary = {
   id: string;
   code: string;
@@ -104,10 +153,12 @@ export async function transitionRevision(
   action: string,
   comment?: string,
 ) {
-  return request<ManualWorkflowPayload>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/workflow`, {
+  const result = await request<ManualWorkflowPayload>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/workflow`, {
     method: "POST",
     body: JSON.stringify({ action, comment }),
   });
+  emitManualsUpdated(tenantSlug, `workflow:${action}`);
+  return result;
 }
 
 export async function acknowledgeRevision(tenantSlug: string, manualId: string, revId: string, acknowledgementText: string) {
@@ -191,7 +242,9 @@ export async function uploadDocxRevision(
     if (resp.status === 401) handleAuthFailure();
     throw new Error(`Request failed: ${resp.status}`);
   }
-  return (await resp.json()) as { manual_id: string; revision_id: string; status: string; paragraphs: number };
+  const result = (await resp.json()) as { manual_id: string; revision_id: string; status: string; paragraphs: number };
+  emitManualsUpdated(tenantSlug, "upload-docx");
+  return result;
 }
 
 
