@@ -451,21 +451,42 @@ body[data-color-scheme="dark"] .qms-cockpit-shell {
 .qms-cockpit-head__actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 .qms-segmented {
+  --segment-count: 1;
+  --segment-active-index: 0;
   display: inline-flex;
+  position: relative;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
   background: var(--qms-card);
   overflow: hidden;
+  isolation: isolate;
+}
+
+.qms-segmented::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  bottom: 2px;
+  width: calc((100% - 4px) / var(--segment-count));
+  border-radius: 999px;
+  background: var(--qms-accent-green);
+  transform: translateX(calc(var(--segment-active-index) * 100%));
+  transition: transform 180ms ease;
+  z-index: 0;
 }
 
 .qms-segmented button {
+  position: relative;
+  z-index: 1;
   border: none;
   background: transparent;
   color: var(--qms-subtext);
   padding: 6px 12px;
   cursor: pointer;
+  transition: color 180ms ease;
 }
-.qms-segmented button.is-active { background: var(--qms-accent-green); color: #fff; }
+.qms-segmented button.is-active { color: #fff; }
 
 .qms-mock-pill {
   border-radius: 999px;
