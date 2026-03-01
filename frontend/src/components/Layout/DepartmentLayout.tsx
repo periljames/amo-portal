@@ -1450,16 +1450,6 @@ const DepartmentLayout: React.FC<Props> = ({
                 })}
 
 
-                {!isAdminArea && !visibleDepartments.some((dept) => dept.id === "document-control") && (
-                  <button
-                    type="button"
-                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/document-control`)}
-                    className={"sidebar__item" + (activeDepartment === "document-control" ? " sidebar__item--active" : "")}
-                  >
-                    <span className="sidebar__item-label">Document Control</span>
-                  </button>
-                )}
-
                 {((!isAdminArea && visibleDepartments.length > 0) ||
                   (isAdminArea && visibleDepartments.length > 0)) && (
                   <div className="sidebar__divider" />
