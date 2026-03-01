@@ -50,14 +50,17 @@ const changeProposals = [
 
 function useDocControlContext() {
   const { amoCode, department, docId, draftId, proposalId, trId, eventId } = useParams();
-  const tenant = (amoCode || "system").toUpperCase();
   const activeDepartment = department || "quality";
-  const basePath = amoCode ? `/maintenance/${amoCode}/${activeDepartment}/doc-control` : "/doc-control";
-  return { amoCode, department: activeDepartment, tenant, basePath, docId, draftId, proposalId, trId, eventId };
+  const basePath = !amoCode
+    ? "/doc-control"
+    : department === "document-control"
+      ? `/maintenance/${amoCode}/document-control`
+      : `/maintenance/${amoCode}/${activeDepartment}/doc-control`;
+  return { amoCode, department: activeDepartment, basePath, docId, draftId, proposalId, trId, eventId };
 }
 
 function DocControlShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
-  const { amoCode, basePath, tenant, department } = useDocControlContext();
+  const { amoCode, basePath, department } = useDocControlContext();
   const navItems = [
     ["Overview", basePath],
     ["Controlled library", `${basePath}/library`],
@@ -77,22 +80,12 @@ function DocControlShell({ title, subtitle, children }: { title: string; subtitl
         title={title}
         subtitle={subtitle}
         breadcrumbs={[
-          { label: "Maintenance", to: amoCode ? `/maintenance/${amoCode}/${department}` : "/doc-control" },
+          { label: "Maintenance", to: amoCode ? `/maintenance/${amoCode}/${department === "document-control" ? "planning" : department}` : "/doc-control" },
           { label: "Document Control" },
         ]}
         actions={<button className="btn btn-primary">Create controlled document</button>}
       />
 
-      <SectionCard
-        title="Tenant isolation"
-        subtitle="All records and acknowledgements shown below are scoped to this AMO tenant and role context."
-      >
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <span className="badge">Tenant: {tenant}</span>
-          <span className="badge">Module: Document Control</span>
-          <span className="badge">Department context: {department}</span>
-        </div>
-      </SectionCard>
 
       <SectionCard title="Document control workbench" subtitle="Separated from Quality & Compliance but fully integrated for traceability.">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
