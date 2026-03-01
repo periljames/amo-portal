@@ -18,6 +18,11 @@ from .enums import (
     QMSDocType,
     QMSDocStatus,
     QMSDistributionFormat,
+    QMSRetentionCategory,
+    QMSRevisionLifecycleStatus,
+    QMSSecurityLevel,
+    QMSPhysicalCopyStatus,
+    QMSCustodyAction,
     QMSChangeRequestStatus,
     QMSAuditKind,
     QMSAuditStatus,
@@ -36,6 +41,9 @@ class QMSDocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
     restricted_access: bool = False
+    security_level: QMSSecurityLevel = QMSSecurityLevel.INTERNAL
+    retention_category: QMSRetentionCategory = QMSRetentionCategory.MAINT_RECORD_5Y
+    owner_user_id: Optional[str] = None
 
 
 class QMSDocumentUpdate(BaseModel):
@@ -55,6 +63,9 @@ class QMSDocumentOut(BaseModel):
     title: str
     description: Optional[str]
     status: QMSDocStatus
+    security_level: QMSSecurityLevel
+    retention_category: QMSRetentionCategory
+    owner_user_id: Optional[str]
 
     current_issue_no: Optional[int]
     current_rev_no: Optional[int]
@@ -71,6 +82,8 @@ class QMSDocumentOut(BaseModel):
 class QMSDocumentRevisionCreate(BaseModel):
     issue_no: int = Field(ge=0)
     rev_no: int = Field(ge=0)
+    version_semver: Optional[str] = Field(default=None, pattern=r"^\d+\.\d+\.\d+$")
+    lifecycle_status: QMSRevisionLifecycleStatus = QMSRevisionLifecycleStatus.DRAFT
 
     issued_date: Optional[date] = None
     entered_date: Optional[date] = None
@@ -83,6 +96,12 @@ class QMSDocumentRevisionCreate(BaseModel):
     temporary_expires_on: Optional[date] = None
 
     file_ref: Optional[str] = None
+    sha256: Optional[str] = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    primary_storage_provider: Optional[str] = None
+    primary_storage_key: Optional[str] = None
+    primary_storage_etag: Optional[str] = None
+    byte_size: Optional[int] = None
+    mime_type: Optional[str] = None
 
     approved_by_authority: bool = False
     authority_ref: Optional[str] = None
@@ -110,6 +129,14 @@ class QMSDocumentRevisionOut(BaseModel):
     temporary_expires_on: Optional[date]
 
     file_ref: Optional[str]
+    version_semver: Optional[str]
+    lifecycle_status: QMSRevisionLifecycleStatus
+    sha256: Optional[str]
+    primary_storage_provider: Optional[str]
+    primary_storage_key: Optional[str]
+    primary_storage_etag: Optional[str]
+    byte_size: Optional[int]
+    mime_type: Optional[str]
 
     approved_by_authority: bool
     authority_ref: Optional[str]
@@ -709,3 +736,77 @@ class AuditorStatsOut(BaseModel):
     lead_audits: int
     observer_audits: int
     assistant_audits: int
+
+
+class QMSUploadRevisionOut(BaseModel):
+    revision_id: UUID
+    sha256: str
+    viewer_url: str
+
+
+class QMSPhysicalCopyRequest(BaseModel):
+    revision_id: UUID
+    count: int = Field(ge=1, le=200)
+    base_serial: str = Field(min_length=3, max_length=80)
+    storage_location_path: Optional[str] = None
+
+
+class QMSPhysicalCopyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    digital_revision_id: UUID
+    copy_serial_number: str
+    current_holder_user_id: Optional[str]
+    storage_location_path: Optional[str]
+    status: QMSPhysicalCopyStatus
+    is_controlled_copy: bool
+    copy_number: int
+    voided_at: Optional[datetime]
+    replaced_by_copy_id: Optional[UUID]
+
+
+class QMSCustodyActionCreate(BaseModel):
+    gps_lat: Optional[float] = None
+    gps_lng: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class QMSCustodyLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    physical_copy_id: UUID
+    user_id: Optional[str]
+    action: QMSCustodyAction
+    occurred_at: datetime
+    gps_lat: Optional[float]
+    gps_lng: Optional[float]
+    notes: Optional[str]
+
+
+class QMSPhysicalVerifyOut(BaseModel):
+    serial: str
+    status: str
+    current: bool
+    approved_version: Optional[str] = None
+
+
+class QMSIssueRevisionRequest(BaseModel):
+    doc_id: UUID
+    issue_no: int = Field(ge=0)
+    rev_no: int = Field(ge=0)
+    version_semver: str = Field(pattern=r"^\d+\.\d+\.\d+$")
+    change_summary: Optional[str] = None
+
+
+class QMSDamageReportRequest(BaseModel):
+    storage_location_path: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class QMSDamageReportOut(BaseModel):
+    old_copy_id: UUID
+    new_copy_id: UUID
+    old_serial: str
+    new_serial: str

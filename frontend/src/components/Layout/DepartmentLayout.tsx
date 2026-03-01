@@ -20,7 +20,7 @@ import {
   setNotificationPreferences,
   type NotificationPreferences,
 } from "../../services/notificationPreferences";
-import { fetchSubscription } from "../../services/billing";
+import { fetchSubscription, fetchEntitlements } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
 import { endSession, getCachedUser, getContext, markSessionActivity, onSessionEvent } from "../../services/auth";
 import { listDocumentAlerts } from "../../services/fleet";
@@ -204,6 +204,7 @@ const DepartmentLayout: React.FC<Props> = ({
   );
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [aerodocEnabled, setAerodocEnabled] = useState(false);
   const [pollingError, setPollingError] = useState<string | null>(null);
   const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(null);
   const [overviewSummaryUnavailable, setOverviewSummaryUnavailable] = useState(false);
@@ -665,6 +666,25 @@ const DepartmentLayout: React.FC<Props> = ({
         label: "KPIs & Review",
         path: `/maintenance/${amoCode}/${activeDepartment}/qms/kpis`,
       },
+      ...(aerodocEnabled
+        ? [
+            {
+              id: "qms-aerodoc-hangar",
+              label: "AeroDoc Hangar",
+              path: `/maintenance/${amoCode}/${activeDepartment}/qms/aerodoc/hangar`,
+            },
+            {
+              id: "qms-aerodoc-compliance",
+              label: "AeroDoc Compliance",
+              path: `/maintenance/${amoCode}/${activeDepartment}/qms/aerodoc/compliance`,
+            },
+            {
+              id: "qms-aerodoc-audit",
+              label: "AeroDoc Audit Mode",
+              path: `/maintenance/${amoCode}/${activeDepartment}/qms/aerodoc/audit-mode`,
+            },
+          ]
+        : []),
       {
         id: "qms-governance",
         label: "Governance",
@@ -679,7 +699,7 @@ const DepartmentLayout: React.FC<Props> = ({
         ],
       },
     ],
-    [activeDepartment, amoCode]
+    [activeDepartment, amoCode, aerodocEnabled]
   );
 
   const isReliabilityRoute = useMemo(() => {
@@ -809,6 +829,19 @@ const DepartmentLayout: React.FC<Props> = ({
       throw err;
     }
   }, [cacheProfile.maxAgeMs, cacheProfile.useMemory, subscriptionCacheKey]);
+
+  useEffect(() => {
+    let active = true;
+    fetchEntitlements().then((rows) => {
+      if (!active) return;
+      const entitlement = rows.find((row) => row.key === "aerodoc_hybrid_dms");
+      setAerodocEnabled(Boolean(entitlement && (entitlement.is_unlimited || (entitlement.limit ?? 0) > 0)));
+    }).catch(() => {
+      if (!active) return;
+      setAerodocEnabled(false);
+    });
+    return () => { active = false; };
+  }, []);
 
   const refreshOverviewSummary = useCallback(async (opts?: { force?: boolean }) => {
     if (!isAdminUser(currentUser)) return;

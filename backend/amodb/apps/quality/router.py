@@ -7,12 +7,14 @@ from pathlib import Path
 import hashlib
 import re
 import shutil
-from typing import Optional, List
+import io
+import zipfile
+from typing import Optional, List, Iterator
 from uuid import UUID
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError, ProgrammingError
@@ -51,8 +53,12 @@ from .schemas import (
     QMSFindingCreate, QMSFindingOut, QMSFindingVerify, QMSFindingAcknowledge,
     QMSAuditScheduleCreate, QMSAuditScheduleOut,
     QMSCAPUpsert, QMSCAPOut,
+    QMSUploadRevisionOut, QMSPhysicalCopyRequest, QMSPhysicalCopyOut,
+    QMSCustodyActionCreate, QMSCustodyLogOut, QMSPhysicalVerifyOut,
+    QMSIssueRevisionRequest, QMSDamageReportRequest, QMSDamageReportOut,
 )
-from .enums import CARStatus, QMSDomain, QMSAuditStatus
+from .enums import CARStatus, QMSDomain, QMSAuditStatus, QMSPhysicalCopyStatus, QMSCustodyAction, QMSRevisionLifecycleStatus
+from .storage_replication import replicate_file
 from .service import (
     add_car_action,
     build_car_invite_link,
@@ -486,6 +492,7 @@ def update_document(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _enforce_aerodoc_control(current_user)
     doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -526,6 +533,7 @@ def add_revision(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    _enforce_aerodoc_control(current_user)
     doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -2711,3 +2719,297 @@ def list_car_actions(car_id: UUID, db: Session = Depends(get_db)):
         .order_by(models.CARActionLog.created_at.desc())
         .all()
     )
+
+
+AERODOC_DOC_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "aerodoc"
+AERODOC_DOC_DIR.mkdir(parents=True, exist_ok=True)
+AERODOC_ALLOWED_MIME_TYPES = {"application/pdf", "text/plain", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+MAX_AERODOC_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def _require_aerodoc_module(_: account_models.User = Depends(require_module("aerodoc_hybrid_dms"))):
+    return True
+
+
+def _is_aerodoc_control_role(current_user: account_models.User) -> bool:
+    role_value = getattr(current_user, "role", None)
+    role_value = getattr(role_value, "value", role_value)
+    return bool(
+        getattr(current_user, "is_superuser", False)
+        or role_value in {
+            account_models.AccountRole.AMO_ADMIN,
+            account_models.AccountRole.QUALITY_MANAGER,
+            account_models.AccountRole.QUALITY_INSPECTOR,
+            "AMO_ADMIN",
+            "QUALITY_MANAGER",
+            "QUALITY_INSPECTOR",
+            "DOCUMENT_CONTROL_OFFICER",
+        }
+    )
+
+
+def _enforce_aerodoc_control(current_user: account_models.User) -> None:
+    if not _is_aerodoc_control_role(current_user):
+        raise HTTPException(status_code=403, detail="Document Control Officer or AMO Admin rights required")
+
+
+def _store_aerodoc_upload(doc_id: UUID, rev_id: UUID, file: UploadFile) -> tuple[str, int, str]:
+    filename = file.filename or "document.bin"
+    ext = Path(filename).suffix.lower()
+    if file.content_type not in AERODOC_ALLOWED_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported content type")
+    if ext not in {".pdf", ".txt", ".doc", ".docx"}:
+        raise HTTPException(status_code=400, detail="Unsupported file extension")
+    target_dir = AERODOC_DOC_DIR / str(doc_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / f"{rev_id}{ext}"
+    digest = hashlib.sha256()
+    total = 0
+    with target_path.open("wb") as fh:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_AERODOC_UPLOAD_BYTES:
+                fh.close()
+                target_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="File too large")
+            digest.update(chunk)
+            fh.write(chunk)
+    return digest.hexdigest(), total, str(target_path)
+
+
+@router.post("/qms/documents/{doc_id}/revisions/upload", response_model=QMSUploadRevisionOut, dependencies=[Depends(_require_aerodoc_module)])
+def upload_doc_revision(
+    doc_id: UUID,
+    issue_no: int = Query(..., ge=0),
+    rev_no: int = Query(..., ge=0),
+    version_semver: str = Query(..., pattern=r"^\d+\.\d+\.\d+$"),
+    request: Request = None,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _enforce_aerodoc_control(current_user)
+    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    rev = models.QMSDocumentRevision(document_id=doc.id, issue_no=issue_no, rev_no=rev_no, created_by_user_id=get_actor(), version_semver=version_semver)
+    db.add(rev)
+    db.flush()
+    sha256, byte_size, storage_path = _store_aerodoc_upload(doc.id, rev.id, file)
+    rev.sha256 = sha256
+    rev.byte_size = byte_size
+    rev.file_ref = storage_path
+    rev.primary_storage_provider = "local"
+    rev.primary_storage_key = storage_path
+    rev.mime_type = file.content_type
+    replication = replicate_file(storage_path, f"{doc.id}/{rev.id}")
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms.document.revision",
+        entity_id=str(rev.id),
+        action="uploaded",
+        after={"sha256": sha256, "byte_size": byte_size, "replication": replication.as_dict()},
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
+    if not (replication.aws_ok and replication.azure_ok and replication.onprem_ok):
+        audit_services.log_event(
+            db,
+            amo_id=current_user.amo_id,
+            actor_user_id=current_user.id,
+            entity_type="qms.document.revision",
+            entity_id=str(rev.id),
+            action="replication_warning",
+            after={"replication": replication.as_dict()},
+            correlation_id=str(uuid.uuid4()),
+            metadata=_audit_metadata(request),
+        )
+    db.commit()
+    return QMSUploadRevisionOut(revision_id=rev.id, sha256=sha256, viewer_url=f"/maintenance/{current_user.amo_id}/quality/qms/documents/{doc.id}/revisions/{rev.id}/view")
+
+
+@router.post("/qms/physical-copies", response_model=List[QMSPhysicalCopyOut], dependencies=[Depends(_require_aerodoc_module)])
+def request_physical_copy(payload: QMSPhysicalCopyRequest, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    _enforce_aerodoc_control(current_user)
+    rev = db.query(models.QMSDocumentRevision).filter(models.QMSDocumentRevision.id == payload.revision_id).first()
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    created = []
+    for i in range(1, payload.count + 1):
+        serial = f"{payload.base_serial}-COPY-{i:03d}"
+        row = models.QMSPhysicalControlledCopy(amo_id=current_user.amo_id, digital_revision_id=rev.id, copy_serial_number=serial, storage_location_path=payload.storage_location_path, copy_number=i)
+        db.add(row)
+        db.flush()
+        created.append(row)
+        audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.physical_copy", entity_id=str(row.id), action="created", after={"serial": serial, "revision_id": str(rev.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+    db.commit()
+    return created
+
+
+def _custody_action(copy_id: UUID, action: QMSCustodyAction, payload: QMSCustodyActionCreate, request: Request, db: Session, current_user: account_models.User):
+    copy = db.query(models.QMSPhysicalControlledCopy).filter(models.QMSPhysicalControlledCopy.id == copy_id, models.QMSPhysicalControlledCopy.amo_id == current_user.amo_id).first()
+    if not copy:
+        raise HTTPException(status_code=404, detail="Physical copy not found")
+    log = models.QMSCustodyLog(amo_id=current_user.amo_id, physical_copy_id=copy.id, user_id=current_user.id, action=action, gps_lat=payload.gps_lat, gps_lng=payload.gps_lng, notes=payload.notes)
+    db.add(log)
+    if action == QMSCustodyAction.CHECK_OUT:
+        copy.current_holder_user_id = current_user.id
+    if action == QMSCustodyAction.CHECK_IN:
+        copy.current_holder_user_id = None
+    audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.custody", entity_id=str(log.id), action=action.value.lower(), after={"copy_id": str(copy.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+@router.post("/qms/physical-copies/{copy_id}/checkout", response_model=QMSCustodyLogOut, dependencies=[Depends(_require_aerodoc_module)])
+def checkout_copy(copy_id: UUID, payload: QMSCustodyActionCreate, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    _enforce_aerodoc_control(current_user)
+    return _custody_action(copy_id, QMSCustodyAction.CHECK_OUT, payload, request, db, current_user)
+
+
+@router.post("/qms/physical-copies/{copy_id}/checkin", response_model=QMSCustodyLogOut, dependencies=[Depends(_require_aerodoc_module)])
+def checkin_copy(copy_id: UUID, payload: QMSCustodyActionCreate, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    _enforce_aerodoc_control(current_user)
+    return _custody_action(copy_id, QMSCustodyAction.CHECK_IN, payload, request, db, current_user)
+
+
+@router.get("/qms/physical-copies/verify/{serial}", response_model=QMSPhysicalVerifyOut, dependencies=[Depends(_require_aerodoc_module)])
+def verify_physical_copy(serial: str, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    copy = db.query(models.QMSPhysicalControlledCopy).filter(models.QMSPhysicalControlledCopy.copy_serial_number == serial, models.QMSPhysicalControlledCopy.amo_id == current_user.amo_id).first()
+    if not copy:
+        return QMSPhysicalVerifyOut(serial=serial, status="RED", current=False)
+    rev = db.query(models.QMSDocumentRevision).filter(models.QMSDocumentRevision.id == copy.digital_revision_id).first()
+    is_current = bool(rev and rev.lifecycle_status == QMSRevisionLifecycleStatus.APPROVED and copy.status == QMSPhysicalCopyStatus.ACTIVE and copy.voided_at is None)
+    return QMSPhysicalVerifyOut(serial=serial, status="GREEN" if is_current else "RED", current=is_current, approved_version=rev.version_semver if rev else None)
+
+
+@router.post("/qms/revisions/issue", response_model=QMSDocumentRevisionOut, dependencies=[Depends(_require_aerodoc_module)])
+def issue_revision(payload: QMSIssueRevisionRequest, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    _enforce_aerodoc_control(current_user)
+    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == payload.doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    db.query(models.QMSDocumentRevision).filter(
+        models.QMSDocumentRevision.document_id == payload.doc_id,
+        models.QMSDocumentRevision.lifecycle_status == QMSRevisionLifecycleStatus.APPROVED,
+    ).update({
+        models.QMSDocumentRevision.lifecycle_status: QMSRevisionLifecycleStatus.SUPERSEDED,
+        models.QMSDocumentRevision.superseded_at: datetime.now(timezone.utc),
+    }, synchronize_session=False)
+
+    rev = models.QMSDocumentRevision(
+        document_id=payload.doc_id,
+        issue_no=payload.issue_no,
+        rev_no=payload.rev_no,
+        version_semver=payload.version_semver,
+        change_summary=payload.change_summary,
+        lifecycle_status=QMSRevisionLifecycleStatus.APPROVED,
+        approved_at=datetime.now(timezone.utc),
+        approved_by_user_id=current_user.id,
+        created_by_user_id=get_actor(),
+    )
+    db.add(rev)
+    db.flush()
+    audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.document.revision", entity_id=str(rev.id), action="issued", after={"doc_id": str(payload.doc_id), "version_semver": rev.version_semver}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+    db.commit()
+    db.refresh(rev)
+    return rev
+
+
+def _stream_file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+@router.get("/qms/documents/{doc_id}/revisions/{rev_id}/open", dependencies=[Depends(_require_aerodoc_module)])
+def open_revision(doc_id: UUID, rev_id: UUID, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    rev = db.query(models.QMSDocumentRevision).join(models.QMSDocument, models.QMSDocument.id == models.QMSDocumentRevision.document_id).filter(models.QMSDocumentRevision.id == rev_id, models.QMSDocumentRevision.document_id == doc_id).first()
+    if not rev or not rev.file_ref:
+        raise HTTPException(status_code=404, detail="Revision file not found")
+    file_path = Path(rev.file_ref)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Stored file missing")
+    computed = _stream_file_sha256(file_path)
+    integrity_ok = bool(rev.sha256 and computed == rev.sha256)
+    if not integrity_ok:
+        audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.document.revision", entity_id=str(rev.id), action="integrity_mismatch", after={"stored": rev.sha256, "computed": computed}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+        db.commit()
+    response = FileResponse(path=file_path, media_type=rev.mime_type or "application/octet-stream", filename=file_path.name)
+    response.headers["X-Document-Integrity"] = "ok" if integrity_ok else "compromised"
+    return response
+
+
+@router.post("/qms/physical-copies/{copy_id}/report-damage", response_model=QMSDamageReportOut, dependencies=[Depends(_require_aerodoc_module)])
+def report_damage(copy_id: UUID, payload: QMSDamageReportRequest, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    _enforce_aerodoc_control(current_user)
+    copy = db.query(models.QMSPhysicalControlledCopy).filter(models.QMSPhysicalControlledCopy.id == copy_id, models.QMSPhysicalControlledCopy.amo_id == current_user.amo_id).first()
+    if not copy:
+        raise HTTPException(status_code=404, detail="Physical copy not found")
+    copy.status = QMSPhysicalCopyStatus.RECALL_PENDING
+    copy.voided_at = datetime.now(timezone.utc)
+    old_serial = copy.copy_serial_number
+    replacement_serial = f"{old_serial}-R{int(datetime.now(timezone.utc).timestamp())}"
+    replacement = models.QMSPhysicalControlledCopy(
+        amo_id=current_user.amo_id,
+        digital_revision_id=copy.digital_revision_id,
+        copy_serial_number=replacement_serial,
+        storage_location_path=payload.storage_location_path or copy.storage_location_path,
+        copy_number=copy.copy_number + 1,
+    )
+    db.add(replacement)
+    db.flush()
+    copy.replaced_by_copy_id = replacement.id
+
+    db.add(models.QMSCustodyLog(amo_id=current_user.amo_id, physical_copy_id=copy.id, user_id=current_user.id, action=QMSCustodyAction.DAMAGED, notes=payload.notes))
+    db.add(models.QMSCustodyLog(amo_id=current_user.amo_id, physical_copy_id=replacement.id, user_id=current_user.id, action=QMSCustodyAction.INSPECTED, notes="Replacement issued"))
+
+    audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.physical_copy", entity_id=str(copy.id), action="damaged", after={"replacement_id": str(replacement.id)}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+    db.commit()
+    return QMSDamageReportOut(old_copy_id=copy.id, new_copy_id=replacement.id, old_serial=old_serial, new_serial=replacement_serial)
+
+
+@router.get("/qms/audit-mode/binder", dependencies=[Depends(_require_aerodoc_module)])
+def audit_mode_binder(db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    _enforce_aerodoc_control(current_user)
+    since = datetime.now(timezone.utc) - timedelta(days=730)
+    docs = db.query(models.QMSDocument).filter(models.QMSDocument.status == models.QMSDocStatus.ACTIVE).all()
+    custody = db.query(models.QMSCustodyLog).filter(models.QMSCustodyLog.amo_id == current_user.amo_id, models.QMSCustodyLog.occurred_at >= since).all()
+
+    def stream_zip() -> Iterator[bytes]:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("current_manuals.json", JSONResponse(content=[{"id": str(d.id), "doc_code": d.doc_code, "title": d.title} for d in docs]).body.decode())
+            zf.writestr("custody_logs.json", JSONResponse(content=[{"id": str(c.id), "copy_id": str(c.physical_copy_id), "action": c.action.value, "occurred_at": c.occurred_at.isoformat()} for c in custody]).body.decode())
+        buf.seek(0)
+        while True:
+            chunk = buf.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+
+    return StreamingResponse(stream_zip(), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=aerodoc-binder.zip"})
+
+
+@router.post("/qms/documents/{doc_id}/archive", dependencies=[Depends(_require_aerodoc_module)])
+def archive_document(doc_id: UUID, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    _enforce_aerodoc_control(current_user)
+    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    doc.status = models.QMSDocStatus.OBSOLETE
+    audit_services.log_event(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="qms.document", entity_id=str(doc.id), action="archived", after={"retention_category": getattr(doc.retention_category, "value", str(doc.retention_category))}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
+    db.commit()
+    return {"status": "archived", "doc_id": str(doc.id)}
