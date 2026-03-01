@@ -100,6 +100,35 @@ class ManualBlock(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
+
+
+class DocumentVersion(Base):
+    __tablename__ = "document_versions"
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    document_id = Column(String(36), ForeignKey("manuals.id", ondelete="CASCADE"), nullable=False, index=True)
+    revision_id = Column(String(36), ForeignKey("manual_revisions.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_label = Column(String(32), nullable=False)
+    content_json = Column(JSON, nullable=False, default=dict)
+    delta_patch = Column(JSON, nullable=False, default=dict)
+    checksum_sha256 = Column(String(64), nullable=False, index=True)
+    state = Column(String(32), nullable=False, default="Draft")
+    is_active = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class DocumentSection(Base):
+    __tablename__ = "document_sections"
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    document_version_id = Column(String(36), ForeignKey("document_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    section_id = Column(String(128), nullable=False, index=True)
+    heading = Column(String(255), nullable=False)
+    word_count = Column(Integer, nullable=False, default=0)
+    min_reading_time = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
 class RevisionDiffIndex(Base):
     __tablename__ = "revision_diff_index"
 

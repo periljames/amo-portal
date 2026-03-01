@@ -83,3 +83,15 @@ class MasterListEntry(BaseModel):
     current_revision: str | None
     current_status: str
     pending_ack_count: int
+
+
+class LifecycleTransitionRequest(BaseModel):
+    action: str = Field(description="save_draft|submit_for_review|verify_compliance|sign_approval|publish|reject_to_draft")
+    comment: str | None = None
+
+
+class LifecycleTransitionOut(BaseModel):
+    revision_id: str
+    state: str
+    previous_state: str
+    approval_chain_reset: bool = False
