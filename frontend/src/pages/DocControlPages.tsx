@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import PageHeader from "../components/shared/PageHeader";
 import SectionCard from "../components/shared/SectionCard";
@@ -6,6 +6,7 @@ import DataTableShell from "../components/shared/DataTableShell";
 import { getContext } from "../services/auth";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { decodeAmoCertFromUrl } from "../utils/amo";
+import { getMasterList, listManuals, subscribeManualsUpdated, type ManualSummary } from "../services/manuals";
 
 type DocRecord = {
   id: string;
@@ -20,7 +21,20 @@ type DocRecord = {
   restricted: boolean;
 };
 
-const controlledLibrary: DocRecord[] = [
+
+type ManualMasterRow = {
+  manual_id?: string;
+  code?: string;
+  title?: string;
+  manual_type?: string;
+  issue_number?: string;
+  rev_number?: string;
+  effective_date?: string;
+  owner_role?: string;
+  status?: string;
+  pending_ack_count?: number;
+};
+const seededControlledLibrary: DocRecord[] = [
   { id: "AMO-QM-001", title: "Quality Manual", type: "Manual", issue: "7", revision: "2", effectiveDate: "2026-01-11", owner: "Document Control", status: "In force", regulated: true, restricted: false },
   { id: "AMO-OP-005", title: "Maintenance Procedures", type: "Procedure", issue: "14", revision: "1", effectiveDate: "2025-12-02", owner: "Production", status: "In force", regulated: true, restricted: true },
   { id: "AMO-SAF-003", title: "Safety & HF Handbook", type: "Handbook", issue: "4", revision: "0", effectiveDate: "2025-10-20", owner: "Safety", status: "Review due", regulated: false, restricted: false },
@@ -172,7 +186,50 @@ export const DocControlDashboardPage: React.FC = () => {
 };
 
 export const DocControlLibraryPage: React.FC = () => {
-  const { basePath } = useDocControlContext();
+  const { amoCode, basePath } = useDocControlContext();
+  const tenantSlug = (amoCode || getContext().amoCode || "").toLowerCase();
+  const [manuals, setManuals] = useState<ManualSummary[]>([]);
+  const [masterRows, setMasterRows] = useState<ManualMasterRow[]>([]);
+
+  useEffect(() => {
+    if (!tenantSlug) {
+      setManuals([]);
+      setMasterRows([]);
+      return;
+    }
+    const load = () => {
+      listManuals(tenantSlug).then(setManuals).catch(() => setManuals([]));
+      getMasterList(tenantSlug).then((rows) => setMasterRows(rows as ManualMasterRow[])).catch(() => setMasterRows([]));
+    };
+    load();
+    const unsubscribe = subscribeManualsUpdated((detail) => {
+      if (detail.tenantSlug === tenantSlug) load();
+    });
+    return unsubscribe;
+  }, [tenantSlug]);
+
+  const libraryRows = useMemo(() => {
+    if (!manuals.length) return [] as DocRecord[];
+    return manuals.map((manual) => {
+      const matched = masterRows.find((row) => row.manual_id === manual.id || row.code === manual.code);
+      return {
+        id: manual.code,
+        title: manual.title,
+        type: manual.manual_type || matched?.manual_type || "Manual",
+        issue: matched?.issue_number || "-",
+        revision: matched?.rev_number || "-",
+        effectiveDate: matched?.effective_date || "-",
+        owner: matched?.owner_role || "Document Control",
+        status: manual.status === "OBSOLETE" ? "Superseded" : manual.status === "ACTIVE" ? "In force" : "Review due",
+        regulated: true,
+        restricted: false,
+      } as DocRecord;
+    });
+  }, [manuals, masterRows]);
+
+  const hasRealData = manuals.length > 0 || masterRows.length > 0;
+  const rows = hasRealData ? libraryRows : (import.meta.env.PROD ? [] : seededControlledLibrary);
+
   return (
     <DocControlShell title="Controlled Library Catalogue" subtitle="Master inventory of manuals and documented information currently under control.">
       <DataTableShell title="Document inventory register" actions={<button className="btn btn-secondary">Export XLSX</button>}>
@@ -184,7 +241,7 @@ export const DocControlLibraryPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {controlledLibrary.map((item) => (
+              {rows.map((item) => (
                 <tr key={item.id}>
                   <td><Link to={`${basePath}/library/${item.id}`}>{item.id}</Link></td>
                   <td>{item.title}</td>
@@ -198,6 +255,11 @@ export const DocControlLibraryPage: React.FC = () => {
                   <td>{item.owner}</td>
                 </tr>
               ))}
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={10}>No controlled documents have been uploaded yet.</td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
