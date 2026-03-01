@@ -511,7 +511,7 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [location.pathname]);
 
   const isDocControlRoute = useMemo(() => {
-    return location.pathname.startsWith("/doc-control");
+    return location.pathname.startsWith("/doc-control") || location.pathname.includes("/doc-control") || location.pathname.includes("/document-control");
   }, [location.pathname]);
 
   useEffect(() => {
@@ -686,21 +686,59 @@ const DepartmentLayout: React.FC<Props> = ({
           ]
         : []),
       {
-        id: "qms-governance",
-        label: "Governance",
-        path: `/doc-control`,
+        id: "qms-doc-control",
+        label: "Document Control",
+        path: `/maintenance/${amoCode}/${activeDepartment}/doc-control`,
         children: [
           {
-            id: "qms-governance-doc-control",
-            label: "Document Control",
-            path: `/doc-control`,
-            matchPrefixes: ["/doc-control"],
+            id: "qms-doc-control-library",
+            label: "Library",
+            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/library`,
+            matchPrefixes: ["/doc-control/library", `/maintenance/${amoCode}/${activeDepartment}/doc-control/library`],
+          },
+          {
+            id: "qms-doc-control-drafts",
+            label: "Drafts & Approval",
+            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/drafts`,
+            matchPrefixes: ["/doc-control/drafts", `/maintenance/${amoCode}/${activeDepartment}/doc-control/drafts`],
+          },
+          {
+            id: "qms-doc-control-distribution",
+            label: "Distribution",
+            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/distribution`,
+            matchPrefixes: ["/doc-control/distribution", `/maintenance/${amoCode}/${activeDepartment}/doc-control/distribution`],
+          },
+          {
+            id: "qms-doc-control-registers",
+            label: "Registers",
+            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/registers`,
+            matchPrefixes: ["/doc-control/registers", `/maintenance/${amoCode}/${activeDepartment}/doc-control/registers`],
           },
         ],
       },
     ],
     [activeDepartment, amoCode, aerodocEnabled]
   );
+
+
+  const docControlNavItems = useMemo<Array<{ id: string; label: string; path: string; matchPrefixes?: string[] }>>(() => {
+    const basePath = activeDepartment === "document-control"
+      ? `/maintenance/${amoCode}/document-control`
+      : `/maintenance/${amoCode}/${activeDepartment}/doc-control`;
+    return [
+      { id: "dc-overview", label: "Overview", path: basePath, matchPrefixes: ["/doc-control"] },
+      { id: "dc-library", label: "Controlled Library", path: `${basePath}/library`, matchPrefixes: ["/doc-control/library"] },
+      { id: "dc-drafts", label: "Drafts & Approval", path: `${basePath}/drafts`, matchPrefixes: ["/doc-control/drafts"] },
+      { id: "dc-change", label: "Change Proposals", path: `${basePath}/change-proposals`, matchPrefixes: ["/doc-control/change-proposals"] },
+      { id: "dc-revisions", label: "Revisions & LEP", path: `${basePath}/revisions/AMO-QM-001`, matchPrefixes: ["/doc-control/revisions", "/doc-control/lep"] },
+      { id: "dc-tr", label: "Temporary Revisions", path: `${basePath}/tr`, matchPrefixes: ["/doc-control/tr"] },
+      { id: "dc-distribution", label: "Distribution & ACK", path: `${basePath}/distribution`, matchPrefixes: ["/doc-control/distribution"] },
+      { id: "dc-archive", label: "Archive / Obsolete", path: `${basePath}/archive`, matchPrefixes: ["/doc-control/archive"] },
+      { id: "dc-reviews", label: "Review Planner", path: `${basePath}/reviews`, matchPrefixes: ["/doc-control/reviews"] },
+      { id: "dc-registers", label: "Registers", path: `${basePath}/registers`, matchPrefixes: ["/doc-control/registers"] },
+      { id: "dc-settings", label: "Settings", path: `${basePath}/settings`, matchPrefixes: ["/doc-control/settings"] },
+    ];
+  }, [activeDepartment, amoCode]);
 
   const isReliabilityRoute = useMemo(() => {
     return location.pathname.includes("/reliability");
@@ -1411,6 +1449,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   );
                 })}
 
+
                 {((!isAdminArea && visibleDepartments.length > 0) ||
                   (isAdminArea && visibleDepartments.length > 0)) && (
                   <div className="sidebar__divider" />
@@ -1607,6 +1646,35 @@ const DepartmentLayout: React.FC<Props> = ({
                         })}
                       </div>
                     )}
+                  </>
+                )}
+
+                {!isAdminArea && activeDepartment === "document-control" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/document-control`)}
+                      className={"sidebar__item" + (isDocControlRoute ? " sidebar__item--active" : "")}
+                      aria-label="Document Control workspace"
+                      title="Document Control workspace"
+                    >
+                      <span className="sidebar__item-label">Document Control</span>
+                    </button>
+                    <div className="sidebar__qms-nav" aria-label="Document Control pages">
+                      {docControlNavItems.map((item) => {
+                        const isActive = isPathMatch(location.pathname, item.path, item.matchPrefixes);
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => navigateWithSidebarClose(item.path)}
+                            className={"sidebar__item sidebar__item--sub" + (isActive ? " sidebar__item--active" : "")}
+                          >
+                            <span className="sidebar__item-label">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </>
                 )}
 
