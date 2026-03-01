@@ -3,7 +3,7 @@ import { Link, Navigate, useLocation, useNavigate, useParams } from "react-route
 import PageHeader from "../components/shared/PageHeader";
 import SectionCard from "../components/shared/SectionCard";
 import DataTableShell from "../components/shared/DataTableShell";
-import { getContext } from "../services/auth";
+import { getCachedUser, getContext, normalizeDepartmentCode } from "../services/auth";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import { getMasterList, listManuals, subscribeManualsUpdated, type ManualSummary } from "../services/manuals";
@@ -116,7 +116,7 @@ function DocControlShell({ title, subtitle, children }: { title: string; subtitl
               <button
                 type="button"
                 className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${resolvedAmoCode}/${department === "document-control" ? "planning" : department}`)}
+                onClick={() => navigate(department === "document-control" ? `/maintenance/${resolvedAmoCode}/document-control` : `/maintenance/${resolvedAmoCode}/${department}`)}
               >
                 Back to department dashboard
               </button>
@@ -148,11 +148,19 @@ export const LegacyDocControlRedirectPage: React.FC = () => {
   const context = getContext();
   const suffix = location.pathname.replace(/^\/doc-control/, "") || "";
   const targetAmo = amoCode || context.amoCode || "system";
+  const normalizedContextDepartment = normalizeDepartmentCode(context.department || "") || undefined;
+  const user = getCachedUser() as (Record<string, unknown> & { department_code?: string; department?: { code?: string } }) | null;
+  const normalizedUserDepartment = normalizeDepartmentCode(
+    (user?.department?.code as string | undefined) || user?.department_code || "",
+  ) || undefined;
+  const authorizedDepartment = normalizedContextDepartment || normalizedUserDepartment || "quality";
   const targetPath = !amoCode
-    ? `/maintenance/${targetAmo}/document-control${suffix}`
+    ? authorizedDepartment === "document-control"
+      ? `/maintenance/${targetAmo}/document-control${suffix}`
+      : `/maintenance/${targetAmo}/${authorizedDepartment}/doc-control${suffix}`
     : department === "document-control"
       ? `/maintenance/${targetAmo}/document-control${suffix}`
-      : `/maintenance/${targetAmo}/${department || "quality"}/doc-control${suffix}`;
+      : `/maintenance/${targetAmo}/${department || authorizedDepartment}/doc-control${suffix}`;
   return <Navigate to={`${targetPath}${location.search}`} replace />;
 };
 
