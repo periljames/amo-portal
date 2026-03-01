@@ -6,6 +6,7 @@ import {
   listManuals,
   previewDocxUpload,
   uploadDocxRevision,
+  subscribeManualsUpdated,
   type ManualSummary,
 } from "../../services/manuals";
 import { useManualRouteContext } from "./context";
@@ -52,6 +53,20 @@ export default function ManualsDashboardPage() {
 
   useEffect(() => {
     refresh();
+  }, [tenant]);
+
+
+  useEffect(() => {
+    if (!tenant) return;
+    const unsubscribe = subscribeManualsUpdated((detail) => {
+      if (detail.tenantSlug === tenant) refresh();
+    });
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", onFocus);
+    };
   }, [tenant]);
 
   useEffect(() => {
