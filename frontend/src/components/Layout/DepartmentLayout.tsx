@@ -511,7 +511,7 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [location.pathname]);
 
   const isDocControlRoute = useMemo(() => {
-    return location.pathname.startsWith("/doc-control");
+    return location.pathname.startsWith("/doc-control") || location.pathname.includes("/doc-control");
   }, [location.pathname]);
 
   useEffect(() => {
@@ -686,15 +686,33 @@ const DepartmentLayout: React.FC<Props> = ({
           ]
         : []),
       {
-        id: "qms-governance",
-        label: "Governance",
-        path: `/doc-control`,
+        id: "qms-doc-control",
+        label: "Document Control",
+        path: `/maintenance/${amoCode}/${activeDepartment}/doc-control`,
         children: [
           {
-            id: "qms-governance-doc-control",
-            label: "Document Control",
-            path: `/doc-control`,
-            matchPrefixes: ["/doc-control"],
+            id: "qms-doc-control-library",
+            label: "Library",
+            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/library`,
+            matchPrefixes: ["/doc-control/library", `/maintenance/${amoCode}/${activeDepartment}/doc-control/library`],
+          },
+          {
+            id: "qms-doc-control-drafts",
+            label: "Drafts & Approval",
+            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/drafts`,
+            matchPrefixes: ["/doc-control/drafts", `/maintenance/${amoCode}/${activeDepartment}/doc-control/drafts`],
+          },
+          {
+            id: "qms-doc-control-distribution",
+            label: "Distribution",
+            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/distribution`,
+            matchPrefixes: ["/doc-control/distribution", `/maintenance/${amoCode}/${activeDepartment}/doc-control/distribution`],
+          },
+          {
+            id: "qms-doc-control-registers",
+            label: "Registers",
+            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/registers`,
+            matchPrefixes: ["/doc-control/registers", `/maintenance/${amoCode}/${activeDepartment}/doc-control/registers`],
           },
         ],
       },
