@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+import shutil
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -82,6 +84,13 @@ def _matches_watchlist(publication: dict, criteria: dict) -> bool:
         if not any(k in source_text for k in kws):
             return False
     return True
+
+
+
+def _exec_evidence_dir(amo_id: str) -> Path:
+    root = Path(__file__).resolve().parents[2] / "generated" / "technical_records" / "execution_evidence" / amo_id
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 def _get_settings(db: Session, amo_id: str) -> models.TechnicalRecordSetting:
     settings = db.query(models.TechnicalRecordSetting).filter_by(amo_id=amo_id).first()
@@ -495,6 +504,105 @@ def update_compliance_action_status(action_id: int, payload: schemas.ComplianceA
     row.status = payload.status
     _create_history(db, amo_id, row.id, payload.status, current_user.id, "STATUS_CHANGE", previous, payload.event_notes)
     _audit(db, amo_id, current_user.id, "ComplianceAction", str(row.id), "STATUS_CHANGE", payload.model_dump())
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.get("/production/evidence", response_model=list[schemas.ProductionExecutionEvidenceRead])
+def list_execution_evidence(work_order_id: int | None = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    q = db.query(models.ProductionExecutionEvidence).filter(models.ProductionExecutionEvidence.amo_id == current_user.effective_amo_id)
+    if work_order_id:
+        q = q.filter(models.ProductionExecutionEvidence.work_order_id == work_order_id)
+    return q.order_by(models.ProductionExecutionEvidence.created_at.desc()).all()
+
+
+@router.post("/production/evidence/upload", response_model=schemas.ProductionExecutionEvidenceRead)
+async def upload_execution_evidence(
+    work_order_id: int = Form(...),
+    task_card_id: int | None = Form(None),
+    notes: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(*PRODUCTION_EXECUTION_ROLES)),
+):
+    wo = db.query(WorkOrder).filter(WorkOrder.amo_id == current_user.effective_amo_id, WorkOrder.id == work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+
+    target_dir = _exec_evidence_dir(current_user.effective_amo_id)
+    safe_name = f"{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}_{Path(file.filename or 'evidence.bin').name}"
+    path = target_dir / safe_name
+    with path.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    row = models.ProductionExecutionEvidence(
+        amo_id=current_user.effective_amo_id,
+        work_order_id=work_order_id,
+        task_card_id=task_card_id,
+        file_name=file.filename or safe_name,
+        storage_path=str(path),
+        content_type=file.content_type,
+        notes=notes,
+        created_by_user_id=current_user.id,
+    )
+    db.add(row)
+    db.flush()
+    _audit(db, current_user.effective_amo_id, current_user.id, "ProductionExecutionEvidence", str(row.id), "UPLOAD", {"work_order_id": work_order_id, "task_card_id": task_card_id})
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.get("/production/release-gates", response_model=list[schemas.ProductionReleaseGateRead])
+def list_release_gates(status_filter: str | None = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    q = db.query(models.ProductionReleaseGate).filter(models.ProductionReleaseGate.amo_id == current_user.effective_amo_id)
+    if status_filter:
+        q = q.filter(models.ProductionReleaseGate.status == status_filter)
+    return q.order_by(models.ProductionReleaseGate.updated_at.desc()).all()
+
+
+@router.post("/production/release-gates", response_model=schemas.ProductionReleaseGateRead)
+def upsert_release_gate(payload: schemas.ProductionReleaseGateUpsert, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*PRODUCTION_EXECUTION_ROLES))):
+    amo_id = current_user.effective_amo_id
+    wo = db.query(WorkOrder).filter(WorkOrder.amo_id == amo_id, WorkOrder.id == payload.work_order_id).first()
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+
+    row = db.query(models.ProductionReleaseGate).filter_by(amo_id=amo_id, work_order_id=payload.work_order_id).first()
+    if not row:
+        row = models.ProductionReleaseGate(amo_id=amo_id, work_order_id=payload.work_order_id)
+        db.add(row)
+        db.flush()
+
+    row.status = payload.status
+    row.readiness_notes = payload.readiness_notes
+    row.blockers_json = payload.blockers_json
+    row.handed_to_records = payload.handed_to_records
+    if payload.handed_to_records:
+        row.handed_to_records_at = datetime.now(UTC)
+    row.evidence_count = db.query(models.ProductionExecutionEvidence).filter(models.ProductionExecutionEvidence.amo_id == amo_id, models.ProductionExecutionEvidence.work_order_id == payload.work_order_id).count()
+    if payload.sign_off:
+        row.signed_off_by_user_id = current_user.id
+        row.signed_off_at = datetime.now(UTC)
+
+    if row.handed_to_records:
+        record = db.query(models.MaintenanceRecord).filter(models.MaintenanceRecord.amo_id == amo_id, models.MaintenanceRecord.linked_wo_id == payload.work_order_id).first()
+        if not record:
+            db.add(models.MaintenanceRecord(
+                amo_id=amo_id,
+                tail_id=wo.aircraft_serial_number,
+                performed_at=datetime.now(UTC),
+                description=f"Release preparation handoff for WO {wo.wo_number}",
+                reference_data_text="Release prep gate",
+                certifying_user_id=current_user.id,
+                outcome="Ready for records reconciliation",
+                linked_wo_id=wo.id,
+                linked_wp_id=wo.work_package_ref,
+                evidence_asset_ids=[str(e.id) for e in db.query(models.ProductionExecutionEvidence).filter(models.ProductionExecutionEvidence.amo_id == amo_id, models.ProductionExecutionEvidence.work_order_id == wo.id).all()],
+            ))
+
+    _audit(db, amo_id, current_user.id, "ProductionReleaseGate", str(row.id), "UPSERT", payload.model_dump())
     db.commit()
     db.refresh(row)
     return row

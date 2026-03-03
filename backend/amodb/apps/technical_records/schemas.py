@@ -218,3 +218,44 @@ class ComplianceActionRead(ComplianceActionCreate):
 class ComplianceActionStatusUpdate(BaseModel):
     status: str
     event_notes: Optional[str] = None
+
+
+class ProductionExecutionEvidenceRead(BaseModel):
+    id: int
+    work_order_id: int
+    task_card_id: Optional[int] = None
+    file_name: str
+    storage_path: str
+    content_type: Optional[str] = None
+    notes: Optional[str] = None
+    created_by_user_id: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProductionReleaseGateUpsert(BaseModel):
+    work_order_id: int
+    status: str = "Draft"
+    readiness_notes: Optional[str] = None
+    blockers_json: list[str] = []
+    handed_to_records: bool = False
+    sign_off: bool = False
+
+
+class ProductionReleaseGateRead(BaseModel):
+    id: int
+    work_order_id: int
+    status: str
+    readiness_notes: Optional[str] = None
+    blockers_json: list[str] = []
+    evidence_count: int
+    signed_off_by_user_id: Optional[str] = None
+    signed_off_at: Optional[datetime] = None
+    handed_to_records: bool
+    handed_to_records_at: Optional[datetime] = None
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

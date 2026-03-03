@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
-import { listWorkOrders } from "../services/workOrders";
+import { createTask, inspectTask, inspectWorkOrder, listTasksForWorkOrder, listWorkOrders, updateTask, updateWorkOrder } from "../services/workOrders";
+import { listExecutionEvidence, listReleaseGates, upsertReleaseGate, uploadExecutionEvidence } from "../services/productionExecution";
 import { listDeferrals, listFleetAircraft, listAD, listSB } from "../services/production";
 import { listInspections, listNonRoutines, listPartToolRequests } from "../services/maintenance";
-import { fetchTechnicalDashboard, fetchTraceability } from "../services/technicalRecords";
 import { getDueList, listProgramItems, recomputeDueList } from "../services/maintenanceProgram";
 import {
   createComplianceAction,
@@ -169,23 +169,32 @@ const ProductionOpsPage: React.FC<{ title: string; mode: string }> = ({ title, m
   const location = useLocation();
   const [summary, setSummary] = useState<any>({ summary: {}, bottlenecks: [] });
   const [wos, setWos] = useState<any[]>([]);
+  const [tasksByWo, setTasksByWo] = useState<Record<number, any[]>>({});
   const [inspections, setInspections] = useState<any[]>([]);
   const [parts, setParts] = useState<any[]>([]);
   const [nrs, setNrs] = useState<any[]>([]);
   const [actions, setActions] = useState<any[]>([]);
-  const [traceability, setTraceability] = useState<any>(null);
-  const [recordsTiles, setRecordsTiles] = useState<any[]>([]);
+  const [evidence, setEvidence] = useState<any[]>([]);
+  const [releaseGates, setReleaseGates] = useState<any[]>([]);
 
-  useEffect(() => {
+  const reload = () => {
     getProductionDashboard().then(setSummary).catch(() => setSummary({ summary: {}, bottlenecks: [] }));
-    listWorkOrders({ limit: 250 }).then(setWos).catch(() => setWos([]));
+    listWorkOrders({ limit: 250 }).then(async (rows) => {
+      setWos(rows);
+      const pairs = await Promise.all(rows.slice(0, 30).map(async (w: any) => [w.id, await listTasksForWorkOrder(w.id).catch(() => [])] as const));
+      setTasksByWo(Object.fromEntries(pairs));
+    }).catch(() => setWos([]));
     setInspections(listInspections());
     setParts(listPartToolRequests());
     setNrs(listNonRoutines());
     listComplianceActions().then(setActions).catch(() => setActions([]));
-    fetchTraceability().then(setTraceability).catch(() => setTraceability(null));
-    fetchTechnicalDashboard().then((d) => setRecordsTiles(d.tiles || [])).catch(() => setRecordsTiles([]));
-  }, [location.key]);
+    listExecutionEvidence().then(setEvidence).catch(() => setEvidence([]));
+    listReleaseGates().then(setReleaseGates).catch(() => setReleaseGates([]));
+  };
+
+  useEffect(() => { reload(); }, [location.key]);
+
+  const gateByWo = useMemo(() => Object.fromEntries(releaseGates.map((g: any) => [g.work_order_id, g])), [releaseGates]);
 
   const dashboards = <>
     <section className="metric-grid">{Object.entries(summary.summary || {}).map(([k, v]) => <div key={k} className="metric-card"><div className="metric-label">{k.replace(/_/g, " ")}</div><div className="metric-value">{String(v)}</div></div>)}</section>
@@ -194,13 +203,13 @@ const ProductionOpsPage: React.FC<{ title: string; mode: string }> = ({ title, m
 
   const sections: Record<string, React.ReactNode> = {
     dashboard: dashboards,
-    "control-board": <section className="card"><h3>Production Control Board</h3><table className="table"><thead><tr><th>WO</th><th>Aircraft</th><th>Status</th><th>Due</th><th>Blocked</th></tr></thead><tbody>{wos.map((w) => <tr key={w.id}><td>{w.wo_number}</td><td>{w.aircraft_serial_number}</td><td><StatusChip value={w.status} /></td><td>{w.due_date || "-"}</td><td>{parts.some((p) => p.woId === w.id && p.status === "REQUESTED") ? <StatusChip value="Awaiting parts" /> : "No"}</td></tr>)}</tbody></table></section>,
-    "work-order-execution": <section className="card"><h3>Work Order Execution</h3><table className="table"><thead><tr><th>WO</th><th>Status</th><th>Open NRs</th><th>Inspection hold</th></tr></thead><tbody>{wos.map((w) => <tr key={w.id}><td>{w.wo_number}</td><td><StatusChip value={w.status} /></td><td>{nrs.filter((n) => n.woId === w.id && !["CLOSED", "EXECUTED"].includes(n.status)).length}</td><td>{inspections.some((i) => i.woId === w.id && i.holdFlag && i.status !== "DONE") ? "Yes" : "No"}</td></tr>)}</tbody></table></section>,
-    findings: <section className="card"><h3>Findings / Non-routines</h3><table className="table"><thead><tr><th>ID</th><th>WO</th><th>Description</th><th>Status</th></tr></thead><tbody>{nrs.map((nr) => <tr key={nr.id}><td>{nr.id}</td><td>{nr.woId}</td><td>{nr.description}</td><td><StatusChip value={nr.status} /></td></tr>)}</tbody></table></section>,
+    "control-board": <section className="card"><h3>Production Control Board</h3><table className="table"><thead><tr><th>WO</th><th>Aircraft</th><th>Status</th><th>Due</th><th>Blocked</th><th>Release gate</th></tr></thead><tbody>{wos.map((w) => <tr key={w.id}><td>{w.wo_number}</td><td>{w.aircraft_serial_number}</td><td><StatusChip value={w.status} /></td><td>{w.due_date || "-"}</td><td>{parts.some((p) => p.woId === w.id && p.status === "REQUESTED") ? <StatusChip value="Awaiting parts" /> : "No"}</td><td><StatusChip value={gateByWo[w.id]?.status || "Draft"} /></td></tr>)}</tbody></table></section>,
+    "work-order-execution": <section className="card"><h3>Work Order Execution (persisted)</h3><table className="table"><thead><tr><th>WO</th><th>Task</th><th>Status</th><th>Actions</th><th>Evidence</th></tr></thead><tbody>{wos.map((w) => (tasksByWo[w.id] || []).slice(0, 6).map((t: any) => <tr key={`${w.id}-${t.id}`}><td>{w.wo_number}</td><td>{t.title}</td><td><StatusChip value={t.status || "PLANNED"} /></td><td><div style={{display:"flex",gap:6}}><button className="btn" onClick={async ()=>{await updateTask(t.id,{status:"IN_PROGRESS",last_known_updated_at:t.updated_at}); await updateWorkOrder(w.id,{status:"IN_PROGRESS"}); reload();}}>Start</button><button className="btn" onClick={async ()=>{await updateTask(t.id,{status:"COMPLETED",last_known_updated_at:t.updated_at}); reload();}}>Complete</button><button className="btn" onClick={async ()=>{await inspectTask(t.id,{signed_flag:true,notes:"Task reviewed"}); reload();}}>Inspect</button></div></td><td><label className="btn btn-secondary"><input type="file" style={{display:"none"}} onChange={async (e)=>{const f=e.target.files?.[0]; if(!f) return; await uploadExecutionEvidence(w.id,f,t.id,"Task evidence"); reload();}}/>Upload</label></td></tr>))}</tbody></table></section>,
+    findings: <section className="card"><h3>Findings / Non-routines (persisted)</h3><div style={{display:"flex",gap:8,marginBottom:8}}><button className="btn" onClick={async ()=>{const w=wos[0]; if(!w) return; await createTask(w.id,{title:"Raised non-routine finding",category:"DEFECT",origin_type:"NON_ROUTINE",priority:"HIGH"}); reload();}}>Raise non-routine task</button></div><table className="table"><thead><tr><th>ID</th><th>WO</th><th>Description</th><th>Status</th></tr></thead><tbody>{nrs.map((nr) => <tr key={nr.id}><td>{nr.id}</td><td>{nr.woId}</td><td>{nr.description}</td><td><StatusChip value={nr.status} /></td></tr>)}</tbody></table></section>,
     materials: <section className="card"><h3>Materials / Parts visibility</h3><table className="table"><thead><tr><th>WO</th><th>Item</th><th>Qty</th><th>Status</th></tr></thead><tbody>{parts.map((p) => <tr key={p.id}><td>{p.woId}</td><td>{p.description}</td><td>{p.qty}</td><td><StatusChip value={p.status} /></td></tr>)}</tbody></table></section>,
-    "review-inspection": <section className="card"><h3>Review and inspection</h3><table className="table"><thead><tr><th>WO</th><th>Type</th><th>Status</th><th>Hold</th></tr></thead><tbody>{inspections.map((i) => <tr key={i.id}><td>{i.woId}</td><td>{i.inspectionType}</td><td><StatusChip value={i.status} /></td><td>{i.holdFlag ? "Yes" : "No"}</td></tr>)}</tbody></table></section>,
-    "release-prep": <section className="card"><h3>Release preparation gate</h3><table className="table"><thead><tr><th>WO</th><th>Execution status</th><th>Traceability</th><th>Records readiness</th></tr></thead><tbody>{wos.map((w) => <tr key={w.id}><td>{w.wo_number}</td><td><StatusChip value={w.status} /></td><td>{traceability?.records?.filter((r: any) => r.linked_wo_id === w.id).length || 0} records linked</td><td>{recordsTiles.find((t: any) => t.key === "unmatched_crs")?.count === 0 ? "Ready" : "Check CRS"}</td></tr>)}</tbody></table></section>,
-    "compliance-items": <section className="card"><h3>Compliance-linked work items</h3><table className="table"><thead><tr><th>Action</th><th>Status</th><th>WO Ref</th><th>Package</th></tr></thead><tbody>{actions.map((a) => <tr key={a.id}><td>CA-{a.id} · {a.decision}</td><td><StatusChip value={a.status} /></td><td>{a.work_order_ref || "-"}</td><td>{a.package_ref || "-"}</td></tr>)}</tbody></table></section>,
+    "review-inspection": <section className="card"><h3>Review and inspection</h3><table className="table"><thead><tr><th>WO</th><th>Type</th><th>Status</th><th>Hold</th><th /></tr></thead><tbody>{inspections.map((i) => <tr key={i.id}><td>{i.woId}</td><td>{i.inspectionType}</td><td><StatusChip value={i.status} /></td><td>{i.holdFlag ? "Yes" : "No"}</td><td><button className="btn" onClick={async()=>{const wo=wos.find((x)=>x.id===i.woId); if(!wo) return; await inspectWorkOrder(wo.id,{signed_flag:true,notes:"Inspection complete"}); reload();}}>Sign inspection</button></td></tr>)}</tbody></table></section>,
+    "release-prep": <section className="card"><h3>Release preparation gate (persisted)</h3><table className="table"><thead><tr><th>WO</th><th>Execution status</th><th>Evidence</th><th>Gate</th><th>Actions</th></tr></thead><tbody>{wos.map((w) => {const gate=gateByWo[w.id]; const evCount=evidence.filter((e)=>e.work_order_id===w.id).length; return <tr key={w.id}><td>{w.wo_number}</td><td><StatusChip value={w.status} /></td><td>{evCount}</td><td><StatusChip value={gate?.status || "Draft"} /></td><td><div style={{display:"flex",gap:6}}><button className="btn" onClick={async()=>{await upsertReleaseGate({work_order_id:w.id,status:"Ready",blockers_json:[],readiness_notes:"Ready for certification"}); reload();}}>Mark ready</button><button className="btn" onClick={async()=>{await upsertReleaseGate({work_order_id:w.id,status:"Awaiting Certification",sign_off:true}); reload();}}>Sign-off</button><button className="btn" onClick={async()=>{await upsertReleaseGate({work_order_id:w.id,status:"Handed to Records",handed_to_records:true,sign_off:true}); await updateWorkOrder(w.id,{status:"INSPECTED"}); reload();}}>Handoff records</button></div></td></tr>})}</tbody></table></section>,
+    "compliance-items": <section className="card"><h3>Compliance-linked work items</h3><table className="table"><thead><tr><th>Action</th><th>Status</th><th>WO Ref</th><th>Package</th><th>Execution</th></tr></thead><tbody>{actions.map((a) => <tr key={a.id}><td>CA-{a.id} · {a.decision}</td><td><StatusChip value={a.status} /></td><td>{a.work_order_ref || "-"}</td><td>{a.package_ref || "-"}</td><td><button className="btn" onClick={async()=>{await updateComplianceActionStatus(a.id,{status:"In Work"}); reload();}}>Set In Work</button></td></tr>)}</tbody></table></section>,
   };
 
   return <Shell title={title} department="production">{sections[mode] || dashboards}</Shell>;

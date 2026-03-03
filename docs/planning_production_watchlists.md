@@ -77,3 +77,37 @@ Dashboard cockpit priority logic now escalates overdue/unplanned AD-SB complianc
 - Planning mutations (watchlist create/run, publication review decision, compliance action create): Planning role set.
 - Compliance action execution transitions: Planning + Production execution role sets.
 - Quality: read-only cockpit visibility with priority/action links into planning compliance routes.
+
+
+## Demo seed and authenticated verification path
+Preferred seeded-auth script:
+- `python backend/scripts/seed_planning_production_auth_demo.py`
+
+This script orchestrates:
+- base tenant/user seed (`seed_demo.py`),
+- maintenance execution seed (`seed_maintenance_module_demo.py`),
+- technical records seed (`seed_technical_records_demo.py`),
+- role-specific demo users (planning/production/quality/records),
+- watchlist run + publication review + compliance action seed,
+- initial production release-gate seed.
+
+Environment knobs:
+- `AMO_API_URL` (default `http://localhost:8080`)
+- `AMO_LOGIN_SLUG` (default `demo-amo`)
+- `AMO_ADMIN_PASSWORD` (default `ChangeMe123!`)
+
+## Production execution persistence extensions
+Technical records now persists production execution evidence and release-preparation gate state:
+- `technical_production_execution_evidence`
+- `technical_production_release_gates`
+
+API additions:
+- `GET /records/production/evidence`
+- `POST /records/production/evidence/upload` (multipart file upload)
+- `GET /records/production/release-gates`
+- `POST /records/production/release-gates`
+
+These are used by Production Control/Execution/Release pages to persist execution evidence, readiness transitions, signoff flags, and handoff-to-records state.
+
+Screenshot manifest:
+- `docs/screenshots/planning-production/manifest.md`

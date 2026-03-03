@@ -267,3 +267,43 @@ class ComplianceActionHistory(Base):
     event_notes = Column(Text, nullable=True)
     actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ProductionExecutionEvidence(Base):
+    __tablename__ = "technical_production_execution_evidence"
+    __table_args__ = (
+        Index("ix_tr_exec_evidence_amo_wo", "amo_id", "work_order_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_card_id = Column(Integer, ForeignKey("task_cards.id", ondelete="SET NULL"), nullable=True, index=True)
+    file_name = Column(String(255), nullable=False)
+    storage_path = Column(String(512), nullable=False)
+    content_type = Column(String(128), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ProductionReleaseGate(Base):
+    __tablename__ = "technical_production_release_gates"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "work_order_id", name="uq_tr_release_gate_amo_wo"),
+        Index("ix_tr_release_gate_amo_status", "amo_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="Draft", index=True)
+    readiness_notes = Column(Text, nullable=True)
+    blockers_json = Column(JSON, nullable=False, default=list)
+    evidence_count = Column(Integer, nullable=False, default=0)
+    signed_off_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    signed_off_at = Column(DateTime(timezone=True), nullable=True)
+    handed_to_records = Column(Boolean, nullable=False, default=False)
+    handed_to_records_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
