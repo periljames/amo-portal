@@ -665,12 +665,10 @@ const DashboardPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
-      {uiShellV2 ? (
-        isQualityDept ? (
-          <DashboardCockpit />
-        ) : (
-          <DepartmentLandingScaffold departmentLabel={niceLabel(department)} />
-        )
+      {uiShellV2 && isQualityDept ? (
+        <DashboardCockpit />
+      ) : uiShellV2 && department !== "planning" && department !== "production" ? (
+        <DepartmentLandingScaffold departmentLabel={niceLabel(department)} />
       ) : (
         <>
           <header className="page-header">

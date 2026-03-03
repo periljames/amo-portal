@@ -19,6 +19,7 @@ from ..training import models as training_models
 from ..accounts import models as account_models
 from ..tasks import models as task_models
 from ..audit import models as audit_models
+from ..technical_records import models as tr_models
 from .enums import (
     CARActionType,
     CARPriority,
@@ -453,6 +454,28 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
 
     manpower = _build_manpower_snapshot(db, amo_id=amo_id, department_code=department_code)
 
+    compliance_actions_q = db.query(tr_models.ComplianceAction)
+    publication_matches_q = db.query(tr_models.AirworthinessPublicationMatch)
+    if amo_id:
+        compliance_actions_q = compliance_actions_q.filter(tr_models.ComplianceAction.amo_id == amo_id)
+        publication_matches_q = publication_matches_q.filter(tr_models.AirworthinessPublicationMatch.amo_id == amo_id)
+
+    compliance_exceptions_open = _safe_count(compliance_actions_q.filter(tr_models.ComplianceAction.status.in_(["Under Review", "Planned", "Scheduled", "In Work", "Awaiting Certification"])))
+    compliance_overdue = _safe_count(compliance_actions_q.filter(tr_models.ComplianceAction.due_date.is_not(None), tr_models.ComplianceAction.due_date < today, tr_models.ComplianceAction.status.notin_(["Complied", "Closed", "Cancelled"])))
+    compliance_unplanned_applicable = _safe_count(publication_matches_q.filter(tr_models.AirworthinessPublicationMatch.classification.in_(["Applicable", "Potentially Applicable"]), tr_models.AirworthinessPublicationMatch.review_status.in_(["Matched", "Under Review"])))
+
+    compliance_rows = []
+    try:
+        compliance_rows = (
+            compliance_actions_q.filter(tr_models.ComplianceAction.status.in_(["Under Review", "Planned", "Scheduled", "In Work", "Awaiting Certification"]))
+            .order_by(tr_models.ComplianceAction.due_date.asc().nulls_last(), tr_models.ComplianceAction.updated_at.desc())
+            .limit(max(1, COCKPIT_ACTION_QUEUE_LIMIT // 3))
+            .all()
+        )
+    except SQLAlchemyError:
+        _rollback_session(db)
+        compliance_rows = []
+
     snapshot = {
         "generated_at": datetime.now(timezone.utc),
         "pending_acknowledgements": dashboard.get("distributions_pending_ack", 0),
@@ -477,6 +500,9 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
         "change_control_pending_approvals": dashboard.get("change_requests_open", 0),
         "events_hold_count": events_hold_count,
         "events_new_count": events_new_count,
+        "compliance_exceptions_open": compliance_exceptions_open,
+        "compliance_overdue": compliance_overdue,
+        "compliance_unplanned_applicable": compliance_unplanned_applicable,
         "manpower": manpower,
         "audit_closure_trend": _build_audit_closure_trend(db),
         "most_common_finding_trend_12m": _build_most_common_finding_trend_12m(db),
@@ -491,6 +517,17 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
                 "assignee_user_id": row.assigned_to_user_id,
             }
             for row in action_rows
+        ] + [
+            {
+                "id": f"CA-{row.id}",
+                "kind": "COMPLIANCE",
+                "title": f"Compliance action {row.id} · {row.decision}",
+                "status": row.status,
+                "priority": "HIGH" if row.status in ["Under Review", "Awaiting Certification"] else "MEDIUM",
+                "due_date": row.due_date,
+                "assignee_user_id": row.owner_user_id,
+            }
+            for row in compliance_rows
         ],
     }
 

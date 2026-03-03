@@ -561,6 +561,9 @@ class QMSCockpitSnapshotOut(BaseModel):
     change_control_pending_approvals: int = 0
     events_hold_count: int = 0
     events_new_count: int = 0
+    compliance_exceptions_open: int = 0
+    compliance_overdue: int = 0
+    compliance_unplanned_applicable: int = 0
     manpower: Optional[QMSManpowerOut] = None
     audit_closure_trend: list[AuditClosureTrendPointOut]
     most_common_finding_trend_12m: list[MostCommonFindingTrendPointOut]

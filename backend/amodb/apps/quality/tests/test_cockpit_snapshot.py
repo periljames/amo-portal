@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from amodb.apps.accounts import models as account_models
 from amodb.apps.quality import models as quality_models
 from amodb.apps.quality import service as quality_service
+from amodb.apps.technical_records import models as tr_models
 
 
 def _seed_amo_user(db_session, amo_code: str, user_id: str, role: account_models.AccountRole):
@@ -170,3 +171,68 @@ def test_cockpit_snapshot_demo_seed_not_applied_to_real_tenant(db_session, monke
 
     snapshot = quality_service.get_cockpit_snapshot(db_session, amo_id=amo_real.id, department_code="quality")
     assert snapshot["manpower"]["availability"] is None
+
+
+def test_cockpit_snapshot_includes_compliance_exception_metrics(db_session, monkeypatch):
+    amo, _dept, user = _seed_amo_user(db_session, "QX", "user-qx", account_models.AccountRole.QUALITY_MANAGER)
+
+    monkeypatch.setattr(quality_service, "get_dashboard", lambda *_args, **_kwargs: {
+        "distributions_pending_ack": 0,
+        "audits_open": 0,
+        "audits_total": 0,
+        "findings_overdue_total": 0,
+        "findings_open_total": 0,
+        "documents_active": 0,
+        "documents_draft": 0,
+        "documents_obsolete": 0,
+        "change_requests_open": 0,
+    })
+
+    tr_models.AirworthinessWatchlist.__table__.create(bind=db_session.get_bind(), checkfirst=True)
+    tr_models.AirworthinessPublication.__table__.create(bind=db_session.get_bind(), checkfirst=True)
+    tr_models.AirworthinessPublicationMatch.__table__.create(bind=db_session.get_bind(), checkfirst=True)
+    tr_models.ComplianceAction.__table__.create(bind=db_session.get_bind(), checkfirst=True)
+
+    watch = tr_models.AirworthinessWatchlist(amo_id=amo.id, name="Engine", status="Active", criteria_json={}, created_by_user_id=user.id)
+    db_session.add(watch)
+    db_session.flush()
+
+    pub = tr_models.AirworthinessPublication(
+        amo_id=amo.id,
+        source="FAA",
+        authority="FAA",
+        document_type="AD",
+        doc_number="AD-1",
+        title="Test AD",
+        keywords=[],
+        raw_metadata_json={},
+    )
+    db_session.add(pub)
+    db_session.flush()
+
+    match = tr_models.AirworthinessPublicationMatch(
+        amo_id=amo.id,
+        watchlist_id=watch.id,
+        publication_id=pub.id,
+        classification="Applicable",
+        review_status="Matched",
+    )
+    db_session.add(match)
+    db_session.flush()
+
+    action = tr_models.ComplianceAction(
+        amo_id=amo.id,
+        publication_match_id=match.id,
+        decision="IMMEDIATE_ACTION",
+        status="Under Review",
+        due_date=date.today() - timedelta(days=1),
+        created_by_user_id=user.id,
+    )
+    db_session.add(action)
+    db_session.commit()
+
+    snapshot = quality_service.get_cockpit_snapshot(db_session, amo_id=amo.id, department_code="quality")
+    assert snapshot["compliance_exceptions_open"] >= 1
+    assert snapshot["compliance_overdue"] >= 1
+    assert snapshot["compliance_unplanned_applicable"] >= 1
+    assert any(item["kind"] == "COMPLIANCE" for item in snapshot["action_queue"])

@@ -9,6 +9,7 @@ import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import * as DocControlPages from "./pages/DocControlPages";
 import * as TechnicalRecordsPages from "./pages/TechnicalRecordsPages";
+import * as PlanningProductionPages from "./pages/PlanningProductionPages";
 
 import {
   fetchOnboardingStatus,
@@ -86,6 +87,7 @@ const ManualWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage
 const ManualExportsPage = lazy(() => import("./pages/manuals/ManualExportsPage"));
 const ManualMasterListPage = lazy(() => import("./pages/manuals/ManualMasterListPage"));
 const ProductionWorkspacePage = lazy(() => import("./pages/ProductionWorkspacePage"));
+
 
 
 type RequireAuthProps = {
@@ -438,22 +440,36 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      {/* Department dashboard, e.g. /maintenance/safarilink/engineering */}
-      <Route
-        path="/maintenance/:amoCode/:department"
-        element={
-          <RequireAuth>
-            <DashboardPage />
-          </RequireAuth>
-        }
-      />
+      <Route path="/maintenance/:amoCode/planning" element={<RequireAuth><PlanningProductionPages.PlanningDashboardPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/dashboard" element={<RequireAuth><PlanningProductionPages.PlanningDashboardPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/utilisation-monitoring" element={<RequireAuth><PlanningProductionPages.PlanningUtilisationPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/forecast-due-list" element={<RequireAuth><PlanningProductionPages.PlanningForecastPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/amp" element={<RequireAuth><PlanningProductionPages.PlanningAmpPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/task-library" element={<RequireAuth><PlanningProductionPages.PlanningTaskLibraryPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/ad-sb-eo-control" element={<RequireAuth><PlanningProductionPages.PlanningAdSbPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/work-packages" element={<RequireAuth><PlanningProductionPages.PlanningWorkPackagesPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/work-orders" element={<RequireAuth><PlanningProductionPages.PlanningWorkOrdersPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/deferments" element={<RequireAuth><PlanningProductionPages.PlanningDefermentsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/non-routine-review" element={<RequireAuth><PlanningProductionPages.PlanningNonRoutinePage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/watchlists" element={<RequireAuth><PlanningProductionPages.WatchlistsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/publication-review" element={<RequireAuth><PlanningProductionPages.PublicationReviewPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/compliance-actions" element={<RequireAuth><PlanningProductionPages.ComplianceActionsPage /></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/production/dashboard" element={<RequireAuth><PlanningProductionPages.ProductionDashboardPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/control-board" element={<RequireAuth><PlanningProductionPages.ProductionControlBoardPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/work-order-execution" element={<RequireAuth><PlanningProductionPages.ProductionExecutionPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/findings" element={<RequireAuth><PlanningProductionPages.ProductionFindingsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/materials" element={<RequireAuth><PlanningProductionPages.ProductionMaterialsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/review-inspection" element={<RequireAuth><PlanningProductionPages.ProductionReviewInspectionPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/release-prep" element={<RequireAuth><PlanningProductionPages.ProductionReleasePrepPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/compliance-items" element={<RequireAuth><PlanningProductionPages.ProductionComplianceItemsPage /></RequireAuth>} />
 
 
       <Route
         path="/maintenance/:amoCode/production"
         element={
           <RequireAuth>
-            <Navigate to="workspace" replace />
+            <Navigate to="dashboard" replace />
           </RequireAuth>
         }
       />
@@ -485,6 +501,17 @@ export const AppRouter: React.FC = () => {
       <Route path="/production" element={<RequireAuth><ProductionWorkspacePage /></RequireAuth>} />
       <Route path="/production/fleet" element={<RequireAuth><ProductionWorkspacePage /></RequireAuth>} />
       <Route path="/production/fleet/:tailId" element={<RequireAuth><ProductionWorkspacePage /></RequireAuth>} />
+
+      {/* Department dashboard, e.g. /maintenance/safarilink/engineering */}
+      <Route
+        path="/maintenance/:amoCode/:department"
+        element={
+          <RequireAuth>
+            <DashboardPage />
+          </RequireAuth>
+        }
+      />
+
 
       {/* Work orders */}
       <Route
