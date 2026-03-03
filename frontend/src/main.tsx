@@ -22,6 +22,7 @@ import "./styles/components/toast.css";
 import "./styles/components/drawer.css";
 import "./styles/components/dashboard-cockpit.css";
 import "./styles/components/action-panel.css";
+import "./styles/components/planning-production.css";
 import "./styles/components/liquid-glass.css";
 
 

@@ -73,6 +73,17 @@ export interface WorkOrderCreatePayload {
   operator_event_id?: string | null;
 }
 
+
+export interface WorkOrderUpdatePayload {
+  description?: string | null;
+  check_type?: string | null;
+  status?: WorkOrderStatus;
+  due_date?: string | null;
+  closed_date?: string | null;
+  closure_reason?: string | null;
+  closure_notes?: string | null;
+}
+
 export interface TaskCardRead {
   id: number;
   work_order_id?: number;
@@ -232,4 +243,17 @@ export async function updateTask(
   payload: TaskUpdatePayload
 ): Promise<TaskCardRead> {
   return sendJson<TaskCardRead>(`/work-orders/tasks/${taskId}`, "PUT", payload);
+}
+
+
+export async function updateWorkOrder(id: number, payload: WorkOrderUpdatePayload): Promise<WorkOrderRead> {
+  return sendJson<WorkOrderRead>(`/work-orders/${id}`, "PUT", payload);
+}
+
+export async function inspectTask(taskId: number, payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null }) {
+  return sendJson<any>(`/work-orders/tasks/${taskId}/inspect`, "POST", payload);
+}
+
+export async function inspectWorkOrder(workOrderId: number, payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null }) {
+  return sendJson<any>(`/work-orders/${workOrderId}/inspect`, "POST", payload);
 }

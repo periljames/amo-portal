@@ -195,6 +195,17 @@ const DashboardCockpit: React.FC = () => {
         lines: [`Overdue: ${numberOrDash(snapshot.cars_overdue)}`, `Open total: ${numberOrDash(snapshot.cars_open_total)}`],
       },
       {
+        id: "compliance",
+        label: "AD/SB Compliance",
+        icon: ShieldAlert,
+        route: `/maintenance/${amoCode}/planning/compliance-actions`,
+        value: snapshot.compliance_exceptions_open ?? 0,
+        lines: [
+          `Overdue: ${numberOrDash(snapshot.compliance_overdue)}`,
+          `Unplanned applicable: ${numberOrDash(snapshot.compliance_unplanned_applicable)}`,
+        ],
+      },
+      {
         id: "training",
         label: "Training",
         icon: GraduationCap,
@@ -242,6 +253,12 @@ const DashboardCockpit: React.FC = () => {
 
   const priority = useMemo(() => {
     if (!snapshot) return null;
+    if ((snapshot.compliance_overdue ?? 0) > 0) {
+      return { label: "AD/SB compliance overdue", route: `/maintenance/${amoCode}/planning/compliance-actions`, count: snapshot.compliance_overdue, state: "overdue" as PriorityState };
+    }
+    if ((snapshot.compliance_unplanned_applicable ?? 0) > 0) {
+      return { label: "Applicable compliance not planned", route: `/maintenance/${amoCode}/planning/publication-review`, count: snapshot.compliance_unplanned_applicable, state: "due-soon" as PriorityState };
+    }
     if (snapshot.cars_overdue > 0) {
       return { label: "CAR overdue", route: `/maintenance/${amoCode}/${department}/qms/cars?status=overdue`, count: snapshot.cars_overdue, state: "overdue" as PriorityState };
     }

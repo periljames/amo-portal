@@ -92,26 +92,27 @@ def upgrade() -> None:
         sa.column("created_by_user_id", sa.String),
     )
 
-    op.add_column(
-        "part_movement_ledger",
-        sa.Column("created_by_user_id", sa.String(length=36), nullable=True),
-    )
-    op.create_foreign_key(
-        op.f("fk_part_movement_ledger_created_by_user_id_users"),
-        "part_movement_ledger",
-        "users",
-        ["created_by_user_id"],
-        ["id"],
-        ondelete="RESTRICT",
+    op.execute("ALTER TABLE part_movement_ledger ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(36)")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'fk_part_movement_ledger_created_by_user_id_users'
+            ) THEN
+                ALTER TABLE part_movement_ledger
+                ADD CONSTRAINT fk_part_movement_ledger_created_by_user_id_users
+                FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT;
+            END IF;
+        END
+        $$;
+        """
     )
 
     # PATCH: reason_code is referenced by ck_part_movement_reason_code_required below.
     # Add it here to avoid failing when the CHECK constraint is created.
     # Nullable is intentional: the CHECK constraint only requires it for specific event types.
-    op.add_column(
-        "part_movement_ledger",
-        sa.Column("reason_code", sa.String(length=64), nullable=True),
-    )
+    op.execute("ALTER TABLE part_movement_ledger ADD COLUMN IF NOT EXISTS reason_code VARCHAR(64)")
 
     # NOTE:
     # Do not query removal_events.created_by_user_id until after that column is added below.
@@ -125,21 +126,22 @@ def upgrade() -> None:
         )
     }
 
-    op.add_column(
-        "removal_events",
-        sa.Column("event_type", sa.String(length=16), nullable=False, server_default="REMOVE"),
-    )
-    op.add_column(
-        "removal_events",
-        sa.Column("created_by_user_id", sa.String(length=36), nullable=True),
-    )
-    op.create_foreign_key(
-        op.f("fk_removal_events_created_by_user_id_users"),
-        "removal_events",
-        "users",
-        ["created_by_user_id"],
-        ["id"],
-        ondelete="RESTRICT",
+    op.execute("ALTER TABLE removal_events ADD COLUMN IF NOT EXISTS event_type VARCHAR(16) NOT NULL DEFAULT 'REMOVE'")
+    op.execute("ALTER TABLE removal_events ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(36)")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'fk_removal_events_created_by_user_id_users'
+            ) THEN
+                ALTER TABLE removal_events
+                ADD CONSTRAINT fk_removal_events_created_by_user_id_users
+                FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT;
+            END IF;
+        END
+        $$;
+        """
     )
 
     # Now it is safe to include removal_events in the amo_id set and backfill it.
@@ -233,8 +235,8 @@ def upgrade() -> None:
         "(event_type NOT IN ('ADJUST', 'SCRAP', 'REMOVE', 'SWAP', 'VENDOR_RETURN')) "
         "OR (reason_code IS NOT NULL AND length(trim(reason_code)) > 0)",
     )
-    op.create_index("ix_part_movement_amo_event_date", "part_movement_ledger", ["amo_id", "event_date"], unique=False)
-    op.create_index("ix_part_movement_amo_created", "part_movement_ledger", ["amo_id", "created_at"], unique=False)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_part_movement_amo_event_date ON part_movement_ledger (amo_id, event_date)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_part_movement_amo_created ON part_movement_ledger (amo_id, created_at)")
 
     op.alter_column("removal_events", "created_by_user_id", nullable=False)
     op.alter_column("removal_events", "event_type", server_default=None)
@@ -243,8 +245,8 @@ def upgrade() -> None:
         "removal_events",
         "event_type IN ('REMOVE', 'SWAP')",
     )
-    op.create_index("ix_removal_events_amo_removed", "removal_events", ["amo_id", "removed_at"], unique=False)
-    op.create_index("ix_removal_events_amo_created", "removal_events", ["amo_id", "created_at"], unique=False)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_removal_events_amo_removed ON removal_events (amo_id, removed_at)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_removal_events_amo_created ON removal_events (amo_id, created_at)")
 
 
 def downgrade() -> None:

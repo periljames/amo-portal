@@ -374,3 +374,18 @@ Stable viewer route retained: `/maintenance/:amoCode/:department/qms/documents/:
 - Service worker enabled route support for AeroDoc/manual viewer cache when `VITE_AERODOC_PWA_ENABLED=1`.
 
 - `GET /aerodoc/public/verify/rate-limit/stats`
+
+- Added tenant-scoped Planning/Production workflow routes and watchlist/compliance API-backed pages (see docs/planning_production_watchlists.md).
+- Planning/Production sidebars now point to full operational route set; Quality cockpit snapshot includes AD/SB compliance exception counts and action-queue items.
+- Added production execution persistence APIs under /records/production/evidence and /records/production/release-gates plus seeded-auth demo script backend/scripts/seed_planning_production_auth_demo.py.
+
+## Changed in this run (2026-03-03)
+### Planning/Production cleanup and route hygiene
+- Normalized tenant production base route: `/maintenance/:amoCode/production` now redirects to `/maintenance/:amoCode/production/dashboard`.
+- Compatibility route retained: `/maintenance/:amoCode/production/workspace` for legacy fleet worksheet access.
+- No migration history rewrites; cleanup focused on service typing, route normalization, and seed-script hardening.
+
+## Changed in this run (2026-03-03) — PostgreSQL runtime proof
+- Verified tenant route set under `/maintenance/:amoCode/planning/*` and `/maintenance/:amoCode/production/*` with authenticated seeded users in PostgreSQL-backed runtime.
+- Authenticated screenshot evidence captured under `docs/screenshots/planning-production/` with manifest at `docs/screenshots/planning-production/manifest.md`.
+- Compatibility path decision retained: `/maintenance/:amoCode/production/workspace` kept for legacy fleet workspace access.

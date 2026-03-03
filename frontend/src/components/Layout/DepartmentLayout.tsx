@@ -489,18 +489,6 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/training");
   }, [location.pathname]);
 
-  const isAircraftImportRoute = useMemo(() => {
-    return location.pathname.includes("/aircraft-import");
-  }, [location.pathname]);
-
-  const isComponentImportRoute = useMemo(() => {
-    return location.pathname.includes("/component-import");
-  }, [location.pathname]);
-
-  const isAircraftDocumentsRoute = useMemo(() => {
-    return location.pathname.includes("/aircraft-documents");
-  }, [location.pathname]);
-
   const isWorkOrdersRoute = useMemo(() => {
     return location.pathname.includes("/work-orders") || location.pathname.includes("/tasks/");
   }, [location.pathname]);
@@ -1459,64 +1447,31 @@ const DepartmentLayout: React.FC<Props> = ({
                 )}
 
                 {!isAdminArea && activeDepartment === "planning" && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        navigateWithSidebarClose(`/maintenance/${amoCode}/planning/aircraft-import`)
-                      }
-                      className={
-                        "sidebar__item" +
-                        (isAircraftImportRoute ? " sidebar__item--active" : "")
-                      }
-                      aria-label="Setup Aircraft"
-                      title="Setup Aircraft"
-                    >
-                      <span className="sidebar__item-label">Setup Aircraft</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        navigateWithSidebarClose(`/maintenance/${amoCode}/planning/component-import`)
-                      }
-                      className={
-                        "sidebar__item" +
-                        (isComponentImportRoute ? " sidebar__item--active" : "")
-                      }
-                      aria-label="Import Components"
-                      title="Import Components"
-                    >
-                      <span className="sidebar__item-label">Import Components</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        navigateWithSidebarClose(`/maintenance/${amoCode}/planning/aircraft-documents`)
-                      }
-                      className={
-                        "sidebar__item" +
-                        (isAircraftDocumentsRoute ? " sidebar__item--active" : "")
-                      }
-                      aria-label="Aircraft Documents"
-                      title="Aircraft Documents"
-                    >
-                      <span className="sidebar__item-label">Aircraft Documents</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        navigateWithSidebarClose(`/maintenance/${amoCode}/planning/work-orders`)
-                      }
-                      className={
-                        "sidebar__item" +
-                        (isWorkOrdersRoute ? " sidebar__item--active" : "")
-                      }
-                      aria-label="Work Orders"
-                      title="Work Orders"
-                    >
-                      <span className="sidebar__item-label">Work Orders</span>
-                    </button>
-                  </>
+                  <div className="sidebar__qms-nav" aria-label="Planning modules">
+                    <div className="sidebar__group-title">Planning module routes</div>
+                    {[
+                      { id: "pl-dash", label: "Planning Dashboard", path: `/maintenance/${amoCode}/planning/dashboard` },
+                      { id: "pl-util", label: "Utilisation Monitoring", path: `/maintenance/${amoCode}/planning/utilisation-monitoring` },
+                      { id: "pl-forecast", label: "Forecast / Due List", path: `/maintenance/${amoCode}/planning/forecast-due-list` },
+                      { id: "pl-amp", label: "AMP", path: `/maintenance/${amoCode}/planning/amp` },
+                      { id: "pl-task", label: "Task Library", path: `/maintenance/${amoCode}/planning/task-library` },
+                      { id: "pl-adsb", label: "AD/SB/EO Control", path: `/maintenance/${amoCode}/planning/ad-sb-eo-control` },
+                      { id: "pl-wp", label: "Work Packages", path: `/maintenance/${amoCode}/planning/work-packages` },
+                      { id: "pl-wo", label: "Work Orders", path: `/maintenance/${amoCode}/planning/work-orders` },
+                      { id: "pl-def", label: "Deferments", path: `/maintenance/${amoCode}/planning/deferments` },
+                      { id: "pl-nr", label: "Non-Routine Review", path: `/maintenance/${amoCode}/planning/non-routine-review` },
+                      { id: "pl-watch", label: "Watchlists", path: `/maintenance/${amoCode}/planning/watchlists` },
+                      { id: "pl-pub", label: "Publication Review", path: `/maintenance/${amoCode}/planning/publication-review` },
+                      { id: "pl-ca", label: "Compliance Actions", path: `/maintenance/${amoCode}/planning/compliance-actions` },
+                    ].map((item) => {
+                      const active = location.pathname === item.path;
+                      return (
+                        <button key={item.id} type="button" onClick={() => navigateWithSidebarClose(item.path)} className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "") }>
+                          <span className="sidebar__item-label">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
 
                 {!isAdminArea &&
@@ -1539,25 +1494,22 @@ const DepartmentLayout: React.FC<Props> = ({
                   )}
 
                 {!isAdminArea && activeDepartment === "production" && (
-                  <div className="sidebar__qms-nav" aria-label="Production worksheets">
+                  <div className="sidebar__qms-nav" aria-label="Production modules">
+                    <div className="sidebar__group-title">Production module routes</div>
                     {[
-                      { id: "p-home", label: "Production Workspace", path: `/maintenance/${amoCode}/production/workspace` },
-                      { id: "p-fleet", label: "Fleet Hours", path: `/maintenance/${amoCode}/production/fleet?tab=fleet` },
-                      { id: "p-logbooks", label: "Logbooks", path: `/maintenance/${amoCode}/production/fleet?tab=logbooks` },
-                      { id: "p-compliance", label: "Compliance (AD/SB)", path: `/maintenance/${amoCode}/production/fleet?tab=compliance` },
-                      { id: "p-inspections", label: "Inspections & Hard Time", path: `/maintenance/${amoCode}/production/fleet?tab=inspections` },
-                      { id: "p-mods", label: "Modifications", path: `/maintenance/${amoCode}/production/fleet?tab=mods` },
-                      { id: "p-components", label: "Components (OC/CM)", path: `/maintenance/${amoCode}/production/fleet?tab=components` },
-                      { id: "p-missing", label: "Missing/Backfill", path: `/maintenance/${amoCode}/production/fleet?tab=missing` },
+                      { id: "p-dash", label: "Production Dashboard", path: `/maintenance/${amoCode}/production/dashboard` },
+                      { id: "p-board", label: "Control Board", path: `/maintenance/${amoCode}/production/control-board` },
+                      { id: "p-exec", label: "Work Order Execution", path: `/maintenance/${amoCode}/production/work-order-execution` },
+                      { id: "p-find", label: "Findings / Non-Routines", path: `/maintenance/${amoCode}/production/findings` },
+                      { id: "p-mat", label: "Materials / Parts", path: `/maintenance/${amoCode}/production/materials` },
+                      { id: "p-ri", label: "Review / Inspection", path: `/maintenance/${amoCode}/production/review-inspection` },
+                      { id: "p-release", label: "Release Preparation", path: `/maintenance/${amoCode}/production/release-prep` },
+                      { id: "p-comp", label: "Production Compliance Items", path: `/maintenance/${amoCode}/production/compliance-items` },
+                      { id: "p-workspace", label: "Fleet Workspace", path: `/maintenance/${amoCode}/production/workspace` },
                     ].map((item) => {
-                      const active = location.pathname.startsWith(`/maintenance/${amoCode}/production`) && location.search.includes(item.path.split("?")[1] || "");
+                      const active = location.pathname === item.path;
                       return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => navigateWithSidebarClose(item.path)}
-                          className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "")}
-                        >
+                        <button key={item.id} type="button" onClick={() => navigateWithSidebarClose(item.path)} className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "") }>
                           <span className="sidebar__item-label">{item.label}</span>
                         </button>
                       );

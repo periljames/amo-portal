@@ -1,0 +1,96 @@
+.planning-production-page .page-header {
+  border-color: var(--border-subtle);
+}
+
+.planning-production-page .page-header__subtitle {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+.planning-production-page .metric-grid {
+  margin-bottom: 10px;
+}
+
+.planning-production-page .metric-card {
+  min-height: 96px;
+  border-color: var(--border-subtle);
+  background: var(--surface-elevated);
+}
+
+.planning-production-page .metric-card:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+.planning-production-page .metric-label,
+.planning-production-page .metric-card__label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.planning-production-page .metric-value,
+.planning-production-page .metric-card__value {
+  color: var(--text-primary);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.planning-production-page .card h3 {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.planning-production-page .table thead th {
+  color: var(--text-secondary);
+  font-weight: 700;
+  background: var(--surface-soft);
+}
+
+.planning-production-page .table tbody td {
+  color: var(--text-primary);
+}
+
+.planning-production-page .text-muted {
+  color: var(--text-secondary);
+}
+
+.badge--info {
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+  color: var(--accent-primary);
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, transparent);
+}
+
+.sidebar__group-title {
+  color: var(--text-secondary);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 7px 10px 3px;
+}
+
+.sidebar__item--sub {
+  padding-left: 18px;
+  border-radius: 12px;
+  margin-left: 4px;
+}
+
+body[data-color-scheme="light"] .badge--warning {
+  background: #fff7ed;
+  color: #9a3412;
+  border-color: #fdba74;
+}
+
+body[data-color-scheme="light"] .badge--danger {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+body[data-color-scheme="light"] .planning-production-page .card,
+body[data-color-scheme="light"] .planning-production-page .metric-card {
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}

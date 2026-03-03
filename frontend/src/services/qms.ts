@@ -399,6 +399,9 @@ export interface QMSCockpitSnapshotOut {
   change_control_pending_approvals?: number;
   events_hold_count?: number;
   events_new_count?: number;
+  compliance_exceptions_open?: number;
+  compliance_overdue?: number;
+  compliance_unplanned_applicable?: number;
   manpower?: QMSManpowerOut | null;
   audit_closure_trend: {
     period_start: string;
