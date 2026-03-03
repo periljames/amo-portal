@@ -42,6 +42,10 @@ PRODUCTION_EXECUTION_ROLES = {
     AccountRole.CERTIFYING_ENGINEER,
     AccountRole.CERTIFYING_TECHNICIAN,
 }
+WATCHLIST_REVIEW_OPEN_STATUSES = ("Matched", "Under Review")
+COMPLIANCE_OPEN_STATUSES = ("Under Review", "Planned", "Scheduled", "In Work", "Awaiting Certification")
+COMPLIANCE_PRIORITIZED_STATUSES = ("Under Review", "Planned")
+
 
 
 def _audit(db: Session, amo_id: str, actor_id: str | None, entity_type: str, entity_id: str, action: str, after: dict | None = None):
@@ -348,13 +352,13 @@ def planning_dashboard(db: Session = Depends(get_db), current_user: User = Depen
         "due_soon": db.query(models.AirworthinessItem).filter(models.AirworthinessItem.amo_id == amo_id, models.AirworthinessItem.next_due_date.isnot(None), models.AirworthinessItem.next_due_date <= horizon).count(),
         "overdue": db.query(models.AirworthinessItem).filter(models.AirworthinessItem.amo_id == amo_id, models.AirworthinessItem.next_due_date.isnot(None), models.AirworthinessItem.next_due_date < today).count(),
         "open_deferrals": db.query(models.Deferral).filter_by(amo_id=amo_id, status="Open").count(),
-        "open_watchlist_reviews": db.query(models.AirworthinessPublicationMatch).filter(models.AirworthinessPublicationMatch.amo_id == amo_id, models.AirworthinessPublicationMatch.review_status.in_(["Matched", "Under Review"])).count(),
-        "open_compliance_actions": db.query(models.ComplianceAction).filter(models.ComplianceAction.amo_id == amo_id, models.ComplianceAction.status.in_(["Under Review", "Planned", "Scheduled", "In Work", "Awaiting Certification"])).count(),
+        "open_watchlist_reviews": db.query(models.AirworthinessPublicationMatch).filter(models.AirworthinessPublicationMatch.amo_id == amo_id, models.AirworthinessPublicationMatch.review_status.in_(WATCHLIST_REVIEW_OPEN_STATUSES)).count(),
+        "open_compliance_actions": db.query(models.ComplianceAction).filter(models.ComplianceAction.amo_id == amo_id, models.ComplianceAction.status.in_(COMPLIANCE_OPEN_STATUSES)).count(),
     }
     priority_items = []
     for d in db.query(models.Deferral).filter_by(amo_id=amo_id, status="Open").order_by(models.Deferral.expiry_at.asc()).limit(5).all():
         priority_items.append({"type": "Deferral", "ref": d.defect_ref, "tail": d.tail_id, "due": d.expiry_at.isoformat(), "status": d.status})
-    for a in db.query(models.ComplianceAction).filter(models.ComplianceAction.amo_id == amo_id, models.ComplianceAction.status.in_(["Under Review", "Planned"])).order_by(models.ComplianceAction.created_at.desc()).limit(5).all():
+    for a in db.query(models.ComplianceAction).filter(models.ComplianceAction.amo_id == amo_id, models.ComplianceAction.status.in_(COMPLIANCE_PRIORITIZED_STATUSES)).order_by(models.ComplianceAction.created_at.desc()).limit(5).all():
         priority_items.append({"type": "Compliance", "ref": f"CA-{a.id}", "due": a.due_date.isoformat() if a.due_date else None, "status": a.status})
     return schemas.PlanningDashboardRead(summary=summary, priority_items=priority_items)
 

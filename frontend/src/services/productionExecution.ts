@@ -27,22 +27,30 @@ export type ReleaseGate = {
   updated_at: string;
 };
 
-export const listExecutionEvidence = (workOrderId?: number) =>
-  apiGet<ExecutionEvidence[]>(`/records/production/evidence${workOrderId ? `?work_order_id=${workOrderId}` : ""}`, { headers: authHeaders() });
+function evidencePath(workOrderId?: number): string {
+  if (!workOrderId) return "/records/production/evidence";
+  const params = new URLSearchParams({ work_order_id: String(workOrderId) });
+  return `/records/production/evidence?${params.toString()}`;
+}
 
-export async function uploadExecutionEvidence(workOrderId: number, file: File, taskCardId?: number, notes?: string): Promise<ExecutionEvidence> {
+export const listExecutionEvidence = (workOrderId?: number) =>
+  apiGet<ExecutionEvidence[]>(evidencePath(workOrderId), { headers: authHeaders() });
+
+export async function uploadExecutionEvidence(
+  workOrderId: number,
+  file: File,
+  taskCardId?: number,
+  notes?: string,
+): Promise<ExecutionEvidence> {
   const form = new FormData();
   form.append("work_order_id", String(workOrderId));
   if (typeof taskCardId === "number") form.append("task_card_id", String(taskCardId));
   if (notes) form.append("notes", notes);
   form.append("file", file);
 
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/records/production/evidence/upload`, {
+  const res = await fetch(`${getApiBaseUrl()}/records/production/evidence/upload`, {
     method: "POST",
-    headers: {
-      ...authHeaders(),
-    },
+    headers: authHeaders(),
     body: form,
     credentials: "include",
   });
@@ -50,7 +58,9 @@ export async function uploadExecutionEvidence(workOrderId: number, file: File, t
   return (await res.json()) as ExecutionEvidence;
 }
 
-export const listReleaseGates = () => apiGet<ReleaseGate[]>("/records/production/release-gates", { headers: authHeaders() });
+export const listReleaseGates = () =>
+  apiGet<ReleaseGate[]>("/records/production/release-gates", { headers: authHeaders() });
+
 export const upsertReleaseGate = (payload: {
   work_order_id: number;
   status: string;

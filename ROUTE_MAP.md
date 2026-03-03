@@ -378,3 +378,9 @@ Stable viewer route retained: `/maintenance/:amoCode/:department/qms/documents/:
 - Added tenant-scoped Planning/Production workflow routes and watchlist/compliance API-backed pages (see docs/planning_production_watchlists.md).
 - Planning/Production sidebars now point to full operational route set; Quality cockpit snapshot includes AD/SB compliance exception counts and action-queue items.
 - Added production execution persistence APIs under /records/production/evidence and /records/production/release-gates plus seeded-auth demo script backend/scripts/seed_planning_production_auth_demo.py.
+
+## Changed in this run (2026-03-03)
+### Planning/Production cleanup and route hygiene
+- Normalized tenant production base route: `/maintenance/:amoCode/production` now redirects to `/maintenance/:amoCode/production/dashboard`.
+- Compatibility route retained: `/maintenance/:amoCode/production/workspace` for legacy fleet worksheet access.
+- No migration history rewrites; cleanup focused on service typing, route normalization, and seed-script hardening.

@@ -469,7 +469,7 @@ export const AppRouter: React.FC = () => {
         path="/maintenance/:amoCode/production"
         element={
           <RequireAuth>
-            <Navigate to="workspace" replace />
+            <Navigate to="dashboard" replace />
           </RequireAuth>
         }
       />

@@ -7,6 +7,9 @@
   - `production@demo.example.com`
   - `quality@demo.example.com`
 
+## Authoritative seeding script
+- `python backend/scripts/seed_planning_production_auth_demo.py` (runs base + maintenance + technical records seeds and role user provisioning)
+
 ## Attempted setup commands
 1. `cd backend && export DATABASE_WRITE_URL=sqlite+pysqlite:///./dev.db && export DATABASE_URL=$DATABASE_WRITE_URL && python -m alembic -c amodb/alembic.ini upgrade heads`
 2. `cd backend && export DATABASE_WRITE_URL=sqlite+pysqlite:///./dev.db && export SCHEMA_STRICT=0 && python - <<'PY' ... Base.metadata.create_all ... PY`

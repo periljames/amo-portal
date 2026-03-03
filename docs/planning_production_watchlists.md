@@ -27,7 +27,7 @@ All routes are under `/maintenance/:amoCode/...` and resolve before the generic 
 - `/production/review-inspection`
 - `/production/release-prep`
 - `/production/compliance-items`
-- `/production/workspace` (existing worksheet remains linked)
+- `/production/workspace` (legacy fleet worksheet retained as compatibility route)
 
 ## Backend workflow domain
 Tenant-scoped technical-records tables:
@@ -111,3 +111,9 @@ These are used by Production Control/Execution/Release pages to persist executio
 
 Screenshot manifest:
 - `docs/screenshots/planning-production/manifest.md`
+
+
+## Production hardening notes
+- Authoritative seed entry point remains `backend/scripts/seed_planning_production_auth_demo.py`; it now runs the seed chain via `subprocess.run(..., check=True)` to fail fast and avoid silent partial seeding.
+- Legacy `/maintenance/:amoCode/production` now redirects to `/maintenance/:amoCode/production/dashboard` so production users land on the operational dashboard; `/production/workspace` remains available as compatibility access for fleet worksheet workflows.
+- Typed frontend service contracts for planning/production/watchlists/compliance and production execution were normalized to reduce `any` payload usage and duplicate query-string construction.
