@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -16,10 +15,15 @@ BASE_URL = os.getenv("AMO_API_URL", "http://localhost:8080").rstrip("/")
 SUPERUSER_EMAIL = os.getenv("AMO_SUPERUSER_EMAIL", "owner@example.com")
 SUPERUSER_PASSWORD = os.getenv("AMO_SUPERUSER_PASSWORD", "ChangeMe123!")
 AMO_LOGIN_SLUG = os.getenv("AMO_LOGIN_SLUG", "demo-amo")
+AMO_CODE = os.getenv("AMO_CODE", "DEMO")
+AMO_NAME = os.getenv("AMO_NAME", "Demo AMO")
+AMO_ADMIN_EMAIL = os.getenv("AMO_ADMIN_EMAIL", "admin@demo.example.com")
 AMO_ADMIN_PASSWORD = os.getenv("AMO_ADMIN_PASSWORD", "ChangeMe123!")
 ALT_DEMO_PASSWORD = os.getenv("AMO_ALT_DEMO_PASSWORD", "ChangeMe1234A")
 AIRCRAFT_SERIAL = os.getenv("AMO_AIRCRAFT_SERIAL", "DEMO-001")
 AIRCRAFT_REG = os.getenv("AMO_AIRCRAFT_REG", "N-DEMO")
+DEFAULT_TRIAL_SKU = os.getenv("AMODB_DEFAULT_TRIAL_SKU", "DEMO-MONTHLY")
+SEED_AIRCRAFT = os.getenv("AMO_SEED_AIRCRAFT", "0") == "1"
 
 
 @dataclass(frozen=True)
@@ -52,11 +56,7 @@ REQUIRED_MODULES: tuple[str, ...] = (
     "training",
 )
 
-BASE_SEED_SCRIPT = "backend/scripts/seed_demo.py"
-FOLLOW_ON_SEED_SCRIPTS: tuple[str, ...] = (
-    "backend/scripts/seed_maintenance_module_demo.py",
-    "backend/scripts/seed_technical_records_demo.py",
-)
+RESOLVED_PASSWORDS: dict[str, str] = {}
 
 
 def req(method: str, path: str, payload: dict[str, Any] | None = None, token: str | None = None) -> Any:
@@ -84,27 +84,109 @@ def safe(method: str, path: str, payload: dict[str, Any] | None = None, token: s
         return None
 
 
+def bootstrap_superuser() -> None:
+    safe(
+        "POST",
+        "/auth/first-superuser",
+        {
+            "email": SUPERUSER_EMAIL,
+            "password": SUPERUSER_PASSWORD,
+            "first_name": "Platform",
+            "last_name": "Owner",
+            "full_name": "Platform Owner",
+            "position_title": "System Owner",
+            "phone": "+10000000000",
+            "staff_code": "ROOT-001",
+        },
+    )
+
+
 def login(email: str, password: str, amo_slug: str, *, fallback_password: str | None = None) -> str:
-    try:
-        response = req("POST", "/auth/login", {"email": email, "password": password, "amo_slug": amo_slug})
-        return response["access_token"]
-    except RuntimeError:
-        if not fallback_password or fallback_password == password:
+    ordered_passwords = []
+    cached = RESOLVED_PASSWORDS.get(email)
+    if cached:
+        ordered_passwords.append(cached)
+    ordered_passwords.append(password)
+    if fallback_password and fallback_password != password:
+        ordered_passwords.append(fallback_password)
+
+    seen = set()
+    last_exc: RuntimeError | None = None
+    for candidate in ordered_passwords:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            response = req("POST", "/auth/login", {"email": email, "password": candidate, "amo_slug": amo_slug})
+            RESOLVED_PASSWORDS[email] = candidate
+            return response["access_token"]
+        except RuntimeError as exc:
+            last_exc = exc
+            if " 401 " in str(exc) or " 429 " in str(exc):
+                continue
             raise
-        response = req("POST", "/auth/login", {"email": email, "password": fallback_password, "amo_slug": amo_slug})
-        return response["access_token"]
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"Unable to authenticate {email}")
 
 
-def run_seed_script(script: str, *, allow_failure: bool = False) -> None:
-    env = os.environ.copy()
-    result = subprocess.run([sys.executable, script], check=False, env=env)
-    if result.returncode != 0 and not allow_failure:
-        raise subprocess.CalledProcessError(result.returncode, [sys.executable, script])
+def try_login(email: str, password: str, amo_slug: str, *, fallback_password: str | None = None) -> str | None:
+    try:
+        return login(email, password, amo_slug, fallback_password=fallback_password)
+    except RuntimeError as exc:
+        if " 429 " in str(exc):
+            print(f"Skipping {email} login due to auth throttling; rerun after cooldown.")
+            return None
+        raise
 
 
-def ensure_modules(super_token: str, amo_id: str) -> None:
-    for module in REQUIRED_MODULES:
-        safe("POST", f"/admin/tenants/{amo_id}/modules/{module}/enable", {"module_code": module, "status": "ENABLED"}, super_token)
+def ensure_catalog_sku(super_token: str) -> str:
+    skus = req("GET", "/billing/catalog", token=super_token) or []
+    for sku in skus:
+        if sku.get("is_active"):
+            return sku["code"]
+
+    created = req(
+        "POST",
+        "/billing/catalog",
+        {
+            "code": DEFAULT_TRIAL_SKU,
+            "name": "Demo Monthly",
+            "description": "Default demo trial SKU",
+            "term": "MONTHLY",
+            "trial_days": 14,
+            "amount_cents": 0,
+            "currency": "USD",
+            "is_active": True,
+        },
+        super_token,
+    )
+    return created["code"]
+
+
+def ensure_amo(super_token: str) -> dict[str, Any]:
+    amos = req("GET", "/accounts/admin/amos", token=super_token) or []
+    for item in amos:
+        if item.get("login_slug") == AMO_LOGIN_SLUG:
+            return item
+
+    created = req(
+        "POST",
+        "/accounts/admin/amos",
+        {
+            "amo_code": AMO_CODE,
+            "name": AMO_NAME,
+            "icao_code": None,
+            "country": "US",
+            "login_slug": AMO_LOGIN_SLUG,
+            "contact_email": AMO_ADMIN_EMAIL,
+            "contact_phone": "+10000000000",
+            "time_zone": "UTC",
+            "is_demo": True,
+        },
+        super_token,
+    )
+    return created
 
 
 def get_department_ids(super_token: str, amo_id: str) -> dict[str, str]:
@@ -125,15 +207,10 @@ def find_user_by_email(super_token: str, amo_id: str, email: str) -> dict[str, A
     return None
 
 
-def ensure_user_department(super_token: str, amo_id: str, user: DemoUser, department_id: str | None) -> None:
-    existing = find_user_by_email(super_token, amo_id, user.email)
-    if not existing:
-        return
-    if department_id and existing.get("department_id") == department_id:
-        return
+def ensure_user_department(super_token: str, user_id: str, user: DemoUser, department_id: str | None) -> None:
     safe(
         "PUT",
-        f"/accounts/admin/users/{existing['id']}",
+        f"/accounts/admin/users/{user_id}",
         {
             "department_id": department_id,
             "position_title": user.label,
@@ -143,33 +220,87 @@ def ensure_user_department(super_token: str, amo_id: str, user: DemoUser, depart
     )
 
 
-def ensure_users(super_token: str, amo_id: str) -> None:
+def ensure_admin_user(super_token: str, amo_id: str) -> None:
+    existing = find_user_by_email(super_token, amo_id, AMO_ADMIN_EMAIL)
+    if existing:
+        return
+    safe(
+        "POST",
+        "/accounts/admin/users",
+        {
+            "email": AMO_ADMIN_EMAIL,
+            "password": AMO_ADMIN_PASSWORD,
+            "first_name": "Demo",
+            "last_name": "Admin",
+            "full_name": "Demo Admin",
+            "role": "AMO_ADMIN",
+            "position_title": "Accountable Manager",
+            "phone": "+10000000000",
+            "amo_id": amo_id,
+            "staff_code": "DEMO-ADMIN",
+        },
+        super_token,
+    )
+
+
+def ensure_demo_users(super_token: str, amo_id: str) -> None:
     department_ids = get_department_ids(super_token, amo_id)
     for user in DEMO_USERS:
         dept_code = ROLE_DEPARTMENT_CODE.get(user.role, "")
         department_id = department_ids.get(dept_code)
+        existing = find_user_by_email(super_token, amo_id, user.email)
+        if not existing:
+            safe(
+                "POST",
+                "/accounts/admin/users",
+                {
+                    "email": user.email,
+                    "password": AMO_ADMIN_PASSWORD,
+                    "first_name": user.label,
+                    "last_name": "Demo",
+                    "full_name": f"{user.label} Demo",
+                    "role": user.role,
+                    "position_title": user.label,
+                    "phone": "+10000000000",
+                    "amo_id": amo_id,
+                    "staff_code": f"DEMO-{user.role}",
+                    "department_id": department_id,
+                },
+                super_token,
+            )
+            existing = find_user_by_email(super_token, amo_id, user.email)
+
+        if existing and existing.get("department_id") != department_id:
+            ensure_user_department(super_token, existing["id"], user, department_id)
+
+
+def ensure_modules(super_token: str, amo_id: str) -> None:
+    current = req("GET", f"/admin/tenants/{amo_id}/modules", token=super_token) or []
+    enabled = {
+        item.get("module_code")
+        for item in current
+        if (item.get("status") or "").upper() == "ENABLED"
+    }
+    for module in REQUIRED_MODULES:
+        if module in enabled:
+            continue
         safe(
             "POST",
-            "/accounts/admin/users",
-            {
-                "email": user.email,
-                "password": AMO_ADMIN_PASSWORD,
-                "first_name": user.label,
-                "last_name": "Demo",
-                "full_name": f"{user.label} Demo",
-                "role": user.role,
-                "position_title": user.label,
-                "phone": "+10000000000",
-                "amo_id": amo_id,
-                "staff_code": f"DEMO-{user.role}",
-                "department_id": department_id,
-            },
+            f"/admin/tenants/{amo_id}/modules/{module}/enable",
+            {"module_code": module, "status": "ENABLED"},
             super_token,
         )
-        ensure_user_department(super_token, amo_id, user, department_id)
 
 
 def ensure_seed_aircraft(amo_admin_token: str) -> None:
+    if not SEED_AIRCRAFT:
+        return
+    aircraft = safe("GET", "/aircraft/?limit=200", None, amo_admin_token)
+    if aircraft is None:
+        print("Skipping aircraft seed because aircraft listing endpoint is unavailable in this runtime.")
+        return
+    if any(a.get("serial_number") == AIRCRAFT_SERIAL for a in aircraft):
+        return
     safe(
         "POST",
         "/aircraft/",
@@ -185,16 +316,22 @@ def ensure_seed_aircraft(amo_admin_token: str) -> None:
 
 
 def seed_watchlists_and_compliance(planner_token: str) -> None:
-    wl = safe(
-        "POST",
-        "/records/watchlists",
-        {"name": "Demo AD/SB", "criteria_json": {"keywords": ["fuel", "wing"]}},
-        planner_token,
-    )
+    watchlists = safe("GET", "/records/watchlists", None, planner_token) or []
+    wl = next((w for w in watchlists if w.get("name") == "Demo AD/SB"), None)
+    if not wl:
+        wl = safe(
+            "POST",
+            "/records/watchlists",
+            {"name": "Demo AD/SB", "criteria_json": {"keywords": ["fuel", "wing"]}},
+            planner_token,
+        )
     if wl:
         safe("POST", f"/records/watchlists/{wl['id']}/run", {}, planner_token)
 
     queue = safe("GET", "/records/publications/review", None, planner_token) or []
+    existing_actions = safe("GET", "/records/compliance-actions", None, planner_token) or []
+    existing_match_ids = {a.get("publication_match_id") for a in existing_actions if a.get("publication_match_id")}
+
     for row in queue[:2]:
         safe(
             "POST",
@@ -202,7 +339,9 @@ def seed_watchlists_and_compliance(planner_token: str) -> None:
             {"review_status": "Under Review", "classification": "Applicable"},
             planner_token,
         )
-        safe(
+        if row.get("match_id") in existing_match_ids:
+            continue
+        created = safe(
             "POST",
             "/records/compliance-actions",
             {
@@ -212,6 +351,8 @@ def seed_watchlists_and_compliance(planner_token: str) -> None:
             },
             planner_token,
         )
+        if created:
+            existing_match_ids.add(row.get("match_id"))
 
 
 def seed_production_handoff(prod_token: str) -> None:
@@ -223,27 +364,34 @@ def seed_production_handoff(prod_token: str) -> None:
     tasks = safe("GET", f"/work-orders/{work_order['id']}/tasks", None, prod_token) or []
     if tasks:
         task = tasks[0]
-        safe(
-            "PUT",
-            f"/work-orders/tasks/{task['id']}",
-            {"status": "IN_PROGRESS", "last_known_updated_at": task["updated_at"]},
-            prod_token,
-        )
-        updated_task = safe("GET", f"/work-orders/tasks/{task['id']}", None, prod_token)
-        if updated_task:
+        if task.get("status") != "COMPLETED":
             safe(
                 "PUT",
                 f"/work-orders/tasks/{task['id']}",
-                {"status": "COMPLETED", "last_known_updated_at": updated_task["updated_at"]},
+                {"status": "IN_PROGRESS", "last_known_updated_at": task["updated_at"]},
                 prod_token,
             )
+            updated_task = safe("GET", f"/work-orders/tasks/{task['id']}", None, prod_token)
+            if updated_task and updated_task.get("status") != "COMPLETED":
+                safe(
+                    "PUT",
+                    f"/work-orders/tasks/{task['id']}",
+                    {"status": "COMPLETED", "last_known_updated_at": updated_task["updated_at"]},
+                    prod_token,
+                )
+
+    gates = safe("GET", "/records/production/release-gates", None, prod_token) or []
+    existing_gate = next((g for g in gates if g.get("work_order_id") == work_order["id"]), None)
+    desired_status = "Ready"
+    if existing_gate and existing_gate.get("status") == desired_status:
+        return
 
     safe(
         "POST",
         "/records/production/release-gates",
         {
             "work_order_id": work_order["id"],
-            "status": "Ready",
+            "status": desired_status,
             "readiness_notes": "Seeded release prep",
             "blockers_json": [],
         },
@@ -252,30 +400,41 @@ def seed_production_handoff(prod_token: str) -> None:
 
 
 def main() -> int:
-    run_seed_script(BASE_SEED_SCRIPT)
+    print("Logging in as platform superuser...")
+    try:
+        super_token = login(SUPERUSER_EMAIL, SUPERUSER_PASSWORD, "system")
+    except RuntimeError:
+        print("Bootstrapping superuser (if needed)...")
+        bootstrap_superuser()
+        super_token = login(SUPERUSER_EMAIL, SUPERUSER_PASSWORD, "system")
 
-    super_token = login(SUPERUSER_EMAIL, SUPERUSER_PASSWORD, "system")
-    amos = req("GET", "/accounts/admin/amos", token=super_token)
-    amo = next((item for item in amos if item.get("login_slug") == AMO_LOGIN_SLUG), amos[0])
+    ensure_catalog_sku(super_token)
+    amo = ensure_amo(super_token)
+
     ensure_modules(super_token, amo["id"])
-    ensure_users(super_token, amo["id"])
+    ensure_admin_user(super_token, amo["id"])
+    ensure_demo_users(super_token, amo["id"])
 
-    amo_admin_token = login("admin@demo.example.com", AMO_ADMIN_PASSWORD, AMO_LOGIN_SLUG, fallback_password=ALT_DEMO_PASSWORD)
+    print("Logging in as AMO admin...")
+    amo_admin_token = try_login(AMO_ADMIN_EMAIL, AMO_ADMIN_PASSWORD, AMO_LOGIN_SLUG, fallback_password=ALT_DEMO_PASSWORD)
+    if not amo_admin_token:
+        print("Demo seed paused due to auth throttling before AMO admin login.")
+        return 0
     ensure_seed_aircraft(amo_admin_token)
 
-    for script in FOLLOW_ON_SEED_SCRIPTS:
-        run_seed_script(script, allow_failure=True)
+    planner_token = try_login("planner@demo.example.com", AMO_ADMIN_PASSWORD, AMO_LOGIN_SLUG, fallback_password=ALT_DEMO_PASSWORD)
+    if planner_token:
+        seed_watchlists_and_compliance(planner_token)
 
-    planner_token = login("planner@demo.example.com", AMO_ADMIN_PASSWORD, AMO_LOGIN_SLUG, fallback_password=ALT_DEMO_PASSWORD)
-    seed_watchlists_and_compliance(planner_token)
-
-    production_token = login("production@demo.example.com", AMO_ADMIN_PASSWORD, AMO_LOGIN_SLUG, fallback_password=ALT_DEMO_PASSWORD)
-    seed_production_handoff(production_token)
+    production_token = try_login("production@demo.example.com", AMO_ADMIN_PASSWORD, AMO_LOGIN_SLUG, fallback_password=ALT_DEMO_PASSWORD)
+    if production_token:
+        seed_production_handoff(production_token)
 
     print("Demo seed complete")
     print(f"Tenant: {AMO_LOGIN_SLUG}")
     for user in DEMO_USERS:
-        print(f"{user.label} login: {user.email} / {AMO_ADMIN_PASSWORD}")
+        resolved = RESOLVED_PASSWORDS.get(user.email, AMO_ADMIN_PASSWORD)
+        print(f"{user.label} login: {user.email} / {resolved}")
     return 0
 
 
