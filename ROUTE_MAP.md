@@ -384,3 +384,8 @@ Stable viewer route retained: `/maintenance/:amoCode/:department/qms/documents/:
 - Normalized tenant production base route: `/maintenance/:amoCode/production` now redirects to `/maintenance/:amoCode/production/dashboard`.
 - Compatibility route retained: `/maintenance/:amoCode/production/workspace` for legacy fleet worksheet access.
 - No migration history rewrites; cleanup focused on service typing, route normalization, and seed-script hardening.
+
+## Changed in this run (2026-03-03) — PostgreSQL runtime proof
+- Verified tenant route set under `/maintenance/:amoCode/planning/*` and `/maintenance/:amoCode/production/*` with authenticated seeded users in PostgreSQL-backed runtime.
+- Authenticated screenshot evidence captured under `docs/screenshots/planning-production/` with manifest at `docs/screenshots/planning-production/manifest.md`.
+- Compatibility path decision retained: `/maintenance/:amoCode/production/workspace` kept for legacy fleet workspace access.

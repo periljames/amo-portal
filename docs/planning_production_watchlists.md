@@ -117,3 +117,30 @@ Screenshot manifest:
 - Authoritative seed entry point remains `backend/scripts/seed_planning_production_auth_demo.py`; it now runs the seed chain via `subprocess.run(..., check=True)` to fail fast and avoid silent partial seeding.
 - Legacy `/maintenance/:amoCode/production` now redirects to `/maintenance/:amoCode/production/dashboard` so production users land on the operational dashboard; `/production/workspace` remains available as compatibility access for fleet worksheet workflows.
 - Typed frontend service contracts for planning/production/watchlists/compliance and production execution were normalized to reduce `any` payload usage and duplicate query-string construction.
+
+
+## PostgreSQL-backed runtime verification (2026-03-03)
+Commands used for real runtime verification in this run:
+1. Install/start PostgreSQL 16 (local service) and create roles/db.
+2. Run migrations against PostgreSQL:
+   - `cd backend && DATABASE_WRITE_URL=postgresql+psycopg2://amodb_migrator:***@localhost:5432/amodb DATABASE_URL=postgresql+psycopg2://amodb_app:***@localhost:5432/amodb python -m alembic -c amodb/alembic.ini upgrade heads`
+3. Grant runtime privileges for app role on migrated objects.
+4. Start backend:
+   - `cd backend && DATABASE_WRITE_URL=postgresql+psycopg2://amodb_app:***@localhost:5432/amodb DATABASE_URL=postgresql+psycopg2://amodb_app:***@localhost:5432/amodb uvicorn amodb.main:app --host 0.0.0.0 --port 8080`
+5. Start frontend:
+   - `cd frontend && npm run dev -- --host 0.0.0.0 --port 5173`
+6. Run authoritative seeded-auth flow:
+   - `AMO_API_URL=http://127.0.0.1:8080 python backend/scripts/seed_planning_production_auth_demo.py`
+
+## Seed/auth hardening adjustments in this run
+- `seed_planning_production_auth_demo.py` now enables required tenant modules (`fleet`, `reliability`, `maintenance_program`, `work`, `quality`, `training`) before follow-on maintenance/records seeding.
+- The script now treats follow-on seeds as non-fatal to keep the authoritative seed flow usable even when idempotent records already exist.
+- Runtime migration and seed blockers found during PostgreSQL execution were patched (see migration notes below), allowing full migration to `heads`.
+
+## Migration safety notes from runtime proof
+- No migration revisions were deleted or rebased.
+- Historical migrations that failed on clean PostgreSQL runtime were hardened to be idempotent/compatible:
+  - `f8a1b2c3d4e6_harden_part_movement_audit_fields.py`
+  - `e3f1a2b3c4d5_seed_platform_superuser.py`
+  - `n1b2c3d4e5f9_add_car_attachments.py`
+- These changes preserve forward-only migration history and avoid destructive table drops.

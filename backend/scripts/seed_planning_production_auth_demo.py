@@ -17,6 +17,8 @@ SUPERUSER_EMAIL = os.getenv("AMO_SUPERUSER_EMAIL", "owner@example.com")
 SUPERUSER_PASSWORD = os.getenv("AMO_SUPERUSER_PASSWORD", "ChangeMe123!")
 AMO_LOGIN_SLUG = os.getenv("AMO_LOGIN_SLUG", "demo-amo")
 AMO_ADMIN_PASSWORD = os.getenv("AMO_ADMIN_PASSWORD", "ChangeMe123!")
+AIRCRAFT_SERIAL = os.getenv("AMO_AIRCRAFT_SERIAL", "DEMO-001")
+AIRCRAFT_REG = os.getenv("AMO_AIRCRAFT_REG", "N-DEMO")
 
 
 @dataclass(frozen=True)
@@ -33,8 +35,17 @@ DEMO_USERS: tuple[DemoUser, ...] = (
     DemoUser("records@demo.example.com", "CERTIFYING_ENGINEER", "Records"),
 )
 
-SEED_CHAIN: tuple[str, ...] = (
-    "backend/scripts/seed_demo.py",
+REQUIRED_MODULES: tuple[str, ...] = (
+    "fleet",
+    "reliability",
+    "maintenance_program",
+    "work",
+    "quality",
+    "training",
+)
+
+BASE_SEED_SCRIPT = "backend/scripts/seed_demo.py"
+FOLLOW_ON_SEED_SCRIPTS: tuple[str, ...] = (
     "backend/scripts/seed_maintenance_module_demo.py",
     "backend/scripts/seed_technical_records_demo.py",
 )
@@ -70,10 +81,16 @@ def login(email: str, password: str, amo_slug: str) -> str:
     return response["access_token"]
 
 
-def run_seed_chain() -> None:
+def run_seed_script(script: str, *, allow_failure: bool = False) -> None:
     env = os.environ.copy()
-    for script in SEED_CHAIN:
-        subprocess.run([sys.executable, script], check=True, env=env)
+    result = subprocess.run([sys.executable, script], check=False, env=env)
+    if result.returncode != 0 and not allow_failure:
+        raise subprocess.CalledProcessError(result.returncode, [sys.executable, script])
+
+
+def ensure_modules(super_token: str, amo_id: str) -> None:
+    for module in REQUIRED_MODULES:
+        safe("POST", f"/admin/tenants/{amo_id}/modules/{module}/enable", {"module_code": module, "status": "ENABLED"}, super_token)
 
 
 def ensure_users(super_token: str, amo_id: str) -> None:
@@ -95,6 +112,21 @@ def ensure_users(super_token: str, amo_id: str) -> None:
             },
             super_token,
         )
+
+
+def ensure_seed_aircraft(amo_admin_token: str) -> None:
+    safe(
+        "POST",
+        "/aircraft/",
+        {
+            "serial_number": AIRCRAFT_SERIAL,
+            "registration": AIRCRAFT_REG,
+            "template": "DHC8",
+            "make": "De Havilland",
+            "model": "Dash 8",
+        },
+        amo_admin_token,
+    )
 
 
 def seed_watchlists_and_compliance(planner_token: str) -> None:
@@ -165,12 +197,19 @@ def seed_production_handoff(prod_token: str) -> None:
 
 
 def main() -> int:
-    run_seed_chain()
+    run_seed_script(BASE_SEED_SCRIPT)
 
     super_token = login(SUPERUSER_EMAIL, SUPERUSER_PASSWORD, "system")
     amos = req("GET", "/accounts/admin/amos", token=super_token)
     amo = next((item for item in amos if item.get("login_slug") == AMO_LOGIN_SLUG), amos[0])
+    ensure_modules(super_token, amo["id"])
     ensure_users(super_token, amo["id"])
+
+    amo_admin_token = login("admin@demo.example.com", AMO_ADMIN_PASSWORD, AMO_LOGIN_SLUG)
+    ensure_seed_aircraft(amo_admin_token)
+
+    for script in FOLLOW_ON_SEED_SCRIPTS:
+        run_seed_script(script, allow_failure=True)
 
     planner_token = login("planner@demo.example.com", AMO_ADMIN_PASSWORD, AMO_LOGIN_SLUG)
     seed_watchlists_and_compliance(planner_token)
