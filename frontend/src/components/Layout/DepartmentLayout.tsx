@@ -1448,10 +1448,11 @@ const DepartmentLayout: React.FC<Props> = ({
 
                 {!isAdminArea && activeDepartment === "planning" && (
                   <div className="sidebar__qms-nav" aria-label="Planning modules">
+                    <div className="sidebar__group-title">Planning module routes</div>
                     {[
                       { id: "pl-dash", label: "Planning Dashboard", path: `/maintenance/${amoCode}/planning/dashboard` },
-                      { id: "pl-util", label: "Utilisation", path: `/maintenance/${amoCode}/planning/utilisation-monitoring` },
-                      { id: "pl-forecast", label: "Forecast / Due", path: `/maintenance/${amoCode}/planning/forecast-due-list` },
+                      { id: "pl-util", label: "Utilisation Monitoring", path: `/maintenance/${amoCode}/planning/utilisation-monitoring` },
+                      { id: "pl-forecast", label: "Forecast / Due List", path: `/maintenance/${amoCode}/planning/forecast-due-list` },
                       { id: "pl-amp", label: "AMP", path: `/maintenance/${amoCode}/planning/amp` },
                       { id: "pl-task", label: "Task Library", path: `/maintenance/${amoCode}/planning/task-library` },
                       { id: "pl-adsb", label: "AD/SB/EO Control", path: `/maintenance/${amoCode}/planning/ad-sb-eo-control` },
@@ -1494,15 +1495,16 @@ const DepartmentLayout: React.FC<Props> = ({
 
                 {!isAdminArea && activeDepartment === "production" && (
                   <div className="sidebar__qms-nav" aria-label="Production modules">
+                    <div className="sidebar__group-title">Production module routes</div>
                     {[
                       { id: "p-dash", label: "Production Dashboard", path: `/maintenance/${amoCode}/production/dashboard` },
                       { id: "p-board", label: "Control Board", path: `/maintenance/${amoCode}/production/control-board` },
                       { id: "p-exec", label: "Work Order Execution", path: `/maintenance/${amoCode}/production/work-order-execution` },
-                      { id: "p-find", label: "Findings", path: `/maintenance/${amoCode}/production/findings` },
+                      { id: "p-find", label: "Findings / Non-Routines", path: `/maintenance/${amoCode}/production/findings` },
                       { id: "p-mat", label: "Materials / Parts", path: `/maintenance/${amoCode}/production/materials` },
                       { id: "p-ri", label: "Review / Inspection", path: `/maintenance/${amoCode}/production/review-inspection` },
                       { id: "p-release", label: "Release Preparation", path: `/maintenance/${amoCode}/production/release-prep` },
-                      { id: "p-comp", label: "Compliance Items", path: `/maintenance/${amoCode}/production/compliance-items` },
+                      { id: "p-comp", label: "Production Compliance Items", path: `/maintenance/${amoCode}/production/compliance-items` },
                       { id: "p-workspace", label: "Fleet Workspace", path: `/maintenance/${amoCode}/production/workspace` },
                     ].map((item) => {
                       const active = location.pathname === item.path;

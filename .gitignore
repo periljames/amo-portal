@@ -1,0 +1,3 @@
+# Runtime verification artifacts (do not commit)
+.artifacts/
+var/artifacts/
