@@ -16,6 +16,7 @@ from ...entitlements import require_module
 from ...security import get_current_active_user, require_roles
 from ..fleet.models import Aircraft, AircraftUsage
 from . import models, schemas
+from .publication_sources import get_publication_adapters
 
 router = APIRouter(prefix="/records", tags=["technical_records"], dependencies=[Depends(require_module("work"))])
 
@@ -23,6 +24,18 @@ EDITOR_ROLES = {
     AccountRole.SUPERUSER,
     AccountRole.AMO_ADMIN,
     AccountRole.PLANNING_ENGINEER,
+    AccountRole.PRODUCTION_ENGINEER,
+    AccountRole.CERTIFYING_ENGINEER,
+    AccountRole.CERTIFYING_TECHNICIAN,
+}
+PLANNING_EDITOR_ROLES = {
+    AccountRole.SUPERUSER,
+    AccountRole.AMO_ADMIN,
+    AccountRole.PLANNING_ENGINEER,
+}
+PRODUCTION_EXECUTION_ROLES = {
+    AccountRole.SUPERUSER,
+    AccountRole.AMO_ADMIN,
     AccountRole.PRODUCTION_ENGINEER,
     AccountRole.CERTIFYING_ENGINEER,
     AccountRole.CERTIFYING_TECHNICIAN,
@@ -41,6 +54,34 @@ def _audit(db: Session, amo_id: str, actor_id: str | None, entity_type: str, ent
         )
     )
 
+
+
+
+def _create_history(db: Session, amo_id: str, action_id: int, to_status: str, actor_id: str | None, event_type: str, from_status: str | None = None, notes: str | None = None):
+    db.add(models.ComplianceActionHistory(
+        amo_id=amo_id,
+        compliance_action_id=action_id,
+        from_status=from_status,
+        to_status=to_status,
+        event_type=event_type,
+        event_notes=notes,
+        actor_user_id=actor_id,
+    ))
+
+
+def _matches_watchlist(publication: dict, criteria: dict) -> bool:
+    if not criteria:
+        return True
+    for key in ("authority", "document_type", "ata_chapter"):
+        allowed = criteria.get(key)
+        if allowed and str(publication.get(key, "")).lower() not in {str(v).lower() for v in allowed}:
+            return False
+    kws = [str(v).lower() for v in criteria.get("keywords", []) if str(v).strip()]
+    if kws:
+        source_text = f"{publication.get('title','')} {publication.get('doc_number','')}".lower()
+        if not any(k in source_text for k in kws):
+            return False
+    return True
 
 def _get_settings(db: Session, amo_id: str) -> models.TechnicalRecordSetting:
     settings = db.query(models.TechnicalRecordSetting).filter_by(amo_id=amo_id).first()
@@ -287,3 +328,173 @@ def packs_preview(pack_type: str, target_id: str | None = None, db: Session = De
         "mode": "pdf-index-with-links",
         "message": "Bundle generation currently returns PDF index metadata and evidence links list.",
     }
+
+
+@router.get("/planning/dashboard", response_model=schemas.PlanningDashboardRead)
+def planning_dashboard(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    amo_id = current_user.effective_amo_id
+    today = date.today()
+    horizon = today + timedelta(days=14)
+    summary = {
+        "due_soon": db.query(models.AirworthinessItem).filter(models.AirworthinessItem.amo_id == amo_id, models.AirworthinessItem.next_due_date.isnot(None), models.AirworthinessItem.next_due_date <= horizon).count(),
+        "overdue": db.query(models.AirworthinessItem).filter(models.AirworthinessItem.amo_id == amo_id, models.AirworthinessItem.next_due_date.isnot(None), models.AirworthinessItem.next_due_date < today).count(),
+        "open_deferrals": db.query(models.Deferral).filter_by(amo_id=amo_id, status="Open").count(),
+        "open_watchlist_reviews": db.query(models.AirworthinessPublicationMatch).filter(models.AirworthinessPublicationMatch.amo_id == amo_id, models.AirworthinessPublicationMatch.review_status.in_(["Matched", "Under Review"])).count(),
+        "open_compliance_actions": db.query(models.ComplianceAction).filter(models.ComplianceAction.amo_id == amo_id, models.ComplianceAction.status.in_(["Under Review", "Planned", "Scheduled", "In Work", "Awaiting Certification"])).count(),
+    }
+    priority_items = []
+    for d in db.query(models.Deferral).filter_by(amo_id=amo_id, status="Open").order_by(models.Deferral.expiry_at.asc()).limit(5).all():
+        priority_items.append({"type": "Deferral", "ref": d.defect_ref, "tail": d.tail_id, "due": d.expiry_at.isoformat(), "status": d.status})
+    for a in db.query(models.ComplianceAction).filter(models.ComplianceAction.amo_id == amo_id, models.ComplianceAction.status.in_(["Under Review", "Planned"])).order_by(models.ComplianceAction.created_at.desc()).limit(5).all():
+        priority_items.append({"type": "Compliance", "ref": f"CA-{a.id}", "due": a.due_date.isoformat() if a.due_date else None, "status": a.status})
+    return schemas.PlanningDashboardRead(summary=summary, priority_items=priority_items)
+
+
+@router.get("/production/dashboard", response_model=schemas.ProductionDashboardRead)
+def production_dashboard(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    amo_id = current_user.effective_amo_id
+    active = db.query(WorkOrder).filter(WorkOrder.amo_id == amo_id, WorkOrder.status.in_(["RELEASED", "IN_PROGRESS", "INSPECTED"])).count()
+    overdue = db.query(WorkOrder).filter(WorkOrder.amo_id == amo_id, WorkOrder.due_date.isnot(None), WorkOrder.due_date < date.today(), WorkOrder.status.notin_(["CLOSED", "ARCHIVED", "CANCELLED"])).count()
+    awaiting_cert = db.query(models.ComplianceAction).filter(models.ComplianceAction.amo_id == amo_id, models.ComplianceAction.status == "Awaiting Certification").count()
+    summary = {"active_work_orders": active, "overdue_tasks": overdue, "awaiting_certification": awaiting_cert}
+    bottlenecks = [
+        {"name": "Awaiting certification", "count": awaiting_cert, "route": "/production/compliance-items"},
+        {"name": "Overdue work orders", "count": overdue, "route": "/production/work-order-execution"},
+    ]
+    return schemas.ProductionDashboardRead(summary=summary, bottlenecks=bottlenecks)
+
+
+@router.get("/watchlists", response_model=list[schemas.WatchlistRead])
+def list_watchlists(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    return db.query(models.AirworthinessWatchlist).filter_by(amo_id=current_user.effective_amo_id).order_by(models.AirworthinessWatchlist.updated_at.desc()).all()
+
+
+@router.post("/watchlists", response_model=schemas.WatchlistRead)
+def create_watchlist(payload: schemas.WatchlistCreate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*PLANNING_EDITOR_ROLES))):
+    row = models.AirworthinessWatchlist(amo_id=current_user.effective_amo_id, created_by_user_id=current_user.id, **payload.model_dump())
+    db.add(row)
+    db.flush()
+    _audit(db, current_user.effective_amo_id, current_user.id, "AirworthinessWatchlist", str(row.id), "CREATE", payload.model_dump())
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.post("/watchlists/{watchlist_id}/run", response_model=schemas.WatchlistRunResult)
+def run_watchlist(watchlist_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*PLANNING_EDITOR_ROLES))):
+    amo_id = current_user.effective_amo_id
+    watchlist = db.query(models.AirworthinessWatchlist).filter_by(amo_id=amo_id, id=watchlist_id).first()
+    if not watchlist:
+        raise HTTPException(status_code=404, detail="Watchlist not found")
+
+    publications_ingested = 0
+    source_publications = []
+    for adapter in get_publication_adapters():
+        source_publications.extend(adapter.fetch(watchlist.criteria_json or {}))
+    for pub in source_publications:
+        if not _matches_watchlist(pub, watchlist.criteria_json or {}):
+            continue
+        existing = db.query(models.AirworthinessPublication).filter_by(amo_id=amo_id, source=pub["source"], doc_number=pub["doc_number"]).first()
+        if not existing:
+            existing = models.AirworthinessPublication(amo_id=amo_id, raw_metadata_json={}, source_link=None, published_date=pub.get("published_date") or date.today(), **{k: v for k, v in pub.items() if k != "published_date"})
+            db.add(existing)
+            db.flush()
+            publications_ingested += 1
+        if db.query(models.AirworthinessPublicationMatch).filter_by(amo_id=amo_id, watchlist_id=watchlist.id, publication_id=existing.id).first():
+            continue
+        match = models.AirworthinessPublicationMatch(
+            amo_id=amo_id,
+            watchlist_id=watchlist.id,
+            publication_id=existing.id,
+            classification="Potentially Applicable",
+            review_status="Matched",
+            matched_fleet_json=[a.serial_number for a in db.query(Aircraft).filter(Aircraft.amo_id == amo_id).limit(5).all()],
+        )
+        db.add(match)
+
+    watchlist.run_count += 1
+    watchlist.last_run_at = datetime.now(UTC)
+    watchlist.next_run_at = datetime.now(UTC) + timedelta(days=1)
+    db.flush()
+    matches_created = db.query(models.AirworthinessPublicationMatch).filter_by(amo_id=amo_id, watchlist_id=watchlist.id).count()
+    _audit(db, amo_id, current_user.id, "AirworthinessWatchlist", str(watchlist.id), "RUN", {"matches": matches_created})
+    db.commit()
+    return schemas.WatchlistRunResult(watchlist_id=watchlist.id, publications_ingested=publications_ingested, matches_created=matches_created)
+
+
+@router.get("/publications/review", response_model=list[schemas.PublicationReviewRead])
+def publication_review_queue(status_filter: str | None = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    amo_id = current_user.effective_amo_id
+    q = db.query(models.AirworthinessPublicationMatch, models.AirworthinessPublication).join(
+        models.AirworthinessPublication, models.AirworthinessPublication.id == models.AirworthinessPublicationMatch.publication_id
+    ).filter(models.AirworthinessPublicationMatch.amo_id == amo_id)
+    if status_filter:
+        q = q.filter(models.AirworthinessPublicationMatch.review_status == status_filter)
+    rows = q.order_by(models.AirworthinessPublicationMatch.created_at.desc()).all()
+    out = []
+    for match, publication in rows:
+        out.append(schemas.PublicationReviewRead(
+            match_id=match.id, watchlist_id=match.watchlist_id, publication_id=publication.id, authority=publication.authority, source=publication.source,
+            document_type=publication.document_type, doc_number=publication.doc_number, title=publication.title, effectivity_summary=publication.effectivity_summary,
+            classification=match.classification, review_status=match.review_status, matched_fleet=match.matched_fleet_json or [], ageing_days=max(0, (date.today() - match.created_at.date()).days),
+            assigned_reviewer_user_id=match.assigned_reviewer_user_id, published_date=publication.published_date
+        ))
+    return out
+
+
+@router.post("/publications/review/{match_id}/decision", response_model=schemas.PublicationReviewRead)
+def decide_publication_review(match_id: int, payload: schemas.PublicationReviewDecisionRequest, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*PLANNING_EDITOR_ROLES))):
+    amo_id = current_user.effective_amo_id
+    row = db.query(models.AirworthinessPublicationMatch).filter_by(amo_id=amo_id, id=match_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Match not found")
+    pub = db.query(models.AirworthinessPublication).filter_by(amo_id=amo_id, id=row.publication_id).first()
+    row.review_status = payload.review_status
+    row.classification = payload.classification
+    row.assigned_reviewer_user_id = payload.assigned_reviewer_user_id or current_user.id
+    row.reviewed_at = datetime.now(UTC)
+    _audit(db, amo_id, current_user.id, "PublicationMatch", str(row.id), "REVIEW", payload.model_dump())
+    db.commit()
+    return schemas.PublicationReviewRead(
+        match_id=row.id, watchlist_id=row.watchlist_id, publication_id=pub.id, authority=pub.authority, source=pub.source, document_type=pub.document_type,
+        doc_number=pub.doc_number, title=pub.title, effectivity_summary=pub.effectivity_summary, classification=row.classification, review_status=row.review_status,
+        matched_fleet=row.matched_fleet_json or [], ageing_days=max(0, (date.today() - row.created_at.date()).days), assigned_reviewer_user_id=row.assigned_reviewer_user_id, published_date=pub.published_date
+    )
+
+
+@router.get("/compliance-actions", response_model=list[schemas.ComplianceActionRead])
+def list_compliance_actions(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    return db.query(models.ComplianceAction).filter_by(amo_id=current_user.effective_amo_id).order_by(models.ComplianceAction.updated_at.desc()).all()
+
+
+@router.post("/compliance-actions", response_model=schemas.ComplianceActionRead)
+def create_compliance_action(payload: schemas.ComplianceActionCreate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*PLANNING_EDITOR_ROLES))):
+    amo_id = current_user.effective_amo_id
+    match = db.query(models.AirworthinessPublicationMatch).filter_by(amo_id=amo_id, id=payload.publication_match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Publication match not found")
+    row = models.ComplianceAction(amo_id=amo_id, created_by_user_id=current_user.id, **payload.model_dump())
+    db.add(row)
+    db.flush()
+    _create_history(db, amo_id, row.id, row.status, current_user.id, "CREATE")
+    if match.review_status == "Matched":
+        match.review_status = "Under Review"
+    _audit(db, amo_id, current_user.id, "ComplianceAction", str(row.id), "CREATE", payload.model_dump())
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.post("/compliance-actions/{action_id}/status", response_model=schemas.ComplianceActionRead)
+def update_compliance_action_status(action_id: int, payload: schemas.ComplianceActionStatusUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*PLANNING_EDITOR_ROLES, *PRODUCTION_EXECUTION_ROLES))):
+    amo_id = current_user.effective_amo_id
+    row = db.query(models.ComplianceAction).filter_by(amo_id=amo_id, id=action_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Compliance action not found")
+    previous = row.status
+    row.status = payload.status
+    _create_history(db, amo_id, row.id, payload.status, current_user.id, "STATUS_CHANGE", previous, payload.event_notes)
+    _audit(db, amo_id, current_user.id, "ComplianceAction", str(row.id), "STATUS_CHANGE", payload.model_dump())
+    db.commit()
+    db.refresh(row)
+    return row

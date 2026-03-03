@@ -165,3 +165,105 @@ class ExceptionQueueItem(Base):
     resolution_notes = Column(Text, nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     resolved_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class AirworthinessWatchlist(Base):
+    __tablename__ = "technical_airworthiness_watchlists"
+    __table_args__ = (
+        Index("ix_tr_watchlists_amo_status", "amo_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    status = Column(String(16), nullable=False, default="Active", index=True)
+    criteria_json = Column(JSON, nullable=False, default=dict)
+    run_count = Column(Integer, nullable=False, default=0)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class AirworthinessPublication(Base):
+    __tablename__ = "technical_airworthiness_publications"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "source", "doc_number", name="uq_tr_publication_source_doc"),
+        Index("ix_tr_publications_amo_date", "amo_id", "published_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    source = Column(String(32), nullable=False, index=True)
+    authority = Column(String(32), nullable=False, index=True)
+    document_type = Column(String(32), nullable=False, index=True)
+    doc_number = Column(String(96), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    ata_chapter = Column(String(16), nullable=True)
+    effectivity_summary = Column(Text, nullable=True)
+    keywords = Column(JSON, nullable=False, default=list)
+    raw_metadata_json = Column(JSON, nullable=False, default=dict)
+    source_link = Column(String(512), nullable=True)
+    published_date = Column(Date, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class AirworthinessPublicationMatch(Base):
+    __tablename__ = "technical_airworthiness_publication_matches"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "watchlist_id", "publication_id", name="uq_tr_watchlist_publication_match"),
+        Index("ix_tr_pub_match_amo_status", "amo_id", "review_status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    watchlist_id = Column(Integer, ForeignKey("technical_airworthiness_watchlists.id", ondelete="CASCADE"), nullable=False, index=True)
+    publication_id = Column(Integer, ForeignKey("technical_airworthiness_publications.id", ondelete="CASCADE"), nullable=False, index=True)
+    classification = Column(String(32), nullable=False, default="Potentially Applicable", index=True)
+    matched_fleet_json = Column(JSON, nullable=False, default=list)
+    matched_components_json = Column(JSON, nullable=False, default=list)
+    review_status = Column(String(32), nullable=False, default="Matched", index=True)
+    assigned_reviewer_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ComplianceAction(Base):
+    __tablename__ = "technical_compliance_actions"
+    __table_args__ = (
+        Index("ix_tr_comp_actions_amo_status", "amo_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    publication_match_id = Column(Integer, ForeignKey("technical_airworthiness_publication_matches.id", ondelete="CASCADE"), nullable=False, index=True)
+    decision = Column(String(48), nullable=False)
+    status = Column(String(32), nullable=False, default="Under Review", index=True)
+    due_date = Column(Date, nullable=True)
+    due_hours = Column(Float, nullable=True)
+    due_cycles = Column(Float, nullable=True)
+    recurring_interval_days = Column(Integer, nullable=True)
+    owner_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    package_ref = Column(String(64), nullable=True)
+    work_order_ref = Column(String(64), nullable=True)
+    evidence_json = Column(JSON, nullable=False, default=list)
+    decision_notes = Column(Text, nullable=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class ComplianceActionHistory(Base):
+    __tablename__ = "technical_compliance_action_history"
+    __table_args__ = (Index("ix_tr_comp_hist_amo_action", "amo_id", "compliance_action_id"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    compliance_action_id = Column(Integer, ForeignKey("technical_compliance_actions.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_status = Column(String(32), nullable=True)
+    to_status = Column(String(32), nullable=False)
+    event_type = Column(String(32), nullable=False)
+    event_notes = Column(Text, nullable=True)
+    actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

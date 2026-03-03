@@ -374,3 +374,6 @@ Stable viewer route retained: `/maintenance/:amoCode/:department/qms/documents/:
 - Service worker enabled route support for AeroDoc/manual viewer cache when `VITE_AERODOC_PWA_ENABLED=1`.
 
 - `GET /aerodoc/public/verify/rate-limit/stats`
+
+- Added tenant-scoped Planning/Production workflow routes and watchlist/compliance API-backed pages (see docs/planning_production_watchlists.md).
+- Planning/Production sidebars now point to full operational route set; Quality cockpit snapshot includes AD/SB compliance exception counts and action-queue items.

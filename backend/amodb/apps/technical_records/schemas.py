@@ -131,3 +131,90 @@ class TechnicalRecordSettingsRead(BaseModel):
 
 class TechnicalRecordSettingsUpdate(TechnicalRecordSettingsRead):
     pass
+
+
+class PlanningDashboardRead(BaseModel):
+    summary: dict[str, int]
+    priority_items: list[dict[str, Any]]
+
+
+class ProductionDashboardRead(BaseModel):
+    summary: dict[str, int]
+    bottlenecks: list[dict[str, Any]]
+
+
+class WatchlistCreate(BaseModel):
+    name: str
+    status: str = "Active"
+    criteria_json: dict[str, Any] = {}
+    next_run_at: Optional[datetime] = None
+
+
+class WatchlistRead(WatchlistCreate):
+    id: int
+    run_count: int
+    last_run_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WatchlistRunResult(BaseModel):
+    watchlist_id: int
+    publications_ingested: int
+    matches_created: int
+
+
+class PublicationReviewRead(BaseModel):
+    match_id: int
+    watchlist_id: int
+    publication_id: int
+    authority: str
+    source: str
+    document_type: str
+    doc_number: str
+    title: str
+    effectivity_summary: Optional[str] = None
+    classification: str
+    review_status: str
+    matched_fleet: list[str] = []
+    ageing_days: int
+    assigned_reviewer_user_id: Optional[str] = None
+    published_date: Optional[date] = None
+
+
+class PublicationReviewDecisionRequest(BaseModel):
+    review_status: str
+    classification: str
+    assigned_reviewer_user_id: Optional[str] = None
+
+
+class ComplianceActionCreate(BaseModel):
+    publication_match_id: int
+    decision: str
+    status: str = "Under Review"
+    due_date: Optional[date] = None
+    due_hours: Optional[float] = None
+    due_cycles: Optional[float] = None
+    recurring_interval_days: Optional[int] = None
+    owner_user_id: Optional[str] = None
+    package_ref: Optional[str] = None
+    work_order_ref: Optional[str] = None
+    evidence_json: list[str] = []
+    decision_notes: Optional[str] = None
+
+
+class ComplianceActionRead(ComplianceActionCreate):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ComplianceActionStatusUpdate(BaseModel):
+    status: str
+    event_notes: Optional[str] = None
