@@ -389,3 +389,121 @@ Stable viewer route retained: `/maintenance/:amoCode/:department/qms/documents/:
 - Verified tenant route set under `/maintenance/:amoCode/planning/*` and `/maintenance/:amoCode/production/*` with authenticated seeded users in PostgreSQL-backed runtime.
 - Authenticated screenshot evidence captured under `docs/screenshots/planning-production/` with manifest at `docs/screenshots/planning-production/manifest.md`.
 - Compatibility path decision retained: `/maintenance/:amoCode/production/workspace` kept for legacy fleet workspace access.
+
+## E-Signatures API routes (Phase 1 backend)
+- `/api/v1/esign/webauthn/registration/options`
+- `/api/v1/esign/webauthn/registration/verify`
+- `/api/v1/esign/webauthn/assertion/options`
+- `/api/v1/esign/webauthn/assertion/verify`
+- `/api/v1/esign/requests`
+- `/api/v1/esign/requests/{request_id}/send`
+- `/api/v1/esign/requests/{request_id}/signing-context`
+- `/api/v1/esign/intents/{intent_id}/assertion/options`
+- `/api/v1/esign/intents/{intent_id}/assertion/verify-and-sign`
+- `/api/v1/esign/verify/{token}` (public)
+- `/api/v1/esign/verify/{token}.json` (public)
+- `/api/v1/esign/tokens/{token_id}/revoke`
+
+- `/api/v1/esign/artifacts/{artifact_id}/validation`
+- `/api/v1/esign/artifacts/{artifact_id}/revalidate`
+- `/api/v1/esign/provider/health`
+- `/api/v1/esign/requests/{request_id}/evidence-bundle`
+- `/api/v1/esign/evidence-bundles/{bundle_id}`
+- `/api/v1/esign/evidence-bundles/{bundle_id}/download`
+- `/api/v1/esign/requests/{request_id}/overrides`
+- `/api/v1/esign/provider/readiness`
+- `/api/v1/esign/artifacts/{artifact_id}/revalidate-now`
+- `/api/v1/esign/reports/trust-summary`
+## Changed in this run (2026-03-05) — E-Sign Phase 3 frontend/operator flows
+### New frontend routes
+- `/maintenance/:amoCode/:department/esign`
+- `/maintenance/:amoCode/:department/esign/requests`
+- `/maintenance/:amoCode/:department/esign/requests/new`
+- `/maintenance/:amoCode/:department/esign/requests/:requestId`
+- `/maintenance/:amoCode/:department/esign/requests/:requestId/evidence`
+- `/maintenance/:amoCode/:department/esign/requests/:requestId/overrides` (admin)
+- `/maintenance/:amoCode/:department/esign/artifacts/:artifactId/validation`
+- `/maintenance/:amoCode/:department/esign/provider` (admin)
+- `/maintenance/:amoCode/:department/esign/reports/trust-summary` (admin)
+- `/maintenance/:amoCode/:department/esign/sign/:intentId`
+- `/verify/:token` (public)
+
+### Trust-labeling notes
+- UI separately labels WebAuthn approval, storage integrity verification, and cryptographic signature validation.
+- Appearance-only artifacts are explicitly labeled non-cryptographic.
+
+## Changed in this run (2026-03-05) — E-Sign Phase 3.1 verify-link hardening
+### New API routes
+- `/api/v1/esign/artifacts/{artifact_id}/verify-link` (private admin)
+- `/api/v1/esign/artifacts/{artifact_id}/verify-link/regenerate` (private admin)
+
+### Verify/QR reliability notes
+- QR destination URL now built from trusted public verify config.
+- Public verify keeps generic 404 for invalid/expired/revoked tokens.
+- Frontend public verify distinguishes generic not-found vs transient server error.
+
+
+## Changed in this run (2026-03-05) — E-Sign Phase 3.2 artifact access/compare
+### New API routes
+- `/api/v1/esign/artifacts/{artifact_id}/access`
+- `/api/v1/esign/artifacts/{artifact_id}/preview`
+- `/api/v1/esign/artifacts/{artifact_id}/download`
+- `/api/v1/esign/artifacts/{artifact_id}/compare-hash`
+- `/api/v1/esign/verify/{token}/artifact-access`
+- `/api/v1/esign/verify/{token}/download`
+- `/api/v1/esign/verify/{token}/evidence-summary`
+- `/api/v1/esign/verify/{token}/compare-hash`
+
+### Semantics
+- Valid verification record and artifact download permission are separate policy decisions.
+- Public bad tokens remain generic non-enumerating 404.
+
+## Changed in this run (2026-03-05) — Shared Loading System (Phase 3.3)
+### Route impact
+- No new HTTP routes.
+- Existing route fallbacks now use shared `PageLoader` during lazy route transitions.
+
+### UX behavior updates
+- Added shared loading primitives for global overlay, page, section, and inline operation states.
+- Public verify, signer passkey flow, and artifact validation actions now emit staged loading labels instead of appearing idle.
+
+## Changed in this run (2026-03-05) — Shared Loading visual refinement
+### Route impact
+- No route changes.
+
+### UX behavior updates
+- Shared loader now uses `InstrumentLoader` motion language (encircled ring + internal sweep bar + waypoint pulse).
+- Overlay/page/section/inline loaders all consume the same primitive with size/tone variants.
+- Reduced-motion mode disables continuous orbit/sweep animations while preserving status clarity.
+
+## Changed in this run (2026-03-05) — Shared Loading validation tooling + escalation rules (Phase 3.4)
+### New internal routes
+- `/ui/loader` (admin/internal)
+- `/maintenance/:amoCode/admin/ui/loader` (admin/internal)
+
+### UX behavior updates
+- Added deterministic loader escalation thresholds (inline -> section -> overlay + long-wait hint).
+- Global loader now applies centralized `pickLoaderPresentation` decisions so long operations never appear frozen.
+- Added route-change task cleanup for non-persistent tasks to prevent stale loaders.
+
+## Changed in this run (2026-03-05) — Shared Loading contrast hardening (Phase 3.5)
+### Route impact
+- No route changes.
+
+### UX behavior updates
+- Added loader contrast tokens and high-contrast mode support (`normal|high`) for sunlight readability.
+- Public verify page loader now opts into high-contrast readability by default.
+- Added prefers-contrast and forced-colors fallback styling for loader surfaces, badges, and status text.
+
+## Changed in this run (2026-03-05) — Passkeys for signing UI enablement (Phase 3.6)
+### New internal/private routes
+- `/maintenance/:amoCode/:department/account/security` (authenticated + E-Sign entitlement gated UI)
+
+### New/extended API routes
+- `GET /api/v1/esign/webauthn/credentials`
+- `DELETE /api/v1/esign/webauthn/credentials/{credential_id}`
+
+### UX behavior updates
+- Signer page now shows `Sign with passkey` when credential exists, otherwise `Set up passkey to sign` and auto-continues after successful setup.
+- Security page exposes passkey add/list/remove management for authenticated tenant users.
+- Passkey UX includes explicit unsupported/insecure-context messaging and staged loader feedback.

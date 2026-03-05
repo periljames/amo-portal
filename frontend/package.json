@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "perf:report": "node scripts/perf-report.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:unit": "node --test tests/unit/**/*.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

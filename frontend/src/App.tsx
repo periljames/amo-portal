@@ -7,6 +7,8 @@ import { useTimeOfDayTheme } from "./hooks/useTimeOfDayTheme";
 import { useColorScheme } from "./hooks/useColorScheme";
 
 import { ToastProvider } from "./components/feedback/ToastProvider";
+import { GlobalLoadingProvider } from "./components/loading/GlobalLoadingProvider";
+import GlobalLoaderOverlay from "./components/loading/GlobalLoaderOverlay";
 
 import "./styles/auth.css";
 
@@ -22,7 +24,10 @@ const App: React.FC = () => {
 
   return (
     <ToastProvider>
-      <AppRouter />
+      <GlobalLoadingProvider>
+        <AppRouter />
+        <GlobalLoaderOverlay />
+      </GlobalLoadingProvider>
     </ToastProvider>
   );
 };

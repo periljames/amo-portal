@@ -10,6 +10,8 @@ import { Routes, Route, Navigate, useLocation, useParams } from "react-router-do
 import * as DocControlPages from "./pages/DocControlPages";
 import * as TechnicalRecordsPages from "./pages/TechnicalRecordsPages";
 import * as PlanningProductionPages from "./pages/PlanningProductionPages";
+import PageLoader from "./components/loading/PageLoader";
+import { isLoaderGalleryEnabled } from "./components/loading/galleryAccess";
 
 import {
   fetchOnboardingStatus,
@@ -65,6 +67,19 @@ const SubscriptionManagementPage = lazy(() => import("./pages/SubscriptionManage
 const UpsellPage = lazy(() => import("./pages/UpsellPage"));
 const UserWidgetsPage = lazy(() => import("./pages/UserWidgetsPage"));
 const OnboardingPasswordPage = lazy(() => import("./pages/OnboardingPasswordPage"));
+const ESignDashboardPage = lazy(() => import("./pages/esign/ESignDashboardPage"));
+const ESignRequestsPage = lazy(() => import("./pages/esign/ESignRequestsPage"));
+const ESignRequestNewPage = lazy(() => import("./pages/esign/ESignRequestNewPage"));
+const ESignRequestDetailPage = lazy(() => import("./pages/esign/ESignRequestDetailPage"));
+const ESignEvidencePage = lazy(() => import("./pages/esign/ESignEvidencePage"));
+const ESignArtifactValidationPage = lazy(() => import("./pages/esign/ESignArtifactValidationPage"));
+const ESignProviderPage = lazy(() => import("./pages/esign/ESignProviderPage"));
+const ESignTrustSummaryPage = lazy(() => import("./pages/esign/ESignTrustSummaryPage"));
+const ESignOverridesPage = lazy(() => import("./pages/esign/ESignOverridesPage"));
+const ESignSignerPage = lazy(() => import("./pages/esign/ESignSignerPage"));
+const ESignPublicVerifyPage = lazy(() => import("./pages/esign/ESignPublicVerifyPage"));
+const LoaderGalleryPage = lazy(() => import("./pages/admin/LoaderGalleryPage"));
+const AccountSecurityPage = lazy(() => import("./pages/AccountSecurityPage"));
 
 const QualityAuditPlannerPage = lazy(() => import("./pages/QualityAuditPlannerPage"));
 const QualityAuditPlannerCalendarPage = lazy(() => import("./pages/QualityAuditPlannerCalendarPage"));
@@ -222,6 +237,21 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
   return children;
 };
 
+
+const RequireLoaderGallery: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const currentUser = getCachedUser();
+  const isAdmin = Boolean(currentUser?.is_superuser || currentUser?.is_amo_admin);
+  const enabled = isLoaderGalleryEnabled({
+    isAdmin,
+    isProd: import.meta.env.PROD,
+    flag: import.meta.env.VITE_ENABLE_LOADER_GALLERY,
+  });
+  if (!enabled) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
+};
+
 /**
  * AppRouter
  * - Defines all app routes.
@@ -229,7 +259,7 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
  */
 export const AppRouter: React.FC = () => {
   return (
-    <Suspense fallback={<div className="page-loading">Loading…</div>}>
+    <Suspense fallback={<PageLoader title="Loading route" subtitle="Syncing module navigation" phase="syncing" />}>
     <Routes>
 
       <Route path="/doc-control" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
@@ -809,6 +839,24 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/:department/qms/aerodoc/hangar" element={<RequireAuth><AeroDocHangarDashboardPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/qms/aerodoc/compliance" element={<RequireAuth><AeroDocComplianceHealthPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/qms/aerodoc/audit-mode" element={<RequireAuth><AeroDocAuditModePage /></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/:department/esign" element={<RequireAuth><ESignDashboardPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/requests" element={<RequireAuth><ESignRequestsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/requests/new" element={<RequireAuth><ESignRequestNewPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/requests/:requestId" element={<RequireAuth><ESignRequestDetailPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/requests/:requestId/evidence" element={<RequireAuth><ESignEvidencePage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/requests/:requestId/overrides" element={<RequireAuth><RequireTenantAdmin><ESignOverridesPage /></RequireTenantAdmin></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/artifacts/:artifactId/validation" element={<RequireAuth><ESignArtifactValidationPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/provider" element={<RequireAuth><RequireTenantAdmin><ESignProviderPage /></RequireTenantAdmin></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/reports/trust-summary" element={<RequireAuth><RequireTenantAdmin><ESignTrustSummaryPage /></RequireTenantAdmin></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/sign/:intentId" element={<RequireAuth><ESignSignerPage /></RequireAuth>} />
+
+      <Route path="/verify/:token" element={<ESignPublicVerifyPage />} />
+
+      <Route path="/maintenance/:amoCode/:department/account/security" element={<RequireAuth><AccountSecurityPage /></RequireAuth>} />
+
+      <Route path="/ui/loader" element={<RequireAuth><RequireLoaderGallery><LoaderGalleryPage /></RequireLoaderGallery></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/admin/ui/loader" element={<RequireAuth><RequireLoaderGallery><LoaderGalleryPage /></RequireLoaderGallery></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/quality/audits" element={<RequireAuth><QualityAliasRedirect suffix="/audits" /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/audits/plan" element={<RequireAuth><QualityAliasRedirect suffix="/audits/plan" /></RequireAuth>} />
