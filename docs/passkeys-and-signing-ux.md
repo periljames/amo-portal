@@ -65,3 +65,9 @@ If passkeys fail to prompt:
 - Passkeys can be renamed in Account Settings → Security to distinguish multiple authenticators.
 - Nicknames are tenant-private metadata for authenticated users only and are never exposed on public verify routes.
 - Removing a passkey deactivates it; rename/remove actions are audited server-side.
+
+
+## Notification + inbox relationship (Phase 3.8)
+- Notifications are lightweight prompts that point users to action surfaces.
+- The inbox remains the durable list of signature tasks and filtering controls.
+- Notification content avoids sensitive document details until user opens the target page.

@@ -30,6 +30,7 @@ def db_session(tmp_path):
         models.ESignProviderEvent.__table__,
         models.ESignPolicyOverride.__table__,
         models.ESignEvidenceBundle.__table__,
+        models.ESignNotification.__table__,
     ]:
         table.create(bind=engine, checkfirst=True)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
@@ -603,3 +604,59 @@ def test_inbox_pagination_stable_order(db_session, tmp_path, monkeypatch):
     ids1 = [item.signature_request_id for item in out1.items]
     ids2 = [item.signature_request_id for item in out2.items]
     assert set(ids1).isdisjoint(set(ids2))
+
+
+def test_notification_created_on_send_and_user_scoped(db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr(services, "_audit", lambda *args, **kwargs: None)
+    sender = _user("amo-1", "admin")
+    signer_user = _user("amo-1", "signer")
+    source = tmp_path / "notif-send.pdf"; _pdf(source)
+
+    out = services.create_signature_request(
+        db_session,
+        sender,
+        schemas.RequestCreateIn(
+            document_id="DOC-N",
+            source_storage_ref=str(source),
+            title="Needs signature",
+            signers=[schemas.SignerIn(signer_type=models.SignerType.INTERNAL_USER.value, user_id=signer_user.id, display_name="Signer")],
+            field_placements=[schemas.FieldPlacement(x=10, y=10)],
+        ),
+    )
+    services.send_request(db_session, sender, out.request_id)
+
+    notes_for_signer = services.list_notifications(db_session, signer_user)
+    assert len(notes_for_signer) == 1
+    assert notes_for_signer[0].type == models.NotificationType.SIGNATURE_REQUESTED.value
+
+    other = _user("amo-1", "other")
+    assert services.list_notifications(db_session, other) == []
+
+
+def test_notification_count_and_read_and_dismiss(db_session, monkeypatch):
+    monkeypatch.setattr(services, "_audit", lambda *args, **kwargs: None)
+    user = _user("amo-1", "u-1")
+    services._create_notification(
+        db_session,
+        tenant_id=user.amo_id,
+        user_id=user.id,
+        notification_type=models.NotificationType.SIGNATURE_REQUESTED.value,
+        title="Signature requested",
+        body="Please review",
+        link_path="/maintenance/amo-1/quality/esign/inbox",
+        actor_user_id=user.id,
+    )
+    db_session.commit()
+
+    count = services.notification_count(db_session, user)
+    assert count.unread_count == 1
+    note = services.list_notifications(db_session, user)[0]
+
+    read = services.mark_notification_read(db_session, user, note.id)
+    assert read.read_at is not None
+
+    count_after_read = services.notification_count(db_session, user)
+    assert count_after_read.unread_count == 0
+
+    services.dismiss_notification(db_session, user, note.id)
+    assert services.list_notifications(db_session, user) == []

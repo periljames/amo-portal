@@ -197,3 +197,20 @@ export type InboxCount = {
   pending_count: number;
   expiring_soon_count: number;
 };
+
+
+export type ESignNotification = {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  link_path: string;
+  request_id: string | null;
+  created_at: string;
+  read_at: string | null;
+  dismissed_at: string | null;
+};
+
+export type ESignNotificationCount = {
+  unread_count: number;
+};

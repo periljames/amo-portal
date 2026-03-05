@@ -522,3 +522,16 @@ Stable viewer route retained: `/maintenance/:amoCode/:department/qms/documents/:
 - Account Security passkey list supports rename + remove flows and shows nickname-first labels.
 - E-Sign dashboard includes a “Pending your signature” widget with in-app inbox count.
 - Action Required inbox lists pending internal signer items and deep-links to Review & Sign.
+
+
+## Changed in this run (2026-03-05) — In-app E-Sign notifications (Phase 3.8)
+### New/extended API routes
+- `GET /api/v1/esign/notifications?unread_only=1`
+- `GET /api/v1/esign/notifications/count`
+- `POST /api/v1/esign/notifications/{id}/read`
+- `POST /api/v1/esign/notifications/{id}/dismiss`
+
+### UX behavior updates
+- Internal users now receive in-app `Signature requested` notifications when a request is sent.
+- E-Sign dashboard and inbox expose a bell/dropdown with unread badge and View/Dismiss actions.
+- Notifications intentionally carry minimal context and deep-link to internal action routes.

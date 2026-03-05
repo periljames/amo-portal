@@ -49,3 +49,9 @@ Flow:
 - Internal users now have an in-app signing inbox (`/maintenance/:amoCode/:department/esign/inbox`) listing requests requiring their approval.
 - Inbox items link directly to the existing signer flow (`/maintenance/:amoCode/:department/esign/sign/:intentId`) when an active intent exists.
 - This complements notification channels by ensuring pending signature tasks are visible in-app without email dependency.
+
+
+## In-app notifications (Phase 3.8)
+- When a request is sent to internal signers, E-Sign creates in-app `SIGNATURE_REQUESTED` notifications scoped to each signer.
+- Notifications show minimal context (`Signature requested`) and route users to internal signing surfaces (inbox/request detail) via safe internal links.
+- Notification read/dismiss actions are user-scoped and audited.

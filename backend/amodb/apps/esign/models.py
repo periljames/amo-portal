@@ -101,6 +101,13 @@ class EvidenceFormat(str, enum.Enum):
     JSON = "JSON"
 
 
+class NotificationType(str, enum.Enum):
+    SIGNATURE_REQUESTED = "SIGNATURE_REQUESTED"
+    REMINDER = "REMINDER"
+    REQUEST_CANCELLED = "REQUEST_CANCELLED"
+    REQUEST_COMPLETED = "REQUEST_COMPLETED"
+
+
 class ESignDocumentVersion(Base):
     __tablename__ = "esign_document_versions"
 
@@ -294,6 +301,27 @@ class ESignEvidenceBundle(Base):
     format = Column(String(8), nullable=False, default=EvidenceFormat.ZIP.value)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
+
+
+
+class ESignNotification(Base):
+    __tablename__ = "esign_notifications"
+    __table_args__ = (
+        Index("ix_esign_notifications_tenant_user_read", "tenant_id", "user_id", "read_at"),
+        Index("ix_esign_notifications_tenant_user_created", "tenant_id", "user_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid7)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    type = Column(String(48), nullable=False)
+    title = Column(Text, nullable=False)
+    body = Column(Text, nullable=True)
+    link_path = Column(Text, nullable=False)
+    request_id = Column(String(36), ForeignKey("esign_signature_requests.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    dismissed_at = Column(DateTime(timezone=True), nullable=True)
 
 class ESignWebAuthnChallenge(Base):
     __tablename__ = "esign_webauthn_challenges"

@@ -250,6 +250,48 @@ def create_signature_request(db: Session, current_user: account_models.User, pay
     return schemas.RequestCreateOut(request_id=req.id, doc_version_id=docv.id, doc_hash=digest, policy_code=policy.policy_code, policy_minimum_level=policy.minimum_level)
 
 
+
+
+def _create_notification(
+    db: Session,
+    *,
+    tenant_id: str,
+    user_id: str,
+    notification_type: str,
+    title: str,
+    body: str | None,
+    link_path: str,
+    request_id: str | None = None,
+    actor_user_id: str | None = None,
+):
+    row = models.ESignNotification(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        type=notification_type,
+        title=title,
+        body=body,
+        link_path=link_path,
+        request_id=request_id,
+    )
+    db.add(row)
+    db.flush()
+    _audit(db, amo_id=tenant_id, actor_user_id=actor_user_id, entity_type="esign_notification", entity_id=row.id, action="ESIGN_NOTIFICATION_CREATED", after={"type": notification_type, "request_id": request_id})
+    return row
+
+
+def _notification_out(row: models.ESignNotification) -> schemas.NotificationOut:
+    return schemas.NotificationOut(
+        id=row.id,
+        type=row.type,
+        title=row.title,
+        body=row.body,
+        link_path=row.link_path,
+        request_id=row.request_id,
+        created_at=row.created_at,
+        read_at=row.read_at,
+        dismissed_at=row.dismissed_at,
+    )
+
 def send_request(db: Session, current_user: account_models.User, request_id: str):
     req = db.query(models.ESignSignatureRequest).filter(models.ESignSignatureRequest.id == request_id, models.ESignSignatureRequest.tenant_id == current_user.amo_id).first()
     if not req:
@@ -263,6 +305,20 @@ def send_request(db: Session, current_user: account_models.User, request_id: str
             raise HTTPException(409, "Policy blocked send: provider not ready")
     req.status = models.SignatureRequestStatus.SENT.value
     req.sent_at = utils.now_utc()
+    signers = db.query(models.ESignSigner).filter(models.ESignSigner.signature_request_id == req.id, models.ESignSigner.tenant_id == current_user.amo_id, models.ESignSigner.signer_type == models.SignerType.INTERNAL_USER.value, models.ESignSigner.user_id.is_not(None)).all()
+    for signer in signers:
+        link = f"/maintenance/{current_user.amo_id}/quality/esign/requests/{req.id}"
+        _create_notification(
+            db,
+            tenant_id=current_user.amo_id,
+            user_id=signer.user_id,
+            notification_type=models.NotificationType.SIGNATURE_REQUESTED.value,
+            title="Signature requested",
+            body="An internal signature action requires your approval.",
+            link_path=link,
+            request_id=req.id,
+            actor_user_id=current_user.id,
+        )
     _audit(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="esign_signature_request", entity_id=req.id, action="SIGNATURE_REQUEST_SENT")
     db.commit()
     return req
@@ -1046,3 +1102,45 @@ def trust_summary(db: Session, current_user: account_models.User, **filters) -> 
     _audit(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="esign_report", entity_id="trust_summary", action="TRUST_SUMMARY_VIEWED")
     db.commit()
     return schemas.TrustSummaryOut(total_requests=total, completed_requests=len(completed), appearance_only_completions=len(appearance), crypto_signed_completions=len(crypto), timestamped_completions=len(timestamped), fallback_count=len(fallback), policy_violation_count=violations, validation_failure_count=val_fail)
+
+
+def list_notifications(db: Session, current_user: account_models.User, unread_only: bool = False):
+    q = db.query(models.ESignNotification).filter(
+        models.ESignNotification.tenant_id == current_user.amo_id,
+        models.ESignNotification.user_id == current_user.id,
+        models.ESignNotification.dismissed_at.is_(None),
+    )
+    if unread_only:
+        q = q.filter(models.ESignNotification.read_at.is_(None))
+    rows = q.order_by(models.ESignNotification.created_at.desc()).limit(100).all()
+    return [_notification_out(row) for row in rows]
+
+
+def notification_count(db: Session, current_user: account_models.User):
+    unread = db.query(models.ESignNotification).filter(
+        models.ESignNotification.tenant_id == current_user.amo_id,
+        models.ESignNotification.user_id == current_user.id,
+        models.ESignNotification.read_at.is_(None),
+        models.ESignNotification.dismissed_at.is_(None),
+    ).count()
+    return schemas.NotificationCountOut(unread_count=unread)
+
+
+def mark_notification_read(db: Session, current_user: account_models.User, notification_id: str):
+    row = db.query(models.ESignNotification).filter(models.ESignNotification.id == notification_id, models.ESignNotification.tenant_id == current_user.amo_id, models.ESignNotification.user_id == current_user.id).first()
+    if not row:
+        raise HTTPException(404, "Notification not found")
+    row.read_at = row.read_at or utils.now_utc()
+    _audit(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="esign_notification", entity_id=row.id, action="ESIGN_NOTIFICATION_READ")
+    db.commit()
+    return _notification_out(row)
+
+
+def dismiss_notification(db: Session, current_user: account_models.User, notification_id: str):
+    row = db.query(models.ESignNotification).filter(models.ESignNotification.id == notification_id, models.ESignNotification.tenant_id == current_user.amo_id, models.ESignNotification.user_id == current_user.id).first()
+    if not row:
+        raise HTTPException(404, "Notification not found")
+    row.dismissed_at = utils.now_utc()
+    _audit(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="esign_notification", entity_id=row.id, action="ESIGN_NOTIFICATION_DISMISSED")
+    db.commit()
+    return _notification_out(row)

@@ -76,3 +76,5 @@ This snapshot should be refreshed after major structural, security, or data-mode
 - Phase 3.6 adds passkey management/signing UX (settings page + signer passkey-first CTA) wired to existing E-Sign WebAuthn endpoints.
 
 - Phase 3.7 adds passkey nickname metadata + internal action-required inbox APIs/UI for signer task visibility and quick sign navigation.
+
+- Phase 3.8 adds tenant-scoped in-app E-Sign notifications (create/read/dismiss/count) for internal action-required events with audited lifecycle actions.

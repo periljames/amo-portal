@@ -6,6 +6,7 @@ import { resolveLoaderContrast } from "../../src/components/loading/contrastMode
 import { getPasskeyEnvironmentMessage, getSignerPrimaryAction } from "../../src/pages/esign/passkeyState.js";
 import { buildPasskeyLabel, validatePasskeyNickname } from "../../src/pages/esign/passkeyManagementState.js";
 import { buildInboxQuery, isInboxEmpty } from "../../src/pages/esign/inboxState.js";
+import { resolveNotificationLinkPath, sortNotificationsNewest, unreadCountFromNotifications } from "../../src/components/esign/notificationState.js";
 
 const task = {
   allow_overlay: true,
@@ -87,4 +88,17 @@ test("inbox empty-state helper", () => {
   assert.equal(isInboxEmpty([]), true);
   assert.equal(isInboxEmpty(null), true);
   assert.equal(isInboxEmpty([1]), false);
+});
+
+
+test("notification helpers compute unread and resolve links", () => {
+  const items = [
+    { id: "1", created_at: "2026-03-05T00:00:00Z", read_at: null, dismissed_at: null, link_path: "/a" },
+    { id: "2", created_at: "2026-03-06T00:00:00Z", read_at: "2026-03-06T00:01:00Z", dismissed_at: null, link_path: "/b" },
+  ];
+  assert.equal(unreadCountFromNotifications(items), 1);
+  const sorted = sortNotificationsNewest(items);
+  assert.equal(sorted[0].id, "2");
+  assert.equal(resolveNotificationLinkPath(items[0], "/"), "/a");
+  assert.equal(resolveNotificationLinkPath(null, "/fallback"), "/fallback");
 });

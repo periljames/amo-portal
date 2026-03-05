@@ -6,6 +6,7 @@ import SectionLoader from "../../components/loading/SectionLoader";
 import { fetchInbox } from "../../services/esign";
 import type { InboxItem } from "../../types/esign";
 import ESignModuleGate from "./ESignModuleGate";
+import ESignNotificationBell from "../../components/esign/ESignNotificationBell";
 import { buildInboxQuery, isInboxEmpty } from "./inboxState";
 
 const ESignInboxPage: React.FC = () => {
@@ -35,7 +36,7 @@ const ESignInboxPage: React.FC = () => {
 
   return (
     <ESignModuleGate>
-      <PageHeader title="Action required" subtitle="Internal signature requests that require your approval." />
+      <PageHeader title="Action required" subtitle="Internal signature requests that require your approval." actions={<ESignNotificationBell />} />
       <SectionCard title="Filters">
         <label htmlFor="esign-inbox-status">Status</label>{" "}
         <select id="esign-inbox-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>

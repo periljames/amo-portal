@@ -83,6 +83,27 @@ def esign_inbox(
 def esign_inbox_count(db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     return services.inbox_count(db, current_user)
 
+
+
+@router.get("/notifications", response_model=list[schemas.NotificationOut])
+def esign_notifications(unread_only: int = Query(default=0), db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    return services.list_notifications(db, current_user, unread_only=bool(unread_only))
+
+
+@router.get("/notifications/count", response_model=schemas.NotificationCountOut)
+def esign_notifications_count(db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    return services.notification_count(db, current_user)
+
+
+@router.post("/notifications/{notification_id}/read", response_model=schemas.NotificationOut)
+def esign_notifications_read(notification_id: str, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    return services.mark_notification_read(db, current_user, notification_id)
+
+
+@router.post("/notifications/{notification_id}/dismiss", response_model=schemas.NotificationOut)
+def esign_notifications_dismiss(notification_id: str, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    return services.dismiss_notification(db, current_user, notification_id)
+
 @router.post("/requests", response_model=schemas.RequestCreateOut)
 def create_request(payload: schemas.RequestCreateIn, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     return services.create_signature_request(db, current_user, payload)

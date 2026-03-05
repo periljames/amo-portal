@@ -5,6 +5,7 @@ import SectionCard from "../../components/shared/SectionCard";
 import { fetchInbox, fetchInboxCount, fetchProviderReadiness, fetchTrustSummary } from "../../services/esign";
 import type { InboxCount, InboxItem, ProviderReadiness, TrustSummary } from "../../types/esign";
 import ESignModuleGate from "./ESignModuleGate";
+import ESignNotificationBell from "../../components/esign/ESignNotificationBell";
 
 const empty: TrustSummary = {
   total_requests: 0,
@@ -41,7 +42,7 @@ const ESignDashboardPage: React.FC = () => {
       <PageHeader
         title="E-Signatures"
         subtitle="Operator overview for policy, trust and verification state."
-        actions={<Link to={`/maintenance/${amoCode}/${department}/esign/requests/new`}>New Signature Request</Link>}
+        actions={<><ESignNotificationBell /> <Link to={`/maintenance/${amoCode}/${department}/esign/requests/new`}>New Signature Request</Link></>}
       />
       <SectionCard title="Pending your signature" actions={<Link to={`/maintenance/${amoCode}/${department}/esign/inbox`}>View all</Link>}>
         <p>Action required now: {inboxCount.pending_count}</p>

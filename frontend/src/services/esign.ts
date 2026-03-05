@@ -22,6 +22,8 @@ import type {
   WebAuthnCredential,
   InboxCount,
   InboxResponse,
+  ESignNotification,
+  ESignNotificationCount,
 } from "../types/esign";
 
 export const isEsignEntitled = async (): Promise<boolean> => {
@@ -60,6 +62,14 @@ export const removeWebAuthnCredential = (credentialId: string) => apiDelete<{ st
 
 export const fetchInbox = (query: URLSearchParams) => apiGet<InboxResponse>(`/api/v1/esign/inbox?${query.toString()}`, { headers: authHeaders() });
 export const fetchInboxCount = () => apiGet<InboxCount>("/api/v1/esign/inbox/count", { headers: authHeaders() });
+
+export const fetchESignNotifications = (unreadOnly = false) =>
+  apiGet<ESignNotification[]>(`/api/v1/esign/notifications?unread_only=${unreadOnly ? 1 : 0}`, { headers: authHeaders() });
+export const fetchESignNotificationCount = () => apiGet<ESignNotificationCount>("/api/v1/esign/notifications/count", { headers: authHeaders() });
+export const markESignNotificationRead = (notificationId: string) =>
+  apiPost<ESignNotification>(`/api/v1/esign/notifications/${encodeURIComponent(notificationId)}/read`, {}, { headers: authHeaders() });
+export const dismissESignNotification = (notificationId: string) =>
+  apiPost<ESignNotification>(`/api/v1/esign/notifications/${encodeURIComponent(notificationId)}/dismiss`, {}, { headers: authHeaders() });
 
 export async function beginRegistration(displayName?: string | null): Promise<PublicKeyCredentialCreationOptions> {
   const out = await apiPost<{ options: Record<string, unknown> }>("/api/v1/esign/webauthn/registration/options", { display_name: displayName || null }, { headers: authHeaders() });

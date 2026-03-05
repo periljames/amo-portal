@@ -260,3 +260,20 @@ class InboxOut(BaseModel):
 class InboxCountOut(BaseModel):
     pending_count: int
     expiring_soon_count: int
+
+
+class NotificationOut(BaseModel):
+    id: str
+    type: str
+    title: str
+    body: str | None = None
+    link_path: str
+    request_id: str | None = None
+    created_at: datetime
+    read_at: datetime | None = None
+    dismissed_at: datetime | None = None
+
+
+class NotificationCountOut(BaseModel):
+    unread_count: int
+
