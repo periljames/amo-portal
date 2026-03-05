@@ -43,3 +43,9 @@ Flow:
 - If passkey exists: primary action is `Sign with passkey`.
 - If no passkey exists: primary action is `Set up passkey to sign`, then flow continues automatically to signing after setup.
 - Unsupported browser and insecure-context (HTTP) states show explicit guidance.
+
+
+## Action Required inbox (Phase 3.7)
+- Internal users now have an in-app signing inbox (`/maintenance/:amoCode/:department/esign/inbox`) listing requests requiring their approval.
+- Inbox items link directly to the existing signer flow (`/maintenance/:amoCode/:department/esign/sign/:intentId`) when an active intent exists.
+- This complements notification channels by ensuring pending signature tasks are visible in-app without email dependency.

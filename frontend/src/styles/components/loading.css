@@ -391,3 +391,19 @@
   padding: 0.6rem;
   background: rgba(15, 23, 42, 0.45);
 }
+
+.loader-passkey-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.loader-passkey-actions input {
+  min-width: 150px;
+  border: 1px solid var(--loader-surface-border);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.7);
+  color: var(--loader-text-primary);
+  padding: 0.35rem 0.5rem;
+}

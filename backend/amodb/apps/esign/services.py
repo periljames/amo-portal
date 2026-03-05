@@ -334,40 +334,164 @@ def assertion_verify(db: Session, current_user: account_models.User, credential:
 
 
 
+
+
+def _serialize_webauthn_credential(row: models.ESignWebAuthnCredential) -> schemas.WebAuthnCredentialOut:
+    raw = utils.b64url_encode(bytes(row.credential_id or b""))
+    masked = f"{raw[:6]}…{raw[-4:]}" if len(raw) > 12 else raw
+    transports_value = row.transports
+    if isinstance(transports_value, str):
+        transports = [transports_value]
+    elif isinstance(transports_value, (list, tuple, set)):
+        transports = [str(value) for value in transports_value if value]
+    else:
+        transports = []
+    return schemas.WebAuthnCredentialOut(
+        id=row.id,
+        credential_id_masked=masked,
+        nickname=row.nickname,
+        transports=transports,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        last_used_at=row.last_used_at,
+        is_active=bool(row.is_active),
+    )
+
 def list_webauthn_credentials(db: Session, current_user: account_models.User):
     rows = (
         db.query(models.ESignWebAuthnCredential)
         .filter(
             models.ESignWebAuthnCredential.tenant_id == current_user.amo_id,
-            models.ESignWebAuthnCredential.owner_type == models.SignerType.INTERNAL_USER.value,
+            models.ESignWebAuthnCredential.owner_type.in_([models.WebAuthnOwnerType.USER.value, models.SignerType.INTERNAL_USER.value]),
             models.ESignWebAuthnCredential.owner_id == current_user.id,
         )
         .order_by(models.ESignWebAuthnCredential.created_at.desc())
         .all()
     )
-    out = []
-    for row in rows:
-        raw = utils.b64url_encode(bytes(row.credential_id or b""))
-        masked = f"{raw[:6]}…{raw[-4:]}" if len(raw) > 12 else raw
-        transports_value = row.transports
-        if isinstance(transports_value, str):
-            transports = [transports_value]
-        elif isinstance(transports_value, (list, tuple, set)):
-            transports = [str(value) for value in transports_value if value]
-        else:
-            transports = []
-        out.append(
-            schemas.WebAuthnCredentialOut(
-                id=row.id,
-                credential_id_masked=masked,
-                transports=transports,
-                created_at=row.created_at,
-                last_used_at=row.last_used_at,
-                is_active=bool(row.is_active),
+    return [_serialize_webauthn_credential(row) for row in rows]
+
+
+
+
+def _sanitize_credential_nickname(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = "".join(ch for ch in value if ch.isprintable() and ch not in "\r\n\t").strip()
+    if cleaned == "":
+        return None
+    if len(cleaned) > 50:
+        raise HTTPException(422, "Nickname must be 50 characters or fewer")
+    return cleaned
+
+
+def rename_webauthn_credential(db: Session, current_user: account_models.User, credential_id: str, nickname: str | None):
+    row = db.query(models.ESignWebAuthnCredential).filter(models.ESignWebAuthnCredential.id == credential_id, models.ESignWebAuthnCredential.tenant_id == current_user.amo_id).first()
+    if not row:
+        raise HTTPException(404, "Credential not found")
+    role = getattr(current_user.role, "value", str(getattr(current_user, "role", "")))
+    is_admin = bool(getattr(current_user, "is_superuser", False) or role in {"AMO_ADMIN", "SUPERUSER"})
+    if row.owner_id != current_user.id and not is_admin:
+        raise HTTPException(403, "Credential rename not permitted")
+
+    clean_nickname = _sanitize_credential_nickname(nickname)
+    row.nickname = clean_nickname
+    row.updated_at = utils.now_utc()
+    _audit(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="esign_webauthn",
+        entity_id=row.id,
+        action="WEB_AUTHN_CREDENTIAL_RENAMED",
+        after={"nickname": clean_nickname},
+    )
+    db.commit()
+    return row
+
+
+def list_signing_inbox(
+    db: Session,
+    current_user: account_models.User,
+    *,
+    status: str | None = None,
+    date_from=None,
+    date_to=None,
+    page: int = 1,
+    page_size: int = 20,
+):
+    page = max(1, int(page))
+    page_size = min(100, max(1, int(page_size)))
+
+    q = (
+        db.query(models.ESignSigner, models.ESignSignatureRequest, models.ESignSignaturePolicy, models.ESignDocumentVersion)
+        .join(models.ESignSignatureRequest, models.ESignSignatureRequest.id == models.ESignSigner.signature_request_id)
+        .outerjoin(models.ESignSignaturePolicy, models.ESignSignaturePolicy.id == models.ESignSignatureRequest.policy_id)
+        .outerjoin(models.ESignDocumentVersion, models.ESignDocumentVersion.id == models.ESignSignatureRequest.doc_version_id)
+        .filter(
+            models.ESignSigner.tenant_id == current_user.amo_id,
+            models.ESignSigner.signer_type == models.SignerType.INTERNAL_USER.value,
+            models.ESignSigner.user_id == current_user.id,
+            models.ESignSignatureRequest.tenant_id == current_user.amo_id,
+        )
+    )
+
+    if status:
+        q = q.filter(models.ESignSigner.status == status)
+    else:
+        q = q.filter(models.ESignSigner.status.in_([models.SignerStatus.PENDING.value, models.SignerStatus.VIEWED.value]))
+
+    if date_from is not None:
+        q = q.filter(models.ESignSignatureRequest.created_at >= date_from)
+    if date_to is not None:
+        q = q.filter(models.ESignSignatureRequest.created_at <= date_to)
+
+    total = q.count()
+    rows = q.order_by(models.ESignSignatureRequest.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    items = []
+    for signer, req, policy, docv in rows:
+        intent = (
+            db.query(models.ESignSigningIntent)
+            .filter(models.ESignSigningIntent.tenant_id == current_user.amo_id, models.ESignSigningIntent.signer_id == signer.id)
+            .order_by(models.ESignSigningIntent.created_at.desc())
+            .first()
+        )
+        fingerprint = (docv.content_sha256 if docv and docv.content_sha256 else "")
+        items.append(
+            schemas.InboxItemOut(
+                signature_request_id=req.id,
+                signer_id=signer.id,
+                intent_id=intent.id if intent else None,
+                request_title=req.title,
+                request_status=req.status,
+                policy_code=policy.policy_code if policy else None,
+                policy_minimum_level=policy.minimum_level if policy else None,
+                achieved_level=req.achieved_level,
+                signer_status=signer.status,
+                expires_at=req.expires_at,
+                created_at=req.created_at,
+                requested_by=(current_user.full_name if req.created_by_user_id == current_user.id else req.created_by_user_id),
+                doc_version_hash_short=(f"{fingerprint[:12]}…" if fingerprint else ""),
+                sign_url=(f"/maintenance/{current_user.amo_id}/quality/esign/sign/{intent.id}" if intent else f"/maintenance/{current_user.amo_id}/quality/esign/requests/{req.id}"),
             )
         )
-    return out
 
+    _audit(db, amo_id=current_user.amo_id, actor_user_id=current_user.id, entity_type="esign_inbox", entity_id=current_user.id, action="ESIGN_INBOX_VIEWED", after={"page": page, "page_size": page_size})
+    db.commit()
+    return schemas.InboxOut(items=items, page=page, page_size=page_size, total=total)
+
+
+def inbox_count(db: Session, current_user: account_models.User):
+    base = db.query(models.ESignSigner).join(models.ESignSignatureRequest, models.ESignSignatureRequest.id == models.ESignSigner.signature_request_id).filter(
+        models.ESignSigner.tenant_id == current_user.amo_id,
+        models.ESignSigner.signer_type == models.SignerType.INTERNAL_USER.value,
+        models.ESignSigner.user_id == current_user.id,
+        models.ESignSigner.status.in_([models.SignerStatus.PENDING.value, models.SignerStatus.VIEWED.value]),
+    )
+    pending = base.count()
+    soon_cutoff = utils.now_utc() + timedelta(days=2)
+    expiring = base.filter(models.ESignSignatureRequest.expires_at.is_not(None), models.ESignSignatureRequest.expires_at <= soon_cutoff).count()
+    return schemas.InboxCountOut(pending_count=pending, expiring_soon_count=expiring)
 
 def deactivate_webauthn_credential(db: Session, current_user: account_models.User, credential_id: str):
     row = (
@@ -375,7 +499,7 @@ def deactivate_webauthn_credential(db: Session, current_user: account_models.Use
         .filter(
             models.ESignWebAuthnCredential.id == credential_id,
             models.ESignWebAuthnCredential.tenant_id == current_user.amo_id,
-            models.ESignWebAuthnCredential.owner_type == models.SignerType.INTERNAL_USER.value,
+            models.ESignWebAuthnCredential.owner_type.in_([models.WebAuthnOwnerType.USER.value, models.SignerType.INTERNAL_USER.value]),
             models.ESignWebAuthnCredential.owner_id == current_user.id,
         )
         .first()

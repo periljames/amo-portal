@@ -507,3 +507,18 @@ Stable viewer route retained: `/maintenance/:amoCode/:department/qms/documents/:
 - Signer page now shows `Sign with passkey` when credential exists, otherwise `Set up passkey to sign` and auto-continues after successful setup.
 - Security page exposes passkey add/list/remove management for authenticated tenant users.
 - Passkey UX includes explicit unsupported/insecure-context messaging and staged loader feedback.
+
+
+## Changed in this run (2026-03-05) — Passkey naming + action-required inbox (Phase 3.7)
+### New internal/private routes
+- `/maintenance/:amoCode/:department/esign/inbox`
+
+### New/extended API routes
+- `PATCH /api/v1/esign/webauthn/credentials/{credential_id}`
+- `GET /api/v1/esign/inbox`
+- `GET /api/v1/esign/inbox/count`
+
+### UX behavior updates
+- Account Security passkey list supports rename + remove flows and shows nickname-first labels.
+- E-Sign dashboard includes a “Pending your signature” widget with in-app inbox count.
+- Action Required inbox lists pending internal signer items and deep-links to Review & Sign.

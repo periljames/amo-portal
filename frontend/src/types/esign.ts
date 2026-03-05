@@ -161,8 +161,39 @@ export type HashCompareResult = {
 export type WebAuthnCredential = {
   id: string;
   credential_id_masked: string;
+  nickname: string | null;
   transports: string[];
   created_at: string;
+  updated_at: string | null;
   last_used_at: string | null;
   is_active: boolean;
+};
+
+export type InboxItem = {
+  signature_request_id: string;
+  signer_id: string;
+  intent_id: string | null;
+  request_title: string;
+  request_status: string;
+  policy_code: string | null;
+  policy_minimum_level: string | null;
+  achieved_level: string | null;
+  signer_status: string;
+  expires_at: string | null;
+  created_at: string;
+  requested_by: string | null;
+  doc_version_hash_short: string;
+  sign_url: string;
+};
+
+export type InboxResponse = {
+  items: InboxItem[];
+  page: number;
+  page_size: number;
+  total: number;
+};
+
+export type InboxCount = {
+  pending_count: number;
+  expiring_soon_count: number;
 };

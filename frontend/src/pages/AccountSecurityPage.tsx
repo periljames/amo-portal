@@ -9,10 +9,12 @@ import {
   completeRegistration,
   listWebAuthnCredentials,
   removeWebAuthnCredential,
+  renameWebAuthnCredential,
 } from "../services/esign";
 import type { WebAuthnCredential } from "../types/esign";
 import { createCredential, isSecureContextAvailable, isWebAuthnSupported } from "../lib/webauthn";
 import ESignModuleGate from "./esign/ESignModuleGate";
+import { buildPasskeyLabel, validatePasskeyNickname } from "./esign/passkeyManagementState";
 
 const formatDate = (value: string | null) => (value ? new Date(value).toLocaleString() : "Never");
 
@@ -22,6 +24,8 @@ const AccountSecurityPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const supported = isWebAuthnSupported();
   const secure = isSecureContextAvailable();
@@ -98,6 +102,43 @@ const AccountSecurityPage: React.FC = () => {
     }
   };
 
+  const beginRename = (item: WebAuthnCredential) => {
+    setRenameId(item.id);
+    setRenameValue(item.nickname || "");
+  };
+
+  const saveRename = async () => {
+    if (!renameId) return;
+    const validation = validatePasskeyNickname(renameValue);
+    if (!validation.ok) {
+      setStatus(validation.error || "Invalid nickname");
+      return;
+    }
+    setBusyAction(`rename-${renameId}`);
+    try {
+      await withLoader(
+        async () => {
+          await renameWebAuthnCredential(renameId, validation.normalized ?? null);
+          const refreshed = await listWebAuthnCredentials();
+          setItems(refreshed);
+          setRenameId(null);
+          setRenameValue("");
+          setStatus("Passkey renamed.");
+        },
+        {
+          scope: "account-security",
+          label: "Renaming passkey",
+          phase: "validating",
+          mode_preference: "inline",
+        }
+      );
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to rename passkey");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const removeCredential = async (credentialId: string) => {
     if (!window.confirm("Remove this passkey from your account?")) return;
     setBusyAction(credentialId);
@@ -137,14 +178,33 @@ const AccountSecurityPage: React.FC = () => {
           {items.map((item) => (
             <li key={item.id}>
               <div>
-                <strong>{item.credential_id_masked}</strong>
+                <strong>{buildPasskeyLabel(item)}</strong>
+                <div>ID: {item.credential_id_masked}</div>
                 <div>Created: {formatDate(item.created_at)}</div>
                 <div>Last used: {formatDate(item.last_used_at)}</div>
                 <div>Transport: {(item.transports || []).join(", ") || "Not reported"}</div>
               </div>
-              <button type="button" onClick={() => void removeCredential(item.id)} disabled={!!busyAction}>
-                {busyAction === item.id ? <InlineLoader label="Removing" /> : "Remove"}
-              </button>
+              <div className="loader-passkey-actions">
+                {renameId === item.id ? (
+                  <>
+                    <input
+                      aria-label="Passkey nickname"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      maxLength={50}
+                    />
+                    <button type="button" onClick={() => void saveRename()} disabled={!!busyAction}>
+                      {busyAction === `rename-${item.id}` ? <InlineLoader label="Saving" /> : "Save"}
+                    </button>
+                    <button type="button" onClick={() => { setRenameId(null); setRenameValue(""); }} disabled={!!busyAction}>Cancel</button>
+                  </>
+                ) : (
+                  <button type="button" onClick={() => beginRename(item)} disabled={!!busyAction}>Rename</button>
+                )}
+                <button type="button" onClick={() => void removeCredential(item.id)} disabled={!!busyAction}>
+                  {busyAction === item.id ? <InlineLoader label="Removing" /> : "Remove"}
+                </button>
+              </div>
             </li>
           ))}
           {!items.length && !loading && <li>No passkeys registered.</li>}

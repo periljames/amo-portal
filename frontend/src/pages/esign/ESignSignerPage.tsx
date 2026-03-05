@@ -29,6 +29,7 @@ const ESignSignerPage: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [checkingCredentials, setCheckingCredentials] = useState(true);
   const [hasCredential, setHasCredential] = useState(false);
+  const [preferredCredentialLabel, setPreferredCredentialLabel] = useState<string | null>(null);
 
   const supported = useMemo(() => isWebAuthnSupported(), []);
   const secure = useMemo(() => isSecureContextAvailable(), []);
@@ -37,8 +38,10 @@ const ESignSignerPage: React.FC = () => {
     setCheckingCredentials(true);
     try {
       const rows = await listWebAuthnCredentials();
-      setHasCredential(rows.some((row) => row.is_active));
-      setStatus(rows.some((row) => row.is_active) ? "Ready to approve with your passkey." : "No passkey found. Set up a passkey to sign.");
+      const active = rows.filter((row) => row.is_active);
+      setHasCredential(active.length > 0);
+      setPreferredCredentialLabel(active.find((row) => row.nickname)?.nickname || null);
+      setStatus(active.length > 0 ? "Ready to approve with your passkey." : "No passkey found. Set up a passkey to sign.");
     } catch (error) {
       setHasCredential(false);
       setStatus(error instanceof Error ? error.message : "Unable to load passkey status");
@@ -168,7 +171,7 @@ const ESignSignerPage: React.FC = () => {
         {!supported && <p>Passkeys are not available in this browser.</p>}
         {supported && !secure && <p>Passkeys require a secure connection (HTTPS).</p>}
         <button type="button" onClick={() => void primaryAction()} disabled={busy || checkingCredentials || !supported || !secure}>
-          {busy ? <InlineLoader label="Processing passkey flow" /> : getSignerPrimaryAction(hasCredential)}
+          {busy ? <InlineLoader label="Processing passkey flow" /> : (hasCredential && preferredCredentialLabel ? `Use passkey: ${preferredCredentialLabel}` : getSignerPrimaryAction(hasCredential))}
         </button>
       </SectionCard>
     </ESignModuleGate>

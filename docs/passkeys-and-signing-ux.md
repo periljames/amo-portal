@@ -58,3 +58,10 @@ If passkeys fail to prompt:
 2. Try a browser/device with passkey support.
 3. Retry setup/sign action from the same signing session.
 4. Ask tenant admin to confirm E-Sign module entitlement.
+
+
+## Passkey nicknames (Phase 3.7)
+
+- Passkeys can be renamed in Account Settings → Security to distinguish multiple authenticators.
+- Nicknames are tenant-private metadata for authenticated users only and are never exposed on public verify routes.
+- Removing a passkey deactivates it; rename/remove actions are audited server-side.

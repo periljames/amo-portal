@@ -74,3 +74,5 @@ This snapshot should be refreshed after major structural, security, or data-mode
 - Phase 3.5 adds loader contrast tokens plus high-contrast behavior (`prefers-contrast`, `forced-colors`, and `.amo-contrast-high`) to improve outdoor readability without changing async semantics.
 
 - Phase 3.6 adds passkey management/signing UX (settings page + signer passkey-first CTA) wired to existing E-Sign WebAuthn endpoints.
+
+- Phase 3.7 adds passkey nickname metadata + internal action-required inbox APIs/UI for signer task visibility and quick sign navigation.

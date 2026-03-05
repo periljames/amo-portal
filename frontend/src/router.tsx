@@ -77,6 +77,7 @@ const ESignProviderPage = lazy(() => import("./pages/esign/ESignProviderPage"));
 const ESignTrustSummaryPage = lazy(() => import("./pages/esign/ESignTrustSummaryPage"));
 const ESignOverridesPage = lazy(() => import("./pages/esign/ESignOverridesPage"));
 const ESignSignerPage = lazy(() => import("./pages/esign/ESignSignerPage"));
+const ESignInboxPage = lazy(() => import("./pages/esign/ESignInboxPage"));
 const ESignPublicVerifyPage = lazy(() => import("./pages/esign/ESignPublicVerifyPage"));
 const LoaderGalleryPage = lazy(() => import("./pages/admin/LoaderGalleryPage"));
 const AccountSecurityPage = lazy(() => import("./pages/AccountSecurityPage"));
@@ -850,6 +851,7 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/:department/esign/provider" element={<RequireAuth><RequireTenantAdmin><ESignProviderPage /></RequireTenantAdmin></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/esign/reports/trust-summary" element={<RequireAuth><RequireTenantAdmin><ESignTrustSummaryPage /></RequireTenantAdmin></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/esign/sign/:intentId" element={<RequireAuth><ESignSignerPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/esign/inbox" element={<RequireAuth><ESignInboxPage /></RequireAuth>} />
 
       <Route path="/verify/:token" element={<ESignPublicVerifyPage />} />
 

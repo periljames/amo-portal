@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from reportlab.pdfgen import canvas
 from sqlalchemy import String, create_engine
 from sqlalchemy.orm import sessionmaker
@@ -489,3 +490,116 @@ def test_deactivate_webauthn_credential_marks_inactive(db_session, monkeypatch):
     services.deactivate_webauthn_credential(db_session, user, cred.id)
     updated = db_session.query(models.ESignWebAuthnCredential).filter_by(id=cred.id).one()
     assert updated.is_active is False
+
+
+def test_rename_webauthn_credential_success_and_audit(db_session, monkeypatch):
+    actions = []
+
+    def _capture(*_args, **kwargs):
+        actions.append(kwargs.get("action"))
+
+    monkeypatch.setattr(services, "_audit", _capture)
+    user = _user()
+    cred = models.ESignWebAuthnCredential(
+        tenant_id=user.amo_id,
+        owner_type=models.WebAuthnOwnerType.USER.value,
+        owner_id=user.id,
+        credential_id=b"credential-rename-1",
+        public_key=b"pk",
+        sign_count=0,
+        is_active=True,
+    )
+    db_session.add(cred)
+    db_session.commit()
+
+    renamed = services.rename_webauthn_credential(db_session, user, cred.id, "Laptop Key")
+    assert renamed.nickname == "Laptop Key"
+    assert renamed.updated_at is not None
+    assert "WEB_AUTHN_CREDENTIAL_RENAMED" in actions
+
+
+def test_rename_webauthn_credential_denied_for_non_owner(db_session, monkeypatch):
+    monkeypatch.setattr(services, "_audit", lambda *args, **kwargs: None)
+    owner = _user("amo-1", "u-owner", role="TECH")
+    other = _user("amo-1", "u-other", role="TECH")
+    cred = models.ESignWebAuthnCredential(
+        tenant_id=owner.amo_id,
+        owner_type=models.WebAuthnOwnerType.USER.value,
+        owner_id=owner.id,
+        credential_id=b"credential-rename-2",
+        public_key=b"pk",
+        sign_count=0,
+        is_active=True,
+    )
+    db_session.add(cred)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        services.rename_webauthn_credential(db_session, other, cred.id, "Other")
+    assert exc.value.status_code == 403
+
+
+def test_rename_webauthn_credential_validation(db_session, monkeypatch):
+    monkeypatch.setattr(services, "_audit", lambda *args, **kwargs: None)
+    user = _user()
+    cred = models.ESignWebAuthnCredential(
+        tenant_id=user.amo_id,
+        owner_type=models.WebAuthnOwnerType.USER.value,
+        owner_id=user.id,
+        credential_id=b"credential-rename-3",
+        public_key=b"pk",
+        sign_count=0,
+        is_active=True,
+    )
+    db_session.add(cred)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        services.rename_webauthn_credential(db_session, user, cred.id, "x" * 51)
+    assert exc.value.status_code == 422
+
+
+def test_inbox_only_returns_current_user_items_and_count(db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr(services, "_audit", lambda *args, **kwargs: None)
+    user = _user("amo-1", "u-1")
+    other = _user("amo-1", "u-2")
+    source = tmp_path / "inbox.pdf"; _pdf(source)
+
+    out, req, intent = _seed_request(db_session, user, source)
+    signer_for_user = db_session.query(models.ESignSigner).filter_by(signature_request_id=req.id, user_id=user.id).one()
+    signer_for_user.status = models.SignerStatus.PENDING.value
+
+    signer_for_other = models.ESignSigner(
+        tenant_id=user.amo_id,
+        signature_request_id=req.id,
+        signer_type=models.SignerType.INTERNAL_USER.value,
+        user_id=other.id,
+        status=models.SignerStatus.PENDING.value,
+    )
+    db_session.add(signer_for_other)
+    db_session.commit()
+
+    inbox_user = services.list_signing_inbox(db_session, user)
+    assert inbox_user.total == 1
+    assert inbox_user.items[0].intent_id == intent.id
+
+    inbox_other = services.list_signing_inbox(db_session, other)
+    assert inbox_other.total == 1
+    assert inbox_other.items[0].signer_id == signer_for_other.id
+
+    counts = services.inbox_count(db_session, user)
+    assert counts.pending_count == 1
+
+def test_inbox_pagination_stable_order(db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr(services, "_audit", lambda *args, **kwargs: None)
+    user = _user("amo-1", "u-1")
+    for i in range(3):
+      source = tmp_path / f"inbox-{i}.pdf"; _pdf(source)
+      _seed_request(db_session, user, source)
+
+    out1 = services.list_signing_inbox(db_session, user, page=1, page_size=2)
+    out2 = services.list_signing_inbox(db_session, user, page=2, page_size=2)
+    assert out1.total >= 3
+    ids1 = [item.signature_request_id for item in out1.items]
+    ids2 = [item.signature_request_id for item in out2.items]
+    assert set(ids1).isdisjoint(set(ids2))

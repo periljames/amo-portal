@@ -67,10 +67,16 @@ class WebAuthnAssertionVerifyIn(BaseModel):
 class WebAuthnCredentialOut(BaseModel):
     id: str
     credential_id_masked: str
+    nickname: str | None = None
     transports: list[str] = Field(default_factory=list)
     created_at: datetime
+    updated_at: datetime | None = None
     last_used_at: datetime | None = None
     is_active: bool
+
+
+class WebAuthnCredentialPatchIn(BaseModel):
+    nickname: str | None = None
 
 class SigningContextOut(BaseModel):
     request_id: str
@@ -225,3 +231,32 @@ class TrustSummaryOut(BaseModel):
 
 class RegistrationOptionsIn(BaseModel):
     display_name: str | None = None
+
+
+class InboxItemOut(BaseModel):
+    signature_request_id: str
+    signer_id: str
+    intent_id: str | None = None
+    request_title: str
+    request_status: str
+    policy_code: str | None = None
+    policy_minimum_level: str | None = None
+    achieved_level: str | None = None
+    signer_status: str
+    expires_at: datetime | None = None
+    created_at: datetime
+    requested_by: str | None = None
+    doc_version_hash_short: str
+    sign_url: str
+
+
+class InboxOut(BaseModel):
+    items: list[InboxItemOut] = Field(default_factory=list)
+    page: int
+    page_size: int
+    total: int
+
+
+class InboxCountOut(BaseModel):
+    pending_count: int
+    expiring_soon_count: int

@@ -4,6 +4,8 @@ import { LOADER_ESCALATION, pickLoaderPresentation, shouldClearTaskOnRouteChange
 import { isLoaderGalleryEnabled } from "../../src/components/loading/galleryAccess.js";
 import { resolveLoaderContrast } from "../../src/components/loading/contrastMode.js";
 import { getPasskeyEnvironmentMessage, getSignerPrimaryAction } from "../../src/pages/esign/passkeyState.js";
+import { buildPasskeyLabel, validatePasskeyNickname } from "../../src/pages/esign/passkeyManagementState.js";
+import { buildInboxQuery, isInboxEmpty } from "../../src/pages/esign/inboxState.js";
 
 const task = {
   allow_overlay: true,
@@ -58,4 +60,31 @@ test("passkey environment messages are explicit", () => {
   assert.equal(getPasskeyEnvironmentMessage({ supported: false, secure: true }).includes("not supported"), true);
   assert.equal(getPasskeyEnvironmentMessage({ supported: true, secure: false }).includes("secure connection"), true);
   assert.equal(getPasskeyEnvironmentMessage({ supported: true, secure: true }), "");
+});
+
+
+test("passkey rename validation normalizes values", () => {
+  assert.equal(validatePasskeyNickname("  Flight Deck Key  ").normalized, "Flight Deck Key");
+  assert.equal(validatePasskeyNickname("   ").normalized, null);
+  assert.equal(validatePasskeyNickname("x".repeat(51)).ok, false);
+});
+
+test("passkey label falls back when nickname missing", () => {
+  const label = buildPasskeyLabel({ nickname: null, created_at: "2026-03-05T00:00:00Z" });
+  assert.equal(label.includes("Passkey"), true);
+  assert.equal(buildPasskeyLabel({ nickname: "Office Laptop", created_at: "2026-03-05T00:00:00Z" }), "Office Laptop");
+});
+
+
+test("inbox query builder applies filter changes", () => {
+  const qs = buildInboxQuery({ status: "VIEWED", page: 2, pageSize: 10 });
+  assert.equal(qs.get("status"), "VIEWED");
+  assert.equal(qs.get("page"), "2");
+  assert.equal(qs.get("page_size"), "10");
+});
+
+test("inbox empty-state helper", () => {
+  assert.equal(isInboxEmpty([]), true);
+  assert.equal(isInboxEmpty(null), true);
+  assert.equal(isInboxEmpty([1]), false);
 });

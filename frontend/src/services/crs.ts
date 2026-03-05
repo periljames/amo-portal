@@ -13,7 +13,7 @@ import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
 import { authHeaders, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
 
-type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 async function request<T>(
   method: HttpMethod,
@@ -125,6 +125,32 @@ export async function apiPut<T>(
   }
 
   return request<T>("PUT", path, bodyInit, { ...init, headers });
+}
+
+
+export async function apiPatch<T>(
+  path: string,
+  body?: unknown,
+  init: RequestInit = {}
+): Promise<T> {
+  let bodyInit: BodyInit | undefined;
+
+  if (body === undefined || body === null) {
+    bodyInit = undefined;
+  } else if (typeof body === "string" || body instanceof FormData) {
+    bodyInit = body;
+  } else {
+    bodyInit = JSON.stringify(body);
+  }
+
+  const headers = new Headers(init.headers);
+  if (bodyInit !== undefined && !(bodyInit instanceof FormData)) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+  }
+
+  return request<T>("PATCH", path, bodyInit, { ...init, headers });
 }
 
 export async function apiGet<T>(

@@ -206,7 +206,9 @@ class ESignWebAuthnCredential(Base):
     aaguid = Column(String(36), nullable=True)
     attestation_format = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
+    nickname = Column(String(50), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
 
 

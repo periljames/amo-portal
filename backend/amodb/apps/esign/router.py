@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
@@ -55,6 +57,31 @@ def webauthn_credentials(db: Session = Depends(get_db), current_user: account_mo
 def delete_webauthn_credential(credential_id: str, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     services.deactivate_webauthn_credential(db, current_user, credential_id)
     return {"status": "removed"}
+
+
+
+@router.patch("/webauthn/credentials/{credential_id}", response_model=schemas.WebAuthnCredentialOut)
+def patch_webauthn_credential(credential_id: str, payload: schemas.WebAuthnCredentialPatchIn, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    row = services.rename_webauthn_credential(db, current_user, credential_id, payload.nickname)
+    return services._serialize_webauthn_credential(row)
+
+
+@router.get("/inbox", response_model=schemas.InboxOut)
+def esign_inbox(
+    status: str | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    return services.list_signing_inbox(db, current_user, status=status, date_from=date_from, date_to=date_to, page=page, page_size=page_size)
+
+
+@router.get("/inbox/count", response_model=schemas.InboxCountOut)
+def esign_inbox_count(db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    return services.inbox_count(db, current_user)
 
 @router.post("/requests", response_model=schemas.RequestCreateOut)
 def create_request(payload: schemas.RequestCreateIn, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):

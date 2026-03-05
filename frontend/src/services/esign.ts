@@ -1,5 +1,5 @@
 import { authHeaders } from "./auth";
-import { apiDelete, apiGet, apiPost } from "./crs";
+import { apiDelete, apiGet, apiPatch, apiPost } from "./crs";
 import {
   decodeCreationOptions,
   decodeRequestOptions,
@@ -20,6 +20,8 @@ import type {
   TrustSummary,
   VerifyResult,
   WebAuthnCredential,
+  InboxCount,
+  InboxResponse,
 } from "../types/esign";
 
 export const isEsignEntitled = async (): Promise<boolean> => {
@@ -52,7 +54,12 @@ export const comparePublicHash = (token: string, payload: { provided_sha256?: st
 export const publicArtifactDownloadUrl = (token: string) => `/api/v1/esign/verify/${encodeURIComponent(token)}/download`;
 
 export const listWebAuthnCredentials = () => apiGet<WebAuthnCredential[]>("/api/v1/esign/webauthn/credentials", { headers: authHeaders() });
+export const renameWebAuthnCredential = (credentialId: string, nickname: string | null) =>
+  apiPatch<WebAuthnCredential>(`/api/v1/esign/webauthn/credentials/${encodeURIComponent(credentialId)}`, { nickname }, { headers: authHeaders() });
 export const removeWebAuthnCredential = (credentialId: string) => apiDelete<{ status: string }>(`/api/v1/esign/webauthn/credentials/${encodeURIComponent(credentialId)}`, { headers: authHeaders() });
+
+export const fetchInbox = (query: URLSearchParams) => apiGet<InboxResponse>(`/api/v1/esign/inbox?${query.toString()}`, { headers: authHeaders() });
+export const fetchInboxCount = () => apiGet<InboxCount>("/api/v1/esign/inbox/count", { headers: authHeaders() });
 
 export async function beginRegistration(displayName?: string | null): Promise<PublicKeyCredentialCreationOptions> {
   const out = await apiPost<{ options: Record<string, unknown> }>("/api/v1/esign/webauthn/registration/options", { display_name: displayName || null }, { headers: authHeaders() });
