@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { WifiOff } from "lucide-react";
+import { Wifi, WifiOff } from "lucide-react";
 import { useRealtime } from "./realtimeContext";
 
 const formatTime = (value: Date | null): string => {
@@ -20,7 +20,7 @@ const statusLabel = (status: string): string => {
   }
 };
 
-const LiveStatusIndicator: React.FC = () => {
+const LiveStatusIndicator: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
   const { status, brokerState, backendHealth, lastGoodServerTime, lastUpdated, currentTime, staleSeconds, isOnline, clockSource, refreshData, triggerSync } = useRealtime();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -28,6 +28,14 @@ const LiveStatusIndicator: React.FC = () => {
   const hasTransportIssue = status !== "live" || !isOnline;
   const chipState = hasTransportIssue ? "offline" : status;
   const isLongConnectionIssue = hasTransportIssue && staleSeconds >= 180;
+
+  if (compact) {
+    return (
+      <div className="live-status live-status--compact" aria-label={hasTransportIssue ? "Offline" : "Online"}>
+        {hasTransportIssue ? <WifiOff size={16} aria-hidden="true" /> : <Wifi size={16} aria-hidden="true" />}
+      </div>
+    );
+  }
 
   return (
     <div className="live-status" onBlur={() => setMenuOpen(false)}>

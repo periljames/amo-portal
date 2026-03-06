@@ -53,6 +53,7 @@ const QMSAuditsPage = lazy(() => import("./pages/QMSAuditsPage"));
 const QMSChangeControlPage = lazy(() => import("./pages/QMSChangeControlPage"));
 const MyTasksPage = lazy(() => import("./pages/MyTasksPage"));
 const QMSTrainingPage = lazy(() => import("./pages/QMSTrainingPage"));
+const TrainingCompetencePage = lazy(() => import("./pages/TrainingCompetencePage"));
 const QMSTrainingUserPage = lazy(() => import("./pages/QMSTrainingUserPage"));
 const QMSEventsPage = lazy(() => import("./pages/QMSEventsPage"));
 const QMSKpisPage = lazy(() => import("./pages/QMSKpisPage"));
@@ -65,6 +66,8 @@ const SubscriptionManagementPage = lazy(() => import("./pages/SubscriptionManage
 const UpsellPage = lazy(() => import("./pages/UpsellPage"));
 const UserWidgetsPage = lazy(() => import("./pages/UserWidgetsPage"));
 const OnboardingPasswordPage = lazy(() => import("./pages/OnboardingPasswordPage"));
+const PublicCertificateVerificationPage = lazy(() => import("./pages/PublicCertificateVerificationPage"));
+const VerifyScanPage = lazy(() => import("./pages/VerifyScanPage"));
 
 const QualityAuditPlannerPage = lazy(() => import("./pages/QualityAuditPlannerPage"));
 const QualityAuditPlannerCalendarPage = lazy(() => import("./pages/QualityAuditPlannerCalendarPage"));
@@ -276,6 +279,13 @@ export const AppRouter: React.FC = () => {
 
       {/* Platform login */}
       <Route path="/login" element={<LoginPage />} />
+
+      <Route
+        path="/verify/certificate/:certificateNumber"
+        element={<PublicCertificateVerificationPage />}
+      />
+      <Route path="/verify/scan" element={<VerifyScanPage />} />
+
 
       {/* AMO-specific login, e.g. /maintenance/safarilink/login */}
       <Route path="/maintenance/:amoCode/login" element={<LoginPage />} />
@@ -766,6 +776,16 @@ export const AppRouter: React.FC = () => {
         element={
           <RequireAuth>
             <QualityCarsPage />
+          </RequireAuth>
+        }
+      />
+
+
+      <Route
+        path="/maintenance/:amoCode/:department/training-competence"
+        element={
+          <RequireAuth>
+            <TrainingCompetencePage />
           </RequireAuth>
         }
       />
