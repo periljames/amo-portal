@@ -25,7 +25,7 @@ from .apps.accounts.router_onboarding import router as accounts_onboarding_route
 from .apps.fleet.router import router as fleet_router
 from .apps.work.router import router as work_router
 from .apps.crs.router import router as crs_router
-from .apps.training.router import router as training_router
+from .apps.training.router import router as training_router, public_router as training_public_router
 from .apps.quality import router as quality_router  
 from .apps.reliability.router import router as reliability_router
 from .apps.inventory.router import router as inventory_router
@@ -289,6 +289,7 @@ app.include_router(fleet_router)
 app.include_router(work_router)
 app.include_router(crs_router)
 app.include_router(training_router)
+app.include_router(training_public_router)
 app.include_router(quality_router) 
 app.include_router(reliability_router)
 app.include_router(inventory_router)

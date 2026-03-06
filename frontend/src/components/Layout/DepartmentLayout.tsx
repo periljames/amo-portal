@@ -3,9 +3,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom";
 import { BrandContext } from "../Brand/BrandContext";
 import { BrandHeader } from "../Brand/BrandHeader";
+import { BrandLogo } from "../Brand/BrandLogo";
 import { BrandProvider } from "../Brand/BrandProvider";
 import AppShellV2 from "../AppShell/AppShellV2";
 import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
+import { Menu, X } from "lucide-react";
 import { useToast } from "../feedback/ToastProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
@@ -17,7 +19,6 @@ import {
   NOTIFICATION_PREFS_EVENT,
   playNotificationChirp,
   pushDesktopNotification,
-  setNotificationPreferences,
   type NotificationPreferences,
 } from "../../services/notificationPreferences";
 import { fetchSubscription, fetchEntitlements } from "../../services/billing";
@@ -28,8 +29,6 @@ import { fetchOverviewSummary, type OverviewSummary } from "../../services/admin
 import { qmsListNotifications } from "../../services/qms";
 import {
   listTrainingNotifications,
-  markAllTrainingNotificationsRead,
-  markTrainingNotificationRead,
 } from "../../services/training";
 import type { TrainingNotificationRead } from "../../types/training";
 import {
@@ -644,8 +643,13 @@ const DepartmentLayout: React.FC<Props> = ({
       },
       {
         id: "qms-training",
-        label: "Training & Competence",
+        label: "Training Matrix",
         path: `/maintenance/${amoCode}/${activeDepartment}/qms/training`,
+      },
+      {
+        id: "qms-training-hub",
+        label: "Training & Competence",
+        path: `/maintenance/${amoCode}/${activeDepartment}/training-competence`,
       },
       {
         id: "qms-events",
@@ -1267,20 +1271,6 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const userName = getUserDisplayName(currentUser);
   const userInitials = getUserInitials(currentUser);
-  const resolveNotificationLink = (linkPath?: string | null): string | null => {
-    if (!linkPath) return null;
-    if (linkPath.startsWith("/profile/training")) {
-      return `/maintenance/${amoCode}/${resolveDeptForTraining()}/training`;
-    }
-    if (linkPath.startsWith("/training/deferrals")) {
-      return `/maintenance/${amoCode}/${resolveDeptForTraining()}/training#training-deferrals`;
-    }
-    if (linkPath.startsWith("/training")) {
-      return `/maintenance/${amoCode}/${resolveDeptForTraining()}/training`;
-    }
-    return linkPath;
-  };
-
   const currentYear = new Date().getFullYear();
   const returnPath = location.pathname + location.search;
   const formattedCountdown = new Date(idleCountdown * 1000)
@@ -1377,7 +1367,18 @@ const DepartmentLayout: React.FC<Props> = ({
               <div className="sidebar__header">
                 <BrandHeader variant="sidebar" />
 
-                {uiShellV2 && (
+                {uiShellV2 && !isDesktopSidebar ? (
+                  <button
+                    type="button"
+                    className="sidebar__close-btn"
+                    aria-label="Close navigation drawer"
+                    onClick={() => setSidebarDrawerOpen(false)}
+                  >
+                    <X size={16} aria-hidden="true" />
+                  </button>
+                ) : null}
+
+                {uiShellV2 && isDesktopSidebar && (
                   <button
                     type="button"
                     className="sidebar__pin-btn"
@@ -1530,6 +1531,21 @@ const DepartmentLayout: React.FC<Props> = ({
                     title="Manuals"
                   >
                     <span className="sidebar__item-label">Manuals</span>
+                  </button>
+                )}
+
+
+                {!isAdminArea && (
+                  <button
+                    type="button"
+                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/training-competence`)}
+                    className={
+                      "sidebar__item" + (location.pathname.includes("/training-competence") ? " sidebar__item--active" : "")
+                    }
+                    aria-label="Training & Competence"
+                    title="Training & Competence"
+                  >
+                    <span className="sidebar__item-label">Training & Competence</span>
                   </button>
                 )}
 
@@ -1687,348 +1703,81 @@ const DepartmentLayout: React.FC<Props> = ({
             </>
           );
 
-          const sidebar = <aside ref={sidebarRef} className="app-shell__sidebar">{sidebarContent}</aside>;
-          const trialChipVisible =
-            uiShellV2 && isTrialing && subscription?.trial_ends_at && !trialChipHidden;
+          const sidebar = <aside ref={sidebarRef} className="app-shell__sidebar" role={!isDesktopSidebar ? "dialog" : undefined} aria-modal={!isDesktopSidebar ? true : undefined} aria-label="Application navigation drawer">{sidebarContent}</aside>;
+          const isMobileTopbar = uiShellV2 && !isDesktopSidebar;
 
           const header = (
-            <header className="app-shell__topbar">
-              <div className="app-shell__topbar-title">
-                <BrandHeader variant="topbar" />
-                <div className="app-shell__topbar-context">
-                  <div className="app-shell__topbar-heading">{deptLabel}</div>
-                  <div className="app-shell__topbar-subtitle">{amoLabel}</div>
-                </div>
-              </div>
-
-              <div className="app-shell__topbar-actions">
-                {uiShellV2 && !isDesktopSidebar && !sidebarPinned && (
+            <header className={`app-shell__topbar${isMobileTopbar ? " app-shell__topbar--mobile" : ""}`}>
+              {isMobileTopbar ? (
+                <>
                   <button
                     type="button"
                     className="sidebar-mobile-toggle"
                     onClick={() => (sidebarDrawerOpen ? setSidebarDrawerOpen(false) : openSidebarDrawer({ source: "mobile" }))}
-                    aria-label="Toggle navigation"
+                    aria-label="Open navigation drawer"
                     aria-expanded={sidebarDrawerOpen}
                     aria-controls="app-shell-sidebar-nav"
                   >
-                    Menu
+                    <Menu size={18} aria-hidden="true" />
                   </button>
-                )}
-                {uiShellV2 && <LiveStatusIndicator />}
-                {uiShellV2 && (
-                  <span className={`app-shell__flight-chip ${isGoLive ? "app-shell__flight-chip--live" : "app-shell__flight-chip--demo"}`}>
-                    {isGoLive ? "LIVE" : "DEMO"}
-                  </span>
-                )}
-                {trialChipVisible && (
-                  <div ref={trialMenuRef} style={{ position: "relative" }}>
-                    <button
-                      type="button"
-                      className="app-shell__status-chip app-shell__status-chip--trial"
-                      onClick={() => setTrialMenuOpen((prev) => !prev)}
-                      aria-expanded={trialMenuOpen}
-                      aria-haspopup="menu"
-                    >
-                      Trial{trialCountdown ? ` · ${trialCountdown} left` : ""}
-                    </button>
-                    {trialMenuOpen && (
-                      <div className="app-shell__status-menu" role="menu">
-                        <div className="app-shell__status-menu-meta">
-                          {trialCountdown
-                            ? `Trial ends in ${trialCountdown}.`
-                            : "Trial ending soon."}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTrialMenuOpen(false);
-                            navigate(`/maintenance/${amoCode}/upsell`);
-                          }}
-                        >
-                          View plans
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTrialMenuOpen(false);
-                            navigateWithSidebarClose(`/maintenance/${amoCode}/admin/billing`);
-                          }}
-                        >
-                          Convert to paid
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const hideUntil =
-                              Date.now() + 7 * 24 * 60 * 60 * 1000;
-                            window.localStorage.setItem(
-                              trialHideKey,
-                              String(hideUntil)
-                            );
-                            setTrialChipHidden(true);
-                            setTrialMenuOpen(false);
-                          }}
-                        >
-                          Hide for 7 days
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            window.sessionStorage.setItem(trialSessionKey, "1");
-                            setTrialChipHidden(true);
-                            setTrialMenuOpen(false);
-                          }}
-                        >
-                          Hide this session
-                        </button>
-                      </div>
-                    )}
+                  <div className="app-shell__topbar-mobile-brand" aria-label="Tenant logo">
+                    <BrandLogo size={20} />
                   </div>
-                )}
-
-                <div ref={notificationsRef} className="notification-menu">
-                  <button
-                    type="button"
-                    className="notification-bell"
-                    aria-label="Training notifications"
-                    aria-expanded={notificationsOpen}
-                    onClick={() => setNotificationsOpen((v) => !v)}
-                  >
-                    <span className="notification-bell__icon">🔔</span>
-                    {unreadNotifications > 0 ? (
-                      <span className="notification-bell__badge">{unreadNotifications}</span>
-                    ) : null}
-                  </button>
-
-                  {notificationsOpen && (
-                    <div className="notification-panel notification-panel--drawer">
-                      <div className="notification-panel__header">
-                        <div>
-                          <strong>Notifications</strong>
-                          <div className="text-muted" style={{ fontSize: 12 }}>
-                            {unreadNotifications} unread
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          className="secondary-chip-btn"
-                          onClick={async () => {
-                            await markAllTrainingNotificationsRead();
-                            await refreshNotifications();
-                          }}
-                        >
-                          Mark all read
-                        </button>
-                      </div>
-
-                      {notificationsLoading && (
-                        <div className="notification-panel__state">
-                          Loading notifications…
-                        </div>
-                      )}
-
-                      {notificationsError && (
-                        <div className="notification-panel__state notification-panel__state--error">
-                          {notificationsError}
-                        </div>
-                      )}
-
-                      {!notificationsLoading && !notificationsError && (
-                        <div className="notification-panel__list">
-                          {notifications.map((note) => (
-                            <button
-                              type="button"
-                              key={note.id}
-                              className={`notification-item${
-                                note.read_at ? "" : " notification-item--unread"
-                              }`}
-                              onClick={async () => {
-                                if (!note.read_at) {
-                                  await markTrainingNotificationRead(note.id, {});
-                                }
-                                setNotificationsOpen(false);
-                                await refreshNotifications();
-                                const target = resolveNotificationLink(note.link_path);
-                                if (target) {
-                                  navigate(target);
-                                }
-                              }}
-                            >
+                  <div className="app-shell__topbar-mobile-right">
+                    <LiveStatusIndicator compact />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="app-shell__topbar-title">
+                    <BrandHeader variant="topbar" />
+                    <div className="app-shell__topbar-context">
+                      <div className="app-shell__topbar-heading">{deptLabel}</div>
+                      <div className="app-shell__topbar-subtitle">{amoLabel}</div>
+                    </div>
+                  </div>
+                  <div className="app-shell__topbar-actions">
+                    {uiShellV2 && <LiveStatusIndicator />}
+                    {uiShellV2 && (
+                      <span className={`app-shell__flight-chip ${isGoLive ? "app-shell__flight-chip--live" : "app-shell__flight-chip--demo"}`}>
+                        {isGoLive ? "LIVE" : "DEMO"}
+                      </span>
+                    )}
+                    <div ref={notificationsRef} className="notification-menu">
+                      <button type="button" className="secondary-chip-btn" onClick={() => setNotificationsOpen((v) => !v)} aria-expanded={notificationsOpen}>
+                        Alerts ({unreadNotifications})
+                      </button>
+                      {notificationsOpen && (
+                        <div className="notification-panel" role="menu">
+                          {notificationsLoading ? <div className="notification-panel__state">Loading…</div> : null}
+                          {notificationsError ? <div className="notification-panel__state notification-panel__state--error">{notificationsError}</div> : null}
+                          {!notificationsLoading && !notificationsError && notifications.slice(0, 6).map((note) => (
+                            <div key={note.id} className="notification-item">
                               <div className="notification-item__title">{note.title}</div>
-                              {note.body ? (
-                                <div className="notification-item__body">{note.body}</div>
-                              ) : null}
-                              <div className="notification-item__meta">
-                                <span>{new Date(note.created_at).toLocaleString()}</span>
-                                <span className="badge badge--neutral">{note.severity}</span>
-                              </div>
-                            </button>
-                          ))}
-                          {notifications.length === 0 ? (
-                            <div className="notification-panel__state">
-                              No notifications yet.
                             </div>
-                          ) : null}
+                          ))}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-
-                <div ref={profileRef} className="profile-menu">
-                  <button
-                    type="button"
-                    onClick={() => setProfileOpen((v) => !v)}
-                    aria-haspopup="menu"
-                    aria-expanded={profileOpen}
-                    className="profile-menu__trigger"
-                    title={userName}
-                  >
-                    <span className="profile-menu__avatar">{userInitials}</span>
-                    <span className="profile-menu__meta">
-                      <span className="profile-menu__name">{userName}</span>
-                      <span className="profile-menu__role">Profile</span>
-                    </span>
-                    <span className="profile-menu__caret">
-                      {profileOpen ? "▲" : "▼"}
-                    </span>
-                  </button>
-
-                  {profileOpen && (
-                    <div role="menu" className="profile-drawer">
-                      <div className="profile-drawer__header">
-                        <div className="profile-drawer__avatar">{userInitials}</div>
-                        <div>
-                          <div className="profile-drawer__name">{userName}</div>
-                          <div className="profile-drawer__meta">Profile & settings</div>
+                    <div ref={profileRef} className="profile-menu">
+                      <button type="button" onClick={() => setProfileOpen((v) => !v)} className="profile-menu__trigger" aria-expanded={profileOpen}>
+                        <span className="profile-menu__avatar">{userInitials}</span>
+                        <span className="profile-menu__meta"><span className="profile-menu__name">{userName}</span></span>
+                      </button>
+                      {profileOpen && (
+                        <div role="menu" className="profile-drawer">
+                          <button type="button" role="menuitem" className="profile-drawer__item" onClick={() => { setProfileOpen(false); toggleColorScheme(); }}>
+                            Toggle theme ({colorScheme})
+                          </button>
+                          <button type="button" role="menuitem" className="profile-drawer__item profile-drawer__item--danger" onClick={() => { setProfileOpen(false); handleLogout(); }}>
+                            Sign out
+                          </button>
                         </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="profile-drawer__item"
-                        onClick={() => {
-                          setProfileOpen(false);
-                          gotoMyTraining();
-                        }}
-                      >
-                        My Training
-                      </button>
-
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="profile-drawer__item"
-                        onClick={() => {
-                          setProfileOpen(false);
-                          const dept = resolveDeptForTraining();
-                          navigate(`/maintenance/${amoCode}/${dept}/settings/widgets`);
-                        }}
-                      >
-                        Dashboard widgets
-                      </button>
-
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="profile-drawer__item"
-                        onClick={() => {
-                          setProfileOpen(false);
-                          toggleColorScheme();
-                        }}
-                      >
-                        {colorScheme === "system"
-                          ? "Theme: System (switch to dark)"
-                          : colorScheme === "dark"
-                            ? "Theme: Dark (switch to light)"
-                            : "Theme: Light (switch to system)"}
-                      </button>
-
-                      {isSuperuser && (
-                        <>
-                          <div className="profile-drawer__divider" />
-                          <div className="profile-drawer__prefs">
-                            <div className="profile-drawer__prefs-title">Superuser Runtime Controls</div>
-                            <label className="profile-drawer__pref-row">
-                              <span>Audio chirper</span>
-                              <input
-                                type="checkbox"
-                                checked={notificationPrefs.audioEnabled}
-                                onChange={(event) => {
-                                  setNotificationPreferences({ audioEnabled: event.target.checked });
-                                  setNotificationPrefs(getNotificationPreferences());
-                                }}
-                              />
-                            </label>
-                            <label className="profile-drawer__pref-row">
-                              <span>Desktop alerts</span>
-                              <input
-                                type="checkbox"
-                                checked={notificationPrefs.desktopEnabled}
-                                onChange={(event) => {
-                                  setNotificationPreferences({ desktopEnabled: event.target.checked });
-                                  setNotificationPrefs(getNotificationPreferences());
-                                }}
-                              />
-                            </label>
-                            <label className="profile-drawer__pref-row">
-                              <span>Photo uploads</span>
-                              <input
-                                type="checkbox"
-                                checked={notificationPrefs.enablePhotoUploads}
-                                onChange={(event) => {
-                                  setNotificationPreferences({ enablePhotoUploads: event.target.checked });
-                                  setNotificationPrefs(getNotificationPreferences());
-                                }}
-                              />
-                            </label>
-                            <label className="profile-drawer__pref-row">
-                              <span>Video uploads</span>
-                              <input
-                                type="checkbox"
-                                checked={notificationPrefs.enableVideoUploads}
-                                onChange={(event) => {
-                                  setNotificationPreferences({ enableVideoUploads: event.target.checked });
-                                  setNotificationPrefs(getNotificationPreferences());
-                                }}
-                              />
-                            </label>
-                            <label className="profile-drawer__pref-row">
-                              <span>Notification poll (sec)</span>
-                              <input
-                                type="number"
-                                min={15}
-                                max={600}
-                                step={5}
-                                value={notificationPrefs.pollIntervalSeconds}
-                                onChange={(event) => {
-                                  setNotificationPreferences({ pollIntervalSeconds: Number(event.target.value) || 60 });
-                                  setNotificationPrefs(getNotificationPreferences());
-                                }}
-                              />
-                            </label>
-                          </div>
-                        </>
                       )}
-
-                      <div className="profile-drawer__divider" />
-
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="profile-drawer__item profile-drawer__item--danger"
-                        onClick={() => {
-                          setProfileOpen(false);
-                          handleLogout();
-                        }}
-                      >
-                        Sign out
-                      </button>
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                </>
+              )}
             </header>
           );
 
@@ -2106,7 +1855,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     </div>
                   )}
 
-                  {isTrialing && subscription?.trial_ends_at && (
+                  {isTrialing && subscription?.trial_ends_at && !trialChipHidden && (
                     <div className="info-banner info-banner--soft" style={{ margin: "12px 16px 0" }}>
                       <div>
                         <strong>Trial in progress</strong>

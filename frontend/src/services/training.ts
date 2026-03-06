@@ -155,6 +155,21 @@ export async function updateTrainingCourse(
 }
 
 // ---------------------------------------------------------------------------
+// REQUIREMENTS
+// ---------------------------------------------------------------------------
+
+
+export async function listTrainingRequirements(): Promise<any[]> {
+  return apiGet<any[]>("/training/requirements", { headers: authHeaders() });
+}
+
+export async function listTrainingEventParticipants(eventId: string): Promise<TrainingEventParticipantRead[]> {
+  return apiGet<TrainingEventParticipantRead[]>(`/training/events/${encodeURIComponent(eventId)}/participants`, {
+    headers: authHeaders(),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // EVENTS
 // ---------------------------------------------------------------------------
 
@@ -448,6 +463,28 @@ export async function listMyTrainingDeferrals(): Promise<TrainingDeferralRequest
   });
 }
 
+export interface ListTrainingDeferralsParams {
+  status?: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+  user_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listTrainingDeferrals(
+  params: ListTrainingDeferralsParams = {},
+): Promise<TrainingDeferralRequestRead[]> {
+  const sp = new URLSearchParams();
+  if (params.status) sp.set("status", params.status);
+  if (params.user_id) sp.set("user_id", params.user_id);
+  if (params.limit) sp.set("limit", String(params.limit));
+  if (params.offset) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  const path = qs ? `/training/deferrals?${qs}` : "/training/deferrals";
+  return apiGet<TrainingDeferralRequestRead[]>(path, {
+    headers: authHeaders(),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // STATUS VIEWS
 // ---------------------------------------------------------------------------
@@ -521,4 +558,44 @@ export async function markAllTrainingNotificationsRead(): Promise<{ ok: boolean 
       headers: authHeaders(),
     },
   );
+}
+
+export async function listTrainingCertificates(userId?: string): Promise<TrainingRecordRead[]> {
+  const path = userId
+    ? `/training/certificates?user_id=${encodeURIComponent(userId)}`
+    : "/training/certificates";
+  return apiGet<TrainingRecordRead[]>(path, { headers: authHeaders() });
+}
+
+export async function issueTrainingCertificate(recordId: string): Promise<TrainingRecordRead> {
+  return apiPost<TrainingRecordRead>(
+    `/training/certificates/issue/${encodeURIComponent(recordId)}`,
+    {},
+    { headers: authHeaders() },
+  );
+}
+
+export type PublicCertificateVerification = {
+  status: "VALID" | "EXPIRED" | "NOT_FOUND" | "MALFORMED";
+  certificate_number: string;
+  trainee_name?: string;
+  course_title?: string;
+  issue_date?: string;
+  valid_until?: string | null;
+  issuer?: string;
+};
+
+export async function verifyCertificatePublic(certificateNumber: string): Promise<PublicCertificateVerification> {
+  const base = getApiBaseUrl() || (import.meta.env.DEV ? (import.meta.env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8080") : "");
+  const url = `${base}/public/certificates/verify/${encodeURIComponent(certificateNumber)}`;
+  const res = await fetch(url, { method: "GET" });
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error("Verification service unavailable");
+  }
+  const data = (await res.json()) as PublicCertificateVerification;
+  if (!res.ok) {
+    throw new Error((data as any)?.message || "Verification service unavailable");
+  }
+  return data;
 }

@@ -1423,3 +1423,49 @@ button.qms-list__item:hover {
 .table-row--comfortable th {
   padding: 12px 12px;
 }
+
+
+.qms-header__back-desktop {
+  display: inline-flex;
+}
+
+.qms-header__mobile-overflow {
+  position: relative;
+  display: none;
+}
+
+.qms-header__overflow-toggle {
+  min-width: 34px;
+  padding: 6px;
+}
+
+.qms-header__overflow-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-elevated);
+  min-width: 170px;
+  box-shadow: var(--sh-1);
+  z-index: 5;
+}
+
+.qms-header__overflow-menu button {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+@media (max-width: 768px) {
+  .qms-header__back-desktop {
+    display: none;
+  }
+
+  .qms-header__mobile-overflow {
+    display: inline-flex;
+  }
+}
