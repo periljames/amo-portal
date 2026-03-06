@@ -1,16 +1,18 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Info, Plus, RefreshCw } from "lucide-react";
 import QMSLayout from "../components/QMS/QMSLayout";
 import Drawer from "../components/shared/Drawer";
 import { getContext } from "../services/auth";
+import { useToast } from "../components/feedback/ToastProvider";
 import {
   fetchCalendarEvents,
   type CalendarItem,
   type DashboardFilter,
   type WorkScope,
 } from "../services/qmsCockpit";
+import { qmsUpdateAudit } from "../services/qms";
 
 type SourceFilter = "All" | CalendarItem["source"];
 type ScopeFilter = "All" | WorkScope;
@@ -148,6 +150,8 @@ const QMSEventsPage: React.FC = () => {
   const [createDate, setCreateDate] = useState<string>(toDateKey(new Date()));
   const [createDraft, setCreateDraft] = useState<CreateEventDraft>(emptyCreateDraft);
   const [localEvents, setLocalEvents] = useState<CalendarItem[]>([]);
+  const queryClient = useQueryClient();
+  const { pushToast } = useToast();
 
   const { data = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ["maintenance-calendar", filters],
@@ -225,20 +229,89 @@ const QMSEventsPage: React.FC = () => {
 
   const criticalVisibleCount = criticalEventsInMonth.length;
 
+  const moveEventMutation = useMutation({
+    mutationFn: async ({ eventId, targetDateKey }: { eventId: string; targetDateKey: string }) => {
+      const item = filtered.find((event) => event.id === eventId) ?? mapped.find((event) => event.id === eventId);
+      if (!item) throw new Error("Event not found.");
+
+      const durationDays = dayDiff(item.viewDate, getEventEndDate(item));
+      const nextEnd = durationDays > 0 ? addDays(targetDateKey, durationDays) : undefined;
+
+      if (item.id.startsWith("audit-")) {
+        const auditId = item.id.replace("audit-", "");
+        await qmsUpdateAudit(auditId, {
+          planned_start: targetDateKey,
+          planned_end: nextEnd ?? null,
+        });
+        return { persisted: true as const };
+      }
+
+      return { persisted: false as const };
+    },
+    onMutate: ({ eventId, targetDateKey }) => {
+      const item = filtered.find((event) => event.id === eventId) ?? mapped.find((event) => event.id === eventId);
+      if (!item) return { eventId, previous: null };
+
+      const durationDays = dayDiff(item.viewDate, getEventEndDate(item));
+      const nextEnd = durationDays > 0 ? addDays(targetDateKey, durationDays) : undefined;
+      const previous = dateOverrides[eventId] ?? {
+        viewDate: item.viewDate,
+        endDate: item.endDate,
+      };
+
+      setDateOverrides((prev) => ({
+        ...prev,
+        [eventId]: {
+          viewDate: targetDateKey,
+          endDate: nextEnd,
+        },
+      }));
+
+      return { eventId, previous };
+    },
+    onSuccess: async (result, vars) => {
+      if (result.persisted) {
+        await queryClient.invalidateQueries({ queryKey: ["maintenance-calendar"] });
+        pushToast({
+          title: `Audit moved to ${vars.targetDateKey}`,
+          variant: "info",
+        });
+        return;
+      }
+
+      pushToast({
+        title: "Calendar item moved locally only",
+        message: "This source does not support drag-drop sync yet. Open the source module to persist the change.",
+        variant: "info",
+      });
+    },
+    onError: (error: Error, _vars, context) => {
+      if (context?.previous) {
+        setDateOverrides((prev) => ({
+          ...prev,
+          [context.eventId]: context.previous,
+        }));
+      } else if (context?.eventId) {
+        setDateOverrides((prev) => {
+          const next = { ...prev };
+          delete next[context.eventId];
+          return next;
+        });
+      }
+      pushToast({
+        title: "Unable to move calendar item",
+        message: error.message || "Please try again.",
+        variant: "error",
+      });
+    },
+  });
+
   const onDropEventToDate = (eventId: string, targetDateKey: string) => {
     const item = filtered.find((event) => event.id === eventId) ?? mapped.find((event) => event.id === eventId);
     if (!item) return;
 
-    const durationDays = dayDiff(item.viewDate, getEventEndDate(item));
-    const nextEnd = durationDays > 0 ? addDays(targetDateKey, durationDays) : targetDateKey;
-
-    setDateOverrides((prev) => ({
-      ...prev,
-      [eventId]: {
-        viewDate: targetDateKey,
-        endDate: durationDays > 0 ? nextEnd : undefined,
-      },
-    }));
+    if (item.viewDate === targetDateKey) return;
+    void moveEventMutation.mutateAsync({ eventId, targetDateKey });
   };
 
   const getEventRoute = (event: CalendarItem): string => {
@@ -430,7 +503,9 @@ const QMSEventsPage: React.FC = () => {
                   onClick={() => setSelectedDate(cell.dateKey)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => {
-                    if (draggingEventId) onDropEventToDate(draggingEventId, cell.dateKey);
+                    if (draggingEventId && !moveEventMutation.isPending) {
+                      onDropEventToDate(draggingEventId, cell.dateKey);
+                    }
                     setDraggingEventId(null);
                   }}
                   onKeyDown={(e) => {
@@ -470,8 +545,11 @@ const QMSEventsPage: React.FC = () => {
                           className={`calendar-mini__event calendar-mini__event--${event.severity} ${segment !== "single" ? "is-span" : ""} ${
                             segment === "start" ? "is-span-start" : ""
                           } ${segment === "end" ? "is-span-end" : ""} ${segment === "middle" ? "is-span-middle" : ""}`}
-                          draggable
-                          onDragStart={() => setDraggingEventId(event.id)}
+                          draggable={isStart}
+                          onDragStart={() => {
+                            if (!isStart) return;
+                            setDraggingEventId(event.id);
+                          }}
                           onDragEnd={() => setDraggingEventId(null)}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -508,7 +586,7 @@ const QMSEventsPage: React.FC = () => {
         <div className="calendar-help-drawer">
           <p>Click event cards to open their module.</p>
           <p>Use scope tabs and source filter to narrow results.</p>
-          <p>Drag events onto another date to reschedule.</p>
+          <p>Drag events onto another date to reschedule. Audit events persist; other sources move locally and prompt next steps.</p>
           <div className="calendar-help-drawer__actions">
             <button type="button" className="calendar-help-drawer__collapse" onClick={() => setHelpOpen(false)}>
               Collapse panel
