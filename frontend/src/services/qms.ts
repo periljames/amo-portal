@@ -516,6 +516,16 @@ export async function qmsCreateAuditSchedule(payload: {
   );
 }
 
+export async function qmsUpdateAudit(
+  auditId: string,
+  payload: {
+    planned_start?: string | null;
+    planned_end?: string | null;
+  }
+): Promise<QMSAuditOut> {
+  return sendJson<QMSAuditOut>(`/quality/audits/${auditId}`, "PATCH", payload);
+}
+
 export async function qmsRunAuditSchedule(
   scheduleId: string
 ): Promise<QMSAuditOut> {
@@ -687,6 +697,19 @@ export async function qmsUpdateCar(
   }
 ): Promise<CAROut> {
   return sendJson<CAROut>(`/quality/cars/${carId}`, "PATCH", payload);
+}
+
+export async function qmsReviewCarResponse(
+  carId: string,
+  payload: {
+    root_cause_status?: "ACCEPTED" | "REJECTED";
+    root_cause_review_note?: string | null;
+    capa_status?: "ACCEPTED" | "REJECTED" | "NEEDS_EVIDENCE";
+    capa_review_note?: string | null;
+    message?: string | null;
+  }
+): Promise<CAROut> {
+  return sendJson<CAROut>(`/quality/cars/${encodeURIComponent(carId)}/review`, "POST", payload);
 }
 
 export async function qmsDeleteCar(carId: string): Promise<void> {
