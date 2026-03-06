@@ -46,6 +46,8 @@ from .apps.manuals.router_branding import router as manuals_branding_router
 from .apps.aerodoc_router import router as aerodoc_router
 from .apps.doc_control.router import router as doc_control_router
 from .apps.technical_records.router import router as technical_records_router
+from .apps.esign.router import router as esign_router, public_router as esign_public_router
+from .apps.esign import services as esign_services
 
 
 logger = logging.getLogger(__name__)
@@ -174,6 +176,7 @@ def _enforce_schema_head_sync_if_configured() -> None:
 @app.on_event("startup")
 def _schema_preflight() -> None:
     _enforce_schema_head_sync_if_configured()
+    esign_services.validate_runtime_config()
     realtime_gateway.connect()
 
 app.add_middleware(
@@ -307,3 +310,5 @@ app.include_router(manuals_branding_router)
 app.include_router(doc_control_router)
 app.include_router(technical_records_router)
 app.include_router(aerodoc_router)
+app.include_router(esign_router)
+app.include_router(esign_public_router)

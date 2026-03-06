@@ -1,0 +1,53 @@
+.esign-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.esign-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.esign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.esign-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.esign-hash-block {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.esign-hash-block code {
+  display: block;
+  overflow-wrap: anywhere;
+  background: rgba(148, 163, 184, 0.15);
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+}
+
+.esign-inbox-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+
+.esign-inbox-table th,
+.esign-inbox-table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+  padding: 0.45rem 0.5rem;
+  text-align: left;
+}

@@ -24,6 +24,8 @@ import "./styles/components/dashboard-cockpit.css";
 import "./styles/components/action-panel.css";
 import "./styles/components/planning-production.css";
 import "./styles/components/liquid-glass.css";
+import "./styles/components/esign.css";
+import "./styles/components/loading.css";
 
 
 if (typeof document !== "undefined" && import.meta.env.VITE_MANUALS_PWA_ENABLED === "1") {

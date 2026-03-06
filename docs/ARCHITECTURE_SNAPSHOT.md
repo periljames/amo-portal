@@ -55,3 +55,26 @@ This snapshot should be refreshed after major structural, security, or data-mode
 - Superuser can now authenticate against any AMO slug path (e.g. `/maintenance/<amoSlug>/login`) using the same superuser email/password.
 - During superuser login with a target AMO slug, backend now aligns active admin context to that AMO automatically, so API scope follows the selected tenant immediately.
 - `/login` now includes **Use Demo Access** quick action to auto-fill demo credentials/slug via environment defaults.
+
+## E-Signatures module (Phase 1)
+- Added backend-only `esign` app with WebAuthn challenge/verification flows, tenant-scoped signature requests/intents, appearance-only PDF stamping provider, and public integrity verification endpoint.
+- Entitlement gate is `require_module("ESIGN_MODULE")` for private e-sign routes.
+- New Alembic migration introduces e-sign document versioning, signing request lifecycle, signers/intents, credentials, challenge replay records, signed artifacts, and verification tokens.
+
+## Shared frontend loading subsystem (Phase 3.3)
+- Added a platform-level loading provider/hook/component set (`frontend/src/components/loading/*`, `frontend/src/hooks/useGlobalLoading.ts`, `frontend/src/hooks/useAsyncWithLoader.ts`).
+- Supports global overlay, page, section, and inline loading modes with normalized phases and minimum-visible timing.
+- Router lazy fallback now uses the shared `PageLoader`; E-Sign verify/signer/artifact flows are integrated as reference consumers.
+- Accessibility/performance: aria-live status messaging, reduced-motion CSS behavior, and lightweight CSS animations only.
+
+- Loader visual primitive refined to `InstrumentLoader` (encircled ring + internal sweep bar) with shared size/tone variants for overlay/page/section/inline states.
+
+- Phase 3.4 adds internal loader gallery routes (`/ui/loader`, `/maintenance/:amoCode/admin/ui/loader`) plus centralized escalation thresholds to prevent frozen-looking async states.
+
+- Phase 3.5 adds loader contrast tokens plus high-contrast behavior (`prefers-contrast`, `forced-colors`, and `.amo-contrast-high`) to improve outdoor readability without changing async semantics.
+
+- Phase 3.6 adds passkey management/signing UX (settings page + signer passkey-first CTA) wired to existing E-Sign WebAuthn endpoints.
+
+- Phase 3.7 adds passkey nickname metadata + internal action-required inbox APIs/UI for signer task visibility and quick sign navigation.
+
+- Phase 3.8 adds tenant-scoped in-app E-Sign notifications (create/read/dismiss/count) for internal action-required events with audited lifecycle actions.
