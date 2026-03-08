@@ -18,7 +18,10 @@ import {
   qmsCreateCar,
   qmsGetCarInvite,
   qmsListCars,
+  qmsListCarAttachments,
+  qmsReviewCarResponse,
   qmsUpdateCar,
+  type CARAttachmentOut,
 } from "../services/qms";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -56,6 +59,23 @@ type CarFormState = {
   assigned_department_id: string;
   assigned_to_user_id: string;
   finding_id: string;
+};
+
+type CarReviewForm = {
+  root_cause_status: "ACCEPTED" | "REJECTED" | "";
+  root_cause_review_note: string;
+  capa_status: "ACCEPTED" | "REJECTED" | "NEEDS_EVIDENCE" | "";
+  capa_review_note: string;
+  message: string;
+};
+
+const getCarWorkflowStep = (car: CAROut): string => {
+  if (!car.submitted_at) return "Awaiting auditee response";
+  if ((car.root_cause_status === "REJECTED") || (car.capa_status === "REJECTED")) return "Returned to auditee";
+  if (car.root_cause_status === "ACCEPTED" && car.capa_status === "NEEDS_EVIDENCE") return "Waiting for more evidence";
+  if (car.status === "PENDING_VERIFICATION") return "Pending verification / closeout";
+  if (car.status === "CLOSED") return "Closed";
+  return "Under reviewer assessment";
 };
 
 const QualityCarsPage: React.FC = () => {
@@ -103,6 +123,17 @@ const QualityCarsPage: React.FC = () => {
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
   const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
+  const [reviewCar, setReviewCar] = useState<CAROut | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewAttachments, setReviewAttachments] = useState<CARAttachmentOut[]>([]);
+  const [reviewAttachmentsLoading, setReviewAttachmentsLoading] = useState(false);
+  const [reviewForm, setReviewForm] = useState<CarReviewForm>({
+    root_cause_status: "",
+    root_cause_review_note: "",
+    capa_status: "",
+    capa_review_note: "",
+    message: "",
+  });
   const { pushToast } = useToast();
 
   const assigneeLookup = useMemo(() => {
@@ -135,6 +166,12 @@ const QualityCarsPage: React.FC = () => {
       return true;
     });
   }, [cars, searchParams]);
+
+  const reviewQueue = useMemo(() => {
+    return cars
+      .filter((car) => !!car.submitted_at || car.status === "IN_PROGRESS" || car.status === "PENDING_VERIFICATION")
+      .sort((a, b) => (new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
+  }, [cars]);
 
   const departmentOptions = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
@@ -313,6 +350,58 @@ const QualityCarsPage: React.FC = () => {
       setError(e?.message || "Failed to export CAR evidence pack.");
     } finally {
       setExportingId(null);
+    }
+  };
+
+  const openReview = async (car: CAROut) => {
+    setReviewCar(car);
+    setReviewForm({
+      root_cause_status: (car.root_cause_status as CarReviewForm["root_cause_status"]) || "",
+      root_cause_review_note: car.root_cause_review_note || "",
+      capa_status: (car.capa_status as CarReviewForm["capa_status"]) || "",
+      capa_review_note: car.capa_review_note || "",
+      message: "",
+    });
+    setReviewAttachmentsLoading(true);
+    try {
+      const files = await qmsListCarAttachments(car.id);
+      setReviewAttachments(files);
+    } catch (e: any) {
+      pushToast({
+        title: "Attachment fetch failed",
+        message: e?.message || "Could not load submitted evidence attachments.",
+        variant: "error",
+      });
+      setReviewAttachments([]);
+    } finally {
+      setReviewAttachmentsLoading(false);
+    }
+  };
+
+  const submitReview = async () => {
+    if (!reviewCar) return;
+    setReviewBusy(true);
+    setError(null);
+    try {
+      await qmsReviewCarResponse(reviewCar.id, {
+        root_cause_status: reviewForm.root_cause_status || undefined,
+        root_cause_review_note: reviewForm.root_cause_review_note.trim() || null,
+        capa_status: reviewForm.capa_status || undefined,
+        capa_review_note: reviewForm.capa_review_note.trim() || null,
+        message: reviewForm.message.trim() || null,
+      });
+      pushToast({
+        title: "CAR review submitted",
+        message: `Review outcome saved for ${reviewCar.car_number}.`,
+        variant: "info",
+      });
+      setReviewCar(null);
+      setReviewAttachments([]);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Failed to submit CAR review.");
+    } finally {
+      setReviewBusy(false);
     }
   };
 
@@ -679,6 +768,13 @@ const QualityCarsPage: React.FC = () => {
                           <button
                             type="button"
                             className="secondary-chip-btn"
+                            onClick={() => void openReview(car)}
+                          >
+                            Review
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
                             onClick={() =>
                               setPanelContext({
                                 type: "car",
@@ -731,6 +827,133 @@ const QualityCarsPage: React.FC = () => {
           )}
         </div>
       </section>
+
+      <section className="page-section">
+        <div className="card">
+          <div className="card-header">
+            <h2>Auditee submissions & review queue</h2>
+            <p className="text-muted">Track internal/external CAR submissions, reviewer decisions, and workflow stage.</p>
+          </div>
+          <div className="table-responsive">
+            <table className="table table-compact">
+              <thead>
+                <tr>
+                  <th>CAR #</th>
+                  <th>Auditee submission</th>
+                  <th>Root cause review</th>
+                  <th>CAPA review</th>
+                  <th>Evidence</th>
+                  <th>Workflow stage</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviewQueue.map((car) => (
+                  <tr key={`review-${car.id}`}>
+                    <td>{car.car_number}</td>
+                    <td>
+                      <div>{car.submitted_by_name || "—"}</div>
+                      <div className="text-muted">{car.submitted_at ? new Date(car.submitted_at).toLocaleString() : "Not submitted"}</div>
+                    </td>
+                    <td>{car.root_cause_status || "Pending"}</td>
+                    <td>{car.capa_status || "Pending"}</td>
+                    <td>{car.evidence_received_at ? "Received" : "Missing"}</td>
+                    <td>{getCarWorkflowStep(car)}</td>
+                    <td>
+                      <button type="button" className="secondary-chip-btn" onClick={() => void openReview(car)}>
+                        Open review
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {reviewQueue.length === 0 && (
+                  <tr>
+                    <td colSpan={7}>No auditee submissions in review queue yet.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {reviewCar && (
+        <div className="upsell-modal__backdrop" role="dialog" aria-modal="true">
+          <div className="upsell-modal" style={{ maxWidth: 920 }}>
+            <div className="upsell-modal__header">
+              <div>
+                <p className="upsell-modal__eyebrow">Reviewer workspace</p>
+                <h3 className="upsell-modal__title">CAR {reviewCar.car_number} · {reviewCar.title}</h3>
+                <p className="text-muted" style={{ marginTop: 4 }}>Current step: {getCarWorkflowStep(reviewCar)}</p>
+              </div>
+              <button type="button" className="upsell-modal__close" onClick={() => setReviewCar(null)} disabled={reviewBusy}>×</button>
+            </div>
+            <div className="upsell-modal__body" style={{ display: "grid", gap: 12 }}>
+              <div className="qms-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                <div className="qms-card">
+                  <h4 style={{ marginTop: 0 }}>Auditee payload</h4>
+                  <p><strong>Name:</strong> {reviewCar.submitted_by_name || "—"}</p>
+                  <p><strong>Email:</strong> {reviewCar.submitted_by_email || "—"}</p>
+                  <p><strong>Containment:</strong> {reviewCar.containment_action || "—"}</p>
+                  <p><strong>Root cause:</strong> {reviewCar.root_cause_text || reviewCar.root_cause || "—"}</p>
+                  <p><strong>CAPA:</strong> {reviewCar.capa_text || reviewCar.corrective_action || "—"}</p>
+                  <p><strong>Evidence ref:</strong> {reviewCar.evidence_ref || "—"}</p>
+                </div>
+                <div className="qms-card">
+                  <h4 style={{ marginTop: 0 }}>Evidence attachments</h4>
+                  {reviewAttachmentsLoading ? <p>Loading evidence…</p> : null}
+                  {!reviewAttachmentsLoading && reviewAttachments.map((file) => (
+                    <div key={file.id} style={{ marginBottom: 8 }}>
+                      <a href={file.download_url} target="_blank" rel="noreferrer">{file.filename}</a>
+                    </div>
+                  ))}
+                  {!reviewAttachmentsLoading && reviewAttachments.length === 0 ? <p className="text-muted">No attachments.</p> : null}
+                </div>
+              </div>
+
+              <div className="qms-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                <label className="qms-field">
+                  Root cause decision
+                  <select value={reviewForm.root_cause_status} onChange={(e) => setReviewForm((prev) => ({ ...prev, root_cause_status: e.target.value as CarReviewForm["root_cause_status"] }))}>
+                    <option value="">No change</option>
+                    <option value="ACCEPTED">Accept</option>
+                    <option value="REJECTED">Reject</option>
+                  </select>
+                </label>
+                <label className="qms-field">
+                  CAPA decision
+                  <select value={reviewForm.capa_status} onChange={(e) => setReviewForm((prev) => ({ ...prev, capa_status: e.target.value as CarReviewForm["capa_status"] }))}>
+                    <option value="">No change</option>
+                    <option value="ACCEPTED">Accept</option>
+                    <option value="NEEDS_EVIDENCE">Needs evidence</option>
+                    <option value="REJECTED">Reject</option>
+                  </select>
+                </label>
+              </div>
+              <div className="qms-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                <label className="qms-field">
+                  Root cause note (required for rejection)
+                  <textarea rows={3} value={reviewForm.root_cause_review_note} onChange={(e) => setReviewForm((prev) => ({ ...prev, root_cause_review_note: e.target.value }))} />
+                </label>
+                <label className="qms-field">
+                  CAPA note (required for reject/needs evidence)
+                  <textarea rows={3} value={reviewForm.capa_review_note} onChange={(e) => setReviewForm((prev) => ({ ...prev, capa_review_note: e.target.value }))} />
+                </label>
+              </div>
+              <label className="qms-field">
+                Reviewer message / action note
+                <textarea rows={3} value={reviewForm.message} onChange={(e) => setReviewForm((prev) => ({ ...prev, message: e.target.value }))} placeholder="Visible in CAR action log for full audit traceability." />
+              </label>
+            </div>
+            <div className="upsell-modal__actions">
+              <button type="button" className="secondary-chip-btn" onClick={() => setReviewCar(null)} disabled={reviewBusy}>Cancel</button>
+              <button type="button" className="primary-chip-btn" onClick={() => void submitReview()} disabled={reviewBusy}>
+                {reviewBusy ? "Submitting…" : "Submit review"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {previewOpen && (
         <div className="upsell-modal__backdrop" role="dialog" aria-modal="true">

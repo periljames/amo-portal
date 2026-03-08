@@ -67,17 +67,11 @@ body[data-color-scheme="dark"] {
   margin: 0 0 6px;
   font-size: 2rem;
   color: var(--qms-text-strong);
-  background: linear-gradient(90deg, var(--qms-text-strong), color-mix(in srgb, var(--qms-accent) 55%, var(--qms-text-strong)));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: qmsTitleSweep 8s ease-in-out infinite;
-  background-size: 220% 100%;
 }
 
 .qms-subtitle {
   margin: 0;
-  color: #475569;
+  color: #334155;
   max-width: 680px;
 }
 
@@ -115,6 +109,7 @@ body[data-color-scheme="dark"] {
   border: 1px solid transparent;
   background: var(--qms-nav-link-bg);
   color: var(--qms-nav-link-color);
+  font-weight: 600;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease,
     background 0.2s ease;
 }
@@ -224,7 +219,7 @@ body[data-color-scheme="dark"] {
 
 .qms-card__subtitle {
   margin: 0;
-  color: #64748b;
+  color: #334155;
   font-size: 0.9rem;
 }
 
@@ -1422,4 +1417,56 @@ button.qms-list__item:hover {
 .table-row--comfortable td,
 .table-row--comfortable th {
   padding: 12px 12px;
+}
+
+
+.qms-shell *::selection {
+  background: #1d4ed8;
+  color: #ffffff;
+}
+
+.qms-shell *::-moz-selection {
+  background: #1d4ed8;
+  color: #ffffff;
+}
+
+.qms-audit-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.qms-audit-detail__breadcrumb {
+  color: #475569;
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+}
+
+.qms-audit-detail__intelligence {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.qms-audit-detail__score {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 8px 0;
+}
+
+.qms-row--active {
+  outline: 2px solid #1d4ed8;
+  outline-offset: -2px;
+  background: #eff6ff;
+}
+
+.qms-card--interactive {
+  text-align: left;
+  border: 1px solid #cbd5e1;
+  cursor: pointer;
+}
+
+.qms-finding-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
 }

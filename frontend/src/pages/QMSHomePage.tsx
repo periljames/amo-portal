@@ -43,6 +43,7 @@ type ScheduledEvent = {
   date: string;
   type: "Audit" | "Training";
   meta?: string;
+  route: string;
 };
 
 function formatDate(value: string | null | undefined): string {
@@ -250,6 +251,7 @@ const QMSHomePage: React.FC = () => {
           date: audit.planned_start as string,
           type: "Audit" as const,
           meta: audit.audit_ref,
+          route: `/maintenance/${amoSlug}/${department}/qms/audits/${audit.id}`,
         })),
       ...trainingEvents.map((event) => ({
         id: event.id,
@@ -257,6 +259,7 @@ const QMSHomePage: React.FC = () => {
         date: event.starts_on,
         type: "Training" as const,
         meta: trainingCourses.find((course) => course.id === event.course_id)?.course_id,
+        route: `/maintenance/${amoSlug}/${department}/qms/events`,
       })),
     ]
       .filter((event) => isWithinDays(event.date, 45))
@@ -445,11 +448,11 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="qms-action"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits/plan`)}
                 >
                   <span className="qms-action__icon">📋</span>
-                  <span className="qms-action__title">Review audit plan</span>
-                  <span className="qms-action__meta">Upcoming audits & closures</span>
+                  <span className="qms-action__title">Plan & schedule audits</span>
+                  <span className="qms-action__meta">Calendar, list, and schedule creation</span>
                 </button>
                 <button
                   type="button"
@@ -642,7 +645,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="secondary-chip-btn"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits/plan`)}
                 >
                   View audit programme
                 </button>
@@ -653,7 +656,7 @@ const QMSHomePage: React.FC = () => {
                     type="button"
                     key={audit.id}
                     className="qms-list__item"
-                    onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits`)}
+                    onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits/${audit.id}`)}
                   >
                     <div>
                       <strong>{audit.title}</strong>
@@ -692,7 +695,7 @@ const QMSHomePage: React.FC = () => {
                     type="button"
                     key={`${event.type}-${event.id}`}
                     className="qms-list__item"
-                    onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/events`)}
+                    onClick={() => navigate(event.route)}
                   >
                     <div>
                       <strong>{event.title}</strong>
