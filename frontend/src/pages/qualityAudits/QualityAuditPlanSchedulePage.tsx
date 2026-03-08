@@ -195,6 +195,12 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
     return contentRows.filter((row) => `${row.title} ${row.status} ${row.owner}`.toLowerCase().includes(q));
   }, [contentFilter, contentRows]);
 
+  const timelineRows = useMemo(() => {
+    return (auditsQuery.data ?? [])
+      .filter((audit) => !!audit.planned_start)
+      .sort((a, b) => (toDate(a.planned_start)?.getTime() ?? 0) - (toDate(b.planned_start)?.getTime() ?? 0));
+  }, [auditsQuery.data]);
+
   return (
     <QualityAuditsSectionLayout
       title="Audit Plan / Schedule"

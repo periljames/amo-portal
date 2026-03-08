@@ -1,5 +1,6 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { MoreVertical } from "lucide-react";
 import DepartmentLayout from "../Layout/DepartmentLayout";
 import PageHeader from "../shared/PageHeader";
 import { decodeAmoCertFromUrl } from "../../utils/amo";
@@ -12,6 +13,7 @@ type Props = {
   subtitle?: string;
   actions?: React.ReactNode;
   children: React.ReactNode;
+  hideBackButton?: boolean;
 };
 
 const QMSLayout: React.FC<Props> = ({
@@ -21,10 +23,17 @@ const QMSLayout: React.FC<Props> = ({
   subtitle,
   actions,
   children,
+  hideBackButton = false,
 }) => {
   const navigate = useNavigate();
   const { pushToast } = useToast();
   const amoDisplay = amoCode !== "UNKNOWN" ? decodeAmoCertFromUrl(amoCode) : "AMO";
+
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const breadcrumbs = useMemo(() => ([
+    { label: `QMS · ${amoDisplay}`, to: `/maintenance/${amoCode}/${department}/qms` },
+    { label: title },
+  ]), [amoCode, department, title, amoDisplay]);
 
   useEffect(() => {
     if (department === "quality") return;
@@ -45,23 +54,45 @@ const QMSLayout: React.FC<Props> = ({
         <PageHeader
           title={title}
           subtitle={subtitle}
-          breadcrumbs={[
-            {
-              label: `QMS · ${amoDisplay}`,
-              to: `/maintenance/${amoCode}/${department}/qms`,
-            },
-            { label: title },
-          ]}
+          breadcrumbs={breadcrumbs}
           actions={
             <div className="qms-header__actions">
               {actions}
-              <button
-                type="button"
-                className="secondary-chip-btn"
-                onClick={() => navigate(`/maintenance/${amoCode}/${department}`)}
-              >
-                Back to department dashboard
-              </button>
+              {!hideBackButton ? (
+                <>
+                  <button
+                    type="button"
+                    className="secondary-chip-btn qms-header__back-desktop"
+                    onClick={() => navigate(`/maintenance/${amoCode}/${department}`)}
+                  >
+                    Back
+                  </button>
+                  <div className="qms-header__mobile-overflow">
+                    <button
+                      type="button"
+                      className="secondary-chip-btn qms-header__overflow-toggle"
+                      aria-label="Open module actions"
+                      onClick={() => setMobileMenuOpen((v) => !v)}
+                    >
+                      <MoreVertical size={15} />
+                    </button>
+                    {mobileMenuOpen ? (
+                      <div className="qms-header__overflow-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setMobileMenuOpen(false);
+                            navigate(`/maintenance/${amoCode}/${department}`);
+                          }}
+                        >
+                          Back to dashboard
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
             </div>
           }
         />

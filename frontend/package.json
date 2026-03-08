@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "perf:report": "node scripts/perf-report.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:unit": "vitest run src/utils/verificationScan.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -21,6 +22,7 @@
     "@tanstack/react-virtual": "^3.13.18",
     "@tinymomentum/liquid-glass-react": "^1.0.6",
     "@tremor/react": "^3.18.7",
+    "@zxing/library": "^0.21.3",
     "ag-grid-community": "^32.3.9",
     "ag-grid-react": "^32.3.9",
     "clsx": "^2.1.1",
@@ -42,10 +44,11 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@playwright/test": "^1.58.2",
-    "@types/node": "^24.10.0",
+    "@types/node": "^24.12.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
+    "@zxing/browser": "^0.1.5",
     "baseline-browser-mapping": "^2.9.17",
     "concurrently": "^9.2.1",
     "eslint": "^10.0.0",
@@ -54,6 +57,7 @@
     "globals": "^16.5.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.36.0",
-    "vite": "^7.2.2"
+    "vite": "^7.2.2",
+    "vitest": "^4.0.18"
   }
 }

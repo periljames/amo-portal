@@ -147,6 +147,27 @@
   overscroll-behavior: contain;
 }
 
+.app-shell--v2 .sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.app-shell--v2 .sidebar__item {
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  justify-content: space-between;
+  flex: 0 0 auto;
+}
+
+.app-shell--v2 .sidebar__item-label {
+  white-space: normal;
+  overflow: visible;
+}
+
+
 .app-shell--focus {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -401,7 +422,7 @@ body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active .sidebar__
   left: 0;
   top: 0;
   z-index: 45;
-  width: min(320px, 90vw);
+  width: min(360px, 92vw);
   height: 100vh;
   transform: translateX(-100%);
   transition: transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -410,6 +431,10 @@ body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active .sidebar__
   backdrop-filter: blur(16px) saturate(1.2);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
   border-right: 1px solid var(--surface-border);
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .app-shell--v2.app-shell--drawer.app-shell--drawer-open .app-shell__sidebar {
@@ -420,6 +445,19 @@ body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active .sidebar__
   .app-shell--v2.app-shell--drawer .app-shell__sidebar {
     background: color-mix(in srgb, var(--surface-elevated) 96%, transparent 4%);
   }
+}
+
+
+.sidebar__close-btn {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sidebar__pin-btn {
@@ -514,5 +552,68 @@ body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active .sidebar__
 
   .app-shell--v2 .sidebar__item-label {
     font-size: 0.92rem;
+  }
+}
+
+.app-shell__topbar--mobile {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+  padding-top: calc(env(safe-area-inset-top, 0px) + var(--s-2));
+}
+
+.app-shell__topbar-mobile-brand {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.app-shell__topbar-mobile-brand .brand-header__topbar-logo-wrap {
+  min-width: 0;
+  max-width: 120px;
+  height: 22px;
+}
+
+.app-shell__topbar-mobile-right {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.live-status--compact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+}
+
+@media (max-width: 1024px) {
+  .sidebar-mobile-toggle {
+    min-height: 32px;
+    width: 32px;
+    padding: 0;
+  }
+}
+
+
+@media (max-width: 1024px) {
+  .app-shell--v2 .app-shell__sidebar {
+    width: min(92vw, 360px);
+  }
+
+  .app-shell--v2 .sidebar__header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface-elevated);
+  }
+
+  .app-shell--v2 .sidebar__nav {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: calc(var(--s-6) + env(safe-area-inset-bottom, 0px));
   }
 }

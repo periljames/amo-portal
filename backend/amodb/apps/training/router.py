@@ -22,7 +22,9 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from ...database import get_db
 from ...entitlements import require_module
@@ -41,6 +43,8 @@ router = APIRouter(
     tags=["training"],
     dependencies=[Depends(require_module("training"))],
 )
+
+public_router = APIRouter(prefix="/public", tags=["training-public"])
 
 _MAX_PAGE_SIZE = 1000  # hard ceiling for list endpoints to protect DB
 
@@ -61,6 +65,26 @@ _MAX_UPLOAD_BYTES = int(os.getenv("TRAINING_MAX_UPLOAD_BYTES", "0") or "0")
 # ---------------------------------------------------------------------------
 # HELPERS
 # ---------------------------------------------------------------------------
+
+
+def _next_certificate_number(db: Session, amo_id: str) -> str:
+    prefix = f"TC-{amo_id[:6].upper()}"
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    seq = 1
+    while True:
+        candidate = f"{prefix}-{today}-{seq:04d}"
+        exists = (
+            db.query(training_models.TrainingRecord.id)
+            .filter(
+                training_models.TrainingRecord.amo_id == amo_id,
+                training_models.TrainingRecord.certificate_reference == candidate,
+            )
+            .first()
+        )
+        if not exists:
+            return candidate
+        seq += 1
+
 
 
 def _normalize_pagination(limit: int, offset: int) -> Tuple[int, int]:
@@ -2594,4 +2618,138 @@ def get_training_dashboard_summary(
         due_soon_count=due_soon_count,
         overdue_count=overdue_count,
         deferred_count=deferred_count,
+    )
+
+@router.get(
+    "/certificates",
+    response_model=List[training_schemas.TrainingRecordRead],
+    summary="List issued training certificates (record-backed)",
+)
+def list_certificates(
+    user_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    q = db.query(training_models.TrainingCertificateIssue).filter(
+        training_models.TrainingCertificateIssue.amo_id == current_user.amo_id,
+    )
+    if user_id:
+        q = q.join(training_models.TrainingRecord, training_models.TrainingRecord.id == training_models.TrainingCertificateIssue.record_id)
+        q = q.filter(training_models.TrainingRecord.user_id == user_id)
+    rows = q.order_by(training_models.TrainingCertificateIssue.issued_at.desc()).all()
+    record_ids = [r.record_id for r in rows]
+    records = db.query(training_models.TrainingRecord).filter(training_models.TrainingRecord.id.in_(record_ids)).all() if record_ids else []
+    by_id = {r.id: r for r in records}
+    return [_record_to_read(by_id[r.record_id]) for r in rows if r.record_id in by_id]
+
+
+@router.post(
+    "/certificates/issue/{record_id}",
+    response_model=training_schemas.TrainingRecordRead,
+    summary="Issue immutable certificate number for a training record",
+)
+def issue_certificate(
+    record_id: str,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    record = (
+        db.query(training_models.TrainingRecord)
+        .filter(
+            training_models.TrainingRecord.id == record_id,
+            training_models.TrainingRecord.amo_id == current_user.amo_id,
+        )
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found.")
+    existing_issue = db.query(training_models.TrainingCertificateIssue).filter(
+        training_models.TrainingCertificateIssue.record_id == record.id,
+        training_models.TrainingCertificateIssue.amo_id == current_user.amo_id,
+    ).first()
+    if existing_issue or record.certificate_reference:
+        raise HTTPException(status_code=400, detail="Certificate already issued and immutable.")
+
+    cert_no = _next_certificate_number(db, current_user.amo_id)
+    qr_value = f"/verify/certificate/{cert_no}"
+    artifact_hash = hashlib.sha256(f"{record.id}:{cert_no}:{record.completion_date}".encode("utf-8")).hexdigest()
+    issue = training_models.TrainingCertificateIssue(
+        amo_id=current_user.amo_id,
+        record_id=record.id,
+        certificate_number=cert_no,
+        issued_by_user_id=current_user.id,
+        status="VALID",
+        qr_value=qr_value,
+        barcode_value=cert_no,
+        artifact_hash=artifact_hash,
+    )
+    db.add(issue)
+    db.flush()
+    history = training_models.TrainingCertificateStatusHistory(
+        amo_id=current_user.amo_id,
+        certificate_issue_id=issue.id,
+        status="VALID",
+        reason="Initial issuance",
+        actor_user_id=current_user.id,
+    )
+    record.certificate_reference = cert_no
+    db.add(history)
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _record_to_read(record)
+
+
+@public_router.get(
+    "/certificates/verify/{certificate_number}",
+    summary="Public certificate authenticity verification",
+)
+def verify_certificate_public(certificate_number: str, db: Session = Depends(get_db)):
+    token = (certificate_number or "").strip()
+    if len(token) < 6:
+        return JSONResponse(status_code=400, content={"status": "MALFORMED", "certificate_number": token, "message": "Malformed certificate number."}, media_type="application/json")
+
+    try:
+        issue = db.execute(
+            select(
+                training_models.TrainingCertificateIssue.record_id,
+                training_models.TrainingCertificateIssue.status,
+            ).where(training_models.TrainingCertificateIssue.certificate_number == token)
+        ).first()
+    except SQLAlchemyError:
+        return JSONResponse(status_code=503, content={"status": "UNAVAILABLE", "certificate_number": token, "message": "Verification service unavailable."}, media_type="application/json")
+    if not issue:
+        return JSONResponse(status_code=200, content={"status": "NOT_FOUND", "certificate_number": token}, media_type="application/json")
+
+    record = db.execute(
+        select(
+            training_models.TrainingRecord.user_id,
+            training_models.TrainingRecord.course_id,
+            training_models.TrainingRecord.completion_date,
+            training_models.TrainingRecord.valid_until,
+        ).where(training_models.TrainingRecord.id == issue.record_id)
+    ).first()
+    if not record:
+        return JSONResponse(status_code=200, content={"status": "NOT_FOUND", "certificate_number": token}, media_type="application/json")
+
+    user_name = db.execute(select(accounts_models.User.full_name).where(accounts_models.User.id == record.user_id)).scalar_one_or_none()
+    course_name = db.execute(select(training_models.TrainingCourse.course_name).where(training_models.TrainingCourse.id == record.course_id)).scalar_one_or_none()
+
+    now = date.today()
+    status_value = issue.status or "VALID"
+    if status_value == "VALID" and record.valid_until and record.valid_until < now:
+        status_value = "EXPIRED"
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": status_value,
+            "certificate_number": token,
+            "trainee_name": user_name or "Unknown",
+            "course_title": course_name or "Unknown",
+            "issue_date": str(record.completion_date),
+            "valid_until": str(record.valid_until) if record.valid_until else None,
+            "issuer": "AMO Portal",
+        },
+        media_type="application/json",
     )

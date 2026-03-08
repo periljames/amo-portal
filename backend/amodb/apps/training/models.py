@@ -958,3 +958,53 @@ class TrainingAuditLog(Base):
 
     def __repr__(self) -> str:
         return f"<TrainingAuditLog {self.id} action={self.action} entity={self.entity_type}:{self.entity_id}>"
+
+
+# ---------------------------------------------------------------------------
+# CERTIFICATE ISSUANCE / STATUS HISTORY
+# ---------------------------------------------------------------------------
+
+
+class TrainingCertificateIssue(Base):
+    __tablename__ = "training_certificate_issues"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "certificate_number", name="uq_training_certificate_issues_amo_number"),
+        Index("idx_training_certificate_issues_amo_status", "amo_id", "status"),
+        Index("idx_training_certificate_issues_amo_record", "amo_id", "record_id"),
+        Index("idx_training_certificate_issues_amo_issued", "amo_id", "issued_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    record_id = Column(String(36), ForeignKey("training_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    certificate_number = Column(String(128), nullable=False)
+    issued_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    issued_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    template_id = Column(String(36), nullable=True)
+    template_version = Column(String(64), nullable=True)
+    artifact_path = Column(String(512), nullable=True)
+    artifact_hash = Column(String(128), nullable=True)
+    qr_value = Column(String(255), nullable=True)
+    barcode_value = Column(String(255), nullable=True)
+    status = Column(String(32), nullable=False, default="VALID", index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class TrainingCertificateStatusHistory(Base):
+    __tablename__ = "training_certificate_status_history"
+    __table_args__ = (
+        Index("idx_training_cert_status_history_issue", "certificate_issue_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    certificate_issue_id = Column(
+        String(36),
+        ForeignKey("training_certificate_issues.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status = Column(String(32), nullable=False)
+    reason = Column(Text, nullable=True)
+    actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)

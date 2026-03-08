@@ -38,3 +38,14 @@
   - Source: `/aircraft/{tail}/components`.
 - Missing/Backfill:
   - Source: `/aircraft/{tail}/usage` + `POST /aircraft/{tail}/usage` (conflicts surfaced inline from 409 responses).
+
+## Training & Competence module discovery (current iteration)
+
+- Backend training domain already includes AMO-scoped courses, requirements, events, participants, records, deferrals, notifications, and audit logs under `backend/amodb/apps/training/*`.
+- Existing operator routes reused:
+  - `/maintenance/:amoCode/:department/qms/training`
+  - `/maintenance/:amoCode/:department/qms/events`
+  - `/maintenance/:amoCode/:department/training`
+- New consolidated hub route:
+  - `/maintenance/:amoCode/:department/training-competence`
+- Sidebar integration now includes a dedicated top-level **Training & Competence** entry for faster cross-workflow navigation.
