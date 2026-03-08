@@ -23,6 +23,7 @@
 - **Routing:** `src/router.tsx` defines public login/reset flows and protected maintenance/admin routes guarded by `RequireAuth` (checks `services/auth.isAuthenticated`).
 - **Auth state:** `services/auth.ts` manages JWT, AMO/department context, cached user in `localStorage`, and provides `authHeaders` for API calls.
 - **Pages/components:** Auth pages (`LoginPage`, `PasswordResetPage`), dashboards (department/admin), CRS creation, aircraft import, QMS, training. Styling via `styles/global.css` and page-specific CSS. Hooks (`useTimeOfDayTheme`, `useColorScheme`) drive theming.
+- **QMS schedule detail war room:** `QualityAuditScheduleDetailPage` now composes `qualityAudits/AuditDetailView` + `qualityAudits/FindingDrawer` to deliver tenant-scoped schedule intelligence (CHI/readiness), findings triage, evidence preview handoff, and verify+close actions.
 
 ## Current risks / gaps
 - **CORS defaults:** Previously allowed `*` with credentials enabled (fixed in this commit to env-driven origins).

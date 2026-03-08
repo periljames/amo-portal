@@ -7,9 +7,9 @@ import SpreadsheetToolbar from "../../components/shared/SpreadsheetToolbar";
 import { getContext } from "../../services/auth";
 import {
   qmsCreateAuditSchedule,
+  qmsDeleteAuditSchedule,
   qmsListAudits,
   qmsListAuditSchedules,
-  type QMSAuditOut,
   type QMSAuditScheduleFrequency,
   type QMSAuditScheduleOut,
 } from "../../services/qms";
@@ -52,24 +52,6 @@ const endOfWeek = (date: Date): Date => {
   return e;
 };
 
-const dayDiff = (start: string, end: string): number => {
-  const s = toDate(start)?.getTime() ?? 0;
-  const e = toDate(end)?.getTime() ?? s;
-  return Math.max(0, Math.round((e - s) / (1000 * 60 * 60 * 24)));
-};
-
-const statusToProgress = (audit: QMSAuditOut): number => {
-  if (audit.status === "CLOSED") return 100;
-  if (audit.status === "CAP_OPEN") return 80;
-  if (audit.status === "IN_PROGRESS") {
-    if (!audit.planned_start || !audit.planned_end) return 50;
-    const totalDays = Math.max(1, dayDiff(audit.planned_start, audit.planned_end) + 1);
-    const elapsed = Math.max(0, dayDiff(audit.planned_start, toDateKey(new Date())) + 1);
-    return Math.min(95, Math.round((elapsed / totalDays) * 100));
-  }
-  return 10;
-};
-
 const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const ctx = getContext();
@@ -110,6 +92,11 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
     staleTime: 60_000,
   });
 
+  const refreshPlannerData = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["qms-audit-schedules"] });
+    await queryClient.invalidateQueries({ queryKey: ["qms-audits"] });
+  };
+
   const createSchedule = useMutation({
     mutationFn: async () => {
       const duration = Number(newSchedule.duration_days);
@@ -130,10 +117,18 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
     onSuccess: async () => {
       setCreateError(null);
       setNewSchedule((prev) => ({ ...prev, title: "", next_due_date: "", lead_auditor_user_id: "" }));
-      await queryClient.invalidateQueries({ queryKey: ["qms-audit-schedules", amoCode] });
+      await refreshPlannerData();
+      setView("list");
     },
     onError: (error: Error) => {
       setCreateError(error.message || "Failed to create schedule.");
+    },
+  });
+
+  const deleteSchedule = useMutation({
+    mutationFn: (scheduleId: string) => qmsDeleteAuditSchedule(scheduleId),
+    onSuccess: async () => {
+      await refreshPlannerData();
     },
   });
 
@@ -209,7 +204,7 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
   return (
     <QualityAuditsSectionLayout
       title="Audit Plan / Schedule"
-      subtitle="Month/week/day planning with list, table, and calendar surfaces plus Gantt-style progress."
+      subtitle="Month/week/day planning with list, table, and calendar views."
     >
       <div className="qms-header__actions">
         <div
@@ -322,15 +317,20 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
                 <section key={date} className="qms-card">
                   <h3 style={{ marginTop: 0 }}>{date}</h3>
                   {rows.map((schedule) => (
-                    <button
-                      type="button"
-                      key={schedule.id}
-                      className="qms-action-list__row"
-                      onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/schedules/${schedule.id}`)}
-                    >
-                      <span>{schedule.title}</span>
-                      <span>{schedule.frequency}</span>
-                    </button>
+                    <div key={schedule.id} className="qms-header__actions" style={{ marginBottom: 8 }}>
+                      <button
+                        type="button"
+                        className="qms-action-list__row"
+                        onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/schedules/${schedule.id}`)}
+                        style={{ flex: 1 }}
+                      >
+                        <span>{schedule.title}</span>
+                        <span>{schedule.frequency}</span>
+                      </button>
+                      <button type="button" className="secondary-chip-btn" onClick={() => deleteSchedule.mutate(schedule.id)} disabled={deleteSchedule.isPending}>
+                        Delete
+                      </button>
+                    </div>
                   ))}
                 </section>
               ))}
@@ -345,6 +345,9 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
                       <li key={row.id}>
                         <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/schedules/${row.id}`)}>
                           {row.title} · {row.frequency}
+                        </button>
+                        <button type="button" className="secondary-chip-btn" onClick={() => deleteSchedule.mutate(row.id)} disabled={deleteSchedule.isPending} style={{ marginLeft: 8 }}>
+                          Delete
                         </button>
                       </li>
                     ))}
@@ -376,6 +379,9 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
                           <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/schedules/${row.id}`)}>
                             Open
                           </button>
+                          <button type="button" className="secondary-chip-btn" onClick={() => deleteSchedule.mutate(row.id)} disabled={deleteSchedule.isPending} style={{ marginLeft: 8 }}>
+                            Delete
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -384,48 +390,6 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
               </table>
             </DataTableShell>
           )}
-
-          <DataTableShell title="Audit fieldwork timeline (Gantt-lite)">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Audit</th>
-                  <th>Dates</th>
-                  <th>Progress</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {timelineRows.map((audit) => {
-                  const progress = statusToProgress(audit);
-                  return (
-                    <tr key={audit.id}>
-                      <td>{audit.title}</td>
-                      <td>{audit.planned_start} → {audit.planned_end ?? audit.planned_start}</td>
-                      <td>
-                        <div style={{ background: "var(--line)", borderRadius: 999, height: 8, width: 220 }}>
-                          <div style={{ width: `${progress}%`, height: 8, background: "var(--qms-accent)", borderRadius: 999 }} />
-                        </div>
-                        <small>{progress}%</small>
-                      </td>
-                      <td>{audit.status}</td>
-                      <td>
-                        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/${audit.id}`)}>
-                          Open run hub
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {timelineRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={5}>No planned audits available for timeline.</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </DataTableShell>
         </>
       )}
 
@@ -438,6 +402,7 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
                 <th>Frequency</th>
                 <th>Next due</th>
                 {showOwnerColumn ? <th>Lead auditor</th> : null}
+                <th>Actions</th>
               </tr>
               {showFilters ? (
                 <tr>
@@ -445,16 +410,25 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
                   <th><input className="input" style={{ height: 30 }} placeholder="Frequency" value={listFilter.frequency} onChange={(e) => setListFilter((prev) => ({ ...prev, frequency: e.target.value }))} /></th>
                   <th></th>
                   {showOwnerColumn ? <th><input className="input" style={{ height: 30 }} placeholder="Owner" value={listFilter.owner} onChange={(e) => setListFilter((prev) => ({ ...prev, owner: e.target.value }))} /></th> : null}
+                  <th></th>
                 </tr>
               ) : null}
             </thead>
             <tbody>
               {filteredSchedules.map((schedule) => (
-                <tr key={schedule.id} onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/schedules/${schedule.id}`)} style={{ cursor: "pointer" }}>
+                <tr key={schedule.id}>
                   <td>{schedule.title}</td>
                   <td>{schedule.frequency}</td>
                   <td>{schedule.next_due_date}</td>
                   {showOwnerColumn ? <td>{schedule.lead_auditor_user_id ?? "Unassigned"}</td> : null}
+                  <td>
+                    <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/schedules/${schedule.id}`)}>
+                      Open
+                    </button>
+                    <button type="button" className="secondary-chip-btn" onClick={() => deleteSchedule.mutate(schedule.id)} disabled={deleteSchedule.isPending} style={{ marginLeft: 8 }}>
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -486,6 +460,9 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
                   <td>
                     <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/schedules/${row.id}`)}>
                       Open schedule
+                    </button>
+                    <button type="button" className="secondary-chip-btn" onClick={() => deleteSchedule.mutate(row.id)} disabled={deleteSchedule.isPending} style={{ marginLeft: 8 }}>
+                      Delete
                     </button>
                   </td>
                 </tr>

@@ -949,6 +949,45 @@ def create_audit_schedule(
     return schedule
 
 
+@router.delete("/audits/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_audit_schedule(
+    schedule_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_quality_scheduler(current_user)
+    schedule = (
+        db.query(models.QMSAuditSchedule)
+        .filter(models.QMSAuditSchedule.id == schedule_id)
+        .first()
+    )
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Audit schedule not found")
+
+    before = {
+        "title": schedule.title,
+        "frequency": schedule.frequency.value,
+        "next_due_date": str(schedule.next_due_date),
+    }
+
+    db.delete(schedule)
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit_schedule",
+        entity_id=str(schedule_id),
+        action="delete",
+        before=before,
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+        critical=True,
+    )
+    db.commit()
+    return None
+
+
 @router.post("/audits/schedules/{schedule_id}/run", response_model=QMSAuditOut)
 def run_audit_schedule(
     schedule_id: UUID,

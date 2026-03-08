@@ -526,6 +526,10 @@ export async function qmsUpdateAudit(
   return sendJson<QMSAuditOut>(`/quality/audits/${auditId}`, "PATCH", payload);
 }
 
+export async function qmsDeleteAuditSchedule(scheduleId: string): Promise<void> {
+  await sendJson<void>(`/quality/audits/schedules/${scheduleId}`, "DELETE", undefined);
+}
+
 export async function qmsRunAuditSchedule(
   scheduleId: string
 ): Promise<QMSAuditOut> {
