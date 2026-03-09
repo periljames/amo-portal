@@ -68,7 +68,7 @@ def test_revision_transition_invalid_state_rejected():
 
 
 def test_car_transition_requires_evidence():
-    car = SimpleNamespace(id="CAR1", status="OPEN", finding_id=None, evidence_ref=None)
+    car = SimpleNamespace(id="CAR1", status="IN_PROGRESS", finding_id=None, evidence_ref=None)
     db = _DB()
     with pytest.raises(HTTPException) as exc:
         car_transitions.transition_car(
@@ -76,7 +76,7 @@ def test_car_transition_requires_evidence():
             amo_id="A1",
             actor_user_id="U1",
             car=car,
-            target_status="ACKNOWLEDGED",
+            target_status="PENDING_VERIFICATION",
             evidence_ref=None,
         )
     assert exc.value.status_code == 400
