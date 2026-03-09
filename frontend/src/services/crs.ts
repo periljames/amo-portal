@@ -15,6 +15,18 @@ import { getApiBaseUrl } from "./config";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
+function buildJsonMisrouteHint(url: string, contentType: string): string {
+  if (!contentType.toLowerCase().includes("text/html")) {
+    return `Expected JSON from ${url}, but got ${contentType || "unknown"}`;
+  }
+  const hint = [
+    `Expected JSON from ${url}, but received HTML (${contentType || "unknown"}).`,
+    "This usually means the request was sent to the Vite dev server instead of the API backend.",
+    "Check VITE_API_BASE_URL and Vite proxy route patterns.",
+  ];
+  return hint.join(" ");
+}
+
 async function request<T>(
   method: HttpMethod,
   path: string,
@@ -61,9 +73,7 @@ async function request<T>(
       contentType,
       text.slice(0, 300)
     );
-    throw new Error(
-      `Expected JSON from ${url}, but got ${contentType || "unknown"}`
-    );
+    throw new Error(buildJsonMisrouteHint(url, contentType));
   }
 
   try {
@@ -157,6 +167,14 @@ export async function apiDelete<T>(
   }
 
   return request<T>("DELETE", path, bodyInit, { ...init, headers });
+}
+
+export async function apiPostForm<T>(
+  path: string,
+  formData: FormData,
+  init: RequestInit = {}
+): Promise<T> {
+  return request<T>("POST", path, formData, init);
 }
 
 // -----------------------------------------------------------------------------
