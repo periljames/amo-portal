@@ -9,6 +9,7 @@ import { fetchHealthz, fetchServerTime, RealtimeHttpError } from "../../services
 import { RealtimeMqttClient } from "../../services/realtime/mqtt";
 import type { BrokerState } from "../../services/realtime/types";
 import { RealtimeContext } from "./realtimeContext";
+import { isRealtimeEnabled } from "../../utils/featureFlags";
 
 export type RealtimeStatus = "live" | "syncing" | "offline";
 export type BackendHealth = "ok" | "degraded";
@@ -201,7 +202,18 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return onSessionEvent((detail) => {
       if (detail.type === "authenticated") {
         retryCount.current = 0;
+
         mqttRef.current?.disconnect();
+        mqttRef.current = null;
+        if (!isRealtimeEnabled()) {
+          controllerRef.current?.abort();
+          setStatus("offline");
+          setBrokerState("offline");
+          return;
+        }
+
+        reconnectNow();
+
         mqttRef.current = new RealtimeMqttClient({
           onState: (state) => {
             setBrokerState(state);
@@ -213,9 +225,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }
           },
           onMessage: () => setLastUpdated(serverNow()),
+          onUnavailable: () => setBrokerState("offline"),
         });
         void mqttRef.current.connect();
-        reconnectNow();
       }
 
       if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
@@ -232,6 +244,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     connectRef.current = connectSse;
 
     if (getToken()) {
+      if (!isRealtimeEnabled()) {
+        controllerRef.current?.abort();
+        setStatus("offline");
+        setBrokerState("offline");
+        return () => {
+          controllerRef.current?.abort();
+          if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+        };
+      }
       connectSse();
       mqttRef.current = new RealtimeMqttClient({
         onState: (state) => {
@@ -244,6 +265,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
         },
         onMessage: () => setLastUpdated(serverNow()),
+        onUnavailable: () => setBrokerState("offline"),
       });
       void mqttRef.current.connect();
     } else {

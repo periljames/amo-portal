@@ -27,10 +27,13 @@ type MsgpackModule = {
 type Handlers = {
   onState: (state: BrokerState) => void;
   onMessage: (msg: RealtimeEnvelope, topic: string) => void;
+  onUnavailable?: (reason: string) => void;
 };
 
 let mqttLibPromise: Promise<MqttModule | null> | null = null;
 let msgpackPromise: Promise<MsgpackModule | null> | null = null;
+
+const MAX_MQTT_RECONNECT_ATTEMPTS = 6;
 
 async function getMqttLib(): Promise<MqttModule | null> {
   if (!mqttLibPromise) {
@@ -122,6 +125,12 @@ export class RealtimeMqttClient {
 
   private scheduleReconnect(reason: string): void {
     if (this.stopped) return;
+    if (this.attempt >= MAX_MQTT_RECONNECT_ATTEMPTS) {
+      this.handlers.onState("offline");
+      this.handlers.onUnavailable?.(`mqtt reconnect limit reached (${reason})`);
+      console.info("[realtime] mqtt disabled for this session after repeated failures");
+      return;
+    }
     this.clearReconnectTimer();
     this.handlers.onState("reconnecting");
     const wait = backoffMs(this.attempt++);

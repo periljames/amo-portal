@@ -10,6 +10,7 @@ from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
@@ -34,6 +35,8 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/manuals", tags=["Manuals"], dependencies=[Depends(get_current_active_user)])
+
+MAX_DOCX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 def _role_value(current_user: account_models.User) -> str:
@@ -121,6 +124,26 @@ def _apply_lifecycle_transition(
     return previous, approval_chain_reset
 
 
+def _validate_docx_upload(file: UploadFile, content: bytes) -> None:
+    filename = (file.filename or "").strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+    if not filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported")
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded DOCX is empty")
+    if len(content) > MAX_DOCX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"DOCX file is too large (max {MAX_DOCX_UPLOAD_BYTES // (1024 * 1024)} MB)")
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as zf:
+            if "word/document.xml" not in set(zf.namelist()):
+                raise HTTPException(status_code=400, detail="Invalid DOCX structure: word/document.xml missing")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid DOCX file") from exc
+
+
 def _extract_docx_header_metadata(content: bytes) -> dict[str, str | None]:
     try:
         with zipfile.ZipFile(BytesIO(content)) as zf:
@@ -184,13 +207,33 @@ def _tenant_by_slug(db: Session, tenant_slug: str) -> models.Tenant:
     tenant = db.query(models.Tenant).filter(models.Tenant.slug == tenant_slug).first()
     if tenant:
         return tenant
+
     amo = db.query(AMO).filter(AMO.login_slug == tenant_slug).first()
     if not amo:
         raise HTTPException(status_code=404, detail="Tenant not found")
+
+    tenant = db.query(models.Tenant).filter(models.Tenant.amo_id == amo.id).first()
+    if tenant:
+        if tenant.slug != tenant_slug:
+            tenant.slug = tenant_slug
+        if tenant.name != amo.name:
+            tenant.name = amo.name
+        return tenant
+
     tenant = models.Tenant(amo_id=amo.id, slug=tenant_slug, name=amo.name, settings_json={"ack_due_days": 10})
     db.add(tenant)
-    db.commit()
-    db.refresh(tenant)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        tenant = db.query(models.Tenant).filter(models.Tenant.amo_id == amo.id).first()
+        if tenant:
+            if tenant.slug != tenant_slug:
+                tenant.slug = tenant_slug
+            if tenant.name != amo.name:
+                tenant.name = amo.name
+            return tenant
+        raise
     return tenant
 
 
@@ -224,14 +267,6 @@ def create_manual(tenant_slug: str, payload: ManualCreate, request: Request, db:
     return manual
 
 
-@router.get("/t/{tenant_slug}/{manual_id}", response_model=ManualOut)
-def get_manual(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
-    tenant = _tenant_by_slug(db, tenant_slug)
-    manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
-    if not manual:
-        raise HTTPException(status_code=404, detail="Manual not found")
-    return manual
-
 
 
 
@@ -249,9 +284,8 @@ async def preview_docx_upload(
     _ = _tenant_by_slug(db, tenant_slug)
     if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
-    if not file.filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported in preview")
     content = await file.read()
+    _validate_docx_upload(file, content)
     paragraphs = _extract_docx_paragraphs(content)
     if not paragraphs:
         paragraphs = ["No extractable text found in DOCX."]
@@ -274,6 +308,7 @@ async def upload_docx_revision(
     manual_type: str = Form("GENERAL"),
     owner_role: str = Form("Library"),
     issue_number: str = Form(...),
+    change_log: str | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -281,8 +316,8 @@ async def upload_docx_revision(
     tenant = _tenant_by_slug(db, tenant_slug)
     if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
-    if not file.filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported in this endpoint")
+    content = await file.read()
+    _validate_docx_upload(file, content)
 
     manual = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id, models.Manual.code == code.strip()).first()
     if not manual:
@@ -296,7 +331,6 @@ async def upload_docx_revision(
         db.add(manual)
         db.flush()
 
-    content = await file.read()
     paragraphs = _extract_docx_paragraphs(content)
     header_meta = _extract_docx_header_metadata(content)
 
@@ -309,7 +343,7 @@ async def upload_docx_revision(
         issue_number=issue_number.strip(),
         created_by=get_current_actor_id(),
         status_enum=models.ManualRevisionStatus.DRAFT,
-        notes=f"Uploaded source: {file.filename}",
+        notes=(f"Uploaded source: {file.filename}" + (f"\nChange log: {change_log.strip()}" if change_log and change_log.strip() else "")),
     )
     db.add(rev)
     db.flush()
@@ -623,6 +657,14 @@ def master_list(tenant_slug: str, db: Session = Depends(get_db)):
             pending = db.query(models.Acknowledgement).filter(models.Acknowledgement.revision_id == manual.current_published_rev_id, models.Acknowledgement.status_enum != "ACKNOWLEDGED").count()
         result.append(MasterListEntry(manual_id=manual.id, code=manual.code, title=manual.title, current_revision=current_rev.rev_number if current_rev else None, current_status=current_rev.status_enum.value if current_rev else "NO_PUBLISHED_REV", pending_ack_count=pending))
     return result
+
+@router.get("/t/{tenant_slug}/{manual_id}", response_model=ManualOut)
+def get_manual(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
+    if not manual:
+        raise HTTPException(status_code=404, detail="Manual not found")
+    return manual
 
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/processing/run")

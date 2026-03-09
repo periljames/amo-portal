@@ -1,0 +1,85 @@
+.manuals-top-tabs { margin-bottom: 1rem; }
+.manuals-link-btn, .manuals-primary-btn {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.8);
+  color: #e2e8f0;
+  padding: 0.5rem 0.85rem;
+  border-radius: 0.5rem;
+}
+.manuals-primary-btn { background: #06b6d4; color: #082f49; border: none; font-weight: 600; }
+.manuals-library-grid, .manuals-upload-grid, .manuals-reader-grid { display: grid; gap: 1rem; }
+.manuals-library-grid { grid-template-columns: minmax(220px, 28%) 1fr; }
+.manuals-upload-grid { grid-template-columns: 1fr minmax(320px, 40%); }
+.manuals-reader-grid { grid-template-columns: minmax(220px, 20%) 1fr; align-items: start; min-height: 70vh; }
+.manuals-library-list, .manuals-library-detail, .manuals-upload-panel, .manuals-upload-preview, .manuals-reader-panel {
+  border: 1px solid rgba(148,163,184,0.2);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: rgba(15,23,42,0.55);
+}
+.manuals-manual-item, .manuals-revision-item {
+  width: 100%; text-align: left; margin-bottom: 0.45rem;
+  border: 1px solid rgba(148,163,184,0.2); border-radius: 0.5rem;
+  padding: 0.6rem; background: rgba(30,41,59,0.6); color: #e2e8f0;
+}
+.manuals-manual-item.active, .manuals-revision-item.active { border-color: rgba(34,211,238,0.7); }
+.manuals-revision-list { display: grid; gap: 0.5rem; }
+.manuals-muted { color: #94a3b8; font-size: 0.85rem; }
+.manuals-error { color: #fda4af; font-size: 0.85rem; }
+.manuals-success { color: #86efac; font-size: 0.85rem; }
+.manuals-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
+.manuals-form-grid input, .manuals-upload-panel textarea {
+  width: 100%; border: 1px solid rgba(148,163,184,0.25); border-radius: 0.5rem;
+  background: rgba(15,23,42,0.7); color: #e2e8f0; padding: 0.55rem;
+}
+.manuals-dropzone { margin: 0.75rem 0; border: 2px dashed rgba(34,211,238,0.5); border-radius: 0.75rem; padding: 1rem; background: rgba(6,182,212,0.05); }
+.manuals-dropzone.drag { background: rgba(6,182,212,0.14); }
+.manuals-panel-title { font-weight: 600; color: #f8fafc; margin-bottom: 0.5rem; }
+.manuals-toc-item {
+  display: block; width: 100%; text-align: left;
+  color: #cbd5e1; padding: 0.35rem 0.3rem; text-decoration: none;
+  border: 1px solid transparent; border-radius: 0.4rem; background: transparent;
+}
+.manuals-toc-item.active { border-color: rgba(34,211,238,0.6); background: rgba(34,211,238,0.12); }
+.manuals-toc-l2 { padding-left: 0.8rem; }
+.manuals-toc-l3 { padding-left: 1.4rem; }
+.manuals-mode-toggle { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; }
+.manuals-mode-toggle button {
+  flex: 1; border-radius: 0.4rem; border: 1px solid rgba(148,163,184,0.3);
+  background: rgba(15,23,42,0.8); color: #cbd5e1; padding: 0.35rem 0.5rem;
+}
+.manuals-mode-toggle button.active { border-color: rgba(34,211,238,0.7); color: #67e8f9; }
+.manuals-print-canvas {
+  max-height: 76vh; overflow: auto;
+  border: 1px solid rgba(148,163,184,0.2); border-radius: 0.75rem;
+  padding: 0.85rem; background: #0b1220;
+}
+.manuals-info-bar {
+  position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.55rem;
+  border: 1px solid rgba(148,163,184,0.25); border-radius: 0.5rem;
+  background: rgba(15,23,42,0.92); color: #e2e8f0; font-size: 0.82rem;
+}
+.manuals-docx-host .docx-wrapper, .manuals-fallback-page {
+  width: min(8.5in, 100%);
+  min-height: 11in;
+  margin: 0 auto 1.25rem auto;
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 18px 40px rgba(2,6,23,0.45);
+  padding: 0.8in;
+}
+.manuals-section-host { display: grid; }
+
+@media (max-width: 1200px) {
+  .manuals-library-grid, .manuals-upload-grid, .manuals-reader-grid { grid-template-columns: 1fr; }
+  .manuals-reader-panel.toc-panel { order: 2; }
+  .manuals-print-canvas { order: 1; max-height: none; }
+  .manuals-info-bar { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+
+@media print {
+  .manuals-reader-panel, .manuals-top-tabs, .manuals-info-bar { display: none !important; }
+  .manuals-print-canvas { border: none; padding: 0; max-height: none; overflow: visible; background: transparent; }
+  .manuals-docx-host .docx-wrapper, .manuals-fallback-page { box-shadow: none; margin: 0; page-break-after: always; }
+}
