@@ -1,7 +1,6 @@
-import { getApiBaseUrl } from "./config";
-import { getToken, handleAuthFailure } from "./auth";
+import { getToken, authHeaders } from "./auth";
+import { apiDelete, apiGet, apiPost, apiPostForm } from "./crs";
 
-const API_BASE = getApiBaseUrl();
 
 const MANUALS_UPDATED_EVENT = "amo:manuals-updated";
 const MANUALS_UPDATED_STORAGE_KEY = "amo_manuals_updated";
@@ -102,20 +101,34 @@ export type ManualExportPayload = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || "GET").toUpperCase();
+  const headers = new Headers(init?.headers);
   const token = getToken();
-  const resp = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.headers || {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      "Content-Type": "application/json",
-    },
-  });
-  if (!resp.ok) {
-    if (resp.status === 401) handleAuthFailure();
-    throw new Error(`Request failed: ${resp.status}`);
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
   }
-  return (await resp.json()) as T;
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
+
+  const body = init?.body;
+  if (body && !(body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  if (method === "GET") {
+    return apiGet<T>(path, { ...init, headers });
+  }
+  if (method === "DELETE") {
+    return apiDelete<T>(path, undefined, { ...init, headers });
+  }
+  if (method === "POST") {
+    if (body instanceof FormData) {
+      return apiPostForm<T>(path, body, { ...init, headers });
+    }
+    return apiPost<T>(path, body as BodyInit | undefined, { ...init, headers });
+  }
+  throw new Error(`Unsupported request method for manuals API: ${method}`);
 }
 
 export async function listManuals(tenantSlug: string): Promise<ManualSummary[]> {
@@ -218,10 +231,10 @@ export async function uploadDocxRevision(
     issue_number: string;
     manual_type?: string;
     owner_role?: string;
+    change_log?: string;
     file: File;
   },
 ) {
-  const token = getToken();
   const body = new FormData();
   body.append("code", payload.code);
   body.append("title", payload.title);
@@ -229,45 +242,27 @@ export async function uploadDocxRevision(
   if (payload.issue_number) body.append("issue_number", payload.issue_number);
   if (payload.manual_type) body.append("manual_type", payload.manual_type);
   if (payload.owner_role) body.append("owner_role", payload.owner_role);
+  if (payload.change_log) body.append("change_log", payload.change_log);
   body.append("file", payload.file);
 
-  const resp = await fetch(`${API_BASE}/manuals/t/${tenantSlug}/upload-docx`, {
-    method: "POST",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+  const result = await apiPostForm<{ manual_id: string; revision_id: string; status: string; paragraphs: number }>(
+    `/manuals/t/${tenantSlug}/upload-docx`,
     body,
-  });
-  if (!resp.ok) {
-    if (resp.status === 401) handleAuthFailure();
-    throw new Error(`Request failed: ${resp.status}`);
-  }
-  const result = (await resp.json()) as { manual_id: string; revision_id: string; status: string; paragraphs: number };
+    { headers: authHeaders() },
+  );
   emitManualsUpdated(tenantSlug, "upload-docx");
   return result;
 }
 
 
 export async function previewDocxUpload(tenantSlug: string, file: File) {
-  const token = getToken();
   const body = new FormData();
   body.append("file", file);
 
-  const resp = await fetch(`${API_BASE}/manuals/t/${tenantSlug}/upload-docx/preview`, {
-    method: "POST",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body,
-  });
-  if (!resp.ok) {
-    if (resp.status === 401) handleAuthFailure();
-    throw new Error(`Preview request failed: ${resp.status}`);
-  }
-  return (await resp.json()) as {
+  return apiPostForm<{
     filename: string;
     heading: string;
     paragraph_count: number;
     sample: string[];
-  };
+  }>(`/manuals/t/${tenantSlug}/upload-docx/preview`, body, { headers: authHeaders() });
 }
