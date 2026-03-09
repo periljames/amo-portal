@@ -12,3 +12,10 @@ export const isCursorLayerEnabled = (): boolean => {
   if (flag !== undefined) return flag !== "0" && flag !== "false";
   return false;
 };
+
+
+export const isRealtimeEnabled = (): boolean => {
+  const flag = import.meta.env.VITE_REALTIME_ENABLED;
+  if (flag !== undefined) return flag !== "0" && flag !== "false";
+  return import.meta.env.DEV ? false : true;
+};

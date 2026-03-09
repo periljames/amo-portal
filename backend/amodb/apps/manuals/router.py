@@ -35,6 +35,8 @@ from .schemas import (
 
 router = APIRouter(prefix="/manuals", tags=["Manuals"], dependencies=[Depends(get_current_active_user)])
 
+MAX_DOCX_UPLOAD_BYTES = 10 * 1024 * 1024
+
 
 def _role_value(current_user: account_models.User) -> str:
     role = getattr(current_user, "role", None)
@@ -119,6 +121,26 @@ def _apply_lifecycle_transition(
         raise HTTPException(status_code=400, detail="Unsupported lifecycle action")
 
     return previous, approval_chain_reset
+
+
+def _validate_docx_upload(file: UploadFile, content: bytes) -> None:
+    filename = (file.filename or "").strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+    if not filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported")
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded DOCX is empty")
+    if len(content) > MAX_DOCX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"DOCX file is too large (max {MAX_DOCX_UPLOAD_BYTES // (1024 * 1024)} MB)")
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as zf:
+            if "word/document.xml" not in set(zf.namelist()):
+                raise HTTPException(status_code=400, detail="Invalid DOCX structure: word/document.xml missing")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid DOCX file") from exc
 
 
 def _extract_docx_header_metadata(content: bytes) -> dict[str, str | None]:
@@ -249,9 +271,8 @@ async def preview_docx_upload(
     _ = _tenant_by_slug(db, tenant_slug)
     if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
-    if not file.filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported in preview")
     content = await file.read()
+    _validate_docx_upload(file, content)
     paragraphs = _extract_docx_paragraphs(content)
     if not paragraphs:
         paragraphs = ["No extractable text found in DOCX."]
@@ -281,8 +302,8 @@ async def upload_docx_revision(
     tenant = _tenant_by_slug(db, tenant_slug)
     if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
-    if not file.filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Only DOCX uploads are supported in this endpoint")
+    content = await file.read()
+    _validate_docx_upload(file, content)
 
     manual = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id, models.Manual.code == code.strip()).first()
     if not manual:
@@ -296,7 +317,6 @@ async def upload_docx_revision(
         db.add(manual)
         db.flush()
 
-    content = await file.read()
     paragraphs = _extract_docx_paragraphs(content)
     header_meta = _extract_docx_header_metadata(content)
 

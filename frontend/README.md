@@ -89,3 +89,10 @@ Standalone entry scaffold:
 
 Branding endpoint expected by the plugin:
 - `GET /api/tenants/:tenantSlug/branding`
+
+
+## Dev API routing notes
+
+- In Vite dev, backend endpoints are expected to go through the dev proxy when `VITE_API_BASE_URL` is not set.
+- Proxy rules include `/manuals` and `/records` so these do not fall through to the SPA shell.
+- Realtime MQTT can be disabled locally with `VITE_REALTIME_ENABLED=false` to avoid reconnect storms when no broker websocket is available.
