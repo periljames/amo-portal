@@ -231,6 +231,7 @@ export async function uploadDocxRevision(
     issue_number: string;
     manual_type?: string;
     owner_role?: string;
+    change_log?: string;
     file: File;
   },
 ) {
@@ -241,6 +242,7 @@ export async function uploadDocxRevision(
   if (payload.issue_number) body.append("issue_number", payload.issue_number);
   if (payload.manual_type) body.append("manual_type", payload.manual_type);
   if (payload.owner_role) body.append("owner_role", payload.owner_role);
+  if (payload.change_log) body.append("change_log", payload.change_log);
   body.append("file", payload.file);
 
   const result = await apiPostForm<{ manual_id: string; revision_id: string; status: string; paragraphs: number }>(

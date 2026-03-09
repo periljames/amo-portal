@@ -72,6 +72,7 @@ def test_upload_docx_revision_creates_revision(db_session):
         issue_number="1",
         manual_type="GENERAL",
         owner_role="Library",
+        change_log="Updated ATA references",
         file=file,
         db=db_session,
         current_user=user,
@@ -79,6 +80,8 @@ def test_upload_docx_revision_creates_revision(db_session):
 
     assert out["manual_id"]
     assert out["revision_id"]
+    rev = db_session.query(models.ManualRevision).filter(models.ManualRevision.id == out["revision_id"]).first()
+    assert rev is not None and "Updated ATA references" in (rev.notes or "")
 
 
 def test_preview_docx_upload_rejects_invalid_file(db_session):

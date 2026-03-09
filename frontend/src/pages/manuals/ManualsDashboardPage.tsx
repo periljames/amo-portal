@@ -1,16 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { getCachedUser } from "../../services/auth";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Tab, TabGroup, TabList, TabPanel, TabPanels } from "@tremor/react";
+import { ShieldCheck } from "lucide-react";
+import { useDropzone } from "react-dropzone";
+
 import {
   getMasterList,
+  getRevisionRead,
+  getRevisionWorkflow,
   listManuals,
+  listRevisions,
   previewDocxUpload,
   subscribeManualsUpdated,
+  type ManualRevision,
   type ManualSummary,
   uploadDocxRevision,
 } from "../../services/manuals";
+import { getCachedUser } from "../../services/auth";
 import { useManualRouteContext } from "./context";
 import ManualsPageLayout from "./ManualsPageLayout";
+import DocumentReader from "./DocumentReader";
+import "./manualsDashboard.css";
 
 type PreviewPayload = {
   filename: string;
@@ -19,38 +29,51 @@ type PreviewPayload = {
   sample: string[];
 };
 
+type MasterRow = { manual_id: string; pending_ack_count: number; current_status: string; current_revision: string | null };
+
+function extractManualCode(source: string): string {
+  const match = source.match(/[A-Z]{2,6}-\d{2,4}/i);
+  return match ? match[0].toUpperCase() : "";
+}
+
 export default function ManualsDashboardPage() {
   const navigate = useNavigate();
   const { tenant, basePath } = useManualRouteContext();
+  const [activeTab, setActiveTab] = useState(0);
   const [manuals, setManuals] = useState<ManualSummary[]>([]);
-  const [masterRows, setMasterRows] = useState<any[]>([]);
+  const [masterRows, setMasterRows] = useState<MasterRow[]>([]);
+  const [revisions, setRevisions] = useState<ManualRevision[]>([]);
+  const [activeManualId, setActiveManualId] = useState<string>("");
+  const [activeRevisionId, setActiveRevisionId] = useState<string>("");
+
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
   const [issue, setIssue] = useState("");
   const [rev, setRev] = useState("0");
+  const [changeLog, setChangeLog] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string>("");
-  const [errorMessage, setErrorMessage] = useState<string>("");
-  const [isDragActive, setIsDragActive] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
+
+  const [readPayload, setReadPayload] = useState<any | null>(null);
+  const [workflow, setWorkflow] = useState<any | null>(null);
 
   const user = getCachedUser();
   const role = String((user as any)?.role || "");
-  const canWrite =
-    !!user?.is_superuser ||
-    !!user?.is_amo_admin ||
-    role === "QUALITY_MANAGER" ||
-    role === "QUALITY_INSPECTOR" ||
-    role === "DOCUMENT_CONTROL_OFFICER" ||
-    role !== "VIEW_ONLY";
+  const canWrite = !!user?.is_superuser || !!user?.is_amo_admin || ["QUALITY_MANAGER", "QUALITY_INSPECTOR", "DOCUMENT_CONTROL_OFFICER"].includes(role);
 
   const refresh = () => {
     if (!tenant) return;
-    listManuals(tenant).then(setManuals).catch(() => setManuals([]));
-    getMasterList(tenant).then(setMasterRows).catch(() => setMasterRows([]));
+    listManuals(tenant).then((data) => {
+      setManuals(data);
+      const first = data[0]?.id || "";
+      setActiveManualId((prev) => prev || first);
+    }).catch(() => setManuals([]));
+
+    getMasterList(tenant).then((rows) => setMasterRows(rows as MasterRow[])).catch(() => setMasterRows([]));
   };
 
   useEffect(() => {
@@ -62,255 +85,194 @@ export default function ManualsDashboardPage() {
     const unsubscribe = subscribeManualsUpdated((detail) => {
       if (detail.tenantSlug === tenant) refresh();
     });
-    const onFocus = () => refresh();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      unsubscribe();
-      window.removeEventListener("focus", onFocus);
-    };
+    return unsubscribe;
   }, [tenant]);
 
   useEffect(() => {
-    if (!tenant || !file) {
+    if (!tenant || !activeManualId) {
+      setRevisions([]);
+      return;
+    }
+    listRevisions(tenant, activeManualId).then((rows) => {
+      setRevisions(rows);
+      setActiveRevisionId((prev) => prev || rows[0]?.id || "");
+    }).catch(() => setRevisions([]));
+  }, [tenant, activeManualId]);
+
+  useEffect(() => {
+    if (!tenant || !activeManualId || !activeRevisionId) {
+      setReadPayload(null);
+      setWorkflow(null);
+      return;
+    }
+    getRevisionRead(tenant, activeManualId, activeRevisionId).then(setReadPayload).catch(() => setReadPayload(null));
+    getRevisionWorkflow(tenant, activeManualId, activeRevisionId).then(setWorkflow).catch(() => setWorkflow(null));
+  }, [tenant, activeManualId, activeRevisionId]);
+
+  const onFilePicked = async (picked: File | null) => {
+    setErrorMessage("");
+    setStatusMessage("");
+    if (!picked) {
+      setFile(null);
       setPreview(null);
       return;
     }
-    setPreviewLoading(true);
-    setErrorMessage("");
-    previewDocxUpload(tenant, file)
-      .then(setPreview)
-      .catch((e) => setErrorMessage(e instanceof Error ? e.message : "Preview failed"))
-      .finally(() => setPreviewLoading(false));
-  }, [tenant, file]);
-
-  const pendingTotal = useMemo(
-    () => masterRows.reduce((acc, row) => acc + Number(row.pending_ack_count || 0), 0),
-    [masterRows],
-  );
-
-  // Keep file-selection logic in one place for both drop and browse handlers.
-  const selectDocxFile = (selectedFile: File | null) => {
-    setErrorMessage("");
-    if (!selectedFile) {
-      setFile(null);
-      return;
-    }
-    const looksLikeDocx =
-      selectedFile.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      selectedFile.name.toLowerCase().endsWith(".docx");
-    if (!looksLikeDocx) {
-      setFile(null);
+    if (!picked.name.toLowerCase().endsWith(".docx")) {
       setErrorMessage("Please upload a DOCX file.");
       return;
     }
-    setFile(selectedFile);
+
+    setFile(picked);
+    if (!code) setCode(extractManualCode(picked.name));
+
+    setPreviewLoading(true);
+    try {
+      const payload = await previewDocxUpload(tenant, picked);
+      setPreview(payload);
+      if (!title) setTitle(payload.heading || picked.name.replace(/\.docx$/i, ""));
+      if (!code) setCode(extractManualCode(`${picked.name} ${payload.heading}`));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Preview failed");
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
-  const inputClasses =
-    "w-full rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-cyan-400/70 focus:ring-2 focus:ring-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60";
+  const dropzone = useDropzone({
+    accept: {
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+    },
+    maxFiles: 1,
+    disabled: !canWrite,
+    onDrop: (files) => void onFilePicked(files[0] || null),
+  });
+
+  const pendingAckCount = useMemo(() => {
+    const row = masterRows.find((item) => item.manual_id === activeManualId);
+    return Number(row?.pending_ack_count || 0);
+  }, [activeManualId, masterRows]);
+
+  const activeRevision = revisions.find((item) => item.id === activeRevisionId);
+
+  const uploadNow = async () => {
+    if (!tenant || !file) return;
+    setUploading(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    try {
+      const out = await uploadDocxRevision(tenant, {
+        code,
+        title,
+        issue_number: issue,
+        rev_number: rev,
+        file,
+        manual_type: "GENERAL",
+        owner_role: "Document Control Officer",
+        change_log: changeLog,
+      });
+      setStatusMessage("Upload complete. Active revision updated.");
+      setActiveManualId(out.manual_id);
+      setActiveRevisionId(out.revision_id);
+      setActiveTab(1);
+      refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
-    <ManualsPageLayout
-      title="Manuals Dashboard"
-      actions={
-        <Link className="text-sm text-cyan-300 underline underline-offset-2" to={`${basePath}/master-list`}>
-          View master list
-        </Link>
-      }
-    >
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 text-sm">
-          <div className="text-slate-400">Manuals</div>
-          <div className="mt-1 text-2xl font-semibold text-slate-100">{manuals.length}</div>
-        </div>
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 text-sm">
-          <div className="text-slate-400">Pending acknowledgements</div>
-          <div className="mt-1 text-2xl font-semibold text-slate-100">{pendingTotal}</div>
-        </div>
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 text-sm">
-          <div className="text-slate-400">Distribution owner</div>
-          <div className="mt-1 font-semibold text-slate-100">Document Control Officer</div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <div className="space-y-4 rounded-lg border border-white/10 bg-white/[0.03] p-5">
-          <h2 className="text-lg font-semibold text-slate-100">Upload DOCX Revision</h2>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">Manual Code</label>
-              <input
-                className={inputClasses}
-                placeholder="e.g. MTM-001"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                disabled={!canWrite}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">Manual Title</label>
-              <input
-                className={inputClasses}
-                placeholder="Manual title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                disabled={!canWrite}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">Issue Number</label>
-              <input
-                className={inputClasses}
-                placeholder="Required"
-                value={issue}
-                onChange={(e) => setIssue(e.target.value)}
-                disabled={!canWrite}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">Revision Number</label>
-              <input
-                className={inputClasses}
-                placeholder="e.g. 0"
-                value={rev}
-                onChange={(e) => setRev(e.target.value)}
-                disabled={!canWrite}
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">DOCX File</label>
-              <div
-                className={`rounded-md border-2 border-dashed p-4 transition ${
-                  isDragActive
-                    ? "border-cyan-400/80 bg-cyan-400/10"
-                    : "border-white/20 bg-slate-900/30"
-                } ${!canWrite ? "opacity-60" : "cursor-pointer hover:border-cyan-300/60"}`}
-                onClick={() => {
-                  if (!canWrite) return;
-                  fileInputRef.current?.click();
-                }}
-                onDragOver={(e) => {
-                  if (!canWrite) return;
-                  e.preventDefault();
-                  setIsDragActive(true);
-                }}
-                onDragEnter={(e) => {
-                  if (!canWrite) return;
-                  e.preventDefault();
-                  setIsDragActive(true);
-                }}
-                onDragLeave={(e) => {
-                  if (!canWrite) return;
-                  e.preventDefault();
-                  setIsDragActive(false);
-                }}
-                onDrop={(e) => {
-                  if (!canWrite) return;
-                  e.preventDefault();
-                  setIsDragActive(false);
-                  selectDocxFile(e.dataTransfer.files?.[0] || null);
-                }}
-              >
-                <input
-                  ref={fileInputRef}
-                  className="hidden"
-                  type="file"
-                  accept=".docx"
-                  onChange={(e) => selectDocxFile(e.target.files?.[0] || null)}
-                  disabled={!canWrite}
-                />
-                <p className="text-sm text-slate-100">
-                  Drag and drop a DOCX here, or <span className="font-semibold text-cyan-300 underline">browse</span>
-                </p>
-                <p className="mt-1 text-xs text-slate-400">{file ? `Selected: ${file.name}` : "No file selected"}</p>
-              </div>
-            </div>
-          </div>
-
-          {!canWrite ? (
-            <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-              Read-only role. Document Control Officer and quality roles can upload revisions.
-            </p>
-          ) : null}
-          {errorMessage ? (
-            <p className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{errorMessage}</p>
-          ) : null}
-          {statusMessage ? (
-            <p className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{statusMessage}</p>
-          ) : null}
-
-          <div className="flex items-center gap-3">
-            <button
-              className="rounded-md bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={uploading || !canWrite || !tenant || !code || !title || !issue || !rev || !file}
-              onClick={async () => {
-                if (!tenant || !file) return;
-                setUploading(true);
-                setErrorMessage("");
-                setStatusMessage("");
-                try {
-                  const out = await uploadDocxRevision(tenant, {
-                    code,
-                    title,
-                    issue_number: issue,
-                    rev_number: rev,
-                    manual_type: "GENERAL",
-                    owner_role: "Document Control Officer",
-                    file,
-                  });
-                  setStatusMessage("Upload successful. Opening manual revision…");
-                  refresh();
-                  navigate(`${basePath}/${out.manual_id}/rev/${out.revision_id}/read`);
-                } catch (e) {
-                  setErrorMessage(e instanceof Error ? e.message : "Upload failed");
-                } finally {
-                  setUploading(false);
-                }
-              }}
-            >
-              {uploading ? "Uploading..." : "Upload DOCX"}
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
-          <h2 className="mb-3 text-lg font-semibold text-slate-100">Preview</h2>
-          {previewLoading ? <p className="text-sm text-slate-300">Loading…</p> : null}
-          {preview ? (
-            <div className="space-y-2 text-sm">
-              <div className="text-xs text-slate-400">{preview.filename}</div>
-              <div className="font-medium text-slate-100">{preview.heading}</div>
-              <div className="text-xs text-slate-400">{preview.paragraph_count} extracted lines</div>
-              <div className="max-h-72 space-y-1 overflow-auto rounded-md border border-white/10 bg-slate-950/40 p-3 text-slate-200">
-                {preview.sample.map((line, idx) => (
-                  <p key={`${idx}-${line.slice(0, 8)}`}>{line}</p>
+    <ManualsPageLayout title="Manuals Document Management Reader" actions={<button className="manuals-link-btn" onClick={() => navigate(`${basePath}/master-list`)}>Master List</button>}>
+      <TabGroup index={activeTab} onIndexChange={setActiveTab}>
+        <TabList className="manuals-top-tabs">
+          <Tab>Library</Tab>
+          <Tab>Reader</Tab>
+          <Tab>Revision Management</Tab>
+        </TabList>
+        <TabPanels>
+          <TabPanel>
+            <div className="manuals-library-grid">
+              <aside className="manuals-library-list">
+                {manuals.map((manual) => (
+                  <button key={manual.id} className={`manuals-manual-item ${manual.id === activeManualId ? "active" : ""}`} onClick={() => setActiveManualId(manual.id)}>
+                    <strong>{manual.code}</strong>
+                    <span>{manual.title}</span>
+                  </button>
                 ))}
+              </aside>
+              <section className="manuals-library-detail">
+                <h3>Revision catalogue</h3>
+                <div className="manuals-revision-list">
+                  {revisions.map((item) => (
+                    <button key={item.id} className={`manuals-revision-item ${item.id === activeRevisionId ? "active" : ""}`} onClick={() => setActiveRevisionId(item.id)}>
+                      <span>Rev {item.rev_number}</span>
+                      <small>{item.status_enum}</small>
+                    </button>
+                  ))}
+                </div>
+                <p className="manuals-muted">Pending acknowledgements: {pendingAckCount}</p>
+              </section>
+            </div>
+          </TabPanel>
+
+          <TabPanel>
+            <DocumentReader
+              file={file}
+              fallbackSections={readPayload?.sections || []}
+              fallbackBlocks={readPayload?.blocks || []}
+              meta={{
+                revisionNumber: activeRevision?.rev_number,
+                issueNumber: activeRevision?.issue_number,
+                approvalStatus: workflow?.status || activeRevision?.status_enum,
+                pendingAcknowledgements: pendingAckCount,
+                history: workflow?.history || [],
+              }}
+            />
+          </TabPanel>
+
+          <TabPanel>
+            <div className="manuals-upload-grid">
+              <div className="manuals-upload-panel">
+                <h3 className="manuals-panel-title">Upload / Edit Revision</h3>
+                <div className="manuals-form-grid">
+                  <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Manual Code (e.g. MTM-001)" />
+                  <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Manual Title" />
+                  <input value={issue} onChange={(e) => setIssue(e.target.value)} placeholder="Issue Number" />
+                  <input value={rev} onChange={(e) => setRev(e.target.value)} placeholder="Revision Number" />
+                </div>
+                <textarea value={changeLog} onChange={(e) => setChangeLog(e.target.value)} rows={4} placeholder="Change log: summarize what changed in this revision" />
+
+                <div {...dropzone.getRootProps()} className={`manuals-dropzone ${dropzone.isDragActive ? "drag" : ""}`}>
+                  <input {...dropzone.getInputProps()} />
+                  <p>{dropzone.isDragActive ? "Drop the DOCX file here" : "Drag & drop DOCX here, or click to browse"}</p>
+                  <small>{file ? `Selected: ${file.name}` : "No file selected"}</small>
+                </div>
+
+                {errorMessage ? <p className="manuals-error">{errorMessage}</p> : null}
+                {statusMessage ? <p className="manuals-success">{statusMessage}</p> : null}
+
+                <button className="manuals-primary-btn" disabled={!canWrite || !file || !code || !title || !issue || !rev || uploading} onClick={uploadNow}>
+                  {uploading ? "Uploading..." : "Upload Revision"}
+                </button>
+              </div>
+
+              <div className="manuals-upload-preview">
+                <h3 className="manuals-panel-title">Preview Metadata</h3>
+                {previewLoading ? <p className="manuals-muted">Analyzing DOCX…</p> : null}
+                {preview ? (
+                  <>
+                    <p><strong>Heading:</strong> {preview.heading}</p>
+                    <p><strong>Paragraphs:</strong> {preview.paragraph_count}</p>
+                    <ul>{preview.sample.slice(0, 6).map((line, index) => <li key={`${line}-${index}`}>{line}</li>)}</ul>
+                  </>
+                ) : <p className="manuals-muted">Upload a DOCX to preview and auto-fill metadata.</p>}
+                <p className="manuals-muted"><ShieldCheck size={14} style={{ display: "inline", marginRight: 6 }} />Aviation-grade controls: revision, issue, change log, and acknowledgements tracked.</p>
               </div>
             </div>
-          ) : (
-            <p className="text-sm text-slate-400">Select a DOCX file to show preview.</p>
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-        <h2 className="mb-2 text-lg font-semibold text-slate-100">Manuals</h2>
-        <ul className="space-y-2">
-          {manuals.map((manual) => (
-            <li
-              key={manual.id}
-              className="cursor-pointer rounded-md border border-white/10 bg-slate-950/30 p-3 transition hover:border-cyan-400/50 hover:bg-slate-950/50"
-              onClick={() => navigate(`${basePath}/${manual.id}`)}
-            >
-              <div className="font-medium text-slate-100">
-                {manual.code} — {manual.title}
-              </div>
-              <div className="text-xs text-slate-400">Status: {manual.status}</div>
-            </li>
-          ))}
-        </ul>
-      </div>
+          </TabPanel>
+        </TabPanels>
+      </TabGroup>
     </ManualsPageLayout>
   );
 }

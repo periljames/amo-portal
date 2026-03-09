@@ -308,6 +308,7 @@ async def upload_docx_revision(
     manual_type: str = Form("GENERAL"),
     owner_role: str = Form("Library"),
     issue_number: str = Form(...),
+    change_log: str | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -342,7 +343,7 @@ async def upload_docx_revision(
         issue_number=issue_number.strip(),
         created_by=get_current_actor_id(),
         status_enum=models.ManualRevisionStatus.DRAFT,
-        notes=f"Uploaded source: {file.filename}",
+        notes=(f"Uploaded source: {file.filename}" + (f"\nChange log: {change_log.strip()}" if change_log and change_log.strip() else "")),
     )
     db.add(rev)
     db.flush()
