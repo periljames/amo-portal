@@ -31,15 +31,36 @@ type PreviewPayload = {
 
 type MasterRow = { manual_id: string; pending_ack_count: number; current_status: string; current_revision: string | null };
 
+const STORAGE_KEY = "manuals.dashboard.reader-state.v1";
+
 function extractManualCode(source: string): string {
   const match = source.match(/[A-Z]{2,6}-\d{2,4}/i);
   return match ? match[0].toUpperCase() : "";
 }
 
+export function resolveNextRevisionId(previousRevisionId: string, revisions: Array<{ id: string }>): string {
+  if (!revisions.length) return "";
+  if (previousRevisionId && revisions.some((row) => row.id === previousRevisionId)) return previousRevisionId;
+  return revisions[0].id;
+}
+
+function readPersistedState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as { activeTab: number; mode: "section" | "continuous"; activeSectionId: string; scrollTop: number };
+  } catch {
+    return null;
+  }
+}
+
 export default function ManualsDashboardPage() {
   const navigate = useNavigate();
   const { tenant, basePath } = useManualRouteContext();
-  const [activeTab, setActiveTab] = useState(0);
+
+  const persisted = typeof window !== "undefined" ? readPersistedState() : null;
+  const [activeTab, setActiveTab] = useState(persisted?.activeTab ?? 0);
+
   const [manuals, setManuals] = useState<ManualSummary[]>([]);
   const [masterRows, setMasterRows] = useState<MasterRow[]>([]);
   const [revisions, setRevisions] = useState<ManualRevision[]>([]);
@@ -48,7 +69,7 @@ export default function ManualsDashboardPage() {
 
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
-  const [issue, setIssue] = useState("");
+  const [issue, setIssue] = useState("1");
   const [rev, setRev] = useState("0");
   const [changeLog, setChangeLog] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -60,6 +81,15 @@ export default function ManualsDashboardPage() {
 
   const [readPayload, setReadPayload] = useState<any | null>(null);
   const [workflow, setWorkflow] = useState<any | null>(null);
+  const [readerState, setReaderState] = useState({
+    mode: persisted?.mode || ("section" as const),
+    activeSectionId: persisted?.activeSectionId || "",
+    scrollTop: persisted?.scrollTop || 0,
+  });
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ activeTab, ...readerState }));
+  }, [activeTab, readerState]);
 
   const user = getCachedUser();
   const role = String((user as any)?.role || "");
@@ -67,13 +97,17 @@ export default function ManualsDashboardPage() {
 
   const refresh = () => {
     if (!tenant) return;
-    listManuals(tenant).then((data) => {
-      setManuals(data);
-      const first = data[0]?.id || "";
-      setActiveManualId((prev) => prev || first);
-    }).catch(() => setManuals([]));
+    listManuals(tenant)
+      .then((data) => {
+        setManuals(data);
+        const first = data[0]?.id || "";
+        setActiveManualId((prev) => prev || first);
+      })
+      .catch(() => setManuals([]));
 
-    getMasterList(tenant).then((rows) => setMasterRows(rows as MasterRow[])).catch(() => setMasterRows([]));
+    getMasterList(tenant)
+      .then((rows) => setMasterRows(rows as MasterRow[]))
+      .catch(() => setMasterRows([]));
   };
 
   useEffect(() => {
@@ -93,10 +127,12 @@ export default function ManualsDashboardPage() {
       setRevisions([]);
       return;
     }
-    listRevisions(tenant, activeManualId).then((rows) => {
-      setRevisions(rows);
-      setActiveRevisionId((prev) => prev || rows[0]?.id || "");
-    }).catch(() => setRevisions([]));
+    listRevisions(tenant, activeManualId)
+      .then((rows) => {
+        setRevisions(rows);
+        setActiveRevisionId((prev) => resolveNextRevisionId(prev, rows));
+      })
+      .catch(() => setRevisions([]));
   }, [tenant, activeManualId]);
 
   useEffect(() => {
@@ -112,6 +148,10 @@ export default function ManualsDashboardPage() {
   const onFilePicked = async (picked: File | null) => {
     setErrorMessage("");
     setStatusMessage("");
+    if (!tenant) {
+      setErrorMessage("Tenant context is missing; cannot preview DOCX.");
+      return;
+    }
     if (!picked) {
       setFile(null);
       setPreview(null);
@@ -131,6 +171,8 @@ export default function ManualsDashboardPage() {
       setPreview(payload);
       if (!title) setTitle(payload.heading || picked.name.replace(/\.docx$/i, ""));
       if (!code) setCode(extractManualCode(`${picked.name} ${payload.heading}`));
+      if (!issue) setIssue("1");
+      setStatusMessage("Preview ready. You can upload this revision now.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Preview failed");
     } finally {
@@ -155,7 +197,10 @@ export default function ManualsDashboardPage() {
   const activeRevision = revisions.find((item) => item.id === activeRevisionId);
 
   const uploadNow = async () => {
-    if (!tenant || !file) return;
+    if (!tenant || !file) {
+      setErrorMessage("Select and preview a DOCX file first.");
+      return;
+    }
     setUploading(true);
     setErrorMessage("");
     setStatusMessage("");
@@ -226,8 +271,9 @@ export default function ManualsDashboardPage() {
                 issueNumber: activeRevision?.issue_number,
                 approvalStatus: workflow?.status || activeRevision?.status_enum,
                 pendingAcknowledgements: pendingAckCount,
-                history: workflow?.history || [],
               }}
+              readerState={readerState}
+              onReaderStateChange={(next) => setReaderState((prev) => ({ ...prev, ...next }))}
             />
           </TabPanel>
 
@@ -252,7 +298,7 @@ export default function ManualsDashboardPage() {
                 {errorMessage ? <p className="manuals-error">{errorMessage}</p> : null}
                 {statusMessage ? <p className="manuals-success">{statusMessage}</p> : null}
 
-                <button className="manuals-primary-btn" disabled={!canWrite || !file || !code || !title || !issue || !rev || uploading} onClick={uploadNow}>
+                <button className="manuals-primary-btn" disabled={!canWrite || !file || !code || !title || !issue || !rev || uploading || previewLoading} onClick={uploadNow}>
                   {uploading ? "Uploading..." : "Upload Revision"}
                 </button>
               </div>
@@ -267,7 +313,7 @@ export default function ManualsDashboardPage() {
                     <ul>{preview.sample.slice(0, 6).map((line, index) => <li key={`${line}-${index}`}>{line}</li>)}</ul>
                   </>
                 ) : <p className="manuals-muted">Upload a DOCX to preview and auto-fill metadata.</p>}
-                <p className="manuals-muted"><ShieldCheck size={14} style={{ display: "inline", marginRight: 6 }} />Aviation-grade controls: revision, issue, change log, and acknowledgements tracked.</p>
+                <p className="manuals-muted"><ShieldCheck size={14} style={{ display: "inline", marginRight: 6 }} />Section-first reader mode is optimized for very large manuals.</p>
               </div>
             </div>
           </TabPanel>

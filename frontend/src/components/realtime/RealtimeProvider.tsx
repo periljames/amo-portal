@@ -203,7 +203,18 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!isRealtimeEnabled()) return;
       if (detail.type === "authenticated") {
         retryCount.current = 0;
+
         mqttRef.current?.disconnect();
+        mqttRef.current = null;
+        if (!isRealtimeEnabled()) {
+          controllerRef.current?.abort();
+          setStatus("offline");
+          setBrokerState("offline");
+          return;
+        }
+
+        reconnectNow();
+
         mqttRef.current = new RealtimeMqttClient({
           onState: (state) => {
             setBrokerState(state);
@@ -218,7 +229,6 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           onUnavailable: () => setBrokerState("offline"),
         });
         void mqttRef.current.connect();
-        reconnectNow();
       }
 
       if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
@@ -235,6 +245,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     connectRef.current = connectSse;
 
     if (getToken()) {
+      if (!isRealtimeEnabled()) {
+        controllerRef.current?.abort();
+        setStatus("offline");
+        setBrokerState("offline");
+        return () => {
+          controllerRef.current?.abort();
+          if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+        };
+      }
       connectSse();
       if (!isRealtimeEnabled()) {
         setBrokerState("offline");
