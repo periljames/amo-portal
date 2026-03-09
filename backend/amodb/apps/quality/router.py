@@ -28,6 +28,7 @@ from amodb.apps.tasks import services as task_services
 from amodb.database import get_db
 
 from . import models
+from . import transitions as car_transitions
 from .schemas import (
     CARActionCreate,
     CARActionOut,
@@ -1960,9 +1961,18 @@ def update_car(
             db.add(response)
     else:
         for field, val in data.items():
-            setattr(car, field, val)
             if field == "status":
                 changed_status = True
+                car_transitions.transition_car(
+                    db,
+                    amo_id=str(current_user.amo_id),
+                    actor_user_id=str(current_user.id),
+                    car=car,
+                    target_status=str(val.value if hasattr(val, "value") else val),
+                    evidence_ref=(data.get("evidence_ref") or car.evidence_ref),
+                )
+                continue
+            setattr(car, field, val)
 
     if changed_status:
         add_car_action(

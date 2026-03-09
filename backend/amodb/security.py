@@ -23,6 +23,7 @@ from typing import Optional, Callable, Union, Set
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -312,6 +313,48 @@ def require_admin(
 def get_current_actor_id() -> Optional[str]:
     return CURRENT_ACTOR_ID.get()
 
+
+
+def require_capability(
+    capability_code: str,
+) -> Callable[[account_models.User, Session], account_models.User]:
+    strict = (os.getenv("AUTHZ_CAPABILITY_STRICT", "false").strip().lower() in {"1", "true", "yes", "on"})
+
+    def dependency(
+        current_user: account_models.User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ) -> account_models.User:
+        if getattr(current_user, "is_superuser", False):
+            return current_user
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM auth_user_role_assignments ura
+                    JOIN auth_role_capability_bindings rcb ON rcb.role_id = ura.role_id
+                    JOIN auth_capability_definitions cd ON cd.id = rcb.capability_id
+                    WHERE ura.amo_id = :amo_id
+                      AND ura.user_id = :user_id
+                      AND cd.code = :capability_code
+                      AND (ura.valid_from IS NULL OR ura.valid_from <= NOW())
+                      AND (ura.valid_to IS NULL OR ura.valid_to >= NOW())
+                    LIMIT 1
+                    """
+                ),
+                {"amo_id": str(current_user.amo_id), "user_id": str(current_user.id), "capability_code": capability_code},
+            ).fetchall()
+            if rows:
+                return current_user
+        except Exception:
+            if strict:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Capability '{capability_code}' is required")
+
+        if not strict and (getattr(current_user, "is_amo_admin", False) or current_user.role == AccountRole.AMO_ADMIN):
+            return current_user
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Capability '{capability_code}' is required")
+
+    return dependency
 
 # ---------------------------------------------------------------------------
 # ROLE-BASED ACCESS HELPER

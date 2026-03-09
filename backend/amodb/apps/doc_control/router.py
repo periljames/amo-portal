@@ -12,7 +12,7 @@ from amodb.apps.doc_control import models, schemas
 from amodb.apps.events.broker import EventEnvelope, publish_event
 from amodb.database import get_db
 from amodb.entitlements import require_module
-from amodb.security import get_current_active_user
+from amodb.security import get_current_active_user, require_capability
 
 router = APIRouter(prefix="/doc-control", tags=["doc_control"], dependencies=[Depends(require_module("quality"))])
 
@@ -78,7 +78,7 @@ def put_settings(payload: schemas.DocControlSettingsIn, db: Session = Depends(ge
 
 
 @router.post("/documents", response_model=schemas.ControlledDocumentOut)
-def create_document(payload: schemas.ControlledDocumentIn, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+def create_document(payload: schemas.ControlledDocumentIn, db: Session = Depends(get_db), current_user: account_models.User = Depends(require_capability("doc_control.document.create"))):
     tenant_id = _tenant_id(current_user)
     doc = models.ControlledDocument(tenant_id=tenant_id, **payload.model_dump())
     if doc.effective_date:
@@ -172,7 +172,7 @@ def create_revision_package(payload: schemas.RevisionPackageIn, db: Session = De
 
 
 @router.post("/revisions/{package_id}/publish")
-def publish_revision(package_id: str, payload: schemas.PublishRevisionIn, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+def publish_revision(package_id: str, payload: schemas.PublishRevisionIn, db: Session = Depends(get_db), current_user: account_models.User = Depends(require_capability("doc_control.revision.publish"))):
     tenant_id = _tenant_id(current_user)
     package = db.query(models.RevisionPackage).filter_by(tenant_id=tenant_id, package_id=package_id).first()
     if not package:
@@ -234,7 +234,7 @@ def create_tr(payload: schemas.TemporaryRevisionIn, db: Session = Depends(get_db
 
 
 @router.post("/tr/{tr_id}/transition")
-def transition_tr(tr_id: str, payload: schemas.PublishTRIn, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+def transition_tr(tr_id: str, payload: schemas.PublishTRIn, db: Session = Depends(get_db), current_user: account_models.User = Depends(require_capability("doc_control.tr.transition"))):
     row = db.query(models.TemporaryRevision).filter_by(tenant_id=_tenant_id(current_user), tr_id=tr_id).first()
     if not row:
         raise HTTPException(404, "TR not found")
@@ -275,7 +275,7 @@ def create_distribution_event(payload: schemas.DistributionEventIn, db: Session 
 
 
 @router.post("/distribution-events/{event_id}/send")
-def send_distribution_event(event_id: str, method: str = Query("Portal"), db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+def send_distribution_event(event_id: str, method: str = Query("Portal"), db: Session = Depends(get_db), current_user: account_models.User = Depends(require_capability("doc_control.transmittal.issue"))):
     event = db.query(models.DistributionEvent).filter_by(tenant_id=_tenant_id(current_user), event_id=event_id).first()
     if not event:
         raise HTTPException(404, "Distribution event not found")
