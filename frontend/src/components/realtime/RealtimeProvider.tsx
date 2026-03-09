@@ -200,6 +200,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     return onSessionEvent((detail) => {
+      if (!isRealtimeEnabled()) return;
       if (detail.type === "authenticated") {
         retryCount.current = 0;
 
@@ -254,6 +255,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
       }
       connectSse();
+      if (!isRealtimeEnabled()) {
+        setBrokerState("offline");
+        return () => {
+          controllerRef.current?.abort();
+          if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+        };
+      }
       mqttRef.current = new RealtimeMqttClient({
         onState: (state) => {
           setBrokerState(state);
