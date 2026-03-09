@@ -10,6 +10,7 @@ from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
@@ -206,13 +207,33 @@ def _tenant_by_slug(db: Session, tenant_slug: str) -> models.Tenant:
     tenant = db.query(models.Tenant).filter(models.Tenant.slug == tenant_slug).first()
     if tenant:
         return tenant
+
     amo = db.query(AMO).filter(AMO.login_slug == tenant_slug).first()
     if not amo:
         raise HTTPException(status_code=404, detail="Tenant not found")
+
+    tenant = db.query(models.Tenant).filter(models.Tenant.amo_id == amo.id).first()
+    if tenant:
+        if tenant.slug != tenant_slug:
+            tenant.slug = tenant_slug
+        if tenant.name != amo.name:
+            tenant.name = amo.name
+        return tenant
+
     tenant = models.Tenant(amo_id=amo.id, slug=tenant_slug, name=amo.name, settings_json={"ack_due_days": 10})
     db.add(tenant)
-    db.commit()
-    db.refresh(tenant)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        tenant = db.query(models.Tenant).filter(models.Tenant.amo_id == amo.id).first()
+        if tenant:
+            if tenant.slug != tenant_slug:
+                tenant.slug = tenant_slug
+            if tenant.name != amo.name:
+                tenant.name = amo.name
+            return tenant
+        raise
     return tenant
 
 
@@ -245,14 +266,6 @@ def create_manual(tenant_slug: str, payload: ManualCreate, request: Request, db:
     db.refresh(manual)
     return manual
 
-
-@router.get("/t/{tenant_slug}/{manual_id}", response_model=ManualOut)
-def get_manual(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
-    tenant = _tenant_by_slug(db, tenant_slug)
-    manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
-    if not manual:
-        raise HTTPException(status_code=404, detail="Manual not found")
-    return manual
 
 
 
@@ -643,6 +656,14 @@ def master_list(tenant_slug: str, db: Session = Depends(get_db)):
             pending = db.query(models.Acknowledgement).filter(models.Acknowledgement.revision_id == manual.current_published_rev_id, models.Acknowledgement.status_enum != "ACKNOWLEDGED").count()
         result.append(MasterListEntry(manual_id=manual.id, code=manual.code, title=manual.title, current_revision=current_rev.rev_number if current_rev else None, current_status=current_rev.status_enum.value if current_rev else "NO_PUBLISHED_REV", pending_ack_count=pending))
     return result
+
+@router.get("/t/{tenant_slug}/{manual_id}", response_model=ManualOut)
+def get_manual(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
+    if not manual:
+        raise HTTPException(status_code=404, detail="Manual not found")
+    return manual
 
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/processing/run")
