@@ -318,7 +318,10 @@ def get_current_actor_id() -> Optional[str]:
 def require_capability(
     capability_code: str,
 ) -> Callable[[account_models.User, Session], account_models.User]:
-    strict = (os.getenv("AUTHZ_CAPABILITY_STRICT", "false").strip().lower() in {"1", "true", "yes", "on"})
+    # Production-safe default: enforce capability checks strictly unless explicitly disabled.
+    strict = (os.getenv("AUTHZ_CAPABILITY_STRICT", "true").strip().lower() in {"1", "true", "yes", "on"})
+    # Legacy compatibility escape hatch for staged rollouts only.
+    legacy_fallback = (os.getenv("AUTHZ_CAPABILITY_LEGACY_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"})
 
     def dependency(
         current_user: account_models.User = Depends(get_current_active_user),
@@ -347,10 +350,11 @@ def require_capability(
             if rows:
                 return current_user
         except Exception:
-            if strict:
+            # Fail closed unless operator explicitly chooses compatibility mode.
+            if strict and not legacy_fallback:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Capability '{capability_code}' is required")
 
-        if not strict and (getattr(current_user, "is_amo_admin", False) or current_user.role == AccountRole.AMO_ADMIN):
+        if legacy_fallback and (getattr(current_user, "is_amo_admin", False) or current_user.role == AccountRole.AMO_ADMIN):
             return current_user
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Capability '{capability_code}' is required")
 

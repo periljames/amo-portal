@@ -52,6 +52,27 @@ def test_require_capability_denies_without_capability():
     assert exc.value.status_code == 403
 
 
+
+
+def test_require_capability_strict_default_denies_admin_without_grant(monkeypatch):
+    monkeypatch.delenv("AUTHZ_CAPABILITY_STRICT", raising=False)
+    monkeypatch.delenv("AUTHZ_CAPABILITY_LEGACY_FALLBACK", raising=False)
+    dep = require_capability("doc_control.revision.publish")
+    user = SimpleNamespace(id="U1", amo_id="A1", is_superuser=False, is_amo_admin=True, role="AMO_ADMIN")
+    db = _DB(allowed=False)
+    with pytest.raises(HTTPException) as exc:
+        dep(current_user=user, db=db)
+    assert exc.value.status_code == 403
+
+
+def test_require_capability_legacy_fallback_allows_admin(monkeypatch):
+    monkeypatch.setenv("AUTHZ_CAPABILITY_STRICT", "false")
+    monkeypatch.setenv("AUTHZ_CAPABILITY_LEGACY_FALLBACK", "true")
+    dep = require_capability("doc_control.revision.publish")
+    user = SimpleNamespace(id="U1", amo_id="A1", is_superuser=False, is_amo_admin=True, role="AMO_ADMIN")
+    db = _DB(allowed=False)
+    out = dep(current_user=user, db=db)
+    assert out is user
 def test_revision_transition_invalid_state_rejected():
     package = SimpleNamespace(package_id="PKG1", internal_approval_status="Draft", requires_training=False, training_gate_policy="NONE")
     db = _DB()
