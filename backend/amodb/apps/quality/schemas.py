@@ -600,6 +600,7 @@ class CARUpdate(BaseModel):
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
     preventive_action: Optional[str] = None
+    evidence_ref: Optional[str] = None
 
 
 class CAROut(BaseModel):
