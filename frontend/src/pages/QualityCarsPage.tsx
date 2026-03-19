@@ -5,7 +5,6 @@ import { z } from "zod";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronRight, ChevronsLeft, ChevronsRight, FileUp, Loader2, Plus, Search, ShieldCheck, TriangleAlert, UserRound, X } from "lucide-react";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { useToast } from "../components/feedback/ToastProvider";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getCachedUser, getContext } from "../services/auth";
@@ -155,13 +154,20 @@ const QualityCarsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [cars, setCars] = useState<CAROut[]>([]);
   const [programFilter, setProgramFilter] = useState<CARProgram>("QUALITY");
-  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") || "all");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [formStep, setFormStep] = useState<FormStep>(1);
-  const [selectedCarId, setSelectedCarId] = useState<string | null>(null);
-  const [findingLookupState, setFindingLookupState] = useState<"idle" | "checking" | "valid" | "warning">("idle");
-  const [findingLookupMessage, setFindingLookupMessage] = useState("Enter a non-conformity finding ID.");
+  const inviteToken = searchParams.get("invite");
+  const [showCreatePanel, setShowCreatePanel] = useState(Boolean(inviteToken));
+
+  const [form, setForm] = useState<CarFormState>({
+    title: "",
+    summary: "",
+    program: "QUALITY",
+    priority: "MEDIUM",
+    due_date: "",
+    target_closure_date: "",
+    assigned_department_id: "",
+    assigned_to_user_id: "",
+    finding_id: "",
+  });
 
   const [assignees, setAssignees] = useState<CARAssignee[]>([]);
   const [assigneesState, setAssigneesState] = useState<AssigneeLoadState>("idle");
@@ -564,20 +570,81 @@ const QualityCarsPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
-      <div className="flex min-h-[calc(100vh-7rem)] flex-col gap-4 bg-slate-950 text-slate-100">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 shadow-[0_20px_60px_rgba(2,6,23,0.45)]">
-          <div className="space-y-2">
-            <nav className="flex items-center gap-2 text-xs text-slate-400">
-              <button type="button" onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms`)} className="transition hover:text-cyan-300">
-                QMS
-              </button>
-              <ChevronRight className="h-3.5 w-3.5" />
-              <span className="text-slate-200">CAR Command Center</span>
-            </nav>
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Corrective Action Requests · {amoDisplay}</h1>
-              <p className="text-sm text-slate-400">High-density register, contextual action drawer, optimistic sync, and append-only audit visibility.</p>
-            </div>
+      <header className="page-header">
+        <h1 className="page-header__title">
+          Corrective Action Requests · {amoDisplay}
+        </h1>
+        <p className="page-header__subtitle">
+          Focused command center for the live CAR register, review queue, and owner follow-up.
+        </p>
+      </header>
+
+      <section className="page-section" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <select
+          value={programFilter}
+          onChange={(e) => setProgramFilter(e.target.value as CARProgram)}
+          className="form-control"
+          style={{ width: 220 }}
+        >
+          {PROGRAM_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label} programme
+            </option>
+          ))}
+        </select>
+        {canManageCars ? (
+          <button
+            type="button"
+            className="secondary-chip-btn"
+            onClick={() => setShowCreatePanel((current) => !current)}
+          >
+            {showCreatePanel ? "Hide CAR intake" : "Open CAR intake"}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="secondary-chip-btn"
+          onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms`)}
+        >
+          Back to QMS overview
+        </button>
+      </section>
+
+      {inviteToken && (
+        <div className="card card--info" style={{ marginBottom: 12 }}>
+          <p style={{ margin: 0 }}>
+            Invitation token detected. Please log a CAR or update the assigned CAR linked to your email invite.
+            The Quality team will be notified automatically.
+          </p>
+        </div>
+      )}
+
+      {state === "error" && (
+        <div className="card card--error">
+          <p>{error}</p>
+          <button type="button" className="primary-chip-btn" onClick={load}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      {assigneesState === "error" && assigneesError && (
+        <div className="card card--warning" style={{ marginBottom: 12 }}>
+          <p>{assigneesError}</p>
+          <button type="button" className="secondary-chip-btn" onClick={loadAssignees}>
+            Retry assignees
+          </button>
+        </div>
+      )}
+
+      {canManageCars && showCreatePanel ? (
+        <section className="page-section">
+          <div className="card qms-car-form-card">
+          <div className="card-header">
+            <h2>CAR intake</h2>
+            <p className="text-muted">
+              Open only when needed by a manager; the main page stays focused on the active register and review workload.
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select value={programFilter} onChange={(e) => setProgramFilter(e.target.value as CARProgram)} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none ring-0">
@@ -772,8 +839,10 @@ const QualityCarsPage: React.FC = () => {
                 </div>
               </section>
             </div>
-          </main>
-        </div>
+          </form>
+          </div>
+        </section>
+      ) : null}
 
         {selectedCar ? (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-4">

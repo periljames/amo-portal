@@ -1,7 +1,7 @@
 import React from "react";
-import { SlidersHorizontal, Text, WrapText } from "lucide-react";
-import { ResponsiveSegmentedControl } from "../qms/ResponsiveSegmentedControl";
-import type { ViewDensity } from "../../hooks/useDensityPreference";
+import { Columns3, Rows3, Rows4, UserRound, WrapText } from "lucide-react";
+
+type Density = "compact" | "comfortable";
 
 type ColumnToggle = {
   id: string;
@@ -34,37 +34,55 @@ const SpreadsheetToolbar: React.FC<Props> = ({
   columnToggles,
   actions,
 }) => {
+  const iconButtonClass =
+    "inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-300/80 bg-white px-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50";
+  const iconLabelClass = "hidden 2xl:inline";
+
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-2">
-      <ResponsiveSegmentedControl
-        label="Row density"
-        value={density}
-        onChange={onDensityChange}
-        options={[
-          { value: "compact", label: "Compact", icon: Text },
-          { value: "comfortable", label: "Comfortable", icon: SlidersHorizontal },
-        ]}
-        compactIconsOnMobile
-      />
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="inline-flex items-center rounded-xl border border-slate-300/80 bg-white p-1 shadow-sm" role="tablist" aria-label="Row density">
+        <button
+          type="button"
+          aria-pressed={density === "compact"}
+          title="Compact density"
+          className={`${iconButtonClass} h-8 border-0 px-2 ${density === "compact" ? "bg-slate-900 text-white hover:bg-slate-900" : "bg-transparent shadow-none"}`}
+          onClick={() => onDensityChange("compact")}
+        >
+          <Rows3 className="h-4 w-4" />
+          <span className={iconLabelClass}>Compact</span>
+        </button>
+        <button
+          type="button"
+          aria-pressed={density === "comfortable"}
+          title="Comfortable density"
+          className={`${iconButtonClass} h-8 border-0 px-2 ${density === "comfortable" ? "bg-slate-900 text-white hover:bg-slate-900" : "bg-transparent shadow-none"}`}
+          onClick={() => onDensityChange("comfortable")}
+        >
+          <Rows4 className="h-4 w-4" />
+          <span className={iconLabelClass}>Comfortable</span>
+        </button>
+      </div>
 
       <button
         type="button"
         aria-pressed={wrapText}
+        title="Wrap text"
+        className={`${iconButtonClass} ${wrapText ? "border-slate-900 bg-slate-900 text-white hover:bg-slate-900" : ""}`}
         onClick={() => onWrapTextChange(!wrapText)}
-        className={`${toolbarButtonClass} ${wrapText ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-100" : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700 hover:text-white"}`}
       >
         <WrapText className="h-4 w-4" />
-        <span className="hidden sm:inline">Wrap text</span>
+        <span className={iconLabelClass}>Wrap text</span>
       </button>
 
       <button
         type="button"
         aria-pressed={showFilters}
+        title="Header filters"
+        className={`${iconButtonClass} ${showFilters ? "border-slate-900 bg-slate-900 text-white hover:bg-slate-900" : ""}`}
         onClick={() => onShowFiltersChange(!showFilters)}
-        className={`${toolbarButtonClass} ${showFilters ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-100" : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700 hover:text-white"}`}
       >
-        <SlidersHorizontal className="h-4 w-4" />
-        <span className="hidden sm:inline">Header filters</span>
+        <Columns3 className="h-4 w-4" />
+        <span className={iconLabelClass}>Header filters</span>
       </button>
 
       {(columnToggles ?? []).map((col) => (
@@ -72,14 +90,16 @@ const SpreadsheetToolbar: React.FC<Props> = ({
           key={col.id}
           type="button"
           aria-pressed={col.checked}
+          title={col.label}
+          className={`${iconButtonClass} ${col.checked ? "border-slate-900 bg-slate-900 text-white hover:bg-slate-900" : ""}`}
           onClick={col.onToggle}
-          className={`${toolbarButtonClass} ${col.checked ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-100" : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700 hover:text-white"}`}
         >
-          <span>{col.label}</span>
+          <UserRound className="h-4 w-4" />
+          <span className={iconLabelClass}>{col.label}</span>
         </button>
       ))}
 
-      <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>
+      {actions}
     </div>
   );
 };
