@@ -325,6 +325,16 @@ class QMSAuditOut(BaseModel):
     created_at: datetime
 
 
+class QMSAuditRegisterRowOut(BaseModel):
+    audit: QMSAuditOut
+    finding: "QMSFindingOut"
+    linked_cars: List["CAROut"] = Field(default_factory=list)
+
+
+class QMSAuditRegisterResponse(BaseModel):
+    rows: List[QMSAuditRegisterRowOut]
+
+
 class QMSFindingCreate(BaseModel):
     finding_ref: Optional[str] = None
     finding_type: QMSFindingType = QMSFindingType.NON_CONFORMITY

@@ -399,7 +399,7 @@ const QualityCarsPage: React.FC = () => {
       });
       setAssigneeSearch("");
       setFormStep(1);
-      pushToast({ title: "CAR created", message: `${created.car_number} synced to the register.`, variant: "success" });
+      pushToast({ title: "CAR created", message: `${created.car_number} synced to the register.`, variant: "info" });
     } catch (e: any) {
       setCars((prev) => prev.filter((car) => car.id !== tempId));
       setError(e?.message || "Failed to create CAR");
@@ -547,7 +547,7 @@ const QualityCarsPage: React.FC = () => {
     setUploadingEvidenceId(car.id);
     try {
       await Promise.all(uploadList.map((file) => qmsUploadCarAttachment(car.id, file)));
-      pushToast({ title: "Evidence uploaded", message: `${uploadList.length} file(s) attached to ${car.car_number}.`, variant: "success" });
+      pushToast({ title: "Evidence uploaded", message: `${uploadList.length} file(s) attached to ${car.car_number}.`, variant: "info" });
       if (reviewCar?.id === car.id) {
         setReviewAttachments(await qmsListCarAttachments(car.id));
       }

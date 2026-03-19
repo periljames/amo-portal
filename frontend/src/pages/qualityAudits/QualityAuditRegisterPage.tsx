@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ClipboardList, ShieldAlert, TableProperties } from "lucide-react";
 import SpreadsheetToolbar from "../../components/shared/SpreadsheetToolbar";
 import { ResponsiveSegmentedControl } from "../../components/qms/ResponsiveSegmentedControl";
 import { useDensityPreference } from "../../hooks/useDensityPreference";
 import { getContext } from "../../services/auth";
-import { qmsListAudits, qmsListCars, qmsListFindings, type CAROut, type QMSAuditOut, type QMSFindingOut } from "../../services/qms";
+import { qmsGetAuditRegister, type CAROut, type QMSAuditOut, type QMSFindingOut } from "../../services/qms";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 
 type RegisterTab = "findings" | "cars";
@@ -43,43 +43,19 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
   const department = params.department ?? "quality";
   const navigate = useNavigate();
 
-  const audits = useQuery({
-    queryKey: ["qms-audits", "register", amoCode],
-    queryFn: () => qmsListAudits({ domain: "AMO" }),
-    staleTime: 60_000,
-  });
-
-  const findingQueries = useQueries({
-    queries: (audits.data ?? []).map((audit) => ({
-      queryKey: ["qms-findings", "register", audit.id],
-      queryFn: () => qmsListFindings(audit.id),
-      staleTime: 60_000,
-    })),
-  });
-
-  const cars = useQuery({
-    queryKey: ["qms-cars", "register"],
-    queryFn: () => qmsListCars({}),
+  const registerQuery = useQuery({
+    queryKey: ["qms-audit-register", amoCode],
+    queryFn: () => qmsGetAuditRegister({ domain: "AMO" }),
     staleTime: 60_000,
   });
 
   const rows = useMemo<RegisterRow[]>(() => {
-    const carByFinding = new Map<string, CAROut[]>();
-    (cars.data ?? []).forEach((car) => {
-      if (!car.finding_id) return;
-      const bucket = carByFinding.get(car.finding_id) ?? [];
-      bucket.push(car);
-      carByFinding.set(car.finding_id, bucket);
-    });
-
-    return (audits.data ?? []).flatMap((audit, index) =>
-      (findingQueries[index]?.data ?? []).map((finding) => ({
-        audit,
-        finding,
-        linkedCars: carByFinding.get(finding.id) ?? [],
-      }))
-    );
-  }, [audits.data, cars.data, findingQueries]);
+    return (registerQuery.data?.rows ?? []).map((row) => ({
+      audit: row.audit,
+      finding: row.finding,
+      linkedCars: row.linked_cars,
+    }));
+  }, [registerQuery.data]);
 
   const filteredRows = useMemo(() => {
     const q = quickFilter.trim().toLowerCase();
@@ -123,7 +99,7 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
       };
 
   const textBehavior = wrapText ? "whitespace-normal break-words" : "truncate whitespace-nowrap";
-  const loading = audits.isLoading || findingQueries.some((query) => query.isLoading) || cars.isLoading;
+  const loading = registerQuery.isLoading;
 
   return (
     <QualityAuditsSectionLayout
@@ -326,7 +302,7 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
           </div>
           <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
             <div className="flex items-center gap-2 text-sm font-medium text-slate-200"><AlertTriangle className="h-4 w-4 text-rose-300" /> Open CAR count</div>
-            <div className="mt-3 text-3xl font-semibold text-slate-50">{(cars.data ?? []).filter((car) => car.status !== "CLOSED").length}</div>
+            <div className="mt-3 text-3xl font-semibold text-slate-50">{rows.flatMap((row) => row.linkedCars).filter((car) => car.status !== "CLOSED").length}</div>
           </div>
         </div>
       </div>

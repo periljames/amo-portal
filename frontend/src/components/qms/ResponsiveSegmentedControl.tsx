@@ -1,4 +1,3 @@
-import React from "react";
 import { clsx } from "clsx";
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";

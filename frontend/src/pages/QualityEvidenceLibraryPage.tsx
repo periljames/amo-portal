@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Copy, Download, Eye, FileText, Files, Filter, Link2 } from "lucide-react";
 import SpreadsheetToolbar from "../components/shared/SpreadsheetToolbar";
 import { useDensityPreference } from "../hooks/useDensityPreference";
 import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
 import { getContext } from "../services/auth";
 import { getApiBaseUrl } from "../services/config";
-import { qmsListAudits, qmsListCars, qmsListCarAttachments, qmsListFindings, type CARAttachmentOut } from "../services/qms";
+import { qmsListAudits, qmsListCars, qmsListCarAttachmentsBulk, qmsListFindingsBulk, type CARAttachmentOut } from "../services/qms";
 
 type EvidenceRow = {
   id: string;
@@ -57,36 +57,42 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   const cars = useQuery({ queryKey: ["qms-cars", "evidence"], queryFn: () => qmsListCars({}), staleTime: 60_000 });
   const audits = useQuery({ queryKey: ["qms-audits", "evidence"], queryFn: () => qmsListAudits({ domain: "AMO" }), staleTime: 60_000 });
 
-  const findingQueries = useQueries({
-    queries: (audits.data ?? []).map((audit) => ({
-      queryKey: ["qms-findings", "evidence", audit.id],
-      queryFn: () => qmsListFindings(audit.id),
-      staleTime: 60_000,
-    })),
+  const findings = useQuery({
+    queryKey: ["qms-findings", "evidence", amoCode],
+    queryFn: () => qmsListFindingsBulk({ domain: "AMO" }),
+    staleTime: 60_000,
   });
 
-  const attachmentQueries = useQueries({
-    queries: (cars.data ?? []).map((car) => ({
-      queryKey: ["car-attachments", car.id],
-      queryFn: () => qmsListCarAttachments(car.id),
-      staleTime: 60_000,
-    })),
+  const attachments = useQuery({
+    queryKey: ["car-attachments", "bulk", amoCode],
+    queryFn: () => qmsListCarAttachmentsBulk({ car_ids: (cars.data ?? []).map((car) => car.id) }),
+    enabled: (cars.data?.length ?? 0) > 0,
+    staleTime: 60_000,
   });
 
   const evidenceRows = useMemo(() => {
     const rows: EvidenceRow[] = [];
     const auditByFindingId = new Map<string, { auditId: string; auditRef: string; auditTitle: string }>();
 
-    (audits.data ?? []).forEach((audit, index) => {
-      (findingQueries[index]?.data ?? []).forEach((finding) => {
+    const auditById = new Map((audits.data ?? []).map((audit) => [audit.id, audit]));
+    (findings.data ?? []).forEach((finding) => {
+      const audit = auditById.get(finding.audit_id);
+      if (audit) {
         auditByFindingId.set(finding.id, { auditId: audit.id, auditRef: audit.audit_ref, auditTitle: audit.title });
-      });
+      }
     });
 
-    (cars.data ?? []).forEach((car, index) => {
+    const attachmentsByCar = new Map<string, CARAttachmentOut[]>();
+    (attachments.data ?? []).forEach((attachment) => {
+      const bucket = attachmentsByCar.get(attachment.car_id) ?? [];
+      bucket.push(attachment);
+      attachmentsByCar.set(attachment.car_id, bucket);
+    });
+
+    (cars.data ?? []).forEach((car) => {
       const auditContext = car.finding_id ? auditByFindingId.get(car.finding_id) : undefined;
-      const attachments = attachmentQueries[index]?.data ?? [];
-      attachments.forEach((file: CARAttachmentOut) => {
+      const carAttachments = attachmentsByCar.get(car.id) ?? [];
+      carAttachments.forEach((file: CARAttachmentOut) => {
         rows.push({
           id: file.id,
           ref: auditContext?.auditRef || car.car_number,
@@ -140,7 +146,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
     });
 
     return rows.sort((a, b) => a.ref.localeCompare(b.ref) || a.title.localeCompare(b.title));
-  }, [attachmentQueries, audits.data, cars.data, findingQueries]);
+  }, [attachments.data, audits.data, cars.data, findings.data]);
 
   const filteredRows = useMemo(() => {
     const q = quickFilter.trim().toLowerCase();
@@ -153,7 +159,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
     });
   }, [evidenceRows, headerFilters, quickFilter]);
 
-  const loading = cars.isLoading || audits.isLoading || attachmentQueries.some((query) => query.isLoading);
+  const loading = cars.isLoading || audits.isLoading || findings.isLoading || attachments.isLoading;
   const cellPadding = density === "compact" ? "px-3 py-2 text-xs" : "px-4 py-3 text-sm";
   const controlHeight = density === "compact" ? "h-8 text-xs" : "h-10 text-sm";
   const textBehavior = wrapText ? "whitespace-normal break-words" : "truncate whitespace-nowrap";
