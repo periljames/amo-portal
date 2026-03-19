@@ -1,6 +1,7 @@
 import React from "react";
-
-type Density = "compact" | "comfortable";
+import { SlidersHorizontal, Text, WrapText } from "lucide-react";
+import { ResponsiveSegmentedControl } from "../qms/ResponsiveSegmentedControl";
+import type { ViewDensity } from "../../hooks/useDensityPreference";
 
 type ColumnToggle = {
   id: string;
@@ -10,8 +11,8 @@ type ColumnToggle = {
 };
 
 type Props = {
-  density: Density;
-  onDensityChange: (density: Density) => void;
+  density: ViewDensity;
+  onDensityChange: (density: ViewDensity) => void;
   wrapText: boolean;
   onWrapTextChange: (next: boolean) => void;
   showFilters: boolean;
@@ -19,6 +20,9 @@ type Props = {
   columnToggles?: ColumnToggle[];
   actions?: React.ReactNode;
 };
+
+const toolbarButtonClass =
+  "inline-flex h-9 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
 
 const SpreadsheetToolbar: React.FC<Props> = ({
   density,
@@ -31,26 +35,51 @@ const SpreadsheetToolbar: React.FC<Props> = ({
   actions,
 }) => {
   return (
-    <div className="spreadsheet-toolbar">
-      <div
-        className="qms-segmented"
-        role="tablist"
-        aria-label="Row density"
-        style={{ "--segment-count": 2, "--segment-active-index": density === "compact" ? 0 : 1 } as React.CSSProperties}
+    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-2">
+      <ResponsiveSegmentedControl
+        label="Row density"
+        value={density}
+        onChange={onDensityChange}
+        options={[
+          { value: "compact", label: "Compact", icon: Text },
+          { value: "comfortable", label: "Comfortable", icon: SlidersHorizontal },
+        ]}
+        compactIconsOnMobile
+      />
+
+      <button
+        type="button"
+        aria-pressed={wrapText}
+        onClick={() => onWrapTextChange(!wrapText)}
+        className={`${toolbarButtonClass} ${wrapText ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-100" : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700 hover:text-white"}`}
       >
-        <button type="button" className={density === "compact" ? "is-active" : ""} onClick={() => onDensityChange("compact")}>
-          Compact
-        </button>
-        <button type="button" className={density === "comfortable" ? "is-active" : ""} onClick={() => onDensityChange("comfortable")}>
-          Comfortable
-        </button>
-      </div>
-      <label className="qms-pill"><input type="checkbox" checked={wrapText} onChange={(e) => onWrapTextChange(e.target.checked)} /> Wrap text</label>
-      <label className="qms-pill"><input type="checkbox" checked={showFilters} onChange={(e) => onShowFiltersChange(e.target.checked)} /> Header filters</label>
+        <WrapText className="h-4 w-4" />
+        <span className="hidden sm:inline">Wrap text</span>
+      </button>
+
+      <button
+        type="button"
+        aria-pressed={showFilters}
+        onClick={() => onShowFiltersChange(!showFilters)}
+        className={`${toolbarButtonClass} ${showFilters ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-100" : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700 hover:text-white"}`}
+      >
+        <SlidersHorizontal className="h-4 w-4" />
+        <span className="hidden sm:inline">Header filters</span>
+      </button>
+
       {(columnToggles ?? []).map((col) => (
-        <label className="qms-pill" key={col.id}><input type="checkbox" checked={col.checked} onChange={col.onToggle} /> {col.label}</label>
+        <button
+          key={col.id}
+          type="button"
+          aria-pressed={col.checked}
+          onClick={col.onToggle}
+          className={`${toolbarButtonClass} ${col.checked ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-100" : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700 hover:text-white"}`}
+        >
+          <span>{col.label}</span>
+        </button>
       ))}
-      {actions}
+
+      <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>
     </div>
   );
 };
