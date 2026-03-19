@@ -55,6 +55,7 @@ def test_close_audit_requires_closed_findings(db_session):
     user = _create_user(db_session, amo_id=amo.id)
 
     audit = quality_models.QMSAudit(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-200",
@@ -100,6 +101,7 @@ def test_close_finding_requires_evidence_and_verification(db_session):
     user = _create_user(db_session, amo_id=amo.id)
 
     audit = quality_models.QMSAudit(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-201",
@@ -142,6 +144,7 @@ def test_close_finding_with_requirements_logs_transition(db_session):
     user = _create_user(db_session, amo_id=amo.id)
 
     audit = quality_models.QMSAudit(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-202",
@@ -189,6 +192,7 @@ def test_close_cap_requires_actions_evidence_and_verification(db_session):
     user = _create_user(db_session, amo_id=amo.id)
 
     audit = quality_models.QMSAudit(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-203",
