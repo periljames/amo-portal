@@ -59,6 +59,7 @@ from .schemas import (
     QMSIssueRevisionRequest, QMSDamageReportRequest, QMSDamageReportOut,
 )
 from .enums import CARStatus, QMSDomain, QMSAuditStatus, QMSPhysicalCopyStatus, QMSCustodyAction, QMSRevisionLifecycleStatus
+from .schema_compat import ensure_qms_audit_reference_schema
 from .storage_replication import replicate_file
 from .service import (
     add_car_action,
@@ -126,6 +127,7 @@ def _current_amo_id(current_user: account_models.User) -> Optional[str]:
 
 
 def _get_audit_for_amo(db: Session, *, amo_id: Optional[str], audit_id: UUID) -> models.QMSAudit:
+    ensure_qms_audit_reference_schema(db)
     audit = (
         db.query(models.QMSAudit)
         .filter(
@@ -140,6 +142,7 @@ def _get_audit_for_amo(db: Session, *, amo_id: Optional[str], audit_id: UUID) ->
 
 
 def _get_finding_for_amo(db: Session, *, amo_id: Optional[str], finding_id: UUID) -> models.QMSAuditFinding:
+    ensure_qms_audit_reference_schema(db)
     finding = (
         db.query(models.QMSAuditFinding)
         .join(models.QMSAudit, models.QMSAudit.id == models.QMSAuditFinding.audit_id)
@@ -161,6 +164,7 @@ def _generate_audit_reference(
     target_date: Optional[date],
     reference_family: str = "QAR",
 ) -> tuple[str, str, int, int]:
+    ensure_qms_audit_reference_schema(db)
     if not amo_id:
         raise HTTPException(status_code=400, detail="AMO scope is required to generate audit references")
 
@@ -916,6 +920,7 @@ def create_audit(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    ensure_qms_audit_reference_schema(db)
     _require_quality_scheduler(current_user)
     scoped_amo_id = _current_amo_id(current_user)
     audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
@@ -971,6 +976,7 @@ def list_audits(
     kind: Optional[models.QMSAuditKind] = None,
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    ensure_qms_audit_reference_schema(db)
     qs = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == _current_amo_id(current_user))
     if domain:
         qs = qs.filter(models.QMSAudit.domain == domain)
@@ -1010,6 +1016,7 @@ def get_audit_register(
     domain: Optional[QMSDomain] = None,
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    ensure_qms_audit_reference_schema(db)
     scoped_amo_id = _current_amo_id(current_user)
     audit_query = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == scoped_amo_id)
     if domain:

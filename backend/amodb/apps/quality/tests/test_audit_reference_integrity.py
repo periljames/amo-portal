@@ -5,12 +5,15 @@ from contextlib import contextmanager
 from datetime import date
 
 from sqlalchemy import inspect
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.quality import models as quality_models
 from amodb.apps.quality import schemas as quality_schemas
+from amodb.apps.quality.schema_compat import ensure_qms_audit_reference_schema
 
 quality_router = importlib.import_module("amodb.apps.quality.router")
 
@@ -194,3 +197,75 @@ def test_bulk_findings_endpoint_scopes_to_current_amo(db_session):
     findings = quality_router.list_findings_bulk(db=db_session, current_user=user_a, domain=quality_models.QMSDomain.AMO, audit_ids=None)
     assert len(findings) == 1
     assert findings[0].audit_id == audit_a.id
+
+
+def test_ensure_qms_audit_reference_schema_backfills_legacy_columns():
+    engine = create_engine("sqlite:///:memory:", future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE qms_audits (
+                    id TEXT PRIMARY KEY,
+                    amo_id TEXT NOT NULL,
+                    domain TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    audit_ref TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    scope TEXT,
+                    criteria TEXT,
+                    auditee TEXT,
+                    auditee_email TEXT,
+                    auditee_user_id TEXT,
+                    lead_auditor_user_id TEXT,
+                    observer_auditor_user_id TEXT,
+                    assistant_auditor_user_id TEXT,
+                    planned_start DATE,
+                    planned_end DATE,
+                    actual_start DATE,
+                    actual_end DATE,
+                    report_file_ref TEXT,
+                    checklist_file_ref TEXT,
+                    retention_until DATE,
+                    upcoming_notice_sent_at DATETIME,
+                    day_of_notice_sent_at DATETIME,
+                    created_by_user_id TEXT,
+                    created_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO qms_audits (id, amo_id, domain, kind, status, audit_ref, title, planned_start, created_at)
+                VALUES ('audit-1', 'amo-1', 'AMO', 'INTERNAL', 'PLANNED', 'QAR/AMODEMO/26/007', 'Legacy audit', '2026-03-19', '2026-03-19 00:00:00')
+                """
+            )
+        )
+        connection.execute(text("CREATE TABLE amos (id TEXT PRIMARY KEY)"))
+
+    with Session(engine) as session:
+        changed = ensure_qms_audit_reference_schema(session)
+        assert changed is True
+
+        columns = {column["name"] for column in inspect(engine).get_columns("qms_audits")}
+        assert {"reference_family", "unit_code", "ref_year", "ref_sequence"}.issubset(columns)
+
+        row = session.execute(
+            text(
+                """
+                SELECT reference_family, unit_code, ref_year, ref_sequence
+                FROM qms_audits
+                WHERE id = 'audit-1'
+                """
+            )
+        ).mappings().one()
+
+    assert row == {
+        "reference_family": "QAR",
+        "unit_code": "AMODEMO",
+        "ref_year": 26,
+        "ref_sequence": 7,
+    }
