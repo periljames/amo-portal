@@ -14,6 +14,7 @@ type Props = {
   actions?: React.ReactNode;
   children: React.ReactNode;
   hideBackButton?: boolean;
+  customHeader?: React.ReactNode;
 };
 
 const QMSLayout: React.FC<Props> = ({
@@ -24,6 +25,7 @@ const QMSLayout: React.FC<Props> = ({
   actions,
   children,
   hideBackButton = false,
+  customHeader,
 }) => {
   const navigate = useNavigate();
   const { pushToast } = useToast();
@@ -51,51 +53,53 @@ const QMSLayout: React.FC<Props> = ({
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment={department}>
       <div className="qms-shell">
-        <PageHeader
-          title={title}
-          subtitle={subtitle}
-          breadcrumbs={breadcrumbs}
-          actions={
-            <div className="qms-header__actions">
-              {actions}
-              {!hideBackButton ? (
-                <>
-                  <button
-                    type="button"
-                    className="secondary-chip-btn qms-header__back-desktop"
-                    onClick={() => navigate(`/maintenance/${amoCode}/${department}`)}
-                  >
-                    Back
-                  </button>
-                  <div className="qms-header__mobile-overflow">
+        {customHeader ?? (
+          <PageHeader
+            title={title}
+            subtitle={subtitle}
+            breadcrumbs={breadcrumbs}
+            actions={
+              <div className="qms-header__actions">
+                {actions}
+                {!hideBackButton ? (
+                  <>
                     <button
                       type="button"
-                      className="secondary-chip-btn qms-header__overflow-toggle"
-                      aria-label="Open module actions"
-                      onClick={() => setMobileMenuOpen((v) => !v)}
+                      className="secondary-chip-btn qms-header__back-desktop"
+                      onClick={() => navigate(`/maintenance/${amoCode}/${department}`)}
                     >
-                      <MoreVertical size={15} />
+                      Back
                     </button>
-                    {mobileMenuOpen ? (
-                      <div className="qms-header__overflow-menu" role="menu">
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setMobileMenuOpen(false);
-                            navigate(`/maintenance/${amoCode}/${department}`);
-                          }}
-                        >
-                          Back to dashboard
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </>
-              ) : null}
-            </div>
-          }
-        />
+                    <div className="qms-header__mobile-overflow">
+                      <button
+                        type="button"
+                        className="secondary-chip-btn qms-header__overflow-toggle"
+                        aria-label="Open module actions"
+                        onClick={() => setMobileMenuOpen((v) => !v)}
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                      {mobileMenuOpen ? (
+                        <div className="qms-header__overflow-menu" role="menu">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMobileMenuOpen(false);
+                              navigate(`/maintenance/${amoCode}/${department}`);
+                            }}
+                          >
+                            Back to dashboard
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            }
+          />
+        )}
 
         <div className="qms-content">{children}</div>
       </div>
