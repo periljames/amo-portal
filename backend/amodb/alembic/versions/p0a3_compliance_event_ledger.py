@@ -1,7 +1,7 @@
 """P0 compliance event ledger
 
 Revision ID: p0a3_compliance_event_ledger
-Revises: p0a2_quality_amo_id_normalization
+Revises: p0a2_quality_amo_id_norm
 Create Date: 2026-03-09 00:00:00.000000
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "p0a3_compliance_event_ledger"
-down_revision = "p0a2_quality_amo_id_normalization"
+down_revision = "p0a2_quality_amo_id_norm"
 branch_labels = None
 depends_on = None
 
