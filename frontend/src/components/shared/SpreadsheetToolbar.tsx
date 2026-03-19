@@ -1,5 +1,5 @@
 import React from "react";
-import { Columns3Cog, Rows3, Rows4, UserRound, WrapText } from "lucide-react";
+import { Columns3, Rows3, Rows4, UserRound, WrapText } from "lucide-react";
 
 type Density = "compact" | "comfortable";
 
@@ -78,7 +78,7 @@ const SpreadsheetToolbar: React.FC<Props> = ({
         className={`${iconButtonClass} ${showFilters ? "border-slate-900 bg-slate-900 text-white hover:bg-slate-900" : ""}`}
         onClick={() => onShowFiltersChange(!showFilters)}
       >
-        <Columns3Cog className="h-4 w-4" />
+        <Columns3 className="h-4 w-4" />
         <span className={iconLabelClass}>Header filters</span>
       </button>
 
