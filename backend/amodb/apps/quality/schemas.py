@@ -248,7 +248,7 @@ class QMSAuditCreate(BaseModel):
     domain: QMSDomain
     kind: QMSAuditKind = QMSAuditKind.INTERNAL
 
-    audit_ref: str = Field(min_length=1, max_length=64)
+    audit_ref: Optional[str] = Field(default=None, min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=255)
 
     scope: Optional[str] = None
@@ -294,6 +294,10 @@ class QMSAuditOut(BaseModel):
     status: QMSAuditStatus
 
     audit_ref: str
+    reference_family: str
+    unit_code: str
+    ref_year: int
+    ref_sequence: int
     title: str
 
     scope: Optional[str]

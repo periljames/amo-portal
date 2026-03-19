@@ -108,18 +108,53 @@ def _date_to_datetime(value: Optional[date]) -> Optional[datetime]:
     return datetime.combine(value, time.min, tzinfo=timezone.utc)
 
 
-def _generate_schedule_audit_ref(schedule: models.QMSAuditSchedule, target_date: date, db: Session) -> str:
-    base = f"SCH-{str(schedule.id)[:8]}-{target_date.strftime('%Y%m')}"
-    candidate = base
-    suffix = 1
-    while (
-        db.query(models.QMSAudit)
-        .filter(models.QMSAudit.domain == schedule.domain, models.QMSAudit.audit_ref == candidate)
+def _derive_audit_unit_code(db: Session, amo_id: Optional[str]) -> str:
+    if not amo_id:
+        return "MO"
+    amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
+    raw = (amo.amo_code if amo else "") or (amo.icao_code if amo else "") or "MO"
+    cleaned = re.sub(r"[^A-Z0-9]", "", raw.upper())
+    return (cleaned[:4] or "MO")
+
+
+def _generate_audit_reference(
+    db: Session,
+    *,
+    amo_id: Optional[str],
+    target_date: Optional[date],
+    reference_family: str = "QAR",
+) -> tuple[str, str, int, int]:
+    if not amo_id:
+        raise HTTPException(status_code=400, detail="AMO scope is required to generate audit references")
+
+    unit_code = _derive_audit_unit_code(db, amo_id)
+    ref_year = (target_date or date.today()).year % 100
+    counter = (
+        db.query(models.QMSAuditReferenceCounter)
+        .filter(
+            models.QMSAuditReferenceCounter.amo_id == amo_id,
+            models.QMSAuditReferenceCounter.reference_family == reference_family,
+            models.QMSAuditReferenceCounter.unit_code == unit_code,
+            models.QMSAuditReferenceCounter.ref_year == ref_year,
+        )
+        .with_for_update()
         .first()
-    ):
-        suffix += 1
-        candidate = f"{base}-{suffix}"
-    return candidate
+    )
+    if not counter:
+        counter = models.QMSAuditReferenceCounter(
+            amo_id=amo_id,
+            reference_family=reference_family,
+            unit_code=unit_code,
+            ref_year=ref_year,
+            last_value=0,
+        )
+        db.add(counter)
+        db.flush()
+
+    counter.last_value += 1
+    ref_sequence = counter.last_value
+    audit_ref = f"{reference_family}/{unit_code}/{ref_year:02d}/{ref_sequence:03d}"
+    return audit_ref, unit_code, ref_year, ref_sequence
 
 
 def _advance_schedule_date(schedule: models.QMSAuditSchedule, base_date: date) -> date:
@@ -837,10 +872,19 @@ def create_audit(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_quality_scheduler(current_user)
+    audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
+        db,
+        amo_id=getattr(current_user, "effective_amo_id", None) or current_user.amo_id,
+        target_date=payload.planned_start,
+    )
     audit = models.QMSAudit(
         domain=payload.domain,
         kind=payload.kind,
-        audit_ref=payload.audit_ref.strip(),
+        audit_ref=audit_ref,
+        reference_family="QAR",
+        unit_code=unit_code,
+        ref_year=ref_year,
+        ref_sequence=ref_sequence,
         title=payload.title.strip(),
         scope=payload.scope,
         criteria=payload.criteria,
@@ -1008,11 +1052,19 @@ def run_audit_schedule(
 
     planned_start = schedule.next_due_date
     planned_end = planned_start + timedelta(days=max(schedule.duration_days, 1) - 1)
-    audit_ref = _generate_schedule_audit_ref(schedule, planned_start, db)
+    audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
+        db,
+        amo_id=getattr(current_user, "effective_amo_id", None) or current_user.amo_id,
+        target_date=planned_start,
+    )
     audit = models.QMSAudit(
         domain=schedule.domain,
         kind=schedule.kind,
         audit_ref=audit_ref,
+        reference_family="QAR",
+        unit_code=unit_code,
+        ref_year=ref_year,
+        ref_sequence=ref_sequence,
         title=schedule.title,
         scope=schedule.scope,
         criteria=schedule.criteria,
