@@ -66,7 +66,13 @@ def upgrade() -> None:
             id, amo_id, record_id, certificate_number, issued_at, status, created_at
         )
         SELECT
-            lower(hex(randomblob(16))),
+            lower(
+                substr(seed.digest, 1, 8) || '-' ||
+                substr(seed.digest, 9, 4) || '-' ||
+                substr(seed.digest, 13, 4) || '-' ||
+                substr(seed.digest, 17, 4) || '-' ||
+                substr(seed.digest, 21, 12)
+            ),
             tr.amo_id,
             tr.id,
             tr.certificate_reference,
@@ -74,6 +80,18 @@ def upgrade() -> None:
             'VALID',
             COALESCE(tr.created_at, CURRENT_TIMESTAMP)
         FROM training_records tr
+        CROSS JOIN LATERAL (
+            SELECT md5(
+                concat_ws(
+                    ':',
+                    tr.id,
+                    tr.amo_id,
+                    tr.certificate_reference,
+                    clock_timestamp()::text,
+                    random()::text
+                )
+            ) AS digest
+        ) AS seed
         WHERE tr.certificate_reference IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM training_certificate_issues i
