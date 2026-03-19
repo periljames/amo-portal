@@ -1,6 +1,6 @@
 """P0 quality amo_id normalization
 
-Revision ID: p0a2_quality_amo_id_normalization
+Revision ID: p0a2_quality_amo_id_norm
 Revises: p0a1_authz_core_tables
 Create Date: 2026-03-09 00:00:00.000000
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "p0a2_quality_amo_id_normalization"
+revision = "p0a2_quality_amo_id_norm"
 down_revision = "p0a1_authz_core_tables"
 branch_labels = None
 depends_on = None
