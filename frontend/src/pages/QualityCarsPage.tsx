@@ -154,8 +154,9 @@ const QualityCarsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [cars, setCars] = useState<CAROut[]>([]);
   const [programFilter, setProgramFilter] = useState<CARProgram>("QUALITY");
-  const inviteToken = searchParams.get("invite");
-  const [showCreatePanel, setShowCreatePanel] = useState(Boolean(inviteToken));
+  const inviteParam = searchParams.get("invite");
+  const hasInviteLink = Boolean(inviteParam);
+  const [showCreatePanel, setShowCreatePanel] = useState(hasInviteLink);
 
   const [form, setForm] = useState<CarFormState>({
     title: "",
@@ -286,10 +287,10 @@ const QualityCarsPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (inviteToken) {
+    if (hasInviteLink) {
       setShowCreatePanel(true);
     }
-  }, [inviteToken]);
+  }, [hasInviteLink]);
 
   const handleSubmit = (ev: React.FormEvent) => {
     ev.preventDefault();
@@ -627,7 +628,7 @@ const QualityCarsPage: React.FC = () => {
         <AuditHistoryPanel title="CAR history" entityType="qms_car" />
       </section>
 
-      {inviteToken && (
+      {hasInviteLink && (
         <div className="card card--info" style={{ marginBottom: 12 }}>
           <p style={{ margin: 0 }}>
             Invitation token detected. Please log a CAR or update the assigned CAR linked to your email invite.
