@@ -93,6 +93,7 @@ const QualityCarsPage: React.FC = () => {
   const [cars, setCars] = useState<CAROut[]>([]);
   const [programFilter, setProgramFilter] = useState<CARProgram>("QUALITY");
   const inviteToken = searchParams.get("invite");
+  const [showCreatePanel, setShowCreatePanel] = useState(Boolean(inviteToken));
 
   const [form, setForm] = useState<CarFormState>({
     title: "",
@@ -254,6 +255,12 @@ const QualityCarsPage: React.FC = () => {
     loadAssignees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (inviteToken) {
+      setShowCreatePanel(true);
+    }
+  }, [inviteToken]);
 
   const handleSubmit = (ev: React.FormEvent) => {
     ev.preventDefault();
@@ -455,18 +462,11 @@ const QualityCarsPage: React.FC = () => {
           Corrective Action Requests · {amoDisplay}
         </h1>
         <p className="page-header__subtitle">
-          Register for Quality & Reliability programmes with escalation tracking.
+          Focused command center for the live CAR register, review queue, and owner follow-up.
         </p>
       </header>
 
       <section className="page-section" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <button
-          type="button"
-          className="secondary-chip-btn"
-          onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms`)}
-        >
-          Back to QMS overview
-        </button>
         <select
           value={programFilter}
           onChange={(e) => setProgramFilter(e.target.value as CARProgram)}
@@ -479,6 +479,22 @@ const QualityCarsPage: React.FC = () => {
             </option>
           ))}
         </select>
+        {canManageCars ? (
+          <button
+            type="button"
+            className="secondary-chip-btn"
+            onClick={() => setShowCreatePanel((current) => !current)}
+          >
+            {showCreatePanel ? "Hide CAR intake" : "Open CAR intake"}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="secondary-chip-btn"
+          onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms`)}
+        >
+          Back to QMS overview
+        </button>
       </section>
 
       <section className="page-section">
@@ -512,12 +528,13 @@ const QualityCarsPage: React.FC = () => {
         </div>
       )}
 
-      <section className="page-section">
-        <div className="card qms-car-form-card">
+      {canManageCars && showCreatePanel ? (
+        <section className="page-section">
+          <div className="card qms-car-form-card">
           <div className="card-header">
-            <h2>Log a new CAR</h2>
+            <h2>CAR intake</h2>
             <p className="text-muted">
-              Assign programme, priority, and a concise summary. Numbers are auto-generated per programme and year.
+              Open only when needed by a manager; the main page stays focused on the active register and review workload.
             </p>
           </div>
 
@@ -693,8 +710,9 @@ const QualityCarsPage: React.FC = () => {
               </button>
             </div>
           </form>
-        </div>
-      </section>
+          </div>
+        </section>
+      ) : null}
 
       <section className="page-section">
         <div className="card">

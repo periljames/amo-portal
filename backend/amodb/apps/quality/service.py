@@ -14,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import models
+from .schema_compat import ensure_qms_audit_reference_schema
 from ..finance import models as finance_models
 from ..training import models as training_models
 from ..accounts import models as account_models
@@ -113,6 +114,7 @@ def normalize_finding_level(severity, level: Optional[FindingLevel]) -> FindingL
 
 
 def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
+    ensure_qms_audit_reference_schema(db)
     # Documents
     doc_q = db.query(models.QMSDocument)
     if domain:
