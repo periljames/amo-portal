@@ -281,8 +281,21 @@ const QualityCarsPage: React.FC = () => {
   }, [watchedFindingId, cars]);
 
   useEffect(() => {
-    setValue("program", programFilter);
-  }, [programFilter, setValue]);
+    loadAssignees();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (inviteToken) {
+      setShowCreatePanel(true);
+    }
+  }, [inviteToken]);
+
+  const handleSubmit = (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (!form.title.trim() || !form.summary.trim() || !form.finding_id.trim()) return;
+    setPreviewOpen(true);
+  };
 
   const departmentOptions = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
@@ -610,6 +623,10 @@ const QualityCarsPage: React.FC = () => {
         </button>
       </section>
 
+      <section className="page-section">
+        <AuditHistoryPanel title="CAR history" entityType="qms_car" />
+      </section>
+
       {inviteToken && (
         <div className="card card--info" style={{ marginBottom: 12 }}>
           <p style={{ margin: 0 }}>
@@ -840,6 +857,15 @@ const QualityCarsPage: React.FC = () => {
               </section>
             </div>
           </form>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="page-section">
+        <div className="card">
+          <div className="card-header">
+            <h2>Register</h2>
+            <p className="text-muted">Auto-numbered entries with status, priority, and ownership.</p>
           </div>
         </section>
       ) : null}
