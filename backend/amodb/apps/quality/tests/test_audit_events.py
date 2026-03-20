@@ -108,6 +108,7 @@ def test_close_finding_logs_audit_event(db_session):
     user = _create_user(db_session, amo_id=amo.id)
 
     audit = quality_models.QMSAudit(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-1",
