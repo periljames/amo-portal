@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, File, Uplo
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
 from amodb.entitlements import require_module
 from amodb.security import get_current_actor_id, get_current_active_user
@@ -50,7 +50,7 @@ from .schemas import (
     QMSDocumentRevisionCreate, QMSDocumentRevisionOut, QMSPublishRevision,
     QMSDistributionCreate, QMSDistributionOut,
     QMSChangeRequestCreate, QMSChangeRequestUpdate, QMSChangeRequestOut,
-    QMSAuditCreate, QMSAuditUpdate, QMSAuditOut,
+    QMSAuditCreate, QMSAuditUpdate, QMSAuditOut, QMSAuditRegisterResponse, QMSAuditRegisterRowOut,
     QMSFindingCreate, QMSFindingOut, QMSFindingVerify, QMSFindingAcknowledge,
     QMSAuditScheduleCreate, QMSAuditScheduleOut,
     QMSCAPUpsert, QMSCAPOut,
@@ -59,6 +59,7 @@ from .schemas import (
     QMSIssueRevisionRequest, QMSDamageReportRequest, QMSDamageReportOut,
 )
 from .enums import CARStatus, QMSDomain, QMSAuditStatus, QMSPhysicalCopyStatus, QMSCustodyAction, QMSRevisionLifecycleStatus
+from .schema_compat import ensure_qms_audit_reference_schema
 from .storage_replication import replicate_file
 from .service import (
     add_car_action,
@@ -108,18 +109,101 @@ def _date_to_datetime(value: Optional[date]) -> Optional[datetime]:
     return datetime.combine(value, time.min, tzinfo=timezone.utc)
 
 
-def _generate_schedule_audit_ref(schedule: models.QMSAuditSchedule, target_date: date, db: Session) -> str:
-    base = f"SCH-{str(schedule.id)[:8]}-{target_date.strftime('%Y%m')}"
-    candidate = base
-    suffix = 1
-    while (
+def _derive_audit_unit_code(db: Session, amo_id: Optional[str]) -> str:
+    if not amo_id:
+        return "MO"
+    amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
+    raw = (amo.amo_code if amo else "") or (amo.icao_code if amo else "") or "MO"
+    cleaned = re.sub(r"[^A-Z0-9]", "", raw.upper())
+    if len(cleaned) <= 8:
+        return cleaned or "MO"
+    compact = "".join(part[:3] for part in re.split(r"[^A-Z0-9]+", raw.upper()) if part)
+    compact_clean = re.sub(r"[^A-Z0-9]", "", compact)
+    return (compact_clean[:8] or cleaned[:8] or "MO")
+
+
+def _current_amo_id(current_user: account_models.User) -> Optional[str]:
+    return getattr(current_user, "effective_amo_id", None) or current_user.amo_id
+
+
+def _get_audit_for_amo(db: Session, *, amo_id: Optional[str], audit_id: UUID) -> models.QMSAudit:
+    ensure_qms_audit_reference_schema(db)
+    audit = (
         db.query(models.QMSAudit)
-        .filter(models.QMSAudit.domain == schedule.domain, models.QMSAudit.audit_ref == candidate)
+        .filter(
+            models.QMSAudit.id == audit_id,
+            models.QMSAudit.amo_id == amo_id,
+        )
         .first()
-    ):
-        suffix += 1
-        candidate = f"{base}-{suffix}"
-    return candidate
+    )
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    return audit
+
+
+def _get_finding_for_amo(db: Session, *, amo_id: Optional[str], finding_id: UUID) -> models.QMSAuditFinding:
+    ensure_qms_audit_reference_schema(db)
+    finding = (
+        db.query(models.QMSAuditFinding)
+        .join(models.QMSAudit, models.QMSAudit.id == models.QMSAuditFinding.audit_id)
+        .filter(
+            models.QMSAuditFinding.id == finding_id,
+            models.QMSAudit.amo_id == amo_id,
+        )
+        .first()
+    )
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    return finding
+
+
+def _generate_audit_reference(
+    db: Session,
+    *,
+    amo_id: Optional[str],
+    target_date: Optional[date],
+    reference_family: str = "QAR",
+) -> tuple[str, str, int, int]:
+    ensure_qms_audit_reference_schema(db)
+    if not amo_id:
+        raise HTTPException(status_code=400, detail="AMO scope is required to generate audit references")
+
+    unit_code = _derive_audit_unit_code(db, amo_id)
+    ref_year = (target_date or date.today()).year % 100
+    for _ in range(5):
+        counter = (
+            db.query(models.QMSAuditReferenceCounter)
+            .filter(
+                models.QMSAuditReferenceCounter.amo_id == amo_id,
+                models.QMSAuditReferenceCounter.reference_family == reference_family,
+                models.QMSAuditReferenceCounter.unit_code == unit_code,
+                models.QMSAuditReferenceCounter.ref_year == ref_year,
+            )
+            .with_for_update()
+            .first()
+        )
+        if counter:
+            counter.last_value += 1
+            ref_sequence = counter.last_value
+            audit_ref = f"{reference_family}/{unit_code}/{ref_year:02d}/{ref_sequence:03d}"
+            return audit_ref, unit_code, ref_year, ref_sequence
+
+        try:
+            with db.begin_nested():
+                db.add(
+                    models.QMSAuditReferenceCounter(
+                        amo_id=amo_id,
+                        reference_family=reference_family,
+                        unit_code=unit_code,
+                        ref_year=ref_year,
+                        last_value=0,
+                    )
+                )
+                db.flush()
+        except IntegrityError:
+            continue
+
+    raise HTTPException(status_code=409, detail="Unable to reserve an audit reference. Please retry.")
 
 
 def _advance_schedule_date(schedule: models.QMSAuditSchedule, base_date: date) -> date:
@@ -836,11 +920,23 @@ def create_audit(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    ensure_qms_audit_reference_schema(db)
     _require_quality_scheduler(current_user)
+    scoped_amo_id = _current_amo_id(current_user)
+    audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
+        db,
+        amo_id=scoped_amo_id,
+        target_date=payload.planned_start,
+    )
     audit = models.QMSAudit(
+        amo_id=scoped_amo_id,
         domain=payload.domain,
         kind=payload.kind,
-        audit_ref=payload.audit_ref.strip(),
+        audit_ref=audit_ref,
+        reference_family="QAR",
+        unit_code=unit_code,
+        ref_year=ref_year,
+        ref_sequence=ref_sequence,
         title=payload.title.strip(),
         scope=payload.scope,
         criteria=payload.criteria,
@@ -878,8 +974,10 @@ def list_audits(
     domain: Optional[QMSDomain] = None,
     status_: Optional[models.QMSAuditStatus] = None,
     kind: Optional[models.QMSAuditKind] = None,
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    qs = db.query(models.QMSAudit)
+    ensure_qms_audit_reference_schema(db)
+    qs = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == _current_amo_id(current_user))
     if domain:
         qs = qs.filter(models.QMSAudit.domain == domain)
     if status_:
@@ -887,6 +985,79 @@ def list_audits(
     if kind:
         qs = qs.filter(models.QMSAudit.kind == kind)
     return qs.order_by(models.QMSAudit.created_at.desc()).all()
+
+
+@router.get("/audits/findings", response_model=List[QMSFindingOut])
+def list_findings_bulk(
+    db: Session = Depends(get_db),
+    domain: Optional[QMSDomain] = None,
+    audit_ids: Optional[List[UUID]] = Query(default=None),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    scoped_amo_id = _current_amo_id(current_user)
+    qs = (
+        db.query(models.QMSAuditFinding)
+        .join(models.QMSAudit, models.QMSAudit.id == models.QMSAuditFinding.audit_id)
+        .filter(models.QMSAudit.amo_id == scoped_amo_id)
+    )
+    if domain:
+        qs = qs.filter(models.QMSAudit.domain == domain)
+    if audit_ids:
+        qs = qs.filter(models.QMSAuditFinding.audit_id.in_(audit_ids))
+    return (
+        qs.order_by(models.QMSAuditFinding.created_at.desc())
+        .all()
+    )
+
+
+@router.get("/audits/register", response_model=QMSAuditRegisterResponse)
+def get_audit_register(
+    db: Session = Depends(get_db),
+    domain: Optional[QMSDomain] = None,
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    ensure_qms_audit_reference_schema(db)
+    scoped_amo_id = _current_amo_id(current_user)
+    audit_query = db.query(models.QMSAudit).filter(models.QMSAudit.amo_id == scoped_amo_id)
+    if domain:
+        audit_query = audit_query.filter(models.QMSAudit.domain == domain)
+    audits = audit_query.order_by(models.QMSAudit.created_at.desc()).all()
+    audit_ids = [audit.id for audit in audits]
+    if not audit_ids:
+        return QMSAuditRegisterResponse(rows=[])
+
+    findings = (
+        db.query(models.QMSAuditFinding)
+        .filter(models.QMSAuditFinding.audit_id.in_(audit_ids))
+        .order_by(models.QMSAuditFinding.created_at.desc())
+        .all()
+    )
+    finding_ids = [finding.id for finding in findings]
+    cars = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.amo_id == scoped_amo_id)
+        .filter(models.CorrectiveActionRequest.finding_id.in_(finding_ids) if finding_ids else False)
+        .order_by(models.CorrectiveActionRequest.created_at.desc())
+        .all()
+    )
+
+    audit_by_id = {audit.id: audit for audit in audits}
+    cars_by_finding: dict[UUID, list[models.CorrectiveActionRequest]] = {}
+    for car in cars:
+        if not car.finding_id:
+            continue
+        cars_by_finding.setdefault(car.finding_id, []).append(car)
+
+    rows = [
+        QMSAuditRegisterRowOut(
+            audit=audit_by_id[finding.audit_id],
+            finding=finding,
+            linked_cars=cars_by_finding.get(finding.id, []),
+        )
+        for finding in findings
+        if finding.audit_id in audit_by_id
+    ]
+    return QMSAuditRegisterResponse(rows=rows)
 
 
 @router.get("/audits/schedules", response_model=List[QMSAuditScheduleOut])
@@ -1008,11 +1179,20 @@ def run_audit_schedule(
 
     planned_start = schedule.next_due_date
     planned_end = planned_start + timedelta(days=max(schedule.duration_days, 1) - 1)
-    audit_ref = _generate_schedule_audit_ref(schedule, planned_start, db)
+    audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
+        db,
+        amo_id=_current_amo_id(current_user),
+        target_date=planned_start,
+    )
     audit = models.QMSAudit(
+        amo_id=_current_amo_id(current_user),
         domain=schedule.domain,
         kind=schedule.kind,
         audit_ref=audit_ref,
+        reference_family="QAR",
+        unit_code=unit_code,
+        ref_year=ref_year,
+        ref_sequence=ref_sequence,
         title=schedule.title,
         scope=schedule.scope,
         criteria=schedule.criteria,
@@ -1159,9 +1339,7 @@ def export_audit_evidence_pack(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_quality_scheduler(current_user)
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
-    if not audit:
-        raise HTTPException(status_code=404, detail="Audit not found")
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
     if not _is_quality_admin(current_user) and not _audit_allows_user_by_audit(audit, current_user.id):
         raise HTTPException(status_code=403, detail="Insufficient privileges to export audit evidence packs")
     return build_evidence_pack(
@@ -1182,9 +1360,7 @@ def upload_audit_checklist(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
-    if not audit:
-        raise HTTPException(status_code=404, detail="Audit not found")
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
     _require_audit_access(current_user, audit)
 
     original_name = Path(file.filename or "checklist").name
@@ -1224,7 +1400,7 @@ def download_audit_checklist(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
     if not audit or not audit.checklist_file_ref:
         raise HTTPException(status_code=404, detail="Checklist not found")
     _require_audit_access(current_user, audit, allow_auditee=True)
@@ -1246,9 +1422,7 @@ def upload_audit_report(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
-    if not audit:
-        raise HTTPException(status_code=404, detail="Audit not found")
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
     _require_audit_access(current_user, audit)
 
     original_name = Path(file.filename or "report").name
@@ -1288,7 +1462,7 @@ def download_audit_report(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
     if not audit or not audit.report_file_ref:
         raise HTTPException(status_code=404, detail="Report not found")
     _require_audit_access(current_user, audit, allow_auditee=True)
@@ -1311,9 +1485,7 @@ def update_audit(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_quality_scheduler(current_user)
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
-    if not audit:
-        raise HTTPException(status_code=404, detail="Audit not found")
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
     before_status = audit.status.value
     before = {"status": before_status, "title": audit.title}
     planned_start_changed = False
@@ -1417,9 +1589,7 @@ def add_finding(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_quality_scheduler(current_user)
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == audit_id).first()
-    if not audit:
-        raise HTTPException(status_code=404, detail="Audit not found")
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
 
     level = normalize_finding_level(payload.severity, payload.level)
 
@@ -1482,7 +1652,12 @@ def add_finding(
 
 
 @router.get("/audits/{audit_id}/findings", response_model=List[QMSFindingOut])
-def list_findings(audit_id: UUID, db: Session = Depends(get_db)):
+def list_findings(
+    audit_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
     return (
         db.query(models.QMSAuditFinding)
         .filter(models.QMSAuditFinding.audit_id == audit_id)
@@ -1498,12 +1673,9 @@ def close_finding(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
-    if audit:
-        _require_audit_access(current_user, audit)
+    finding = _get_finding_for_amo(db, amo_id=_current_amo_id(current_user), finding_id=finding_id)
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=finding.audit_id)
+    _require_audit_access(current_user, audit)
     if not finding.closed_at:
         before_state = "OPEN"
         finding.closed_at = func.now()
@@ -1551,12 +1723,9 @@ def verify_finding(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
-    if audit:
-        _require_audit_access(current_user, audit)
+    finding = _get_finding_for_amo(db, amo_id=_current_amo_id(current_user), finding_id=finding_id)
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=finding.audit_id)
+    _require_audit_access(current_user, audit)
 
     if payload.objective_evidence is not None:
         finding.objective_evidence = payload.objective_evidence
@@ -1593,13 +1762,9 @@ def acknowledge_finding(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-
-    audit = db.query(models.QMSAudit).filter(models.QMSAudit.id == finding.audit_id).first()
-    if audit:
-        _require_audit_access(current_user, audit, allow_auditee=True)
+    finding = _get_finding_for_amo(db, amo_id=_current_amo_id(current_user), finding_id=finding_id)
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=finding.audit_id)
+    _require_audit_access(current_user, audit, allow_auditee=True)
 
     finding.acknowledged_at = payload.acknowledged_at or func.now()
     finding.acknowledged_by_user_id = current_user.id
@@ -2438,6 +2603,33 @@ def list_car_attachments(
             uploaded_at=a.uploaded_at,
             download_url=f"/quality/cars/{car.id}/attachments/{a.id}/download",
         )
+        for a in car.attachments
+    ]
+
+
+@router.get("/cars/attachments/bulk", response_model=List[CARAttachmentOut])
+def list_car_attachments_bulk(
+    car_ids: Optional[List[UUID]] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    scoped_amo_id = _current_amo_id(current_user)
+    cars_query = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.amo_id == scoped_amo_id)
+    if car_ids:
+        cars_query = cars_query.filter(models.CorrectiveActionRequest.id.in_(car_ids))
+    cars = cars_query.all()
+    return [
+        CARAttachmentOut(
+            id=str(a.id),
+            car_id=str(car.id),
+            filename=a.filename,
+            content_type=a.content_type,
+            size_bytes=a.size_bytes,
+            sha256=a.sha256,
+            uploaded_at=a.uploaded_at,
+            download_url=f"/quality/cars/{car.id}/attachments/{a.id}/download",
+        )
+        for car in cars
         for a in car.attachments
     ]
 
