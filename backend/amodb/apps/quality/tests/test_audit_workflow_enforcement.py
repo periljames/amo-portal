@@ -43,6 +43,7 @@ def _seed_audit(db_session):
     quality = _user(db_session, amo.id, account_models.AccountRole.QUALITY_MANAGER)
     tech = _user(db_session, amo.id, account_models.AccountRole.TECHNICIAN)
     audit = quality_models.QMSAudit(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-WF-1",

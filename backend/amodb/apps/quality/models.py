@@ -387,10 +387,29 @@ class QMSManualChangeRequest(Base):
         return f"<QMSManualChangeRequest id={self.id} domain={self.domain} status={self.status}>"
 
 
+class QMSAuditReferenceCounter(Base):
+    __tablename__ = "qms_audit_reference_counters"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    reference_family = Column(String(16), nullable=False)
+    unit_code = Column(String(16), nullable=False)
+    ref_year = Column(Integer, nullable=False)
+    last_value = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("amo_id", "reference_family", "unit_code", "ref_year", name="uq_qms_audit_ref_counter_scope"),
+        Index("ix_qms_audit_ref_counter_scope", "amo_id", "reference_family", "unit_code", "ref_year"),
+    )
+
+
 class QMSAudit(Base):
     __tablename__ = "qms_audits"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
 
     domain = Column(
         SAEnum(QMSDomain, name="qms_domain", native_enum=False),
@@ -411,6 +430,10 @@ class QMSAudit(Base):
     )
 
     audit_ref = Column(String(64), nullable=False, index=True)
+    reference_family = Column(String(16), nullable=False, default="QAR")
+    unit_code = Column(String(16), nullable=False, default="MO")
+    ref_year = Column(Integer, nullable=False, default=lambda: datetime.now(timezone.utc).year % 100)
+    ref_sequence = Column(Integer, nullable=False, default=1)
     title = Column(String(255), nullable=False)
 
     scope = Column(Text, nullable=True)
@@ -446,9 +469,19 @@ class QMSAudit(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("domain", "audit_ref", name="uq_qms_audit_ref"),
+        UniqueConstraint("amo_id", "domain", "audit_ref", name="uq_qms_audit_ref_per_amo"),
+        UniqueConstraint(
+            "amo_id",
+            "domain",
+            "reference_family",
+            "unit_code",
+            "ref_year",
+            "ref_sequence",
+            name="uq_qms_audit_ref_scope_per_amo",
+        ),
         Index("ix_qms_audits_domain_status", "domain", "status"),
         Index("ix_qms_audits_domain_kind", "domain", "kind"),
+        Index("ix_qms_audits_amo_domain_created", "amo_id", "domain", "created_at"),
         CheckConstraint(
             "planned_start IS NULL OR planned_end IS NULL OR planned_end >= planned_start",
             name="ck_qms_audit_planned_dates_order",
