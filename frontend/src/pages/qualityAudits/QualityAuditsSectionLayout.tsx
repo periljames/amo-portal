@@ -1,22 +1,18 @@
 import React, { useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import QMSLayout from "../../components/QMS/QMSLayout";
+import { CalendarDays, Files, TableProperties } from "lucide-react";
+import AuditPageShell, { type AuditShellNavItem } from "../../components/qms/AuditPageShell";
+import { ResponsiveSegmentedControl } from "../../components/qms/ResponsiveSegmentedControl";
 import { getContext } from "../../services/auth";
 
 type Props = {
   title: string;
   subtitle: string;
   children: React.ReactNode;
+  toolbar?: React.ReactNode;
 };
 
-type SubpageLink = {
-  id: string;
-  label: string;
-  to: string;
-  prefixes?: string[];
-};
-
-const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children }) => {
+const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children, toolbar }) => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const ctx = getContext();
   const navigate = useNavigate();
@@ -24,59 +20,75 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? "quality";
 
-  const links = useMemo<SubpageLink[]>(
+  const links = useMemo<AuditShellNavItem[]>(
     () => [
       {
         id: "plan-schedule",
         label: "Plan / Schedule",
-        to: `/maintenance/${amoCode}/${department}/qms/audits/schedules/calendar`,
-        prefixes: [
-          `/maintenance/${amoCode}/${department}/qms/audits/schedules/list`,
-          `/maintenance/${amoCode}/${department}/qms/audits/schedules/`,
-        ],
+        shortLabel: "Plan",
+        icon: CalendarDays,
+        href: `/maintenance/${amoCode}/${department}/qms/audits/schedules/calendar`,
+        active:
+          location.pathname.startsWith(`/maintenance/${amoCode}/${department}/qms/audits/schedules`) ||
+          location.pathname === `/maintenance/${amoCode}/${department}/qms/audits/plan`,
       },
       {
         id: "register",
         label: "Register",
-        to: `/maintenance/${amoCode}/${department}/qms/audits/closeout/findings`,
-        prefixes: [`/maintenance/${amoCode}/${department}/qms/audits/closeout/cars`],
+        shortLabel: "Register",
+        icon: TableProperties,
+        href: `/maintenance/${amoCode}/${department}/qms/audits/closeout/findings`,
+        active:
+          location.pathname.startsWith(`/maintenance/${amoCode}/${department}/qms/audits/closeout`) ||
+          location.pathname === `/maintenance/${amoCode}/${department}/qms/audits/register`,
       },
       {
         id: "evidence-library",
         label: "Evidence Library",
-        to: `/maintenance/${amoCode}/${department}/qms/evidence`,
-        prefixes: [`/maintenance/${amoCode}/${department}/qms/evidence/`],
+        shortLabel: "Evidence",
+        icon: Files,
+        href: `/maintenance/${amoCode}/${department}/qms/evidence`,
+        active: location.pathname.startsWith(`/maintenance/${amoCode}/${department}/qms/evidence`),
       },
     ],
-    [amoCode, department]
+    [amoCode, department, location.pathname]
   );
 
-  const actions = (
-    <div className="qms-nav__items" role="tablist" aria-label="Audit planner and viewer pages">
-      {links.map((link) => {
-        const active =
-          location.pathname === link.to ||
-          location.pathname.startsWith(`${link.to}/`) ||
-          (link.prefixes ?? []).some((prefix) => location.pathname.startsWith(prefix));
-        return (
-          <button
-            key={link.id}
-            type="button"
-            className={`qms-nav__link${active ? " qms-nav__link--active" : ""}`}
-            onClick={() => navigate(link.to)}
-            aria-current={active ? "page" : undefined}
-          >
-            <span className="qms-nav__label">{link.label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
+  const activeId = links.find((link) => link.active)?.id ?? links[0].id;
 
   return (
-    <QMSLayout amoCode={amoCode} department={department} title={title} subtitle={subtitle} actions={actions}>
+    <AuditPageShell
+      amoCode={amoCode}
+      department={department}
+      title={title}
+      subtitle={subtitle}
+      breadcrumbs={[
+        { label: "QMS", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms`) },
+        { label: "Audits & Inspections", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits`) },
+        { label: title },
+      ]}
+      toolbar={toolbar}
+      nav={
+        <ResponsiveSegmentedControl
+          label="Audit pages"
+          value={activeId}
+          options={links.map((link) => ({
+            value: link.id,
+            label: link.label,
+            shortLabel: link.shortLabel,
+            icon: link.icon,
+            ariaLabel: link.label,
+          }))}
+          onChange={(value) => {
+            const next = links.find((link) => link.id === value);
+            if (next) navigate(next.href);
+          }}
+          compactIconsOnMobile
+        />
+      }
+    >
       {children}
-    </QMSLayout>
+    </AuditPageShell>
   );
 };
 

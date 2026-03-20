@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import EmptyState from "../../components/shared/EmptyState";
 import DataTableShell from "../../components/shared/DataTableShell";
 import SpreadsheetToolbar from "../../components/shared/SpreadsheetToolbar";
+import { ResponsiveSegmentedControl } from "../../components/qms/ResponsiveSegmentedControl";
+import { useDensityPreference } from "../../hooks/useDensityPreference";
 import { getContext } from "../../services/auth";
 import {
   qmsCreateAuditSchedule,
@@ -14,6 +16,7 @@ import {
   type QMSAuditScheduleOut,
 } from "../../services/qms";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
+import { CalendarDays, LayoutList, TableProperties } from "lucide-react";
 
 type PlannerView = "calendar" | "list" | "content";
 type CalendarSpan = "month" | "week" | "day";
@@ -62,7 +65,7 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
   const [view, setView] = useState<PlannerView>(defaultView);
   const [calendarSpan, setCalendarSpan] = useState<CalendarSpan>("month");
   const [calendarRenderMode, setCalendarRenderMode] = useState<CalendarRenderMode>("cards");
-  const [density, setDensity] = useState<"compact" | "comfortable">("compact");
+  const { density, setDensity } = useDensityPreference("audit-plan-schedule", "compact");
   const [wrapText, setWrapText] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
   const [showOwnerColumn, setShowOwnerColumn] = useState(true);
@@ -200,31 +203,19 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
       title="Audit Plan / Schedule"
       subtitle="Month/week/day planning with list, table, and calendar views."
     >
-      <div className="qms-header__actions">
-        <div
-          className="qms-segmented"
-          role="tablist"
-          aria-label="Planner view mode"
-          style={{ "--segment-count": 3, "--segment-active-index": view === "calendar" ? 0 : view === "list" ? 1 : 2 } as React.CSSProperties}
-        >
-          {([
-            ["calendar", "Calendar view"],
-            ["list", "List view"],
-            ["content", "Table view"],
-          ] as const).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={view === key}
-              className={view === key ? "is-active" : ""}
-              onClick={() => setView(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits`)}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <ResponsiveSegmentedControl
+          label="Planner view mode"
+          value={view}
+          onChange={(next) => setView(next as PlannerView)}
+          compactIconsOnMobile
+          options={[
+            { value: "calendar", label: "Calendar", icon: CalendarDays },
+            { value: "list", label: "List", icon: LayoutList },
+            { value: "content", label: "Table", icon: TableProperties },
+          ]}
+        />
+        <button type="button" className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 transition hover:border-slate-700" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits`)}>
           Back to Audits
         </button>
       </div>
