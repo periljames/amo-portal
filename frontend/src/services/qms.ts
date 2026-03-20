@@ -144,6 +144,16 @@ export interface QMSFindingOut {
   created_at: string;
 }
 
+export interface QMSAuditRegisterRowOut {
+  audit: QMSAuditOut;
+  finding: QMSFindingOut;
+  linked_cars: CAROut[];
+}
+
+export interface QMSAuditRegisterResponse {
+  rows: QMSAuditRegisterRowOut[];
+}
+
 export interface CAROut {
   id: string;
   program: CARProgram;
@@ -619,6 +629,23 @@ export async function qmsListFindings(auditId: string): Promise<QMSFindingOut[]>
   return fetchJson<QMSFindingOut[]>(`/quality/audits/${auditId}/findings`);
 }
 
+export async function qmsListFindingsBulk(params?: {
+  domain?: string;
+  audit_ids?: string[];
+}): Promise<QMSFindingOut[]> {
+  const qs = new URLSearchParams();
+  if (params?.domain) qs.set("domain", params.domain);
+  (params?.audit_ids ?? []).forEach((auditId) => qs.append("audit_ids", auditId));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson<QMSFindingOut[]>(`/quality/audits/findings${suffix}`);
+}
+
+export async function qmsGetAuditRegister(params?: {
+  domain?: string;
+}): Promise<QMSAuditRegisterResponse> {
+  return fetchJson<QMSAuditRegisterResponse>(`/quality/audits/register${toQuery(params ?? {})}`);
+}
+
 export async function qmsVerifyFinding(
   findingId: string,
   payload: { objective_evidence?: string | null }
@@ -822,6 +849,15 @@ export async function qmsUploadCarInviteAttachment(
 
 export async function qmsListCarAttachments(carId: string): Promise<CARAttachmentOut[]> {
   return fetchJson<CARAttachmentOut[]>(`/quality/cars/${encodeURIComponent(carId)}/attachments`);
+}
+
+export async function qmsListCarAttachmentsBulk(params?: {
+  car_ids?: string[];
+}): Promise<CARAttachmentOut[]> {
+  const qs = new URLSearchParams();
+  (params?.car_ids ?? []).forEach((carId) => qs.append("car_ids", carId));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson<CARAttachmentOut[]>(`/quality/cars/attachments/bulk${suffix}`);
 }
 
 export async function qmsUploadCarAttachment(carId: string, file: File): Promise<CARAttachmentOut> {

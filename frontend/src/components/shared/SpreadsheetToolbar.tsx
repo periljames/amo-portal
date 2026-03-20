@@ -11,8 +11,8 @@ type ColumnToggle = {
 };
 
 type Props = {
-  density: Density;
-  onDensityChange: (density: Density) => void;
+  density: ViewDensity;
+  onDensityChange: (density: ViewDensity) => void;
   wrapText: boolean;
   onWrapTextChange: (next: boolean) => void;
   showFilters: boolean;
@@ -20,6 +20,9 @@ type Props = {
   columnToggles?: ColumnToggle[];
   actions?: React.ReactNode;
 };
+
+const toolbarButtonClass =
+  "inline-flex h-9 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
 
 const SpreadsheetToolbar: React.FC<Props> = ({
   density,
