@@ -292,7 +292,7 @@ const QualityCarsPage: React.FC = () => {
     }
   }, [hasInviteLink]);
 
-  const handleSubmit = (ev: React.FormEvent) => {
+  const handleCreateFormSubmit = (ev: React.FormEvent) => {
     ev.preventDefault();
     if (!form.title.trim() || !form.summary.trim() || !form.finding_id.trim()) return;
     setPreviewOpen(true);
@@ -674,27 +674,137 @@ const QualityCarsPage: React.FC = () => {
           </div>
         </div>
 
-        {inviteToken ? <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">Invitation token detected. Log or update the assigned CAR linked to your email invite. The Quality team will be notified automatically.</div> : null}
-        {error ? <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div> : null}
-        {assigneesState === "error" && assigneesError ? <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{assigneesError}</div> : null}
+          <form onSubmit={handleCreateFormSubmit} className="form-grid qms-car-form">
+            <label className="form-control">
+              <span>Programme</span>
+              <select
+                value={form.program}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, program: e.target.value as CARProgram }))
+                }
+              >
+                {PROGRAM_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 xl:grid-cols-[auto_minmax(0,1fr)]">
-          <aside className={["relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 transition-all", sidebarCollapsed ? "w-20" : "w-full xl:w-[280px]"] .join(" ")}>
-            <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-              {!sidebarCollapsed ? <div><h2 className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-400">Filters</h2><p className="mt-1 text-xs text-slate-500">Programme signals & workflow counts.</p></div> : <ShieldCheck className="h-5 w-5 text-cyan-300" />}
-              <button type="button" className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:border-slate-600 hover:text-white" onClick={() => setSidebarCollapsed((prev) => !prev)}>
-                {sidebarCollapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
-              </button>
-            </div>
+            <label className="form-control">
+              <span>Priority</span>
+              <select
+                value={form.priority}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, priority: e.target.value as CARPriority }))
+                }
+              >
+                <option value="LOW">Low</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option>
+                <option value="CRITICAL">Critical</option>
+              </select>
+            </label>
 
-            <div className="space-y-4 p-4">
-              {!sidebarCollapsed && (
-                <>
-                  <div className="grid grid-cols-2 gap-2">
-                    {PROGRAM_OPTIONS.map((opt) => (
-                      <button key={opt.value} type="button" onClick={() => setProgramFilter(opt.value)} className={["rounded-xl border px-3 py-2 text-left text-sm", programFilter === opt.value ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-100" : "border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-600"] .join(" ")}>
-                        <div className="font-medium">{opt.label}</div>
-                        <div className="text-xs text-slate-500">{cars.filter((car) => car.program === opt.value).length} active rows</div>
+            <label className="form-control form-control--full">
+              <span>Title</span>
+              <input
+                type="text"
+                value={form.title}
+                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="Short, action-oriented title"
+                required
+              />
+            </label>
+
+            <label className="form-control form-control--full">
+              <span>Summary</span>
+              <textarea
+                value={form.summary}
+                onChange={(e) => setForm((f) => ({ ...f, summary: e.target.value }))}
+                placeholder="Detail the finding, containment, and requested corrective actions."
+                rows={3}
+                required
+              />
+            </label>
+
+
+            <label className="form-control form-control--full">
+              <span>Finding ID (NC finding)</span>
+              <input
+                type="text"
+                value={form.finding_id}
+                onChange={(e) => setForm((f) => ({ ...f, finding_id: e.target.value }))}
+                placeholder="Paste non-conformity finding ID"
+                required
+              />
+            </label>
+            <label className="form-control">
+              <span>Target closure date</span>
+              <input
+                type="date"
+                value={form.target_closure_date}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, target_closure_date: e.target.value }))
+                }
+              />
+            </label>
+
+            <label className="form-control">
+              <span>Due date</span>
+              <input
+                type="date"
+                value={form.due_date}
+                onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
+              />
+            </label>
+
+            <label className="form-control">
+              <span>Responsible department</span>
+              <select
+                value={form.assigned_department_id}
+                onChange={(e) => {
+                  setForm((f) => ({
+                    ...f,
+                    assigned_department_id: e.target.value,
+                    assigned_to_user_id: "",
+                  }));
+                  setAssigneeSearch("");
+                }}
+              >
+                <option value="">All departments</option>
+                {departmentOptions.map((dept) => (
+                  <option key={dept.id} value={dept.id}>
+                    {dept.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="form-control qms-car-assignee-search">
+              <span>Search assignees</span>
+              <input
+                type="text"
+                value={assigneeSearch}
+                onChange={(e) => setAssigneeSearch(e.target.value)}
+                onKeyDown={handleAssigneeSearchKeyDown}
+                placeholder="Search by name, email, or staff code"
+                autoComplete="off"
+              />
+              {assigneeSearch.trim() && assigneeSuggestions.length > 0 && (
+                <ul className="qms-car-assignee-suggestions" role="listbox" aria-label="Assignee suggestions">
+                  {assigneeSuggestions.map((assignee) => (
+                    <li key={assignee.id}>
+                      <button
+                        type="button"
+                        className="qms-car-assignee-suggestion"
+                        onClick={() => selectAssignee(assignee.id)}
+                      >
+                        <strong>{assignee.full_name}</strong>
+                        <span>
+                          {assignee.email || assignee.staff_code || "No contact info"}
+                          {assignee.department_name ? ` · ${assignee.department_name}` : ""}
+                        </span>
                       </button>
                     ))}
                   </div>
