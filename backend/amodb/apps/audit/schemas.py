@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AuditEventCreate(BaseModel):
@@ -14,10 +14,22 @@ class AuditEventCreate(BaseModel):
     occurred_at: Optional[datetime] = None
     before: Optional[dict] = None
     after: Optional[dict] = None
-    before_json: Optional[dict] = None
-    after_json: Optional[dict] = None
     correlation_id: Optional[str] = None
     metadata: Optional[dict] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def promote_legacy_payload_keys(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        next_data = dict(data)
+        if ("before" not in next_data or next_data.get("before") is None) and "before_json" in next_data:
+            next_data["before"] = next_data.get("before_json")
+        if ("after" not in next_data or next_data.get("after") is None) and "after_json" in next_data:
+            next_data["after"] = next_data.get("after_json")
+        next_data.pop("before_json", None)
+        next_data.pop("after_json", None)
+        return next_data
 
 
 class AuditEventRead(BaseModel):
@@ -36,4 +48,4 @@ class AuditEventRead(BaseModel):
 
     class Config:
         from_attributes = True
-        validate_by_name = True
+        populate_by_name = True
