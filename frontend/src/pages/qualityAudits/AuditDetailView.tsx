@@ -1,6 +1,16 @@
 import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { Search, Info, ClipboardList } from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { getBrandContext } from "../../services/branding";
 import {
   qmsGetDashboard,
@@ -12,7 +22,6 @@ import {
   type QMSAuditOut,
   type QMSFindingOut,
 } from "../../services/qms";
-import { computeChi } from "./chi";
 import { computeReadiness } from "./readiness";
 import FindingDrawer from "./FindingDrawer";
 
@@ -22,12 +31,17 @@ type Props = {
   scheduleId: string;
 };
 
-type Tab = "historical" | "checklists" | "documents";
+type WorkspaceTab = "findings" | "checklists" | "documents";
 
 type FindingRow = {
   finding: QMSFindingOut;
   audit: QMSAuditOut;
   linkedCar: CAROut | null;
+};
+
+type TrendDatum = {
+  label: string;
+  value: number;
 };
 
 const asStatus = (finding: QMSFindingOut): "Open" | "Closed" | "Overdue" => {
@@ -36,28 +50,127 @@ const asStatus = (finding: QMSFindingOut): "Open" | "Closed" | "Overdue" => {
   return "Open";
 };
 
-const sparklinePath = (values: number[]): string => {
-  if (values.length === 0) return "";
-  const width = 180;
-  const height = 48;
-  const max = Math.max(...values, 100);
-  const min = Math.min(...values, 0);
-  const range = Math.max(max - min, 1);
-  return values
-    .map((value, idx) => {
-      const x = (idx / Math.max(values.length - 1, 1)) * width;
-      const y = height - ((value - min) / range) * height;
-      return `${idx === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(" ");
+const riskTone = (openLevel1: number, openLevel2: number) => {
+  if (openLevel1 > 0) return { label: "High", className: "qms-pill qms-pill--danger" };
+  if (openLevel2 > 0) return { label: "Moderate", className: "qms-pill qms-pill--warning" };
+  return { label: "Low", className: "qms-pill qms-pill--success" };
 };
+
+const statusClassName = (status: "Open" | "Closed" | "Overdue") => {
+  if (status === "Closed") return "qms-status-pill qms-status-pill--closed";
+  if (status === "Overdue") return "qms-status-pill qms-status-pill--overdue";
+  return "qms-status-pill qms-status-pill--open";
+};
+
+const TrendCard = React.memo(function TrendCard({ data, hasData }: { data: TrendDatum[]; hasData: boolean }) {
+  return (
+    <article className="qms-card qms-audit-detail__kpi-card">
+      <div className="qms-audit-detail__kpi-title-row">
+        <h4>Compliance Trend</h4>
+        <span className="qms-audit-detail__tooltip" title="Trend Formula: monthly count of findings across this schedule.">
+          <Info size={14} />
+          Trend Formula Info
+        </span>
+      </div>
+      <div className="qms-audit-detail__trend-wrap">
+        <ResponsiveContainer width="100%" height={190}>
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" opacity={0.35} />
+            <XAxis dataKey="label" tick={{ fill: "var(--text-secondary)", fontSize: 11 }} />
+            <YAxis allowDecimals={false} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} />
+            <Tooltip />
+            <Bar
+              dataKey="value"
+              fill={hasData ? "var(--accent-primary)" : "var(--text-muted)"}
+              opacity={hasData ? 0.9 : 0.2}
+              radius={[8, 8, 0, 0]}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+        {!hasData ? (
+          <div className="qms-audit-detail__trend-empty-copy">
+            <strong>No trend data yet. Complete first audit to generate insights.</strong>
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+});
+
+const FindingsTable = React.memo(function FindingsTable({
+  filteredRows,
+  selectedFindingId,
+  openFinding,
+  onAddFirstFinding,
+}: {
+  filteredRows: FindingRow[];
+  selectedFindingId: string | null;
+  openFinding: (findingId: string) => void;
+  onAddFirstFinding: () => void;
+}) {
+  if (filteredRows.length === 0) {
+    return (
+      <div className="qms-audit-detail__empty-findings">
+        <ClipboardList size={30} />
+        <h4>No findings recorded</h4>
+        <p>No findings match your current schedule and filter criteria.</p>
+        <button type="button" className="btn" onClick={onAddFirstFinding}>+ Add First Finding</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="qms-audit-detail__table-wrap">
+      <table className="table table--wrap">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Clause (KCAR / ISO)</th>
+            <th>Severity</th>
+            <th>Status</th>
+            <th>Closed Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredRows.map((row) => {
+            const active = selectedFindingId === row.finding.id;
+            const status = asStatus(row.finding);
+            return (
+              <tr
+                key={row.finding.id}
+                className={active ? "qms-row--active qms-table__row" : "qms-table__row"}
+                onClick={() => openFinding(row.finding.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openFinding(row.finding.id);
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+              >
+                <td>{row.finding.finding_ref ?? row.finding.id.slice(0, 8)}</td>
+                <td><code>{row.finding.requirement_ref ?? "N/A"}</code></td>
+                <td><span className="qms-pill">{row.finding.level}</span></td>
+                <td><span className={statusClassName(status)}>{status}</span></td>
+                <td>{row.finding.closed_at ? new Date(row.finding.closed_at).toLocaleDateString() : "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+});
 
 const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = (searchParams.get("tab") as Tab) || "historical";
+  const rawWorkspaceTab = searchParams.get("tab");
+  const activeTab: WorkspaceTab = rawWorkspaceTab === "checklists" || rawWorkspaceTab === "documents" ? rawWorkspaceTab : "findings";
   const severityFilter = searchParams.get("severity") || "ALL";
   const statusFilter = searchParams.get("status") || "ALL";
+  const findingSearch = searchParams.get("q") || "";
   const selectedFindingId = searchParams.get("findingId");
 
   const schedulesQuery = useQuery({
@@ -130,27 +243,24 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
   }, [carsQuery.data, findingsQueries.data]);
 
   const filteredRows = useMemo(() => {
+    const q = findingSearch.trim().toLowerCase();
     return findingRows
       .filter((row) => severityFilter === "ALL" || row.finding.level === severityFilter)
       .filter((row) => statusFilter === "ALL" || asStatus(row.finding) === statusFilter)
+      .filter((row) => {
+        if (!q) return true;
+        return [row.finding.finding_ref, row.finding.requirement_ref, row.finding.description]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      })
       .sort((a, b) => b.finding.created_at.localeCompare(a.finding.created_at));
-  }, [findingRows, severityFilter, statusFilter]);
+  }, [findingRows, severityFilter, statusFilter, findingSearch]);
 
   const selectedRow = useMemo(
     () => findingRows.find((row) => row.finding.id === selectedFindingId) ?? null,
     [findingRows, selectedFindingId]
-  );
-
-  const chi = useMemo(
-    () =>
-      computeChi(
-        (findingsQueries.data ?? []).map((entry) => ({
-          auditLabel: entry.audit.audit_ref,
-          findings: entry.findings,
-          createdAt: entry.audit.created_at,
-        }))
-      ),
-    [findingsQueries.data]
   );
 
   const upcomingAudit = useMemo(() => {
@@ -160,8 +270,25 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     return planned[0] ?? scheduleAudits[0] ?? null;
   }, [scheduleAudits]);
 
+  const trendData = useMemo<TrendDatum[]>(() => {
+    const grouped = new Map<string, number>();
+    findingRows.forEach((row) => {
+      const key = row.finding.created_at.slice(0, 7);
+      grouped.set(key, (grouped.get(key) ?? 0) + 1);
+    });
+    if (grouped.size === 0) {
+      return ["M1", "M2", "M3", "M4", "M5", "M6"].map((label, idx) => ({ label, value: Math.max(1, 5 - idx) }));
+    }
+    return Array.from(grouped.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-6)
+      .map(([label, value]) => ({ label: label.slice(5), value }));
+  }, [findingRows]);
+
   const readiness = schedule ? computeReadiness(schedule, upcomingAudit) : null;
   const brand = getBrandContext();
+  const dashboard = dashboardQuery.data;
+  const risk = riskTone(dashboard?.findings_open_level_1 ?? 0, dashboard?.findings_open_level_2 ?? 0);
 
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -170,7 +297,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     setSearchParams(next);
   };
 
-  const setTab = (tab: Tab) => {
+  const setTab = (tab: WorkspaceTab) => {
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
     setSearchParams(next);
@@ -188,6 +315,19 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     setSearchParams(next);
   };
 
+  const clearFilters = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("severity");
+    next.delete("status");
+    next.delete("q");
+    setSearchParams(next);
+  };
+
+  const baseQmsPath = `/maintenance/${amoCode}/${department}/qms`;
+  const goToPlan = () => navigate(`${baseQmsPath}/audits/plan`);
+  const goToRegister = () => navigate(`${baseQmsPath}/audits/register`);
+  const goToEvidence = () => navigate(`${baseQmsPath}/evidence`);
+
   if (!schedule && !schedulesQuery.isLoading) {
     return (
       <div className="qms-card">
@@ -202,74 +342,76 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
 
   return (
     <div className="qms-audit-detail">
-      <section className="qms-card">
-        <div className="qms-audit-detail__breadcrumb">Audits &gt; {brand.name || amoCode} &gt; Schedule</div>
-        <div className="qms-header__actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+      <section className="qms-card qms-audit-detail__hero">
+        <div className="qms-audit-detail__breadcrumb">Audits &gt; {brand.name || amoCode} &gt; {schedule?.title || "Schedule"}</div>
+        <div className="qms-audit-detail__hero-grid">
           <div>
-            <h2 className="qms-title" style={{ marginBottom: 0 }}>{schedule?.title || "Loading schedule..."}</h2>
-            <p className="qms-subtitle">Audit War Room: readiness, findings, evidence and closure controls.</p>
+            <h1 className="qms-audit-detail__title">Schedule Detail</h1>
+            <h2 className="qms-audit-detail__audit-name">{schedule?.title || "Loading audit..."}</h2>
           </div>
-          <span className="qms-pill qms-pill--info">Audit Status: {upcomingAudit?.status || "PLANNED"}</span>
+          <div className="qms-audit-detail__hero-actions">
+            <span className="qms-pill qms-pill--info">{upcomingAudit?.status || "PLANNED"}</span>
+            <div
+              className="qms-segmented"
+              role="tablist"
+              aria-label="Audit route tabs"
+              style={{ "--segment-count": 3, "--segment-active-index": 0 } as React.CSSProperties}
+            >
+              <button type="button" className="is-active" onClick={goToPlan}>Plan</button>
+              <button type="button" onClick={goToRegister}>Register</button>
+              <button type="button" onClick={goToEvidence}>Evidence</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="qms-audit-detail__kpi-grid">
+          <article className="qms-card qms-audit-detail__kpi-card">
+            <h4>Preparation Status</h4>
+            <div className="qms-audit-detail__prep-bar">
+              <span style={{ width: `${readiness?.score ?? 0}%` }} />
+            </div>
+            <div className="qms-audit-detail__prep-meta">Steps Complete: {Math.round(((readiness?.score ?? 0) / 100) * 5)} of 5</div>
+            <small>{readiness?.label ?? "Loading"}</small>
+            <button type="button" className="btn qms-audit-detail__prep-cta">Start Preparation Steps</button>
+          </article>
+
+          <article className="qms-card qms-audit-detail__kpi-card">
+            <h4>AMO Dossier</h4>
+            <div className="qms-audit-detail__dossier-list">
+              <div><strong>Registered Name:</strong> {brand.name || amoCode}</div>
+              <div>
+                <strong>Primary Quality Manager:</strong>{" "}
+                {schedule?.lead_auditor_user_id ? schedule.lead_auditor_user_id : <button type="button" className="qms-link">Add Manager +</button>}
+              </div>
+              <div>
+                <strong>Risk Summary:</strong> <span className={risk.className}>{risk.label}</span>
+              </div>
+              <div><strong>Schedule Frequency:</strong> {schedule?.frequency?.replaceAll("_", " ") || "—"}</div>
+            </div>
+          </article>
+
+          <TrendCard data={trendData} hasData={findingRows.length > 0} />
         </div>
       </section>
 
-      <section className="qms-grid qms-audit-detail__intelligence">
-        <article className="qms-card">
-          <h4 style={{ marginTop: 0 }}>Compliance Health Index</h4>
-          {findingsQueries.isLoading ? <div className="qms-skeleton-block" /> : (
-            <>
-              <div className="qms-audit-detail__score">{chi.score === null ? "—" : `${chi.score}%`}</div>
-              <div className="qms-card__subtitle">Weighted score (Level 1: -5, Level 2: -2, Level 3: -0.5)</div>
-              <svg viewBox="0 0 180 48" width="100%" height="48" aria-label="CHI trend">
-                <path d={sparklinePath(chi.trend.map((point) => point.score ?? 100))} fill="none" stroke="#2563eb" strokeWidth="2" />
-              </svg>
-              <small>{chi.hasEnoughData ? chi.interpretation : "Insufficient historical audits for trend confidence."}</small>
-            </>
-          )}
-        </article>
-
-        <article className="qms-card">
-          <h4 style={{ marginTop: 0 }}>AMO dossier</h4>
-          {dashboardQuery.isLoading ? <div className="qms-skeleton-block" /> : (
-            <div className="qms-grid" style={{ gap: 6 }}>
-              <div><strong>Registered Name:</strong> {brand.name || amoCode}</div>
-              <div><strong>Primary Quality Manager:</strong> {schedule?.lead_auditor_user_id || "Unassigned"}</div>
-              <div>
-                <strong>Risk Summary:</strong>{" "}
-                {dashboardQuery.data?.findings_open_level_1
-                  ? "High Risk: Technical Records"
-                  : dashboardQuery.data?.findings_open_level_2
-                  ? "Moderate Risk: Training"
-                  : "Low Risk: Stores"}
-              </div>
-            </div>
-          )}
-        </article>
-
-        <article className="qms-card">
-          <h4 style={{ marginTop: 0 }}>Preparation Tracker</h4>
-          {schedulesQuery.isLoading ? <div className="qms-skeleton-block" /> : (
-            <>
-              <div className="qms-meter__inner" style={{ width: "100%", height: 16, borderRadius: 999, background: "#e2e8f0" }}>
-                <div style={{ width: `${readiness?.score ?? 0}%`, height: "100%", background: "#1d4ed8", borderRadius: 999 }} />
-              </div>
-              <div style={{ marginTop: 8, fontWeight: 700 }}>{readiness?.score ?? 0}% · {readiness?.label ?? "Loading"}</div>
-              <small>Readiness combines checklist/report staging, scope quality and auditor assignment.</small>
-            </>
-          )}
-        </article>
-      </section>
-
       <section className="qms-card">
-        <div className="qms-segmented" role="tablist" aria-label="Audit detail tabs" style={{ "--segment-count": 3, "--segment-active-index": activeTab === "historical" ? 0 : activeTab === "checklists" ? 1 : 2 } as React.CSSProperties}>
-          <button type="button" className={activeTab === "historical" ? "is-active" : ""} onClick={() => setTab("historical")}>Historical Findings</button>
-          <button type="button" className={activeTab === "checklists" ? "is-active" : ""} onClick={() => setTab("checklists")}>Live Checklists</button>
+        <div className="qms-audit-detail__workspace-tabs" role="tablist" aria-label="Audit detail workspace tabs">
+          <button type="button" className={activeTab === "findings" ? "is-active" : ""} onClick={() => setTab("findings")}>Findings</button>
+          <button type="button" className={activeTab === "checklists" ? "is-active" : ""} onClick={() => setTab("checklists")}>Checklists</button>
           <button type="button" className={activeTab === "documents" ? "is-active" : ""} onClick={() => setTab("documents")}>Document Library</button>
         </div>
 
-        {activeTab === "historical" ? (
+        {activeTab === "findings" ? (
           <>
-            <div className="qms-header__actions" style={{ marginTop: 12 }}>
+            <div className="qms-audit-detail__control-bar" style={{ marginTop: 12 }}>
+              <label className="qms-audit-detail__search">
+                <Search size={14} />
+                <input
+                  value={findingSearch}
+                  onChange={(e) => setFilter("q", e.target.value)}
+                  placeholder="Search findings, clause or description"
+                />
+              </label>
               <label className="qms-pill">Severity
                 <select value={severityFilter} onChange={(e) => setFilter("severity", e.target.value)}>
                   <option value="ALL">All</option>
@@ -286,53 +428,30 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
                   <option value="Overdue">Overdue</option>
                 </select>
               </label>
+              <button type="button" className="secondary-chip-btn" onClick={clearFilters}>Clear filters</button>
             </div>
+            <p className="qms-audit-detail__results-meta">{filteredRows.length} finding(s) shown</p>
 
             {findingsQueries.isLoading ? <div className="qms-skeleton-row"><div /><div /><div /><div /></div> : null}
-            {findingsQueries.isError ? <p className="text-danger">Failed to load historical findings.</p> : null}
-            {!findingsQueries.isLoading && filteredRows.length === 0 ? <p>No findings match current filters.</p> : null}
-
-            <table className="table" style={{ marginTop: 12 }}>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Clause (KCAR / ISO)</th>
-                  <th>Severity</th>
-                  <th>Status</th>
-                  <th>Closed Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((row) => {
-                  const active = selectedFindingId === row.finding.id;
-                  return (
-                    <tr
-                      key={row.finding.id}
-                      className={active ? "qms-row--active" : ""}
-                      onClick={() => openFinding(row.finding.id)}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <td>{row.finding.finding_ref ?? row.finding.id.slice(0, 8)}</td>
-                      <td><code>{row.finding.requirement_ref ?? "N/A"}</code></td>
-                      <td><span className="qms-pill">{row.finding.level}</span></td>
-                      <td>{asStatus(row.finding)}</td>
-                      <td>{row.finding.closed_at ? new Date(row.finding.closed_at).toLocaleDateString() : "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            {findingsQueries.isError ? <p className="text-danger">Failed to load findings.</p> : null}
+            {!findingsQueries.isLoading ? (
+              <FindingsTable
+                filteredRows={filteredRows}
+                selectedFindingId={selectedFindingId}
+                openFinding={openFinding}
+                onAddFirstFinding={() => navigate(`${baseQmsPath}/audits/closeout/findings`)}
+              />
+            ) : null}
           </>
         ) : activeTab === "checklists" ? (
           <div style={{ marginTop: 12 }}>
-            <p>Checklist collaboration is linked from Audit Run Hub. Uploaded checklist status:</p>
             <p><strong>{upcomingAudit?.checklist_file_ref ? "Checklist attached" : "No checklist attached yet"}</strong></p>
-            {upcomingAudit ? <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/${upcomingAudit.id}`)}>Open Run Hub</button> : null}
+            {upcomingAudit ? <button type="button" className="secondary-chip-btn" onClick={() => navigate(`${baseQmsPath}/audits/${upcomingAudit.id}`)}>Open Run Hub</button> : null}
           </div>
         ) : (
           <div style={{ marginTop: 12 }}>
             <p>Review all reports/checklists and CAR attachments in the evidence library.</p>
-            <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/evidence`)}>
+            <button type="button" className="secondary-chip-btn" onClick={() => navigate(`${baseQmsPath}/evidence`)}>
               Open Document Library
             </button>
           </div>
