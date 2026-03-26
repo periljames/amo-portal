@@ -61,36 +61,36 @@ def log_event(
     - For non-critical actions, log warning and continue.
     """
     try:
-        event = create_audit_event(
-            db,
-            amo_id=amo_id,
-            data=schemas.AuditEventCreate(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                action=action,
-                actor_user_id=actor_user_id,
-                before=before,
-                after=after,
-                correlation_id=correlation_id,
-                metadata=metadata,
-            ),
-        )
-        metadata_payload = {"amoId": amo_id, **(event.metadata_json or {})}
-        event_type = f"{event.entity_type}.{event.action}".lower()
-        if metadata_payload.get("module") == "training":
-            event_type = f"training.{event.entity_type}.{event.action}".lower()
-        envelope = EventEnvelope(
-            id=str(event.id),
-            type=event_type,
-            entityType=event.entity_type,
-            entityId=event.entity_id,
-            action=event.action,
-            timestamp=event.occurred_at.isoformat() if event.occurred_at else event.created_at.isoformat(),
-            actor={"userId": actor_user_id} if actor_user_id else None,
-            metadata=metadata_payload,
-        )
+        with db.begin_nested():
+            event = create_audit_event(
+                db,
+                amo_id=amo_id,
+                data=schemas.AuditEventCreate(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    action=action,
+                    actor_user_id=actor_user_id,
+                    before=before,
+                    after=after,
+                    correlation_id=correlation_id,
+                    metadata=metadata,
+                ),
+            )
+            metadata_payload = {"amoId": amo_id, **(event.metadata_json or {})}
+            event_type = f"{event.entity_type}.{event.action}".lower()
+            if metadata_payload.get("module") == "training":
+                event_type = f"training.{event.entity_type}.{event.action}".lower()
+            envelope = EventEnvelope(
+                id=str(event.id),
+                type=event_type,
+                entityType=event.entity_type,
+                entityId=event.entity_id,
+                action=event.action,
+                timestamp=event.occurred_at.isoformat() if event.occurred_at else event.created_at.isoformat(),
+                actor={"userId": actor_user_id} if actor_user_id else None,
+                metadata=metadata_payload,
+            )
     except Exception:
-        db.rollback()
         logger.warning(
             "Failed to log audit event",
             extra={
@@ -118,6 +118,8 @@ def log_event(
             },
             exc_info=True,
         )
+        if critical:
+            raise
     return event
 
 
