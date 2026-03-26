@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Copy, Download, Eye, FileText, Files, Filter, Link2 } from "lucide-react";
+import { Download, Eye, FileText, Filter, Link2 } from "lucide-react";
 import SpreadsheetToolbar from "../components/shared/SpreadsheetToolbar";
 import { useDensityPreference } from "../hooks/useDensityPreference";
 import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
@@ -160,9 +160,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   }, [evidenceRows, headerFilters, quickFilter]);
 
   const loading = cars.isLoading || audits.isLoading || findings.isLoading || attachments.isLoading;
-  const cellPadding = density === "compact" ? "px-3 py-2 text-xs" : "px-4 py-3 text-sm";
-  const controlHeight = density === "compact" ? "h-8 text-xs" : "h-10 text-sm";
-  const textBehavior = wrapText ? "whitespace-normal break-words" : "truncate whitespace-nowrap";
+  const cellTextClass = wrapText ? "qms-cell-text qms-cell-text--wrap" : "qms-cell-text qms-cell-text--truncate";
 
   const openViewer = (file: EvidenceRow) => {
     navigate(`/maintenance/${amoCode}/${department}/qms/evidence/${file.id}?name=${encodeURIComponent(file.filename)}&mime=${encodeURIComponent(file.mime)}&url=${encodeURIComponent(file.reviewUrl)}&source=${encodeURIComponent(file.source)}`);
@@ -176,17 +174,16 @@ const QualityEvidenceLibraryPage: React.FC = () => {
 
   return (
     <QualityAuditsSectionLayout title="Evidence Library" subtitle="Evidence browser with audit-first hierarchy, compact scanning, and reviewer actions.">
-      <div className="space-y-3">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-          <div className="flex min-w-0 items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/70 px-3 py-2">
-            <Filter className="h-4 w-4 text-slate-500" />
+      <div className="audit-workspace">
+        <div className="audit-workspace__toolbar-row">
+          <label className="audit-search" aria-label="Filter evidence rows">
+            <Filter size={15} />
             <input
               value={quickFilter}
               onChange={(event) => setQuickFilter(event.target.value)}
               placeholder="Filter by reference, evidence title, audit, file name, or type"
-              className="w-full bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500"
             />
-          </div>
+          </label>
           <SpreadsheetToolbar
             density={density}
             onDensityChange={setDensity}
@@ -197,112 +194,69 @@ const QualityEvidenceLibraryPage: React.FC = () => {
           />
         </div>
 
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/70 shadow-[0_20px_60px_rgba(2,6,23,0.18)]">
-          <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+        <div className="audit-panel">
+          <div className="audit-panel__header">
             <div>
-              <h2 className="text-base font-semibold text-slate-50">Evidence browser</h2>
-              <p className="text-sm text-slate-400">Human-friendly audit references first, raw filenames demoted to secondary metadata.</p>
+              <h2 className="audit-panel__title">Evidence browser</h2>
+              <p className="audit-panel__subtitle">Human-friendly audit references first, raw filenames demoted to secondary metadata.</p>
             </div>
-            <div className="rounded-full border border-slate-800 bg-slate-950 px-3 py-1 text-xs text-slate-400">{filteredRows.length} files</div>
+            <span className="qms-pill">{filteredRows.length} files</span>
           </div>
-
-          <div className="hidden overflow-auto lg:block">
-            <table className="min-w-full table-fixed text-left text-slate-200">
-              <thead className="sticky top-0 z-10 bg-slate-950/95 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+          <div className="table-wrapper">
+            <table className={`table ${density === "compact" ? "table-row--compact" : "table-row--comfortable"} ${wrapText ? "table--wrap" : ""}`}>
+              <thead>
                 <tr>
-                  <th className={`${cellPadding} w-[10rem]`}>Ref</th>
-                  <th className={cellPadding}>Title / Evidence</th>
-                  <th className={`${cellPadding} w-[14rem]`}>Audit</th>
-                  <th className={`${cellPadding} w-[9rem]`}>Type</th>
-                  <th className={`${cellPadding} w-[8rem]`}>Size</th>
-                  <th className={`${cellPadding} w-[11rem]`}>Updated</th>
-                  <th className={`${cellPadding} w-[17rem]`}>Actions</th>
+                  <th>Ref</th>
+                  <th>Title / Evidence</th>
+                  <th>Audit</th>
+                  <th>Type</th>
+                  <th>Size</th>
+                  <th>Updated</th>
+                  <th>Actions</th>
                 </tr>
                 {showFilters ? (
-                  <tr className="border-t border-slate-800/80 bg-slate-950/90">
-                    {[
-                      ["ref", "Reference"],
-                      [null, null],
-                      ["audit", "Audit / source"],
-                      ["type", "Type"],
-                    ].map(([key, placeholder], index) => (
-                      <th key={`${key}-${index}`} className={cellPadding}>
-                        {key ? (
-                          <input
-                            value={headerFilters[key as keyof typeof headerFilters]}
-                            onChange={(event) => setHeaderFilters((current) => ({ ...current, [key]: event.target.value }))}
-                            placeholder={placeholder || ""}
-                            className={`w-full rounded-xl border border-slate-800 bg-slate-900 px-3 text-slate-100 placeholder:text-slate-500 ${controlHeight}`}
-                          />
-                        ) : null}
-                      </th>
-                    ))}
-                    <th className={cellPadding} />
-                    <th className={cellPadding} />
-                    <th className={cellPadding} />
+                  <tr>
+                    <th><input className="input" placeholder="Reference" value={headerFilters.ref} onChange={(event) => setHeaderFilters((current) => ({ ...current, ref: event.target.value }))} /></th>
+                    <th />
+                    <th><input className="input" placeholder="Audit / source" value={headerFilters.audit} onChange={(event) => setHeaderFilters((current) => ({ ...current, audit: event.target.value }))} /></th>
+                    <th><input className="input" placeholder="Type" value={headerFilters.type} onChange={(event) => setHeaderFilters((current) => ({ ...current, type: event.target.value }))} /></th>
+                    <th />
+                    <th />
+                    <th />
                   </tr>
                 ) : null}
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-500">Loading evidence library…</td></tr>
+                  <tr><td colSpan={7}>Loading evidence library…</td></tr>
                 ) : filteredRows.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-500">No evidence uploaded yet.</td></tr>
+                  <tr><td colSpan={7}>No evidence uploaded yet.</td></tr>
                 ) : filteredRows.map((file) => (
-                  <tr key={file.id} className="border-t border-slate-800/80 align-top hover:bg-slate-800/30">
-                    <td className={`${cellPadding} text-cyan-300`}>{file.ref}</td>
-                    <td className={cellPadding}>
-                      <div className={`font-medium text-slate-100 ${textBehavior}`}>{file.title}</div>
-                      <div className={`mt-1 text-slate-500 ${textBehavior}`}>{file.filename}</div>
+                  <tr key={file.id}>
+                    <td>{file.ref}</td>
+                    <td>
+                      <strong className={cellTextClass}>{file.title}</strong>
+                      <div className={`text-muted ${cellTextClass}`}>{file.filename}</div>
                     </td>
-                    <td className={cellPadding}>
-                      <div className={`font-medium text-slate-200 ${textBehavior}`}>{file.auditTitle}</div>
-                      <div className={`mt-1 text-slate-500 ${textBehavior}`}>{file.source}</div>
+                    <td>
+                      <div className={cellTextClass}>{file.auditTitle}</div>
+                      <div className={`text-muted ${cellTextClass}`}>{file.source}</div>
                     </td>
-                    <td className={cellPadding}><span className="inline-flex rounded-full border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-200">{file.type}</span></td>
-                    <td className={cellPadding}>{fmtBytes(file.sizeBytes)}</td>
-                    <td className={cellPadding}>{file.updatedLabel}</td>
-                    <td className={cellPadding}>
-                      <div className="flex flex-wrap gap-2">
-                        <button type="button" aria-label={`Open viewer for ${file.title}`} onClick={() => openViewer(file)} className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-slate-700"><Eye className="h-3.5 w-3.5" /> Open Viewer</button>
-                        <a aria-label={`Download ${file.title}`} href={file.reviewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-slate-700"><Download className="h-3.5 w-3.5" /> Download</a>
-                        <button type="button" aria-label={`Copy link for ${file.title}`} onClick={() => void copyLink(file)} className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-slate-700"><Link2 className="h-3.5 w-3.5" /> Copy Link</button>
-                        {file.auditId ? <button type="button" aria-label={`View audit for ${file.title}`} onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/${file.auditId}`)} className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-slate-700"><FileText className="h-3.5 w-3.5" /> View Audit</button> : null}
+                    <td><span className="qms-pill">{file.type}</span></td>
+                    <td>{fmtBytes(file.sizeBytes)}</td>
+                    <td>{file.updatedLabel}</td>
+                    <td>
+                      <div className="audit-chip-list">
+                        <button type="button" aria-label={`Open viewer for ${file.title}`} onClick={() => openViewer(file)} className="secondary-chip-btn"><Eye size={14} /> Open</button>
+                        <a aria-label={`Download ${file.title}`} href={file.reviewUrl} target="_blank" rel="noreferrer" className="secondary-chip-btn"><Download size={14} /> Download</a>
+                        <button type="button" aria-label={`Copy link for ${file.title}`} onClick={() => void copyLink(file)} className="secondary-chip-btn"><Link2 size={14} /> Copy</button>
+                        {file.auditId ? <button type="button" aria-label={`View audit for ${file.title}`} onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/${file.auditId}`)} className="secondary-chip-btn"><FileText size={14} /> Audit</button> : null}
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
-
-          <div className="grid gap-3 p-3 lg:hidden">
-            {loading ? <div className="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-8 text-center text-sm text-slate-500">Loading evidence library…</div> : null}
-            {!loading && filteredRows.length === 0 ? <div className="rounded-2xl border border-slate-800 bg-slate-950 px-4 py-8 text-center text-sm text-slate-500">No evidence uploaded yet.</div> : null}
-            {!loading && filteredRows.map((file) => (
-              <article key={file.id} className="rounded-2xl border border-slate-800 bg-slate-950 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-cyan-300">{file.ref}</p>
-                    <h3 className="mt-1 text-sm font-semibold text-slate-100">{file.title}</h3>
-                  </div>
-                  <span className="inline-flex rounded-full border border-slate-800 bg-slate-900 px-2.5 py-1 text-xs text-slate-200">{file.type}</span>
-                </div>
-                <p className="mt-3 text-sm text-slate-300">{file.auditTitle}</p>
-                <div className="mt-2 text-xs text-slate-500">{file.filename}</div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-400">
-                  <span>{fmtBytes(file.sizeBytes)}</span>
-                  <span>•</span>
-                  <span>{file.updatedLabel}</span>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => openViewer(file)} className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-3 py-2 text-xs font-medium text-slate-950"><Eye className="h-3.5 w-3.5" /> Open</button>
-                  <a href={file.reviewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-slate-800 px-3 py-2 text-xs text-slate-200"><Download className="h-3.5 w-3.5" /> Download</a>
-                  {file.auditId ? <button type="button" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/${file.auditId}`)} className="inline-flex items-center gap-2 rounded-xl border border-slate-800 px-3 py-2 text-xs text-slate-200"><Files className="h-3.5 w-3.5" /> Audit</button> : null}
-                  <button type="button" onClick={() => void copyLink(file)} className="inline-flex items-center gap-2 rounded-xl border border-slate-800 px-3 py-2 text-xs text-slate-200"><Copy className="h-3.5 w-3.5" /> Link</button>
-                </div>
-              </article>
-            ))}
           </div>
         </div>
       </div>

@@ -241,7 +241,7 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
       </div>
 
       <DataTableShell title="Create audit schedule">
-        <div className="qms-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+        <div className="qms-grid qms-grid--schedule-form">
           <label className="qms-field">
             Title
             <input className="input" value={newSchedule.title} onChange={(e) => setNewSchedule((prev) => ({ ...prev, title: e.target.value }))} placeholder="Ramp safety audit" />
@@ -273,7 +273,7 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
             <input className="input" value={newSchedule.lead_auditor_user_id} onChange={(e) => setNewSchedule((prev) => ({ ...prev, lead_auditor_user_id: e.target.value }))} placeholder="user_123" />
           </label>
         </div>
-        <div className="qms-header__actions" style={{ marginTop: 12 }}>
+        <div className="qms-header__actions qms-header__actions--spaced">
           <button type="button" className="btn btn-primary" onClick={() => createSchedule.mutate()} disabled={createSchedule.isPending}>
             {createSchedule.isPending ? "Creating…" : "Create schedule"}
           </button>
@@ -295,7 +295,7 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
 
       {view === "calendar" && (
         <>
-          <div className="qms-header__actions" style={{ marginBottom: 10 }}>
+          <div className="qms-header__actions qms-header__actions--tight">
             <label className="qms-pill">
               Calendar span
               <select value={calendarSpan} onChange={(e) => setCalendarSpan(e.target.value as CalendarSpan)}>
@@ -441,10 +441,10 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
               </tr>
               {showFilters ? (
                 <tr>
-                  <th><input className="input" style={{ height: 30 }} placeholder="Filter title" value={listFilter.title} onChange={(e) => setListFilter((prev) => ({ ...prev, title: e.target.value }))} /></th>
-                  <th><input className="input" style={{ height: 30 }} placeholder="Frequency" value={listFilter.frequency} onChange={(e) => setListFilter((prev) => ({ ...prev, frequency: e.target.value }))} /></th>
+                  <th><input className="input qms-input--filter" placeholder="Filter title" value={listFilter.title} onChange={(e) => setListFilter((prev) => ({ ...prev, title: e.target.value }))} /></th>
+                  <th><input className="input qms-input--filter" placeholder="Frequency" value={listFilter.frequency} onChange={(e) => setListFilter((prev) => ({ ...prev, frequency: e.target.value }))} /></th>
                   <th></th>
-                  {showOwnerColumn ? <th><input className="input" style={{ height: 30 }} placeholder="Owner" value={listFilter.owner} onChange={(e) => setListFilter((prev) => ({ ...prev, owner: e.target.value }))} /></th> : null}
+                  {showOwnerColumn ? <th><input className="input qms-input--filter" placeholder="Owner" value={listFilter.owner} onChange={(e) => setListFilter((prev) => ({ ...prev, owner: e.target.value }))} /></th> : null}
                 </tr>
               ) : null}
             </thead>
@@ -463,7 +463,7 @@ const QualityAuditPlanSchedulePage: React.FC<Props> = ({ defaultView }) => {
       )}
 
       {view === "content" && (
-        <DataTableShell title="Table view" actions={<input className="input" style={{ height: 34, maxWidth: 280 }} placeholder="Quick filter" value={contentFilter} onChange={(e) => setContentFilter(e.target.value)} />}>
+        <DataTableShell title="Table view" actions={<input className="input qms-input--control" placeholder="Quick filter" value={contentFilter} onChange={(e) => setContentFilter(e.target.value)} />}>
           <table className={`table ${density === "compact" ? "table-row--compact" : "table-row--comfortable"} ${wrapText ? "table--wrap" : ""}`}>
             <thead>
               <tr>
