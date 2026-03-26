@@ -32,50 +32,50 @@ type Props = {
 
 const AuditPageShell: React.FC<Props> = ({ amoCode, department, title, subtitle, breadcrumbs, nav, toolbar, children }) => {
   const customHeader = (
-    <div className="space-y-3 rounded-3xl border border-slate-800 bg-slate-900/70 p-4 shadow-[0_20px_60px_rgba(2,6,23,0.25)] backdrop-blur">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 space-y-2">
-          <nav className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-slate-400" aria-label="Breadcrumb">
+    <div className="audit-shell-header">
+      <div className="audit-shell-header__top-row">
+        <div className="audit-shell-header__title-block">
+          <nav className="audit-shell-header__breadcrumbs" aria-label="Breadcrumb">
             {breadcrumbs.map((item, index) => (
               <React.Fragment key={`${item.label}-${index}`}>
-                {index > 0 ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-600" /> : null}
+                {index > 0 ? <ChevronRight className="audit-shell-header__crumb-separator" /> : null}
                 {item.href || item.onClick ? (
                   <button
                     type="button"
                     onClick={item.onClick}
-                    className="truncate rounded-md px-1 py-0.5 transition hover:text-cyan-300"
+                    className="audit-shell-header__crumb-button"
                   >
                     {item.label}
                   </button>
                 ) : (
-                  <span className="truncate text-slate-200">{item.label}</span>
+                  <span className="audit-shell-header__crumb-current">{item.label}</span>
                 )}
               </React.Fragment>
             ))}
           </nav>
-          <div className="min-w-0">
-            <h1 className="truncate text-2xl font-semibold tracking-tight text-slate-50">{title}</h1>
-            <p className="mt-1 text-sm text-slate-400">{subtitle}</p>
+          <div>
+            <h1 className="audit-shell-header__title">{title}</h1>
+            <p className="audit-shell-header__subtitle">{subtitle}</p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 lg:max-w-[52%] lg:justify-end">
+        <div className="audit-shell-header__actions">
           {toolbar}
           <button
             type="button"
             aria-label="More audit page actions"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-950 text-slate-300 transition hover:border-slate-700 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            className="secondary-chip-btn audit-shell-header__overflow"
           >
-            <Ellipsis className="h-4 w-4" />
+            <Ellipsis size={15} />
           </button>
         </div>
       </div>
-      <div className="border-t border-slate-800 pt-3">{nav}</div>
+      <div className="audit-shell-header__nav">{nav}</div>
     </div>
   );
 
   return (
     <QMSLayout amoCode={amoCode} department={department} title={title} subtitle={subtitle} hideBackButton customHeader={customHeader}>
-      <div className={clsx("space-y-4")}>{children}</div>
+      <div className={clsx("audit-shell-content")}>{children}</div>
     </QMSLayout>
   );
 };

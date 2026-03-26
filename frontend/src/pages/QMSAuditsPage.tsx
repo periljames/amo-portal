@@ -178,7 +178,7 @@ const QMSAuditsPage: React.FC = () => {
       <DataTableShell
         title="Recent audits (last 10)"
         actions={
-          <div className="qms-header__actions" style={{ flexDirection: "column", alignItems: "stretch" }}>
+          <div className="qms-toolbar-stack">
             <div className="qms-header__actions">
               <label className="qms-pill">Window
                 <select value={timeWindow} onChange={(e) => setTimeWindow(e.target.value as TimeWindow)}>
@@ -227,12 +227,12 @@ const QMSAuditsPage: React.FC = () => {
                 {showOwnerColumn ? <th>Lead auditor</th> : null}
               </tr>
               {showFilters ? <tr>
-                <th><input className="input" style={{ height: 30 }} placeholder="Filter title" value={tableFilter.title} onChange={(e) => setTableFilter((p) => ({ ...p, title: e.target.value }))} /></th>
-                <th><input className="input" style={{ height: 30 }} placeholder="Filter kind" value={tableFilter.kind} onChange={(e) => setTableFilter((p) => ({ ...p, kind: e.target.value }))} /></th>
+                <th><input className="input qms-input--filter" placeholder="Filter title" value={tableFilter.title} onChange={(e) => setTableFilter((p) => ({ ...p, title: e.target.value }))} /></th>
+                <th><input className="input qms-input--filter" placeholder="Filter kind" value={tableFilter.kind} onChange={(e) => setTableFilter((p) => ({ ...p, kind: e.target.value }))} /></th>
                 <th></th>
                 <th></th>
                 <th></th>
-                {showOwnerColumn ? <th><input className="input" style={{ height: 30 }} placeholder="Filter owner" value={tableFilter.owner} onChange={(e) => setTableFilter((p) => ({ ...p, owner: e.target.value }))} /></th> : null}
+                {showOwnerColumn ? <th><input className="input qms-input--filter" placeholder="Filter owner" value={tableFilter.owner} onChange={(e) => setTableFilter((p) => ({ ...p, owner: e.target.value }))} /></th> : null}
               </tr> : null}
             </thead>
             <tbody>
