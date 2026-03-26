@@ -160,6 +160,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   }, [evidenceRows, headerFilters, quickFilter]);
 
   const loading = cars.isLoading || audits.isLoading || findings.isLoading || attachments.isLoading;
+  const cellTextClass = wrapText ? "qms-cell-text qms-cell-text--wrap" : "qms-cell-text qms-cell-text--truncate";
 
   const openViewer = (file: EvidenceRow) => {
     navigate(`/maintenance/${amoCode}/${department}/qms/evidence/${file.id}?name=${encodeURIComponent(file.filename)}&mime=${encodeURIComponent(file.mime)}&url=${encodeURIComponent(file.reviewUrl)}&source=${encodeURIComponent(file.source)}`);
@@ -234,12 +235,12 @@ const QualityEvidenceLibraryPage: React.FC = () => {
                   <tr key={file.id}>
                     <td>{file.ref}</td>
                     <td>
-                      <strong>{file.title}</strong>
-                      <div className="text-muted">{file.filename}</div>
+                      <strong className={cellTextClass}>{file.title}</strong>
+                      <div className={`text-muted ${cellTextClass}`}>{file.filename}</div>
                     </td>
                     <td>
-                      <div>{file.auditTitle}</div>
-                      <div className="text-muted">{file.source}</div>
+                      <div className={cellTextClass}>{file.auditTitle}</div>
+                      <div className={`text-muted ${cellTextClass}`}>{file.source}</div>
                     </td>
                     <td><span className="qms-pill">{file.type}</span></td>
                     <td>{fmtBytes(file.sizeBytes)}</td>

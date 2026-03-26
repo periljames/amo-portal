@@ -85,6 +85,7 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
   }, [headerFilters, quickFilter, rows, tab]);
 
   const loading = registerQuery.isLoading;
+  const cellTextClass = wrapText ? "qms-cell-text qms-cell-text--wrap" : "qms-cell-text qms-cell-text--truncate";
 
   return (
     <QualityAuditsSectionLayout
@@ -173,11 +174,11 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
                       <td>{finding.finding_ref || finding.id}</td>
                       <td>
                         <strong>{audit.audit_ref}</strong>
-                        <div className="text-muted">{audit.title}</div>
+                        <div className={`text-muted ${cellTextClass}`}>{audit.title}</div>
                       </td>
                       <td>
-                        <div>{finding.description}</div>
-                        <div className="text-muted">{finding.objective_evidence || "No objective evidence captured."}</div>
+                        <div className={cellTextClass}>{finding.description}</div>
+                        <div className={`text-muted ${cellTextClass}`}>{finding.objective_evidence || "No objective evidence captured."}</div>
                       </td>
                       <td><span className="qms-pill">{finding.finding_type}</span></td>
                       {showOwner ? <td>{finding.acknowledged_by_name || "Unassigned"}</td> : null}

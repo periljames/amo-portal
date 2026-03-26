@@ -1935,6 +1935,22 @@ button.qms-list__item:hover {
   gap: 4px;
 }
 
+.qms-cell-text {
+  display: block;
+  max-width: 100%;
+}
+
+.qms-cell-text--truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qms-cell-text--wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .audit-stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
