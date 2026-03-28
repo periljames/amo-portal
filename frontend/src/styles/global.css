@@ -2705,6 +2705,63 @@ body[data-color-scheme="light"] .planning-calendar-badge--leave {
   gap: 12px;
 }
 
+.qms-car-toolbar {
+  display: grid;
+  gap: 12px;
+  align-items: end;
+}
+
+.qms-car-toolbar__filter {
+  width: min(220px, 100%);
+}
+
+.qms-car-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.qms-car-overview__item {
+  border: 1px solid var(--surface-border);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  padding: 10px 12px;
+  display: grid;
+  gap: 2px;
+}
+
+.qms-car-overview__item span {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.qms-car-overview__item strong {
+  font-size: 1.05rem;
+}
+
+.qms-history-tab {
+  position: fixed;
+  top: calc(var(--app-header-offset, 64px) + 34vh);
+  left: 10px;
+  z-index: 55;
+  border: 1px solid var(--border);
+  border-left: none;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  border-radius: 0 12px 12px 0;
+  padding: 10px 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: var(--sh-1);
+  cursor: pointer;
+}
+
+.qms-history-tab:hover,
+.qms-history-tab:focus-visible {
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface-elevated));
+  outline: none;
+}
+
 .qms-car-form-card {
   max-width: 1080px;
   margin-inline: auto;
