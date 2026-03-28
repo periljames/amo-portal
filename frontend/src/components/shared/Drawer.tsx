@@ -5,9 +5,10 @@ type DrawerProps = {
   isOpen: boolean;
   onClose: () => void;
   children: React.ReactNode;
+  side?: "left" | "right";
 };
 
-const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children }) => {
+const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children, side = "right" }) => {
   const lastActiveRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -37,7 +38,7 @@ const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children }) => 
 
   return (
     <div
-      className={`drawer-overlay${isOpen ? " drawer-overlay--open" : ""}`}
+      className={`drawer-overlay drawer-overlay--${side}${isOpen ? " drawer-overlay--open" : ""}`}
       onMouseDown={handleBackdropClick}
       aria-hidden={!isOpen}
     >

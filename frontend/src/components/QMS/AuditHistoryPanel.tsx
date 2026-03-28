@@ -8,6 +8,8 @@ type AuditHistoryPanelProps = {
   entityType?: string;
   entityId?: string;
   limit?: number;
+  currentUserId?: string;
+  onEventOpen?: (event: AuditEvent) => void;
 };
 
 const AuditHistoryPanel: React.FC<AuditHistoryPanelProps> = ({
@@ -15,6 +17,8 @@ const AuditHistoryPanel: React.FC<AuditHistoryPanelProps> = ({
   entityType,
   entityId,
   limit = 8,
+  currentUserId,
+  onEventOpen,
 }) => {
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +48,15 @@ const AuditHistoryPanel: React.FC<AuditHistoryPanelProps> = ({
     return date.toLocaleString();
   };
 
+  const eventVerb = (action: string) => {
+    const cleaned = action.replaceAll("_", " ").trim();
+    if (!cleaned) return "Updated";
+    return `${cleaned.charAt(0).toUpperCase()}${cleaned.slice(1)}`;
+  };
+
+  const canContinue = (event: AuditEvent) =>
+    Boolean(currentUserId) && event.actor_user_id === currentUserId;
+
   return (
     <div className="qms-card">
       <div className="qms-card__header">
@@ -64,12 +77,23 @@ const AuditHistoryPanel: React.FC<AuditHistoryPanelProps> = ({
           {events.map((event) => (
             <div key={event.id} className="qms-list__item">
               <div>
-                <strong>{event.action}</strong>
+                <strong>{eventVerb(event.action)}</strong>
                 <span className="qms-list__meta">
                   {event.entity_type} · {formatDate(event.occurred_at || event.created_at)}
                 </span>
               </div>
-              <span className="qms-pill">{event.actor_user_id || "system"}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {onEventOpen && (
+                  <button
+                    type="button"
+                    className="secondary-chip-btn"
+                    onClick={() => onEventOpen(event)}
+                  >
+                    {canContinue(event) ? "Continue" : "Open"}
+                  </button>
+                )}
+                <span className="qms-pill">{event.actor_user_id || "system"}</span>
+              </div>
             </div>
           ))}
           {events.length === 0 && <p className="text-muted">No audit events yet.</p>}

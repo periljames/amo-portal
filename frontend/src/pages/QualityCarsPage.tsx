@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
+import Drawer from "../components/shared/Drawer";
 import { useToast } from "../components/feedback/ToastProvider";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getCachedUser, getContext } from "../services/auth";
@@ -93,6 +94,7 @@ const QualityCarsPage: React.FC = () => {
   const [cars, setCars] = useState<CAROut[]>([]);
   const [programFilter, setProgramFilter] = useState<CARProgram>("QUALITY");
   const inviteToken = searchParams.get("invite");
+  const [showCreateForm, setShowCreateForm] = useState<boolean>(!!inviteToken);
 
   const [form, setForm] = useState<CarFormState>({
     title: "",
@@ -127,6 +129,7 @@ const QualityCarsPage: React.FC = () => {
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewAttachments, setReviewAttachments] = useState<CARAttachmentOut[]>([]);
   const [reviewAttachmentsLoading, setReviewAttachmentsLoading] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [reviewForm, setReviewForm] = useState<CarReviewForm>({
     root_cause_status: "",
     root_cause_review_note: "",
@@ -172,6 +175,17 @@ const QualityCarsPage: React.FC = () => {
       .filter((car) => !!car.submitted_at || car.status === "IN_PROGRESS" || car.status === "PENDING_VERIFICATION")
       .sort((a, b) => (new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
   }, [cars]);
+
+  const overviewStats = useMemo(() => {
+    const now = new Date();
+    const openCount = filteredCars.filter((car) => car.status !== "CLOSED" && car.status !== "CANCELLED").length;
+    const overdueCount = filteredCars.filter((car) => {
+      if (!car.due_date) return false;
+      return new Date(car.due_date) < now && car.status !== "CLOSED" && car.status !== "CANCELLED";
+    }).length;
+    const inReviewCount = filteredCars.filter((car) => car.status === "PENDING_VERIFICATION").length;
+    return { total: filteredCars.length, openCount, overdueCount, inReviewCount };
+  }, [filteredCars]);
 
   const departmentOptions = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
@@ -448,6 +462,17 @@ const QualityCarsPage: React.FC = () => {
     !!currentUser?.is_amo_admin ||
     currentUser?.role === "QUALITY_MANAGER";
 
+  const openCarFromHistory = (entityId: string) => {
+    if (!entityId) return;
+    setHistoryOpen(false);
+    const next = new URLSearchParams(searchParams);
+    next.set("carId", entityId);
+    navigate({
+      pathname: `/maintenance/${amoSlug}/${department}/cars`,
+      search: `?${next.toString()}`,
+    });
+  };
+
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
       <header className="page-header">
@@ -459,31 +484,60 @@ const QualityCarsPage: React.FC = () => {
         </p>
       </header>
 
-      <section className="page-section" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <button
-          type="button"
-          className="secondary-chip-btn"
-          onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms`)}
-        >
-          Back to QMS overview
-        </button>
-        <select
-          value={programFilter}
-          onChange={(e) => setProgramFilter(e.target.value as CARProgram)}
-          className="form-control"
-          style={{ width: 220 }}
-        >
-          {PROGRAM_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label} programme
-            </option>
-          ))}
-        </select>
+      <section className="page-section qms-car-toolbar">
+        <div className="page-section__actions">
+          <button
+            type="button"
+            className="secondary-chip-btn"
+            onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms`)}
+          >
+            Back to QMS overview
+          </button>
+          <label className="form-control qms-car-toolbar__filter">
+            <span>Programme</span>
+            <select
+              value={programFilter}
+              onChange={(e) => setProgramFilter(e.target.value as CARProgram)}
+            >
+              {PROGRAM_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="qms-car-overview">
+          <div className="qms-car-overview__item">
+            <span>Total</span>
+            <strong>{overviewStats.total}</strong>
+          </div>
+          <div className="qms-car-overview__item">
+            <span>Open</span>
+            <strong>{overviewStats.openCount}</strong>
+          </div>
+          <div className="qms-car-overview__item">
+            <span>Overdue</span>
+            <strong>{overviewStats.overdueCount}</strong>
+          </div>
+          <div className="qms-car-overview__item">
+            <span>In review</span>
+            <strong>{overviewStats.inReviewCount}</strong>
+          </div>
+        </div>
       </section>
 
-      <section className="page-section">
-        <AuditHistoryPanel title="CAR history" entityType="qms_car" />
-      </section>
+      <button
+        type="button"
+        className="qms-history-tab"
+        onClick={() => setHistoryOpen(true)}
+        aria-label="Open CAR history"
+        aria-expanded={historyOpen}
+        aria-controls="car-history-drawer"
+        hidden={historyOpen}
+      >
+        CAR history
+      </button>
 
       {inviteToken && (
         <div className="card card--info" style={{ marginBottom: 12 }}>
@@ -512,6 +566,149 @@ const QualityCarsPage: React.FC = () => {
         </div>
       )}
 
+      <section className="page-section">
+        <div className="card">
+          <div className="card-header">
+            <h2>Register</h2>
+            <p className="text-muted">Auto-numbered entries with status, priority, and ownership.</p>
+            {canManageCars && (
+              <button
+                type="button"
+                className="primary-chip-btn"
+                onClick={() => setShowCreateForm((open) => !open)}
+                aria-expanded={showCreateForm}
+              >
+                {showCreateForm ? "Hide create form" : "Log new CAR"}
+              </button>
+            )}
+          </div>
+
+          {state === "loading" && <p>Loading register…</p>}
+
+          {state === "ready" && (
+            <div className="table-responsive">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>CAR #</th>
+                    <th>Title</th>
+                    <th>Owner</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th>Due</th>
+                    <th>Next reminder</th>
+                    <th>Updated</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCars.map((car) => (
+                    <tr key={car.id}>
+                      <td>{car.car_number}</td>
+                      <td>{car.title}</td>
+                      <td>
+                        {car.assigned_to_user_id
+                          ? assigneeLookup.get(car.assigned_to_user_id)?.full_name ||
+                            "Assigned user"
+                          : "Unassigned"}
+                      </td>
+                      <td>
+                        <span className="badge badge--neutral">
+                          {PRIORITY_LABELS[car.priority]}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`badge ${STATUS_COLORS[car.status] || "badge--neutral"}`}>
+                          {car.status}
+                        </span>
+                      </td>
+                      <td>{car.due_date || "—"}</td>
+                      <td>{car.next_reminder_at ? new Date(car.next_reminder_at).toLocaleString() : "—"}</td>
+                      <td>{new Date(car.updated_at).toLocaleDateString()}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          {car.assigned_to_user_id && (
+                            <button
+                              type="button"
+                              className="secondary-chip-btn"
+                              onClick={() =>
+                                navigate(`/maintenance/${amoSlug}/admin/users/${car.assigned_to_user_id}`)
+                              }
+                            >
+                              Owner
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => openEdit(car)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => void openReview(car)}
+                          >
+                            Review
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() =>
+                              setPanelContext({
+                                type: "car",
+                                id: car.id,
+                                title: car.title,
+                                status: car.status,
+                                ownerId: car.assigned_to_user_id,
+                              })
+                            }
+                          >
+                            Quick actions
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => handleExport(car)}
+                            disabled={exportingId === car.id}
+                          >
+                            {exportingId === car.id ? "Exporting…" : "Export pack"}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => handleCopyInvite(car)}
+                            disabled={inviteBusyId === car.id}
+                          >
+                            {inviteBusyId === car.id ? "Copying…" : "Copy invite"}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-chip-btn"
+                            onClick={() => setDeleteCar(car)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredCars.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="text-muted">
+                        No CARs logged for this programme yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {canManageCars && showCreateForm && (
       <section className="page-section">
         <div className="card qms-car-form-card">
           <div className="card-header">
@@ -695,138 +892,22 @@ const QualityCarsPage: React.FC = () => {
           </form>
         </div>
       </section>
+      )}
 
-      <section className="page-section">
-        <div className="card">
-          <div className="card-header">
-            <h2>Register</h2>
-            <p className="text-muted">Auto-numbered entries with status, priority, and ownership.</p>
-          </div>
-
-          {state === "loading" && <p>Loading register…</p>}
-
-          {state === "ready" && (
-            <div className="table-responsive">
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>CAR #</th>
-                    <th>Title</th>
-                    <th>Owner</th>
-                    <th>Priority</th>
-                    <th>Status</th>
-                    <th>Due</th>
-                    <th>Next reminder</th>
-                    <th>Updated</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCars.map((car) => (
-                    <tr key={car.id}>
-                      <td>{car.car_number}</td>
-                      <td>{car.title}</td>
-                      <td>
-                        {car.assigned_to_user_id
-                          ? assigneeLookup.get(car.assigned_to_user_id)?.full_name ||
-                            "Assigned user"
-                          : "Unassigned"}
-                      </td>
-                      <td>
-                        <span className="badge badge--neutral">
-                          {PRIORITY_LABELS[car.priority]}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`badge ${STATUS_COLORS[car.status] || "badge--neutral"}`}>
-                          {car.status}
-                        </span>
-                      </td>
-                      <td>{car.due_date || "—"}</td>
-                      <td>{car.next_reminder_at ? new Date(car.next_reminder_at).toLocaleString() : "—"}</td>
-                      <td>{new Date(car.updated_at).toLocaleDateString()}</td>
-                      <td>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          {car.assigned_to_user_id && (
-                            <button
-                              type="button"
-                              className="secondary-chip-btn"
-                              onClick={() =>
-                                navigate(`/maintenance/${amoSlug}/admin/users/${car.assigned_to_user_id}`)
-                              }
-                            >
-                              Owner
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => openEdit(car)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => void openReview(car)}
-                          >
-                            Review
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() =>
-                              setPanelContext({
-                                type: "car",
-                                id: car.id,
-                                title: car.title,
-                                status: car.status,
-                                ownerId: car.assigned_to_user_id,
-                              })
-                            }
-                          >
-                            Quick actions
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => handleExport(car)}
-                            disabled={exportingId === car.id}
-                          >
-                            {exportingId === car.id ? "Exporting…" : "Export pack"}
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => handleCopyInvite(car)}
-                            disabled={inviteBusyId === car.id}
-                          >
-                            {inviteBusyId === car.id ? "Copying…" : "Copy invite"}
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => setDeleteCar(car)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredCars.length === 0 && (
-                    <tr>
-                      <td colSpan={9} className="text-muted">
-                        No CARs logged for this programme yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+      <Drawer title="CAR history" isOpen={historyOpen} onClose={() => setHistoryOpen(false)} side="left">
+        <div id="car-history-drawer" style={{ display: "grid", gap: 10, paddingBottom: 6 }}>
+          <p className="text-muted" style={{ margin: 0 }}>
+            Review completed activity and jump straight to the selected CAR to continue or collaborate.
+          </p>
+          <AuditHistoryPanel
+            title="Activity timeline"
+            entityType="qms_car"
+            limit={16}
+            currentUserId={currentUser?.id}
+            onEventOpen={(event) => openCarFromHistory(event.entity_id)}
+          />
         </div>
-      </section>
+      </Drawer>
 
       <section className="page-section">
         <div className="card">
