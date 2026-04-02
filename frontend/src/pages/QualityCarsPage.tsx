@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
-import Drawer from "../components/shared/Drawer";
 import { useToast } from "../components/feedback/ToastProvider";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getCachedUser, getContext } from "../services/auth";
@@ -527,18 +526,6 @@ const QualityCarsPage: React.FC = () => {
         </div>
       </section>
 
-      <button
-        type="button"
-        className="qms-history-tab"
-        onClick={() => setHistoryOpen(true)}
-        aria-label="Open CAR history"
-        aria-expanded={historyOpen}
-        aria-controls="car-history-drawer"
-        hidden={historyOpen}
-      >
-        CAR history
-      </button>
-
       {inviteToken && (
         <div className="card card--info" style={{ marginBottom: 12 }}>
           <p style={{ margin: 0 }}>
@@ -568,6 +555,30 @@ const QualityCarsPage: React.FC = () => {
 
       <section className="page-section">
         <div className="card">
+          <div className="qms-car-register-tabs" role="tablist" aria-label="CAR register sections">
+            <button
+              type="button"
+              role="tab"
+              id="car-register-tab"
+              className={`qms-car-register-tab ${!historyOpen ? "is-active" : ""}`}
+              aria-selected={!historyOpen}
+              aria-controls="car-register-panel"
+              onClick={() => setHistoryOpen(false)}
+            >
+              Register
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="car-history-tab"
+              className={`qms-car-register-tab ${historyOpen ? "is-active" : ""}`}
+              aria-selected={historyOpen}
+              aria-controls="car-history-panel"
+              onClick={() => setHistoryOpen(true)}
+            >
+              CAR history
+            </button>
+          </div>
           <div className="card-header">
             <h2>Register</h2>
             <p className="text-muted">Auto-numbered entries with status, priority, and ownership.</p>
@@ -583,10 +594,10 @@ const QualityCarsPage: React.FC = () => {
             )}
           </div>
 
-          {state === "loading" && <p>Loading register…</p>}
+          {state === "loading" && !historyOpen && <p id="car-register-panel">Loading register…</p>}
 
-          {state === "ready" && (
-            <div className="table-responsive">
+          {state === "ready" && !historyOpen && (
+            <div className="table-responsive" id="car-register-panel" role="tabpanel" aria-labelledby="car-register-tab">
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -703,6 +714,26 @@ const QualityCarsPage: React.FC = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {historyOpen && (
+            <div
+              id="car-history-panel"
+              className="qms-car-history-panel"
+              role="tabpanel"
+              aria-labelledby="car-history-tab"
+            >
+              <p className="text-muted" style={{ margin: 0 }}>
+                Review completed activity and jump straight to the selected CAR to continue or collaborate.
+              </p>
+              <AuditHistoryPanel
+                title="Activity timeline"
+                entityType="qms_car"
+                limit={16}
+                currentUserId={currentUser?.id}
+                onEventOpen={(event) => openCarFromHistory(event.entity_id)}
+              />
             </div>
           )}
         </div>
@@ -893,21 +924,6 @@ const QualityCarsPage: React.FC = () => {
         </div>
       </section>
       )}
-
-      <Drawer title="CAR history" isOpen={historyOpen} onClose={() => setHistoryOpen(false)} side="left">
-        <div id="car-history-drawer" style={{ display: "grid", gap: 10, paddingBottom: 6 }}>
-          <p className="text-muted" style={{ margin: 0 }}>
-            Review completed activity and jump straight to the selected CAR to continue or collaborate.
-          </p>
-          <AuditHistoryPanel
-            title="Activity timeline"
-            entityType="qms_car"
-            limit={16}
-            currentUserId={currentUser?.id}
-            onEventOpen={(event) => openCarFromHistory(event.entity_id)}
-          />
-        </div>
-      </Drawer>
 
       <section className="page-section">
         <div className="card">
