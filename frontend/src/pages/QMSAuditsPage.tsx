@@ -166,8 +166,8 @@ const QMSAuditsPage: React.FC = () => {
           <button type="button" className="btn btn-primary" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/plan`)}>
             Plan audit
           </button>
-          <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/closeout`)}>
-            Closeout
+          <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/register?tab=findings`)}>
+            Register & Closeout
           </button>
           <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/register`)}>
             Register

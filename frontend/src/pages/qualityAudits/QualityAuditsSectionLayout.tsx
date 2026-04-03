@@ -1,8 +1,8 @@
 import React, { useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { CalendarDays, Files, TableProperties } from "lucide-react";
-import AuditPageShell, { type AuditShellNavItem } from "../../components/qms/AuditPageShell";
-import { ResponsiveSegmentedControl } from "../../components/qms/ResponsiveSegmentedControl";
+import AuditPageShell, { type AuditShellNavItem } from "../../components/QMS/AuditPageShell";
+import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegmentedControl";
 import { getContext } from "../../services/auth";
 
 type Props = {
@@ -24,27 +24,23 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
     () => [
       {
         id: "plan-schedule",
-        label: "Plan / Schedule",
-        shortLabel: "Plan",
+        label: "Planner",
+        shortLabel: "Planner",
         icon: CalendarDays,
-        href: `/maintenance/${amoCode}/${department}/qms/audits/schedules/calendar`,
-        active:
-          location.pathname.startsWith(`/maintenance/${amoCode}/${department}/qms/audits/schedules`) ||
-          location.pathname === `/maintenance/${amoCode}/${department}/qms/audits/plan`,
+        href: `/maintenance/${amoCode}/${department}/qms/audits/plan?view=calendar`,
+        active: location.pathname === `/maintenance/${amoCode}/${department}/qms/audits/plan`,
       },
       {
         id: "register",
         label: "Register",
         shortLabel: "Register",
         icon: TableProperties,
-        href: `/maintenance/${amoCode}/${department}/qms/audits/closeout/findings`,
-        active:
-          location.pathname.startsWith(`/maintenance/${amoCode}/${department}/qms/audits/closeout`) ||
-          location.pathname === `/maintenance/${amoCode}/${department}/qms/audits/register`,
+        href: `/maintenance/${amoCode}/${department}/qms/audits/register?tab=findings`,
+        active: location.pathname === `/maintenance/${amoCode}/${department}/qms/audits/register`,
       },
       {
         id: "evidence-library",
-        label: "Evidence Library",
+        label: "Evidence",
         shortLabel: "Evidence",
         icon: Files,
         href: `/maintenance/${amoCode}/${department}/qms/evidence`,
@@ -64,7 +60,7 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
       subtitle={subtitle}
       breadcrumbs={[
         { label: "QMS", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms`) },
-        { label: "Audits & Inspections", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits`) },
+        { label: "Audits", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits`) },
         { label: title },
       ]}
       toolbar={toolbar}
@@ -79,7 +75,7 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
             icon: link.icon,
             ariaLabel: link.label,
           }))}
-          onChange={(value) => {
+          onChange={(value: string) => {
             const next = links.find((link) => link.id === value);
             if (next) navigate(next.href);
           }}

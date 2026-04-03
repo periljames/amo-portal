@@ -6,10 +6,12 @@
 // - Uses RequireAuth wrapper to redirect unauthenticated users back to login.
 
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import * as DocControlPages from "./pages/DocControlPages";
 import * as TechnicalRecordsPages from "./pages/TechnicalRecordsPages";
 import * as PlanningProductionPages from "./pages/PlanningProductionPages";
+import QualityAuditPlanSchedulePage from "./pages/qualityAudits/QualityAuditPlanSchedulePage";
+import QualityAuditRegisterPage from "./pages/qualityAudits/QualityAuditRegisterPage";
 
 import {
   fetchOnboardingStatus,
@@ -69,16 +71,8 @@ const OnboardingPasswordPage = lazy(() => import("./pages/OnboardingPasswordPage
 const PublicCertificateVerificationPage = lazy(() => import("./pages/PublicCertificateVerificationPage"));
 const VerifyScanPage = lazy(() => import("./pages/VerifyScanPage"));
 
-const QualityAuditPlannerPage = lazy(() => import("./pages/QualityAuditPlannerPage"));
-const QualityAuditPlannerCalendarPage = lazy(() => import("./pages/QualityAuditPlannerCalendarPage"));
-const QualityAuditPlannerListPage = lazy(() => import("./pages/QualityAuditPlannerListPage"));
 const QualityAuditScheduleDetailPage = lazy(() => import("./pages/QualityAuditScheduleDetailPage"));
 const QualityAuditRunHubPage = lazy(() => import("./pages/QualityAuditRunHubPage"));
-const QualityCloseoutHubPage = lazy(() => import("./pages/QualityCloseoutHubPage"));
-const QualityCloseoutFindingsPage = lazy(() => import("./pages/QualityCloseoutFindingsPage"));
-const QualityCloseoutCarsPage = lazy(() => import("./pages/QualityCloseoutCarsPage"));
-const QualityAuditEvidencePage = lazy(() => import("./pages/QualityAuditEvidencePage"));
-const QualityAuditRegisterPage = lazy(() => import("./pages/QualityAuditRegisterPage"));
 const QualityEvidenceLibraryPage = lazy(() => import("./pages/QualityEvidenceLibraryPage"));
 const QualityEvidenceViewerPage = lazy(() => import("./pages/QualityEvidenceViewerPage"));
 
@@ -101,16 +95,6 @@ type RequireTenantAdminProps = {
   children: React.ReactElement;
 };
 
-
-type QualityAliasRedirectProps = {
-  suffix: string;
-};
-
-const QualityAliasRedirect: React.FC<QualityAliasRedirectProps> = ({ suffix }) => {
-  const { amoCode } = useParams<{ amoCode?: string }>();
-  const target = `/maintenance/${amoCode ?? "UNKNOWN"}/quality/qms${suffix}`;
-  return <Navigate to={target} replace />;
-};
 
 function inferAmoCodeFromPath(pathname: string): string | null {
   // supports:
@@ -718,40 +702,15 @@ export const AppRouter: React.FC = () => {
           </RequireAuth>
         }
       />
-      <Route path="/maintenance/:amoCode/:department/qms/audits/plan" element={<RequireAuth><QualityAuditPlannerPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/audits/plan" element={<RequireAuth><QualityAuditPlanSchedulePage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/qms/audits/register" element={<RequireAuth><QualityAuditRegisterPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/audits/closeout" element={<RequireAuth><QualityCloseoutHubPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/audits/closeout/:auditId" element={<RequireAuth><QualityCloseoutHubPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/audits/closeout/findings/:findingId" element={<RequireAuth><QualityCloseoutFindingsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/audits/closeout/cars/:carId" element={<RequireAuth><QualityCloseoutCarsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/audits/:auditId/findings" element={<RequireAuth><QualityCloseoutFindingsPage /></RequireAuth>} />
-      <Route
-        path="/maintenance/:amoCode/:department/qms/audits/schedules/calendar"
-        element={<RequireAuth><QualityAuditPlannerCalendarPage /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/qms/audits/schedules/list"
-        element={<RequireAuth><QualityAuditPlannerListPage /></RequireAuth>}
-      />
       <Route
         path="/maintenance/:amoCode/:department/qms/audits/schedules/:scheduleId"
         element={<RequireAuth><QualityAuditScheduleDetailPage /></RequireAuth>}
       />
       <Route
-        path="/maintenance/:amoCode/:department/qms/audits/closeout/findings"
-        element={<RequireAuth><QualityCloseoutFindingsPage /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/qms/audits/closeout/cars"
-        element={<RequireAuth><QualityCloseoutCarsPage /></RequireAuth>}
-      />
-      <Route
         path="/maintenance/:amoCode/:department/qms/audits/:auditId"
         element={<RequireAuth><QualityAuditRunHubPage /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/qms/audits/:auditId/evidence"
-        element={<RequireAuth><QualityAuditEvidencePage /></RequireAuth>}
       />
       <Route
         path="/maintenance/:amoCode/:department/qms/evidence"
@@ -830,40 +789,7 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/:department/qms/aerodoc/compliance" element={<RequireAuth><AeroDocComplianceHealthPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/qms/aerodoc/audit-mode" element={<RequireAuth><AeroDocAuditModePage /></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/quality/audits" element={<RequireAuth><QualityAliasRedirect suffix="/audits" /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/plan" element={<RequireAuth><QualityAliasRedirect suffix="/audits/plan" /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/register" element={<RequireAuth><QualityAliasRedirect suffix="/audits/register" /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/closeout" element={<RequireAuth><QualityAliasRedirect suffix="/audits/closeout" /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/schedules/calendar" element={<RequireAuth><QualityAliasRedirect suffix="/audits/schedules/calendar" /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/audits/schedules/list" element={<RequireAuth><QualityAliasRedirect suffix="/audits/schedules/list" /></RequireAuth>} />
-      <Route
-        path="/maintenance/:amoCode/quality/audits/schedules/:scheduleId"
-        element={<RequireAuth><QualityAuditScheduleDetailPage /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/quality/audits/:auditId"
-        element={<RequireAuth><QualityAuditRunHubPage /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/quality/audits/:auditId/evidence"
-        element={<RequireAuth><QualityAuditEvidencePage /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/quality/audits/closeout/findings"
-        element={<RequireAuth><QualityAliasRedirect suffix="/audits/closeout/findings" /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/quality/audits/closeout/cars"
-        element={<RequireAuth><QualityAliasRedirect suffix="/audits/closeout/cars" /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/quality/evidence"
-        element={<RequireAuth><QualityAliasRedirect suffix="/evidence" /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/quality/evidence/:evidenceId"
-        element={<RequireAuth><QualityEvidenceViewerPage /></RequireAuth>}
-      />
+
 
 
 

@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Search, Info, ClipboardList } from "lucide-react";
@@ -23,6 +23,7 @@ import {
   type QMSFindingOut,
 } from "../../services/qms";
 import { computeReadiness } from "./readiness";
+import { getDueMessage } from "./dueStatus";
 import FindingDrawer from "./FindingDrawer";
 
 type Props = {
@@ -277,7 +278,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
       grouped.set(key, (grouped.get(key) ?? 0) + 1);
     });
     if (grouped.size === 0) {
-      return ["M1", "M2", "M3", "M4", "M5", "M6"].map((label, idx) => ({ label, value: Math.max(1, 5 - idx) }));
+      return [];
     }
     return Array.from(grouped.entries())
       .sort(([a], [b]) => a.localeCompare(b))
@@ -285,7 +286,10 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
       .map(([label, value]) => ({ label: label.slice(5), value }));
   }, [findingRows]);
 
+  const [tick, setTick] = useState(Date.now());
+  useEffect(() => { const id = window.setInterval(() => setTick(Date.now()), 60_000); return () => window.clearInterval(id); }, []);
   const readiness = schedule ? computeReadiness(schedule, upcomingAudit) : null;
+  const dueBanner = getDueMessage(new Date(tick), schedule?.next_due_date, upcomingAudit?.planned_start, upcomingAudit?.planned_end);
   const brand = getBrandContext();
   const dashboard = dashboardQuery.data;
   const risk = riskTone(dashboard?.findings_open_level_1 ?? 0, dashboard?.findings_open_level_2 ?? 0);
@@ -324,7 +328,6 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
   };
 
   const baseQmsPath = `/maintenance/${amoCode}/${department}/qms`;
-  const goToPlan = () => navigate(`${baseQmsPath}/audits/plan`);
   const goToRegister = () => navigate(`${baseQmsPath}/audits/register`);
   const goToEvidence = () => navigate(`${baseQmsPath}/evidence`);
 
@@ -333,7 +336,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
       <div className="qms-card">
         <h3>Schedule not found</h3>
         <p>The schedule is missing, inactive, or outside your AMO scope.</p>
-        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/schedules/list`)}>
+        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/plan?view=list`)}>
           Back to list
         </button>
       </div>
@@ -342,6 +345,15 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
 
   return (
     <div className="qms-audit-detail">
+      {dueBanner ? (
+        <section className="qms-card" style={{ marginBottom: 12 }}>
+          <strong>{dueBanner.label}</strong>
+          <div className="text-muted">
+            Next due: {schedule?.next_due_date || "—"} · Upcoming notice: {upcomingAudit?.upcoming_notice_sent_at || "—"} · Day-of notice: {upcomingAudit?.day_of_notice_sent_at || "—"}
+          </div>
+        </section>
+      ) : null}
+
       <section className="qms-card qms-audit-detail__hero">
         <div className="qms-audit-detail__breadcrumb">Audits &gt; {brand.name || amoCode} &gt; {schedule?.title || "Schedule"}</div>
         <div className="qms-audit-detail__hero-grid">
@@ -357,7 +369,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
               aria-label="Audit route tabs"
               style={{ "--segment-count": 3, "--segment-active-index": 0 } as React.CSSProperties}
             >
-              <button type="button" className="is-active" onClick={goToPlan}>Plan</button>
+              <button type="button" className="is-active" onClick={() => navigate(`${baseQmsPath}/audits/plan?view=calendar`)}>Plan</button>
               <button type="button" onClick={goToRegister}>Register</button>
               <button type="button" onClick={goToEvidence}>Evidence</button>
             </div>
@@ -380,9 +392,12 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
             <div className="qms-audit-detail__dossier-list">
               <div><strong>Registered Name:</strong> {brand.name || amoCode}</div>
               <div>
-                <strong>Primary Quality Manager:</strong>{" "}
-                {schedule?.lead_auditor_user_id ? schedule.lead_auditor_user_id : <button type="button" className="qms-link">Add Manager +</button>}
+                <strong>Lead auditor:</strong>{" "}
+                {schedule?.lead_auditor_user_id || "Unassigned"}
               </div>
+              <div><strong>Auditee:</strong> {schedule?.auditee || "Unassigned"}</div>
+              <div><strong>Observer auditor:</strong> {schedule?.observer_auditor_user_id || "Unassigned"}</div>
+              <div><strong>Assistant auditor:</strong> {schedule?.assistant_auditor_user_id || "Unassigned"}</div>
               <div>
                 <strong>Risk Summary:</strong> <span className={risk.className}>{risk.label}</span>
               </div>
@@ -439,7 +454,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
                 filteredRows={filteredRows}
                 selectedFindingId={selectedFindingId}
                 openFinding={openFinding}
-                onAddFirstFinding={() => navigate(`${baseQmsPath}/audits/closeout/findings`)}
+                onAddFirstFinding={() => navigate(`${baseQmsPath}/audits/register?tab=findings`)}
               />
             ) : null}
           </>
