@@ -26,11 +26,7 @@ import type { Subscription } from "../../types/billing";
 import { endSession, getCachedUser, getContext, markSessionActivity, onSessionEvent } from "../../services/auth";
 import { listDocumentAlerts } from "../../services/fleet";
 import { fetchOverviewSummary, type OverviewSummary } from "../../services/adminOverview";
-import { qmsListNotifications } from "../../services/qms";
-import {
-  listTrainingNotifications,
-} from "../../services/training";
-import type { TrainingNotificationRead } from "../../types/training";
+import { qmsListNotifications, qmsMarkNotificationRead, type QMSNotificationOut } from "../../services/qms";
 import {
   DEPARTMENT_ITEMS,
   type DepartmentId,
@@ -192,7 +188,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const [isDesktopSidebar, setIsDesktopSidebar] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<TrainingNotificationRead[]>([]);
+  const [notifications, setNotifications] = useState<QMSNotificationOut[]>([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
@@ -606,28 +602,28 @@ const DepartmentLayout: React.FC<Props> = ({
         id: "qms-audits",
         label: "Audits & Inspections",
         path: `/maintenance/${amoCode}/${activeDepartment}/qms/audits`,
-        matchPrefixes: [`/maintenance/${amoCode}/quality/audits`],
+        
         children: [
           {
             id: "qms-audits-plan-schedule",
             label: "Plan / Schedule",
-            path: `/maintenance/${amoCode}/quality/audits/schedules/calendar`,
+            path: `/maintenance/${amoCode}/${activeDepartment}/qms/audits/plan?view=calendar`,
             matchPrefixes: [
-              `/maintenance/${amoCode}/quality/audits/schedules/list`,
-              `/maintenance/${amoCode}/quality/audits/schedules/`,
+              `/maintenance/${amoCode}/${activeDepartment}/qms/audits/plan?view=list`,
+              `/maintenance/${amoCode}/${activeDepartment}/qms/audits/schedules/`,
             ],
           },
           {
             id: "qms-audits-register",
             label: "Register",
-            path: `/maintenance/${amoCode}/quality/audits/closeout/findings`,
-            matchPrefixes: [`/maintenance/${amoCode}/quality/audits/closeout/cars`],
+            path: `/maintenance/${amoCode}/${activeDepartment}/qms/audits/register?tab=findings`,
+            matchPrefixes: [`/maintenance/${amoCode}/${activeDepartment}/qms/audits/register?tab=cars`],
           },
           {
             id: "qms-audits-evidence-library",
             label: "Evidence Library",
-            path: `/maintenance/${amoCode}/quality/evidence`,
-            matchPrefixes: [`/maintenance/${amoCode}/quality/evidence/`],
+            path: `/maintenance/${amoCode}/${activeDepartment}/qms/evidence`,
+            matchPrefixes: [`/maintenance/${amoCode}/${activeDepartment}/qms/evidence/`],
           },
         ],
       },
@@ -932,29 +928,23 @@ const DepartmentLayout: React.FC<Props> = ({
       }
     };
 
-    const trainingPromise = handleModuleCall(
-      listTrainingNotifications({ unread_only: true, limit: 100 }),
+    const qmsPromise = handleModuleCall(
+      qmsListNotifications(),
       (data) => {
-        const nextUnread = data.length;
+        const nextUnread = data.filter((n) => !n.read_at).length;
         if (nextUnread > previousUnreadRef.current) {
           playNotificationChirp();
-          void pushDesktopNotification("New training notifications", `${nextUnread - previousUnreadRef.current} new item(s) received.`);
+          void pushDesktopNotification("New QMS notifications", `${nextUnread - previousUnreadRef.current} new item(s) received.`);
         }
         previousUnreadRef.current = nextUnread;
         setUnreadNotifications(nextUnread);
-        writeLayoutCache(unreadCacheKey, data.length, cacheProfile.useMemory);
-      },
-      () => {
-        previousUnreadRef.current = 0;
-        setUnreadNotifications(0);
-        writeLayoutCache(unreadCacheKey, 0, cacheProfile.useMemory);
+        writeLayoutCache(unreadCacheKey, nextUnread, cacheProfile.useMemory);
       }
     );
 
-    const qmsPromise = handleModuleCall(qmsListNotifications());
     const documentsPromise = handleModuleCall(listDocumentAlerts());
 
-    await Promise.all([trainingPromise, qmsPromise, documentsPromise]);
+    await Promise.all([qmsPromise, documentsPromise]);
   }, [cacheProfile.maxAgeMs, cacheProfile.useMemory, currentUser, isForbiddenError, unreadCacheKey]);
 
   const handlePollingFailure = useCallback(
@@ -1000,10 +990,7 @@ const DepartmentLayout: React.FC<Props> = ({
         setNotificationsError(null);
       }
       try {
-        const data = await listTrainingNotifications({
-          unread_only: unreadOnly,
-          limit: 100,
-        });
+        const data = await qmsListNotifications();
         if (unreadOnly) {
           if (data.length > previousUnreadRef.current) {
             playNotificationChirp();
@@ -1567,7 +1554,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   <>
                     <button
                       type="button"
-                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/quality/qms`)}
+                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/qms/audits`)}
                       className={
                         "sidebar__item" + ((isQmsRoute || isDocControlRoute) ? " sidebar__item--active" : "")
                       }
@@ -1753,7 +1740,8 @@ const DepartmentLayout: React.FC<Props> = ({
                           {notificationsError ? <div className="notification-panel__state notification-panel__state--error">{notificationsError}</div> : null}
                           {!notificationsLoading && !notificationsError && notifications.slice(0, 6).map((note) => (
                             <div key={note.id} className="notification-item">
-                              <div className="notification-item__title">{note.title}</div>
+                              <div className="notification-item__title">{note.message}</div>
+                              {!note.read_at ? <button type="button" className="secondary-chip-btn" onClick={() => qmsMarkNotificationRead(note.id).then(() => refreshNotifications())}>Mark read</button> : null}
                             </div>
                           ))}
                         </div>

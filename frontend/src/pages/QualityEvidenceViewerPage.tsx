@@ -182,7 +182,7 @@ const QualityEvidenceViewerPage: React.FC = () => {
 
         <div className="qms-card">
           <h3 style={{ marginTop: 0 }}>Reviewer Markup</h3>
-          <p className="text-muted">Capture the exact issue/reference for closeout traceability.</p>
+          <p className="text-muted">Local review notes only — not shared or saved to server.</p>
           <label className="qms-field">
             Page/section reference
             <input className="input" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Page 4, paragraph 2" />

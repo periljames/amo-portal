@@ -40,6 +40,7 @@ const AdminUserDetailPage: React.FC = () => {
   const queryClient = useQueryClient();
   const ctx = getContext();
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
+  const department = "quality";
   const userId = params.userId ?? "";
 
   const [selectedRole, setSelectedRole] = useState<AccountRole | "">("");
@@ -255,7 +256,7 @@ const AdminUserDetailPage: React.FC = () => {
           <div className="card">
             <h3 style={{ marginTop: 0 }}>Quick links</h3>
             <div className="page-section__actions">
-              <button type="button" className="btn btn-secondary" onClick={() => navigate(`/maintenance/${amoCode}/quality/qms/training/${resolvedUser.id}`)}>
+              <button type="button" className="btn btn-secondary" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/training`)}>
                 Training profile
               </button>
               <button type="button" className="btn btn-secondary" onClick={() => navigate(`/maintenance/${amoCode}/admin/users`)}>
