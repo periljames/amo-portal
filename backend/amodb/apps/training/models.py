@@ -30,6 +30,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -216,6 +217,24 @@ class TrainingCourse(Base):
         default=TrainingCourseCategory.OTHER,
         index=True,
     )
+    category_raw = Column(
+        String(255),
+        nullable=True,
+        doc="Spreadsheet/raw category value (free text) for course catalog imports.",
+    )
+
+    status = Column(
+        String(64),
+        nullable=False,
+        default="One_Off",
+        server_default="One_Off",
+        doc="Operational status from course catalog import (Initial/Recurrent/One_Off).",
+    )
+    scope = Column(
+        String(255),
+        nullable=True,
+        doc="Applicability scope from source catalog (free text).",
+    )
 
     kind = Column(
         SAEnum(TrainingKind, name="training_kind_enum", native_enum=False),
@@ -234,7 +253,7 @@ class TrainingCourse(Base):
     default_provider = Column(String(255), nullable=True)
     default_duration_days = Column(Integer, nullable=True, default=1)
 
-    is_mandatory = Column(Boolean, nullable=False, default=True)
+    is_mandatory = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     mandatory_for_all = Column(Boolean, nullable=False, default=False)
 
     prerequisite_course_id = Column(
