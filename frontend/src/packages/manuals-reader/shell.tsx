@@ -2,12 +2,22 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
+  Bell,
+  ClipboardPlus,
+  Clock3,
   Focus,
+  Headset,
+  HelpCircle,
+  Home,
+  ListChecks,
+  ListOrdered,
   Maximize,
   Minimize,
   PanelLeft,
   PanelRight,
   Search,
+  Settings,
+  Wrench,
   X,
   ZoomIn,
   ZoomOut,
@@ -17,6 +27,18 @@ import Badge from "../../components/UI/Admin/Badge";
 import { useTenantBranding } from "./branding";
 
 const PORTAL_URL = (import.meta as any).env?.VITE_PORTAL_URL as string | undefined;
+
+export type ReaderActionId =
+  | "notifications"
+  | "change-request"
+  | "delta"
+  | "task"
+  | "history"
+  | "order-list"
+  | "support"
+  | "help"
+  | "home"
+  | "account";
 
 type Props = {
   tenantSlug: string;
@@ -35,6 +57,8 @@ type Props = {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onZoomReset?: () => void;
+  onActionClick?: (action: ReaderActionId) => void;
+  activeAction?: ReaderActionId | null;
   children: React.ReactNode;
 };
 
@@ -43,6 +67,7 @@ export function ManualsReaderShell(props: Props) {
   const branding = useTenantBranding();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [focusMode, setFocusMode] = useState(localStorage.getItem("manuals.focusMode") === "1");
+  const [headerCollapsed, setHeaderCollapsed] = useState(localStorage.getItem("manuals.headerCollapsed") === "1");
   const [hint, setHint] = useState(false);
 
   const exitTarget = useMemo(() => {
@@ -55,6 +80,10 @@ export function ManualsReaderShell(props: Props) {
     localStorage.setItem("manuals.focusMode", focusMode ? "1" : "0");
     document.body.dataset.manualReaderFocus = focusMode ? "1" : "0";
   }, [focusMode]);
+
+  useEffect(() => {
+    localStorage.setItem("manuals.headerCollapsed", headerCollapsed ? "1" : "0");
+  }, [headerCollapsed]);
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -79,9 +108,22 @@ export function ManualsReaderShell(props: Props) {
     navigate(exitTarget);
   };
 
+  const actions: Array<{ id: ReaderActionId; label: string; icon: any }> = [
+    { id: "notifications", label: "Notifications", icon: Bell },
+    { id: "change-request", label: "Change Request", icon: ClipboardPlus },
+    { id: "delta", label: "Manual Delta", icon: Wrench },
+    { id: "task", label: "Task Panel", icon: ListChecks },
+    { id: "history", label: "History", icon: Clock3 },
+    { id: "order-list", label: "Order List", icon: ListOrdered },
+    { id: "support", label: "Support", icon: Headset },
+    { id: "help", label: "Help", icon: HelpCircle },
+    { id: "home", label: "Home", icon: Home },
+    { id: "account", label: "Account", icon: Settings },
+  ];
+
   return (
     <div id="manuals-reader-root" className="manual-reader-root">
-      <header className="manual-reader-topbar">
+      <header className={`manual-reader-topbar ${headerCollapsed ? "collapsed" : ""}`}>
         <div className="manual-reader-topbar-cluster">
           <AdminButton variant="ghost" size="sm" onClick={goBack} title="Back to Portal">
             <ArrowLeft size={14} /> Back to Portal
@@ -97,7 +139,8 @@ export function ManualsReaderShell(props: Props) {
             id="manual-reader-search" className="manual-reader-search-input"
             value={props.searchValue || ""}
             onChange={(e) => props.onSearchChange?.(e.target.value)}
-            placeholder="Search this manual… (Ctrl/Cmd+K)"
+            placeholder="Search publications… (Ctrl/Cmd+K)"
+            aria-label="Global publication search"
           />
           <span className="manual-reader-location-label">{props.locationLabel || "Document"}</span>
         </div>
@@ -118,9 +161,30 @@ export function ManualsReaderShell(props: Props) {
           <button className="manual-reader-icon-btn" onClick={() => props.onZoomReset?.()} title="Reset zoom">100%</button>
           <button className="manual-reader-icon-btn" onClick={() => props.onZoomIn?.()} title="Zoom in"><ZoomIn size={14} /></button>
           <button className="manual-reader-icon-btn" onClick={() => setFocusMode((v) => !v)} title="Focus mode"><Focus size={14} /></button>
+          <button className="manual-reader-icon-btn" onClick={() => setHeaderCollapsed((v) => !v)} title={headerCollapsed ? "Expand header" : "Collapse header"}>
+            {headerCollapsed ? "Expand" : "Collapse"}
+          </button>
           <button className="manual-reader-icon-btn" onClick={toggleFullscreen} title="Fullscreen">{isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}</button>
-          <button className="manual-reader-icon-btn" onClick={props.onToggleToc} title="Toggle TOC"><PanelLeft size={14} /></button>
-          <button className="manual-reader-icon-btn" onClick={props.onToggleInspector} title="Toggle inspector"><PanelRight size={14} /></button>
+          <button className="manual-reader-icon-btn" onClick={props.onToggleToc} title="Toggle hierarchy" aria-label="Toggle hierarchy"><PanelLeft size={14} /></button>
+          <button className="manual-reader-icon-btn" onClick={props.onToggleInspector} title="Toggle contextual panel" aria-label="Toggle contextual panel"><PanelRight size={14} /></button>
+          <span className="manual-reader-action-separator" />
+          {actions.map((action, idx) => {
+            const Icon = action.icon;
+            const active = props.activeAction === action.id;
+            return (
+              <React.Fragment key={action.id}>
+                {idx > 0 ? <span className="manual-reader-action-separator" /> : null}
+                <button
+                  className={`manual-reader-icon-btn utility ${active ? "active" : ""}`}
+                  onClick={() => props.onActionClick?.(action.id)}
+                  title={action.label}
+                  aria-label={action.label}
+                >
+                  <Icon size={14} />
+                </button>
+              </React.Fragment>
+            );
+          })}
           {props.mode === "standalone" && typeof window !== "undefined" && (window as any).opener ? (
             <button className="manual-reader-icon-btn" onClick={() => window.close()} title="Close window"><X size={14} /></button>
           ) : null}

@@ -14,11 +14,17 @@ export function ManualsReaderRoutes() {
       <Route path="/t/:tenantSlug/manuals/master-list" element={<ManualMasterListPage />} />
       <Route path="/t/:tenantSlug/manuals/:manualId" element={<ManualOverviewPage />} />
       <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/read" element={<ManualReaderPage />} />
+      <Route path="/t/:tenantSlug/publications/:manualId/:chapterId/:sectionId" element={<ManualReaderPage />} />
+      <Route path="/t/:tenantSlug/publications/:manualId/:chapterId/:sectionId/:subSectionId" element={<ManualReaderPage />} />
+      <Route path="/t/:tenantSlug/publications/:manualId/figure/:figureId" element={<ManualReaderPage />} />
       <Route path="/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view" element={<ManualReaderPage />} />
       <Route path="/maintenance/:amoCode/manuals" element={<ManualsDashboardPage />} />
       <Route path="/maintenance/:amoCode/manuals/master-list" element={<ManualMasterListPage />} />
       <Route path="/maintenance/:amoCode/manuals/:manualId" element={<ManualOverviewPage />} />
       <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/read" element={<ManualReaderPage />} />
+      <Route path="/maintenance/:amoCode/publications/:manualId/:chapterId/:sectionId" element={<ManualReaderPage />} />
+      <Route path="/maintenance/:amoCode/publications/:manualId/:chapterId/:sectionId/:subSectionId" element={<ManualReaderPage />} />
+      <Route path="/maintenance/:amoCode/publications/:manualId/figure/:figureId" element={<ManualReaderPage />} />
       <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/diff" element={<ManualDiffPage />} />
       <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/workflow" element={<ManualWorkflowPage />} />
       <Route path="/maintenance/:amoCode/manuals/:manualId/rev/:revId/exports" element={<ManualExportsPage />} />
