@@ -49,6 +49,15 @@ async function request<T>(
   if (!res.ok) {
     const contentType = res.headers.get("Content-Type") || "";
     const text = await res.text();
+    let message = text || `HTTP ${res.status}`;
+    if (contentType.toLowerCase().includes("application/json")) {
+      try {
+        const parsed = JSON.parse(text) as { detail?: string; message?: string };
+        message = parsed.detail || parsed.message || message;
+      } catch {
+        // keep raw text fallback
+      }
+    }
     // Log for easier debugging in the browser console
     console.error(
       `API ${method} ${url} failed:`,
@@ -56,7 +65,7 @@ async function request<T>(
       contentType,
       text.slice(0, 300)
     );
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new Error(message || `HTTP ${res.status}`);
   }
 
   if (res.status === 204 || res.status === 205) {
