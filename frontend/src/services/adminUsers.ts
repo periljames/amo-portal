@@ -28,6 +28,7 @@ export interface AdminUserCreatePayload {
   role: AccountRole;
   position_title?: string;
   phone?: string;
+  secondary_phone?: string;
   department_id?: string | null;
 
   regulatory_authority?: RegulatoryAuthority | null;
@@ -55,6 +56,7 @@ export interface AdminUserRead {
   role: AccountRole;
   position_title: string | null;
   phone: string | null;
+  secondary_phone: string | null;
 
   regulatory_authority: RegulatoryAuthority | null;
   licence_number: string | null;
@@ -79,6 +81,7 @@ export interface AdminUserUpdatePayload {
   role?: AccountRole;
   position_title?: string | null;
   phone?: string | null;
+  secondary_phone?: string | null;
   department_id?: string | null;
   regulatory_authority?: RegulatoryAuthority | null;
   licence_number?: string | null;
@@ -214,6 +217,25 @@ export interface AdminContext {
   updated_at: string;
 }
 
+export interface PersonnelImportRowIssue {
+  row_number: number;
+  person_id?: string | null;
+  reason: string;
+}
+
+export interface PersonnelImportSummary {
+  dry_run: boolean;
+  rows_processed: number;
+  created_personnel: number;
+  updated_personnel: number;
+  created_accounts: number;
+  updated_accounts: number;
+  skipped_accounts: number;
+  rejected_rows: number;
+  skipped_rows: number;
+  issues: PersonnelImportRowIssue[];
+}
+
 /**
  * Optional support: store the current "admin context" AMO in localStorage.
  * Useful for SUPERUSER support workflows (switch AMO without re-login).
@@ -267,6 +289,31 @@ export async function setAdminContext(payload: {
     JSON.stringify(payload),
     { headers: authHeaders() }
   );
+}
+
+export async function importPersonnelFile(params: {
+  file: File;
+  dryRun?: boolean;
+  amoId?: string;
+  sheetName?: string;
+}): Promise<PersonnelImportSummary> {
+  const form = new FormData();
+  form.append("file", params.file);
+  const search = new URLSearchParams();
+  search.set("dry_run", params.dryRun === false ? "false" : "true");
+  if (params.amoId) search.set("amo_id", params.amoId);
+  if (params.sheetName) search.set("sheet_name", params.sheetName);
+
+  const response = await fetch(`/api/accounts/admin/personnel/import?${search.toString()}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: form,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Personnel import failed (${response.status})`);
+  }
+  return response.json();
 }
 
 type CreateOptions = {

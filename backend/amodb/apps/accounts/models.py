@@ -352,6 +352,7 @@ class User(Base):
 
     position_title = Column(String(255), nullable=True)
     phone = Column(String(64), nullable=True)
+    secondary_phone = Column(String(64), nullable=True)
 
     # Regulatory/licence metadata to back CRS signatories etc.
     regulatory_authority = Column(
@@ -405,6 +406,11 @@ class User(Base):
         nullable=False,
         default=True,
         doc="Require the user to change their password on first login.",
+    )
+    password_changed_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp of the most recent successful password change/reset.",
     )
     token_revoked_at = Column(
         DateTime(timezone=True),
@@ -467,6 +473,51 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role})>"
+
+
+class PersonnelProfile(Base):
+    """
+    Personnel master record imported from HR/system rosters.
+
+    Keeps profile data even when a login account cannot be created.
+    """
+
+    __tablename__ = "personnel_profiles"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "person_id", name="uq_personnel_profiles_amo_person_id"),
+        UniqueConstraint("amo_id", "email", name="uq_personnel_profiles_amo_email"),
+        UniqueConstraint("user_id", name="uq_personnel_profiles_user_id"),
+        Index("ix_personnel_profiles_amo_status", "amo_id", "status"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    person_id = Column(String(64), nullable=False)
+    first_name = Column(String(128), nullable=False)
+    last_name = Column(String(128), nullable=False)
+    full_name = Column(String(255), nullable=True)
+    national_id = Column(String(128), nullable=True)
+    amel_no = Column(String(128), nullable=True)
+    internal_certification_stamp_no = Column(String(255), nullable=True)
+    initial_authorization_date = Column(Date, nullable=True)
+    department = Column(String(255), nullable=True)
+    position_title = Column(String(255), nullable=True)
+    phone_number = Column(String(64), nullable=True)
+    secondary_phone = Column(String(64), nullable=True)
+    email = Column(String(255), nullable=True, index=True)
+    hire_date = Column(Date, nullable=True)
+    employment_status = Column(String(64), nullable=True)
+    status = Column(String(64), nullable=False, default="Active", index=True)
+    date_of_birth = Column(Date, nullable=True)
+    birth_place = Column(String(255), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    amo = relationship("AMO", lazy="joined")
+    user = relationship("User", lazy="joined")
 
 
 class UserActiveContext(Base):

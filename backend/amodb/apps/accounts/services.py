@@ -488,6 +488,7 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
         role=data.role,
         position_title=data.position_title,
         phone=data.phone,
+        secondary_phone=data.secondary_phone,
         regulatory_authority=data.regulatory_authority,
         licence_number=(data.licence_number or "").strip() or None,
         licence_state_or_country=(data.licence_state_or_country or "").strip()
@@ -537,6 +538,8 @@ def update_user(
         user.position_title = data.position_title
     if data.phone is not None:
         user.phone = data.phone
+    if data.secondary_phone is not None:
+        user.secondary_phone = data.secondary_phone
     if "department_id" in data.model_fields_set:
         department_id = (data.department_id or "").strip() or None
         if department_id:
@@ -1028,6 +1031,7 @@ def change_password(
     _validate_password_strength(new_password)
     user.hashed_password = get_password_hash(new_password)
     user.must_change_password = False
+    user.password_changed_at = datetime.now(timezone.utc)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -1145,6 +1149,7 @@ def redeem_password_reset_token(
     _validate_password_strength(new_password)
     user.hashed_password = get_password_hash(new_password)
     user.must_change_password = False
+    user.password_changed_at = datetime.now(timezone.utc)
     db.add(user)
     db.commit()
     db.refresh(user)
