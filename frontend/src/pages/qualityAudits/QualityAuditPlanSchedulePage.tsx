@@ -11,6 +11,7 @@ import {
   type QMSAuditScheduleFrequency,
 } from "../../services/qms";
 import { getDueMessage } from "./dueStatus";
+import { selectRelevantDueSchedule } from "../../utils/auditDate";
 
 type PlannerView = "calendar" | "list" | "table";
 
@@ -103,7 +104,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   });
 
   const schedules = schedulesQuery.data ?? [];
-  const nearestDue = useMemo(() => schedules.filter((s) => !!s.next_due_date).sort((a, b) => a.next_due_date.localeCompare(b.next_due_date))[0] ?? null, [schedules]);
+  const nearestDue = useMemo(() => selectRelevantDueSchedule(schedules, new Date(tick)), [schedules, tick]);
   const dueBanner = getDueMessage(new Date(tick), nearestDue?.next_due_date);
 
   return (

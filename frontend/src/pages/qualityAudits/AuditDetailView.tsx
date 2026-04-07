@@ -25,6 +25,7 @@ import {
 import { computeReadiness } from "./readiness";
 import { getDueMessage } from "./dueStatus";
 import FindingDrawer from "./FindingDrawer";
+import { selectRelevantDueAudit } from "../../utils/auditDate";
 
 type Props = {
   amoCode: string;
@@ -264,12 +265,13 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     [findingRows, selectedFindingId]
   );
 
-  const upcomingAudit = useMemo(() => {
-    const planned = scheduleAudits
-      .filter((audit) => audit.status !== "CLOSED")
-      .sort((a, b) => (a.planned_start || "9999").localeCompare(b.planned_start || "9999"));
-    return planned[0] ?? scheduleAudits[0] ?? null;
-  }, [scheduleAudits]);
+  const [tick, setTick] = useState(Date.now());
+  useEffect(() => { const id = window.setInterval(() => setTick(Date.now()), 60_000); return () => window.clearInterval(id); }, []);
+
+  const upcomingAudit = useMemo(
+    () => selectRelevantDueAudit(scheduleAudits, new Date(tick)) ?? scheduleAudits[0] ?? null,
+    [scheduleAudits, tick],
+  );
 
   const trendData = useMemo<TrendDatum[]>(() => {
     const grouped = new Map<string, number>();

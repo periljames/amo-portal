@@ -1007,7 +1007,9 @@ button,
 
 .app-shell__main {
   flex: 1;
-  padding: 16px 18px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 28px;
   border-radius: 22px;
   background: linear-gradient(
     135deg,
@@ -1028,6 +1030,7 @@ button,
 
 .app-shell__main-inner {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
