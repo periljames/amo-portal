@@ -37,6 +37,7 @@ from ..exports import build_evidence_pack
 from . import models as training_models
 from . import schemas as training_schemas
 from ..workflow import apply_transition, TransitionError
+from .courses_import import import_courses_rows, parse_courses_sheet
 
 router = APIRouter(
     prefix="/training",
@@ -618,6 +619,9 @@ def create_course(
         course_name=payload.course_name.strip(),
         frequency_months=payload.frequency_months,
         category=payload.category,
+        category_raw=(payload.category_raw.strip() if payload.category_raw else None),
+        status=payload.status.strip(),
+        scope=(payload.scope.strip() if payload.scope else None),
         kind=payload.kind,
         delivery_method=payload.delivery_method,
         regulatory_reference=payload.regulatory_reference,
@@ -644,6 +648,33 @@ def create_course(
     db.commit()
     db.refresh(course)
     return course
+
+
+@router.post(
+    "/courses/import",
+    response_model=training_schemas.CourseImportSummary,
+    summary="Import training courses from Courses worksheet (dry-run by default)",
+)
+async def import_courses(
+    file: UploadFile = File(...),
+    dry_run: bool = True,
+    sheet_name: str = "Courses",
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+    try:
+        rows = parse_courses_sheet(content, filename=file.filename or "courses.xlsx", sheet_name=sheet_name)
+        summary = import_courses_rows(db, amo_id=current_user.amo_id, rows=rows, dry_run=dry_run)
+        return summary
+    except (ValueError, RuntimeError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Courses import database error: {exc}")
 
 
 @router.put(

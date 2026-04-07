@@ -3,9 +3,13 @@ import { Download, ExternalLink, RefreshCw, ScanLine } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import Drawer from "../components/shared/Drawer";
+import { useToast } from "../components/feedback/ToastProvider";
+import { getCachedUser } from "../services/auth";
 import { listAdminUsers } from "../services/adminUsers";
 import {
+  createTrainingCourse,
   getUserTrainingStatus,
+  importTrainingCoursesWorkbook,
   issueTrainingCertificate,
   listTrainingCertificates,
   listTrainingCourses,
@@ -14,6 +18,8 @@ import {
   listTrainingEvents,
   listTrainingRecords,
   listTrainingRequirements,
+  updateTrainingCourse,
+  type TransferProgress,
   updateTrainingEventParticipant,
 } from "../services/training";
 import type {
@@ -117,6 +123,30 @@ const TrainingCompetencePage: React.FC = () => {
   const [statusRows, setStatusRows] = useState<TrainingStatusItem[]>([]);
   const [requirementsCount, setRequirementsCount] = useState(0);
   const [drawer, setDrawer] = useState<{ title: string; body: React.ReactNode } | null>(null);
+  const { pushToast } = useToast();
+  const currentUser = getCachedUser();
+  const canManageCourses = Boolean(
+    currentUser?.is_superuser || currentUser?.is_amo_admin || currentUser?.role === "QUALITY_MANAGER"
+  );
+  const [courseFormOpen, setCourseFormOpen] = useState(false);
+  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
+  const [savingCourse, setSavingCourse] = useState(false);
+  const [courseForm, setCourseForm] = useState({
+    course_id: "",
+    course_name: "",
+    frequency_months: "",
+    status: "One_Off",
+    category_raw: "",
+    is_mandatory: false,
+    scope: "",
+    regulatory_reference: "",
+  });
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importDryRun, setImportDryRun] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<TransferProgress | null>(null);
+  const [importSummary, setImportSummary] = useState<any | null>(null);
 
   useEffect(() => {
     if (sectionParam !== section) setSection(sectionParam);
@@ -187,6 +217,101 @@ const TrainingCompetencePage: React.FC = () => {
   useEffect(() => {
     void load();
   }, []);
+
+  const openCreateCourse = () => {
+    setEditingCourseId(null);
+    setCourseForm({
+      course_id: "",
+      course_name: "",
+      frequency_months: "",
+      status: "One_Off",
+      category_raw: "",
+      is_mandatory: false,
+      scope: "",
+      regulatory_reference: "",
+    });
+    setCourseFormOpen(true);
+  };
+
+  const openEditCourse = (course: TrainingCourseRead) => {
+    setEditingCourseId(course.id);
+    setCourseForm({
+      course_id: course.course_id || "",
+      course_name: course.course_name || "",
+      frequency_months:
+        course.frequency_months == null || Number.isNaN(course.frequency_months)
+          ? ""
+          : String(course.frequency_months),
+      status: (course.status || "One_Off") as string,
+      category_raw: (course.category_raw || "") as string,
+      is_mandatory: Boolean(course.is_mandatory),
+      scope: (course.scope || "") as string,
+      regulatory_reference: (course.regulatory_reference || "") as string,
+    });
+    setCourseFormOpen(true);
+  };
+
+  const submitCourse = async () => {
+    if (!courseForm.course_id.trim() || !courseForm.course_name.trim()) {
+      pushToast({ title: "Missing fields", message: "Course ID and Course Name are required.", variant: "error" });
+      return;
+    }
+    setSavingCourse(true);
+    try {
+      const payload = {
+        course_id: courseForm.course_id.trim(),
+        course_name: courseForm.course_name.trim(),
+        frequency_months: courseForm.frequency_months.trim() ? Number(courseForm.frequency_months.trim()) : null,
+        status: courseForm.status,
+        category_raw: courseForm.category_raw.trim() || null,
+        scope: courseForm.scope.trim() || null,
+        regulatory_reference: courseForm.regulatory_reference.trim() || null,
+        is_mandatory: courseForm.is_mandatory,
+        mandatory_for_all: false,
+      };
+      if (editingCourseId) {
+        await updateTrainingCourse(editingCourseId, payload);
+        pushToast({ title: "Course updated", message: `${payload.course_id} updated successfully.`, variant: "info" });
+      } else {
+        await createTrainingCourse(payload);
+        pushToast({ title: "Course created", message: `${payload.course_id} created successfully.`, variant: "info" });
+      }
+      setCourseFormOpen(false);
+      await load();
+    } catch (e: any) {
+      pushToast({ title: "Save failed", message: e?.message || "Unable to save course.", variant: "error" });
+    } finally {
+      setSavingCourse(false);
+    }
+  };
+
+  const runImport = async () => {
+    if (!importFile) {
+      pushToast({ title: "No file selected", message: "Choose a COURSES.xlsx file first.", variant: "error" });
+      return;
+    }
+    setImporting(true);
+    setImportProgress(null);
+    setImportSummary(null);
+    try {
+      const summary = await importTrainingCoursesWorkbook(importFile, {
+        dryRun: importDryRun,
+        sheetName: "Courses",
+        onProgress: setImportProgress,
+      });
+      setImportSummary(summary);
+      pushToast({
+        title: importDryRun ? "Dry-run completed" : "Import completed",
+        message: `${summary.created_courses} created, ${summary.updated_courses} updated, ${summary.skipped_rows} skipped.`,
+        variant: "info",
+      });
+      if (!importDryRun) await load();
+    } catch (e: any) {
+      pushToast({ title: "Import failed", message: e?.message || "Could not import courses.", variant: "error" });
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const summary = useMemo(
     () => ({
@@ -281,6 +406,10 @@ const TrainingCompetencePage: React.FC = () => {
             records={records}
             certificates={certificates}
             deferrals={deferrals}
+            canManageCourses={canManageCourses}
+            onOpenCreateCourse={openCreateCourse}
+            onOpenEditCourse={openEditCourse}
+            onOpenImportCourses={() => setImportOpen(true)}
             load={load}
             setDrawer={setDrawer}
             navigate={navigate}
@@ -293,6 +422,55 @@ const TrainingCompetencePage: React.FC = () => {
 
       <Drawer title={drawer?.title || "Details"} isOpen={Boolean(drawer)} onClose={() => setDrawer(null)}>
         <div style={{ padding: 16 }}>{drawer?.body}</div>
+      </Drawer>
+
+      <Drawer
+        title={editingCourseId ? "Modify course" : "Create course"}
+        isOpen={courseFormOpen}
+        onClose={() => setCourseFormOpen(false)}
+      >
+        <div style={{ padding: 16, display: "grid", gap: 10 }}>
+          <input className="input" placeholder="Course ID" value={courseForm.course_id} onChange={(e) => setCourseForm((p) => ({ ...p, course_id: e.target.value }))} />
+          <input className="input" placeholder="Course name" value={courseForm.course_name} onChange={(e) => setCourseForm((p) => ({ ...p, course_name: e.target.value }))} />
+          <input className="input" placeholder="Frequency months (blank allowed)" value={courseForm.frequency_months} onChange={(e) => setCourseForm((p) => ({ ...p, frequency_months: e.target.value }))} />
+          <select className="input" value={courseForm.status} onChange={(e) => setCourseForm((p) => ({ ...p, status: e.target.value }))}>
+            <option value="Initial">Initial</option>
+            <option value="Recurrent">Recurrent</option>
+            <option value="One_Off">One_Off</option>
+          </select>
+          <input className="input" placeholder="Category (raw)" value={courseForm.category_raw} onChange={(e) => setCourseForm((p) => ({ ...p, category_raw: e.target.value }))} />
+          <input className="input" placeholder="Scope (e.g. All Staff)" value={courseForm.scope} onChange={(e) => setCourseForm((p) => ({ ...p, scope: e.target.value }))} />
+          <input className="input" placeholder="Reference" value={courseForm.regulatory_reference} onChange={(e) => setCourseForm((p) => ({ ...p, regulatory_reference: e.target.value }))} />
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="checkbox" checked={courseForm.is_mandatory} onChange={(e) => setCourseForm((p) => ({ ...p, is_mandatory: e.target.checked }))} />
+            Mandatory
+          </label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="secondary-chip-btn" onClick={() => setCourseFormOpen(false)} disabled={savingCourse}>Cancel</button>
+            <button type="button" className="secondary-chip-btn" onClick={submitCourse} disabled={savingCourse}>
+              {savingCourse ? "Saving…" : editingCourseId ? "Update course" : "Create course"}
+            </button>
+          </div>
+        </div>
+      </Drawer>
+
+      <Drawer title="Import courses workbook" isOpen={importOpen} onClose={() => setImportOpen(false)}>
+        <div style={{ padding: 16, display: "grid", gap: 10 }}>
+          <input type="file" accept=".xlsx,.xlsm,.xltx,.xltm" onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="checkbox" checked={importDryRun} onChange={(e) => setImportDryRun(e.target.checked)} />
+            Dry-run only
+          </label>
+          {importProgress?.percent != null ? <p className="text-muted" style={{ margin: 0 }}>Uploading… {importProgress.percent.toFixed(1)}%</p> : null}
+          <button type="button" className="secondary-chip-btn" onClick={runImport} disabled={importing}>
+            {importing ? "Processing…" : importDryRun ? "Run dry-run import" : "Run live import"}
+          </button>
+          {importSummary ? (
+            <p className="text-muted" style={{ margin: 0 }}>
+              Rows: {importSummary.total_rows} · Created: {importSummary.created_courses} · Updated: {importSummary.updated_courses} · Skipped: {importSummary.skipped_rows}
+            </p>
+          ) : null}
+        </div>
       </Drawer>
     </QMSLayout>
   );
@@ -307,6 +485,10 @@ type SectionContentProps = {
   records: TrainingRecordRead[];
   certificates: TrainingRecordRead[];
   deferrals: TrainingDeferralRequestRead[];
+  canManageCourses: boolean;
+  onOpenCreateCourse: () => void;
+  onOpenEditCourse: (course: TrainingCourseRead) => void;
+  onOpenImportCourses: () => void;
   load: () => Promise<void>;
   setDrawer: (d: { title: string; body: React.ReactNode } | null) => void;
   navigate: ReturnType<typeof useNavigate>;
@@ -324,6 +506,10 @@ const SectionContent: React.FC<SectionContentProps> = ({
   records,
   certificates,
   deferrals,
+  canManageCourses,
+  onOpenCreateCourse,
+  onOpenEditCourse,
+  onOpenImportCourses,
   load,
   setDrawer,
   navigate,
@@ -350,6 +536,28 @@ const SectionContent: React.FC<SectionContentProps> = ({
       <section className="card">
         <h3 style={{ marginTop: 0 }}>Training Matrix</h3>
         <p className="text-muted">Courses: {courses.length} · Requirements: {requirementsCount}</p>
+        {canManageCourses ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            <button type="button" className="secondary-chip-btn" onClick={onOpenCreateCourse}>
+              + New course
+            </button>
+            <button type="button" className="secondary-chip-btn" onClick={onOpenImportCourses}>
+              Import COURSES.xlsx
+            </button>
+          </div>
+        ) : null}
+        {canManageCourses && courses.length > 0 ? (
+          <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+            {courses.slice(0, 12).map((course) => (
+              <div key={course.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
+                <span>{course.course_id} · {course.course_name}</span>
+                <button type="button" className="secondary-chip-btn" onClick={() => onOpenEditCourse(course)}>
+                  Modify
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/training`)}>
           Open matrix
         </button>

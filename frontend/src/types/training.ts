@@ -37,6 +37,9 @@ export interface TrainingCourseBase {
   frequency_months: number | null;
 
   category?: string | null;     // e.g. "REGULATORY", "INTERNAL"
+  category_raw?: string | null; // raw spreadsheet category
+  status?: string;              // Initial / Recurrent / One_Off
+  scope?: string | null;        // e.g. All Staff
   kind?: string | null;         // e.g. "INITIAL", "REFRESHER"
   delivery_method?: string | null; // e.g. "CLASSROOM", "ONLINE", "CBT"
 
@@ -61,6 +64,9 @@ export interface TrainingCourseUpdate {
   course_name?: string;
   frequency_months?: number | null;
   category?: string | null;
+  category_raw?: string | null;
+  status?: string;
+  scope?: string | null;
   kind?: string | null;
   delivery_method?: string | null;
   regulatory_reference?: string | null;
@@ -80,6 +86,21 @@ export interface TrainingCourseRead extends TrainingCourseBase {
   updated_by_user_id: string | null;
   created_at?: string; // ISO datetime
   updated_at?: string; // ISO datetime
+}
+
+export interface CourseImportRowIssue {
+  row_number: number;
+  course_id?: string | null;
+  reason: string;
+}
+
+export interface CourseImportSummary {
+  dry_run: boolean;
+  total_rows: number;
+  created_courses: number;
+  updated_courses: number;
+  skipped_rows: number;
+  issues: CourseImportRowIssue[];
 }
 
 // ---------------------------------------------------------------------------

@@ -51,6 +51,7 @@ import type {
   TrainingStatusItem,
   TrainingNotificationRead,
   TrainingNotificationMarkRead,
+  CourseImportSummary,
 } from "../types/training";
 
 export type TrainingFileReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
@@ -152,6 +153,57 @@ export async function updateTrainingCourse(
       headers: authHeaders(),
     } as RequestInit,
   );
+}
+
+export async function importTrainingCoursesWorkbook(
+  file: File,
+  opts?: { dryRun?: boolean; sheetName?: string; onProgress?: (progress: TransferProgress) => void }
+): Promise<CourseImportSummary> {
+  const dryRun = opts?.dryRun ?? true;
+  const sheetName = opts?.sheetName ?? "Courses";
+  const onProgress = opts?.onProgress;
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const startedAt = performance.now();
+    const apiBaseUrl = getApiBaseUrl();
+    const qs = new URLSearchParams({
+      dry_run: String(dryRun),
+      sheet_name: sheetName,
+    });
+    xhr.open("POST", `${apiBaseUrl}/training/courses/import?${qs.toString()}`);
+    const headers = authHeaders();
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!onProgress) return;
+      const total = event.lengthComputable ? event.total : undefined;
+      onProgress(buildSpeed(event.loaded, total, startedAt));
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(xhr.responseText || `Request failed (${xhr.status})`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as CourseImportSummary);
+      } catch {
+        reject(new Error("Invalid courses import response."));
+      }
+    });
+    xhr.addEventListener("error", () => reject(new Error("Network error while importing courses workbook.")));
+
+    const fd = new FormData();
+    fd.append("file", file);
+    xhr.send(fd);
+  });
 }
 
 // ---------------------------------------------------------------------------

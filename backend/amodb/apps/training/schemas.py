@@ -53,6 +53,12 @@ class TrainingCourseBase(BaseModel):
         TrainingCourseCategory.OTHER,
         description="Broad bucket (HF, FTS, EWIS, SMS, TYPE, INTERNAL_TECHNICAL, etc.).",
     )
+    category_raw: Optional[str] = Field(
+        None,
+        description="Raw spreadsheet category value (free text) when importing external course catalogs.",
+    )
+    status: str = Field("One_Off", description="Course status from source catalog (Initial/Recurrent/One_Off).")
+    scope: Optional[str] = Field(None, description="Optional applicability scope from source catalog.")
     kind: TrainingKind = Field(TrainingKind.OTHER, description="INITIAL / RECURRENT / REFRESHER / CONTINUATION / OTHER.")
     delivery_method: TrainingDeliveryMethod = Field(
         TrainingDeliveryMethod.CLASSROOM,
@@ -66,7 +72,7 @@ class TrainingCourseBase(BaseModel):
     default_provider: Optional[str] = None
     default_duration_days: Optional[int] = 1
 
-    is_mandatory: bool = Field(True, description="True if this is a required course for some staff group.")
+    is_mandatory: bool = Field(False, description="True if this is a required course for some staff group.")
     mandatory_for_all: bool = Field(False, description="True if all staff in the AMO must hold this training.")
 
     prerequisite_course_id: Optional[str] = Field(
@@ -87,6 +93,9 @@ class TrainingCourseUpdate(BaseModel):
     course_name: Optional[str] = None
     frequency_months: Optional[int] = None
     category: Optional[TrainingCourseCategory] = None
+    category_raw: Optional[str] = None
+    status: Optional[str] = None
+    scope: Optional[str] = None
     kind: Optional[TrainingKind] = None
     delivery_method: Optional[TrainingDeliveryMethod] = None
     regulatory_reference: Optional[str] = None
@@ -586,3 +595,18 @@ class TrainingQualityDashboard(BaseModel):
 
     summary: TrainingDashboardSummary
     top_overdue: List[TrainingStatusItem] = Field(default_factory=list, description="Optional: most urgent overdue items.")
+
+
+class CourseImportRowIssue(BaseModel):
+    row_number: int
+    course_id: Optional[str] = None
+    reason: str
+
+
+class CourseImportSummary(BaseModel):
+    dry_run: bool
+    total_rows: int
+    created_courses: int
+    updated_courses: int
+    skipped_rows: int
+    issues: List[CourseImportRowIssue] = Field(default_factory=list)
