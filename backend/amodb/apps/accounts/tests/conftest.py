@@ -28,6 +28,7 @@ def db_session():
             models.AMOAsset.__table__,
             models.Department.__table__,
             models.User.__table__,
+            models.PersonnelProfile.__table__,
             models.UserActiveContext.__table__,
             models.AuthorisationType.__table__,
             models.UserAuthorisation.__table__,

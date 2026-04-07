@@ -1,5 +1,7 @@
 export const NOTIFICATION_PREFS_EVENT = "amodb:notification-prefs";
 const PREFS_STORAGE_KEY = "amodb_notification_preferences";
+let sharedAudioCtx: AudioContext | null = null;
+let unlockBound = false;
 
 export type NotificationPreferences = {
   audioEnabled: boolean;
@@ -52,7 +54,27 @@ export function playNotificationChirp(): void {
   const AudioCtx = (window as Window & { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext
     || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioCtx) return;
-  const ctx = new AudioCtx();
+  if (!unlockBound) {
+    const unlock = () => {
+      if (!sharedAudioCtx) {
+        sharedAudioCtx = new AudioCtx();
+      }
+      if (sharedAudioCtx.state === "suspended") {
+        void sharedAudioCtx.resume().catch(() => undefined);
+      }
+    };
+    window.addEventListener("pointerdown", unlock, { passive: true });
+    window.addEventListener("keydown", unlock, { passive: true });
+    unlockBound = true;
+  }
+  if (!sharedAudioCtx) {
+    return;
+  }
+  if (sharedAudioCtx.state === "suspended") {
+    void sharedAudioCtx.resume().catch(() => undefined);
+    return;
+  }
+  const ctx = sharedAudioCtx;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = "sine";
@@ -64,9 +86,6 @@ export function playNotificationChirp(): void {
   gain.connect(ctx.destination);
   osc.start();
   osc.stop(ctx.currentTime + 0.18);
-  window.setTimeout(() => {
-    void ctx.close();
-  }, 250);
 }
 
 export async function pushDesktopNotification(title: string, body: string): Promise<void> {

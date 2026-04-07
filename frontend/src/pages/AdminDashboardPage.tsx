@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { useToast } from "../components/feedback/ToastProvider";
 import {
   Button,
   EmptyState,
@@ -23,6 +24,7 @@ import {
   updateAdminUser,
   updateAdminDepartment,
   setAdminContext,
+  importPersonnelFile,
 } from "../services/adminUsers";
 import { isPortalGoLive, setPortalGoLive } from "../services/runtimeMode";
 import type {
@@ -30,6 +32,7 @@ import type {
   AdminDepartmentCreatePayload,
   AdminDepartmentRead,
   AdminUserRead,
+  PersonnelImportSummary,
   DataMode,
 } from "../services/adminUsers";
 import { LS_ACTIVE_AMO_ID } from "../services/adminUsers";
@@ -86,7 +89,14 @@ const AdminDashboardPage: React.FC = () => {
   const [goLiveActive, setGoLiveActive] = useState<boolean>(() => isPortalGoLive());
   const [goLiveSaving, setGoLiveSaving] = useState(false);
   const [goLiveMessage, setGoLiveMessage] = useState<string | null>(null);
+  const [personnelFile, setPersonnelFile] = useState<File | null>(null);
+  const [personnelBusy, setPersonnelBusy] = useState(false);
+  const [personnelResult, setPersonnelResult] = useState<PersonnelImportSummary | null>(null);
+  const [personnelError, setPersonnelError] = useState<string | null>(null);
+  const [personnelNotice, setPersonnelNotice] = useState<string | null>(null);
+  const [conflictDecisions, setConflictDecisions] = useState<Record<number, string>>({});
   const contextInitRef = useRef(false);
+  const { pushToast } = useToast();
 
   type AmoFormState = {
     amoCode: string;
@@ -523,6 +533,65 @@ const AdminDashboardPage: React.FC = () => {
     } catch (err: any) {
       setError(err?.message || "Failed to update user status.");
     }
+  };
+
+  const runPersonnelImport = async (dryRun: boolean) => {
+    const actionLabel = dryRun ? "Dry-run" : "Live import";
+    if (!personnelFile) {
+      setPersonnelError("Select PERSONNEL.xlsx first.");
+      return;
+    }
+    if (!effectiveAmoId) {
+      setPersonnelError("No active AMO selected.");
+      return;
+    }
+    try {
+      setPersonnelBusy(true);
+      setPersonnelError(null);
+      setPersonnelNotice(`${actionLabel} in progress…`);
+      const result = await importPersonnelFile({
+        file: personnelFile,
+        dryRun,
+        amoId: isSuperuser ? effectiveAmoId : undefined,
+        sheetName: "People",
+        decisions: conflictDecisions,
+      });
+      setPersonnelResult(result);
+      if (result.conflicts?.length) {
+        setConflictDecisions((prev) => {
+          const next = { ...prev };
+          for (const conflict of result.conflicts) {
+            if (!next[conflict.row_number] && conflict.options.length) {
+              next[conflict.row_number] = conflict.options[0];
+            }
+          }
+          return next;
+        });
+      }
+      setPersonnelNotice(`${actionLabel} completed successfully.`);
+      pushToast({
+        title: `${actionLabel} complete`,
+        message: `Rows processed: ${result.rows_processed}. Created/updated accounts: ${result.created_accounts}/${result.updated_accounts}.`,
+      });
+      if (!dryRun) setSkip(0);
+    } catch (err: any) {
+      setPersonnelError(err?.message || "Personnel import failed.");
+      setPersonnelNotice(null);
+      pushToast({
+        variant: "error",
+        title: `${actionLabel} failed`,
+        message: err?.message || "Personnel import failed.",
+      });
+    } finally {
+      setPersonnelBusy(false);
+    }
+  };
+
+  const clearPersonnelImportState = () => {
+    setPersonnelResult(null);
+    setPersonnelError(null);
+    setPersonnelNotice(null);
+    setConflictDecisions({});
   };
 
   const handleCreateDepartment = async (event: React.FormEvent) => {
@@ -1218,6 +1287,104 @@ const AdminDashboardPage: React.FC = () => {
           </div>
 
           <div className="admin-page__side">
+            <Panel title="Personnel import">
+              <div style={{ display: "grid", gap: 10 }}>
+                <input
+                  type="file"
+                  accept=".xlsx,.xlsm"
+                  onChange={(e) => setPersonnelFile(e.target.files?.[0] ?? null)}
+                />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => runPersonnelImport(true)} disabled={personnelBusy}>
+                    Dry-run People sheet
+                  </Button>
+                  <Button type="button" size="sm" variant="primary" onClick={() => runPersonnelImport(false)} disabled={personnelBusy}>
+                    Import People sheet
+                  </Button>
+                </div>
+                {personnelError && (
+                  <InlineAlert tone="danger" title="Import error">
+                    <span>{personnelError}</span>
+                  </InlineAlert>
+                )}
+                {personnelNotice && !personnelError && (
+                  <InlineAlert tone={personnelBusy ? "info" : "success"} title={personnelBusy ? "Import running" : "Import status"}>
+                    <span>{personnelNotice}</span>
+                  </InlineAlert>
+                )}
+                {personnelResult && (
+                  <div className="text-muted" style={{ fontSize: 12 }}>
+                    <div>Rows: {personnelResult.rows_processed}</div>
+                    <div>Personnel created/updated: {personnelResult.created_personnel}/{personnelResult.updated_personnel}</div>
+                    <div>Accounts created/updated: {personnelResult.created_accounts}/{personnelResult.updated_accounts}</div>
+                    <div>Skipped accounts: {personnelResult.skipped_accounts}</div>
+                    <div>Rejected rows: {personnelResult.rejected_rows}</div>
+                    <div>Conflicts: {personnelResult.conflicts?.length ?? 0}</div>
+                    {personnelResult.issues.slice(0, 5).map((issue, idx) => (
+                      <div key={`${issue.row_number}-${idx}`}>Row {issue.row_number}: {issue.reason}</div>
+                    ))}
+                  </div>
+                )}
+                {!!personnelResult?.conflicts?.length && (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <strong>Resolve conflicts before live import</strong>
+                    <div className="text-muted" style={{ fontSize: 12 }}>
+                      Your selections are staged only. Click one of the action buttons below to apply them.
+                    </div>
+                    {personnelResult.conflicts.map((conflict, idx) => (
+                      <div key={`${conflict.row_number}-${idx}`} style={{ border: "1px solid #ddd", padding: 8, borderRadius: 6 }}>
+                        <div>Row {conflict.row_number}: {conflict.reason}</div>
+                        <div>Existing email: {conflict.existing_email || "—"} | Imported email: {conflict.imported_email || "—"}</div>
+                        <select
+                          className="input"
+                          value={conflictDecisions[conflict.row_number] || conflict.options[0] || ""}
+                          onChange={(e) =>
+                            setConflictDecisions((prev) => ({
+                              ...prev,
+                              [conflict.row_number]: e.target.value,
+                            }))
+                          }
+                        >
+                          {conflict.options.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <Button type="button" size="sm" variant="primary" onClick={() => runPersonnelImport(false)} disabled={personnelBusy}>
+                        Apply choices & import
+                      </Button>
+                      <Button type="button" size="sm" variant="secondary" onClick={() => runPersonnelImport(true)} disabled={personnelBusy}>
+                        Re-run dry-run with choices
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConflictDecisions({})}
+                        disabled={personnelBusy}
+                      >
+                        Reset choices
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {(personnelResult || personnelError || personnelNotice) && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={clearPersonnelImportState}
+                    disabled={personnelBusy}
+                  >
+                    Clear previous import state
+                  </Button>
+                )}
+              </div>
+            </Panel>
             <Panel title="User actions" compact>
               <Button type="button" size="sm" onClick={handleNewUser}>
                 + Create user
