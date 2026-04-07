@@ -25,6 +25,9 @@ Explicitly excluded from deletion:
 
 No hard-drop execution is allowed unless all six gates are met.
 
+Execution safeguard:
+- The Alembic hard-drop revision is intentionally **no-op** unless all required gate env flags are set to `1` (`AMO_ALLOW_HARD_DROP_LEGACY`, `AMO_RETENTION_APPROVED`, `AMO_CUTOVER_GATES_PASSED`).
+
 ---
 
 ## Candidate A: `technical_aircraft_utilisation`
