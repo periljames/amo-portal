@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Download, Eye, FileText, Filter, Link2 } from "lucide-react";
 import SpreadsheetToolbar from "../components/shared/SpreadsheetToolbar";
@@ -7,7 +7,7 @@ import { useDensityPreference } from "../hooks/useDensityPreference";
 import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
 import { getContext } from "../services/auth";
 import { getApiBaseUrl } from "../services/config";
-import { qmsListAudits, qmsListCars, qmsListCarAttachmentsBulk, qmsListFindingsBulk, type CARAttachmentOut } from "../services/qms";
+import { downloadAuditEvidencePack, downloadCarEvidencePack, qmsListAudits, qmsListCars, qmsListCarAttachmentsBulk, qmsListFindingsBulk, type CARAttachmentOut } from "../services/qms";
 
 type EvidenceRow = {
   id: string;
@@ -46,6 +46,8 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const ctx = getContext();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const filterAuditId = searchParams.get("auditId")?.trim() || "";
   const amoCode = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
   const [wrapText, setWrapText] = useState(false);
@@ -151,19 +153,32 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   const filteredRows = useMemo(() => {
     const q = quickFilter.trim().toLowerCase();
     return evidenceRows.filter((row) => {
+      if (filterAuditId && row.auditId !== filterAuditId) return false;
       if (q && !`${row.ref} ${row.title} ${row.auditTitle} ${row.type} ${row.filename}`.toLowerCase().includes(q)) return false;
       if (headerFilters.ref && !row.ref.toLowerCase().includes(headerFilters.ref.toLowerCase())) return false;
       if (headerFilters.type && !row.type.toLowerCase().includes(headerFilters.type.toLowerCase())) return false;
       if (headerFilters.audit && !`${row.auditTitle} ${row.source}`.toLowerCase().includes(headerFilters.audit.toLowerCase())) return false;
       return true;
     });
-  }, [evidenceRows, headerFilters, quickFilter]);
+  }, [evidenceRows, filterAuditId, headerFilters, quickFilter]);
 
   const loading = cars.isLoading || audits.isLoading || findings.isLoading || attachments.isLoading;
   const cellTextClass = wrapText ? "qms-cell-text qms-cell-text--wrap" : "qms-cell-text qms-cell-text--truncate";
 
   const openViewer = (file: EvidenceRow) => {
     navigate(`/maintenance/${amoCode}/${department}/qms/evidence/${file.id}?name=${encodeURIComponent(file.filename)}&mime=${encodeURIComponent(file.mime)}&url=${encodeURIComponent(file.reviewUrl)}&source=${encodeURIComponent(file.source)}`);
+  };
+
+
+  const saveBlob = (blob: Blob, name: string) => {
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = u;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(u);
   };
 
   const copyLink = async (file: EvidenceRow) => {
@@ -175,6 +190,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   return (
     <QualityAuditsSectionLayout title="Evidence Library" subtitle="Evidence browser with audit-first hierarchy, compact scanning, and reviewer actions.">
       <div className="audit-workspace">
+        {filterAuditId ? <div className="qms-card" style={{ marginBottom: 12 }}><strong>Filtered by audit:</strong> {filterAuditId}</div> : null}
         <div className="audit-workspace__toolbar-row">
           <label className="audit-search" aria-label="Filter evidence rows">
             <Filter size={15} />
@@ -200,7 +216,10 @@ const QualityEvidenceLibraryPage: React.FC = () => {
               <h2 className="audit-panel__title">Evidence browser</h2>
               <p className="audit-panel__subtitle">Human-friendly audit references first, raw filenames demoted to secondary metadata.</p>
             </div>
+            <div className="qms-header__actions">
             <span className="qms-pill">{filteredRows.length} files</span>
+            {filterAuditId ? <button type="button" className="secondary-chip-btn" onClick={() => downloadAuditEvidencePack(filterAuditId).then((b) => saveBlob(b, `audit-${filterAuditId}-evidence.zip`))}>Export audit evidence pack</button> : null}
+          </div>
           </div>
           <div className="table-wrapper">
             <table className={`table ${density === "compact" ? "table-row--compact" : "table-row--comfortable"} ${wrapText ? "table--wrap" : ""}`}>
@@ -251,6 +270,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
                         <a aria-label={`Download ${file.title}`} href={file.reviewUrl} target="_blank" rel="noreferrer" className="secondary-chip-btn"><Download size={14} /> Download</a>
                         <button type="button" aria-label={`Copy link for ${file.title}`} onClick={() => void copyLink(file)} className="secondary-chip-btn"><Link2 size={14} /> Copy</button>
                         {file.auditId ? <button type="button" aria-label={`View audit for ${file.title}`} onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/${file.auditId}`)} className="secondary-chip-btn"><FileText size={14} /> Audit</button> : null}
+                        {file.type === "CAR evidence" ? <button type="button" className="secondary-chip-btn" onClick={() => { const carId = (cars.data ?? []).find((c) => `${c.car_number} · ${c.title}` === file.source)?.id; if (carId) downloadCarEvidencePack(carId).then((b) => saveBlob(b, `car-${carId}-evidence.zip`)); }}>Export CAR pack</button> : null}
                       </div>
                     </td>
                   </tr>

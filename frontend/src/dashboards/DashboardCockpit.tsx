@@ -18,15 +18,15 @@ import ActionPanel, { type ActionPanelContext } from "../components/panels/Actio
 import { getContext } from "../services/auth";
 import { listEventHistory } from "../services/events";
 import { useRealtime } from "../components/realtime/realtimeContext";
-import { qmsGetCockpitSnapshot, type CARStatus, type QMSCockpitSnapshotOut } from "../services/qms";
+import { qmsGetCockpitSnapshot, qmsListAudits, qmsListCars, type CARStatus, type QMSCockpitSnapshotOut } from "../services/qms";
 import type { ActionItem, ActivityItem } from "../components/dashboard/DashboardScaffold";
 import type { QualityCockpitVisualData } from "../components/dashboard/QualityCockpitCanvas";
 import { deepEqual } from "../utils/deepEqual";
-import { isPortalGoLive } from "../services/runtimeMode";
+import { getDueMessage } from "../pages/qualityAudits/dueStatus";
+import { deriveCarMetrics } from "../utils/carMetrics";
+import { selectRelevantDueAudit } from "../utils/auditDate";
 
 const LazyQualityCockpitCanvas = lazy(() => import("../components/dashboard/QualityCockpitCanvas"));
-const ENV_FORCE_MOCK_COCKPIT = import.meta.env.VITE_QMS_MOCK_COCKPIT === "true";
-const ENV_QMS_DEMO_SEED = import.meta.env.VITE_QMS_DEMO_SEED === "true";
 
 const PIE_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6"];
 
@@ -40,11 +40,6 @@ type TileDef = {
 };
 
 type PriorityState = "normal" | "due-soon" | "overdue";
-type CockpitSnapshotView = QMSCockpitSnapshotOut & { __demo?: boolean };
-
-const numberOrDash = (n: number | null | undefined) => (typeof n === "number" ? String(n) : "—");
-const isMissingNumber = (n: number | null | undefined) => typeof n !== "number";
-
 function useReducedMotionPref(): boolean {
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
@@ -58,59 +53,7 @@ function useReducedMotionPref(): boolean {
   return reduced;
 }
 
-function applyDemoSeed(snapshot: QMSCockpitSnapshotOut | undefined, options: { enabled: boolean }): CockpitSnapshotView | undefined {
-  if (!snapshot) return snapshot;
-  if (!options.enabled) return snapshot;
-
-  const seeded: CockpitSnapshotView = { ...snapshot };
-  let usedDemo = false;
-
-  if (!seeded.manpower) {
-    seeded.manpower = {
-      scope: "department",
-      total_employees: 16,
-      by_role: { ENGINEER: 5, TECHNICIAN: 7, QUALITY_INSPECTOR: 2, QUALITY_MANAGER: 2 },
-      availability: { on_duty: 11, away: 3, on_leave: 2 },
-      by_department: [{ department: "Quality", count: 16 }],
-      updated_at: new Date().toISOString(),
-    };
-    usedDemo = true;
-  } else {
-    if (!seeded.manpower.by_role || Object.keys(seeded.manpower.by_role).length === 0) {
-      seeded.manpower.by_role = { ENGINEER: 5, TECHNICIAN: 7, QUALITY_INSPECTOR: 2, QUALITY_MANAGER: 2 };
-      usedDemo = true;
-    }
-    if (!seeded.manpower.availability) {
-      seeded.manpower.availability = { on_duty: 11, away: 3, on_leave: 2 };
-      usedDemo = true;
-    }
-    if (!seeded.manpower.by_department || seeded.manpower.by_department.length === 0) {
-      seeded.manpower.by_department = [{ department: "Quality", count: seeded.manpower.total_employees || 16 }];
-      usedDemo = true;
-    }
-  }
-
-  if (isMissingNumber(seeded.tasks_due_today)) {
-    seeded.tasks_due_today = 4;
-    usedDemo = true;
-  }
-  if (isMissingNumber(seeded.tasks_overdue)) {
-    seeded.tasks_overdue = 3;
-    usedDemo = true;
-  }
-  if (isMissingNumber(seeded.events_hold_count)) {
-    seeded.events_hold_count = 1;
-    usedDemo = true;
-  }
-  if (isMissingNumber(seeded.events_new_count)) {
-    seeded.events_new_count = 6;
-    usedDemo = true;
-  }
-
-  if (usedDemo) seeded.__demo = true;
-  return seeded;
-}
-
+const numberOrDash = (n: number | null | undefined) => (typeof n === "number" ? String(n) : "—");
 const DashboardCockpit: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const navigate = useNavigate();
@@ -121,13 +64,13 @@ const DashboardCockpit: React.FC = () => {
   const queryClient = useQueryClient();
   useRealtime();
   const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
+  const [tick, setTick] = useState(Date.now());
   const [manpowerSlide, setManpowerSlide] = useState(0);
   const [manpowerPaused, setManpowerPaused] = useState(false);
   const [manpowerTickSeed, setManpowerTickSeed] = useState(0);
   const touchResumeTimerRef = useRef<number | null>(null);
   const reducedMotion = useReducedMotionPref();
 
-  const useMockCockpit = ENV_FORCE_MOCK_COCKPIT && !isPortalGoLive();
 
   const { data: activityHistory } = useInfiniteQuery({
     queryKey: ["activity-history", amoCode, department],
@@ -146,7 +89,7 @@ const DashboardCockpit: React.FC = () => {
       if (cached && deepEqual(cached, next)) return cached;
       return next;
     },
-    enabled: qmsEnabled && !useMockCockpit,
+    enabled: qmsEnabled,
     staleTime: 60_000,
     gcTime: 15 * 60_000,
     placeholderData: keepPreviousData,
@@ -155,8 +98,35 @@ const DashboardCockpit: React.FC = () => {
   });
 
   const rawSnapshot = snapshotQuery.data;
-  const demoAllowed = ENV_QMS_DEMO_SEED && !isPortalGoLive() && (amoCode.toLowerCase() === "demo" || !isPortalGoLive());
-  const snapshot = useMemo(() => applyDemoSeed(rawSnapshot, { enabled: demoAllowed }), [demoAllowed, rawSnapshot]);
+  const snapshot = rawSnapshot;
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const auditsQuery = useQuery({
+    queryKey: ["qms-dashboard-audits", amoCode, department],
+    queryFn: () => qmsListAudits({ domain: "AMO" }),
+    enabled: qmsEnabled,
+    staleTime: 60_000,
+  });
+
+  const nearestAudit = useMemo(
+    () => selectRelevantDueAudit(auditsQuery.data ?? [], new Date(tick)),
+    [auditsQuery.data, tick],
+  );
+  const dueBanner = getDueMessage(new Date(tick), null, nearestAudit?.planned_start, nearestAudit?.planned_end);
+
+  const carsQuery = useQuery({
+    queryKey: ["qms-dashboard-cars", amoCode, department, "QUALITY"],
+    queryFn: () => qmsListCars({ program: "QUALITY" }),
+    enabled: qmsEnabled,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+
+  const carMetrics = useMemo(() => deriveCarMetrics(carsQuery.data ?? []), [carsQuery.data]);
 
   useEffect(() => {
     if (!qmsEnabled) {
@@ -191,8 +161,8 @@ const DashboardCockpit: React.FC = () => {
         label: "CARs / CAPA",
         icon: ShieldAlert,
         route: `/maintenance/${amoCode}/${department}/qms/cars`,
-        value: snapshot.cars_open_total,
-        lines: [`Overdue: ${numberOrDash(snapshot.cars_overdue)}`, `Open total: ${numberOrDash(snapshot.cars_open_total)}`],
+        value: carMetrics.open,
+        lines: [`Overdue: ${numberOrDash(carMetrics.overdue)}`, `Open total: ${numberOrDash(carMetrics.open)}`, "Scope: Quality programme"],
       },
       {
         id: "compliance",
@@ -217,7 +187,7 @@ const DashboardCockpit: React.FC = () => {
         id: "change",
         label: "Change control",
         icon: ClipboardList,
-        route: `/maintenance/${amoCode}/${department}/qms/change-requests`,
+        route: `/maintenance/${amoCode}/${department}/qms/change-control`,
         value: snapshot.change_requests_open,
         lines: [
           `Pending approvals: ${numberOrDash(snapshot.change_control_pending_approvals ?? snapshot.change_requests_open)}`,
@@ -249,7 +219,7 @@ const DashboardCockpit: React.FC = () => {
         lines: [`Overdue findings: ${numberOrDash(snapshot.findings_overdue)}`, `Last refresh: ${refresh}`],
       },
     ];
-  }, [amoCode, department, snapshot]);
+  }, [amoCode, carMetrics.open, carMetrics.overdue, department, snapshot]);
 
   const priority = useMemo(() => {
     if (!snapshot) return null;
@@ -259,8 +229,8 @@ const DashboardCockpit: React.FC = () => {
     if ((snapshot.compliance_unplanned_applicable ?? 0) > 0) {
       return { label: "Applicable compliance not planned", route: `/maintenance/${amoCode}/planning/publication-review`, count: snapshot.compliance_unplanned_applicable, state: "due-soon" as PriorityState };
     }
-    if (snapshot.cars_overdue > 0) {
-      return { label: "CAR overdue", route: `/maintenance/${amoCode}/${department}/qms/cars?status=overdue`, count: snapshot.cars_overdue, state: "overdue" as PriorityState };
+    if (carMetrics.overdue > 0) {
+      return { label: "CAR overdue (Quality programme)", route: `/maintenance/${amoCode}/${department}/qms/cars?status=overdue`, count: carMetrics.overdue, state: "overdue" as PriorityState };
     }
     if (snapshot.findings_overdue > 0) {
       return { label: "Findings overdue", route: `/maintenance/${amoCode}/${department}/qms/audits?finding=overdue`, count: snapshot.findings_overdue, state: "overdue" as PriorityState };
@@ -269,7 +239,7 @@ const DashboardCockpit: React.FC = () => {
       return { label: "Training due soon", route: `/maintenance/${amoCode}/${department}/qms/training?window=30d`, count: snapshot.training_records_expiring_30d, state: "due-soon" as PriorityState };
     }
     return { label: "System stable", route: `/maintenance/${amoCode}/${department}/qms/kpis`, count: 0, state: "normal" as PriorityState };
-  }, [amoCode, department, snapshot]);
+  }, [amoCode, carMetrics.overdue, department, snapshot]);
 
   const visualData: QualityCockpitVisualData = useMemo(() => {
     if (!snapshot) {
@@ -282,15 +252,15 @@ const DashboardCockpit: React.FC = () => {
     return {
       kpis: [
         { id: "pending_ack", label: "Pending acknowledgements", value: snapshot.pending_acknowledgements, accent: "amber", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
-        { id: "cars_overdue", label: "CAR overdue", value: snapshot.cars_overdue, accent: "rose", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue`) },
+        { id: "cars_overdue", label: "CAR overdue", value: carMetrics.overdue, accent: "rose", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue`) },
         { id: "findings", label: "Open findings", value: snapshot.findings_open_total, accent: "navy", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/audits`) },
       ],
-      qualityScore: Math.max(0, 100 - snapshot.findings_overdue * 2 - snapshot.cars_overdue * 3),
+      qualityScore: Math.max(0, 100 - snapshot.findings_overdue * 2 - carMetrics.overdue * 3),
       fatalErrorsBySupervisor: [],
       fatalErrorsByLocation: [],
       fatalErrorsByMonth: [],
       mostCommonFindingTrend:
-        snapshot.most_common_finding_trend_12m?.map((row) => ({
+        snapshot.most_common_finding_trend_12m?.map((row: any) => ({
           month: new Date(row.period_start).toLocaleDateString(undefined, { month: "short", year: "2-digit" }),
           value: row.count,
           route: `/maintenance/${amoCode}/${department}/qms/audits?finding_type=${encodeURIComponent(row.finding_type)}`,
@@ -298,7 +268,7 @@ const DashboardCockpit: React.FC = () => {
       mostCommonFindingTypeLabel: snapshot.most_common_finding_trend_12m?.[0]?.finding_type?.replaceAll("_", " ") ?? null,
       samplesVsDefects: [],
       fatalErrorsByEmployee: [],
-      manpowerByRole: Object.entries(snapshot.manpower?.by_role || {}).map(([name, value]) => ({ name, value, route: `/maintenance/${amoCode}/${department}/qms/training` })),
+      manpowerByRole: Object.entries(snapshot.manpower?.by_role || {}).map(([name, value]) => ({ name, value: Number(value) || 0, route: `/maintenance/${amoCode}/${department}/qms/training` })),
       manpower: {
         on_duty_total: snapshot.manpower?.availability?.on_duty ?? 0,
         engineers: snapshot.manpower?.by_role?.ENGINEER ?? 0,
@@ -306,24 +276,27 @@ const DashboardCockpit: React.FC = () => {
         inspectors: snapshot.manpower?.by_role?.QUALITY_INSPECTOR ?? 0,
       },
     };
-  }, [amoCode, department, snapshot]);
+  }, [amoCode, carMetrics.overdue, department, snapshot]);
 
   const actionItems = useMemo<ActionItem[]>(
     () =>
-      (snapshot?.action_queue || []).map((item) => ({
+      (snapshot?.action_queue || []).map((item: { id: string; kind: string; title: string; status: string; assignee_user_id?: string | null }) => ({
         id: item.id,
         type: item.kind,
         title: item.title,
         status: item.status,
         ownerId: item.assignee_user_id || undefined,
-        onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/cars?carId=${item.id}`),
+        onClick: () => {
+          if (item.kind === "CAR") { nav(`/maintenance/${amoCode}/${department}/qms/cars?carId=${item.id}`); return; }
+          if (item.kind === "COMPLIANCE") { nav(`/maintenance/${amoCode}/planning/compliance-actions`); return; }
+        },
       })),
     [amoCode, department, snapshot]
   );
 
   const historyRows = activityHistory?.pages.flatMap((p) => p.items || []) || [];
   const activityItems = useMemo<ActivityItem[]>(() => {
-    return historyRows.slice(0, 24).map((row) => ({
+    return historyRows.slice(0, 24).map((row: any) => ({
       id: `${row.id}`,
       summary: row.action || row.entityType || "Activity",
       timestamp: row.timestamp || "",
@@ -441,6 +414,14 @@ const DashboardCockpit: React.FC = () => {
         <strong>{priority?.count ?? 0}</strong>
       </div>
 
+
+      {dueBanner && nearestAudit ? (
+        <div className="qms-card" style={{ marginBottom: 12 }}>
+          <strong>{dueBanner.label}</strong>
+          <div className="text-muted">{nearestAudit.audit_ref} · {nearestAudit.title} · CAR scope: Quality programme</div>
+        </div>
+      ) : null}
+
       <section className="quality-navigator quality-navigator--operational" aria-label="Quality Navigator">
         <div className="quality-navigator__grid quality-navigator__grid--dense">
           {navigatorTiles.map((tile) => {
@@ -483,8 +464,7 @@ const DashboardCockpit: React.FC = () => {
             <p>{manpower?.scope === "tenant" ? "Tenant scope" : "Department scope"}</p>
           </div>
           <div className="qms-manpower-module__controls">
-            {snapshot?.__demo ? <span className="qms-demo-badge">DEMO DATA</span> : null}
-            <button type="button" onClick={() => goToSlide((manpowerSlide - 1 + slides.length) % slides.length)} aria-label="Previous manpower slide">
+                        <button type="button" onClick={() => goToSlide((manpowerSlide - 1 + slides.length) % slides.length)} aria-label="Previous manpower slide">
               ‹
             </button>
             <button type="button" onClick={() => goToSlide((manpowerSlide + 1) % slides.length)} aria-label="Next manpower slide">

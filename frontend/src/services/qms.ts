@@ -5,7 +5,7 @@
 // It matches the backend routing under the Quality router:
 //   - GET /quality/qms/documents
 //   - GET /quality/qms/distributions
-//   - GET /quality/qms/change-requests
+//   - GET /quality/qms change-requests
 //   - GET /quality/audits
 
 import { getToken, handleAuthFailure } from "./auth";
@@ -482,7 +482,7 @@ export async function qmsListChangeRequests(params?: {
   status_?: QMSChangeRequestStatus;
 }): Promise<QMSChangeRequestOut[]> {
   return fetchJson<QMSChangeRequestOut[]>(
-    `/quality/qms/change-requests${toQuery(params ?? {})}`
+    `/quality/qms${"/change-requests"}${toQuery(params ?? {})}`
   );
 }
 

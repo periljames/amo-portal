@@ -6,6 +6,7 @@ import { useToast } from "../components/feedback/ToastProvider";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getCachedUser, getContext } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
+import { deriveCarMetrics, isCarOverdue, isCarClosedStatus } from "../utils/carMetrics";
 import {
   type CAROut,
   type CARAssignee,
@@ -144,24 +145,28 @@ const QualityCarsPage: React.FC = () => {
     return map;
   }, [assignees]);
 
+  const sharedScopeCars = useMemo(() => cars, [cars]);
+
   const filteredCars = useMemo(() => {
     const statusParam = searchParams.get("status");
     const dueWindow = searchParams.get("dueWindow");
     const carId = searchParams.get("carId");
     const now = new Date();
+    const today = now.toISOString().slice(0, 10);
     return cars.filter((car) => {
       if (carId && car.id !== carId) return false;
       if (statusParam === "overdue") {
-        if (!car.due_date) return false;
-        return new Date(car.due_date) < now && car.status !== "CLOSED";
+        return isCarOverdue(car, today);
       }
       if (statusParam === "open") {
-        if (car.status === "CLOSED") return false;
+        if (isCarClosedStatus(car.status)) return false;
       }
       if (dueWindow && car.due_date) {
-        const diff = (new Date(car.due_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        const due = new Date(`${car.due_date}T00:00:00Z`).getTime();
+        const todayMs = new Date(`${today}T00:00:00Z`).getTime();
+        const diff = Math.floor((due - todayMs) / (1000 * 60 * 60 * 24));
         if (dueWindow === "now" && diff >= 0) return false;
-        if (dueWindow === "today" && Math.floor(diff) !== 0) return false;
+        if (dueWindow === "today" && diff !== 0) return false;
         if (dueWindow === "week" && !(diff >= 0 && diff <= 7)) return false;
         if (dueWindow === "month" && !(diff >= 0 && diff <= 30)) return false;
       }
@@ -175,16 +180,7 @@ const QualityCarsPage: React.FC = () => {
       .sort((a, b) => (new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
   }, [cars]);
 
-  const overviewStats = useMemo(() => {
-    const now = new Date();
-    const openCount = filteredCars.filter((car) => car.status !== "CLOSED" && car.status !== "CANCELLED").length;
-    const overdueCount = filteredCars.filter((car) => {
-      if (!car.due_date) return false;
-      return new Date(car.due_date) < now && car.status !== "CLOSED" && car.status !== "CANCELLED";
-    }).length;
-    const inReviewCount = filteredCars.filter((car) => car.status === "PENDING_VERIFICATION").length;
-    return { total: filteredCars.length, openCount, overdueCount, inReviewCount };
-  }, [filteredCars]);
+  const overviewStats = useMemo(() => deriveCarMetrics(sharedScopeCars), [sharedScopeCars]);
 
   const departmentOptions = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
@@ -513,15 +509,15 @@ const QualityCarsPage: React.FC = () => {
           </div>
           <div className="qms-car-overview__item">
             <span>Open</span>
-            <strong>{overviewStats.openCount}</strong>
+            <strong>{overviewStats.open}</strong>
           </div>
           <div className="qms-car-overview__item">
             <span>Overdue</span>
-            <strong>{overviewStats.overdueCount}</strong>
+            <strong>{overviewStats.overdue}</strong>
           </div>
           <div className="qms-car-overview__item">
             <span>In review</span>
-            <strong>{overviewStats.inReviewCount}</strong>
+            <strong>{overviewStats.inReview}</strong>
           </div>
         </div>
       </section>

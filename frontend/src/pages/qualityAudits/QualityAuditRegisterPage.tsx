@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ClipboardList, ShieldAlert, TableProperties } from "lucide-react";
 import SpreadsheetToolbar from "../../components/shared/SpreadsheetToolbar";
-import { ResponsiveSegmentedControl } from "../../components/qms/ResponsiveSegmentedControl";
+import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegmentedControl";
 import { useDensityPreference } from "../../hooks/useDensityPreference";
 import { getContext } from "../../services/auth";
 import { qmsGetAuditRegister, type CAROut, type QMSAuditOut, type QMSFindingOut } from "../../services/qms";
@@ -11,18 +11,17 @@ import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 
 type RegisterTab = "findings" | "cars";
 
-type Props = {
-  defaultTab: RegisterTab;
-};
-
 type RegisterRow = {
   audit: QMSAuditOut;
   finding: QMSFindingOut;
   linkedCars: CAROut[];
 };
 
-const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
-  const [tab, setTab] = useState<RegisterTab>(defaultTab);
+const QualityAuditRegisterPage: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get("tab");
+  const tab: RegisterTab = rawTab === "cars" ? "cars" : "findings";
+  const auditId = searchParams.get("auditId")?.trim() || "";
   const [wrapText, setWrapText] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
   const [showOwner, setShowOwner] = useState(true);
@@ -60,6 +59,7 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
   const filteredRows = useMemo(() => {
     const q = quickFilter.trim().toLowerCase();
     return rows.filter(({ audit, finding, linkedCars }) => {
+      if (auditId && audit.id !== auditId) return false;
       if (tab === "cars" && linkedCars.length === 0) return false;
       const haystack = [
         audit.audit_ref,
@@ -95,7 +95,12 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
         <ResponsiveSegmentedControl
           label="Register dataset"
           value={tab}
-          onChange={setTab}
+          onChange={(nextTab: RegisterTab) => {
+            const next = new URLSearchParams(searchParams);
+            next.set("tab", nextTab);
+            if (auditId) next.set("auditId", auditId);
+            setSearchParams(next);
+          }}
           compactIconsOnMobile
           options={[
             { value: "findings", label: "Findings", icon: ClipboardList },
@@ -188,7 +193,7 @@ const QualityAuditRegisterPage: React.FC<Props> = ({ defaultTab }) => {
                             <button
                               key={car.id}
                               type="button"
-                              onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/closeout/cars/${car.id}`)}
+                              onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${car.id}`)}
                               className="secondary-chip-btn"
                               title={`${car.car_number} · ${car.title}`}
                             >
