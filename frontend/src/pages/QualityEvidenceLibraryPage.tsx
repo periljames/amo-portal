@@ -8,6 +8,7 @@ import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayo
 import { getContext } from "../services/auth";
 import { getApiBaseUrl } from "../services/config";
 import { downloadAuditEvidencePack, downloadCarEvidencePack, qmsListAudits, qmsListCars, qmsListCarAttachmentsBulk, qmsListFindingsBulk, type CARAttachmentOut } from "../services/qms";
+import { buildAuditWorkspacePath } from "../utils/auditSlug";
 
 type EvidenceRow = {
   id: string;
@@ -190,7 +191,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   return (
     <QualityAuditsSectionLayout title="Evidence Library" subtitle="Evidence browser with audit-first hierarchy, compact scanning, and reviewer actions.">
       <div className="audit-workspace">
-        {filterAuditId ? <div className="qms-card" style={{ marginBottom: 12 }}><strong>Filtered by audit:</strong> {filterAuditId}</div> : null}
+        {filterAuditId ? <div className="qms-card" style={{ marginBottom: 12 }}><strong>Filtered by audit:</strong> {(() => { const a = (audits.data ?? []).find((row) => row.id === filterAuditId); return a ? `${a.audit_ref} — ${a.title}` : filterAuditId; })()}</div> : null}
         <div className="audit-workspace__toolbar-row">
           <label className="audit-search" aria-label="Filter evidence rows">
             <Filter size={15} />
@@ -269,7 +270,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
                         <button type="button" aria-label={`Open viewer for ${file.title}`} onClick={() => openViewer(file)} className="secondary-chip-btn"><Eye size={14} /> Open</button>
                         <a aria-label={`Download ${file.title}`} href={file.reviewUrl} target="_blank" rel="noreferrer" className="secondary-chip-btn"><Download size={14} /> Download</a>
                         <button type="button" aria-label={`Copy link for ${file.title}`} onClick={() => void copyLink(file)} className="secondary-chip-btn"><Link2 size={14} /> Copy</button>
-                        {file.auditId ? <button type="button" aria-label={`View audit for ${file.title}`} onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/${file.auditId}`)} className="secondary-chip-btn"><FileText size={14} /> Audit</button> : null}
+                        {file.auditId ? <button type="button" aria-label={`View audit for ${file.title}`} onClick={() => { const audit = (audits.data ?? []).find((row) => row.id === file.auditId); if (audit) navigate(buildAuditWorkspacePath({ amoCode, department, auditRef: audit.audit_ref })); }} className="secondary-chip-btn"><FileText size={14} /> Audit</button> : null}
                         {file.type === "CAR evidence" ? <button type="button" className="secondary-chip-btn" onClick={() => { const carId = (cars.data ?? []).find((c) => `${c.car_number} · ${c.title}` === file.source)?.id; if (carId) downloadCarEvidencePack(carId).then((b) => saveBlob(b, `car-${carId}-evidence.zip`)); }}>Export CAR pack</button> : null}
                       </div>
                     </td>

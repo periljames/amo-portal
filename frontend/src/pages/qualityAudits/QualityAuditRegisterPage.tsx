@@ -7,6 +7,7 @@ import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegme
 import { useDensityPreference } from "../../hooks/useDensityPreference";
 import { getContext } from "../../services/auth";
 import { qmsGetAuditRegister, type CAROut, type QMSAuditOut, type QMSFindingOut } from "../../services/qms";
+import { buildAuditWorkspacePath } from "../../utils/auditSlug";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 
 type RegisterTab = "findings" | "cars";
@@ -205,7 +206,7 @@ const QualityAuditRegisterPage: React.FC = () => {
                       <td>
                         <button
                           type="button"
-                          onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/${audit.id}`)}
+                          onClick={() => navigate(buildAuditWorkspacePath({ amoCode, department, auditRef: audit.audit_ref }))}
                           className="secondary-chip-btn"
                         >
                           View audit

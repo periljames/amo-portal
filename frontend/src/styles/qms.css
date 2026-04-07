@@ -1977,3 +1977,57 @@ button.qms-list__item:hover {
   font-weight: 700;
   color: var(--text-primary);
 }
+
+.audit-countdown-card {
+  min-width: 220px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 8px 10px;
+}
+.audit-countdown-card__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.audit-countdown-card__value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.95rem;
+  margin-top: 3px;
+}
+.audit-countdown-card__meta {
+  margin-top: 2px;
+  font-size: 0.76rem;
+  opacity: 0.8;
+}
+.audit-countdown-card--overdue { border-color: #f87171; color: #fecaca; }
+.audit-countdown-card--progress { border-color: #34d399; color: #a7f3d0; }
+.audit-countdown-card--planned { border-color: #60a5fa; color: #bfdbfe; }
+
+.audit-shell-header {
+  padding: 10px 12px;
+  gap: 8px;
+}
+.audit-shell-header__title {
+  font-size: 1.4rem;
+}
+.audit-shell-header__subtitle {
+  margin-top: 2px;
+}
+.audit-shell-header__nav {
+  padding-top: 6px;
+}
+.audit-shell-segmented {
+  border-radius: 8px;
+  padding: 2px;
+}
+.audit-shell-segmented__button {
+  padding: 5px 9px;
+  border-radius: 6px;
+  text-transform: capitalize;
+}
