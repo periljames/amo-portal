@@ -170,6 +170,7 @@ class UserBase(BaseModel):
     role: AccountRole
     position_title: Optional[str] = None
     phone: Optional[str] = None
+    secondary_phone: Optional[str] = None
 
     regulatory_authority: Optional[RegulatoryAuthority] = None
     licence_number: Optional[str] = None
@@ -193,6 +194,7 @@ class UserUpdate(BaseModel):
     role: Optional[AccountRole] = None
     position_title: Optional[str] = None
     phone: Optional[str] = None
+    secondary_phone: Optional[str] = None
     department_id: Optional[str] = None
 
     regulatory_authority: Optional[RegulatoryAuthority] = None
@@ -215,6 +217,7 @@ class UserSelfUpdate(BaseModel):
     full_name: Optional[str] = None
     position_title: Optional[str] = None
     phone: Optional[str] = None
+    secondary_phone: Optional[str] = None
 
 
 class UserRead(UserBase):
@@ -231,6 +234,7 @@ class UserRead(UserBase):
     is_amo_admin: bool
     is_auditor: bool
     must_change_password: bool
+    password_changed_at: Optional[datetime] = None
     token_revoked_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
     last_login_ip: Optional[str] = None
@@ -265,6 +269,35 @@ class UserCommandResult(BaseModel):
 class OnboardingStatusRead(BaseModel):
     is_complete: bool
     missing: list[str] = Field(default_factory=list)
+
+
+class PersonnelImportRowIssue(BaseModel):
+    row_number: int
+    person_id: Optional[str] = None
+    reason: str
+
+
+class PersonnelImportSummary(BaseModel):
+    dry_run: bool
+    rows_processed: int
+    created_personnel: int
+    updated_personnel: int
+    created_accounts: int
+    updated_accounts: int
+    skipped_accounts: int
+    rejected_rows: int
+    skipped_rows: int
+    issues: list[PersonnelImportRowIssue] = Field(default_factory=list)
+    conflicts: list[PersonnelImportConflict] = Field(default_factory=list)
+
+
+class PersonnelImportConflict(BaseModel):
+    row_number: int
+    person_id: Optional[str] = None
+    existing_email: Optional[str] = None
+    imported_email: Optional[str] = None
+    reason: str
+    options: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
