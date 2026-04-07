@@ -55,6 +55,7 @@ const QMSLayout: React.FC<Props> = ({
       <div className="qms-shell">
         {customHeader ?? (
           <PageHeader
+            eyebrow={`QMS · ${amoDisplay}`}
             title={title}
             subtitle={subtitle}
             breadcrumbs={breadcrumbs}

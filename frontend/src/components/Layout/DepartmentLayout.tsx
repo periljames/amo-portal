@@ -174,6 +174,12 @@ function getUserInitials(u: any): string {
   return (a + b).toUpperCase();
 }
 
+function getStoredProfileAvatar(userId?: string | null): string | null {
+  if (typeof window === "undefined" || !userId) return null;
+  const value = window.localStorage.getItem(`amo_portal_profile_avatar:${userId}`);
+  return value && value.trim() ? value : null;
+}
+
 const DepartmentLayout: React.FC<Props> = ({
   amoCode,
   activeDepartment,
@@ -1258,6 +1264,7 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const userName = getUserDisplayName(currentUser);
   const userInitials = getUserInitials(currentUser);
+  const userAvatarUrl = getStoredProfileAvatar(currentUser?.id);
   const currentYear = new Date().getFullYear();
   const returnPath = location.pathname + location.search;
   const formattedCountdown = new Date(idleCountdown * 1000)
@@ -1749,11 +1756,22 @@ const DepartmentLayout: React.FC<Props> = ({
                     </div>
                     <div ref={profileRef} className="profile-menu">
                       <button type="button" onClick={() => setProfileOpen((v) => !v)} className="profile-menu__trigger" aria-expanded={profileOpen}>
-                        <span className="profile-menu__avatar">{userInitials}</span>
+                        <span className="profile-menu__avatar">{userAvatarUrl ? <img src={userAvatarUrl} alt={userName} className="profile-menu__avatar-image" /> : userInitials}</span>
                         <span className="profile-menu__meta"><span className="profile-menu__name">{userName}</span></span>
                       </button>
                       {profileOpen && (
                         <div role="menu" className="profile-drawer">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="profile-drawer__item"
+                            onClick={() => {
+                              setProfileOpen(false);
+                              navigate(`/maintenance/${amoCode}/profile`);
+                            }}
+                          >
+                            View profile
+                          </button>
                           <button type="button" role="menuitem" className="profile-drawer__item" onClick={() => { setProfileOpen(false); toggleColorScheme(); }}>
                             Toggle theme ({colorScheme})
                           </button>
