@@ -167,3 +167,135 @@ def test_person_id_change_reuses_existing_profile_by_email(db_session, monkeypat
     updated_profile = db_session.query(models.PersonnelProfile).first()
     assert updated_profile is not None
     assert updated_profile.person_id == "NEW-001"
+
+
+def test_skip_row_decision_does_not_apply_partial_profile_or_user_updates(db_session, monkeypatch):
+    amo = _seed_amo(db_session)
+    monkeypatch.setenv("PERSONNEL_IMPORT_DEFAULT_PASSWORD", "TempPass123!")
+
+    existing_user = models.User(
+        id="usr-skip-1",
+        amo_id=amo.id,
+        staff_code="P-020",
+        email="old@example.com",
+        first_name="Old",
+        last_name="Name",
+        full_name="Old Name",
+        role=models.AccountRole.TECHNICIAN,
+        hashed_password=services.get_password_hash("OldPass123!"),
+        phone="+1-555-0000",
+        is_active=True,
+    )
+    existing_profile = models.PersonnelProfile(
+        id="prof-skip-1",
+        amo_id=amo.id,
+        person_id="P-020",
+        user_id=existing_user.id,
+        first_name="Old",
+        last_name="Name",
+        full_name="Old Name",
+        email="old@example.com",
+        phone_number="+1-555-0000",
+        status="Active",
+    )
+    db_session.add_all([existing_user, existing_profile])
+    db_session.commit()
+
+    rows = [
+        {
+            "row_number": 2,
+            "PersonID": "P-020",
+            "FIRSTNAME": "New",
+            "LASTNAME": "Name",
+            "PersonName": "New Name",
+            "Status": "Active",
+            "PhoneNumber": "+1-555-9999",
+            "Email": "new@example.com",
+        }
+    ]
+    summary = import_personnel_rows(
+        db_session,
+        amo_id=amo.id,
+        rows=rows,
+        dry_run=False,
+        decisions={2: "skip_row"},
+    )
+
+    assert summary.skipped_rows >= 1 or any("rejected" in issue.reason.lower() for issue in summary.issues)
+
+    reloaded_profile = db_session.query(models.PersonnelProfile).filter_by(id="prof-skip-1").first()
+    assert reloaded_profile is not None
+    assert reloaded_profile.first_name == "Old"
+    assert reloaded_profile.phone_number == "+1-555-0000"
+    assert reloaded_profile.email == "old@example.com"
+
+    reloaded_user = db_session.query(models.User).filter_by(id="usr-skip-1").first()
+    assert reloaded_user is not None
+    assert reloaded_user.first_name == "Old"
+    assert reloaded_user.phone == "+1-555-0000"
+    assert reloaded_user.email == "old@example.com"
+
+
+def test_use_import_email_rejected_when_email_taken_by_different_user(db_session, monkeypatch):
+    amo = _seed_amo(db_session)
+    monkeypatch.setenv("PERSONNEL_IMPORT_DEFAULT_PASSWORD", "TempPass123!")
+
+    linked_user = models.User(
+        id="usr-email-1",
+        amo_id=amo.id,
+        staff_code="P-030",
+        email="linked@example.com",
+        first_name="Linked",
+        last_name="User",
+        full_name="Linked User",
+        role=models.AccountRole.TECHNICIAN,
+        hashed_password=services.get_password_hash("OldPass123!"),
+        is_active=True,
+    )
+    taken_user = models.User(
+        id="usr-email-2",
+        amo_id=amo.id,
+        staff_code="P-031",
+        email="taken@example.com",
+        first_name="Taken",
+        last_name="User",
+        full_name="Taken User",
+        role=models.AccountRole.TECHNICIAN,
+        hashed_password=services.get_password_hash("OldPass123!"),
+        is_active=True,
+    )
+    profile = models.PersonnelProfile(
+        id="prof-email-1",
+        amo_id=amo.id,
+        person_id="P-030",
+        user_id=linked_user.id,
+        first_name="Linked",
+        last_name="User",
+        full_name="Linked User",
+        email="linked@example.com",
+        status="Active",
+    )
+    db_session.add_all([linked_user, taken_user, profile])
+    db_session.commit()
+
+    rows = [
+        {
+            "row_number": 2,
+            "PersonID": "P-030",
+            "FIRSTNAME": "Linked",
+            "LASTNAME": "User",
+            "Status": "Active",
+            "Email": "taken@example.com",
+        }
+    ]
+    summary = import_personnel_rows(
+        db_session,
+        amo_id=amo.id,
+        rows=rows,
+        dry_run=False,
+        decisions={2: "use_import_email"},
+    )
+
+    assert any("already used by another user account" in issue.reason.lower() for issue in summary.issues)
+    assert db_session.query(models.User).filter_by(id="usr-email-1").first().email == "linked@example.com"
+    assert db_session.query(models.PersonnelProfile).filter_by(id="prof-email-1").first().email == "linked@example.com"

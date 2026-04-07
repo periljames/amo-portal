@@ -240,9 +240,6 @@ def import_personnel_rows(
         is_new_profile = profile is None
         if is_new_profile:
             profile = models.PersonnelProfile(amo_id=amo_id, person_id=parsed.person_id, created_at=now, updated_at=now)
-        elif profile.person_id != parsed.person_id:
-            # Email match with changed PersonID: update PersonID idempotently.
-            profile.person_id = parsed.person_id
 
         chosen_email = parsed.email
         if profile.email and parsed.email and profile.email.lower() != parsed.email.lower():
@@ -271,6 +268,66 @@ def import_personnel_rows(
                 )
                 continue
 
+        existing_user = None
+        if chosen_email:
+            if profile.user_id:
+                existing_user = (
+                    db.query(models.User)
+                    .filter(models.User.id == profile.user_id)
+                    .first()
+                )
+
+            if not existing_user:
+                existing_user = (
+                    db.query(models.User)
+                    .filter(models.User.amo_id == amo_id, func.lower(models.User.email) == chosen_email.lower())
+                    .first()
+                )
+
+        if existing_user and existing_user.email.lower() != chosen_email.lower():
+            email_decision = decision_map.get(parsed.row_number)
+            conflicts.append(
+                schemas.PersonnelImportConflict(
+                    row_number=parsed.row_number,
+                    person_id=parsed.person_id,
+                    existing_email=existing_user.email,
+                    imported_email=chosen_email,
+                    reason="Existing linked user email differs from imported/selected email.",
+                    options=["keep_existing_email", "use_import_email", "skip_row"],
+                )
+            )
+            if email_decision == "skip_row":
+                issues.append(
+                    schemas.PersonnelImportRowIssue(
+                        row_number=parsed.row_number,
+                        person_id=parsed.person_id,
+                        reason="Rejected: skipped row due to user email conflict.",
+                    )
+                )
+                continue
+            if email_decision in {"keep_existing_email", None}:
+                chosen_email = existing_user.email
+            elif email_decision == "use_import_email":
+                conflicting_user = (
+                    db.query(models.User)
+                    .filter(
+                        models.User.amo_id == amo_id,
+                        func.lower(models.User.email) == chosen_email.lower(),
+                        models.User.id != existing_user.id,
+                    )
+                    .first()
+                )
+                if conflicting_user:
+                    issues.append(
+                        schemas.PersonnelImportRowIssue(
+                            row_number=parsed.row_number,
+                            person_id=parsed.person_id,
+                            reason="Rejected: imported email already used by another user account.",
+                        )
+                    )
+                    continue
+
+        profile.person_id = parsed.person_id
         profile.first_name = parsed.first_name
         profile.last_name = parsed.last_name
         profile.full_name = parsed.full_name or f"{parsed.first_name} {parsed.last_name}".strip()
@@ -300,21 +357,6 @@ def import_personnel_rows(
             skipped_accounts += 1
             issues.append(schemas.PersonnelImportRowIssue(row_number=parsed.row_number, person_id=parsed.person_id, reason="Account creation skipped: missing email."))
             continue
-
-        existing_user = None
-        if profile.user_id:
-            existing_user = (
-                db.query(models.User)
-                .filter(models.User.id == profile.user_id)
-                .first()
-            )
-
-        if not existing_user:
-            existing_user = (
-                db.query(models.User)
-                .filter(models.User.amo_id == amo_id, func.lower(models.User.email) == chosen_email.lower())
-                .first()
-            )
 
         if not existing_user:
             if dry_run:
@@ -352,31 +394,7 @@ def import_personnel_rows(
                 existing_user.phone = parsed.phone_number
                 existing_user.secondary_phone = parsed.secondary_phone
                 existing_user.is_active = parsed.status == STATUS_ACTIVE
-                if existing_user.email.lower() != chosen_email.lower():
-                    email_decision = decision_map.get(parsed.row_number)
-                    conflicts.append(
-                        schemas.PersonnelImportConflict(
-                            row_number=parsed.row_number,
-                            person_id=parsed.person_id,
-                            existing_email=existing_user.email,
-                            imported_email=chosen_email,
-                            reason="Existing linked user email differs from imported/selected email.",
-                            options=["keep_existing_email", "use_import_email", "skip_row"],
-                        )
-                    )
-                    if email_decision == "use_import_email":
-                        existing_user.email = chosen_email
-                    elif email_decision in {"keep_existing_email", None}:
-                        profile.email = existing_user.email
-                    elif email_decision == "skip_row":
-                        issues.append(
-                            schemas.PersonnelImportRowIssue(
-                                row_number=parsed.row_number,
-                                person_id=parsed.person_id,
-                                reason="Rejected: skipped row due to user email conflict.",
-                            )
-                        )
-                        continue
+                existing_user.email = chosen_email
                 if existing_user.staff_code != parsed.person_id:
                     issues.append(schemas.PersonnelImportRowIssue(row_number=parsed.row_number, person_id=parsed.person_id, reason=f"User exists with email but different staff_code ({existing_user.staff_code}); staff_code not changed."))
 
