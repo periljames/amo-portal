@@ -7,6 +7,7 @@ import EmptyState from "../components/shared/EmptyState";
 import InlineError from "../components/shared/InlineError";
 import { getContext } from "../services/auth";
 import { qmsListAudits, type QMSAuditOut } from "../services/qms";
+import { buildAuditWorkspacePath } from "../utils/auditSlug";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type UiStatus = "open" | "pending" | "closed" | "overdue" | "escalated";
@@ -237,7 +238,7 @@ const QMSAuditsPage: React.FC = () => {
             </thead>
             <tbody>
               {recentFiltered.map((audit) => (
-                <tr key={audit.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/${audit.id}`)}>
+                <tr key={audit.id} style={{ cursor: "pointer" }} onClick={() => navigate(buildAuditWorkspacePath({ amoCode, department, auditRef: audit.audit_ref }))}>
                   <td>
                     <strong>{audit.title}</strong>
                     <div className="text-muted">{audit.audit_ref}</div>
