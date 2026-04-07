@@ -587,6 +587,13 @@ const AdminDashboardPage: React.FC = () => {
     }
   };
 
+  const clearPersonnelImportState = () => {
+    setPersonnelResult(null);
+    setPersonnelError(null);
+    setPersonnelNotice(null);
+    setConflictDecisions({});
+  };
+
   const handleCreateDepartment = async (event: React.FormEvent) => {
     event.preventDefault();
     setDepartmentCreateError(null);
@@ -1321,6 +1328,9 @@ const AdminDashboardPage: React.FC = () => {
                 {!!personnelResult?.conflicts?.length && (
                   <div style={{ display: "grid", gap: 8 }}>
                     <strong>Resolve conflicts before live import</strong>
+                    <div className="text-muted" style={{ fontSize: 12 }}>
+                      Your selections are staged only. Click one of the action buttons below to apply them.
+                    </div>
                     {personnelResult.conflicts.map((conflict, idx) => (
                       <div key={`${conflict.row_number}-${idx}`} style={{ border: "1px solid #ddd", padding: 8, borderRadius: 6 }}>
                         <div>Row {conflict.row_number}: {conflict.reason}</div>
@@ -1343,7 +1353,35 @@ const AdminDashboardPage: React.FC = () => {
                         </select>
                       </div>
                     ))}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <Button type="button" size="sm" variant="primary" onClick={() => runPersonnelImport(false)} disabled={personnelBusy}>
+                        Apply choices & import
+                      </Button>
+                      <Button type="button" size="sm" variant="secondary" onClick={() => runPersonnelImport(true)} disabled={personnelBusy}>
+                        Re-run dry-run with choices
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConflictDecisions({})}
+                        disabled={personnelBusy}
+                      >
+                        Reset choices
+                      </Button>
+                    </div>
                   </div>
+                )}
+                {(personnelResult || personnelError || personnelNotice) && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={clearPersonnelImportState}
+                    disabled={personnelBusy}
+                  >
+                    Clear previous import state
+                  </Button>
                 )}
               </div>
             </Panel>

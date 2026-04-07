@@ -41,6 +41,133 @@ AIRCRAFT_DOC_AMO_SUBDIR = "aircraft"
 ALLOWED_PLATFORM_LOGO_EXTS = {".png", ".jpg", ".jpeg", ".svg"}
 
 
+def _jsonable(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
+
+
+def _from_iso_date(value):
+    if not value:
+        return None
+    if isinstance(value, str):
+        return datetime.fromisoformat(value).date()
+    return value
+
+
+def _from_iso_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return value
+
+
+def _profile_state(profile: models.PersonnelProfile) -> dict:
+    return {
+        "id": profile.id,
+        "person_id": profile.person_id,
+        "user_id": profile.user_id,
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "full_name": profile.full_name,
+        "national_id": profile.national_id,
+        "amel_no": profile.amel_no,
+        "internal_certification_stamp_no": profile.internal_certification_stamp_no,
+        "initial_authorization_date": _jsonable(profile.initial_authorization_date),
+        "department": profile.department,
+        "position_title": profile.position_title,
+        "phone_number": profile.phone_number,
+        "secondary_phone": profile.secondary_phone,
+        "email": profile.email,
+        "hire_date": _jsonable(profile.hire_date),
+        "employment_status": profile.employment_status,
+        "status": profile.status,
+        "date_of_birth": _jsonable(profile.date_of_birth),
+        "birth_place": profile.birth_place,
+    }
+
+
+def _user_state(user: models.User) -> dict:
+    return {
+        "id": user.id,
+        "staff_code": user.staff_code,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "full_name": user.full_name,
+        "position_title": user.position_title,
+        "phone": user.phone,
+        "secondary_phone": user.secondary_phone,
+        "is_active": user.is_active,
+        "must_change_password": user.must_change_password,
+        "password_changed_at": _jsonable(user.password_changed_at),
+    }
+
+
+def _capture_import_state(db: Session, *, amo_id: str, rows: list[dict]) -> dict:
+    person_ids = {str(r.get("PersonID") or "").strip() for r in rows if str(r.get("PersonID") or "").strip()}
+    emails = {str(r.get("Email") or "").strip().lower() for r in rows if str(r.get("Email") or "").strip()}
+
+    profile_query = db.query(models.PersonnelProfile).filter(models.PersonnelProfile.amo_id == amo_id)
+    if person_ids:
+        profile_query = profile_query.filter(models.PersonnelProfile.person_id.in_(person_ids))
+    profiles = profile_query.all()
+    if emails:
+        email_profiles = (
+            db.query(models.PersonnelProfile)
+            .filter(models.PersonnelProfile.amo_id == amo_id, func.lower(models.PersonnelProfile.email).in_(emails))
+            .all()
+        )
+        profile_map = {p.id: p for p in profiles}
+        for profile in email_profiles:
+            profile_map[profile.id] = profile
+        profiles = list(profile_map.values())
+
+    user_query = db.query(models.User).filter(models.User.amo_id == amo_id)
+    if person_ids:
+        user_query = user_query.filter(models.User.staff_code.in_(person_ids))
+    users = user_query.all()
+    if emails:
+        email_users = (
+            db.query(models.User)
+            .filter(models.User.amo_id == amo_id, func.lower(models.User.email).in_(emails))
+            .all()
+        )
+        user_map = {u.id: u for u in users}
+        for user in email_users:
+            user_map[user.id] = user
+        users = list(user_map.values())
+
+    return {
+        "profiles": {p.id: _profile_state(p) for p in profiles},
+        "users": {u.id: _user_state(u) for u in users},
+    }
+
+
+def _build_undo_payload(before: dict, after: dict) -> dict:
+    created_profile_ids = [pid for pid in after["profiles"].keys() if pid not in before["profiles"]]
+    created_user_ids = [uid for uid in after["users"].keys() if uid not in before["users"]]
+    updated_profiles_before = [
+        before["profiles"][pid]
+        for pid in before["profiles"].keys()
+        if pid in after["profiles"] and before["profiles"][pid] != after["profiles"][pid]
+    ]
+    updated_users_before = [
+        before["users"][uid]
+        for uid in before["users"].keys()
+        if uid in after["users"] and before["users"][uid] != after["users"][uid]
+    ]
+    return {
+        "created_profile_ids": created_profile_ids,
+        "created_user_ids": created_user_ids,
+        "updated_profiles_before": updated_profiles_before,
+        "updated_users_before": updated_users_before,
+    }
+
+
 
 def _get_managed_user_or_404(db: Session, *, current_user: models.User, user_id: str) -> models.User:
     query = db.query(models.User).filter(models.User.id == user_id)
@@ -1091,12 +1218,15 @@ async def import_personnel_admin(
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
+    before_state = None
     try:
         decisions: dict[int, str] = {}
         if decisions_json:
             raw = json.loads(decisions_json)
             if isinstance(raw, dict):
                 decisions = {int(k): str(v) for k, v in raw.items()}
+        if not dry_run:
+            before_state = _capture_import_state(db, amo_id=target_amo_id, rows=rows)
         summary = import_personnel_rows(
             db,
             amo_id=target_amo_id,
@@ -1127,6 +1257,12 @@ async def import_personnel_admin(
             detail="Personnel import failed unexpectedly. Check backend logs for details.",
         )
 
+    metadata = {"module": "accounts", "sheet": sheet_name}
+    if not dry_run and before_state is not None:
+        after_state = _capture_import_state(db, amo_id=target_amo_id, rows=rows)
+        metadata["undo_payload"] = _build_undo_payload(before_state, after_state)
+        metadata["undo_available"] = True
+
     audit_services.log_event(
         db,
         amo_id=target_amo_id,
@@ -1135,9 +1271,111 @@ async def import_personnel_admin(
         entity_id=target_amo_id,
         action="DRY_RUN" if dry_run else "IMPORT",
         after=summary.model_dump(),
-        metadata={"module": "accounts", "sheet": sheet_name},
+        metadata=metadata,
     )
     return summary
+
+
+@router.post(
+    "/personnel/import/undo-last",
+    response_model=schemas.PersonnelImportSummary,
+    summary="Undo last live personnel import using audit snapshot",
+)
+def undo_last_personnel_import(
+    amo_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    target_amo_id = amo_id if current_user.is_superuser and amo_id else current_user.amo_id
+    event = (
+        db.query(audit_models.AuditEvent)
+        .filter(
+            audit_models.AuditEvent.amo_id == target_amo_id,
+            audit_models.AuditEvent.entity_type == "accounts.personnel_import",
+            audit_models.AuditEvent.action == "IMPORT",
+        )
+        .order_by(audit_models.AuditEvent.occurred_at.desc())
+        .first()
+    )
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No live personnel import found to undo.")
+    metadata = event.metadata_json or {}
+    undo_payload = metadata.get("undo_payload")
+    if not isinstance(undo_payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Latest personnel import has no undo snapshot.")
+    if metadata.get("undo_applied"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Latest personnel import already undone.")
+
+    created_profile_ids = undo_payload.get("created_profile_ids") or []
+    created_user_ids = undo_payload.get("created_user_ids") or []
+    updated_profiles_before = undo_payload.get("updated_profiles_before") or []
+    updated_users_before = undo_payload.get("updated_users_before") or []
+
+    if created_profile_ids:
+        db.query(models.PersonnelProfile).filter(models.PersonnelProfile.id.in_(created_profile_ids)).delete(synchronize_session=False)
+    if created_user_ids:
+        db.query(models.User).filter(models.User.id.in_(created_user_ids)).delete(synchronize_session=False)
+
+    for state in updated_profiles_before:
+        profile = db.query(models.PersonnelProfile).filter(models.PersonnelProfile.id == state.get("id")).first()
+        if not profile:
+            continue
+        for key in [
+            "person_id", "user_id", "first_name", "last_name", "full_name", "national_id", "amel_no",
+            "internal_certification_stamp_no", "department", "position_title", "phone_number", "secondary_phone",
+            "email", "employment_status", "status", "birth_place",
+        ]:
+            setattr(profile, key, state.get(key))
+        profile.initial_authorization_date = _from_iso_date(state.get("initial_authorization_date"))
+        profile.hire_date = _from_iso_date(state.get("hire_date"))
+        profile.date_of_birth = _from_iso_date(state.get("date_of_birth"))
+
+    for state in updated_users_before:
+        user = db.query(models.User).filter(models.User.id == state.get("id")).first()
+        if not user:
+            continue
+        for key in [
+            "staff_code", "email", "first_name", "last_name", "full_name", "position_title",
+            "phone", "secondary_phone", "is_active", "must_change_password",
+        ]:
+            setattr(user, key, state.get(key))
+        user.password_changed_at = _from_iso_datetime(state.get("password_changed_at"))
+
+    metadata["undo_applied"] = True
+    metadata["undo_applied_at"] = datetime.now(timezone.utc).isoformat()
+    event.metadata_json = metadata
+    db.add(event)
+    db.commit()
+
+    audit_services.log_event(
+        db,
+        amo_id=target_amo_id,
+        actor_user_id=str(current_user.id),
+        entity_type="accounts.personnel_import",
+        entity_id=target_amo_id,
+        action="UNDO_LAST",
+        after={
+            "created_profile_ids_removed": len(created_profile_ids),
+            "created_user_ids_removed": len(created_user_ids),
+            "profiles_restored": len(updated_profiles_before),
+            "users_restored": len(updated_users_before),
+        },
+        metadata={"module": "accounts", "source_event_id": event.id},
+    )
+
+    return schemas.PersonnelImportSummary(
+        dry_run=False,
+        rows_processed=0,
+        created_personnel=0,
+        updated_personnel=0,
+        created_accounts=0,
+        updated_accounts=0,
+        skipped_accounts=0,
+        rejected_rows=0,
+        skipped_rows=0,
+        issues=[],
+        conflicts=[],
+    )
 
 
 @router.post("/users/{user_id}/commands/disable", response_model=schemas.UserCommandResult)
