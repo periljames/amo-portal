@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import { useToast } from "../components/feedback/ToastProvider";
 import {
   Button,
   EmptyState,
@@ -92,8 +93,10 @@ const AdminDashboardPage: React.FC = () => {
   const [personnelBusy, setPersonnelBusy] = useState(false);
   const [personnelResult, setPersonnelResult] = useState<PersonnelImportSummary | null>(null);
   const [personnelError, setPersonnelError] = useState<string | null>(null);
+  const [personnelNotice, setPersonnelNotice] = useState<string | null>(null);
   const [conflictDecisions, setConflictDecisions] = useState<Record<number, string>>({});
   const contextInitRef = useRef(false);
+  const { pushToast } = useToast();
 
   type AmoFormState = {
     amoCode: string;
@@ -533,6 +536,7 @@ const AdminDashboardPage: React.FC = () => {
   };
 
   const runPersonnelImport = async (dryRun: boolean) => {
+    const actionLabel = dryRun ? "Dry-run" : "Live import";
     if (!personnelFile) {
       setPersonnelError("Select PERSONNEL.xlsx first.");
       return;
@@ -544,6 +548,7 @@ const AdminDashboardPage: React.FC = () => {
     try {
       setPersonnelBusy(true);
       setPersonnelError(null);
+      setPersonnelNotice(`${actionLabel} in progress…`);
       const result = await importPersonnelFile({
         file: personnelFile,
         dryRun,
@@ -563,9 +568,20 @@ const AdminDashboardPage: React.FC = () => {
           return next;
         });
       }
+      setPersonnelNotice(`${actionLabel} completed successfully.`);
+      pushToast({
+        title: `${actionLabel} complete`,
+        message: `Rows processed: ${result.rows_processed}. Created/updated accounts: ${result.created_accounts}/${result.updated_accounts}.`,
+      });
       if (!dryRun) setSkip(0);
     } catch (err: any) {
       setPersonnelError(err?.message || "Personnel import failed.");
+      setPersonnelNotice(null);
+      pushToast({
+        variant: "error",
+        title: `${actionLabel} failed`,
+        message: err?.message || "Personnel import failed.",
+      });
     } finally {
       setPersonnelBusy(false);
     }
@@ -1282,6 +1298,11 @@ const AdminDashboardPage: React.FC = () => {
                 {personnelError && (
                   <InlineAlert tone="danger" title="Import error">
                     <span>{personnelError}</span>
+                  </InlineAlert>
+                )}
+                {personnelNotice && !personnelError && (
+                  <InlineAlert tone={personnelBusy ? "info" : "success"} title={personnelBusy ? "Import running" : "Import status"}>
+                    <span>{personnelNotice}</span>
                   </InlineAlert>
                 )}
                 {personnelResult && (

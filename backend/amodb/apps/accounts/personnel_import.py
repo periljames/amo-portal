@@ -165,8 +165,6 @@ def import_personnel_rows(
     skipped_rows = 0
 
     default_password = (os.getenv("PERSONNEL_IMPORT_DEFAULT_PASSWORD") or "").strip()
-    if not default_password and not dry_run:
-        raise ValueError("PERSONNEL_IMPORT_DEFAULT_PASSWORD is required for live import.")
 
     seen_person_ids: set[str] = set()
     seen_emails: set[str] = set()
@@ -283,6 +281,15 @@ def import_personnel_rows(
                     .filter(models.User.amo_id == amo_id, func.lower(models.User.email) == chosen_email.lower())
                     .first()
                 )
+        if not existing_user:
+            existing_user = (
+                db.query(models.User)
+                .filter(
+                    models.User.amo_id == amo_id,
+                    models.User.staff_code == parsed.person_id,
+                )
+                .first()
+            )
 
         if existing_user and existing_user.email.lower() != chosen_email.lower():
             email_decision = decision_map.get(parsed.row_number)
@@ -327,6 +334,36 @@ def import_personnel_rows(
                     )
                     continue
 
+        if existing_user and profile.user_id != existing_user.id:
+            linked_profile = (
+                db.query(models.PersonnelProfile)
+                .filter(
+                    models.PersonnelProfile.amo_id == amo_id,
+                    models.PersonnelProfile.user_id == existing_user.id,
+                    models.PersonnelProfile.id != profile.id,
+                )
+                .first()
+            )
+            if linked_profile:
+                conflicts.append(
+                    schemas.PersonnelImportConflict(
+                        row_number=parsed.row_number,
+                        person_id=parsed.person_id,
+                        existing_email=linked_profile.email,
+                        imported_email=chosen_email,
+                        reason="Matched user is already linked to another personnel profile.",
+                        options=["skip_row"],
+                    )
+                )
+                issues.append(
+                    schemas.PersonnelImportRowIssue(
+                        row_number=parsed.row_number,
+                        person_id=parsed.person_id,
+                        reason=f"Rejected: user already linked to profile person_id {linked_profile.person_id}.",
+                    )
+                )
+                continue
+
         profile.person_id = parsed.person_id
         profile.first_name = parsed.first_name
         profile.last_name = parsed.last_name
@@ -362,6 +399,16 @@ def import_personnel_rows(
             if dry_run:
                 created_accounts += 1
             else:
+                if not default_password:
+                    skipped_accounts += 1
+                    issues.append(
+                        schemas.PersonnelImportRowIssue(
+                            row_number=parsed.row_number,
+                            person_id=parsed.person_id,
+                            reason="Account creation skipped: PERSONNEL_IMPORT_DEFAULT_PASSWORD is not configured on the backend.",
+                        )
+                    )
+                    continue
                 existing_user = models.User(
                     amo_id=amo_id,
                     department_id=None,

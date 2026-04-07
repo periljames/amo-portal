@@ -88,7 +88,13 @@ def test_personnel_import_skips_account_when_email_missing_and_dormant(db_sessio
         },
     ]
 
-    summary = import_personnel_rows(db_session, amo_id=amo.id, rows=rows, dry_run=False)
+    summary = import_personnel_rows(
+        db_session,
+        amo_id=amo.id,
+        rows=rows,
+        dry_run=False,
+        decisions={2: "use_import_email"},
+    )
     assert summary.created_personnel == 2
     assert summary.skipped_accounts == 1
     assert summary.created_accounts == 1
@@ -160,7 +166,13 @@ def test_person_id_change_reuses_existing_profile_by_email(db_session, monkeypat
             "Email": "jane@example.com",
         }
     ]
-    summary = import_personnel_rows(db_session, amo_id=amo.id, rows=rows, dry_run=False)
+    summary = import_personnel_rows(
+        db_session,
+        amo_id=amo.id,
+        rows=rows,
+        dry_run=False,
+        decisions={2: "use_import_email"},
+    )
     assert summary.created_personnel == 0
     assert summary.updated_personnel == 1
     assert db_session.query(models.PersonnelProfile).count() == 1
@@ -299,3 +311,174 @@ def test_use_import_email_rejected_when_email_taken_by_different_user(db_session
     assert any("already used by another user account" in issue.reason.lower() for issue in summary.issues)
     assert db_session.query(models.User).filter_by(id="usr-email-1").first().email == "linked@example.com"
     assert db_session.query(models.PersonnelProfile).filter_by(id="prof-email-1").first().email == "linked@example.com"
+
+
+def test_live_import_without_default_password_skips_only_new_account_creation(db_session, monkeypatch):
+    amo = _seed_amo(db_session)
+    monkeypatch.delenv("PERSONNEL_IMPORT_DEFAULT_PASSWORD", raising=False)
+
+    existing_user = models.User(
+        id="usr-nopw-1",
+        amo_id=amo.id,
+        staff_code="P-040",
+        email="existing@example.com",
+        first_name="Existing",
+        last_name="User",
+        full_name="Existing User",
+        role=models.AccountRole.TECHNICIAN,
+        hashed_password=services.get_password_hash("OldPass123!"),
+        is_active=True,
+    )
+    existing_profile = models.PersonnelProfile(
+        id="prof-nopw-1",
+        amo_id=amo.id,
+        person_id="P-040",
+        user_id=existing_user.id,
+        first_name="Existing",
+        last_name="User",
+        full_name="Existing User",
+        email="existing@example.com",
+        status="Active",
+    )
+    db_session.add_all([existing_user, existing_profile])
+    db_session.commit()
+
+    rows = [
+        {
+            "row_number": 2,
+            "PersonID": "P-040",
+            "FIRSTNAME": "ExistingUpdated",
+            "LASTNAME": "User",
+            "Status": "Active",
+            "Email": "existing@example.com",
+        },
+        {
+            "row_number": 3,
+            "PersonID": "P-041",
+            "FIRSTNAME": "New",
+            "LASTNAME": "User",
+            "Status": "Active",
+            "Email": "new-user@example.com",
+        },
+    ]
+
+    summary = import_personnel_rows(
+        db_session,
+        amo_id=amo.id,
+        rows=rows,
+        dry_run=False,
+        decisions={2: "use_import_email"},
+    )
+
+    assert summary.updated_accounts == 1
+    assert summary.created_accounts == 0
+    assert summary.skipped_accounts == 1
+    assert any("not configured on the backend" in issue.reason.lower() for issue in summary.issues)
+
+    updated_existing = db_session.query(models.User).filter_by(id="usr-nopw-1").first()
+    assert updated_existing is not None
+    assert updated_existing.first_name == "ExistingUpdated"
+    assert db_session.query(models.User).filter_by(email="new-user@example.com").count() == 0
+    assert db_session.query(models.PersonnelProfile).filter_by(person_id="P-041").count() == 1
+
+
+def test_import_matches_existing_user_by_staff_code_before_create(db_session, monkeypatch):
+    amo = _seed_amo(db_session)
+    monkeypatch.setenv("PERSONNEL_IMPORT_DEFAULT_PASSWORD", "TempPass123!")
+
+    user = models.User(
+        id="usr-staff-1",
+        amo_id=amo.id,
+        staff_code="P-050",
+        email="legacy@example.com",
+        first_name="Legacy",
+        last_name="User",
+        full_name="Legacy User",
+        role=models.AccountRole.TECHNICIAN,
+        hashed_password=services.get_password_hash("OldPass123!"),
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    rows = [
+        {
+            "row_number": 2,
+            "PersonID": "P-050",
+            "FIRSTNAME": "Updated",
+            "LASTNAME": "User",
+            "Status": "Active",
+            "Email": "legacy@example.com",
+        }
+    ]
+
+    summary = import_personnel_rows(db_session, amo_id=amo.id, rows=rows, dry_run=False)
+    assert summary.created_accounts == 0
+    assert summary.updated_accounts == 1
+    assert db_session.query(models.User).filter(models.User.amo_id == amo.id, models.User.staff_code == "P-050").count() == 1
+    assert db_session.query(models.PersonnelProfile).filter_by(person_id="P-050").first().user_id == "usr-staff-1"
+
+
+def test_import_rejects_when_matched_user_already_linked_to_different_profile(db_session, monkeypatch):
+    amo = _seed_amo(db_session)
+    monkeypatch.setenv("PERSONNEL_IMPORT_DEFAULT_PASSWORD", "TempPass123!")
+
+    user = models.User(
+        id="usr-link-1",
+        amo_id=amo.id,
+        staff_code="P-060",
+        email="shared@example.com",
+        first_name="Shared",
+        last_name="User",
+        full_name="Shared User",
+        role=models.AccountRole.TECHNICIAN,
+        hashed_password=services.get_password_hash("OldPass123!"),
+        is_active=True,
+    )
+    linked_profile = models.PersonnelProfile(
+        id="prof-link-1",
+        amo_id=amo.id,
+        person_id="P-060",
+        user_id=user.id,
+        first_name="Shared",
+        last_name="User",
+        full_name="Shared User",
+        email="shared@example.com",
+        status="Active",
+    )
+    target_profile = models.PersonnelProfile(
+        id="prof-link-2",
+        amo_id=amo.id,
+        person_id="P-061",
+        first_name="Target",
+        last_name="User",
+        full_name="Target User",
+        email="target@example.com",
+        status="Active",
+    )
+    db_session.add_all([user, linked_profile, target_profile])
+    db_session.commit()
+
+    rows = [
+        {
+            "row_number": 2,
+            "PersonID": "P-061",
+            "FIRSTNAME": "TargetUpdated",
+            "LASTNAME": "User",
+            "Status": "Active",
+            "Email": "shared@example.com",
+        }
+    ]
+
+    summary = import_personnel_rows(
+        db_session,
+        amo_id=amo.id,
+        rows=rows,
+        dry_run=False,
+        decisions={2: "use_import_email"},
+    )
+    assert summary.rejected_rows >= 1 or len(summary.issues) >= 1
+    reloaded_target = db_session.query(models.PersonnelProfile).filter_by(id="prof-link-2").first()
+    assert reloaded_target is not None
+    assert reloaded_target.user_id is None
+    assert reloaded_target.first_name == "Target"
