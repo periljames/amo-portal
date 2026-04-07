@@ -22,6 +22,7 @@ from amodb.apps.notifications import service as notification_service
 from amodb.apps.tasks import services as task_services
 from amodb.security import get_current_active_user, require_admin, require_roles
 from . import models, schemas, services
+from .personnel_import import import_personnel_rows, parse_people_sheet
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
 RESERVED_PLATFORM_SLUGS = {"system", "root"}
@@ -1061,6 +1062,57 @@ def deactivate_user_admin(
         metadata={"module": "accounts"},
     )
     return
+
+
+@router.post(
+    "/personnel/import",
+    response_model=schemas.PersonnelImportSummary,
+    summary="Import personnel profiles and linked login accounts from People Excel sheet",
+)
+async def import_personnel_admin(
+    file: UploadFile = File(...),
+    dry_run: bool = True,
+    sheet_name: str = "People",
+    amo_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    target_amo_id = amo_id if current_user.is_superuser and amo_id else current_user.amo_id
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+
+    try:
+        rows = parse_people_sheet(content, filename=file.filename or "upload.xlsx", sheet_name=sheet_name)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    try:
+        summary = import_personnel_rows(
+            db,
+            amo_id=target_amo_id,
+            rows=rows,
+            dry_run=dry_run,
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception:
+        db.rollback()
+        raise
+
+    audit_services.log_event(
+        db,
+        amo_id=target_amo_id,
+        actor_user_id=str(current_user.id),
+        entity_type="accounts.personnel_import",
+        entity_id=target_amo_id,
+        action="DRY_RUN" if dry_run else "IMPORT",
+        after=summary.model_dump(),
+        metadata={"module": "accounts", "sheet": sheet_name},
+    )
+    return summary
 
 
 @router.post("/users/{user_id}/commands/disable", response_model=schemas.UserCommandResult)
