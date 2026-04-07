@@ -1,3 +1,5 @@
+import { parseLocalDate } from "../../utils/auditDate";
+
 export type DueBanner = { label: string; dateText?: string };
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -5,8 +7,8 @@ const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDat
 export function getDueMessage(now: Date, nextDueDate?: string | null, plannedStart?: string | null, plannedEnd?: string | null): DueBanner | null {
   const today = startOfDay(now);
   if (plannedStart) {
-    const start = new Date(plannedStart);
-    if (!Number.isNaN(start.getTime())) {
+    const start = parseLocalDate(plannedStart);
+    if (start && !Number.isNaN(start.getTime())) {
       const startDay = startOfDay(start);
       const diffMs = start.getTime() - now.getTime();
       const dayDiff = Math.floor((startDay.getTime() - today.getTime()) / 86400000);
@@ -22,15 +24,15 @@ export function getDueMessage(now: Date, nextDueDate?: string | null, plannedSta
   }
 
   if (plannedEnd) {
-    const end = new Date(plannedEnd);
-    if (!Number.isNaN(end.getTime()) && end.getTime() >= now.getTime()) {
+    const end = parseLocalDate(plannedEnd);
+    if (end && !Number.isNaN(end.getTime()) && end.getTime() >= now.getTime()) {
       return { label: `In progress until ${end.toLocaleDateString()}` };
     }
   }
 
   if (nextDueDate) {
-    const due = new Date(nextDueDate);
-    if (!Number.isNaN(due.getTime())) {
+    const due = parseLocalDate(nextDueDate);
+    if (due && !Number.isNaN(due.getTime())) {
       const dueDay = startOfDay(due);
       const dayDiff = Math.floor((dueDay.getTime() - today.getTime()) / 86400000);
       if (dayDiff === 0) return { label: "Due today" };

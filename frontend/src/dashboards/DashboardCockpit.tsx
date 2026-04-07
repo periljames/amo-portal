@@ -18,11 +18,13 @@ import ActionPanel, { type ActionPanelContext } from "../components/panels/Actio
 import { getContext } from "../services/auth";
 import { listEventHistory } from "../services/events";
 import { useRealtime } from "../components/realtime/realtimeContext";
-import { qmsGetCockpitSnapshot, qmsListAudits, type CARStatus, type QMSCockpitSnapshotOut } from "../services/qms";
+import { qmsGetCockpitSnapshot, qmsListAudits, qmsListCars, type CARStatus, type QMSCockpitSnapshotOut } from "../services/qms";
 import type { ActionItem, ActivityItem } from "../components/dashboard/DashboardScaffold";
 import type { QualityCockpitVisualData } from "../components/dashboard/QualityCockpitCanvas";
 import { deepEqual } from "../utils/deepEqual";
 import { getDueMessage } from "../pages/qualityAudits/dueStatus";
+import { deriveCarMetrics } from "../utils/carMetrics";
+import { selectRelevantDueAudit } from "../utils/auditDate";
 
 const LazyQualityCockpitCanvas = lazy(() => import("../components/dashboard/QualityCockpitCanvas"));
 
@@ -110,10 +112,21 @@ const DashboardCockpit: React.FC = () => {
     staleTime: 60_000,
   });
 
-  const nearestAudit = useMemo(() => (auditsQuery.data ?? [])
-    .filter((a) => !!(a.planned_start || a.planned_end))
-    .sort((a, b) => (a.planned_start || a.planned_end || "9999-12-31").localeCompare(b.planned_start || b.planned_end || "9999-12-31"))[0] ?? null, [auditsQuery.data]);
+  const nearestAudit = useMemo(
+    () => selectRelevantDueAudit(auditsQuery.data ?? [], new Date(tick)),
+    [auditsQuery.data, tick],
+  );
   const dueBanner = getDueMessage(new Date(tick), null, nearestAudit?.planned_start, nearestAudit?.planned_end);
+
+  const carsQuery = useQuery({
+    queryKey: ["qms-dashboard-cars", amoCode, department, "QUALITY"],
+    queryFn: () => qmsListCars({ program: "QUALITY" }),
+    enabled: qmsEnabled,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+
+  const carMetrics = useMemo(() => deriveCarMetrics(carsQuery.data ?? []), [carsQuery.data]);
 
   useEffect(() => {
     if (!qmsEnabled) {
@@ -148,8 +161,8 @@ const DashboardCockpit: React.FC = () => {
         label: "CARs / CAPA",
         icon: ShieldAlert,
         route: `/maintenance/${amoCode}/${department}/qms/cars`,
-        value: snapshot.cars_open_total,
-        lines: [`Overdue: ${numberOrDash(snapshot.cars_overdue)}`, `Open total: ${numberOrDash(snapshot.cars_open_total)}`],
+        value: carMetrics.open,
+        lines: [`Overdue: ${numberOrDash(carMetrics.overdue)}`, `Open total: ${numberOrDash(carMetrics.open)}`, "Scope: Quality programme"],
       },
       {
         id: "compliance",
@@ -206,7 +219,7 @@ const DashboardCockpit: React.FC = () => {
         lines: [`Overdue findings: ${numberOrDash(snapshot.findings_overdue)}`, `Last refresh: ${refresh}`],
       },
     ];
-  }, [amoCode, department, snapshot]);
+  }, [amoCode, carMetrics.open, carMetrics.overdue, department, snapshot]);
 
   const priority = useMemo(() => {
     if (!snapshot) return null;
@@ -216,8 +229,8 @@ const DashboardCockpit: React.FC = () => {
     if ((snapshot.compliance_unplanned_applicable ?? 0) > 0) {
       return { label: "Applicable compliance not planned", route: `/maintenance/${amoCode}/planning/publication-review`, count: snapshot.compliance_unplanned_applicable, state: "due-soon" as PriorityState };
     }
-    if (snapshot.cars_overdue > 0) {
-      return { label: "CAR overdue", route: `/maintenance/${amoCode}/${department}/qms/cars?status=overdue`, count: snapshot.cars_overdue, state: "overdue" as PriorityState };
+    if (carMetrics.overdue > 0) {
+      return { label: "CAR overdue (Quality programme)", route: `/maintenance/${amoCode}/${department}/qms/cars?status=overdue`, count: carMetrics.overdue, state: "overdue" as PriorityState };
     }
     if (snapshot.findings_overdue > 0) {
       return { label: "Findings overdue", route: `/maintenance/${amoCode}/${department}/qms/audits?finding=overdue`, count: snapshot.findings_overdue, state: "overdue" as PriorityState };
@@ -226,7 +239,7 @@ const DashboardCockpit: React.FC = () => {
       return { label: "Training due soon", route: `/maintenance/${amoCode}/${department}/qms/training?window=30d`, count: snapshot.training_records_expiring_30d, state: "due-soon" as PriorityState };
     }
     return { label: "System stable", route: `/maintenance/${amoCode}/${department}/qms/kpis`, count: 0, state: "normal" as PriorityState };
-  }, [amoCode, department, snapshot]);
+  }, [amoCode, carMetrics.overdue, department, snapshot]);
 
   const visualData: QualityCockpitVisualData = useMemo(() => {
     if (!snapshot) {
@@ -239,10 +252,10 @@ const DashboardCockpit: React.FC = () => {
     return {
       kpis: [
         { id: "pending_ack", label: "Pending acknowledgements", value: snapshot.pending_acknowledgements, accent: "amber", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/documents?ack=pending`) },
-        { id: "cars_overdue", label: "CAR overdue", value: snapshot.cars_overdue, accent: "rose", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue`) },
+        { id: "cars_overdue", label: "CAR overdue", value: carMetrics.overdue, accent: "rose", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/cars?status=overdue`) },
         { id: "findings", label: "Open findings", value: snapshot.findings_open_total, accent: "navy", onClick: () => nav(`/maintenance/${amoCode}/${department}/qms/audits`) },
       ],
-      qualityScore: Math.max(0, 100 - snapshot.findings_overdue * 2 - snapshot.cars_overdue * 3),
+      qualityScore: Math.max(0, 100 - snapshot.findings_overdue * 2 - carMetrics.overdue * 3),
       fatalErrorsBySupervisor: [],
       fatalErrorsByLocation: [],
       fatalErrorsByMonth: [],
@@ -263,7 +276,7 @@ const DashboardCockpit: React.FC = () => {
         inspectors: snapshot.manpower?.by_role?.QUALITY_INSPECTOR ?? 0,
       },
     };
-  }, [amoCode, department, snapshot]);
+  }, [amoCode, carMetrics.overdue, department, snapshot]);
 
   const actionItems = useMemo<ActionItem[]>(
     () =>
@@ -405,7 +418,7 @@ const DashboardCockpit: React.FC = () => {
       {dueBanner && nearestAudit ? (
         <div className="qms-card" style={{ marginBottom: 12 }}>
           <strong>{dueBanner.label}</strong>
-          <div className="text-muted">{nearestAudit.audit_ref} · {nearestAudit.title}</div>
+          <div className="text-muted">{nearestAudit.audit_ref} · {nearestAudit.title} · CAR scope: Quality programme</div>
         </div>
       ) : null}
 

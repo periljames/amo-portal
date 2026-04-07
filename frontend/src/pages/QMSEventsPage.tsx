@@ -5,6 +5,7 @@ import QMSLayout from "../components/QMS/QMSLayout";
 import { getContext } from "../services/auth";
 import { qmsListAudits, qmsUpdateAudit } from "../services/qms";
 import { getDueMessage } from "./qualityAudits/dueStatus";
+import { selectRelevantDueAudit, shiftAuditWindowByDays } from "../utils/auditDate";
 
 const QMSEventsPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
@@ -30,11 +31,16 @@ const QMSEventsPage: React.FC = () => {
     mutationFn: ({ id, planned_start, planned_end }: { id: string; planned_start: string; planned_end: string | null }) => qmsUpdateAudit(id, { planned_start, planned_end }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["qms-events-audits", amoCode, department] });
+      await queryClient.invalidateQueries({ queryKey: ["qms-dashboard-audits", amoCode, department] });
+      await queryClient.invalidateQueries({ queryKey: ["qms-audits", "planner", amoCode, department] });
+      await queryClient.invalidateQueries({ queryKey: ["qms-audits", "schedule-detail", amoCode] });
+      await queryClient.invalidateQueries({ queryKey: ["qms-audits", "run-hub"] });
     },
   });
 
-  const audits = (auditsQuery.data ?? []).filter((a) => a.planned_start).sort((a, b) => (a.planned_start || "").localeCompare(b.planned_start || ""));
-  const nearest = audits[0];
+  const allAudits = auditsQuery.data ?? [];
+  const audits = allAudits.filter((a) => a.planned_start).sort((a, b) => (a.planned_start || "").localeCompare(b.planned_start || ""));
+  const nearest = selectRelevantDueAudit(allAudits, new Date(tick));
   const dueBanner = getDueMessage(new Date(tick), null, nearest?.planned_start, nearest?.planned_end);
 
   return (
@@ -53,10 +59,9 @@ const QMSEventsPage: React.FC = () => {
                 <td>
                   <button type="button" className="secondary-chip-btn" onClick={() => {
                     if (!a.planned_start) return;
-                    const d = new Date(a.planned_start);
-                    d.setDate(d.getDate() + 1);
-                    const next = d.toISOString().slice(0, 10);
-                    moveAudit.mutate({ id: a.id, planned_start: next, planned_end: a.planned_end });
+                    const shifted = shiftAuditWindowByDays(a.planned_start, a.planned_end, 1);
+                    if (!shifted) return;
+                    moveAudit.mutate({ id: a.id, planned_start: shifted.planned_start, planned_end: shifted.planned_end });
                   }}>+1 day</button>
                 </td>
               </tr>
