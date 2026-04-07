@@ -288,6 +288,8 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
       .map(([label, value]) => ({ label: label.slice(5), value }));
   }, [findingRows]);
 
+  const [tick, setTick] = useState(Date.now());
+  useEffect(() => { const id = window.setInterval(() => setTick(Date.now()), 60_000); return () => window.clearInterval(id); }, []);
   const readiness = schedule ? computeReadiness(schedule, upcomingAudit) : null;
   const dueBanner = getDueMessage(new Date(tick), schedule?.next_due_date, upcomingAudit?.planned_start, upcomingAudit?.planned_end);
   const brand = getBrandContext();
