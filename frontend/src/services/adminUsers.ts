@@ -7,7 +7,7 @@
 // - Uses authHeaders() from auth.ts so only logged-in SUPERUSER/AMO_ADMIN
 //   can call these endpoints.
 
-import { apiPost, apiGet } from "./crs";
+import { apiPost, apiGet, apiPostForm } from "./crs";
 import { apiDelete, apiPut } from "./crs";
 import { authHeaders, getCachedUser } from "./auth";
 import type { AccountRole, RegulatoryAuthority } from "./auth";
@@ -318,16 +318,11 @@ export async function importPersonnelFile(params: {
     search.set("decisions_json", JSON.stringify(params.decisions));
   }
 
-  const response = await fetch(`/api/accounts/admin/personnel/import?${search.toString()}`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: form,
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Personnel import failed (${response.status})`);
-  }
-  return response.json();
+  return apiPostForm<PersonnelImportSummary>(
+    `/accounts/admin/personnel/import?${search.toString()}`,
+    form,
+    { headers: authHeaders() }
+  );
 }
 
 type CreateOptions = {
