@@ -288,6 +288,16 @@ class PersonnelImportSummary(BaseModel):
     rejected_rows: int
     skipped_rows: int
     issues: list[PersonnelImportRowIssue] = Field(default_factory=list)
+    conflicts: list[PersonnelImportConflict] = Field(default_factory=list)
+
+
+class PersonnelImportConflict(BaseModel):
+    row_number: int
+    person_id: Optional[str] = None
+    existing_email: Optional[str] = None
+    imported_email: Optional[str] = None
+    reason: str
+    options: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

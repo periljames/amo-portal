@@ -131,3 +131,39 @@ def test_password_change_sets_password_changed_at(db_session, monkeypatch):
     assert updated.must_change_password is False
     assert updated.password_changed_at is not None
     assert updated.password_changed_at.date() >= date(2020, 1, 1)
+
+
+def test_person_id_change_reuses_existing_profile_by_email(db_session, monkeypatch):
+    amo = _seed_amo(db_session)
+    monkeypatch.setenv("PERSONNEL_IMPORT_DEFAULT_PASSWORD", "TempPass123!")
+
+    existing_profile = models.PersonnelProfile(
+        id="prof-1",
+        amo_id=amo.id,
+        person_id="OLD-001",
+        first_name="Jane",
+        last_name="Doe",
+        full_name="Jane Doe",
+        email="jane@example.com",
+        status="Active",
+    )
+    db_session.add(existing_profile)
+    db_session.commit()
+
+    rows = [
+        {
+            "row_number": 2,
+            "PersonID": "NEW-001",
+            "FIRSTNAME": "Jane",
+            "LASTNAME": "Doe",
+            "Status": "Active",
+            "Email": "jane@example.com",
+        }
+    ]
+    summary = import_personnel_rows(db_session, amo_id=amo.id, rows=rows, dry_run=False)
+    assert summary.created_personnel == 0
+    assert summary.updated_personnel == 1
+    assert db_session.query(models.PersonnelProfile).count() == 1
+    updated_profile = db_session.query(models.PersonnelProfile).first()
+    assert updated_profile is not None
+    assert updated_profile.person_id == "NEW-001"

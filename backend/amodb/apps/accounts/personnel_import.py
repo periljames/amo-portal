@@ -153,8 +153,10 @@ def import_personnel_rows(
     amo_id: str,
     rows: list[dict[str, Any]],
     dry_run: bool,
+    decisions: Optional[dict[int, str]] = None,
 ) -> schemas.PersonnelImportSummary:
     issues: list[schemas.PersonnelImportRowIssue] = []
+    conflicts: list[schemas.PersonnelImportConflict] = []
     created_personnel = 0
     updated_personnel = 0
     created_accounts = 0
@@ -168,6 +170,7 @@ def import_personnel_rows(
 
     seen_person_ids: set[str] = set()
     seen_emails: set[str] = set()
+    decision_map = decisions or {}
 
     for raw in rows:
         try:
@@ -188,16 +191,85 @@ def import_personnel_rows(
                 continue
             seen_emails.add(email_key)
 
-        profile = (
+        profile_by_person_id = (
             db.query(models.PersonnelProfile)
             .filter(models.PersonnelProfile.amo_id == amo_id, models.PersonnelProfile.person_id == parsed.person_id)
             .first()
         )
+        profile_by_email = None
+        if parsed.email:
+            profile_by_email = (
+                db.query(models.PersonnelProfile)
+                .filter(
+                    models.PersonnelProfile.amo_id == amo_id,
+                    func.lower(models.PersonnelProfile.email) == parsed.email.lower(),
+                )
+                .first()
+            )
+
+        profile = profile_by_person_id
+        if profile is None and profile_by_email is not None:
+            # PersonID changed in HR source; match on existing unique email profile first.
+            profile = profile_by_email
+
+        if (
+            profile_by_person_id is not None
+            and profile_by_email is not None
+            and profile_by_person_id.id != profile_by_email.id
+        ):
+            conflicts.append(
+                schemas.PersonnelImportConflict(
+                    row_number=parsed.row_number,
+                    person_id=parsed.person_id,
+                    existing_email=profile_by_person_id.email,
+                    imported_email=parsed.email,
+                    reason="Two personnel profiles already match this row (person_id and email point to different profiles).",
+                    options=["skip_row"],
+                )
+            )
+            issues.append(
+                schemas.PersonnelImportRowIssue(
+                    row_number=parsed.row_number,
+                    person_id=parsed.person_id,
+                    reason="Rejected: conflicting existing profiles for person_id/email.",
+                )
+            )
+            continue
 
         now = datetime.now(timezone.utc)
         is_new_profile = profile is None
         if is_new_profile:
             profile = models.PersonnelProfile(amo_id=amo_id, person_id=parsed.person_id, created_at=now, updated_at=now)
+        elif profile.person_id != parsed.person_id:
+            # Email match with changed PersonID: update PersonID idempotently.
+            profile.person_id = parsed.person_id
+
+        chosen_email = parsed.email
+        if profile.email and parsed.email and profile.email.lower() != parsed.email.lower():
+            decision = decision_map.get(parsed.row_number)
+            conflicts.append(
+                schemas.PersonnelImportConflict(
+                    row_number=parsed.row_number,
+                    person_id=parsed.person_id,
+                    existing_email=profile.email,
+                    imported_email=parsed.email,
+                    reason="Existing personnel email differs from imported email.",
+                    options=["keep_existing_email", "use_import_email", "skip_row"],
+                )
+            )
+            if decision == "keep_existing_email":
+                chosen_email = profile.email
+            elif decision == "use_import_email":
+                chosen_email = parsed.email
+            elif decision == "skip_row" or not decision:
+                issues.append(
+                    schemas.PersonnelImportRowIssue(
+                        row_number=parsed.row_number,
+                        person_id=parsed.person_id,
+                        reason="Rejected: unresolved email conflict (choose keep_existing_email/use_import_email/skip_row).",
+                    )
+                )
+                continue
 
         profile.first_name = parsed.first_name
         profile.last_name = parsed.last_name
@@ -210,7 +282,7 @@ def import_personnel_rows(
         profile.position_title = parsed.position_title
         profile.phone_number = parsed.phone_number
         profile.secondary_phone = parsed.secondary_phone
-        profile.email = parsed.email
+        profile.email = chosen_email
         profile.hire_date = parsed.hire_date
         profile.employment_status = parsed.employment_status
         profile.status = parsed.status
@@ -224,7 +296,7 @@ def import_personnel_rows(
         else:
             updated_personnel += 1
 
-        if not parsed.email:
+        if not chosen_email:
             skipped_accounts += 1
             issues.append(schemas.PersonnelImportRowIssue(row_number=parsed.row_number, person_id=parsed.person_id, reason="Account creation skipped: missing email."))
             continue
@@ -240,7 +312,7 @@ def import_personnel_rows(
         if not existing_user:
             existing_user = (
                 db.query(models.User)
-                .filter(models.User.amo_id == amo_id, func.lower(models.User.email) == parsed.email.lower())
+                .filter(models.User.amo_id == amo_id, func.lower(models.User.email) == chosen_email.lower())
                 .first()
             )
 
@@ -252,7 +324,7 @@ def import_personnel_rows(
                     amo_id=amo_id,
                     department_id=None,
                     staff_code=parsed.person_id,
-                    email=parsed.email,
+                    email=chosen_email,
                     first_name=parsed.first_name,
                     last_name=parsed.last_name,
                     full_name=parsed.full_name or f"{parsed.first_name} {parsed.last_name}".strip(),
@@ -280,6 +352,31 @@ def import_personnel_rows(
                 existing_user.phone = parsed.phone_number
                 existing_user.secondary_phone = parsed.secondary_phone
                 existing_user.is_active = parsed.status == STATUS_ACTIVE
+                if existing_user.email.lower() != chosen_email.lower():
+                    email_decision = decision_map.get(parsed.row_number)
+                    conflicts.append(
+                        schemas.PersonnelImportConflict(
+                            row_number=parsed.row_number,
+                            person_id=parsed.person_id,
+                            existing_email=existing_user.email,
+                            imported_email=chosen_email,
+                            reason="Existing linked user email differs from imported/selected email.",
+                            options=["keep_existing_email", "use_import_email", "skip_row"],
+                        )
+                    )
+                    if email_decision == "use_import_email":
+                        existing_user.email = chosen_email
+                    elif email_decision in {"keep_existing_email", None}:
+                        profile.email = existing_user.email
+                    elif email_decision == "skip_row":
+                        issues.append(
+                            schemas.PersonnelImportRowIssue(
+                                row_number=parsed.row_number,
+                                person_id=parsed.person_id,
+                                reason="Rejected: skipped row due to user email conflict.",
+                            )
+                        )
+                        continue
                 if existing_user.staff_code != parsed.person_id:
                     issues.append(schemas.PersonnelImportRowIssue(row_number=parsed.row_number, person_id=parsed.person_id, reason=f"User exists with email but different staff_code ({existing_user.staff_code}); staff_code not changed."))
 
@@ -305,4 +402,5 @@ def import_personnel_rows(
         rejected_rows=rejected_rows,
         skipped_rows=skipped_rows,
         issues=issues,
+        conflicts=conflicts,
     )

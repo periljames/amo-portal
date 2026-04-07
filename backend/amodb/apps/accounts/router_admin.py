@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -1074,6 +1075,7 @@ async def import_personnel_admin(
     dry_run: bool = True,
     sheet_name: str = "People",
     amo_id: Optional[str] = None,
+    decisions_json: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
@@ -1089,13 +1091,19 @@ async def import_personnel_admin(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     try:
+        decisions: dict[int, str] = {}
+        if decisions_json:
+            raw = json.loads(decisions_json)
+            if isinstance(raw, dict):
+                decisions = {int(k): str(v) for k, v in raw.items()}
         summary = import_personnel_rows(
             db,
             amo_id=target_amo_id,
             rows=rows,
             dry_run=dry_run,
+            decisions=decisions,
         )
-    except ValueError as exc:
+    except (ValueError, json.JSONDecodeError) as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except Exception:

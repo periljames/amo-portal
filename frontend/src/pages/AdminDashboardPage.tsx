@@ -92,6 +92,7 @@ const AdminDashboardPage: React.FC = () => {
   const [personnelBusy, setPersonnelBusy] = useState(false);
   const [personnelResult, setPersonnelResult] = useState<PersonnelImportSummary | null>(null);
   const [personnelError, setPersonnelError] = useState<string | null>(null);
+  const [conflictDecisions, setConflictDecisions] = useState<Record<number, string>>({});
   const contextInitRef = useRef(false);
 
   type AmoFormState = {
@@ -548,8 +549,20 @@ const AdminDashboardPage: React.FC = () => {
         dryRun,
         amoId: isSuperuser ? effectiveAmoId : undefined,
         sheetName: "People",
+        decisions: conflictDecisions,
       });
       setPersonnelResult(result);
+      if (result.conflicts?.length) {
+        setConflictDecisions((prev) => {
+          const next = { ...prev };
+          for (const conflict of result.conflicts) {
+            if (!next[conflict.row_number] && conflict.options.length) {
+              next[conflict.row_number] = conflict.options[0];
+            }
+          }
+          return next;
+        });
+      }
       if (!dryRun) setSkip(0);
     } catch (err: any) {
       setPersonnelError(err?.message || "Personnel import failed.");
@@ -1278,8 +1291,36 @@ const AdminDashboardPage: React.FC = () => {
                     <div>Accounts created/updated: {personnelResult.created_accounts}/{personnelResult.updated_accounts}</div>
                     <div>Skipped accounts: {personnelResult.skipped_accounts}</div>
                     <div>Rejected rows: {personnelResult.rejected_rows}</div>
+                    <div>Conflicts: {personnelResult.conflicts?.length ?? 0}</div>
                     {personnelResult.issues.slice(0, 5).map((issue, idx) => (
                       <div key={`${issue.row_number}-${idx}`}>Row {issue.row_number}: {issue.reason}</div>
+                    ))}
+                  </div>
+                )}
+                {!!personnelResult?.conflicts?.length && (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <strong>Resolve conflicts before live import</strong>
+                    {personnelResult.conflicts.map((conflict, idx) => (
+                      <div key={`${conflict.row_number}-${idx}`} style={{ border: "1px solid #ddd", padding: 8, borderRadius: 6 }}>
+                        <div>Row {conflict.row_number}: {conflict.reason}</div>
+                        <div>Existing email: {conflict.existing_email || "—"} | Imported email: {conflict.imported_email || "—"}</div>
+                        <select
+                          className="input"
+                          value={conflictDecisions[conflict.row_number] || conflict.options[0] || ""}
+                          onChange={(e) =>
+                            setConflictDecisions((prev) => ({
+                              ...prev,
+                              [conflict.row_number]: e.target.value,
+                            }))
+                          }
+                        >
+                          {conflict.options.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     ))}
                   </div>
                 )}

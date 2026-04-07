@@ -234,6 +234,16 @@ export interface PersonnelImportSummary {
   rejected_rows: number;
   skipped_rows: number;
   issues: PersonnelImportRowIssue[];
+  conflicts: PersonnelImportConflict[];
+}
+
+export interface PersonnelImportConflict {
+  row_number: number;
+  person_id?: string | null;
+  existing_email?: string | null;
+  imported_email?: string | null;
+  reason: string;
+  options: string[];
 }
 
 /**
@@ -296,6 +306,7 @@ export async function importPersonnelFile(params: {
   dryRun?: boolean;
   amoId?: string;
   sheetName?: string;
+  decisions?: Record<number, string>;
 }): Promise<PersonnelImportSummary> {
   const form = new FormData();
   form.append("file", params.file);
@@ -303,6 +314,9 @@ export async function importPersonnelFile(params: {
   search.set("dry_run", params.dryRun === false ? "false" : "true");
   if (params.amoId) search.set("amo_id", params.amoId);
   if (params.sheetName) search.set("sheet_name", params.sheetName);
+  if (params.decisions && Object.keys(params.decisions).length) {
+    search.set("decisions_json", JSON.stringify(params.decisions));
+  }
 
   const response = await fetch(`/api/accounts/admin/personnel/import?${search.toString()}`, {
     method: "POST",
