@@ -30,6 +30,12 @@ const presenceTone = (user: AdminUserDirectoryItem, presence = user.presence) =>
   return presence.state === "away" ? "is-away" : "is-online";
 };
 
+const presenceTone = (user: AdminUserDirectoryItem) => {
+  if (!user.is_active) return "is-inactive";
+  if (!user.presence.is_online) return "is-offline";
+  return user.presence.state === "away" ? "is-away" : "is-online";
+};
+
 const formatDateTime = (value?: string | null) => {
   if (!value) return "Never seen";
   const date = new Date(value);
