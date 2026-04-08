@@ -59,7 +59,7 @@ const AdminDashboardPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { status: realtimeStatus } = useRealtime();
+  const { status: realtimeStatus, isOnline: clientOnline } = useRealtime();
   const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
 
@@ -102,7 +102,7 @@ const AdminDashboardPage: React.FC = () => {
               : userStatus === statusFilter;
       return matchesRole && matchesStatus;
     });
-  }, [items, roleFilter, statusFilter]);
+  }, [items, roleFilter, statusFilter, currentUser?.id, realtimeStatus, clientOnline, nowIso]);
 
   const departmentGroups = useMemo(() => {
     const counts = new Map<string, number>();
