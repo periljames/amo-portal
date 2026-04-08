@@ -679,6 +679,13 @@ export interface AdminUserPresence {
   source: string | null;
 }
 
+export interface AdminUserPresenceDisplay {
+  status_label: string;
+  last_seen_label: string;
+  last_seen_at: string | null;
+  last_seen_at_display: string | null;
+}
+
 export interface AdminUserDirectoryItem {
   id: string;
   amo_id: string;
@@ -694,10 +701,12 @@ export interface AdminUserDirectoryItem {
   is_active: boolean;
   is_superuser: boolean;
   is_amo_admin: boolean;
+  display_title: string;
   last_login_at: string | null;
   created_at: string;
   updated_at: string;
   presence: AdminUserPresence;
+  presence_display: AdminUserPresenceDisplay;
 }
 
 export interface AdminUserDirectoryMetrics {
@@ -705,6 +714,8 @@ export interface AdminUserDirectoryMetrics {
   active_users: number;
   inactive_users: number;
   online_users: number;
+  away_users: number;
+  recently_active_users: number;
   departmentless_users: number;
   managers: number;
 }
@@ -768,7 +779,9 @@ export interface AdminUserGroupChip {
 export interface AdminUserWorkspace {
   user: AdminUserRead;
   department_name: string | null;
+  display_title: string;
   presence: AdminUserPresence;
+  presence_display: AdminUserPresenceDisplay;
   metrics: AdminUserWorkspaceMetric[];
   tasks: AdminUserTaskSummary[];
   permissions: AdminUserPermissionSummary[];
