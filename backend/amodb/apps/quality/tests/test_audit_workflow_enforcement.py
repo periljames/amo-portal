@@ -165,9 +165,10 @@ class _FakeProvider(notification_providers.EmailProvider):
         })
 
 
-def test_schedule_creation_notifies_lead_auditor(db_session):
+def test_schedule_creation_notifies_lead_auditor_and_auditee(db_session):
     amo, quality, _, _ = _seed_audit(db_session)
     lead = _user(db_session, amo.id, account_models.AccountRole.QUALITY_INSPECTOR)
+    auditee = _user(db_session, amo.id, account_models.AccountRole.TECHNICIAN)
     payload = quality_schemas.QMSAuditScheduleCreate(
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
@@ -176,25 +177,37 @@ def test_schedule_creation_notifies_lead_auditor(db_session):
         duration_days=3,
         next_due_date=date.today(),
         lead_auditor_user_id=lead.id,
+        auditee_user_id=auditee.id,
+        auditee_email=auditee.email,
+        auditee="Stores",
     )
 
     schedule = quality_router.create_audit_schedule(payload=payload, request=_req(), db=db_session, current_user=quality)
-    note = (
+    lead_note = (
         db_session.query(quality_models.QMSNotification)
         .filter(quality_models.QMSNotification.user_id == lead.id)
         .order_by(quality_models.QMSNotification.created_at.desc())
         .first()
     )
+    auditee_note = (
+        db_session.query(quality_models.QMSNotification)
+        .filter(quality_models.QMSNotification.user_id == auditee.id)
+        .order_by(quality_models.QMSNotification.created_at.desc())
+        .first()
+    )
 
     assert schedule.lead_auditor_user_id == lead.id
-    assert note is not None
-    assert "assigned as lead auditor" in note.message
-    assert "Quarterly Procurement Audit" in note.message
+    assert lead_note is not None
+    assert "assigned as lead auditor" in lead_note.message
+    assert "Quarterly Procurement Audit" in lead_note.message
+    assert auditee_note is not None
+    assert "listed as auditee" in auditee_note.message
 
 
 def test_running_schedule_sends_notice_notification_and_email(db_session, monkeypatch):
     amo, quality, _, _ = _seed_audit(db_session)
     lead = _user(db_session, amo.id, account_models.AccountRole.QUALITY_INSPECTOR)
+    auditee = _user(db_session, amo.id, account_models.AccountRole.TECHNICIAN)
     fake_provider = _FakeProvider()
     monkeypatch.setattr(notification_providers, "get_email_provider", lambda: (fake_provider, True))
 
@@ -204,6 +217,9 @@ def test_running_schedule_sends_notice_notification_and_email(db_session, monkey
         frequency=quality_models.QMSAuditScheduleFrequency.MONTHLY,
         title="Hangar Readiness Audit",
         lead_auditor_user_id=lead.id,
+        auditee_user_id=auditee.id,
+        auditee_email=auditee.email,
+        auditee="Hangar team",
         duration_days=2,
         next_due_date=date.today(),
         created_by_user_id=quality.id,
@@ -213,24 +229,32 @@ def test_running_schedule_sends_notice_notification_and_email(db_session, monkey
 
     audit = quality_router.run_audit_schedule(schedule_id=schedule.id, request=_req(), db=db_session, current_user=quality)
 
-    note = (
+    lead_note = (
         db_session.query(quality_models.QMSNotification)
         .filter(quality_models.QMSNotification.user_id == lead.id)
         .order_by(quality_models.QMSNotification.created_at.desc())
         .first()
     )
-    email_log = (
-        db_session.query(notification_models.EmailLog)
-        .filter(notification_models.EmailLog.recipient == lead.email)
-        .order_by(notification_models.EmailLog.created_at.desc())
+    auditee_note = (
+        db_session.query(quality_models.QMSNotification)
+        .filter(quality_models.QMSNotification.user_id == auditee.id)
+        .order_by(quality_models.QMSNotification.created_at.desc())
         .first()
     )
+    email_logs = (
+        db_session.query(notification_models.EmailLog)
+        .filter(notification_models.EmailLog.template_key == "qms_audit_notice_memo")
+        .order_by(notification_models.EmailLog.created_at.asc())
+        .all()
+    )
+    recipients = {log.recipient for log in email_logs}
 
     assert audit.lead_auditor_user_id == lead.id
-    assert note is not None
-    assert "Audit notice memo" in note.message
-    assert audit.audit_ref in note.message
-    assert email_log is not None
-    assert email_log.template_key == "qms_audit_notice_memo"
-    assert email_log.recipient == lead.email
-    assert fake_provider.sent and fake_provider.sent[-1]["recipient"] == lead.email
+    assert lead_note is not None
+    assert "Audit notice memo" in lead_note.message
+    assert audit.audit_ref in lead_note.message
+    assert auditee_note is not None
+    assert "Audit notice memo issued to auditee" in auditee_note.message
+    assert lead.email in recipients
+    assert auditee.email in recipients
+    assert {entry["recipient"] for entry in fake_provider.sent} >= {lead.email, auditee.email}

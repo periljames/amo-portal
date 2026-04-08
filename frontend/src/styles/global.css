@@ -5445,241 +5445,276 @@ textarea.input {
   }
 }
 
-.admin-user-hub,
-.admin-user-profile-page {
-  gap: 16px;
-}
-
-.admin-user-hub__header-actions,
-.admin-user-profile-page__header-actions,
-.admin-user-hub__actions-cell,
-.admin-user-hub__toolbar,
-.admin-user-profile-page__command-bar,
-.admin-user-profile-page__form-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.admin-user-hub__amo-label,
-.admin-user-hub__note {
-  color: var(--text-secondary, #6b7280);
-  font-size: 0.92rem;
-}
-
-.admin-user-hub__metrics,
-.admin-user-profile-page__metrics,
-.admin-user-hub__signals-grid {
+.planner-calendar-shell {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.9rem;
+  min-width: 0;
 }
 
-.admin-user-hub__metric-card,
-.admin-user-profile-page__metric,
-.admin-user-hub__signal-card,
-.admin-user-profile-page__fact-card {
-  border: 1px solid var(--border-soft, rgba(15, 23, 42, 0.08));
-  border-radius: 14px;
-  padding: 12px 14px;
-  background: var(--surface-elevated, #fff);
+.planner-calendar-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.admin-user-hub__metric-card span,
-.admin-user-profile-page__metric span,
-.admin-user-hub__signal-card span,
-.admin-user-profile-page__fact-card span {
-  font-size: 0.82rem;
-  color: var(--text-secondary, #6b7280);
-}
-
-.admin-user-hub__metric-card strong,
-.admin-user-profile-page__metric strong,
-.admin-user-hub__signal-card strong,
-.admin-user-profile-page__fact-card strong {
-  font-size: 1.15rem;
-  color: var(--text-primary, #111827);
-}
-
-.admin-user-hub__tabs,
-.admin-user-profile-page__tabs {
-  display: flex;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   flex-wrap: wrap;
-  border-bottom: 1px solid var(--border-soft, rgba(15, 23, 42, 0.08));
-  padding-bottom: 8px;
 }
 
-.admin-user-hub__tab,
-.admin-user-profile-page__tab {
-  border: 1px solid var(--border-soft, rgba(15, 23, 42, 0.08));
-  background: transparent;
-  border-radius: 999px;
-  padding: 9px 14px;
-  font: inherit;
-  cursor: pointer;
+.planner-calendar-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
 }
 
-.admin-user-hub__tab.is-active,
-.admin-user-profile-page__tab.is-active {
-  background: var(--surface-elevated, #fff);
-  border-color: var(--accent, #2563eb);
-  color: var(--accent, #2563eb);
+.planner-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(130px, 1fr));
+  gap: 0.75rem;
+  min-width: 980px;
 }
 
-.admin-user-hub__subcell,
-.admin-user-profile-page__subcell {
-  color: var(--text-secondary, #6b7280);
-  font-size: 0.82rem;
-  margin-top: 3px;
+.planner-calendar-grid--header {
+  margin-bottom: 0.75rem;
 }
 
-.admin-user-hub__presence,
-.admin-user-profile-page__chip {
+.planner-calendar-cell {
+  min-height: 11rem;
+  padding: 0.8rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 82%, var(--surface) 18%);
+  display: grid;
+  align-content: start;
+  gap: 0.6rem;
+}
+
+.planner-calendar-cell--label {
+  min-height: auto;
+  padding-block: 0.65rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  place-items: center start;
+}
+
+.planner-calendar-cell.is-outside {
+  opacity: 0.45;
+}
+
+.planner-calendar-cell.is-today {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 40%, transparent);
+}
+
+.planner-calendar-cell__date {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
   border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
   font-size: 0.82rem;
-  border: 1px solid var(--border-soft, rgba(15, 23, 42, 0.08));
-  background: var(--surface-elevated, #fff);
+  font-weight: 700;
 }
 
-.admin-user-hub__presence.is-online,
-.admin-user-profile-page__chip--presence.is-online {
-  color: #166534;
-}
-
-.admin-user-hub__presence.is-away,
-.admin-user-profile-page__chip--presence.is-away {
-  color: #92400e;
-}
-
-.admin-user-hub__presence.is-offline,
-.admin-user-profile-page__chip--presence.is-offline {
-  color: #6b7280;
-}
-
-.admin-user-hub__groups-layout,
-.admin-user-hub__import-grid,
-.admin-user-profile-page__grid {
+.planner-calendar-cell__items {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  gap: 16px;
+  gap: 0.45rem;
 }
 
-.admin-user-hub__group-form,
-.admin-user-profile-page__stack,
-.admin-user-profile-page__form-grid {
+.planner-calendar-event {
   display: grid;
-  gap: 12px;
-}
-
-.admin-user-hub__template-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.admin-user-hub__template-card {
-  border: 1px solid var(--border-soft, rgba(15, 23, 42, 0.08));
-  background: var(--surface-elevated, #fff);
-  border-radius: 14px;
-  padding: 12px;
-  display: grid;
-  gap: 6px;
+  gap: 0.18rem;
   text-align: left;
+  padding: 0.65rem 0.7rem;
+  border-radius: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 18%, var(--border) 82%);
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--surface) 90%);
+  color: var(--text-primary);
   cursor: pointer;
 }
 
-.admin-user-hub__template-card span {
-  color: var(--text-secondary, #6b7280);
+.planner-calendar-event strong {
   font-size: 0.82rem;
 }
 
-.admin-user-hub__row-selected {
-  background: rgba(37, 99, 235, 0.06);
+.planner-calendar-event span {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
 }
 
-.admin-user-hub__group-detail,
-.admin-user-profile-page__hero,
-.admin-user-profile-page__identity,
-.admin-user-profile-page__chips,
-.admin-user-profile-page__facts-grid {
+.planner-calendar-event--preview {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--accent-warning) 12%, var(--surface) 88%);
+}
+
+.planner-drawer-layout {
+  min-height: 0;
   display: grid;
-  gap: 12px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
 }
 
-.admin-user-profile-page__hero {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  padding: 18px;
-  border: 1px solid var(--border-soft, rgba(15, 23, 42, 0.08));
-  border-radius: 18px;
-  background: var(--surface-elevated, #fff);
+.planner-drawer-layout__body {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.1rem 1.15rem;
 }
 
-.admin-user-profile-page__identity {
-  grid-template-columns: auto 1fr;
+.planner-drawer-layout__intro {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.planner-drawer-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.planner-drawer-tabs__item {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+  padding: 0.8rem 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 84%, var(--surface) 16%);
+  color: var(--text-primary);
+}
+
+.planner-drawer-tabs__item strong {
+  font-size: 0.9rem;
+}
+
+.planner-drawer-tabs__item span {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.planner-drawer-tabs__item.is-active {
+  border-color: color-mix(in srgb, var(--accent-primary) 34%, var(--border) 66%);
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--surface) 90%);
+}
+
+.planner-checkbox-field {
+  min-height: 44px;
+  display: inline-flex;
   align-items: center;
+  gap: 0.65rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 84%, var(--surface) 16%);
+  font-weight: 600;
 }
 
-.admin-user-profile-page__avatar {
-  width: 72px;
-  height: 72px;
-  border-radius: 20px;
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  background: rgba(37, 99, 235, 0.12);
-  color: var(--accent, #2563eb);
-}
-
-.admin-user-profile-page__identity h2 {
+.planner-checkbox-field input {
   margin: 0;
 }
 
-.admin-user-profile-page__identity p {
-  margin: 4px 0 0;
-  color: var(--text-secondary, #6b7280);
+.planner-review-grid {
+  display: grid;
+  gap: 0.85rem;
 }
 
-.admin-user-profile-page__chips {
+.planner-review-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.95rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 84%, var(--surface) 16%);
+}
+
+.planner-review-card--muted {
+  background: color-mix(in srgb, var(--surface-soft) 90%, var(--surface) 10%);
+}
+
+.planner-review-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.planner-review-list div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.planner-review-list dt {
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.planner-review-list dd {
+  margin: 0;
+}
+
+.planner-recipient-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.planner-recipient-chip {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+}
+
+.planner-recipient-chip span {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.planner-recipient-chip strong {
+  font-size: 0.86rem;
+}
+
+.planner-recipient-chip.is-muted {
+  background: color-mix(in srgb, var(--accent-warning) 10%, var(--surface) 90%);
+}
+
+.planner-drawer-layout__footer {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.95rem 1.1rem 1.1rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+
+.planner-drawer-layout__footer-left,
+.planner-drawer-layout__footer-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   flex-wrap: wrap;
 }
 
-.admin-user-profile-page__form-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-
-.admin-user-profile-page__form-grid label {
-  display: grid;
-  gap: 6px;
-}
-
-.admin-user-profile-page__form-grid label span {
-  font-size: 0.84rem;
-  color: var(--text-secondary, #6b7280);
-}
-
-.admin-user-hub__import-panel,
-.admin-user-hub__import-summary {
-  display: grid;
-  gap: 10px;
-}
-
-@media (max-width: 1080px) {
-  .admin-user-hub__groups-layout,
-  .admin-user-hub__import-grid,
-  .admin-user-profile-page__grid,
-  .admin-user-profile-page__hero {
+@media (max-width: 980px) {
+  .planner-drawer-tabs {
     grid-template-columns: 1fr;
+  }
+
+  .planner-drawer-layout__footer {
+    align-items: stretch;
+  }
+
+  .planner-drawer-layout__footer-left,
+  .planner-drawer-layout__footer-right {
+    width: 100%;
+  }
+
+  .planner-drawer-layout__footer-right > * {
+    flex: 1 1 auto;
   }
 }

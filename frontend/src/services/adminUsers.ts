@@ -43,21 +43,6 @@ export interface AdminUserCreatePayload {
  * Shape of the user returned by /accounts/admin/users.
  * Kept in sync with UserRead from the backend.
  */
-export interface AdminUserSummaryRead {
-  id: string;
-  amo_id: string;
-  department_id: string | null;
-  staff_code: string;
-  email: string;
-  full_name: string;
-  role: AccountRole;
-  position_title: string | null;
-  is_active: boolean;
-  online_status: "online" | "away" | "offline" | string;
-  last_seen_at: string | null;
-  groups_count: number;
-}
-
 export interface AdminUserRead {
   id: string;
   amo_id: string;
@@ -81,13 +66,10 @@ export interface AdminUserRead {
   is_active: boolean;
   is_superuser: boolean;
   is_amo_admin: boolean;
-  is_auditor?: boolean;
   must_change_password: boolean;
   token_revoked_at: string | null;
   last_login_at: string | null;
   last_login_ip: string | null;
-  last_seen_at: string | null;
-  online_status: "online" | "away" | "offline" | string;
   created_at: string;
   updated_at: string;
 }
@@ -148,120 +130,6 @@ export interface UserScheduleReviewPayload {
   description?: string;
   due_at?: string;
   priority?: number;
-}
-
-
-export type AdminUserGroupType = "POST_HOLDERS" | "DEPARTMENT" | "CUSTOM" | "PERSONAL";
-export type AdminUserGroupVisibility = "PRIVATE" | "AMO" | "SYSTEM";
-
-export interface AdminUserTaskSummaryRead {
-  id: string;
-  title: string;
-  status: string;
-  priority: number;
-  due_at: string | null;
-  escalated_at: string | null;
-  entity_type: string | null;
-  entity_id: string | null;
-  updated_at: string;
-}
-
-export interface AdminUserPermissionRowRead {
-  category: string;
-  subject: string;
-  permission_level: string;
-  status: string;
-  effective_from: string | null;
-  expires_at: string | null;
-  notes: string | null;
-}
-
-export interface AdminUserActivityRowRead {
-  id: string;
-  happened_at: string;
-  action: string;
-  entity_type: string;
-  entity_id: string;
-  note: string | null;
-}
-
-export interface AdminUserLoginRecordRead {
-  id: string;
-  event_type: string;
-  description: string | null;
-  ip_address: string | null;
-  user_agent: string | null;
-  created_at: string;
-}
-
-export interface AdminUserGroupMemberRead {
-  user_id: string;
-  full_name: string;
-  email: string;
-  role: AccountRole;
-  member_role: string;
-  added_at: string;
-}
-
-export interface AdminUserGroupRead {
-  id: string;
-  amo_id: string;
-  owner_user_id: string | null;
-  code: string;
-  name: string;
-  description: string | null;
-  group_type: AdminUserGroupType;
-  visibility: AdminUserGroupVisibility;
-  is_system_managed: boolean;
-  is_active: boolean;
-  member_count: number;
-  members: AdminUserGroupMemberRead[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AdminUserGroupCreatePayload {
-  amo_id?: string;
-  owner_user_id?: string | null;
-  code?: string | null;
-  name: string;
-  description?: string | null;
-  group_type?: AdminUserGroupType;
-  visibility?: AdminUserGroupVisibility;
-  is_system_managed?: boolean;
-  user_ids?: string[];
-}
-
-export interface AdminUserGroupUpdatePayload {
-  name?: string | null;
-  description?: string | null;
-  visibility?: AdminUserGroupVisibility;
-  is_active?: boolean;
-}
-
-export interface AdminUserGroupMemberPayload {
-  user_id: string;
-  member_role?: string;
-}
-
-export interface AdminUserKpiRead {
-  open_tasks: number;
-  overdue_tasks: number;
-  completed_tasks_30d: number;
-  active_authorisations: number;
-  activity_events_30d: number;
-  login_failures_30d: number;
-  groups_count: number;
-}
-
-export interface AdminUserWorkspaceRead {
-  user: AdminUserRead;
-  metrics: AdminUserKpiRead;
-  tasks: AdminUserTaskSummaryRead[];
-  permissions: AdminUserPermissionRowRead[];
-  activity: AdminUserActivityRowRead[];
-  login_records: AdminUserLoginRecordRead[];
-  groups: AdminUserGroupRead[];
 }
 
 export interface AdminDepartmentRead {
@@ -580,30 +448,6 @@ function resolveListAmoId(params?: ListParams): string | undefined {
  * - amo_id (superuser only)
  * - skip / limit / search
  */
-export async function listAdminUserSummaries(
-  params: ListParams = {},
-  options: ListOptions = {}
-): Promise<AdminUserSummaryRead[]> {
-  const sp = new URLSearchParams();
-
-  const amoId = resolveListAmoId(params);
-  if (amoId) sp.set("amo_id", amoId);
-
-  if (typeof params.skip === "number") sp.set("skip", String(params.skip));
-  if (typeof params.limit === "number") sp.set("limit", String(params.limit));
-  if (params.search && params.search.trim()) {
-    sp.set("search", params.search.trim());
-  }
-
-  const qs = sp.toString();
-  const path = qs ? `/accounts/admin/users/summary?${qs}` : "/accounts/admin/users/summary";
-
-  return apiGet<AdminUserSummaryRead[]>(path, {
-    headers: authHeaders(),
-    signal: options.signal,
-  });
-}
-
 export async function listAdminUsers(
   params: ListParams = {},
   options: ListOptions = {}
@@ -828,39 +672,130 @@ export async function scheduleAdminUserReview(
   );
 }
 
+export interface AdminUserPresence {
+  state: string;
+  is_online: boolean;
+  last_seen_at: string | null;
+  source: string | null;
+}
 
-export async function getAdminUserWorkspace(userId: string): Promise<AdminUserWorkspaceRead> {
-  return apiGet<AdminUserWorkspaceRead>(`/accounts/admin/users/${encodeURIComponent(userId)}/workspace`, {
+export interface AdminUserDirectoryItem {
+  id: string;
+  amo_id: string;
+  department_id: string | null;
+  department_name: string | null;
+  staff_code: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  role: AccountRole;
+  position_title: string | null;
+  is_active: boolean;
+  is_superuser: boolean;
+  is_amo_admin: boolean;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+  presence: AdminUserPresence;
+}
+
+export interface AdminUserDirectoryMetrics {
+  total_users: number;
+  active_users: number;
+  inactive_users: number;
+  online_users: number;
+  departmentless_users: number;
+  managers: number;
+}
+
+export interface AdminUserDirectoryResponse {
+  items: AdminUserDirectoryItem[];
+  metrics: AdminUserDirectoryMetrics;
+}
+
+export interface AdminUserWorkspaceMetric {
+  key: string;
+  label: string;
+  value: number;
+}
+
+export interface AdminUserTaskSummary {
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+  due_at: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  updated_at: string;
+}
+
+export interface AdminUserPermissionSummary {
+  id: string;
+  code: string;
+  label: string;
+  maintenance_scope: string | null;
+  scope_text: string | null;
+  effective_from: string;
+  expires_at: string | null;
+  is_currently_valid: boolean;
+}
+
+export interface AdminUserActivitySummary {
+  id: string;
+  occurred_at: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+}
+
+export interface AdminUserLoginRecord {
+  last_login_at: string | null;
+  last_login_ip: string | null;
+  last_login_user_agent: string | null;
+  must_change_password: boolean;
+  password_changed_at: string | null;
+  token_revoked_at: string | null;
+}
+
+export interface AdminUserGroupChip {
+  kind: string;
+  label: string;
+  value: string | null;
+}
+
+export interface AdminUserWorkspace {
+  user: AdminUserRead;
+  department_name: string | null;
+  presence: AdminUserPresence;
+  metrics: AdminUserWorkspaceMetric[];
+  tasks: AdminUserTaskSummary[];
+  permissions: AdminUserPermissionSummary[];
+  activity_log: AdminUserActivitySummary[];
+  login_record: AdminUserLoginRecord;
+  groups: AdminUserGroupChip[];
+}
+
+export async function getAdminUserDirectory(params: {
+  amo_id?: string | null;
+  search?: string;
+  skip?: number;
+  limit?: number;
+} = {}): Promise<AdminUserDirectoryResponse> {
+  const sp = new URLSearchParams();
+  if (params.amo_id && params.amo_id.trim()) sp.set("amo_id", params.amo_id.trim());
+  if (params.search && params.search.trim()) sp.set("search", params.search.trim());
+  if (typeof params.skip === "number") sp.set("skip", String(params.skip));
+  if (typeof params.limit === "number") sp.set("limit", String(params.limit));
+  const qs = sp.toString();
+  return apiGet<AdminUserDirectoryResponse>(`/accounts/admin/user-directory${qs ? `?${qs}` : ""}`, {
     headers: authHeaders(),
   });
 }
 
-export async function listAdminUserGroups(params: { amo_id?: string; user_id?: string; include_inactive?: boolean } = {}): Promise<AdminUserGroupRead[]> {
-  const sp = new URLSearchParams();
-  if (params.amo_id?.trim()) sp.set("amo_id", params.amo_id.trim());
-  if (params.user_id?.trim()) sp.set("user_id", params.user_id.trim());
-  if (typeof params.include_inactive === "boolean") sp.set("include_inactive", String(params.include_inactive));
-  const qs = sp.toString();
-  const path = qs ? `/accounts/admin/groups?${qs}` : "/accounts/admin/groups";
-  return apiGet<AdminUserGroupRead[]>(path, { headers: authHeaders() });
-}
-
-export async function createAdminUserGroup(payload: AdminUserGroupCreatePayload): Promise<AdminUserGroupRead> {
-  return apiPost<AdminUserGroupRead>("/accounts/admin/groups", JSON.stringify(payload), { headers: authHeaders() });
-}
-
-export async function updateAdminUserGroup(groupId: string, payload: AdminUserGroupUpdatePayload): Promise<AdminUserGroupRead> {
-  return apiPut<AdminUserGroupRead>(`/accounts/admin/groups/${encodeURIComponent(groupId)}`, JSON.stringify(payload), { headers: authHeaders() });
-}
-
-export async function addAdminUserGroupMember(groupId: string, payload: AdminUserGroupMemberPayload): Promise<AdminUserGroupRead> {
-  return apiPost<AdminUserGroupRead>(`/accounts/admin/groups/${encodeURIComponent(groupId)}/members`, JSON.stringify(payload), { headers: authHeaders() });
-}
-
-export async function removeAdminUserGroupMember(groupId: string, userId: string): Promise<AdminUserGroupRead> {
-  return apiDelete<AdminUserGroupRead>(`/accounts/admin/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`, undefined, { headers: authHeaders() });
-}
-
-export async function deactivateAdminUserGroup(groupId: string): Promise<void> {
-  await apiDelete<void>(`/accounts/admin/groups/${encodeURIComponent(groupId)}`, undefined, { headers: authHeaders() });
+export async function getAdminUserWorkspace(userId: string): Promise<AdminUserWorkspace> {
+  return apiGet<AdminUserWorkspace>(`/accounts/admin/users/${encodeURIComponent(userId)}/workspace`, {
+    headers: authHeaders(),
+  });
 }

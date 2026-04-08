@@ -102,6 +102,26 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
+
+  const sendPresenceHeartbeat = useCallback(async (state: "online" | "away" = "online") => {
+    const token = getToken();
+    if (!token || !isRealtimeEnabled()) return;
+    try {
+      await fetch(`${getApiBaseUrl()}/api/realtime/presence`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ state }),
+      });
+    } catch {
+      // presence is best-effort only
+    }
+  }, []);
+
   const handleEvent = useCallback((raw: unknown, transportCursor?: string) => {
     const parsed = eventSchema.safeParse(raw);
     if (!parsed.success) return;
@@ -332,13 +352,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [reconnectNow, syncServerTime]);
 
   useEffect(() => {
-    if (!getToken() || !isRealtimeEnabled()) {
-      setBackendHealth("ok");
-      return;
-    }
-
     const refreshHealth = async () => {
-      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const health = await fetchHealthz();
         setBackendHealth(health.status === "ok" ? "ok" : "degraded");
@@ -347,29 +361,31 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     };
 
-    const refreshClock = async () => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      await syncServerTime();
-    };
-
-    const onVisible = () => {
-      if (!document.hidden) {
-        void refreshClock();
-        void refreshHealth();
-      }
-    };
-
-    void refreshClock();
+    void syncServerTime();
     void refreshHealth();
     const timer = window.setInterval(() => {
       void refreshHealth();
     }, 180_000);
-    document.addEventListener("visibilitychange", onVisible);
+    return () => window.clearInterval(timer);
+  }, [syncServerTime]);
+
+  useEffect(() => {
+    if (!getToken() || !isRealtimeEnabled()) return;
+
+    const pushPresence = () => {
+      const state = typeof document !== "undefined" && document.hidden ? "away" : "online";
+      void sendPresenceHeartbeat(state);
+    };
+
+    pushPresence();
+    const timer = window.setInterval(pushPresence, 45_000);
+    const handleVisibility = () => pushPresence();
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [syncServerTime]);
+  }, [sendPresenceHeartbeat]);
 
   const refreshData = useCallback(() => {
     queryClient.invalidateQueries();

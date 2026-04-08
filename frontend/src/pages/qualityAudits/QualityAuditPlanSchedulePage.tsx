@@ -33,6 +33,7 @@ import {
 } from "../../services/qms";
 
 type PlannerView = "calendar" | "list" | "table";
+type DrawerTab = "overview" | "participants" | "review";
 
 type ScheduleFormState = {
   title: string;
@@ -58,6 +59,11 @@ type ScheduleViewModel = QMSAuditScheduleOut & {
 
 const frequencies: QMSAuditScheduleFrequency[] = ["ONE_TIME", "MONTHLY", "QUARTERLY", "BI_ANNUAL", "ANNUAL"];
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const drawerTabs: Array<{ id: DrawerTab; label: string; helper: string }> = [
+  { id: "overview", label: "Overview", helper: "Scope, cadence, and dates" },
+  { id: "participants", label: "Participants", helper: "Auditee and audit team" },
+  { id: "review", label: "Review", helper: "Notice recipients and final check" },
+];
 
 const defaultSchedule: ScheduleFormState = {
   title: "",
@@ -82,6 +88,10 @@ function plannerViewOptions() {
     { value: "list" as PlannerView, label: "List", icon: LayoutList },
     { value: "table" as PlannerView, label: "Table", icon: ClipboardList },
   ];
+}
+
+function formatFrequencyLabel(value: QMSAuditScheduleFrequency): string {
+  return value.replaceAll("_", " ");
 }
 
 function formatDate(value?: string | null): string {
@@ -201,6 +211,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState<Date | null>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>("overview");
   const queryClient = useQueryClient();
   const draftStorageKey = useMemo(() => `qms-audit-schedule-draft:${amoCode}:${department}`, [amoCode, department]);
 
@@ -314,9 +325,49 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     [boardSchedules, editingScheduleId, form]
   );
 
+  const leadAuditorUser = form.lead_auditor_user_id ? peopleById.get(form.lead_auditor_user_id) ?? null : null;
+  const auditeeUser = form.auditee_user_id ? peopleById.get(form.auditee_user_id) ?? null : null;
+  const recipientSummary = useMemo(() => {
+    const items: Array<{ key: string; label: string; value: string; muted?: boolean }> = [];
+    if (leadAuditorUser) {
+      items.push({
+        key: "lead",
+        label: "Lead auditor notice",
+        value: leadAuditorUser.email ? `${userLabel(leadAuditorUser)} · ${leadAuditorUser.email}` : userLabel(leadAuditorUser),
+      });
+    }
+    if (auditeeUser) {
+      items.push({
+        key: "auditee-user",
+        label: "Auditee notice",
+        value: auditeeUser.email ? `${userLabel(auditeeUser)} · ${auditeeUser.email}` : userLabel(auditeeUser),
+      });
+    } else if (form.auditee_email.trim()) {
+      items.push({
+        key: "auditee-email",
+        label: "Auditee notice",
+        value: form.auditee.trim() ? `${form.auditee.trim()} · ${form.auditee_email.trim()}` : form.auditee_email.trim(),
+      });
+    }
+    if (!items.length) {
+      items.push({
+        key: "missing",
+        label: "Notice recipients",
+        value: "Add a lead auditor or auditee email to send audit notices.",
+        muted: true,
+      });
+    }
+    return items;
+  }, [auditeeUser, form.auditee, form.auditee_email, leadAuditorUser]);
+
+  const activeDrawerTabIndex = drawerTabs.findIndex((tab) => tab.id === drawerTab);
+  const canGoBackDrawerTab = activeDrawerTabIndex > 0;
+  const canGoForwardDrawerTab = activeDrawerTabIndex < drawerTabs.length - 1;
+
   const openCreateDrawer = () => {
     setEditingScheduleId(null);
     setError(null);
+    setDrawerTab("overview");
     setDrawerOpen(true);
   };
 
@@ -333,6 +384,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     setForm(scheduleToForm(schedule));
     setEditingScheduleId(schedule.id);
     setError(null);
+    setDrawerTab("overview");
     setDrawerOpen(true);
   };
 
@@ -351,6 +403,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     onSuccess: async () => {
       const wasEditing = Boolean(editingScheduleId);
       discardDraft();
+      setDrawerTab("overview");
       setDrawerOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["qms-audit-schedules", amoCode, department] });
       pushToast({
@@ -373,6 +426,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     onSuccess: async (schedule) => {
       if (editingScheduleId === schedule.id) {
         discardDraft();
+        setDrawerTab("overview");
         setDrawerOpen(false);
       }
       await queryClient.invalidateQueries({ queryKey: ["qms-audit-schedules", amoCode, department] });
@@ -472,13 +526,14 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
           </Button>
         </div>
 
-        <div className="planner-calendar-grid planner-calendar-grid--header">
+        <div className="planner-calendar-scroll">
+          <div className="planner-calendar-grid planner-calendar-grid--header">
           {weekdayLabels.map((label) => (
             <div key={label} className="planner-calendar-cell planner-calendar-cell--label">{label}</div>
           ))}
-        </div>
+          </div>
 
-        <div className="planner-calendar-grid">
+          <div className="planner-calendar-grid">
           {calendarCells.map((cell) => {
             const dateKey = cell.date.toISOString().slice(0, 10);
             const daySchedules = byDate.get(dateKey) ?? [];
@@ -497,7 +552,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                         onClick={() => (schedule.is_preview ? setDrawerOpen(true) : beginEdit(schedule))}
                       >
                         <strong>{schedule.title}</strong>
-                        <span>{schedule.preview_label || schedule.kind}</span>
+                        <span>{schedule.preview_label || schedule.kind.replaceAll("_", " ")}</span>
                         <span>{leadUser ? userLabel(leadUser) : "Lead auditor pending"}</span>
                         <span className={countdown.className}>{countdown.text}</span>
                       </button>
@@ -507,6 +562,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
               </div>
             );
           })}
+          </div>
         </div>
       </div>
     );
@@ -582,7 +638,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                     <span>{schedule.preview_label || schedule.kind}</span>
                   </div>
                 </td>
-                <td>{schedule.frequency.replaceAll("_", " ")}</td>
+                <td>{formatFrequencyLabel(schedule.frequency)}</td>
                 <td>{formatDate(schedule.next_due_date)}</td>
                 <td>{leadUser ? userLabel(leadUser) : "Unassigned"}</td>
                 <td>{auditeeUser ? userLabel(auditeeUser) : schedule.auditee || "Not set"}</td>
@@ -655,107 +711,193 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
         </SectionCard>
       </div>
 
-      <Drawer title={editingScheduleId ? "Edit audit schedule" : "Create audit schedule"} isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} side="left">
-        <div className="planner-drawer-form">
-          <p className="planner-inline-note">Draft changes are staged automatically for the current user and AMO.</p>
-          {previewSchedule ? (
-            <div className="planner-preview-card">
-              <p className="planner-preview-card__eyebrow">{previewSchedule.preview_label || "Live preview"}</p>
-              <h3 className="planner-preview-card__title">{previewSchedule.title}</h3>
-              <span>{formatDate(previewSchedule.next_due_date)} · {countdownLabel(previewSchedule.next_due_date).text}</span>
-              <span>{previewSchedule.kind} · {previewSchedule.frequency.replaceAll("_", " ")}</span>
-              <span>Lead auditor: {userLabel(peopleById.get(previewSchedule.lead_auditor_user_id || "") || null)}</span>
+      <Drawer
+        title={editingScheduleId ? "Edit audit schedule" : "Create audit schedule"}
+        isOpen={drawerOpen}
+        onClose={() => {
+          setDrawerTab("overview");
+          setDrawerOpen(false);
+        }}
+        side="left"
+        panelClassName="drawer-panel--planner"
+      >
+        <div className="planner-drawer-layout">
+          <div className="planner-drawer-layout__body">
+            <div className="planner-drawer-layout__intro">
+              <p className="planner-inline-note">Draft changes are staged automatically for the current user and AMO.</p>
+              {previewSchedule ? (
+                <div className="planner-preview-card">
+                  <p className="planner-preview-card__eyebrow">{previewSchedule.preview_label || "Live preview"}</p>
+                  <h3 className="planner-preview-card__title">{previewSchedule.title}</h3>
+                  <span>{formatDate(previewSchedule.next_due_date)} · {countdownLabel(previewSchedule.next_due_date).text}</span>
+                  <span>{previewSchedule.kind} · {formatFrequencyLabel(previewSchedule.frequency)}</span>
+                  <span>Lead auditor: {userLabel(peopleById.get(previewSchedule.lead_auditor_user_id || "") || null)}</span>
+                </div>
+              ) : null}
             </div>
-          ) : null}
-          <div className="planner-drawer-form__grid">
-            <label className="profile-inline-field planner-form-span-2">
-              <span>Audit title</span>
-              <input className="input" value={form.title} onChange={(e) => setField("title", e.target.value)} placeholder="e.g. Base maintenance quality audit" />
-            </label>
-            <label className="profile-inline-field">
-              <span>Audit kind</span>
-              <input className="input" value={form.kind} onChange={(e) => setField("kind", e.target.value)} placeholder="Internal Audit" />
-            </label>
-            <label className="profile-inline-field">
-              <span>Frequency</span>
-              <select className="input" value={form.frequency} onChange={(e) => setField("frequency", e.target.value as QMSAuditScheduleFrequency)}>
-                {frequencies.map((freq) => <option key={freq} value={freq}>{freq.replaceAll("_", " ")}</option>)}
-              </select>
-            </label>
-            <label className="profile-inline-field">
-              <span>Next due date</span>
-              <input className="input" type="date" value={form.next_due_date} onChange={(e) => setField("next_due_date", e.target.value)} />
-            </label>
-            <label className="profile-inline-field">
-              <span>Duration in days</span>
-              <input className="input" type="number" min={1} value={form.duration_days} onChange={(e) => setField("duration_days", e.target.value)} />
-            </label>
-            <label className="profile-inline-field planner-form-span-2">
-              <span>Scope</span>
-              <input className="input" value={form.scope} onChange={(e) => setField("scope", e.target.value)} placeholder="Stations, manuals, departments, or product areas covered" />
-            </label>
-            <label className="profile-inline-field planner-form-span-2">
-              <span>Criteria</span>
-              <input className="input" value={form.criteria} onChange={(e) => setField("criteria", e.target.value)} placeholder="Applicable manuals, regulations, and internal procedures" />
-            </label>
-            <label className="profile-inline-field">
-              <span>Auditee from personnel</span>
-              <select className="input" value={form.auditee_user_id} onChange={(e) => applyPerson("auditee_user_id", e.target.value)}>
-                <option value="">Select auditee…</option>
-                {personnelOptions.map((person) => (
-                  <option key={person.id} value={person.id}>{person.full_name}{person.email ? ` · ${person.email}` : ""}</option>
-                ))}
-              </select>
-            </label>
-            <label className="profile-inline-field">
-              <span>Auditee email</span>
-              <input className="input" type="email" value={form.auditee_email} onChange={(e) => setField("auditee_email", e.target.value)} placeholder="name@example.com" />
-            </label>
-            <label className="profile-inline-field planner-form-span-2">
-              <span>Auditee label</span>
-              <input className="input" value={form.auditee} onChange={(e) => setField("auditee", e.target.value)} placeholder="Team or accountable holder" />
-            </label>
-            <label className="profile-inline-field">
-              <span>Lead auditor</span>
-              <select className="input" value={form.lead_auditor_user_id} onChange={(e) => applyPerson("lead_auditor_user_id", e.target.value)}>
-                <option value="">Select lead auditor…</option>
-                {personnelOptions.map((person) => (
-                  <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
-                ))}
-              </select>
-            </label>
-            <label className="profile-inline-field">
-              <span>Observer auditor</span>
-              <select className="input" value={form.observer_auditor_user_id} onChange={(e) => applyPerson("observer_auditor_user_id", e.target.value)}>
-                <option value="">Select observer…</option>
-                {personnelOptions.map((person) => (
-                  <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
-                ))}
-              </select>
-            </label>
-            <label className="profile-inline-field">
-              <span>Assistant auditor</span>
-              <select className="input" value={form.assistant_auditor_user_id} onChange={(e) => applyPerson("assistant_auditor_user_id", e.target.value)}>
-                <option value="">Select assistant…</option>
-                {personnelOptions.map((person) => (
-                  <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
-                ))}
-              </select>
-            </label>
-            <label className="profile-inline-field" style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
-              <input type="checkbox" checked={form.is_active} onChange={(e) => setField("is_active", e.target.checked)} />
-              <span>Schedule active</span>
-            </label>
+
+            <div className="planner-drawer-tabs" role="tablist" aria-label="Audit schedule form sections">
+              {drawerTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={drawerTab === tab.id}
+                  className={`planner-drawer-tabs__item${drawerTab === tab.id ? " is-active" : ""}`}
+                  onClick={() => setDrawerTab(tab.id)}
+                >
+                  <strong>{tab.label}</strong>
+                  <span>{tab.helper}</span>
+                </button>
+              ))}
+            </div>
+
+            {drawerTab === "overview" ? (
+              <div className="planner-drawer-form__grid">
+                <label className="profile-inline-field planner-form-span-2">
+                  <span>Audit title</span>
+                  <input className="input" value={form.title} onChange={(e) => setField("title", e.target.value)} placeholder="e.g. Base maintenance quality audit" />
+                </label>
+                <label className="profile-inline-field">
+                  <span>Audit kind</span>
+                  <input className="input" value={form.kind} onChange={(e) => setField("kind", e.target.value)} placeholder="Internal Audit" />
+                </label>
+                <label className="profile-inline-field">
+                  <span>Frequency</span>
+                  <select className="input" value={form.frequency} onChange={(e) => setField("frequency", e.target.value as QMSAuditScheduleFrequency)}>
+                    {frequencies.map((freq) => <option key={freq} value={freq}>{formatFrequencyLabel(freq)}</option>)}
+                  </select>
+                </label>
+                <label className="profile-inline-field">
+                  <span>Next due date</span>
+                  <input className="input" type="date" value={form.next_due_date} onChange={(e) => setField("next_due_date", e.target.value)} />
+                </label>
+                <label className="profile-inline-field">
+                  <span>Duration in days</span>
+                  <input className="input" type="number" min={1} value={form.duration_days} onChange={(e) => setField("duration_days", e.target.value)} />
+                </label>
+                <label className="profile-inline-field planner-form-span-2">
+                  <span>Scope</span>
+                  <input className="input" value={form.scope} onChange={(e) => setField("scope", e.target.value)} placeholder="Stations, manuals, departments, or product areas covered" />
+                </label>
+                <label className="profile-inline-field planner-form-span-2">
+                  <span>Criteria</span>
+                  <input className="input" value={form.criteria} onChange={(e) => setField("criteria", e.target.value)} placeholder="Applicable manuals, regulations, and internal procedures" />
+                </label>
+                <div className="planner-review-card planner-review-card--muted planner-form-span-2">
+                  <strong>Planner note</strong>
+                  <span>The schedule stays in this drawer until saved, so the calendar can show the staged version before the live record is updated.</span>
+                </div>
+              </div>
+            ) : null}
+
+            {drawerTab === "participants" ? (
+              <div className="planner-drawer-form__grid">
+                <label className="profile-inline-field">
+                  <span>Auditee from personnel</span>
+                  <select className="input" value={form.auditee_user_id} onChange={(e) => applyPerson("auditee_user_id", e.target.value)}>
+                    <option value="">Select auditee…</option>
+                    {personnelOptions.map((person) => (
+                      <option key={person.id} value={person.id}>{person.full_name}{person.email ? ` · ${person.email}` : ""}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="profile-inline-field">
+                  <span>Auditee email</span>
+                  <input className="input" type="email" value={form.auditee_email} onChange={(e) => setField("auditee_email", e.target.value)} placeholder="name@example.com" />
+                </label>
+                <label className="profile-inline-field planner-form-span-2">
+                  <span>Auditee label</span>
+                  <input className="input" value={form.auditee} onChange={(e) => setField("auditee", e.target.value)} placeholder="Team or accountable holder" />
+                </label>
+                <label className="profile-inline-field">
+                  <span>Lead auditor</span>
+                  <select className="input" value={form.lead_auditor_user_id} onChange={(e) => applyPerson("lead_auditor_user_id", e.target.value)}>
+                    <option value="">Select lead auditor…</option>
+                    {personnelOptions.map((person) => (
+                      <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="profile-inline-field">
+                  <span>Observer auditor</span>
+                  <select className="input" value={form.observer_auditor_user_id} onChange={(e) => applyPerson("observer_auditor_user_id", e.target.value)}>
+                    <option value="">Select observer…</option>
+                    {personnelOptions.map((person) => (
+                      <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="profile-inline-field">
+                  <span>Assistant auditor</span>
+                  <select className="input" value={form.assistant_auditor_user_id} onChange={(e) => applyPerson("assistant_auditor_user_id", e.target.value)}>
+                    <option value="">Select assistant…</option>
+                    {personnelOptions.map((person) => (
+                      <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="planner-checkbox-field">
+                  <input type="checkbox" checked={form.is_active} onChange={(e) => setField("is_active", e.target.checked)} />
+                  <span>Schedule active</span>
+                </label>
+              </div>
+            ) : null}
+
+            {drawerTab === "review" ? (
+              <div className="planner-review-grid">
+                <div className="planner-review-card">
+                  <strong>Schedule summary</strong>
+                  <dl className="planner-review-list">
+                    <div><dt>Audit</dt><dd>{form.title.trim() || "Title pending"}</dd></div>
+                    <div><dt>Kind</dt><dd>{form.kind.trim() || "Internal Audit"}</dd></div>
+                    <div><dt>Frequency</dt><dd>{formatFrequencyLabel(form.frequency)}</dd></div>
+                    <div><dt>Next due</dt><dd>{form.next_due_date ? formatDate(form.next_due_date) : "Select a date"}</dd></div>
+                    <div><dt>Duration</dt><dd>{form.duration_days || "1"} day(s)</dd></div>
+                    <div><dt>Scope</dt><dd>{form.scope.trim() || "Not set"}</dd></div>
+                  </dl>
+                </div>
+                <div className="planner-review-card">
+                  <strong>Notice recipients</strong>
+                  <div className="planner-recipient-list">
+                    {recipientSummary.map((item) => (
+                      <div key={item.key} className={`planner-recipient-chip${item.muted ? " is-muted" : ""}`}>
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="planner-review-card planner-review-card--muted">
+                  <strong>Invite handling</strong>
+                  <span>Saving the schedule stores the auditee and team details. Running the schedule issues the live audit notice from those saved recipients.</span>
+                </div>
+              </div>
+            ) : null}
+
+            {personnelQuery.isLoading ? <p className="planner-inline-note">Loading personnel options…</p> : null}
+            {personnelQuery.isError ? <p className="planner-form-error">Personnel options could not be loaded. You can still type free text for auditee details.</p> : null}
+            {error ? <p className="planner-form-error">{error}</p> : null}
           </div>
-          {personnelQuery.isLoading ? <p className="planner-inline-note">Loading personnel options…</p> : null}
-          {personnelQuery.isError ? <p className="planner-form-error">Personnel options could not be loaded. You can still type free text for auditee details.</p> : null}
-          {error ? <p className="planner-form-error">{error}</p> : null}
-          <div className="profile-form__footer-actions">
-            <Button variant="secondary" onClick={discardDraft}>Discard draft</Button>
-            <Button onClick={() => saveSchedule.mutate()} loading={saveSchedule.isPending}>
-              <Plus size={16} />
-              {editingScheduleId ? "Save changes" : "Save schedule"}
-            </Button>
+
+          <div className="planner-drawer-layout__footer">
+            <div className="planner-drawer-layout__footer-left">
+              <Button variant="secondary" onClick={discardDraft}>Discard draft</Button>
+            </div>
+            <div className="planner-drawer-layout__footer-right">
+              <Button variant="ghost" onClick={() => setDrawerTab(drawerTabs[Math.max(activeDrawerTabIndex - 1, 0)].id)} disabled={!canGoBackDrawerTab}>
+                Back
+              </Button>
+              {canGoForwardDrawerTab ? (
+                <Button variant="secondary" onClick={() => setDrawerTab(drawerTabs[Math.min(activeDrawerTabIndex + 1, drawerTabs.length - 1)].id)}>
+                  Next
+                </Button>
+              ) : null}
+              <Button onClick={() => saveSchedule.mutate()} loading={saveSchedule.isPending}>
+                <Plus size={16} />
+                {editingScheduleId ? "Save changes" : "Save schedule"}
+              </Button>
+            </div>
           </div>
         </div>
       </Drawer>

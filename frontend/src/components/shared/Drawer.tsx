@@ -6,9 +6,10 @@ type DrawerProps = {
   onClose: () => void;
   children: React.ReactNode;
   side?: "left" | "right";
+  panelClassName?: string;
 };
 
-const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children, side = "right" }) => {
+const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children, side = "right", panelClassName }) => {
   const lastActiveRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -42,7 +43,7 @@ const Drawer: React.FC<DrawerProps> = ({ title, isOpen, onClose, children, side 
       onMouseDown={handleBackdropClick}
       aria-hidden={!isOpen}
     >
-      <aside className="drawer-panel" role="dialog" aria-modal="true">
+      <aside className={`drawer-panel${panelClassName ? ` ${panelClassName}` : ""}`} role="dialog" aria-modal="true">
         <div className="drawer__header">
           <h3 className="drawer__title">{title}</h3>
           <button type="button" className="drawer__close" onClick={onClose}>

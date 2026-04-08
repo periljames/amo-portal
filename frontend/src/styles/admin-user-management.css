@@ -1,0 +1,369 @@
+.admin-users-workspace,
+.admin-user-profile {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.aum-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-subtle, #d7dde7);
+  border-radius: 18px;
+  background: var(--surface-elevated, #fff);
+}
+
+.aum-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  line-height: 1.15;
+}
+
+.aum-eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #667085);
+}
+
+.aum-subtitle {
+  margin: 6px 0 0;
+  color: var(--text-secondary, #667085);
+}
+
+.aum-header-actions,
+.aum-row-actions,
+.aum-chip-row,
+.aum-filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.aum-button {
+  border: 1px solid var(--border-subtle, #d7dde7);
+  border-radius: 12px;
+  padding: 9px 14px;
+  font-weight: 600;
+  background: #fff;
+  color: var(--text-primary, #17212b);
+  cursor: pointer;
+}
+
+.aum-button--primary {
+  background: var(--accent-600, #2563eb);
+  color: #fff;
+  border-color: var(--accent-600, #2563eb);
+}
+
+.aum-button--secondary,
+.aum-button--ghost {
+  background: var(--surface-soft, #f7f9fc);
+}
+
+.aum-live {
+  border-radius: 999px;
+  padding: 7px 11px;
+  border: 1px solid var(--border-subtle, #d7dde7);
+  background: var(--surface-soft, #f7f9fc);
+  text-transform: capitalize;
+  font-weight: 600;
+}
+
+.aum-live.is-live {
+  color: #067647;
+}
+
+.aum-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.aum-metric-card {
+  border: 1px solid var(--border-subtle, #d7dde7);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: var(--surface-elevated, #fff);
+  display: grid;
+  gap: 6px;
+}
+
+.aum-metric-card.compact {
+  padding: 12px 14px;
+}
+
+.aum-metric-card span {
+  color: var(--text-secondary, #667085);
+  font-size: 0.86rem;
+}
+
+.aum-metric-card strong {
+  font-size: 1.35rem;
+}
+
+.aum-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.aum-tab {
+  border: 1px solid var(--border-subtle, #d7dde7);
+  background: var(--surface-soft, #f7f9fc);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.aum-tab.is-active {
+  background: #fff;
+  border-color: var(--accent-600, #2563eb);
+  color: var(--accent-700, #1d4ed8);
+}
+
+.aum-panel {
+  border: 1px solid var(--border-subtle, #d7dde7);
+  border-radius: 18px;
+  background: var(--surface-elevated, #fff);
+  padding: 16px;
+}
+
+.aum-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.aum-panel h2,
+.aum-panel-header h2,
+.aum-profile-hero h2 {
+  margin: 0 0 4px;
+  font-size: 1.15rem;
+}
+
+.aum-panel p,
+.aum-panel-header p,
+.aum-profile-hero p,
+.aum-note {
+  margin: 0;
+  color: var(--text-secondary, #667085);
+}
+
+.aum-input,
+.aum-select,
+.aum-textarea {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border-subtle, #d7dde7);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.aum-textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.aum-table-wrap {
+  overflow: auto;
+}
+
+.aum-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.aum-table th,
+.aum-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border-subtle, #e5e7eb);
+  text-align: left;
+  vertical-align: top;
+}
+
+.aum-table th {
+  color: var(--text-secondary, #667085);
+  font-size: 0.79rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.aum-empty,
+.aum-empty-row {
+  text-align: center;
+  color: var(--text-secondary, #667085);
+  padding: 20px 12px;
+}
+
+.aum-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent-700, #1d4ed8);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.aum-muted {
+  color: var(--text-secondary, #667085);
+  font-size: 0.86rem;
+  margin-top: 2px;
+}
+
+.aum-status,
+.aum-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  background: var(--surface-soft, #f7f9fc);
+}
+
+.aum-status.is-online {
+  color: #067647;
+  background: #ecfdf3;
+}
+
+.aum-status.is-offline {
+  color: #475467;
+  background: #f2f4f7;
+}
+
+.aum-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.aum-three-col {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
+  gap: 16px;
+}
+
+.aum-profile-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.aum-profile-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.aum-definition-list {
+  display: grid;
+  gap: 10px;
+}
+
+.aum-definition-list.two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.aum-definition-list > div {
+  border-bottom: 1px solid var(--border-subtle, #eef2f6);
+  padding-bottom: 8px;
+}
+
+.aum-definition-list span {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #667085);
+  margin-bottom: 3px;
+}
+
+.aum-definition-list strong {
+  font-size: 0.96rem;
+}
+
+.aum-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.aum-stack.top-gap {
+  margin-top: 14px;
+}
+
+.aum-field {
+  display: grid;
+  gap: 6px;
+}
+
+.aum-field span {
+  font-size: 0.84rem;
+  color: var(--text-secondary, #667085);
+  font-weight: 600;
+}
+
+.aum-list-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.aum-list-card {
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.aum-note {
+  border: 1px dashed var(--border-subtle, #d7dde7);
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--surface-soft, #f7f9fc);
+}
+
+@media (max-width: 1280px) {
+  .aum-metrics-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .aum-three-col,
+  .aum-two-col,
+  .aum-profile-hero {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .aum-profile-metrics,
+  .aum-list-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-users-workspace,
+  .admin-user-profile {
+    padding: 12px;
+  }
+
+  .aum-header {
+    padding: 14px;
+  }
+
+  .aum-metrics-grid,
+  .aum-profile-metrics,
+  .aum-list-grid,
+  .aum-definition-list.two-col {
+    grid-template-columns: 1fr;
+  }
+}

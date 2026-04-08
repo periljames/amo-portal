@@ -529,12 +529,6 @@ class UserGroupType(str, enum.Enum):
     PERSONAL = "PERSONAL"
 
 
-class UserGroupVisibility(str, enum.Enum):
-    PRIVATE = "PRIVATE"
-    AMO = "AMO"
-    SYSTEM = "SYSTEM"
-
-
 class UserGroup(Base):
     __tablename__ = "user_groups"
     __table_args__ = (
@@ -550,7 +544,6 @@ class UserGroup(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     group_type = Column(Enum(UserGroupType, name="user_group_type_enum"), nullable=False, default=UserGroupType.CUSTOM, index=True)
-    visibility = Column(Enum(UserGroupVisibility, name="user_group_visibility_enum"), nullable=False, default=UserGroupVisibility.AMO)
     is_system_managed = Column(Boolean, nullable=False, default=False, index=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
