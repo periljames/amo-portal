@@ -705,6 +705,8 @@ export interface AdminUserDirectoryMetrics {
   active_users: number;
   inactive_users: number;
   online_users: number;
+  away_users: number;
+  recently_active_users: number;
   departmentless_users: number;
   managers: number;
 }
