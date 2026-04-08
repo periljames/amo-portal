@@ -190,7 +190,29 @@ const AdminDashboardPage: React.FC = () => {
     navigate(amoCode ? `/maintenance/${amoCode}/${ctx.department || "planning"}` : "/login", { replace: true });
   }, [amoCode, canAccessAdmin, ctx.department, navigate]);
 
-  if (!canAccessAdmin) return null;
+  if (!currentUser) {
+    return (
+      <DepartmentLayout amoCode={amoCode ?? ctx.amoCode ?? "UNKNOWN"} activeDepartment="admin-users">
+        <div className="admin-users-workspace aum-shell">
+          <section className="aum-panel">
+            <div className="aum-empty">Loading user management workspace…</div>
+          </section>
+        </div>
+      </DepartmentLayout>
+    );
+  }
+
+  if (!canAccessAdmin) {
+    return (
+      <DepartmentLayout amoCode={amoCode ?? ctx.amoCode ?? "UNKNOWN"} activeDepartment="admin-users">
+        <div className="admin-users-workspace aum-shell">
+          <section className="aum-panel">
+            <div className="aum-empty">You do not have permission to access User Management.</div>
+          </section>
+        </div>
+      </DepartmentLayout>
+    );
+  }
 
   return (
     <DepartmentLayout amoCode={amoCode ?? ctx.amoCode ?? "UNKNOWN"} activeDepartment="admin-users">
