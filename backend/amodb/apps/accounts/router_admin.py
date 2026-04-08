@@ -39,6 +39,18 @@ AIRCRAFT_DOC_UPLOAD_DIR = Path(
 AIRCRAFT_DOC_AMO_SUBDIR = "aircraft"
 
 ALLOWED_PLATFORM_LOGO_EXTS = {".png", ".jpg", ".jpeg", ".svg"}
+PRESENCE_HEARTBEAT_GRACE_SECONDS = 150
+RECENTLY_ACTIVE_WINDOW_MINUTES = 10
+
+
+def _resolve_presence_state(*, raw_state: str, last_seen_at: Optional[datetime], now: datetime) -> tuple[str, bool]:
+    normalized_state = str(raw_state or "offline").lower()
+    freshness_cutoff = now - timedelta(seconds=PRESENCE_HEARTBEAT_GRACE_SECONDS)
+    is_fresh = bool(last_seen_at and last_seen_at >= freshness_cutoff)
+    is_online = bool(is_fresh and normalized_state in {"online", "away"})
+    if not is_online:
+        return "offline", False
+    return ("away" if normalized_state == "away" else "online"), True
 
 
 def _jsonable(value):
@@ -2054,7 +2066,6 @@ def _presence_map_for_users(db: Session, *, amo_id: str, user_ids: list[str]) ->
         from amodb.apps.realtime import models as realtime_models
 
         now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(seconds=90)
         rows = (
             db.query(realtime_models.PresenceState)
             .filter(
@@ -2066,9 +2077,13 @@ def _presence_map_for_users(db: Session, *, amo_id: str, user_ids: list[str]) ->
         result: dict[str, schemas.UserPresenceRead] = {}
         for row in rows:
             last_seen = row.last_seen_at
-            is_online = bool(last_seen and last_seen >= cutoff and getattr(row.state, "value", row.state) == "online")
+            resolved_state, is_online = _resolve_presence_state(
+                raw_state=str(getattr(row.state, "value", row.state) or "offline"),
+                last_seen_at=last_seen,
+                now=now,
+            )
             result[str(row.user_id)] = schemas.UserPresenceRead(
-                state="online" if is_online else "offline",
+                state=resolved_state,
                 is_online=is_online,
                 last_seen_at=last_seen,
                 source="realtime",
@@ -2169,12 +2184,22 @@ def get_user_directory_admin(
             )
         )
 
-    all_online = sum(1 for u in all_users if _resolve_presence_for_user(user=u, presence_map=presence_map).is_online)
+    all_presence = [_resolve_presence_for_user(user=u, presence_map=presence_map) for u in all_users]
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=RECENTLY_ACTIVE_WINDOW_MINUTES)
+    all_online = sum(1 for presence in all_presence if presence.is_online)
+    all_away = sum(1 for presence in all_presence if presence.state == "away")
+    all_recently_active = sum(
+        1
+        for presence in all_presence
+        if bool(presence.last_seen_at and presence.last_seen_at >= recent_cutoff)
+    )
     metrics = schemas.AdminUserDirectoryMetrics(
         total_users=len(all_users),
         active_users=sum(1 for u in all_users if u.is_active),
         inactive_users=sum(1 for u in all_users if not u.is_active),
         online_users=all_online,
+        away_users=all_away,
+        recently_active_users=all_recently_active,
         departmentless_users=sum(1 for u in all_users if not u.department_id),
         managers=sum(1 for u in all_users if u.role in _manager_roles()),
     )
