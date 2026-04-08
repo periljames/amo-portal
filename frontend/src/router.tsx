@@ -216,7 +216,7 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
  */
 export const AppRouter: React.FC = () => {
   return (
-    <Suspense fallback={<div className="page-loading">Loading…</div>}>
+    <Suspense fallback={<div className="page-loading"><div className="page-loading__card"><div className="page-loading__spinner" /><div className="page-loading__label">Loading…</div></div></div>}>
     <Routes>
 
       <Route path="/doc-control" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />

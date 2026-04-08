@@ -10,6 +10,7 @@
 
 import { getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { beginLoading, endLoading } from "./loading";
 
 export type QMSDocumentStatus = "DRAFT" | "ACTIVE" | "OBSOLETE";
 export type QMSAuditStatus = "PLANNED" | "IN_PROGRESS" | "CAP_OPEN" | "CLOSED";
@@ -241,6 +242,8 @@ function downloadEvidencePack(path: string): Promise<Blob> {
 
 async function downloadBinary(path: string): Promise<Blob> {
   const token = getToken();
+  beginLoading();
+  try {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "GET",
     headers: {
@@ -259,10 +262,15 @@ async function downloadBinary(path: string): Promise<Blob> {
     throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
   }
   return res.blob();
+  } finally {
+    endLoading();
+  }
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
   const token = getToken();
+  beginLoading();
+  try {
   const res = await fetch(`${getApiBaseUrl()}${path}`, {
     method: "GET",
     headers: {
@@ -287,6 +295,9 @@ async function fetchJson<T>(path: string): Promise<T> {
     throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
   }
   return (await res.json()) as T;
+  } finally {
+    endLoading();
+  }
 }
 
 async function sendJson<T>(
@@ -295,6 +306,8 @@ async function sendJson<T>(
   body: unknown
 ): Promise<T> {
   const token = getToken();
+  beginLoading();
+  try {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
@@ -324,6 +337,9 @@ async function sendJson<T>(
     return undefined as T;
   }
   return (await res.json()) as T;
+  } finally {
+    endLoading();
+  }
 }
 
 

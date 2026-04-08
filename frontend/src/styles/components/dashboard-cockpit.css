@@ -784,12 +784,39 @@ body[data-color-scheme="dark"] .qms-cockpit-shell {
   background: var(--surface);
   color: var(--text-primary);
   text-align: left;
-  padding: 8px 10px;
+  padding: 10px 12px;
   display: grid;
-  gap: 4px;
+  gap: 8px;
 }
-.quality-op-tile__header { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
-.quality-op-tile__value { font-size: 1.25rem; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
+.quality-op-tile__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.quality-op-tile__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.quality-op-tile__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.quality-op-tile__lines { display: grid; gap: 4px; }
 .quality-op-tile__line { font-size: 11px; color: var(--text-secondary); }
 
 .qms-manpower-module {

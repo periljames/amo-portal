@@ -429,15 +429,16 @@ const DashboardCockpit: React.FC = () => {
             return (
               <button key={tile.id} type="button" className="quality-op-tile" onClick={() => nav(tile.route)}>
                 <div className="quality-op-tile__header">
-                  <Icon size={15} />
-                  <span>{tile.label}</span>
+                  <span className="quality-op-tile__label"><Icon size={15} /><span>{tile.label}</span></span>
+                  <span className="quality-op-tile__count">{numberOrDash(tile.value)}</span>
                 </div>
-                <div className="quality-op-tile__value">{numberOrDash(tile.value)}</div>
-                {tile.lines.map((line) => (
-                  <div className="quality-op-tile__line" key={line}>
-                    {line}
-                  </div>
-                ))}
+                <div className="quality-op-tile__lines">
+                  {tile.lines.map((line) => (
+                    <div className="quality-op-tile__line" key={line}>
+                      {line}
+                    </div>
+                  ))}
+                </div>
               </button>
             );
           })}

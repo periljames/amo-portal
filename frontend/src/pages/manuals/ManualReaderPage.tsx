@@ -1,441 +1,702 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, RefreshCcw, ScanLine, FileText, Loader2, ChevronRight, ChevronDown, Search, ZoomIn, ZoomOut } from "lucide-react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import {
-  acknowledgeRevision,
-  createRevisionExport,
-  generateOutline,
-  getProcessingStatus,
+  ChevronDown,
+  ChevronRight,
+  ClipboardPlus,
+  FileImage,
+  FileText,
+  History,
+  Loader2,
+  Search,
+  Send,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
+import { useNavigate } from "react-router-dom";
+
+import { getCachedUser } from "../../services/auth";
+import {
   getRevisionDiff,
   getRevisionRead,
   getRevisionWorkflow,
-  runOcr,
-  runProcessor,
+  searchPublicationSelector,
+  submitPublicationChangeRequest,
   type ManualReadPayload,
-  type ManualProcessingStatus,
+  type PublicationSelectorItem,
 } from "../../services/manuals";
-import { authHeaders } from "../../services/auth";
-import { getApiBaseUrl } from "../../services/config";
+import { ManualsReaderShell, TenantBrandingProvider, type ReaderActionId } from "../../packages/manuals-reader";
 import { useManualRouteContext } from "./context";
 import "./manualReader.css";
-import { ManualsReaderShell, TenantBrandingProvider, type ReaderActionId } from "../../packages/manuals-reader";
 
-type ReaderMode = "section" | "figure" | "search" | "history" | "task" | "change-request";
-type ContextPanel = "metadata" | "search" | "history" | "task" | "change-request" | "figure" | "order-list";
-type HistoryItem = { route: string; timestamp: string; manual: string; chapter?: string; section?: string; title?: string; source: "reader" };
+type MainTab = "reader" | "figures" | "history" | "pcr";
+type InspectorTab = "details" | "history" | "pcr";
 
 type FigureRef = {
   id: string;
   src: string;
   title: string;
-  sectionId: string;
+  sectionAnchor: string;
   sectionHeading: string;
-  chapterLabel: string;
 };
 
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
+type ReaderHistoryItem = {
+  id: string;
+  label: string;
+  kind: "section" | "figure" | "request";
+  at: string;
+};
+
+type PcrFormState = {
+  requestedByFirstName: string;
+  requestedByLastName: string;
+  email: string;
+  phone: string;
+  manualId: string;
+  partNumber: string;
+  manualType: string;
+  title: string;
+  model: string;
+  publicationDate: string;
+  revisionNumber: string;
+  ataChapter: string;
+  section: string;
+  subSection: string;
+  figure: string;
+  pageNumber: string;
+  artFigure: string;
+  other: string;
+  otherPublicationsAffected: string;
+  suggestionForChange: string;
+  requestUpdates: boolean;
+};
+
+const READER_HISTORY_KEY = "amo_portal_manual_reader_history";
+
+function splitName(value?: string | null) {
+  const parts = String(value || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return {
+    first: parts[0] || "",
+    last: parts.length > 1 ? parts.slice(1).join(" ") : "",
+  };
 }
 
-function sectionToChapterLabel(heading: string) {
-  const match = heading.match(/^(\d{1,2})/);
-  return match ? `ATA ${match[1]}` : "General";
+function chapterFromHeading(heading?: string | null): string {
+  const match = String(heading || "").match(/(\d{2})/);
+  return match ? match[1] : "";
+}
+
+function formatDate(value?: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString();
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const output: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    output.push(items.slice(index, index + size));
+  }
+  return output;
+}
+
+function extractFigures(payload: ManualReadPayload | null): FigureRef[] {
+  if (!payload) return [];
+  const blockMap = new Map<string, Array<{ html: string }>>();
+  payload.blocks.forEach((block) => {
+    const bucket = blockMap.get(block.section_id) || [];
+    bucket.push({ html: block.html });
+    blockMap.set(block.section_id, bucket);
+  });
+
+  const figures: FigureRef[] = [];
+  payload.sections.forEach((section) => {
+    const blocks = blockMap.get(section.id) || [];
+    blocks.forEach((block, blockIndex) => {
+      const regex = /<img[^>]+src=["']([^"']+)["'][^>]*?(?:alt=["']([^"']*)["'])?[^>]*>/gi;
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(block.html))) {
+        figures.push({
+          id: `${section.anchor_slug}-figure-${blockIndex}-${figures.length + 1}`,
+          src: match[1],
+          title: match[2] || `Figure ${figures.length + 1}`,
+          sectionAnchor: section.anchor_slug,
+          sectionHeading: section.heading,
+        });
+      }
+    });
+  });
+  return figures;
 }
 
 export default function ManualReaderPage() {
-  const { tenant, manualId, revId, amoCode, chapterId, sectionId, subSectionId, figureId } = useManualRouteContext();
   const navigate = useNavigate();
+  const { tenant, manualId, revId, sectionId, figureId, basePath } = useManualRouteContext();
+  const user = getCachedUser();
+  const requestor = splitName((user as any)?.full_name || (user as any)?.name);
+
   const [payload, setPayload] = useState<ManualReadPayload | null>(null);
   const [workflowStatus, setWorkflowStatus] = useState("Loading");
   const [diffSummary, setDiffSummary] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [activeSection, setActiveSection] = useState("");
-  const [layout, setLayout] = useState<"continuous" | "paged-1" | "paged-2" | "paged-3">((localStorage.getItem("manuals.layout") as any) || "continuous");
-  const [zoom, setZoom] = useState(Number(localStorage.getItem("manuals.zoom") || "100"));
-  const [figureZoom, setFigureZoom] = useState(Number(localStorage.getItem("manuals.figureZoom") || "100"));
+  const [mainTab, setMainTab] = useState<MainTab>(figureId ? "figures" : "reader");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("details");
+  const [layout, setLayout] = useState<"continuous" | "paged-1" | "paged-2" | "paged-3">(
+    (localStorage.getItem("manuals.layout") as "continuous" | "paged-1" | "paged-2" | "paged-3") || "continuous",
+  );
+  const [zoom, setZoom] = useState<number>(Number(localStorage.getItem("manuals.zoom") || "100"));
+  const [figureZoom, setFigureZoom] = useState<number>(Number(localStorage.getItem("manuals.figureZoom") || "100"));
   const [tocOpen, setTocOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [tab, setTab] = useState<"revision" | "ack" | "export">("revision");
-  const [ackChecked, setAckChecked] = useState(false);
-  const [ackComment, setAckComment] = useState("");
-  const [controlled, setControlled] = useState(false);
-  const [watermarkOn, setWatermarkOn] = useState(true);
-  const [processing, setProcessing] = useState<ManualProcessingStatus | null>(null);
-  const [busy, setBusy] = useState<"processor" | "ocr" | "outline" | null>(null);
-  const [uploadName, setUploadName] = useState("");
-  const [integrityCompromised, setIntegrityCompromised] = useState(false);
-  const [readerMode, setReaderMode] = useState<ReaderMode>(figureId ? "figure" : "section");
-  const [panel, setPanel] = useState<ContextPanel>("metadata");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [selectorOpen, setSelectorOpen] = useState(false);
-  const [taskTab, setTaskTab] = useState<"current" | "visited" | "all">("current");
+  const [activeSection, setActiveSection] = useState(sectionId || "");
   const [activeFigureId, setActiveFigureId] = useState<string | null>(figureId || null);
-  const [history, setHistory] = useState<HistoryItem[]>(() => {
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [selectorQuery, setSelectorQuery] = useState("");
+  const [selectorLoading, setSelectorLoading] = useState(false);
+  const [selectorItems, setSelectorItems] = useState<PublicationSelectorItem[]>([]);
+  const [submitState, setSubmitState] = useState<"idle" | "submitting" | "done" | "error">("idle");
+  const [submitMessage, setSubmitMessage] = useState("");
+  const [history, setHistory] = useState<ReaderHistoryItem[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem("manuals.readerHistory") || "[]");
+      return JSON.parse(localStorage.getItem(READER_HISTORY_KEY) || "[]") as ReaderHistoryItem[];
     } catch {
       return [];
     }
   });
 
-  const [crForm, setCrForm] = useState({
-    partNumber: "",
-    manualType: "",
-    title: "",
+  const [pcrForm, setPcrForm] = useState<PcrFormState>({
+    requestedByFirstName: requestor.first,
+    requestedByLastName: requestor.last,
+    email: (user as any)?.email || "",
+    phone: (user as any)?.phone || (user as any)?.secondary_phone || "",
+    manualId: manualId || "",
+    partNumber: manualId || "",
+    manualType: "Technical Publication",
+    title: manualId ? `Manual ${manualId}` : "",
     model: "",
     publicationDate: "",
     revisionNumber: revId || "",
-    ataChapter: chapterId || "",
-    section: sectionId || "",
-    subSection: subSectionId || "",
-    figure: figureId || "",
+    ataChapter: "",
+    section: "",
+    subSection: "",
+    figure: "",
     pageNumber: "",
     artFigure: "",
     other: "",
-    otherPublications: "",
-    suggestion: "",
+    otherPublicationsAffected: "",
+    suggestionForChange: "",
     requestUpdates: true,
   });
 
-  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
-  const pagedParentRef = useRef<HTMLDivElement | null>(null);
-
-  const refresh = () => {
+  const refresh = async () => {
     if (!tenant || !manualId || !revId) return;
-    getRevisionRead(tenant, manualId, revId).then(setPayload).catch(() => setPayload(null));
-    getRevisionWorkflow(tenant, manualId, revId).then((v) => setWorkflowStatus(v.status || "Metadata incomplete")).catch(() => setWorkflowStatus("Metadata incomplete"));
-    getRevisionDiff(tenant, manualId, revId).then((v) => setDiffSummary(v.summary_json || {})).catch(() => setDiffSummary({}));
-    getProcessingStatus(tenant, manualId, revId).then(setProcessing).catch(() => setProcessing(null));
+    setLoading(true);
+    setError("");
+    try {
+      const [readResponse, workflowResponse, diffResponse] = await Promise.all([
+        getRevisionRead(tenant, manualId, revId),
+        getRevisionWorkflow(tenant, manualId, revId),
+        getRevisionDiff(tenant, manualId, revId),
+      ]);
+      setPayload(readResponse);
+      setWorkflowStatus(workflowResponse.status || "Ready");
+      setDiffSummary(diffResponse.summary_json || {});
+      setActiveSection((prev) => prev || sectionId || readResponse.sections[0]?.anchor_slug || "");
+      setError("");
+    } catch (err) {
+      setPayload(null);
+      setWorkflowStatus("Unavailable");
+      setDiffSummary({});
+      setError(err instanceof Error ? err.message : "Unable to load the selected manual revision.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { refresh(); }, [tenant, manualId, revId]);
-
   useEffect(() => {
-    if (!manualId || !revId) {
-      setIntegrityCompromised(false);
-      return;
-    }
-    let alive = true;
-    const controller = new AbortController();
-    (async () => {
-      try {
-        const response = await fetch(`${getApiBaseUrl()}/quality/qms/documents/${manualId}/revisions/${revId}/open`, {
-          method: "GET",
-          headers: { ...authHeaders(), Range: "bytes=0-0" },
-          signal: controller.signal,
-        });
-        const integrity = (response.headers.get("X-Document-Integrity") || "").toLowerCase();
-        if (alive) setIntegrityCompromised(integrity === "compromised");
-      } catch {
-        if (alive) setIntegrityCompromised(false);
-      }
-    })();
-    return () => {
-      alive = false;
-      controller.abort();
-    };
-  }, [manualId, revId]);
+    void refresh();
+  }, [tenant, manualId, revId]);
 
   useEffect(() => {
     localStorage.setItem("manuals.layout", layout);
     localStorage.setItem("manuals.zoom", String(zoom));
     localStorage.setItem("manuals.figureZoom", String(figureZoom));
-  }, [layout, zoom, figureZoom]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        document.getElementById("manual-reader-search")?.focus();
-      }
-      if (e.key === "[") setTocOpen((v) => !v);
-      if (e.key === "]") setInspectorOpen((v) => !v);
-      if (e.altKey && e.key === "ArrowRight") goRelativeSection(1);
-      if (e.altKey && e.key === "ArrowLeft") goRelativeSection(-1);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
-
-  useEffect(() => {
-    const obs = new IntersectionObserver((entries) => {
-      const top = entries.find((e) => e.isIntersecting);
-      if (top?.target?.id) setActiveSection(top.target.id);
-    }, { rootMargin: "-10% 0px -75% 0px", threshold: [0.2] });
-    Object.values(sectionRefs.current).forEach((el) => el && obs.observe(el));
-    return () => obs.disconnect();
-  }, [payload?.sections]);
-
-  useEffect(() => {
-    const source = new EventSource(new URL("/api/events", window.location.origin));
-    source.onmessage = (event) => {
-      try {
-        const v = JSON.parse(event.data || "{}");
-        const type = String(v.entity_type || v.entityType || "");
-        const entityId = String(v.entity_id || v.entityId || "");
-        if (type.includes("manual") || entityId === manualId || entityId === revId) refresh();
-      } catch {}
-    };
-    source.addEventListener("reset", () => refresh());
-    return () => source.close();
-  }, [manualId, revId]);
+  }, [figureZoom, layout, zoom]);
 
   const blocksBySection = useMemo(() => {
-    const grouped: Record<string, ManualReadPayload["blocks"]> = {};
-    (payload?.blocks || []).forEach((b) => ((grouped[b.section_id] = grouped[b.section_id] || []).push(b)));
-    return grouped;
-  }, [payload?.blocks]);
-
-  const figures = useMemo<FigureRef[]>(() => {
-    const refs: FigureRef[] = [];
-    (payload?.sections || []).forEach((section) => {
-      (blocksBySection[section.id] || []).forEach((b, idx) => {
-        const regex = /<img[^>]+src=["']([^"']+)["'][^>]*?(?:alt=["']([^"']*)["'])?[^>]*>/gi;
-        let m: RegExpExecArray | null;
-        while ((m = regex.exec(b.html))) {
-          refs.push({
-            id: `${section.id}-fig-${idx}-${refs.length}`,
-            src: m[1],
-            title: m[2] || `Figure ${refs.length + 1}`,
-            sectionId: section.anchor_slug,
-            sectionHeading: section.heading,
-            chapterLabel: sectionToChapterLabel(section.heading),
-          });
-        }
-      });
+    const grouped = new Map<string, Array<{ html: string; text: string }>>();
+    (payload?.blocks || []).forEach((block) => {
+      const bucket = grouped.get(block.section_id) || [];
+      bucket.push({ html: block.html, text: block.text });
+      grouped.set(block.section_id, bucket);
     });
-    return refs;
-  }, [payload?.sections, blocksBySection]);
+    return grouped;
+  }, [payload]);
 
-  useEffect(() => {
-    if (!activeFigureId && figures.length) setActiveFigureId(figures[0].id);
-  }, [figures, activeFigureId]);
+  const figures = useMemo(() => extractFigures(payload), [payload]);
+  const activeFigure = useMemo(() => figures.find((figure) => figure.id === activeFigureId) || null, [activeFigureId, figures]);
 
-  const activeFigure = useMemo(() => figures.find((f) => f.id === activeFigureId) || null, [figures, activeFigureId]);
+  const filteredSections = useMemo(() => {
+    const sections = payload?.sections || [];
+    if (!search.trim()) return sections;
+    const needle = search.trim().toLowerCase();
+    return sections.filter((section) => {
+      if (section.heading.toLowerCase().includes(needle)) return true;
+      const blocks = blocksBySection.get(section.id) || [];
+      return blocks.some((block) => block.text.toLowerCase().includes(needle));
+    });
+  }, [blocksBySection, payload?.sections, search]);
 
-  const filteredSections = useMemo(
-    () => (payload?.sections || []).filter((s) => s.heading.toLowerCase().includes(search.toLowerCase()) || (blocksBySection[s.id] || []).some((b) => b.text.toLowerCase().includes(search.toLowerCase()))),
-    [payload?.sections, blocksBySection, search],
+  const activeSectionRecord = useMemo(
+    () => filteredSections.find((section) => section.anchor_slug === activeSection) || payload?.sections?.[0] || null,
+    [activeSection, filteredSections, payload?.sections],
   );
 
-  const pages = useMemo(() => chunk(filteredSections.map((section) => ({ section, blocks: blocksBySection[section.id] || [] })), 1), [filteredSections, blocksBySection]);
-  const columns = layout === "paged-3" ? 3 : layout === "paged-2" ? 2 : 1;
-  const rows = useMemo(() => chunk(pages, columns), [pages, columns]);
-  const virtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => pagedParentRef.current, estimateSize: () => 930, overscan: 3 });
+  const pagedSections = useMemo(() => {
+    const width = layout === "paged-3" ? 3 : layout === "paged-2" ? 2 : 1;
+    return chunk(filteredSections, width);
+  }, [filteredSections, layout]);
 
-  const missingMetaFields = [!revId && "revision id", !workflowStatus && "workflow status"].filter(Boolean) as string[];
-  const noContent = !filteredSections.length;
-
-  const setRouteSection = (anchor: string) => {
-    const base = amoCode ? `/maintenance/${amoCode}/publications/${manualId}` : `/t/${tenant}/publications/${manualId}`;
-    const chapter = anchor.split("-")[0] || "chapter";
-    navigate(`${base}/${chapter}/${anchor}`);
-  };
-
-  const pushHistory = (title: string, sectionAnchor?: string) => {
-    const next: HistoryItem = {
-      route: window.location.pathname,
-      timestamp: new Date().toISOString(),
-      manual: manualId || "manual",
-      chapter: sectionAnchor?.split("-")[0],
-      section: sectionAnchor,
-      title,
-      source: "reader",
+  const pushHistory = (label: string, kind: ReaderHistoryItem["kind"]) => {
+    const next: ReaderHistoryItem = {
+      id: `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      label,
+      kind,
+      at: new Date().toISOString(),
     };
-    const merged = [next, ...history].slice(0, 250);
+    const merged = [next, ...history].slice(0, 80);
     setHistory(merged);
-    localStorage.setItem("manuals.readerHistory", JSON.stringify(merged));
+    localStorage.setItem(READER_HISTORY_KEY, JSON.stringify(merged));
   };
 
-  const goRelativeSection = (delta: number) => {
-    if (!filteredSections.length) return;
-    const idx = filteredSections.findIndex((s) => s.anchor_slug === activeSection);
-    const next = filteredSections[Math.max(0, Math.min(filteredSections.length - 1, (idx === -1 ? 0 : idx) + delta))];
-    if (!next) return;
-    setActiveSection(next.anchor_slug);
-    location.hash = `#${next.anchor_slug}`;
-    setRouteSection(next.anchor_slug);
-    pushHistory(next.heading, next.anchor_slug);
+  const openSection = (anchor: string) => {
+    setMainTab("reader");
+    setInspectorTab("details");
+    setActiveSection(anchor);
+    const section = payload?.sections.find((entry) => entry.anchor_slug === anchor);
+    if (section) {
+      setPcrForm((prev) => ({
+        ...prev,
+        ataChapter: chapterFromHeading(section.heading),
+        section: section.heading,
+        figure: "",
+      }));
+      pushHistory(section.heading, "section");
+    }
+    requestAnimationFrame(() => {
+      document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   };
 
-  const run = async (kind: "processor" | "ocr" | "outline") => {
-    if (!tenant || !manualId || !revId) return;
-    setBusy(kind);
+  const openFigure = (figure: FigureRef) => {
+    setMainTab("figures");
+    setInspectorTab("details");
+    setActiveFigureId(figure.id);
+    setActiveSection(figure.sectionAnchor);
+    setPcrForm((prev) => ({
+      ...prev,
+      ataChapter: chapterFromHeading(figure.sectionHeading),
+      section: figure.sectionHeading,
+      figure: figure.title,
+    }));
+    pushHistory(figure.title, "figure");
+  };
+
+  useEffect(() => {
+    if (figures.length && !activeFigureId) {
+      setActiveFigureId(figures[0].id);
+    }
+  }, [activeFigureId, figures]);
+
+  useEffect(() => {
+    setPcrForm((prev) => ({
+      ...prev,
+      manualId: manualId || prev.manualId,
+      partNumber: manualId || prev.partNumber,
+      manualType: prev.manualType || "Technical Publication",
+      title: prev.title || (manualId ? `Manual ${manualId}` : ""),
+      publicationDate: prev.publicationDate || new Date().toISOString().slice(0, 10),
+      revisionNumber: revId || prev.revisionNumber,
+      ataChapter: prev.ataChapter || chapterFromHeading(activeSectionRecord?.heading),
+      section: prev.section || activeSectionRecord?.heading || "",
+      figure: activeFigure?.title || prev.figure,
+    }));
+  }, [activeFigure?.title, activeSectionRecord?.heading, manualId, revId]);
+
+  const selectorSearch = async () => {
+    if (!tenant) return;
+    setSelectorLoading(true);
     try {
-      if (kind === "processor") await runProcessor(tenant, manualId, revId);
-      if (kind === "ocr") await runOcr(tenant, manualId, revId);
-      if (kind === "outline") await generateOutline(tenant, manualId, revId);
-      refresh();
+      const rows = await searchPublicationSelector(tenant, { q: selectorQuery.trim() || undefined });
+      setSelectorItems(rows);
+    } catch {
+      setSelectorItems([]);
     } finally {
-      setBusy(null);
+      setSelectorLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectorOpen || !tenant) return;
+    void selectorSearch();
+  }, [selectorOpen, tenant]);
+
+  const pickPublication = (item: PublicationSelectorItem) => {
+    setPcrForm((prev) => ({
+      ...prev,
+      manualId: item.manual_id,
+      partNumber: item.code,
+      manualType: item.manual_type,
+      title: item.title,
+      model: item.model || "",
+      publicationDate: item.publication_date || prev.publicationDate,
+      revisionNumber: item.current_revision || prev.revisionNumber,
+    }));
+    setSelectorOpen(false);
+  };
+
+  const submitPcr = async () => {
+    if (!tenant || !pcrForm.manualId || !pcrForm.partNumber || !pcrForm.revisionNumber || !pcrForm.suggestionForChange.trim()) {
+      setSubmitState("error");
+      setSubmitMessage("Complete the publication, revision, and suggestion fields before submitting.");
+      return;
+    }
+    setSubmitState("submitting");
+    setSubmitMessage("");
+    try {
+      const response = await submitPublicationChangeRequest(tenant, {
+        requested_by_first_name: pcrForm.requestedByFirstName,
+        requested_by_last_name: pcrForm.requestedByLastName,
+        email: pcrForm.email,
+        phone: pcrForm.phone,
+        manual_id: pcrForm.manualId,
+        part_number: pcrForm.partNumber,
+        manual_type: pcrForm.manualType,
+        title: pcrForm.title,
+        model: pcrForm.model || null,
+        publication_date: pcrForm.publicationDate || null,
+        revision_number: pcrForm.revisionNumber,
+        ata_chapter: pcrForm.ataChapter || null,
+        section: pcrForm.section || null,
+        sub_section: pcrForm.subSection || null,
+        figure: pcrForm.figure || null,
+        page_number: pcrForm.pageNumber || null,
+        art_figure: pcrForm.artFigure || null,
+        other: pcrForm.other || null,
+        other_publications_affected: pcrForm.otherPublicationsAffected || null,
+        suggestion_for_change: pcrForm.suggestionForChange,
+        request_updates: pcrForm.requestUpdates,
+      });
+      setSubmitState("done");
+      setSubmitMessage(`${response.message} Ref ${response.id}`);
+      pushHistory(`PCR ${response.id}`, "request");
+      setPcrForm((prev) => ({
+        ...prev,
+        other: "",
+        otherPublicationsAffected: "",
+        suggestionForChange: "",
+      }));
+    } catch (err) {
+      setSubmitState("error");
+      setSubmitMessage(err instanceof Error ? err.message : "Unable to submit the publication change request.");
     }
   };
 
   const onActionClick = (action: ReaderActionId) => {
     if (action === "change-request") {
-      setReaderMode("change-request");
-      setPanel("change-request");
+      setInspectorTab("pcr");
+      setInspectorOpen(true);
       return;
     }
     if (action === "history") {
-      setReaderMode("history");
-      setPanel("history");
+      setInspectorTab("history");
+      setInspectorOpen(true);
       return;
     }
-    if (action === "task") {
-      setReaderMode("task");
-      setPanel("task");
+    if (action === "home") {
+      navigate(basePath);
       return;
     }
-    if (action === "order-list") {
-      setPanel("order-list");
-      return;
-    }
-    if (action === "notifications" || action === "delta" || action === "support" || action === "help" || action === "account") {
-      setPanel("metadata");
-    }
-    if (action === "home") navigate(amoCode ? `/maintenance/${amoCode}` : `/t/${tenant}`);
+    setInspectorTab("details");
   };
 
-  const breadcrumb = useMemo(() => {
-    const sec = filteredSections.find((s) => s.anchor_slug === activeSection) || filteredSections[0];
-    return {
-      make: "AMO",
-      library: "Technical Publications",
-      manual: `Manual ${manualId || ""}`,
-      chapter: sec ? sectionToChapterLabel(sec.heading) : chapterId || "Chapter",
-      section: sec?.heading || sectionId || "Section",
-    };
-  }, [filteredSections, activeSection, manualId, chapterId, sectionId]);
+  const activeAction = inspectorTab === "pcr" ? "change-request" : inspectorTab === "history" ? "history" : null;
+  const locationLabel = activeFigure ? activeFigure.title : activeSectionRecord?.heading || "Manual reader";
 
-  useEffect(() => {
-    setCrForm((prev) => ({
-      ...prev,
-      partNumber: manualId || prev.partNumber,
-      manualType: "Technical Manual",
-      title: `Manual ${manualId || ""}`,
-      model: prev.model || "N/A",
-      publicationDate: prev.publicationDate || new Date().toISOString().slice(0, 10),
-      revisionNumber: revId || prev.revisionNumber,
-      ataChapter: breadcrumb.chapter,
-      section: breadcrumb.section,
-      figure: activeFigure?.title || prev.figure,
-    }));
-  }, [manualId, revId, breadcrumb.chapter, breadcrumb.section, activeFigure?.title]);
+  const renderReader = () => {
+    if (!filteredSections.length) {
+      return (
+        <div className="manual-reader-empty">
+          <Search size={18} />
+          <h3>No sections match this search</h3>
+          <p>Clear the search term or switch to another tab.</p>
+        </div>
+      );
+    }
 
-  const viewer = readerMode === "figure" && activeFigure ? (
-    <div>
-      <div className="manual-reader-figure-toolbar">
-        <button className="manual-reader-icon-btn" onClick={() => setFigureZoom((z) => Math.max(40, z - 10))}><ZoomOut size={14} /> Zoom out</button>
-        <button className="manual-reader-icon-btn" onClick={() => setFigureZoom(100)}>Reset view</button>
-        <button className="manual-reader-icon-btn" onClick={() => setFigureZoom((z) => Math.min(320, z + 10))}><ZoomIn size={14} /> Zoom in</button>
-        <button className="manual-reader-icon-btn" onClick={() => setFigureZoom(125)}>Fit width</button>
-        <button className="manual-reader-icon-btn" onClick={() => setFigureZoom(100)}>Fit page</button>
-        <button className="manual-reader-icon-btn" onClick={() => {
-          const idx = figures.findIndex((f) => f.id === activeFigure.id);
-          if (idx > 0) setActiveFigureId(figures[idx - 1].id);
-        }}>Previous figure</button>
-        <button className="manual-reader-icon-btn" onClick={() => {
-          const idx = figures.findIndex((f) => f.id === activeFigure.id);
-          if (idx < figures.length - 1) setActiveFigureId(figures[idx + 1].id);
-        }}>Next figure</button>
-        <button className="manual-reader-icon-btn" onClick={() => {
-          setReaderMode("section");
-          location.hash = `#${activeFigure.sectionId}`;
-        }}>Back to section</button>
-      </div>
-      <div className="manual-reader-figure-view">
-        <p><strong>{activeFigure.title}</strong> · {activeFigure.chapterLabel} · {activeFigure.sectionHeading}</p>
-        <img src={activeFigure.src} alt={activeFigure.title} style={{ transform: `scale(${figureZoom / 100})`, transformOrigin: "top left" }} />
-      </div>
-    </div>
-  ) : layout === "continuous" ? (
-    <div className="manual-reader-pane">
-      {filteredSections.map((s) => (
-        <article key={s.id} id={s.anchor_slug} ref={(el) => { sectionRefs.current[s.anchor_slug] = el; }} className="manual-reader-section">
-          <h2>{s.heading}</h2>
-          {(blocksBySection[s.id] || []).map((b, i) => <div key={`${s.id}-${i}`} className="manual-reader-content" dangerouslySetInnerHTML={{ __html: b.html }} />)}
-          <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
-            <button className="manual-reader-icon-btn" onClick={() => {
-              const fig = figures.find((f) => f.sectionId === s.anchor_slug);
-              if (fig) {
-                setActiveFigureId(fig.id);
-                setReaderMode("figure");
-                setPanel("figure");
-                pushHistory(`Figure ${fig.title}`, s.anchor_slug);
-              }
-            }}>Open figure mode</button>
-            <button className="manual-reader-icon-btn" onClick={() => {
-              setReaderMode("change-request");
-              setPanel("change-request");
-            }}>Raise change request</button>
-          </div>
-        </article>
-      ))}
-    </div>
-  ) : (
-    <div ref={pagedParentRef} className="manual-reader-pane overflow-auto">
-      <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
-        {virtualizer.getVirtualItems().map((row) => (
-          <div key={row.key} style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${row.start}px)` }}>
-            <div className="manual-paged-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0,1fr))` }}>
-              {(rows[row.index] || []).map((page, idx) => (
-                <section key={`p-${row.index}-${idx}`} className="manual-page">
-                  {(page || []).map((entry) => (
-                    <div key={entry.section.id} className="manual-reader-content"><h3>{entry.section.heading}</h3>{entry.blocks.map((b, i) => <div key={`${entry.section.id}-${i}`} dangerouslySetInnerHTML={{ __html: b.html }} />)}</div>
+    if (layout === "continuous") {
+      return (
+        <div className="manual-reader-article" style={{ fontSize: `${zoom}%` }}>
+          {filteredSections.map((section) => {
+            const blocks = blocksBySection.get(section.id) || [];
+            const sectionFigures = figures.filter((figure) => figure.sectionAnchor === section.anchor_slug);
+            return (
+              <section key={section.id} id={section.anchor_slug} className="manual-reader-block">
+                <div className="manual-reader-block__header">
+                  <div>
+                    <span className="manual-reader-block__eyebrow">ATA {chapterFromHeading(section.heading) || "—"}</span>
+                    <h2>{section.heading}</h2>
+                  </div>
+                  {sectionFigures.length ? (
+                    <button type="button" className="manual-reader-icon-btn" onClick={() => openFigure(sectionFigures[0])}>
+                      <FileImage size={14} />
+                      View figure
+                    </button>
+                  ) : null}
+                </div>
+                {blocks.map((block, index) => (
+                  <div key={`${section.id}-${index}`} className="manual-reader-html" dangerouslySetInnerHTML={{ __html: block.html }} />
+                ))}
+              </section>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return (
+      <div className={`manual-reader-paged manual-reader-paged--${layout}`} style={{ fontSize: `${zoom}%` }}>
+        {pagedSections.map((page, pageIndex) => (
+          <div key={`page-${pageIndex}`} className="manual-reader-page">
+            {page.map((section) => {
+              const blocks = blocksBySection.get(section.id) || [];
+              return (
+                <section key={section.id} className="manual-reader-block">
+                  <span className="manual-reader-block__eyebrow">ATA {chapterFromHeading(section.heading) || "—"}</span>
+                  <h3>{section.heading}</h3>
+                  {blocks.map((block, index) => (
+                    <div key={`${section.id}-${index}`} className="manual-reader-html" dangerouslySetInnerHTML={{ __html: block.html }} />
                   ))}
                 </section>
-              ))}
-            </div>
+              );
+            })}
           </div>
         ))}
+      </div>
+    );
+  };
+
+  const renderFigures = () => (
+    <div className="manual-figure-workspace">
+      <aside className="manual-figure-list">
+        {figures.length ? (
+          figures.map((figure) => (
+            <button
+              key={figure.id}
+              type="button"
+              className={`manual-figure-list__item${activeFigureId === figure.id ? " is-active" : ""}`}
+              onClick={() => openFigure(figure)}
+            >
+              <span className="manual-figure-list__title">{figure.title}</span>
+              <span className="manual-figure-list__meta">{figure.sectionHeading}</span>
+            </button>
+          ))
+        ) : (
+          <div className="manual-reader-empty manual-reader-empty--compact">
+            <FileImage size={18} />
+            <p>No figures were extracted from this revision.</p>
+          </div>
+        )}
+      </aside>
+      <div className="manual-figure-stage">
+        <div className="manual-figure-toolbar">
+          <button type="button" className="manual-reader-icon-btn" onClick={() => setFigureZoom((value) => Math.max(50, value - 10))}>
+            <ZoomOut size={14} />
+            Zoom out
+          </button>
+          <button type="button" className="manual-reader-icon-btn" onClick={() => setFigureZoom(100)}>Reset</button>
+          <button type="button" className="manual-reader-icon-btn" onClick={() => setFigureZoom((value) => Math.min(220, value + 10))}>
+            <ZoomIn size={14} />
+            Zoom in
+          </button>
+          {activeFigure ? (
+            <button type="button" className="manual-reader-icon-btn" onClick={() => openSection(activeFigure.sectionAnchor)}>
+              <FileText size={14} />
+              Open section
+            </button>
+          ) : null}
+        </div>
+        {activeFigure ? (
+          <div className="manual-figure-view">
+            <div className="manual-figure-view__meta">
+              <span>{activeFigure.sectionHeading}</span>
+              <strong>{activeFigure.title}</strong>
+            </div>
+            <div className="manual-figure-view__canvas">
+              <img src={activeFigure.src} alt={activeFigure.title} style={{ transform: `scale(${figureZoom / 100})`, transformOrigin: "top left" }} />
+            </div>
+          </div>
+        ) : (
+          <div className="manual-reader-empty">
+            <FileImage size={18} />
+            <h3>Select a figure</h3>
+            <p>Use the figure tab to move directly to illustrations referenced in the publication.</p>
+          </div>
+        )}
       </div>
     </div>
   );
 
-  const fallbackPath = amoCode ? `/maintenance/${amoCode}/manuals` : `/t/${tenant || ""}/manuals`;
-
-  const publicationTree = (
-    <div>
-      <div className="manual-panel-title">Publication hierarchy</div>
-      <div style={{ padding: 8, fontSize: 12 }}>
-        <div className="manual-tree-node active"><ChevronDown size={12} /> {breadcrumb.make}</div>
-        <div className="manual-tree-children">
-          <div className="manual-tree-node active"><ChevronDown size={12} /> {breadcrumb.library}</div>
-          <div className="manual-tree-children">
-            <div className="manual-tree-node active"><ChevronDown size={12} /> {breadcrumb.manual}</div>
-            <div className="manual-tree-children">
-              {filteredSections.map((s) => {
-                const active = s.anchor_slug === activeSection;
-                return (
-                  <div key={s.id}>
-                    <button className={`manual-tree-node ${active ? "active" : ""}`} onClick={() => {
-                      setActiveSection(s.anchor_slug);
-                      setRouteSection(s.anchor_slug);
-                      location.hash = `#${s.anchor_slug}`;
-                      pushHistory(s.heading, s.anchor_slug);
-                    }}>
-                      {active ? <ChevronDown size={12} /> : <ChevronRight size={12} />} {s.heading}
-                    </button>
-                    {active ? (
-                      <div className="manual-tree-children">
-                        {figures.filter((f) => f.sectionId === s.anchor_slug).map((f) => (
-                          <button key={f.id} className="manual-tree-node" onClick={() => { setActiveFigureId(f.id); setReaderMode("figure"); }}>
-                            Figure: {f.title}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
+  const renderHistory = () => (
+    <div className="manual-history-list">
+      {history.length ? (
+        history.map((item) => (
+          <div key={item.id} className="manual-history-list__item">
+            <div>
+              <strong>{item.label}</strong>
+              <p>{item.kind}</p>
             </div>
+            <span>{new Date(item.at).toLocaleString()}</span>
           </div>
+        ))
+      ) : (
+        <div className="manual-reader-empty manual-reader-empty--compact">
+          <History size={18} />
+          <p>No recent manual navigation yet.</p>
         </div>
-      </div>
+      )}
+    </div>
+  );
+
+  const renderPcrForm = () => (
+    <div className="manual-pcr-form">
+      <section className="manual-pcr-section">
+        <div className="manual-pcr-section__header">
+          <strong>Requested by</strong>
+        </div>
+        <div className="manual-pcr-grid manual-pcr-grid--four">
+          <label>
+            <span>First name</span>
+            <input className="manual-input" value={pcrForm.requestedByFirstName} onChange={(event) => setPcrForm((prev) => ({ ...prev, requestedByFirstName: event.target.value }))} />
+          </label>
+          <label>
+            <span>Last name</span>
+            <input className="manual-input" value={pcrForm.requestedByLastName} onChange={(event) => setPcrForm((prev) => ({ ...prev, requestedByLastName: event.target.value }))} />
+          </label>
+          <label>
+            <span>Email address</span>
+            <input className="manual-input" type="email" value={pcrForm.email} onChange={(event) => setPcrForm((prev) => ({ ...prev, email: event.target.value }))} />
+          </label>
+          <label>
+            <span>Phone number</span>
+            <input className="manual-input" value={pcrForm.phone} onChange={(event) => setPcrForm((prev) => ({ ...prev, phone: event.target.value }))} />
+          </label>
+        </div>
+      </section>
+
+      <section className="manual-pcr-section">
+        <div className="manual-pcr-section__header manual-pcr-section__header--action">
+          <strong>Publication affected</strong>
+          <button type="button" className="manual-reader-icon-btn" onClick={() => setSelectorOpen(true)}>
+            <Search size={14} />
+            Select publication
+          </button>
+        </div>
+        <div className="manual-pcr-grid manual-pcr-grid--four">
+          <label>
+            <span>Part number</span>
+            <input className="manual-input" value={pcrForm.partNumber} onChange={(event) => setPcrForm((prev) => ({ ...prev, partNumber: event.target.value }))} />
+          </label>
+          <label>
+            <span>Manual type</span>
+            <input className="manual-input" value={pcrForm.manualType} onChange={(event) => setPcrForm((prev) => ({ ...prev, manualType: event.target.value }))} />
+          </label>
+          <label>
+            <span>Title</span>
+            <input className="manual-input" value={pcrForm.title} onChange={(event) => setPcrForm((prev) => ({ ...prev, title: event.target.value }))} />
+          </label>
+          <label>
+            <span>Model</span>
+            <input className="manual-input" value={pcrForm.model} onChange={(event) => setPcrForm((prev) => ({ ...prev, model: event.target.value }))} />
+          </label>
+          <label>
+            <span>Publication date</span>
+            <input className="manual-input" type="date" value={pcrForm.publicationDate} onChange={(event) => setPcrForm((prev) => ({ ...prev, publicationDate: event.target.value }))} />
+          </label>
+          <label>
+            <span>Revision number</span>
+            <input className="manual-input" value={pcrForm.revisionNumber} onChange={(event) => setPcrForm((prev) => ({ ...prev, revisionNumber: event.target.value }))} />
+          </label>
+        </div>
+      </section>
+
+      <section className="manual-pcr-section">
+        <div className="manual-pcr-section__header">
+          <strong>Location in the publication</strong>
+        </div>
+        <div className="manual-pcr-grid manual-pcr-grid--four">
+          <label>
+            <span>ATA chapter</span>
+            <input className="manual-input" value={pcrForm.ataChapter} onChange={(event) => setPcrForm((prev) => ({ ...prev, ataChapter: event.target.value }))} />
+          </label>
+          <label>
+            <span>Section</span>
+            <input className="manual-input" value={pcrForm.section} onChange={(event) => setPcrForm((prev) => ({ ...prev, section: event.target.value }))} />
+          </label>
+          <label>
+            <span>Sub section</span>
+            <input className="manual-input" value={pcrForm.subSection} onChange={(event) => setPcrForm((prev) => ({ ...prev, subSection: event.target.value }))} />
+          </label>
+          <label>
+            <span>Figure</span>
+            <input className="manual-input" value={pcrForm.figure} onChange={(event) => setPcrForm((prev) => ({ ...prev, figure: event.target.value }))} />
+          </label>
+          <label>
+            <span>Page number</span>
+            <input className="manual-input" value={pcrForm.pageNumber} onChange={(event) => setPcrForm((prev) => ({ ...prev, pageNumber: event.target.value }))} />
+          </label>
+          <label>
+            <span>Art/Figure</span>
+            <input className="manual-input" value={pcrForm.artFigure} onChange={(event) => setPcrForm((prev) => ({ ...prev, artFigure: event.target.value }))} />
+          </label>
+          <label className="manual-pcr-grid__span-2">
+            <span>Other</span>
+            <input className="manual-input" value={pcrForm.other} onChange={(event) => setPcrForm((prev) => ({ ...prev, other: event.target.value }))} />
+          </label>
+        </div>
+      </section>
+
+      <section className="manual-pcr-section">
+        <div className="manual-pcr-section__header">
+          <strong>Change requested</strong>
+        </div>
+        <div className="manual-pcr-grid">
+          <label>
+            <span>Other publications affected</span>
+            <textarea className="manual-textarea" rows={3} value={pcrForm.otherPublicationsAffected} onChange={(event) => setPcrForm((prev) => ({ ...prev, otherPublicationsAffected: event.target.value }))} />
+          </label>
+          <label>
+            <span>Suggestion for change</span>
+            <textarea className="manual-textarea" rows={6} value={pcrForm.suggestionForChange} onChange={(event) => setPcrForm((prev) => ({ ...prev, suggestionForChange: event.target.value }))} />
+          </label>
+        </div>
+        <label className="manual-check">
+          <input type="checkbox" checked={pcrForm.requestUpdates} onChange={(event) => setPcrForm((prev) => ({ ...prev, requestUpdates: event.target.checked }))} />
+          <span>Receive email updates for this publication change request</span>
+        </label>
+        {submitMessage ? <div className={`manual-pcr-feedback is-${submitState}`}>{submitMessage}</div> : null}
+        <div className="manual-pcr-actions">
+          <button type="button" className="manual-reader-icon-btn" onClick={submitPcr} disabled={submitState === "submitting"}>
+            {submitState === "submitting" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            Submit request
+          </button>
+        </div>
+      </section>
     </div>
   );
 
@@ -447,200 +708,200 @@ export default function ManualReaderPage() {
         manualLabel={manualId ? `Manual ${manualId}` : "Manual"}
         statusBadge={workflowStatus}
         revMeta={`Rev ${revId || "n/a"}`}
-        locationLabel={activeSection || "Reader"}
-        missingMetaFields={missingMetaFields.length ? missingMetaFields : undefined}
-        fallbackPath={fallbackPath}
+        locationLabel={locationLabel}
+        fallbackPath={basePath}
         searchValue={search}
-        onSearchChange={(value) => { setSearch(value); setPanel("search"); setReaderMode("search"); }}
-        onToggleToc={() => setTocOpen((v) => !v)}
-        onToggleInspector={() => setInspectorOpen((v) => !v)}
-        onLayoutChange={(next) => setLayout(next)}
-        onZoomIn={() => setZoom((z) => Math.min(220, z + 10))}
-        onZoomOut={() => setZoom((z) => Math.max(60, z - 10))}
+        onSearchChange={setSearch}
+        onToggleToc={() => setTocOpen((value) => !value)}
+        onToggleInspector={() => setInspectorOpen((value) => !value)}
+        onLayoutChange={setLayout}
+        onZoomIn={() => setZoom((value) => Math.min(180, value + 10))}
+        onZoomOut={() => setZoom((value) => Math.max(80, value - 10))}
         onZoomReset={() => setZoom(100)}
         onActionClick={onActionClick}
-        activeAction={panel === "change-request" ? "change-request" : panel === "history" ? "history" : panel === "task" ? "task" : panel === "order-list" ? "order-list" : null}
+        activeAction={activeAction}
       >
-        {integrityCompromised ? (
-          <div className="manual-card" style={{ borderColor: "var(--danger, #d9534f)", background: "rgba(217, 83, 79, 0.12)", marginBottom: 12 }}>
-            <strong>CRITICAL: DOCUMENT INTEGRITY COMPROMISED</strong>
-            <p>This revision hash does not match the immutable record. Stop use and notify Quality Management immediately.</p>
-          </div>
-        ) : null}
-
-        {advancedOpen ? (
-          <div className="manual-card" style={{ marginBottom: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}><strong>Advanced publication search</strong><button className="manual-reader-icon-btn" onClick={() => setAdvancedOpen(false)}>Close</button></div>
-            <div style={{ display: "grid", gap: 6, gridTemplateColumns: "repeat(5,minmax(0,1fr))" }}>
-              <input className="manual-input" placeholder="Make" />
-              <input className="manual-input" placeholder="Library" />
-              <input className="manual-input" placeholder="Manual" />
-              <input className="manual-input" placeholder="Search phrase" />
-              <select className="manual-input"><option>any words</option><option>all words</option><option>exact phrase</option><option>starts with</option></select>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="manual-reader-workspace">
-          {tocOpen ? <aside className="manual-reader-toc">{publicationTree}</aside> : null}
-
-          <section className="manual-reader-viewer" style={{ transform: `scale(${zoom / 100})`, transformOrigin: "top center" }}>
-            <div className="manual-reader-breadcrumbs">
-              <button>{breadcrumb.make}</button> / <button>{breadcrumb.library}</button> / <button>{breadcrumb.manual}</button> / <button>{breadcrumb.chapter}</button> / <button>{breadcrumb.section}</button>
-            </div>
-            <div className="manual-publication-meta">
-              <div className="meta-chip"><strong>Model/PN</strong><br />N/A / {manualId || "n/a"}</div>
-              <div className="meta-chip"><strong>Revision</strong><br />{revId || "n/a"}</div>
-              <div className="meta-chip"><strong>Mode</strong><br />{readerMode.toUpperCase()}</div>
-            </div>
-
-            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-              <button className="manual-reader-icon-btn" onClick={() => goRelativeSection(-1)}>Previous section</button>
-              <button className="manual-reader-icon-btn" onClick={() => goRelativeSection(1)}>Next section</button>
-              <button className="manual-reader-icon-btn" onClick={() => setAdvancedOpen(true)}><Search size={14} /> Advanced search</button>
-            </div>
-
-            {noContent ? (
-              <div className="manual-empty-hub">
-                <h2>This revision has no rendered content yet</h2>
-                <p>Upload a source document, run processing, or use OCR for scanned PDFs.</p>
-                <div className="manual-empty-actions">
-                  <label className="manual-reader-icon-btn"><Upload size={14} /> Upload Document<input type="file" accept=".pdf,.docx" hidden onChange={(e) => setUploadName(e.target.files?.[0]?.name || "")} /></label>
-                  <button className="manual-reader-icon-btn" onClick={() => run("processor")} disabled={busy !== null}>{busy === "processor" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />} Run Processor</button>
-                  <button className="manual-reader-icon-btn" onClick={() => run("ocr")} disabled={busy !== null}>{busy === "ocr" ? <Loader2 size={14} className="animate-spin" /> : <ScanLine size={14} />} Run OCR</button>
-                  <a className="manual-reader-icon-btn" href="#processor-logs"><FileText size={14} /> View logs</a>
-                </div>
-                {uploadName ? <p className="manual-upload-caption">Selected: {uploadName}</p> : null}
-                {processing ? <p className="manual-upload-caption">Status: {processing.stage} · Last run by {processing.actor_id || "system"}</p> : null}
+        <div className="manual-reader-workspace-v2">
+          {tocOpen ? (
+            <aside className="manual-reader-nav">
+              <div className="manual-reader-nav__header">
+                <strong>Publication</strong>
+                <span>{filteredSections.length} section(s)</span>
               </div>
-            ) : viewer}
+              <div className="manual-reader-nav__body">
+                {filteredSections.map((section) => {
+                  const sectionFigures = figures.filter((figure) => figure.sectionAnchor === section.anchor_slug);
+                  const isActive = section.anchor_slug === activeSection;
+                  return (
+                    <div key={section.id} className="manual-tree-group">
+                      <button type="button" className={`manual-tree-node${isActive ? " is-active" : ""}`} onClick={() => openSection(section.anchor_slug)}>
+                        {isActive ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span>{section.heading}</span>
+                      </button>
+                      {isActive && sectionFigures.length ? (
+                        <div className="manual-tree-children">
+                          {sectionFigures.map((figure) => (
+                            <button key={figure.id} type="button" className={`manual-tree-child${activeFigureId === figure.id ? " is-active" : ""}`} onClick={() => openFigure(figure)}>
+                              <FileImage size={13} />
+                              <span>{figure.title}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </aside>
+          ) : null}
+
+          <section className="manual-reader-stage">
+            <div className="manual-reader-stage__header">
+              <div className="manual-reader-stage__meta">
+                <span className="manual-reader-stage__eyebrow">Technical publications</span>
+                <h1>{manualId ? `Manual ${manualId}` : "Manual reader"}</h1>
+                <p>{activeSectionRecord?.heading || "Select a section from the publication tree."}</p>
+              </div>
+              <div className="manual-reader-view-tabs">
+                <button type="button" className={mainTab === "reader" ? "is-active" : ""} onClick={() => setMainTab("reader")}>
+                  <FileText size={14} />
+                  Reader
+                </button>
+                <button type="button" className={mainTab === "figures" ? "is-active" : ""} onClick={() => setMainTab("figures")}>
+                  <FileImage size={14} />
+                  Figures
+                </button>
+                <button type="button" className={mainTab === "history" ? "is-active" : ""} onClick={() => setMainTab("history")}>
+                  <History size={14} />
+                  History
+                </button>
+                <button type="button" className={mainTab === "pcr" ? "is-active" : ""} onClick={() => setMainTab("pcr")}>
+                  <ClipboardPlus size={14} />
+                  PCR
+                </button>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="manual-reader-empty">
+                <Loader2 size={18} className="animate-spin" />
+                <h3>Loading publication</h3>
+                <p>Please wait while the selected revision is prepared.</p>
+              </div>
+            ) : error ? (
+              <div className="manual-reader-empty">
+                <FileText size={18} />
+                <h3>Unable to load publication</h3>
+                <p>{error}</p>
+                <button type="button" className="manual-reader-icon-btn" onClick={() => void refresh()}>Retry</button>
+              </div>
+            ) : mainTab === "figures" ? (
+              renderFigures()
+            ) : mainTab === "history" ? (
+              renderHistory()
+            ) : mainTab === "pcr" ? (
+              renderPcrForm()
+            ) : (
+              renderReader()
+            )}
           </section>
 
           {inspectorOpen ? (
-            <aside className="manual-reader-aside">
-              <div className="manual-tabs">
-                {(["revision", "ack", "export"] as const).map((t) => <button key={t} className={`manual-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t.toUpperCase()}</button>)}
+            <aside className="manual-reader-inspector">
+              <div className="manual-reader-inspector__tabs">
+                <button type="button" className={inspectorTab === "details" ? "is-active" : ""} onClick={() => setInspectorTab("details")}>Details</button>
+                <button type="button" className={inspectorTab === "history" ? "is-active" : ""} onClick={() => setInspectorTab("history")}>History</button>
+                <button type="button" className={inspectorTab === "pcr" ? "is-active" : ""} onClick={() => setInspectorTab("pcr")}>PCR</button>
               </div>
-              <div className="manual-context-panel">
-                {panel === "search" ? (
-                  <>
-                    <strong>Search hits</strong>
-                    <div className="manual-mini-list">
-                      {filteredSections.map((s) => (
-                        <button key={s.id} className="manual-mini-item" onClick={() => { setActiveSection(s.anchor_slug); setReaderMode("section"); }}>{s.heading}<span>Open</span></button>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
 
-                {panel === "history" ? (
-                  <>
-                    <strong>History</strong>
-                    <div className="manual-mini-list">
-                      {history.map((h, idx) => (
-                        <button key={`${h.timestamp}-${idx}`} className="manual-mini-item" onClick={() => navigate(h.route)}>
-                          <span>{h.title || h.section || h.manual}</span>
-                          <span>{new Date(h.timestamp).toLocaleDateString()}</span>
-                        </button>
-                      ))}
+              {inspectorTab === "details" ? (
+                <div className="manual-reader-inspector__panel">
+                  <div className="manual-inspector-card">
+                    <span className="manual-inspector-card__label">Workflow</span>
+                    <strong>{workflowStatus}</strong>
+                  </div>
+                  <div className="manual-inspector-card-grid">
+                    <div className="manual-inspector-card">
+                      <span className="manual-inspector-card__label">Revision</span>
+                      <strong>{revId || "—"}</strong>
                     </div>
-                  </>
-                ) : null}
+                    <div className="manual-inspector-card">
+                      <span className="manual-inspector-card__label">Publication date</span>
+                      <strong>{formatDate(pcrForm.publicationDate)}</strong>
+                    </div>
+                    <div className="manual-inspector-card">
+                      <span className="manual-inspector-card__label">Current chapter</span>
+                      <strong>{pcrForm.ataChapter || "—"}</strong>
+                    </div>
+                    <div className="manual-inspector-card">
+                      <span className="manual-inspector-card__label">Current figure</span>
+                      <strong>{activeFigure?.title || "—"}</strong>
+                    </div>
+                  </div>
+                  <div className="manual-inspector-card">
+                    <span className="manual-inspector-card__label">Revision delta</span>
+                    <ul className="manual-inspector-list">
+                      <li><span>Changed sections</span><strong>{diffSummary.changed_sections || 0}</strong></li>
+                      <li><span>Changed blocks</span><strong>{diffSummary.changed_blocks || 0}</strong></li>
+                      <li><span>Added</span><strong>{diffSummary.added || 0}</strong></li>
+                      <li><span>Removed</span><strong>{diffSummary.removed || 0}</strong></li>
+                    </ul>
+                  </div>
+                </div>
+              ) : null}
 
-                {panel === "task" ? (
-                  <>
-                    <strong>Task workspace</strong>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      {(["current", "visited", "all"] as const).map((t) => <button key={t} className={`manual-reader-icon-btn ${taskTab === t ? "active" : ""}`} onClick={() => setTaskTab(t)}>{t}</button>)}
-                    </div>
-                    <div className="manual-mini-list">
-                      {["Inspection doc", "Figure pack", "Section print queue"].map((n) => <div key={n} className="manual-mini-item"><span>{n}</span><span>Queued</span></div>)}
-                    </div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button className="manual-reader-icon-btn">Email</button>
-                      <button className="manual-reader-icon-btn">Print</button>
-                      <button className="manual-reader-icon-btn">Save as PDF</button>
-                    </div>
-                  </>
-                ) : null}
-
-                {panel === "order-list" ? (
-                  <>
-                    <strong>Order / Parts list</strong>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button className="manual-reader-icon-btn">Open</button>
-                      <button className="manual-reader-icon-btn">Import</button>
-                      <button className="manual-reader-icon-btn">Save</button>
-                      <button className="manual-reader-icon-btn">Save as</button>
-                      <button className="manual-reader-icon-btn">Export TXT</button>
-                      <button className="manual-reader-icon-btn">Export PDF</button>
-                    </div>
-                    <div className="manual-mini-list">
-                      {["P/N 123-00", "P/N 234-11"].map((n) => <div key={n} className="manual-mini-item"><span>{n}</span><input style={{ width: 54 }} defaultValue={1} /></div>)}
-                    </div>
-                  </>
-                ) : null}
-
-                {panel === "change-request" ? (
-                  <>
-                    <strong>Publication Change Request</strong>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      {[
-                        ["Part Number", "partNumber"], ["Manual Type", "manualType"], ["Title", "title"], ["Model", "model"], ["Publication Date", "publicationDate"], ["Revision Number", "revisionNumber"],
-                        ["ATA Chapter", "ataChapter"], ["Section", "section"], ["Sub Section", "subSection"], ["Figure", "figure"], ["Page Number", "pageNumber"], ["Art/Figure", "artFigure"],
-                      ].map(([label, key]) => (
-                        <input key={key} className="manual-input" placeholder={label} value={(crForm as any)[key]} onChange={(e) => setCrForm((v) => ({ ...v, [key]: e.target.value }))} />
-                      ))}
-                      <textarea className="manual-textarea" rows={3} placeholder="Other publications affected" value={crForm.otherPublications} onChange={(e) => setCrForm((v) => ({ ...v, otherPublications: e.target.value }))} />
-                      <textarea className="manual-textarea" rows={4} placeholder="Suggestion for change" value={crForm.suggestion} onChange={(e) => setCrForm((v) => ({ ...v, suggestion: e.target.value }))} />
-                      <label className="manual-check"><input type="checkbox" checked={crForm.requestUpdates} onChange={(e) => setCrForm((v) => ({ ...v, requestUpdates: e.target.checked }))} /> Request updates</label>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button className="manual-reader-icon-btn" onClick={() => setSelectorOpen(true)}>Select Publication</button>
-                        <button className="manual-reader-icon-btn">Submit</button>
-                      </div>
-                    </div>
-                  </>
-                ) : null}
-
-                {panel === "metadata" || panel === "figure" ? (
-                  <>
-                    {tab === "revision" ? <div className="manual-card"><p>Changed sections: {diffSummary.changed_sections || 0}</p><p>Changed blocks: {diffSummary.changed_blocks || 0}</p><p>Added {diffSummary.added || 0} · Removed {diffSummary.removed || 0}</p></div> : null}
-                    {tab === "ack" ? (
-                      <div className="manual-card">
-                        <p>I acknowledge receipt and review of this revision.</p>
-                        <label className="manual-check"><input type="checkbox" checked={ackChecked} onChange={(e) => setAckChecked(e.target.checked)} /> I acknowledge the transmittal requirement.</label>
-                        <textarea className="manual-textarea" rows={3} placeholder="Optional comment" value={ackComment} onChange={(e) => setAckComment(e.target.value)} />
-                        <button className="manual-reader-icon-btn" disabled={!ackChecked} onClick={() => tenant && manualId && revId && acknowledgeRevision(tenant, manualId, revId, `I acknowledge receipt and review.${ackComment ? ` Note: ${ackComment}` : ""}`)}>Acknowledge</button>
-                      </div>
-                    ) : null}
-                    {tab === "export" ? (
-                      <div className="manual-card">
-                        <label className="manual-switch-row"><span>UNCONTROLLED watermark</span><input type="checkbox" checked={watermarkOn} disabled={controlled} onChange={(e) => setWatermarkOn(e.target.checked)} /></label>
-                        <label className="manual-switch-row"><span>Controlled hard copy</span><input type="checkbox" checked={controlled} onChange={(e) => { const next = e.target.checked; setControlled(next); if (next) setWatermarkOn(false); }} /></label>
-                        {controlled ? <><input className="manual-input" placeholder="Manual Copy No" /><input className="manual-input" placeholder="Copy Holder" /><input className="manual-input" placeholder="Purpose" /></> : null}
-                        <button className="manual-reader-icon-btn" onClick={() => tenant && manualId && revId && createRevisionExport(tenant, manualId, revId, { controlled_bool: controlled, watermark_uncontrolled_bool: watermarkOn, version_label: `rev-${revId}` })}>Generate PDF Artifact</button>
-                      </div>
-                    ) : null}
-                  </>
-                ) : null}
-              </div>
+              {inspectorTab === "history" ? renderHistory() : null}
+              {inspectorTab === "pcr" ? renderPcrForm() : null}
             </aside>
           ) : null}
         </div>
 
         {selectorOpen ? (
-          <div className="manual-card" style={{ position: "fixed", inset: "20% 20% auto", zIndex: 100, background: "white" }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}><strong>Select Publication</strong><button className="manual-reader-icon-btn" onClick={() => setSelectorOpen(false)}>Close</button></div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 6 }}>
-              <input className="manual-input" placeholder="Model" />
-              <input className="manual-input" placeholder="Type" />
-              <input className="manual-input" placeholder="P/N" />
-              <input className="manual-input" placeholder="Title" />
+          <div className="manual-selector-modal">
+            <div className="manual-selector-modal__backdrop" onClick={() => setSelectorOpen(false)} />
+            <div className="manual-selector-modal__dialog">
+              <div className="manual-selector-modal__header">
+                <div>
+                  <strong>Select publication</strong>
+                  <p>Pick the affected publication, then continue the request from the reader context.</p>
+                </div>
+                <button type="button" className="manual-reader-icon-btn" onClick={() => setSelectorOpen(false)}>Close</button>
+              </div>
+              <div className="manual-selector-modal__toolbar">
+                <input className="manual-input" placeholder="Search code, title, or type" value={selectorQuery} onChange={(event) => setSelectorQuery(event.target.value)} />
+                <button type="button" className="manual-reader-icon-btn" onClick={() => void selectorSearch()}>
+                  {selectorLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                  Search
+                </button>
+              </div>
+              <div className="manual-selector-table">
+                <div className="manual-selector-table__head">
+                  <span>Part number</span>
+                  <span>Type</span>
+                  <span>Title</span>
+                  <span>Revision</span>
+                  <span>Publication date</span>
+                  <span />
+                </div>
+                {selectorItems.length ? (
+                  selectorItems.map((item) => (
+                    <div key={item.manual_id} className="manual-selector-table__row">
+                      <span>{item.code}</span>
+                      <span>{item.manual_type}</span>
+                      <span>{item.title}</span>
+                      <span>{item.current_revision || "—"}</span>
+                      <span>{formatDate(item.publication_date)}</span>
+                      <button type="button" className="manual-reader-icon-btn" onClick={() => pickPublication(item)}>Use</button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="manual-reader-empty manual-reader-empty--compact">
+                    {selectorLoading ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+                    <p>{selectorLoading ? "Searching publications…" : "No publications found."}</p>
+                  </div>
+                )}
+              </div>
             </div>
-            <table className="manual-reader-content">
-              <thead><tr><th>Part Number</th><th>Type</th><th>Title</th><th>Last Rev</th><th>Pub Date</th></tr></thead>
-              <tbody><tr><td>{manualId || "N/A"}</td><td>Technical Manual</td><td>{`Manual ${manualId || ""}`}</td><td>{revId || "N/A"}</td><td>{new Date().toISOString().slice(0, 10)}</td></tr></tbody>
-            </table>
           </div>
         ) : null}
       </ManualsReaderShell>

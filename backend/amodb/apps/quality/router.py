@@ -23,6 +23,7 @@ from amodb.entitlements import require_module
 from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
 from amodb.apps.audit import services as audit_services
+from amodb.apps.notifications import service as notification_service
 from amodb.apps.exports import build_evidence_pack
 from amodb.apps.tasks import services as task_services
 from amodb.database import get_db
@@ -963,6 +964,35 @@ def create_audit(
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
     )
+    if audit.lead_auditor_user_id:
+        _notify_user(
+            db,
+            audit.lead_auditor_user_id,
+            f"Audit notice issued: {audit.audit_ref} · {audit.title} starts {planned_start.isoformat()}",
+            models.QMSNotificationSeverity.ACTION_REQUIRED,
+        )
+        lead_user = db.query(account_models.User).filter(account_models.User.id == audit.lead_auditor_user_id).first()
+        if lead_user and getattr(lead_user, "email", None):
+            try:
+                notification_service.send_email(
+                    template_key="qms_audit_notice_memo",
+                    recipient=lead_user.email,
+                    subject=f"Audit Notice Memo · {audit.audit_ref}",
+                    context={
+                        "audit_ref": audit.audit_ref,
+                        "title": audit.title,
+                        "planned_start": planned_start.isoformat(),
+                        "planned_end": planned_end.isoformat(),
+                        "scope": audit.scope,
+                        "criteria": audit.criteria,
+                        "auditee": audit.auditee,
+                    },
+                    correlation_id=str(audit.id),
+                    amo_id=str(current_user.amo_id),
+                    db=db,
+                )
+            except Exception:
+                pass
     db.commit()
     db.refresh(audit)
     return audit
@@ -1116,6 +1146,36 @@ def create_audit_schedule(
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
     )
+    if schedule.lead_auditor_user_id:
+        _notify_user(
+            db,
+            schedule.lead_auditor_user_id,
+            f"Audit schedule assigned: {schedule.title} due {schedule.next_due_date.isoformat()}",
+            models.QMSNotificationSeverity.INFO,
+        )
+        lead_user = db.query(account_models.User).filter(account_models.User.id == schedule.lead_auditor_user_id).first()
+        if lead_user and getattr(lead_user, "email", None):
+            try:
+                notification_service.send_email(
+                    template_key="qms_audit_schedule_notice",
+                    recipient=lead_user.email,
+                    subject=f"Audit Notice Memo · {schedule.title}",
+                    context={
+                        "title": schedule.title,
+                        "kind": schedule.kind.value,
+                        "frequency": schedule.frequency.value,
+                        "next_due_date": schedule.next_due_date.isoformat(),
+                        "scope": schedule.scope,
+                        "criteria": schedule.criteria,
+                        "auditee": schedule.auditee,
+                        "lead_auditor_user_id": schedule.lead_auditor_user_id,
+                    },
+                    correlation_id=str(schedule.id),
+                    amo_id=str(current_user.amo_id),
+                    db=db,
+                )
+            except Exception:
+                pass
     db.commit()
     db.refresh(schedule)
     return schedule

@@ -12,6 +12,7 @@
 import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
 import { authHeaders, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { beginLoading, endLoading } from "./loading";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
@@ -35,64 +36,63 @@ async function request<T>(
 ): Promise<T> {
   const url = `${getApiBaseUrl()}${path}`;
 
-  const res = await fetch(url, {
-    method,
-    body,
-    ...init,
-  });
-
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
-
-  if (!res.ok) {
-    const contentType = res.headers.get("Content-Type") || "";
-    const text = await res.text();
-    let message = text || `HTTP ${res.status}`;
-    if (contentType.toLowerCase().includes("application/json")) {
-      try {
-        const parsed = JSON.parse(text) as { detail?: string; message?: string };
-        message = parsed.detail || parsed.message || message;
-      } catch {
-        // keep raw text fallback
-      }
-    }
-    // Log for easier debugging in the browser console
-    console.error(
-      `API ${method} ${url} failed:`,
-      res.status,
-      contentType,
-      text.slice(0, 300)
-    );
-    throw new Error(message || `HTTP ${res.status}`);
-  }
-
-  if (res.status === 204 || res.status === 205) {
-    return null as T;
-  }
-
-  const contentType = res.headers.get("Content-Type") || "";
-
-  // We expect these helpers to talk to JSON endpoints.
-  if (!contentType.includes("application/json")) {
-    const text = await res.text();
-    console.error(
-      `API ${method} ${url} returned non-JSON success response:`,
-      contentType,
-      text.slice(0, 300)
-    );
-    throw new Error(buildJsonMisrouteHint(url, contentType));
-  }
-
+  beginLoading();
   try {
-    return (await res.json()) as T;
-  } catch (err) {
-    console.error(
-      `API ${method} ${url} JSON parse error:`,
-      err
-    );
-    throw err;
+    const res = await fetch(url, {
+      method,
+      body,
+      ...init,
+    });
+
+    if (res.status === 401) {
+      handleAuthFailure("expired");
+      throw new Error("Session expired. Please sign in again.");
+    }
+
+    if (!res.ok) {
+      const contentType = res.headers.get("Content-Type") || "";
+      const text = await res.text();
+      let message = text || `HTTP ${res.status}`;
+      if (contentType.toLowerCase().includes("application/json")) {
+        try {
+          const parsed = JSON.parse(text) as { detail?: string; message?: string };
+          message = parsed.detail || parsed.message || message;
+        } catch {
+          // keep raw text fallback
+        }
+      }
+      console.error(
+        `API ${method} ${url} failed:`,
+        res.status,
+        contentType,
+        text.slice(0, 300)
+      );
+      throw new Error(message || `HTTP ${res.status}`);
+    }
+
+    if (res.status === 204 || res.status === 205) {
+      return null as T;
+    }
+
+    const contentType = res.headers.get("Content-Type") || "";
+    if (!contentType.includes("application/json")) {
+      const text = await res.text();
+      console.error(
+        `API ${method} ${url} returned non-JSON success response:`,
+        contentType,
+        text.slice(0, 300)
+      );
+      throw new Error(buildJsonMisrouteHint(url, contentType));
+    }
+
+    try {
+      return (await res.json()) as T;
+    } catch (err) {
+      console.error(`API ${method} ${url} JSON parse error:`, err);
+      throw err;
+    }
+  } finally {
+    endLoading();
   }
 }
 

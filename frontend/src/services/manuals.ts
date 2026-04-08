@@ -266,3 +266,59 @@ export async function previewDocxUpload(tenantSlug: string, file: File) {
     sample: string[];
   }>(`/manuals/t/${tenantSlug}/upload-docx/preview`, body, { headers: authHeaders() });
 }
+
+
+export type PublicationSelectorItem = {
+  manual_id: string;
+  code: string;
+  title: string;
+  manual_type: string;
+  current_revision: string | null;
+  publication_date: string | null;
+  model: string | null;
+};
+
+export type PublicationChangeRequestPayload = {
+  requested_by_first_name: string;
+  requested_by_last_name: string;
+  email: string;
+  phone: string;
+  manual_id: string;
+  part_number: string;
+  manual_type: string;
+  title: string;
+  model?: string | null;
+  publication_date?: string | null;
+  revision_number: string;
+  ata_chapter?: string | null;
+  section?: string | null;
+  sub_section?: string | null;
+  figure?: string | null;
+  page_number?: string | null;
+  art_figure?: string | null;
+  other?: string | null;
+  other_publications_affected?: string | null;
+  suggestion_for_change: string;
+  request_updates?: boolean;
+};
+
+export async function searchPublicationSelector(
+  tenantSlug: string,
+  params?: { q?: string; model?: string; manual_type?: string }
+) {
+  const qs = new URLSearchParams();
+  if (params?.q) qs.set("q", params.q);
+  if (params?.model) qs.set("model", params.model);
+  if (params?.manual_type) qs.set("manual_type", params.manual_type);
+  return request<PublicationSelectorItem[]>(`/manuals/t/${tenantSlug}/publication-selector${qs.toString() ? `?${qs.toString()}` : ""}`);
+}
+
+export async function submitPublicationChangeRequest(
+  tenantSlug: string,
+  payload: PublicationChangeRequestPayload,
+) {
+  return request<{ id: string; status: string; message: string }>(`/manuals/t/${tenantSlug}/publication-change-requests`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}

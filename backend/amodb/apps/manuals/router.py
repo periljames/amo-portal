@@ -8,7 +8,7 @@ import re
 import zipfile
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -16,6 +16,7 @@ from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.models import AMO
+from amodb.apps.notifications import service as notification_service
 
 from . import models
 from .schemas import (
@@ -32,6 +33,9 @@ from .schemas import (
     WorkflowOut,
     LifecycleTransitionRequest,
     LifecycleTransitionOut,
+    PublicationSelectorItem,
+    PublicationChangeRequestCreate,
+    PublicationChangeRequestOut,
 )
 
 router = APIRouter(prefix="/manuals", tags=["Manuals"], dependencies=[Depends(get_current_active_user)])
@@ -703,3 +707,145 @@ def generate_outline(tenant_slug: str, manual_id: str, rev_id: str, request: Req
     _audit(db, tenant.id, actor_id, "revision.outline.generated", "manual_revision", rev_id, request, {"generated": count})
     db.commit()
     return {"status": "ok", "generated": count}
+
+
+@router.get("/t/{tenant_slug}/publication-selector", response_model=list[PublicationSelectorItem])
+def publication_selector(
+    tenant_slug: str,
+    q: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+    manual_type: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    manuals_q = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id)
+    if manual_type:
+        manuals_q = manuals_q.filter(models.Manual.manual_type.ilike(f"%{manual_type.strip()}%"))
+    if q:
+        needle = f"%{q.strip()}%"
+        manuals_q = manuals_q.filter(
+            (models.Manual.code.ilike(needle))
+            | (models.Manual.title.ilike(needle))
+            | (models.Manual.manual_type.ilike(needle))
+        )
+    manuals = manuals_q.order_by(models.Manual.code.asc()).limit(50).all()
+    items: list[PublicationSelectorItem] = []
+    for manual in manuals:
+        revision = None
+        if manual.current_published_rev_id:
+            revision = db.query(models.ManualRevision).filter(models.ManualRevision.id == manual.current_published_rev_id).first()
+        if revision is None:
+            revision = (
+                db.query(models.ManualRevision)
+                .filter(models.ManualRevision.manual_id == manual.id)
+                .order_by(models.ManualRevision.created_at.desc())
+                .first()
+            )
+        inferred_model = None
+        if model and model.strip():
+            if model.strip().lower() not in (manual.title or "").lower():
+                continue
+            inferred_model = model.strip()
+        items.append(
+            PublicationSelectorItem(
+                manual_id=manual.id,
+                code=manual.code,
+                title=manual.title,
+                manual_type=manual.manual_type,
+                current_revision=revision.rev_number if revision else None,
+                publication_date=revision.effective_date if revision else None,
+                model=inferred_model,
+            )
+        )
+    return items
+
+
+@router.post("/t/{tenant_slug}/publication-change-requests", response_model=PublicationChangeRequestOut)
+def submit_publication_change_request(
+    tenant_slug: str,
+    payload: PublicationChangeRequestCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    manual = db.query(models.Manual).filter(models.Manual.id == payload.manual_id, models.Manual.tenant_id == tenant.id).first()
+    if not manual:
+        raise HTTPException(status_code=404, detail="Manual not found")
+
+    request_id = str(uuid4())
+    detail = {
+        "requested_by": {
+            "first_name": payload.requested_by_first_name,
+            "last_name": payload.requested_by_last_name,
+            "email": payload.email,
+            "phone": payload.phone,
+        },
+        "publication": {
+            "manual_id": payload.manual_id,
+            "part_number": payload.part_number,
+            "manual_type": payload.manual_type,
+            "title": payload.title,
+            "model": payload.model,
+            "publication_date": payload.publication_date.isoformat() if payload.publication_date else None,
+            "revision_number": payload.revision_number,
+        },
+        "location": {
+            "ata_chapter": payload.ata_chapter,
+            "section": payload.section,
+            "sub_section": payload.sub_section,
+            "figure": payload.figure,
+            "page_number": payload.page_number,
+            "art_figure": payload.art_figure,
+            "other": payload.other,
+        },
+        "other_publications_affected": payload.other_publications_affected,
+        "suggestion_for_change": payload.suggestion_for_change,
+        "request_updates": payload.request_updates,
+    }
+
+    _audit(
+        db,
+        tenant.id,
+        get_current_actor_id(),
+        "publication_change_request.submitted",
+        "manual_publication_change_request",
+        request_id,
+        request,
+        detail,
+    )
+
+    quality_manager = (
+        db.query(account_models.User)
+        .filter(account_models.User.amo_id == tenant.amo_id)
+        .filter(account_models.User.role.in_([account_models.AccountRole.QUALITY_MANAGER, account_models.AccountRole.DOCUMENT_CONTROL_OFFICER]))
+        .order_by(account_models.User.created_at.asc())
+        .first()
+    )
+    if quality_manager and getattr(quality_manager, "email", None):
+        try:
+            notification_service.send_email(
+                template_key="manual_publication_change_request",
+                recipient=quality_manager.email,
+                subject=f"Publication Change Request · {manual.code}",
+                context={
+                    "request_id": request_id,
+                    "manual_code": manual.code,
+                    "manual_title": manual.title,
+                    "requested_by": f"{payload.requested_by_first_name} {payload.requested_by_last_name}".strip(),
+                    "suggestion_for_change": payload.suggestion_for_change,
+                    "location": detail["location"],
+                },
+                correlation_id=request_id,
+                amo_id=str(tenant.amo_id),
+                db=db,
+            )
+        except Exception:
+            pass
+
+    db.commit()
+    return PublicationChangeRequestOut(
+        id=request_id,
+        status="SUBMITTED",
+        message="Publication change request submitted.",
+    )

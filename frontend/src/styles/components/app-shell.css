@@ -675,3 +675,34 @@ body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active .sidebar__
     align-items: flex-start;
   }
 }
+
+
+.live-status__chip {
+  gap: 0.45rem;
+}
+
+.live-status__connection-icon {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+
+.live-status__connection-icon.is-critical {
+  box-shadow: none;
+  animation: none;
+}
+
+.live-status__chip--live .live-status__dot {
+  background: #16a34a;
+}
+
+.live-status__chip--syncing .live-status__dot {
+  background: #f59e0b;
+}
+
+.live-status__chip--offline .live-status__dot {
+  background: #dc2626;
+}

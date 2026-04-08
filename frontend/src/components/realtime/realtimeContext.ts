@@ -15,6 +15,7 @@ export type RealtimeContextValue = {
   staleSeconds: number;
   isOnline: boolean;
   clockSource: "server" | "local";
+  lastClockSyncAt: Date | null;
   refreshData: () => void;
   triggerSync: () => void;
 };

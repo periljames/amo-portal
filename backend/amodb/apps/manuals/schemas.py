@@ -95,3 +95,43 @@ class LifecycleTransitionOut(BaseModel):
     state: str
     previous_state: str
     approval_chain_reset: bool = False
+
+
+class PublicationSelectorItem(BaseModel):
+    manual_id: str
+    code: str
+    title: str
+    manual_type: str
+    current_revision: str | None = None
+    publication_date: date | None = None
+    model: str | None = None
+
+
+class PublicationChangeRequestCreate(BaseModel):
+    requested_by_first_name: str
+    requested_by_last_name: str
+    email: str
+    phone: str
+    manual_id: str
+    part_number: str
+    manual_type: str
+    title: str
+    model: str | None = None
+    publication_date: date | None = None
+    revision_number: str
+    ata_chapter: str | None = None
+    section: str | None = None
+    sub_section: str | None = None
+    figure: str | None = None
+    page_number: str | None = None
+    art_figure: str | None = None
+    other: str | None = None
+    other_publications_affected: str | None = None
+    suggestion_for_change: str
+    request_updates: bool = True
+
+
+class PublicationChangeRequestOut(BaseModel):
+    id: str
+    status: str
+    message: str

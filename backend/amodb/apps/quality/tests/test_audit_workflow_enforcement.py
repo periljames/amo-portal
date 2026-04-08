@@ -8,6 +8,7 @@ from starlette.requests import Request
 from fastapi import HTTPException
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.notifications import models as notification_models, providers as notification_providers
 from amodb.apps.quality import models as quality_models
 from amodb.apps.quality import schemas as quality_schemas
 
@@ -148,3 +149,88 @@ def test_evidence_required_blocks_invite_submission_without_attachment(db_sessio
     with pytest.raises(HTTPException) as exc:
         quality_router.submit_car_from_invite(invite_token="tok2", payload=payload, db=db_session)
     assert exc.value.status_code == 400
+
+
+class _FakeProvider(notification_providers.EmailProvider):
+    def __init__(self):
+        self.sent = []
+
+    def send(self, *, template_key: str, recipient: str, subject: str, context: dict, correlation_id: str | None) -> None:
+        self.sent.append({
+            "template_key": template_key,
+            "recipient": recipient,
+            "subject": subject,
+            "context": context,
+            "correlation_id": correlation_id,
+        })
+
+
+def test_schedule_creation_notifies_lead_auditor(db_session):
+    amo, quality, _, _ = _seed_audit(db_session)
+    lead = _user(db_session, amo.id, account_models.AccountRole.QUALITY_INSPECTOR)
+    payload = quality_schemas.QMSAuditScheduleCreate(
+        domain=quality_models.QMSDomain.AMO,
+        kind=quality_models.QMSAuditKind.INTERNAL,
+        frequency=quality_models.QMSAuditScheduleFrequency.QUARTERLY,
+        title="Quarterly Procurement Audit",
+        duration_days=3,
+        next_due_date=date.today(),
+        lead_auditor_user_id=lead.id,
+    )
+
+    schedule = quality_router.create_audit_schedule(payload=payload, request=_req(), db=db_session, current_user=quality)
+    note = (
+        db_session.query(quality_models.QMSNotification)
+        .filter(quality_models.QMSNotification.user_id == lead.id)
+        .order_by(quality_models.QMSNotification.created_at.desc())
+        .first()
+    )
+
+    assert schedule.lead_auditor_user_id == lead.id
+    assert note is not None
+    assert "assigned as lead auditor" in note.message
+    assert "Quarterly Procurement Audit" in note.message
+
+
+def test_running_schedule_sends_notice_notification_and_email(db_session, monkeypatch):
+    amo, quality, _, _ = _seed_audit(db_session)
+    lead = _user(db_session, amo.id, account_models.AccountRole.QUALITY_INSPECTOR)
+    fake_provider = _FakeProvider()
+    monkeypatch.setattr(notification_providers, "get_email_provider", lambda: (fake_provider, True))
+
+    schedule = quality_models.QMSAuditSchedule(
+        domain=quality_models.QMSDomain.AMO,
+        kind=quality_models.QMSAuditKind.INTERNAL,
+        frequency=quality_models.QMSAuditScheduleFrequency.MONTHLY,
+        title="Hangar Readiness Audit",
+        lead_auditor_user_id=lead.id,
+        duration_days=2,
+        next_due_date=date.today(),
+        created_by_user_id=quality.id,
+    )
+    db_session.add(schedule)
+    db_session.commit()
+
+    audit = quality_router.run_audit_schedule(schedule_id=schedule.id, request=_req(), db=db_session, current_user=quality)
+
+    note = (
+        db_session.query(quality_models.QMSNotification)
+        .filter(quality_models.QMSNotification.user_id == lead.id)
+        .order_by(quality_models.QMSNotification.created_at.desc())
+        .first()
+    )
+    email_log = (
+        db_session.query(notification_models.EmailLog)
+        .filter(notification_models.EmailLog.recipient == lead.email)
+        .order_by(notification_models.EmailLog.created_at.desc())
+        .first()
+    )
+
+    assert audit.lead_auditor_user_id == lead.id
+    assert note is not None
+    assert "Audit notice memo" in note.message
+    assert audit.audit_ref in note.message
+    assert email_log is not None
+    assert email_log.template_key == "qms_audit_notice_memo"
+    assert email_log.recipient == lead.email
+    assert fake_provider.sent and fake_provider.sent[-1]["recipient"] == lead.email

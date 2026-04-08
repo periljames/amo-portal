@@ -7,7 +7,7 @@ import { BrandLogo } from "../Brand/BrandLogo";
 import { BrandProvider } from "../Brand/BrandProvider";
 import AppShellV2 from "../AppShell/AppShellV2";
 import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
-import { Menu, X } from "lucide-react";
+import { Bell, Menu, X } from "lucide-react";
 import { useToast } from "../feedback/ToastProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
@@ -1738,19 +1738,50 @@ const DepartmentLayout: React.FC<Props> = ({
                       </span>
                     )}
                     <div ref={notificationsRef} className="notification-menu">
-                      <button type="button" className="secondary-chip-btn" onClick={() => setNotificationsOpen((v) => !v)} aria-expanded={notificationsOpen}>
-                        Alerts ({unreadNotifications})
+                      <button
+                        type="button"
+                        className="notification-bell notification-bell--plain"
+                        onClick={() => setNotificationsOpen((v) => !v)}
+                        aria-expanded={notificationsOpen}
+                        aria-label={`Notifications${unreadNotifications ? ` (${unreadNotifications} unread)` : ""}`}
+                      >
+                        {unreadNotifications > 0 ? <span className="notification-bell__badge">{unreadNotifications > 99 ? "99+" : unreadNotifications}</span> : null}
+                        <Bell size={18} aria-hidden="true" />
                       </button>
                       {notificationsOpen && (
                         <div className="notification-panel" role="menu">
+                          <div className="notification-panel__header">
+                            <strong>Notifications</strong>
+                            <button type="button" className="notification-panel__dismiss" onClick={() => setNotificationsOpen(false)}>
+                              Close
+                            </button>
+                          </div>
                           {notificationsLoading ? <div className="notification-panel__state">Loading…</div> : null}
                           {notificationsError ? <div className="notification-panel__state notification-panel__state--error">{notificationsError}</div> : null}
-                          {!notificationsLoading && !notificationsError && notifications.slice(0, 6).map((note) => (
-                            <div key={note.id} className="notification-item">
-                              <div className="notification-item__title">{note.message}</div>
-                              {!note.read_at ? <button type="button" className="secondary-chip-btn" onClick={() => qmsMarkNotificationRead(note.id).then(() => refreshNotifications())}>Mark read</button> : null}
+                          {!notificationsLoading && !notificationsError && !notifications.length ? (
+                            <div className="notification-panel__state">No unread notifications.</div>
+                          ) : null}
+                          {!notificationsLoading && !notificationsError && notifications.length ? (
+                            <div className="notification-panel__list">
+                              {notifications.slice(0, 8).map((note) => (
+                                <article key={note.id} className={`notification-item${note.read_at ? "" : " notification-item--unread"}`}>
+                                  <div className="notification-item__title">{note.message}</div>
+                                  <div className="notification-item__meta">
+                                    <span>{new Date(note.created_at).toLocaleString()}</span>
+                                    {!note.read_at ? (
+                                      <button
+                                        type="button"
+                                        className="notification-item__action"
+                                        onClick={() => qmsMarkNotificationRead(note.id).then(() => refreshNotifications())}
+                                      >
+                                        Mark read
+                                      </button>
+                                    ) : <span>Read</span>}
+                                  </div>
+                                </article>
+                              ))}
                             </div>
-                          ))}
+                          ) : null}
                         </div>
                       )}
                     </div>

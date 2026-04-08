@@ -63,6 +63,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [lastGoodServerTime, setLastGoodServerTime] = useState<Date | null>(null);
+  const [lastClockSyncAt, setLastClockSyncAt] = useState<Date | null>(null);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const controllerRef = useRef<AbortController | null>(null);
   const reconnectTimer = useRef<number | null>(null);
@@ -78,7 +79,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const ctx = getContext();
   const lastEventKey = `amo:last-event-id:${ctx.amoCode || "unknown"}`;
 
-  const isStale = status !== "live" || brokerState !== "connected";
+  const isStale = !isOnline || (status === "offline" && !lastGoodServerTime);
 
   const serverNow = useCallback(() => {
     if (frozenClockRef.current !== null) return new Date(frozenClockRef.current);
@@ -93,7 +94,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setClockSource("server");
       const syncedTime = new Date(data.epoch_ms);
       setLastGoodServerTime(syncedTime);
+      setLastClockSyncAt(new Date());
       setCurrentTime(syncedTime);
+      setStatus((prev) => (prev === "offline" ? "live" : prev));
     } catch {
       if (frozenClockRef.current === null) frozenClockRef.current = Date.now() + clockOffsetMsRef.current;
     }
@@ -359,6 +362,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       brokerState,
       backendHealth,
       lastGoodServerTime,
+      lastClockSyncAt,
       lastUpdated,
       currentTime,
       activity,
@@ -369,7 +373,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       refreshData,
       triggerSync,
     }),
-    [status, brokerState, backendHealth, lastGoodServerTime, lastUpdated, currentTime, activity, isStale, staleSeconds, isOnline, clockSource, refreshData, triggerSync]
+    [status, brokerState, backendHealth, lastGoodServerTime, lastClockSyncAt, lastUpdated, currentTime, activity, isStale, staleSeconds, isOnline, clockSource, refreshData, triggerSync]
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

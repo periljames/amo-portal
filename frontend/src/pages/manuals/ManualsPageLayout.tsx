@@ -4,17 +4,21 @@ import { useManualRouteContext } from "./context";
 
 type Props = PropsWithChildren<{
   title: string;
+  subtitle?: string;
   actions?: ReactNode;
 }>;
 
-export default function ManualsPageLayout({ title, actions, children }: Props) {
+export default function ManualsPageLayout({ title, subtitle, actions, children }: Props) {
   const { amoCode, department } = useManualRouteContext();
 
   const content = (
-    <div className="mx-auto w-full max-w-6xl space-y-4 p-4 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {actions}
+    <div className="manuals-page-shell">
+      <div className="manuals-page-shell__header">
+        <div>
+          <h1 className="manuals-page-shell__title">{title}</h1>
+          {subtitle ? <p className="manuals-page-shell__subtitle">{subtitle}</p> : null}
+        </div>
+        {actions ? <div className="manuals-page-shell__actions">{actions}</div> : null}
       </div>
       {children}
     </div>
