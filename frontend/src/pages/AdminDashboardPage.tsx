@@ -17,6 +17,40 @@ import "../styles/admin-user-management.css";
 type UrlParams = { amoCode?: string };
 type UserTab = "users" | "groups" | "hr";
 type PresenceFilter = "all" | "online" | "away" | "offline" | "inactive";
+const ZERO_METRICS = {
+  total_users: 0,
+  active_users: 0,
+  inactive_users: 0,
+  online_users: 0,
+  away_users: 0,
+  recently_active_users: 0,
+  departmentless_users: 0,
+  managers: 0,
+} as const;
+
+class AdminUsersErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error?.message || "Unexpected rendering failure" };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <section className="aum-panel">
+          <div className="aum-empty">
+            Unable to render user workspace right now. {this.state.message}
+          </div>
+        </section>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const presenceLabel = (user: AdminUserDirectoryItem) => {
   return user.presence_display.status_label;
@@ -81,8 +115,21 @@ const AdminDashboardPage: React.FC = () => {
   });
 
   const directory = directoryQuery.data;
-  const items = directory?.items ?? [];
-  const metrics = directory?.metrics;
+  const items = useMemo(
+    () => (directory?.items ?? []).map((item) => ({
+      ...item,
+      display_title: item.display_title || item.position_title || String(item.role || "Portal User"),
+      presence: item.presence || { state: "offline", is_online: false, last_seen_at: item.last_login_at || null, source: "fallback" },
+      presence_display: item.presence_display || {
+        status_label: item.is_active ? "Offline" : "Inactive",
+        last_seen_label: item.last_login_at ? "Last seen" : "Never seen",
+        last_seen_at: item.last_login_at || null,
+        last_seen_at_display: item.last_login_at || null,
+      },
+    })),
+    [directory?.items],
+  );
+  const metrics = directory?.metrics ?? ZERO_METRICS;
   const roleOptions = useMemo(
     () => ["all", ...Array.from(new Set(items.map((item) => item.display_title))).sort()],
     [items],
@@ -147,7 +194,8 @@ const AdminDashboardPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoCode ?? ctx.amoCode ?? "UNKNOWN"} activeDepartment="admin-users">
-      <div className="admin-users-workspace">
+      <AdminUsersErrorBoundary>
+      <div className="admin-users-workspace aum-shell">
         <header className="aum-header">
           <div>
             <p className="aum-eyebrow">User Management</p>
@@ -253,7 +301,7 @@ const AdminDashboardPage: React.FC = () => {
             {directoryQuery.isLoading ? (
               <div className="aum-empty">Loading users…</div>
             ) : directoryQuery.error ? (
-              <div className="aum-empty">{(directoryQuery.error as Error).message}</div>
+              <div className="aum-empty">Unable to load users right now. {(directoryQuery.error as Error).message}</div>
             ) : (
               <div className="aum-table-wrap">
                 <table className="aum-table">
@@ -417,6 +465,7 @@ const AdminDashboardPage: React.FC = () => {
           </section>
         )}
       </div>
+      </AdminUsersErrorBoundary>
     </DepartmentLayout>
   );
 };

@@ -74,6 +74,16 @@ export interface AdminUserRead {
   updated_at: string;
 }
 
+export interface AdminUserSummaryRead {
+  id: string;
+  full_name: string;
+  email: string;
+  staff_code: string;
+  role: AccountRole;
+  position_title: string | null;
+  is_active: boolean;
+}
+
 export interface AdminUserUpdatePayload {
   first_name?: string | null;
   last_name?: string | null;
@@ -470,6 +480,22 @@ export async function listAdminUsers(
     headers: authHeaders(),
     signal: options.signal,
   });
+}
+
+export async function listAdminUserSummaries(
+  params: ListParams = {},
+  options: ListOptions = {},
+): Promise<AdminUserSummaryRead[]> {
+  const users = await listAdminUsers(params, options);
+  return users.map((user) => ({
+    id: user.id,
+    full_name: user.full_name,
+    email: user.email,
+    staff_code: user.staff_code,
+    role: user.role,
+    position_title: user.position_title,
+    is_active: user.is_active,
+  }));
 }
 
 /**

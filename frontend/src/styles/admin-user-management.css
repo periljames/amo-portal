@@ -5,6 +5,11 @@
   padding: 16px;
 }
 
+.aum-shell {
+  min-height: 60vh;
+  align-content: start;
+}
+
 .aum-header {
   display: flex;
   align-items: flex-start;
@@ -196,6 +201,7 @@
 
 .aum-table-wrap {
   overflow: auto;
+  min-height: 220px;
 }
 
 .aum-table {
