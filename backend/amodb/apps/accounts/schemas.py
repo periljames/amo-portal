@@ -868,6 +868,8 @@ class AdminUserDirectoryMetrics(BaseModel):
     active_users: int = 0
     inactive_users: int = 0
     online_users: int = 0
+    away_users: int = 0
+    recently_active_users: int = 0
     departmentless_users: int = 0
     managers: int = 0
 
