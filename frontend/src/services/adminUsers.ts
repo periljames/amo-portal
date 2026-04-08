@@ -74,6 +74,16 @@ export interface AdminUserRead {
   updated_at: string;
 }
 
+export interface AdminUserSummaryRead {
+  id: string;
+  full_name: string;
+  email: string;
+  staff_code: string;
+  role: AccountRole;
+  position_title: string | null;
+  is_active: boolean;
+}
+
 export interface AdminUserUpdatePayload {
   first_name?: string | null;
   last_name?: string | null;
@@ -472,6 +482,22 @@ export async function listAdminUsers(
   });
 }
 
+export async function listAdminUserSummaries(
+  params: ListParams = {},
+  options: ListOptions = {},
+): Promise<AdminUserSummaryRead[]> {
+  const users = await listAdminUsers(params, options);
+  return users.map((user) => ({
+    id: user.id,
+    full_name: user.full_name,
+    email: user.email,
+    staff_code: user.staff_code,
+    role: user.role,
+    position_title: user.position_title,
+    is_active: user.is_active,
+  }));
+}
+
 /**
  * SUPERUSER ONLY: list all AMOs for the AMO picker.
  * GET /accounts/admin/amos
@@ -679,6 +705,13 @@ export interface AdminUserPresence {
   source: string | null;
 }
 
+export interface AdminUserPresenceDisplay {
+  status_label: string;
+  last_seen_label: string;
+  last_seen_at: string | null;
+  last_seen_at_display: string | null;
+}
+
 export interface AdminUserDirectoryItem {
   id: string;
   amo_id: string;
@@ -694,10 +727,12 @@ export interface AdminUserDirectoryItem {
   is_active: boolean;
   is_superuser: boolean;
   is_amo_admin: boolean;
+  display_title: string;
   last_login_at: string | null;
   created_at: string;
   updated_at: string;
   presence: AdminUserPresence;
+  presence_display: AdminUserPresenceDisplay;
 }
 
 export interface AdminUserDirectoryMetrics {
@@ -705,6 +740,8 @@ export interface AdminUserDirectoryMetrics {
   active_users: number;
   inactive_users: number;
   online_users: number;
+  away_users: number;
+  recently_active_users: number;
   departmentless_users: number;
   managers: number;
 }
@@ -768,7 +805,9 @@ export interface AdminUserGroupChip {
 export interface AdminUserWorkspace {
   user: AdminUserRead;
   department_name: string | null;
+  display_title: string;
   presence: AdminUserPresence;
+  presence_display: AdminUserPresenceDisplay;
   metrics: AdminUserWorkspaceMetric[];
   tasks: AdminUserTaskSummary[];
   permissions: AdminUserPermissionSummary[];

@@ -122,13 +122,36 @@ export type ManualWorkflowPayload = {
   revision_id: string;
   status: string;
   requires_authority_approval: boolean;
+  allowed_actions?: string[];
+  process_rail?: Array<{ key: string; label: string; state: string; at?: string | null }>;
+  current_stage?: string;
+  authority_approval_ref?: string | null;
+  quick_review?: {
+    changed_sections?: number;
+    changed_blocks?: number;
+    added?: number;
+    removed?: number;
+    changed_pages?: string[];
+    change_highlights?: string[];
+  };
   history: Array<{ action: string; at: string; actor_id?: string | null }>;
+};
+
+export type ManualLifecycleTransitionPayload = ManualWorkflowPayload & {
+  previous_state?: string;
+  state?: string;
 };
 
 export type ManualDiffPayload = {
   revision_id: string;
   baseline_revision_id?: string | null;
   summary_json: Record<string, number>;
+};
+
+export type ManualComparisonPayload = {
+  baseline_revision_id?: string | null;
+  current_lines: Array<{ line: string; kind: "added" | "removed" | "same" }>;
+  baseline_lines: Array<{ line: string; kind: "added" | "removed" | "same" }>;
 };
 
 export type ManualExportPayload = {
@@ -198,6 +221,19 @@ export async function getRevisionDiff(tenantSlug: string, manualId: string, revI
   return request<ManualDiffPayload>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/diff`);
 }
 
+export async function getRevisionComparison(tenantSlug: string, manualId: string, revId: string) {
+  try {
+    return await request<ManualComparisonPayload>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/compare`);
+  } catch {
+    const diff = await getRevisionDiff(tenantSlug, manualId, revId).catch(() => null);
+    return {
+      baseline_revision_id: diff?.baseline_revision_id || null,
+      current_lines: [],
+      baseline_lines: [],
+    } satisfies ManualComparisonPayload;
+  }
+}
+
 export async function getRevisionWorkflow(tenantSlug: string, manualId: string, revId: string) {
   return request<ManualWorkflowPayload>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/workflow`);
 }
@@ -215,6 +251,21 @@ export async function transitionRevision(
   });
   emitManualsUpdated(tenantSlug, `workflow:${action}`);
   return result;
+}
+
+export async function transitionManualLifecycle(
+  tenantSlug: string,
+  manualId: string,
+  revId: string,
+  action: string,
+  comment?: string,
+): Promise<ManualLifecycleTransitionPayload> {
+  const response = await transitionRevision(tenantSlug, manualId, revId, action, comment);
+  return {
+    ...response,
+    previous_state: response.status,
+    state: response.status,
+  };
 }
 
 export async function acknowledgeRevision(tenantSlug: string, manualId: string, revId: string, acknowledgementText: string) {
