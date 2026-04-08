@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import router_admin
 
 
@@ -37,3 +38,30 @@ def test_presence_resolution_marks_fresh_online_as_online():
     assert state == "online"
     assert is_online is True
 
+
+def test_display_title_prefers_specific_position_title():
+    user = account_models.User(
+        staff_code="SC-1",
+        email="demo@example.com",
+        first_name="Demo",
+        last_name="User",
+        full_name="Demo User",
+        hashed_password="hash",
+        role=account_models.AccountRole.TECHNICIAN,
+        position_title="Accountable Manager",
+    )
+    assert router_admin._display_title_for_user(user) == "Accountable Manager"
+
+
+def test_display_title_falls_back_to_role_label():
+    user = account_models.User(
+        staff_code="SC-2",
+        email="demo2@example.com",
+        first_name="Demo",
+        last_name="User",
+        full_name="Demo User",
+        hashed_password="hash",
+        role=account_models.AccountRole.SAFETY_MANAGER,
+        position_title=None,
+    )
+    assert router_admin._display_title_for_user(user) == "Safety Manager"

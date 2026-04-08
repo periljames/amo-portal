@@ -104,11 +104,29 @@ const AdminUserDetailPage: React.FC = () => {
     onSuccess: refreshWorkspace,
   });
 
-  const currentStatus = useMemo(() => {
-    if (!workspace) return "Offline";
-    if (!workspace.user.is_active) return "Inactive";
-    return workspace.presence.is_online ? "Online" : "Offline";
-  }, [workspace]);
+  const currentStatus = useMemo(() => workspace?.presence_display.status_label || "Offline", [workspace]);
+  const currentLastSeenPrimary = useMemo(() => {
+    if (!workspace || !user) return "Never seen";
+    if (workspace.presence_display.last_seen_label === "Active now") return "Active now";
+    if (workspace.presence_display.last_seen_label === "Never seen") return "Never seen";
+    const seen = workspace.presence_display.last_seen_at || user.last_login_at;
+    if (!seen) return "Never seen";
+    const dt = new Date(seen);
+    if (Number.isNaN(dt.getTime())) return "Never seen";
+    const deltaMs = Date.now() - dt.getTime();
+    if (deltaMs < 60_000) return "Just now";
+    const mins = Math.floor(deltaMs / 60_000);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  }, [workspace, user]);
+  const currentLastSeenSecondary = useMemo(() => {
+    if (!workspace || !user) return null;
+    if (workspace.presence_display.status_label === "Online") return null;
+    if (currentLastSeenPrimary === "Never seen") return null;
+    return formatDateTime(workspace.presence_display.last_seen_at || user.last_login_at);
+  }, [workspace, user, currentLastSeenPrimary]);
 
   return (
     <DepartmentLayout amoCode={resolvedAmoCode} activeDepartment="admin-users">
@@ -140,11 +158,12 @@ const AdminUserDetailPage: React.FC = () => {
                 <h2>{user.full_name}</h2>
                 <p>{user.email}</p>
                 <div className="aum-chip-row">
-                  <span className={`aum-status ${workspace.presence.is_online ? "is-online" : "is-offline"}`}>{currentStatus}</span>
-                  <span className="aum-chip">Role: {user.role}</span>
+                  <span className={`aum-status ${currentStatus === "Inactive" ? "is-inactive" : currentStatus === "Online" ? "is-online" : workspace.presence.state === "away" ? "is-away" : "is-offline"}`}>{currentStatus}</span>
+                  <span className="aum-chip">Title: {workspace.display_title}</span>
                   <span className="aum-chip">Department: {workspace.department_name || "—"}</span>
-                  <span className="aum-chip">Last seen: {formatDateTime(workspace.presence.last_seen_at || user.last_login_at)}</span>
+                  <span className="aum-chip">Last seen: {currentLastSeenPrimary}</span>
                 </div>
+                {currentLastSeenSecondary ? <p className="aum-muted">{currentLastSeenSecondary}</p> : null}
               </div>
               <div className="aum-profile-metrics">
                 {workspace.metrics.map((metric) => (
@@ -183,8 +202,7 @@ const AdminUserDetailPage: React.FC = () => {
                     <div><span>First name</span><strong>{user.first_name}</strong></div>
                     <div><span>Last name</span><strong>{user.last_name}</strong></div>
                     <div><span>Staff code</span><strong>{user.staff_code}</strong></div>
-                    <div><span>Role</span><strong>{user.role}</strong></div>
-                    <div><span>Position title</span><strong>{user.position_title || "—"}</strong></div>
+                    <div><span>Title</span><strong>{workspace.display_title}</strong></div>
                     <div><span>Phone</span><strong>{user.phone || "—"}</strong></div>
                     <div><span>Secondary phone</span><strong>{user.secondary_phone || "—"}</strong></div>
                     <div><span>Department</span><strong>{workspace.department_name || "—"}</strong></div>
@@ -325,7 +343,7 @@ const AdminUserDetailPage: React.FC = () => {
                 <div className="aum-panel-header"><div><h2>Login record</h2><p>Current session state and account access history.</p></div></div>
                 <div className="aum-definition-list two-col">
                   <div><span>Online status</span><strong>{currentStatus}</strong></div>
-                  <div><span>Last seen</span><strong>{formatDateTime(workspace.presence.last_seen_at || user.last_login_at)}</strong></div>
+                  <div><span>Last seen</span><strong>{currentLastSeenPrimary}</strong></div>
                   <div><span>Last login</span><strong>{formatDateTime(workspace.login_record.last_login_at)}</strong></div>
                   <div><span>Last login IP</span><strong>{workspace.login_record.last_login_ip || "—"}</strong></div>
                   <div><span>Password change required</span><strong>{workspace.login_record.must_change_password ? "Yes" : "No"}</strong></div>

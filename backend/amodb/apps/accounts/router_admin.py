@@ -53,6 +53,55 @@ def _resolve_presence_state(*, raw_state: str, last_seen_at: Optional[datetime],
     return ("away" if normalized_state == "away" else "online"), True
 
 
+def _format_role_for_display(role_value: object) -> str:
+    raw = str(getattr(role_value, "value", role_value) or "").strip()
+    if not raw:
+        return "Portal User"
+    return raw.replace("_", " ").title()
+
+
+def _display_title_for_user(user: models.User) -> str:
+    title = str(user.position_title or "").strip()
+    return title if title else _format_role_for_display(user.role)
+
+
+def _presence_display_for_user(
+    *,
+    user: models.User,
+    presence: schemas.UserPresenceRead,
+) -> schemas.UserPresenceDisplayRead:
+    if not user.is_active:
+        return schemas.UserPresenceDisplayRead(
+            status_label="Inactive",
+            last_seen_label="Never seen" if not (presence.last_seen_at or user.last_login_at) else "Inactive",
+            last_seen_at=presence.last_seen_at or user.last_login_at,
+            last_seen_at_display=None,
+        )
+
+    if presence.is_online:
+        return schemas.UserPresenceDisplayRead(
+            status_label="Online",
+            last_seen_label="Active now",
+            last_seen_at=presence.last_seen_at,
+            last_seen_at_display=None,
+        )
+
+    last_seen = presence.last_seen_at or user.last_login_at
+    if not last_seen:
+        return schemas.UserPresenceDisplayRead(
+            status_label="Offline",
+            last_seen_label="Never seen",
+            last_seen_at=None,
+            last_seen_at_display=None,
+        )
+    return schemas.UserPresenceDisplayRead(
+        status_label="Offline",
+        last_seen_label="Last seen",
+        last_seen_at=last_seen,
+        last_seen_at_display=last_seen.isoformat() if hasattr(last_seen, "isoformat") else str(last_seen),
+    )
+
+
 def _jsonable(value):
     if isinstance(value, datetime):
         return value.isoformat()
@@ -2161,6 +2210,7 @@ def get_user_directory_admin(
         presence = _resolve_presence_for_user(user=user, presence_map=presence_map)
         if presence.is_online:
             online_users += 1
+        presence_display = _presence_display_for_user(user=user, presence=presence)
         items.append(
             schemas.AdminUserDirectoryItem(
                 id=str(user.id),
@@ -2177,10 +2227,12 @@ def get_user_directory_admin(
                 is_active=user.is_active,
                 is_superuser=user.is_superuser,
                 is_amo_admin=user.is_amo_admin,
+                display_title=_display_title_for_user(user),
                 last_login_at=user.last_login_at,
                 created_at=user.created_at,
                 updated_at=user.updated_at,
                 presence=presence,
+                presence_display=presence_display,
             )
         )
 
@@ -2229,6 +2281,7 @@ def get_user_workspace_admin(
 
     presence_map = _presence_map_for_users(db, amo_id=target_amo_id, user_ids=[str(user.id)])
     presence = _resolve_presence_for_user(user=user, presence_map=presence_map)
+    presence_display = _presence_display_for_user(user=user, presence=presence)
 
     tasks = (
         db.query(task_models.Task)
@@ -2308,7 +2361,9 @@ def get_user_workspace_admin(
     return schemas.AdminUserWorkspaceRead(
         user=schemas.UserRead.model_validate(user),
         department_name=departments.get(str(user.department_id)) if user.department_id else None,
+        display_title=_display_title_for_user(user),
         presence=presence,
+        presence_display=presence_display,
         metrics=metrics,
         tasks=task_items,
         permissions=permissions,

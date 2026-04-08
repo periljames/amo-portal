@@ -18,16 +18,14 @@ type UrlParams = { amoCode?: string };
 type UserTab = "users" | "groups" | "hr";
 type PresenceFilter = "all" | "online" | "away" | "offline" | "inactive";
 
-const presenceLabel = (user: AdminUserDirectoryItem, presence = user.presence) => {
-  if (!user.is_active) return "Inactive";
-  if (presence.state === "away") return "Away";
-  return presence.is_online ? "Online" : "Offline";
+const presenceLabel = (user: AdminUserDirectoryItem) => {
+  return user.presence_display.status_label;
 };
 
-const resolvePresenceTone = (user: AdminUserDirectoryItem, presence = user.presence) => {
-  if (!user.is_active) return "is-inactive";
-  if (!presence.is_online) return "is-offline";
-  return presence.state === "away" ? "is-away" : "is-online";
+const resolvePresenceTone = (user: AdminUserDirectoryItem) => {
+  if (user.presence_display.status_label === "Inactive") return "is-inactive";
+  if (user.presence.state === "away") return "is-away";
+  return user.presence.is_online ? "is-online" : "is-offline";
 };
 
 const formatDateTime = (value?: string | null) => {
@@ -85,44 +83,22 @@ const AdminDashboardPage: React.FC = () => {
   const directory = directoryQuery.data;
   const items = directory?.items ?? [];
   const metrics = directory?.metrics;
-  const nowIso = new Date().toISOString();
-
-  const displayPresence = (item: AdminUserDirectoryItem): AdminUserDirectoryItem["presence"] => {
-    if (
-      currentUser?.id &&
-      item.id === currentUser.id &&
-      item.is_active &&
-      realtimeStatus === "live" &&
-      clientOnline
-    ) {
-      return {
-        ...item.presence,
-        state: "online",
-        is_online: true,
-        last_seen_at: item.presence.last_seen_at || nowIso,
-        source: item.presence.source || "client",
-      };
-    }
-    return item.presence;
-  };
-
   const roleOptions = useMemo(
-    () => ["all", ...Array.from(new Set(items.map((item) => item.role))).sort()],
+    () => ["all", ...Array.from(new Set(items.map((item) => item.display_title))).sort()],
     [items],
   );
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
-      const matchesRole = roleFilter === "all" || item.role === roleFilter;
-      const presence = displayPresence(item);
-      const userStatus = presenceLabel(item, presence).toLowerCase();
+      const matchesRole = roleFilter === "all" || item.display_title === roleFilter;
+      const userStatus = presenceLabel(item).toLowerCase();
       const matchesStatus =
         statusFilter === "all"
           ? true
           : statusFilter === "inactive"
             ? !item.is_active
             : statusFilter === "away"
-              ? item.is_active && presence.state === "away"
+              ? item.is_active && item.presence.state === "away"
               : userStatus === statusFilter;
       return matchesRole && matchesStatus;
     });
@@ -300,7 +276,16 @@ const AdminDashboardPage: React.FC = () => {
                       </tr>
                     ) : (
                       filteredItems.map((user) => {
-                        const presence = displayPresence(user);
+                        const primaryLastSeen = user.presence_display.last_seen_label === "Active now"
+                          ? "Active now"
+                          : user.presence_display.last_seen_label === "Never seen"
+                            ? "Never seen"
+                            : formatRelativeLastSeen(user.presence_display.last_seen_at || user.last_login_at);
+                        const secondaryLastSeen =
+                          user.presence_display.status_label === "Online" ||
+                          primaryLastSeen === "Never seen"
+                            ? null
+                            : formatDateTime(user.presence_display.last_seen_at || user.last_login_at);
                         return (
                         <tr key={user.id}>
                           <td>
@@ -311,19 +296,18 @@ const AdminDashboardPage: React.FC = () => {
                           </td>
                           <td>{user.staff_code}</td>
                           <td>
-                            <div>{user.role}</div>
-                            {user.position_title && <div className="aum-muted">{user.position_title}</div>}
+                            <div>{user.display_title}</div>
                           </td>
                           <td>{user.department_name || "—"}</td>
                           <td>{user.is_active ? "Enabled" : "Disabled"}</td>
                           <td>
-                            <span className={`aum-status ${resolvePresenceTone(user, presence)}`}>
-                              {presenceLabel(user, presence)}
+                            <span className={`aum-status ${resolvePresenceTone(user)}`}>
+                              {presenceLabel(user)}
                             </span>
                           </td>
                           <td>
-                            <div>{formatRelativeLastSeen(presence.last_seen_at || user.last_login_at)}</div>
-                            <div className="aum-muted">{formatDateTime(presence.last_seen_at || user.last_login_at)}</div>
+                            <div>{primaryLastSeen}</div>
+                            {secondaryLastSeen ? <div className="aum-muted">{secondaryLastSeen}</div> : null}
                           </td>
                           <td>
                             <div className="aum-row-actions">

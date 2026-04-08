@@ -842,6 +842,13 @@ class UserPresenceRead(BaseModel):
     source: Optional[str] = None
 
 
+class UserPresenceDisplayRead(BaseModel):
+    status_label: str = "Offline"
+    last_seen_label: str = "Never seen"
+    last_seen_at: Optional[datetime] = None
+    last_seen_at_display: Optional[str] = None
+
+
 class AdminUserDirectoryItem(BaseModel):
     id: str
     amo_id: str
@@ -857,10 +864,12 @@ class AdminUserDirectoryItem(BaseModel):
     is_active: bool
     is_superuser: bool
     is_amo_admin: bool
+    display_title: str
     last_login_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     presence: UserPresenceRead
+    presence_display: UserPresenceDisplayRead
 
 
 class AdminUserDirectoryMetrics(BaseModel):
@@ -933,7 +942,9 @@ class UserGroupChipRead(BaseModel):
 class AdminUserWorkspaceRead(BaseModel):
     user: UserRead
     department_name: Optional[str] = None
+    display_title: str
     presence: UserPresenceRead
+    presence_display: UserPresenceDisplayRead
     metrics: List[UserWorkspaceMetricRead] = Field(default_factory=list)
     tasks: List[UserTaskSummaryRead] = Field(default_factory=list)
     permissions: List[UserPermissionSummaryRead] = Field(default_factory=list)
