@@ -39,6 +39,67 @@ AIRCRAFT_DOC_UPLOAD_DIR = Path(
 AIRCRAFT_DOC_AMO_SUBDIR = "aircraft"
 
 ALLOWED_PLATFORM_LOGO_EXTS = {".png", ".jpg", ".jpeg", ".svg"}
+PRESENCE_HEARTBEAT_GRACE_SECONDS = 150
+RECENTLY_ACTIVE_WINDOW_MINUTES = 10
+
+
+def _resolve_presence_state(*, raw_state: str, last_seen_at: Optional[datetime], now: datetime) -> tuple[str, bool]:
+    normalized_state = str(raw_state or "offline").lower()
+    freshness_cutoff = now - timedelta(seconds=PRESENCE_HEARTBEAT_GRACE_SECONDS)
+    is_fresh = bool(last_seen_at and last_seen_at >= freshness_cutoff)
+    is_online = bool(is_fresh and normalized_state in {"online", "away"})
+    if not is_online:
+        return "offline", False
+    return ("away" if normalized_state == "away" else "online"), True
+
+
+def _format_role_for_display(role_value: object) -> str:
+    raw = str(getattr(role_value, "value", role_value) or "").strip()
+    if not raw:
+        return "Portal User"
+    return raw.replace("_", " ").title()
+
+
+def _display_title_for_user(user: models.User) -> str:
+    title = str(user.position_title or "").strip()
+    return title if title else _format_role_for_display(user.role)
+
+
+def _presence_display_for_user(
+    *,
+    user: models.User,
+    presence: schemas.UserPresenceRead,
+) -> schemas.UserPresenceDisplayRead:
+    if not user.is_active:
+        return schemas.UserPresenceDisplayRead(
+            status_label="Inactive",
+            last_seen_label="Never seen" if not (presence.last_seen_at or user.last_login_at) else "Inactive",
+            last_seen_at=presence.last_seen_at or user.last_login_at,
+            last_seen_at_display=None,
+        )
+
+    if presence.is_online:
+        return schemas.UserPresenceDisplayRead(
+            status_label="Online",
+            last_seen_label="Active now",
+            last_seen_at=presence.last_seen_at,
+            last_seen_at_display=None,
+        )
+
+    last_seen = presence.last_seen_at or user.last_login_at
+    if not last_seen:
+        return schemas.UserPresenceDisplayRead(
+            status_label="Offline",
+            last_seen_label="Never seen",
+            last_seen_at=None,
+            last_seen_at_display=None,
+        )
+    return schemas.UserPresenceDisplayRead(
+        status_label="Offline",
+        last_seen_label="Last seen",
+        last_seen_at=last_seen,
+        last_seen_at_display=last_seen.isoformat() if hasattr(last_seen, "isoformat") else str(last_seen),
+    )
 
 
 def _jsonable(value):
@@ -2054,7 +2115,6 @@ def _presence_map_for_users(db: Session, *, amo_id: str, user_ids: list[str]) ->
         from amodb.apps.realtime import models as realtime_models
 
         now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(seconds=90)
         rows = (
             db.query(realtime_models.PresenceState)
             .filter(
@@ -2066,9 +2126,13 @@ def _presence_map_for_users(db: Session, *, amo_id: str, user_ids: list[str]) ->
         result: dict[str, schemas.UserPresenceRead] = {}
         for row in rows:
             last_seen = row.last_seen_at
-            is_online = bool(last_seen and last_seen >= cutoff and getattr(row.state, "value", row.state) == "online")
+            resolved_state, is_online = _resolve_presence_state(
+                raw_state=str(getattr(row.state, "value", row.state) or "offline"),
+                last_seen_at=last_seen,
+                now=now,
+            )
             result[str(row.user_id)] = schemas.UserPresenceRead(
-                state="online" if is_online else "offline",
+                state=resolved_state,
                 is_online=is_online,
                 last_seen_at=last_seen,
                 source="realtime",
@@ -2146,6 +2210,7 @@ def get_user_directory_admin(
         presence = _resolve_presence_for_user(user=user, presence_map=presence_map)
         if presence.is_online:
             online_users += 1
+        presence_display = _presence_display_for_user(user=user, presence=presence)
         items.append(
             schemas.AdminUserDirectoryItem(
                 id=str(user.id),
@@ -2162,19 +2227,31 @@ def get_user_directory_admin(
                 is_active=user.is_active,
                 is_superuser=user.is_superuser,
                 is_amo_admin=user.is_amo_admin,
+                display_title=_display_title_for_user(user),
                 last_login_at=user.last_login_at,
                 created_at=user.created_at,
                 updated_at=user.updated_at,
                 presence=presence,
+                presence_display=presence_display,
             )
         )
 
-    all_online = sum(1 for u in all_users if _resolve_presence_for_user(user=u, presence_map=presence_map).is_online)
+    all_presence = [_resolve_presence_for_user(user=u, presence_map=presence_map) for u in all_users]
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=RECENTLY_ACTIVE_WINDOW_MINUTES)
+    all_online = sum(1 for presence in all_presence if presence.is_online)
+    all_away = sum(1 for presence in all_presence if presence.state == "away")
+    all_recently_active = sum(
+        1
+        for presence in all_presence
+        if bool(presence.last_seen_at and presence.last_seen_at >= recent_cutoff)
+    )
     metrics = schemas.AdminUserDirectoryMetrics(
         total_users=len(all_users),
         active_users=sum(1 for u in all_users if u.is_active),
         inactive_users=sum(1 for u in all_users if not u.is_active),
         online_users=all_online,
+        away_users=all_away,
+        recently_active_users=all_recently_active,
         departmentless_users=sum(1 for u in all_users if not u.department_id),
         managers=sum(1 for u in all_users if u.role in _manager_roles()),
     )
@@ -2204,6 +2281,7 @@ def get_user_workspace_admin(
 
     presence_map = _presence_map_for_users(db, amo_id=target_amo_id, user_ids=[str(user.id)])
     presence = _resolve_presence_for_user(user=user, presence_map=presence_map)
+    presence_display = _presence_display_for_user(user=user, presence=presence)
 
     tasks = (
         db.query(task_models.Task)
@@ -2283,7 +2361,9 @@ def get_user_workspace_admin(
     return schemas.AdminUserWorkspaceRead(
         user=schemas.UserRead.model_validate(user),
         department_name=departments.get(str(user.department_id)) if user.department_id else None,
+        display_title=_display_title_for_user(user),
         presence=presence,
+        presence_display=presence_display,
         metrics=metrics,
         tasks=task_items,
         permissions=permissions,
