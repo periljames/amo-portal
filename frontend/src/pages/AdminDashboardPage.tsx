@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { useRealtime } from "../components/realtime/realtimeContext";
+import { RealtimeContext } from "../components/realtime/realtimeContext";
 import { getCachedUser, getContext } from "../services/auth";
 import {
   disableAdminUser,
@@ -93,7 +93,8 @@ const AdminDashboardPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { status: realtimeStatus, isOnline: clientOnline } = useRealtime();
+  const realtime = React.useContext(RealtimeContext);
+  const realtimeStatus = realtime?.status || "offline";
   const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
 
