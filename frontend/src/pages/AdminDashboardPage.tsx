@@ -150,7 +150,7 @@ const AdminDashboardPage: React.FC = () => {
               : userStatus === statusFilter;
       return matchesRole && matchesStatus;
     });
-  }, [items, roleFilter, statusFilter]);
+  }, [items, roleFilter, statusFilter, currentUser?.id, realtimeStatus, clientOnline, nowIso]);
 
   const departmentGroups = useMemo(() => {
     const counts = new Map<string, number>();
