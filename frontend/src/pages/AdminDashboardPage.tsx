@@ -24,16 +24,10 @@ const presenceLabel = (user: AdminUserDirectoryItem, presence = user.presence) =
   return presence.is_online ? "Online" : "Offline";
 };
 
-const presenceTone = (user: AdminUserDirectoryItem, presence = user.presence) => {
+const resolvePresenceTone = (user: AdminUserDirectoryItem, presence = user.presence) => {
   if (!user.is_active) return "is-inactive";
   if (!presence.is_online) return "is-offline";
   return presence.state === "away" ? "is-away" : "is-online";
-};
-
-const presenceTone = (user: AdminUserDirectoryItem) => {
-  if (!user.is_active) return "is-inactive";
-  if (!user.presence.is_online) return "is-offline";
-  return user.presence.state === "away" ? "is-away" : "is-online";
 };
 
 const formatDateTime = (value?: string | null) => {
@@ -323,7 +317,7 @@ const AdminDashboardPage: React.FC = () => {
                           <td>{user.department_name || "—"}</td>
                           <td>{user.is_active ? "Enabled" : "Disabled"}</td>
                           <td>
-                            <span className={`aum-status ${presenceTone(user, presence)}`}>
+                            <span className={`aum-status ${resolvePresenceTone(user, presence)}`}>
                               {presenceLabel(user, presence)}
                             </span>
                           </td>
