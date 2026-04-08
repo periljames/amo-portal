@@ -16,10 +16,18 @@ import "../styles/admin-user-management.css";
 
 type UrlParams = { amoCode?: string };
 type UserTab = "users" | "groups" | "hr";
+type PresenceFilter = "all" | "online" | "away" | "offline" | "inactive";
 
-const presenceLabel = (user: AdminUserDirectoryItem) => {
+const presenceLabel = (user: AdminUserDirectoryItem, presence = user.presence) => {
   if (!user.is_active) return "Inactive";
-  return user.presence.is_online ? "Online" : "Offline";
+  if (presence.state === "away") return "Away";
+  return presence.is_online ? "Online" : "Offline";
+};
+
+const presenceTone = (user: AdminUserDirectoryItem, presence = user.presence) => {
+  if (!user.is_active) return "is-inactive";
+  if (!presence.is_online) return "is-offline";
+  return presence.state === "away" ? "is-away" : "is-online";
 };
 
 const formatDateTime = (value?: string | null) => {
@@ -35,11 +43,25 @@ const formatDateTime = (value?: string | null) => {
   }).format(date);
 };
 
+const formatRelativeLastSeen = (value?: string | null) => {
+  if (!value) return "Never seen";
+  const seen = new Date(value);
+  if (Number.isNaN(seen.getTime())) return "Never seen";
+  const deltaMs = Date.now() - seen.getTime();
+  if (deltaMs < 60_000) return "Just now";
+  const mins = Math.floor(deltaMs / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+};
+
 const AdminDashboardPage: React.FC = () => {
   const { amoCode } = useParams<UrlParams>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { status: realtimeStatus } = useRealtime();
+  const { status: realtimeStatus, isOnline: clientOnline } = useRealtime();
   const currentUser = useMemo(() => getCachedUser(), []);
   const ctx = getContext();
 
@@ -51,7 +73,7 @@ const AdminDashboardPage: React.FC = () => {
 
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<UserTab>("users");
-  const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline" | "inactive">("all");
+  const [statusFilter, setStatusFilter] = useState<PresenceFilter>("all");
   const [roleFilter, setRoleFilter] = useState<string>("all");
 
   const directoryQuery = useQuery({
@@ -63,6 +85,26 @@ const AdminDashboardPage: React.FC = () => {
   const directory = directoryQuery.data;
   const items = directory?.items ?? [];
   const metrics = directory?.metrics;
+  const nowIso = new Date().toISOString();
+
+  const displayPresence = (item: AdminUserDirectoryItem): AdminUserDirectoryItem["presence"] => {
+    if (
+      currentUser?.id &&
+      item.id === currentUser.id &&
+      item.is_active &&
+      realtimeStatus === "live" &&
+      clientOnline
+    ) {
+      return {
+        ...item.presence,
+        state: "online",
+        is_online: true,
+        last_seen_at: item.presence.last_seen_at || nowIso,
+        source: item.presence.source || "client",
+      };
+    }
+    return item.presence;
+  };
 
   const roleOptions = useMemo(
     () => ["all", ...Array.from(new Set(items.map((item) => item.role))).sort()],
@@ -72,16 +114,19 @@ const AdminDashboardPage: React.FC = () => {
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       const matchesRole = roleFilter === "all" || item.role === roleFilter;
-      const userStatus = presenceLabel(item).toLowerCase();
+      const presence = displayPresence(item);
+      const userStatus = presenceLabel(item, presence).toLowerCase();
       const matchesStatus =
         statusFilter === "all"
           ? true
           : statusFilter === "inactive"
             ? !item.is_active
-            : userStatus === statusFilter;
+            : statusFilter === "away"
+              ? item.is_active && presence.state === "away"
+              : userStatus === statusFilter;
       return matchesRole && matchesStatus;
     });
-  }, [items, roleFilter, statusFilter]);
+  }, [items, roleFilter, statusFilter, currentUser?.id, realtimeStatus, clientOnline, nowIso]);
 
   const departmentGroups = useMemo(() => {
     const counts = new Map<string, number>();
@@ -160,6 +205,14 @@ const AdminDashboardPage: React.FC = () => {
             <strong>{metrics?.online_users ?? 0}</strong>
           </article>
           <article className="aum-metric-card">
+            <span>Away</span>
+            <strong>{metrics?.away_users ?? 0}</strong>
+          </article>
+          <article className="aum-metric-card">
+            <span>Recently active (10m)</span>
+            <strong>{metrics?.recently_active_users ?? 0}</strong>
+          </article>
+          <article className="aum-metric-card">
             <span>Inactive</span>
             <strong>{metrics?.inactive_users ?? 0}</strong>
           </article>
@@ -214,6 +267,7 @@ const AdminDashboardPage: React.FC = () => {
                 <select className="aum-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
                   <option value="all">All statuses</option>
                   <option value="online">Online</option>
+                  <option value="away">Away</option>
                   <option value="offline">Offline</option>
                   <option value="inactive">Inactive</option>
                 </select>
@@ -245,7 +299,9 @@ const AdminDashboardPage: React.FC = () => {
                         <td colSpan={8} className="aum-empty-row">No users match the current filter.</td>
                       </tr>
                     ) : (
-                      filteredItems.map((user) => (
+                      filteredItems.map((user) => {
+                        const presence = displayPresence(user);
+                        return (
                         <tr key={user.id}>
                           <td>
                             <button type="button" className="aum-link" onClick={() => navigate(`/maintenance/${amoCode}/admin/users/${user.id}`)}>
@@ -261,11 +317,14 @@ const AdminDashboardPage: React.FC = () => {
                           <td>{user.department_name || "—"}</td>
                           <td>{user.is_active ? "Enabled" : "Disabled"}</td>
                           <td>
-                            <span className={`aum-status ${user.presence.is_online ? "is-online" : "is-offline"}`}>
-                              {presenceLabel(user)}
+                            <span className={`aum-status ${presenceTone(user, presence)}`}>
+                              {presenceLabel(user, presence)}
                             </span>
                           </td>
-                          <td>{formatDateTime(user.presence.last_seen_at || user.last_login_at)}</td>
+                          <td>
+                            <div>{formatRelativeLastSeen(presence.last_seen_at || user.last_login_at)}</div>
+                            <div className="aum-muted">{formatDateTime(presence.last_seen_at || user.last_login_at)}</div>
+                          </td>
                           <td>
                             <div className="aum-row-actions">
                               <button type="button" className="aum-button aum-button--ghost" onClick={() => navigate(`/maintenance/${amoCode}/admin/users/${user.id}`)}>
@@ -282,7 +341,7 @@ const AdminDashboardPage: React.FC = () => {
                             </div>
                           </td>
                         </tr>
-                      ))
+                      )})
                     )}
                   </tbody>
                 </table>
