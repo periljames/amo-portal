@@ -97,41 +97,46 @@ class LifecycleTransitionOut(BaseModel):
     approval_chain_reset: bool = False
 
 
-class PublicationSelectorItem(BaseModel):
+class ManualFeaturedEntry(BaseModel):
     manual_id: str
     code: str
     title: str
     manual_type: str
     current_revision: str | None = None
-    publication_date: date | None = None
-    model: str | None = None
+    open_count: int = 0
 
 
-class PublicationChangeRequestCreate(BaseModel):
-    requested_by_first_name: str
-    requested_by_last_name: str
-    email: str
-    phone: str
-    manual_id: str
-    part_number: str
-    manual_type: str
-    title: str
-    model: str | None = None
-    publication_date: date | None = None
-    revision_number: str
-    ata_chapter: str | None = None
-    section: str | None = None
-    sub_section: str | None = None
-    figure: str | None = None
-    page_number: str | None = None
-    art_figure: str | None = None
-    other: str | None = None
-    other_publications_affected: str | None = None
-    suggestion_for_change: str
-    request_updates: bool = True
+class DocxPreviewOut(BaseModel):
+    filename: str
+    heading: str
+    paragraph_count: int
+    sample: list[str]
+    outline: list[str] = []
+    metadata: dict = Field(default_factory=dict)
+    excerpt: str = ""
 
 
-class PublicationChangeRequestOut(BaseModel):
-    id: str
-    status: str
-    message: str
+class OCRVerifyOut(BaseModel):
+    revision_id: str
+    detected_ref: str | None = None
+    detected_date: date | None = None
+    typed_ref: str | None = None
+    typed_date: date | None = None
+    ref_match: bool = False
+    date_match: bool = False
+    verified: bool = False
+    text_excerpt: str = ""
+
+
+class StampOverlayRequest(BaseModel):
+    signer_name: str
+    signer_role: str
+    stamp_label: str = "APPROVED FOR SUBMISSION"
+    controlled_bool: bool = False
+
+
+class StampOverlayOut(BaseModel):
+    revision_id: str
+    export_id: str
+    storage_uri: str
+    sha256: str

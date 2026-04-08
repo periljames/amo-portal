@@ -1,7 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarRange, ChevronLeft, ChevronRight, ClipboardList, LayoutList, Play, Plus, RefreshCw } from "lucide-react";
+import {
+  CalendarRange,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  LayoutList,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 import SectionCard from "../../components/shared/SectionCard";
 import Button from "../../components/UI/Button";
@@ -11,10 +22,14 @@ import { useToast } from "../../components/feedback/ToastProvider";
 import { getContext } from "../../services/auth";
 import {
   qmsCreateAuditSchedule,
+  qmsDeleteAuditSchedule,
+  qmsListAuditPersonnelOptions,
   qmsListAuditSchedules,
   qmsRunAuditSchedule,
+  qmsUpdateAuditSchedule,
   type QMSAuditScheduleFrequency,
   type QMSAuditScheduleOut,
+  type QMSPersonOption,
 } from "../../services/qms";
 
 type PlannerView = "calendar" | "list" | "table";
@@ -33,6 +48,12 @@ type ScheduleFormState = {
   lead_auditor_user_id: string;
   observer_auditor_user_id: string;
   assistant_auditor_user_id: string;
+  is_active: boolean;
+};
+
+type ScheduleViewModel = QMSAuditScheduleOut & {
+  is_preview?: boolean;
+  preview_label?: string;
 };
 
 const frequencies: QMSAuditScheduleFrequency[] = ["ONE_TIME", "MONTHLY", "QUARTERLY", "BI_ANNUAL", "ANNUAL"];
@@ -52,6 +73,7 @@ const defaultSchedule: ScheduleFormState = {
   lead_auditor_user_id: "",
   observer_auditor_user_id: "",
   assistant_auditor_user_id: "",
+  is_active: true,
 };
 
 function plannerViewOptions() {
@@ -108,6 +130,65 @@ function monthGrid(seedDate: Date) {
   return cells;
 }
 
+function normalizeNullable(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function formToPayload(form: ScheduleFormState) {
+  return {
+    domain: "AMO",
+    title: form.title.trim(),
+    kind: form.kind.trim() || "Internal Audit",
+    frequency: form.frequency,
+    next_due_date: form.next_due_date,
+    duration_days: Math.max(1, Number(form.duration_days) || 1),
+    scope: normalizeNullable(form.scope),
+    criteria: normalizeNullable(form.criteria),
+    auditee: normalizeNullable(form.auditee),
+    auditee_email: normalizeNullable(form.auditee_email),
+    auditee_user_id: normalizeNullable(form.auditee_user_id),
+    lead_auditor_user_id: normalizeNullable(form.lead_auditor_user_id),
+    observer_auditor_user_id: normalizeNullable(form.observer_auditor_user_id),
+    assistant_auditor_user_id: normalizeNullable(form.assistant_auditor_user_id),
+    is_active: form.is_active,
+  };
+}
+
+function isMeaningfulDraft(form: ScheduleFormState): boolean {
+  return Object.entries(form).some(([key, value]) => {
+    if (key === "frequency") return value !== defaultSchedule.frequency;
+    if (key === "duration_days") return value !== defaultSchedule.duration_days;
+    if (key === "kind") return value !== defaultSchedule.kind;
+    if (key === "is_active") return value !== defaultSchedule.is_active;
+    return String(value).trim().length > 0;
+  });
+}
+
+function scheduleToForm(schedule: QMSAuditScheduleOut): ScheduleFormState {
+  return {
+    title: schedule.title || "",
+    kind: schedule.kind || "Internal Audit",
+    frequency: schedule.frequency,
+    next_due_date: schedule.next_due_date || "",
+    duration_days: String(Math.max(1, schedule.duration_days || 1)),
+    scope: schedule.scope || "",
+    criteria: schedule.criteria || "",
+    auditee: schedule.auditee || "",
+    auditee_email: schedule.auditee_email || "",
+    auditee_user_id: schedule.auditee_user_id || "",
+    lead_auditor_user_id: schedule.lead_auditor_user_id || "",
+    observer_auditor_user_id: schedule.observer_auditor_user_id || "",
+    assistant_auditor_user_id: schedule.assistant_auditor_user_id || "",
+    is_active: schedule.is_active,
+  };
+}
+
+function userLabel(user?: QMSPersonOption | null): string {
+  if (!user) return "Unassigned";
+  return user.position_title ? `${user.full_name} · ${user.position_title}` : user.full_name;
+}
+
 const QualityAuditPlanSchedulePage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const ctx = getContext();
@@ -119,7 +200,9 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState<Date | null>(null);
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const draftStorageKey = useMemo(() => `qms-audit-schedule-draft:${amoCode}:${department}`, [amoCode, department]);
 
   const rawView = searchParams.get("view") || "calendar";
   const view = (["calendar", "list", "table"].includes(rawView) ? rawView : "calendar") as PlannerView;
@@ -130,12 +213,53 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     staleTime: 60_000,
   });
 
-  const schedules = schedulesQuery.data ?? [];
+  const personnelQuery = useQuery({
+    queryKey: ["qms-audit-personnel-options", amoCode],
+    queryFn: () => qmsListAuditPersonnelOptions({ limit: 100 }),
+    staleTime: 5 * 60_000,
+  });
 
-  const previewSchedule = useMemo(() => {
+  const schedules = schedulesQuery.data ?? [];
+  const personnelOptions = personnelQuery.data ?? [];
+  const peopleById = useMemo(() => {
+    const next = new Map<string, QMSPersonOption>();
+    personnelOptions.forEach((person) => next.set(person.id, person));
+    return next;
+  }, [personnelOptions]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem(draftStorageKey);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { form?: ScheduleFormState; editingScheduleId?: string | null };
+      if (parsed.form) {
+        setForm({ ...defaultSchedule, ...parsed.form });
+      }
+      if (parsed.editingScheduleId) {
+        setEditingScheduleId(parsed.editingScheduleId);
+      }
+    } catch {
+      window.localStorage.removeItem(draftStorageKey);
+    }
+  }, [draftStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!isMeaningfulDraft(form) && !editingScheduleId) {
+      window.localStorage.removeItem(draftStorageKey);
+      return;
+    }
+    window.localStorage.setItem(
+      draftStorageKey,
+      JSON.stringify({ form, editingScheduleId, savedAt: new Date().toISOString() })
+    );
+  }, [draftStorageKey, editingScheduleId, form]);
+
+  const previewSchedule = useMemo<ScheduleViewModel | null>(() => {
     if (!form.title.trim() || !form.next_due_date) return null;
     return {
-      id: "preview-schedule",
+      id: editingScheduleId || "preview-schedule",
       domain: "AMO",
       kind: form.kind.trim() || "Internal Audit",
       frequency: form.frequency,
@@ -151,16 +275,21 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
       duration_days: Math.max(1, Number(form.duration_days) || 1),
       next_due_date: form.next_due_date,
       last_run_at: null,
-      is_active: true,
+      is_active: form.is_active,
       created_by_user_id: null,
       created_at: new Date().toISOString(),
       is_preview: true,
-    } as QMSAuditScheduleOut & { is_preview: true };
-  }, [form]);
+      preview_label: editingScheduleId ? "Editing draft" : "Unsaved draft",
+    };
+  }, [editingScheduleId, form]);
 
-  const boardSchedules = useMemo(() => {
-    const merged = [...schedules];
-    if (previewSchedule) merged.unshift(previewSchedule);
+  const boardSchedules = useMemo<ScheduleViewModel[]>(() => {
+    const merged: ScheduleViewModel[] = [...schedules];
+    if (previewSchedule) {
+      const existingIndex = merged.findIndex((row) => row.id === previewSchedule.id);
+      if (existingIndex >= 0) merged[existingIndex] = previewSchedule;
+      else merged.unshift(previewSchedule);
+    }
     return merged.sort((a, b) => (a.next_due_date || "").localeCompare(b.next_due_date || ""));
   }, [previewSchedule, schedules]);
 
@@ -180,48 +309,86 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     () => [
       { label: "Visible schedules", value: String(boardSchedules.length) },
       { label: "Next due", value: boardSchedules[0]?.next_due_date ? formatDate(boardSchedules[0].next_due_date) : "Not scheduled" },
-      { label: "Default cadence", value: form.frequency.replaceAll("_", " ") },
+      { label: editingScheduleId ? "Editing" : isMeaningfulDraft(form) ? "Staged draft" : "Draft state", value: editingScheduleId ? "Existing schedule" : isMeaningfulDraft(form) ? "Autosaved" : "Clean" },
     ],
-    [boardSchedules, form.frequency]
+    [boardSchedules, editingScheduleId, form]
   );
 
-  const createSchedule = useMutation({
+  const openCreateDrawer = () => {
+    setEditingScheduleId(null);
+    setError(null);
+    setDrawerOpen(true);
+  };
+
+  const discardDraft = () => {
+    setForm(defaultSchedule);
+    setEditingScheduleId(null);
+    setError(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(draftStorageKey);
+    }
+  };
+
+  const beginEdit = (schedule: QMSAuditScheduleOut) => {
+    setForm(scheduleToForm(schedule));
+    setEditingScheduleId(schedule.id);
+    setError(null);
+    setDrawerOpen(true);
+  };
+
+  const saveSchedule = useMutation({
     mutationFn: async () => {
       const duration = Number(form.duration_days);
       if (!form.title.trim() || !form.next_due_date || !Number.isFinite(duration) || duration < 1) {
         throw new Error("Title, due date, and valid duration are required.");
       }
-      return qmsCreateAuditSchedule({
-        domain: "AMO",
-        title: form.title.trim(),
-        kind: form.kind.trim() || "Internal Audit",
-        frequency: form.frequency,
-        next_due_date: form.next_due_date,
-        duration_days: duration,
-        scope: form.scope.trim() || null,
-        criteria: form.criteria.trim() || null,
-        auditee: form.auditee.trim() || null,
-        auditee_email: form.auditee_email.trim() || null,
-        auditee_user_id: form.auditee_user_id.trim() || null,
-        lead_auditor_user_id: form.lead_auditor_user_id.trim() || null,
-        observer_auditor_user_id: form.observer_auditor_user_id.trim() || null,
-        assistant_auditor_user_id: form.assistant_auditor_user_id.trim() || null,
-      });
+      const payload = formToPayload(form);
+      if (editingScheduleId) {
+        return qmsUpdateAuditSchedule(editingScheduleId, payload);
+      }
+      return qmsCreateAuditSchedule(payload);
     },
     onSuccess: async () => {
-      setError(null);
-      const leadAssigned = Boolean(form.lead_auditor_user_id.trim());
-      setForm(defaultSchedule);
+      const wasEditing = Boolean(editingScheduleId);
+      discardDraft();
       setDrawerOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["qms-audit-schedules", amoCode, department] });
       pushToast({
-        title: "Schedule created",
-        message: leadAssigned ? "Lead auditor platform notice queued. Email notice is queued after schedule creation." : "The new schedule is now visible in the planner.",
+        title: wasEditing ? "Schedule updated" : "Schedule created",
+        message: wasEditing
+          ? "The planner now reflects the revised schedule details."
+          : "The new schedule is now visible in the planner.",
         variant: "success",
         sound: true,
       });
     },
-    onError: (e: Error) => setError(e.message || "Failed to create schedule."),
+    onError: (e: Error) => setError(e.message || "Failed to save schedule."),
+  });
+
+  const deleteSchedule = useMutation({
+    mutationFn: async (schedule: QMSAuditScheduleOut) => {
+      await qmsDeleteAuditSchedule(schedule.id);
+      return schedule;
+    },
+    onSuccess: async (schedule) => {
+      if (editingScheduleId === schedule.id) {
+        discardDraft();
+        setDrawerOpen(false);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["qms-audit-schedules", amoCode, department] });
+      pushToast({
+        title: "Schedule deleted",
+        message: `${schedule.title} has been removed from the planner.`,
+        variant: "success",
+      });
+    },
+    onError: (e: Error) => {
+      pushToast({
+        title: "Delete failed",
+        message: e.message || "The schedule could not be deleted.",
+        variant: "error",
+      });
+    },
   });
 
   const runSchedule = useMutation({
@@ -236,53 +403,103 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const applyPerson = (field: "auditee_user_id" | "lead_auditor_user_id" | "observer_auditor_user_id" | "assistant_auditor_user_id", personId: string) => {
+    const person = peopleById.get(personId);
+    setForm((prev) => {
+      const next: ScheduleFormState = { ...prev, [field]: personId } as ScheduleFormState;
+      if (field === "auditee_user_id") {
+        next.auditee = person?.full_name ?? "";
+        next.auditee_email = person?.email ?? "";
+      }
+      return next;
+    });
+  };
+
+  const handleDelete = (schedule: QMSAuditScheduleOut) => {
+    const confirmDelete = window.confirm(`Delete schedule \"${schedule.title}\" due ${formatDate(schedule.next_due_date)}?`);
+    if (!confirmDelete) return;
+    deleteSchedule.mutate(schedule);
+  };
+
+  const renderActionCluster = (schedule: ScheduleViewModel) => {
+    if (schedule.is_preview) {
+      return (
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <Button variant="ghost" size="sm" onClick={() => setDrawerOpen(true)}>Continue</Button>
+          <Button variant="secondary" size="sm" onClick={discardDraft}>Discard draft</Button>
+        </div>
+      );
+    }
+    return (
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <Button variant="ghost" size="sm" onClick={() => beginEdit(schedule)}>
+          <Pencil size={14} />
+          Edit
+        </Button>
+        <Button variant="secondary" size="sm" onClick={() => runSchedule.mutate(schedule.id)} loading={runSchedule.isPending && runSchedule.variables === schedule.id}>
+          <Play size={14} />
+          Run
+        </Button>
+        <Button variant="danger" size="sm" onClick={() => handleDelete(schedule)} loading={deleteSchedule.isPending && deleteSchedule.variables?.id === schedule.id}>
+          <Trash2 size={14} />
+          Delete
+        </Button>
+      </div>
+    );
+  };
+
   const renderCalendar = () => {
-    const byDate = new Map<string, Array<QMSAuditScheduleOut & { is_preview?: boolean }>>();
+    const byDate = new Map<string, ScheduleViewModel[]>();
     boardSchedules.forEach((schedule) => {
-      if (!schedule.next_due_date) return;
-      const key = new Date(schedule.next_due_date).toDateString();
-      const bucket = byDate.get(key) || [];
-      bucket.push(schedule as QMSAuditScheduleOut & { is_preview?: boolean });
-      byDate.set(key, bucket);
+      const key = schedule.next_due_date;
+      if (!key) return;
+      const group = byDate.get(key) ?? [];
+      group.push(schedule);
+      byDate.set(key, group);
     });
 
     return (
-      <div className="audit-calendar">
-        <div className="audit-calendar__header">
-          <div>
-            <p className="portal-stat-card__label">Calendar view</p>
-            <h3 className="audit-calendar__title">{activeCalendarMonth.toLocaleString(undefined, { month: "long", year: "numeric" })}</h3>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
-            <Button variant="ghost" size="sm" onClick={() => setVisibleMonth(new Date(activeCalendarMonth.getFullYear(), activeCalendarMonth.getMonth() - 1, 1))}>
-              <ChevronLeft size={14} />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setVisibleMonth(new Date(seedDate.getFullYear(), seedDate.getMonth(), 1))}>Today</Button>
-            <Button variant="ghost" size="sm" onClick={() => setVisibleMonth(new Date(activeCalendarMonth.getFullYear(), activeCalendarMonth.getMonth() + 1, 1))}>
-              <ChevronRight size={14} />
-            </Button>
-          </div>
+      <div className="planner-calendar-shell">
+        <div className="planner-calendar-toolbar">
+          <Button variant="ghost" size="sm" onClick={() => setVisibleMonth((prev) => new Date((prev ?? activeCalendarMonth).getFullYear(), (prev ?? activeCalendarMonth).getMonth() - 1, 1))}>
+            <ChevronLeft size={15} />
+            Prev
+          </Button>
+          <strong>{activeCalendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
+          <Button variant="ghost" size="sm" onClick={() => setVisibleMonth((prev) => new Date((prev ?? activeCalendarMonth).getFullYear(), (prev ?? activeCalendarMonth).getMonth() + 1, 1))}>
+            Next
+            <ChevronRight size={15} />
+          </Button>
         </div>
-        <div className="audit-calendar__grid">
-          {weekdayLabels.map((weekday) => (
-            <div key={weekday} className="audit-calendar__weekday">{weekday}</div>
+
+        <div className="planner-calendar-grid planner-calendar-grid--header">
+          {weekdayLabels.map((label) => (
+            <div key={label} className="planner-calendar-cell planner-calendar-cell--label">{label}</div>
           ))}
+        </div>
+
+        <div className="planner-calendar-grid">
           {calendarCells.map((cell) => {
-            const items = byDate.get(cell.date.toDateString()) || [];
+            const dateKey = cell.date.toISOString().slice(0, 10);
+            const daySchedules = byDate.get(dateKey) ?? [];
             return (
-              <div key={cell.key} className={`audit-calendar__cell${cell.inMonth ? "" : " is-outside"}${cell.isToday ? " is-today" : ""}`}>
-                <div className="audit-calendar__day">
-                  <span>{cell.date.getDate()}</span>
-                  {items.length ? <span className="portal-stat-card__label">{items.length}</span> : null}
-                </div>
-                <div className="audit-calendar__events">
-                  {items.map((schedule) => {
+              <div key={cell.key} className={`planner-calendar-cell${cell.inMonth ? "" : " is-outside"}${cell.isToday ? " is-today" : ""}`}>
+                <div className="planner-calendar-cell__date">{cell.date.getDate()}</div>
+                <div className="planner-calendar-cell__items">
+                  {daySchedules.map((schedule) => {
                     const countdown = countdownLabel(schedule.next_due_date);
+                    const leadUser = schedule.lead_auditor_user_id ? peopleById.get(schedule.lead_auditor_user_id) : null;
                     return (
-                      <button key={schedule.id} type="button" className={`audit-calendar__event${(schedule as any).is_preview ? " is-preview" : ""}`} onClick={() => setDrawerOpen(Boolean((schedule as any).is_preview))}>
-                        <span className="audit-calendar__event-title">{schedule.title}</span>
-                        <span className="audit-calendar__event-meta">{schedule.kind}</span>
-                        <span className="audit-calendar__event-meta">{countdown.text}</span>
+                      <button
+                        key={schedule.id}
+                        type="button"
+                        className={`planner-calendar-event${schedule.is_preview ? " planner-calendar-event--preview" : ""}`}
+                        onClick={() => (schedule.is_preview ? setDrawerOpen(true) : beginEdit(schedule))}
+                      >
+                        <strong>{schedule.title}</strong>
+                        <span>{schedule.preview_label || schedule.kind}</span>
+                        <span>{leadUser ? userLabel(leadUser) : "Lead auditor pending"}</span>
+                        <span className={countdown.className}>{countdown.text}</span>
                       </button>
                     );
                   })}
@@ -296,33 +513,41 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   };
 
   const renderList = () => (
-    <div className="planner-card-list planner-card-list--list">
+    <div className="portal-list-grid">
       {boardSchedules.map((schedule) => {
         const countdown = countdownLabel(schedule.next_due_date);
+        const auditeeUser = schedule.auditee_user_id ? peopleById.get(schedule.auditee_user_id) : null;
+        const leadUser = schedule.lead_auditor_user_id ? peopleById.get(schedule.lead_auditor_user_id) : null;
         return (
-          <article key={schedule.id} className="planner-schedule-card">
-            <div className="planner-schedule-card__header">
+          <article key={schedule.id} className={`portal-list-card${schedule.is_preview ? " portal-list-card--draft" : ""}`}>
+            <div className="portal-list-card__header">
               <div>
-                <h3>{schedule.title}</h3>
-                <p>{schedule.kind} · {schedule.frequency.replaceAll("_", " ")}</p>
+                <p className="portal-list-card__eyebrow">{schedule.preview_label || schedule.frequency.replaceAll("_", " ")}</p>
+                <h3 className="portal-list-card__title">{schedule.title}</h3>
               </div>
               <span className={countdown.className}>{countdown.text}</span>
             </div>
-            <div className="planner-schedule-card__facts">
-              <span><strong>Due:</strong> {formatDate(schedule.next_due_date)}</span>
-              <span><strong>Auditee:</strong> {schedule.auditee || "—"}</span>
-              <span><strong>Lead:</strong> {schedule.lead_auditor_user_id || "Unassigned"}</span>
-            </div>
-            <div className="planner-schedule-card__actions">
-              {!((schedule as any).is_preview) ? (
-                <Button variant="secondary" size="sm" onClick={() => runSchedule.mutate(schedule.id)}>
-                  <Play size={14} />
-                  Run schedule
-                </Button>
-              ) : null}
-              <Button variant="ghost" size="sm" onClick={() => setDrawerOpen(true)}>
-                {((schedule as any).is_preview) ? "Continue editing" : "Adjust in drawer"}
-              </Button>
+            <dl className="portal-list-card__meta">
+              <div>
+                <dt>Due</dt>
+                <dd>{formatDate(schedule.next_due_date)}</dd>
+              </div>
+              <div>
+                <dt>Lead auditor</dt>
+                <dd>{leadUser ? userLabel(leadUser) : "Unassigned"}</dd>
+              </div>
+              <div>
+                <dt>Auditee</dt>
+                <dd>{auditeeUser ? userLabel(auditeeUser) : schedule.auditee || "Not set"}</dd>
+              </div>
+              <div>
+                <dt>Scope</dt>
+                <dd>{schedule.scope || "No scope added yet"}</dd>
+              </div>
+            </dl>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
+              <span>{schedule.is_active ? "Active schedule" : "Paused schedule"}</span>
+              {renderActionCluster(schedule)}
             </div>
           </article>
         );
@@ -339,6 +564,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             <th>Frequency</th>
             <th>Next due</th>
             <th>Lead auditor</th>
+            <th>Auditee</th>
             <th>Schedule</th>
             <th>Action</th>
           </tr>
@@ -346,28 +572,22 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
         <tbody>
           {boardSchedules.map((schedule) => {
             const countdown = countdownLabel(schedule.next_due_date);
+            const leadUser = schedule.lead_auditor_user_id ? peopleById.get(schedule.lead_auditor_user_id) : null;
+            const auditeeUser = schedule.auditee_user_id ? peopleById.get(schedule.auditee_user_id) : null;
             return (
               <tr key={schedule.id}>
                 <td>
                   <div className="table-primary-cell">
                     <strong>{schedule.title}</strong>
-                    <span>{schedule.kind}</span>
+                    <span>{schedule.preview_label || schedule.kind}</span>
                   </div>
                 </td>
                 <td>{schedule.frequency.replaceAll("_", " ")}</td>
                 <td>{formatDate(schedule.next_due_date)}</td>
-                <td>{schedule.lead_auditor_user_id || "Unassigned"}</td>
+                <td>{leadUser ? userLabel(leadUser) : "Unassigned"}</td>
+                <td>{auditeeUser ? userLabel(auditeeUser) : schedule.auditee || "Not set"}</td>
                 <td><span className={countdown.className}>{countdown.text}</span></td>
-                <td>
-                  {((schedule as any).is_preview) ? (
-                    <Button variant="ghost" size="sm" onClick={() => setDrawerOpen(true)}>Continue</Button>
-                  ) : (
-                    <Button variant="secondary" size="sm" onClick={() => runSchedule.mutate(schedule.id)}>
-                      <Play size={14} />
-                      Run
-                    </Button>
-                  )}
-                </td>
+                <td>{renderActionCluster(schedule)}</td>
               </tr>
             );
           })}
@@ -379,7 +599,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   return (
     <QualityAuditsSectionLayout
       title="Audit Planner"
-      subtitle="Schedule audits from a left drawer while the board updates in real time."
+      subtitle="Stage, edit, run, and delete schedules from one place with controlled audit trail feedback."
       toolbar={
         <Button variant="secondary" size="sm" onClick={() => schedulesQuery.refetch()}>
           <RefreshCw size={15} />
@@ -391,11 +611,11 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
         <SectionCard variant="subtle" className="qms-compact-toolbar-card">
           <div className="qms-toolbar qms-toolbar--portal" style={{ justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-              <Button size="sm" onClick={() => setDrawerOpen(true)}>
+              <Button size="sm" onClick={openCreateDrawer}>
                 <Plus size={15} />
                 Create schedule
               </Button>
-              <span className="planner-inline-note">Open the drawer to pick a date and build the audit notice before saving.</span>
+              <span className="planner-inline-note">Schedules can now be edited, deleted, and resumed from autosaved draft state.</span>
             </div>
             <div className="portal-view-switcher">
               {plannerViewOptions().map((option) => {
@@ -424,7 +644,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
         <SectionCard
           title={view === "calendar" ? "Upcoming schedule board" : view === "list" ? "Schedule list" : "Schedule register"}
-          subtitle={view === "calendar" ? "Use the left drawer to stage a new schedule while watching the board refresh in real time." : undefined}
+          subtitle={view === "calendar" ? "The board reflects staged edits before save so the planner stays predictable." : undefined}
           eyebrow={view === "calendar" ? "Calendar view" : "Planner"}
         >
           {schedulesQuery.isLoading ? <p className="qms-loading-copy">Loading schedules…</p> : null}
@@ -435,16 +655,16 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
         </SectionCard>
       </div>
 
-      <Drawer title="Create audit schedule" isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} side="left">
+      <Drawer title={editingScheduleId ? "Edit audit schedule" : "Create audit schedule"} isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} side="left">
         <div className="planner-drawer-form">
-          <p className="planner-inline-note">Changes appear on the board immediately before you save the schedule.</p>
+          <p className="planner-inline-note">Draft changes are staged automatically for the current user and AMO.</p>
           {previewSchedule ? (
             <div className="planner-preview-card">
-              <p className="planner-preview-card__eyebrow">Live preview</p>
+              <p className="planner-preview-card__eyebrow">{previewSchedule.preview_label || "Live preview"}</p>
               <h3 className="planner-preview-card__title">{previewSchedule.title}</h3>
               <span>{formatDate(previewSchedule.next_due_date)} · {countdownLabel(previewSchedule.next_due_date).text}</span>
               <span>{previewSchedule.kind} · {previewSchedule.frequency.replaceAll("_", " ")}</span>
-              <span>Lead auditor: {previewSchedule.lead_auditor_user_id || "Unassigned"}</span>
+              <span>Lead auditor: {userLabel(peopleById.get(previewSchedule.lead_auditor_user_id || "") || null)}</span>
             </div>
           ) : null}
           <div className="planner-drawer-form__grid">
@@ -479,36 +699,62 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
               <input className="input" value={form.criteria} onChange={(e) => setField("criteria", e.target.value)} placeholder="Applicable manuals, regulations, and internal procedures" />
             </label>
             <label className="profile-inline-field">
-              <span>Auditee</span>
-              <input className="input" value={form.auditee} onChange={(e) => setField("auditee", e.target.value)} placeholder="Team or accountable holder" />
+              <span>Auditee from personnel</span>
+              <select className="input" value={form.auditee_user_id} onChange={(e) => applyPerson("auditee_user_id", e.target.value)}>
+                <option value="">Select auditee…</option>
+                {personnelOptions.map((person) => (
+                  <option key={person.id} value={person.id}>{person.full_name}{person.email ? ` · ${person.email}` : ""}</option>
+                ))}
+              </select>
             </label>
             <label className="profile-inline-field">
               <span>Auditee email</span>
               <input className="input" type="email" value={form.auditee_email} onChange={(e) => setField("auditee_email", e.target.value)} placeholder="name@example.com" />
             </label>
-            <label className="profile-inline-field">
-              <span>Lead auditor user ID</span>
-              <input className="input" value={form.lead_auditor_user_id} onChange={(e) => setField("lead_auditor_user_id", e.target.value)} placeholder="Lead auditor" />
+            <label className="profile-inline-field planner-form-span-2">
+              <span>Auditee label</span>
+              <input className="input" value={form.auditee} onChange={(e) => setField("auditee", e.target.value)} placeholder="Team or accountable holder" />
             </label>
             <label className="profile-inline-field">
-              <span>Observer auditor user ID</span>
-              <input className="input" value={form.observer_auditor_user_id} onChange={(e) => setField("observer_auditor_user_id", e.target.value)} placeholder="Observer" />
+              <span>Lead auditor</span>
+              <select className="input" value={form.lead_auditor_user_id} onChange={(e) => applyPerson("lead_auditor_user_id", e.target.value)}>
+                <option value="">Select lead auditor…</option>
+                {personnelOptions.map((person) => (
+                  <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
+                ))}
+              </select>
             </label>
             <label className="profile-inline-field">
-              <span>Assistant auditor user ID</span>
-              <input className="input" value={form.assistant_auditor_user_id} onChange={(e) => setField("assistant_auditor_user_id", e.target.value)} placeholder="Assistant" />
+              <span>Observer auditor</span>
+              <select className="input" value={form.observer_auditor_user_id} onChange={(e) => applyPerson("observer_auditor_user_id", e.target.value)}>
+                <option value="">Select observer…</option>
+                {personnelOptions.map((person) => (
+                  <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
+                ))}
+              </select>
             </label>
             <label className="profile-inline-field">
-              <span>Auditee user ID</span>
-              <input className="input" value={form.auditee_user_id} onChange={(e) => setField("auditee_user_id", e.target.value)} placeholder="Optional portal user ID" />
+              <span>Assistant auditor</span>
+              <select className="input" value={form.assistant_auditor_user_id} onChange={(e) => applyPerson("assistant_auditor_user_id", e.target.value)}>
+                <option value="">Select assistant…</option>
+                {personnelOptions.map((person) => (
+                  <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
+                ))}
+              </select>
+            </label>
+            <label className="profile-inline-field" style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+              <input type="checkbox" checked={form.is_active} onChange={(e) => setField("is_active", e.target.checked)} />
+              <span>Schedule active</span>
             </label>
           </div>
+          {personnelQuery.isLoading ? <p className="planner-inline-note">Loading personnel options…</p> : null}
+          {personnelQuery.isError ? <p className="planner-form-error">Personnel options could not be loaded. You can still type free text for auditee details.</p> : null}
           {error ? <p className="planner-form-error">{error}</p> : null}
           <div className="profile-form__footer-actions">
-            <Button variant="secondary" onClick={() => setForm(defaultSchedule)}>Reset</Button>
-            <Button onClick={() => createSchedule.mutate()} loading={createSchedule.isPending}>
+            <Button variant="secondary" onClick={discardDraft}>Discard draft</Button>
+            <Button onClick={() => saveSchedule.mutate()} loading={saveSchedule.isPending}>
               <Plus size={16} />
-              Save schedule
+              {editingScheduleId ? "Save changes" : "Save schedule"}
             </Button>
           </div>
         </div>

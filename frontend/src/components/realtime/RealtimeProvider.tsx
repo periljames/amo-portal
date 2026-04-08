@@ -332,7 +332,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [reconnectNow, syncServerTime]);
 
   useEffect(() => {
+    if (!getToken() || !isRealtimeEnabled()) {
+      setBackendHealth("ok");
+      return;
+    }
+
     const refreshHealth = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const health = await fetchHealthz();
         setBackendHealth(health.status === "ok" ? "ok" : "degraded");
@@ -341,12 +347,28 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     };
 
-    void syncServerTime();
+    const refreshClock = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      await syncServerTime();
+    };
+
+    const onVisible = () => {
+      if (!document.hidden) {
+        void refreshClock();
+        void refreshHealth();
+      }
+    };
+
+    void refreshClock();
     void refreshHealth();
     const timer = window.setInterval(() => {
       void refreshHealth();
     }, 180_000);
-    return () => window.clearInterval(timer);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [syncServerTime]);
 
   const refreshData = useCallback(() => {

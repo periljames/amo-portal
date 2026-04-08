@@ -409,6 +409,23 @@ class QMSAuditScheduleCreate(BaseModel):
     next_due_date: date
 
 
+class QMSAuditScheduleUpdate(BaseModel):
+    kind: Optional[QMSAuditKind] = None
+    frequency: Optional[QMSAuditScheduleFrequency] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    scope: Optional[str] = None
+    criteria: Optional[str] = None
+    auditee: Optional[str] = None
+    auditee_email: Optional[EmailStr] = None
+    auditee_user_id: Optional[str] = None
+    lead_auditor_user_id: Optional[str] = None
+    observer_auditor_user_id: Optional[str] = None
+    assistant_auditor_user_id: Optional[str] = None
+    duration_days: Optional[int] = Field(default=None, ge=1, le=90)
+    next_due_date: Optional[date] = None
+    is_active: Optional[bool] = None
+
+
 class QMSAuditScheduleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -744,6 +761,20 @@ class QMSNotificationOut(BaseModel):
     created_by_user_id: Optional[str]
     created_at: datetime
     read_at: Optional[datetime]
+
+
+class QMSNotificationSummaryOut(BaseModel):
+    unread_count: int
+    latest_created_at: Optional[datetime] = None
+
+
+class QMSPersonOptionOut(BaseModel):
+    id: str
+    full_name: str
+    email: Optional[str] = None
+    role: Optional[str] = None
+    department_id: Optional[str] = None
+    position_title: Optional[str] = None
 
 
 class AuditorStatsOut(BaseModel):

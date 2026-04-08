@@ -5,10 +5,10 @@ import QMSLayout from "../components/QMS/QMSLayout";
 import Drawer from "../components/shared/Drawer";
 import { useToast } from "../components/feedback/ToastProvider";
 import { getCachedUser } from "../services/auth";
-import { listAdminUsers } from "../services/adminUsers";
+import { listAdminUserSummaries } from "../services/adminUsers";
 import {
   createTrainingCourse,
-  getUserTrainingStatus,
+  getBulkTrainingStatusForUsers,
   importTrainingCoursesWorkbook,
   issueTrainingCertificate,
   listTrainingCertificates,
@@ -164,7 +164,7 @@ const TrainingCompetencePage: React.FC = () => {
     setError(null);
     try {
       const [users, nextCourses, nextEvents, nextRecords, nextDeferrals, reqs, certs] = await Promise.all([
-        listAdminUsers({ limit: 50 }),
+        listAdminUserSummaries({ limit: 50 }),
         listTrainingCourses(),
         listTrainingEvents(),
         listTrainingRecords(),
@@ -173,11 +173,8 @@ const TrainingCompetencePage: React.FC = () => {
         listTrainingCertificates(),
       ]);
 
-      const statusBatches = await Promise.allSettled(users.map((u) => getUserTrainingStatus(u.id)));
-      const flattened: TrainingStatusItem[] = [];
-      statusBatches.forEach((batch) => {
-        if (batch.status === "fulfilled") flattened.push(...batch.value);
-      });
+      const statusMap = await getBulkTrainingStatusForUsers(users.map((u) => u.id));
+      const flattened: TrainingStatusItem[] = Object.values(statusMap.users).flat();
 
       setIsSampleMode(false);
       setCourses(nextCourses);

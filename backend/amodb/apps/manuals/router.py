@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import hashlib
 from uuid import uuid4
 from html import escape
+import json
+import os
 import re
+import tempfile
 import zipfile
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -16,26 +20,27 @@ from amodb.database import get_db
 from amodb.security import get_current_actor_id, get_current_active_user
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.models import AMO
-from amodb.apps.notifications import service as notification_service
 
 from . import models
 from .schemas import (
     AcknowledgeRequest,
     DiffSummaryOut,
+    DocxPreviewOut,
     ExportCreate,
+    LifecycleTransitionOut,
+    LifecycleTransitionRequest,
     ManualCreate,
+    ManualFeaturedEntry,
     ManualOut,
     MasterListEntry,
+    OCRVerifyOut,
     PrintLogCreate,
     RevisionCreate,
     RevisionOut,
+    StampOverlayOut,
+    StampOverlayRequest,
     TransitionRequest,
     WorkflowOut,
-    LifecycleTransitionRequest,
-    LifecycleTransitionOut,
-    PublicationSelectorItem,
-    PublicationChangeRequestCreate,
-    PublicationChangeRequestOut,
 )
 
 router = APIRouter(prefix="/manuals", tags=["Manuals"], dependencies=[Depends(get_current_active_user)])
@@ -96,6 +101,8 @@ def _apply_lifecycle_transition(
     elif action == "publish":
         if rev.status_enum != models.ManualRevisionStatus.REGULATOR_SIGNOFF:
             raise HTTPException(status_code=400, detail="Revision must be approved before publication")
+        if rev.requires_authority_approval_bool and not rev.ocr_verified_bool:
+            raise HTTPException(status_code=400, detail="KCAA approval letter must be OCR-verified before publication")
         rev.status_enum = models.ManualRevisionStatus.PUBLISHED
         rev.published_at = datetime.utcnow()
         rev.immutable_locked = True
@@ -148,42 +155,162 @@ def _validate_docx_upload(file: UploadFile, content: bytes) -> None:
         raise HTTPException(status_code=400, detail="Invalid DOCX file") from exc
 
 
-def _extract_docx_header_metadata(content: bytes) -> dict[str, str | None]:
+def _slugify_heading(value: str, fallback: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or fallback
+
+
+def _clean_docx_text(value: str) -> str:
+    text = (value or "").replace("\xa0", " ")
+    text = re.sub(r"PAGEREF\s+_Toc\d+.*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\\[huz]", " ", text)
+    text = re.sub(r"_Toc\d+", " ", text)
+    text = re.sub(r"TOC\s+\\o.*", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _heading_level(style_name: str, text: str) -> int | None:
+    style = (style_name or "").strip().lower()
+    match = re.search(r"heading\s*(\d)", style)
+    if match:
+        return max(1, min(3, int(match.group(1))))
+    if re.match(r"^\d+(?:\.\d+)*\s+.+", text) and len(text) <= 180:
+        depth = min(3, text.split(" ", 1)[0].count(".") + 1)
+        return depth
+    if text.isupper() and 4 <= len(text) <= 120:
+        return 1
+    return None
+
+
+def _normalize_manual_type(value: str | None) -> str | None:
+    if not value:
+        return None
+    upper = value.upper()
+    for token in ["OMA", "CAME", "MEL", "MOE", "MTM", "MCM", "MPM", "CLM", "QMSM", "SMS", "AMP", "MM"]:
+        if token in upper:
+            return token
+    return None
+
+
+def _parse_date_string(value: str | None) -> date | None:
+    if not value:
+        return None
+    raw = value.strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_docx_content(content: bytes, filename: str | None = None) -> dict[str, object]:
     try:
-        with zipfile.ZipFile(BytesIO(content)) as zf:
-            header = zf.read("word/header1.xml").decode("utf-8", errors="ignore")
-    except Exception:
-        return {"revision_number": None, "effectivity_date": None, "manual_title": None}
+        from docx import Document  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail="DOCX parsing library unavailable") from exc
 
-    plain = re.sub(r"<[^>]+>", " ", header)
-    plain = re.sub(r"\s+", " ", plain).strip()
+    doc = Document(BytesIO(content))
+    paragraphs: list[dict[str, object]] = []
+    headings: list[dict[str, object]] = []
 
-    rev_match = re.search(r"(?:rev(?:ision)?\s*(?:no\.?|number)?\s*[:#-]?\s*)([A-Za-z0-9._-]+)", plain, flags=re.IGNORECASE)
-    date_match = re.search(r"(?:effectivity|effective\s*date)\s*[:#-]?\s*(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})", plain, flags=re.IGNORECASE)
-    title_match = re.search(r"(?:manual\s*title|title)\s*[:#-]?\s*([A-Za-z0-9 ,()/._-]{4,255})", plain, flags=re.IGNORECASE)
+    for paragraph in doc.paragraphs:
+        raw = " ".join(run.text for run in paragraph.runs) or paragraph.text
+        text = _clean_docx_text(raw)
+        if not text:
+            continue
+        style_name = getattr(getattr(paragraph, "style", None), "name", "") or ""
+        level = _heading_level(style_name, text)
+        entry = {"text": text, "style": style_name, "level": level}
+        paragraphs.append(entry)
+        if level is not None:
+            headings.append({"heading": text, "level": level})
+
+    doc_title = _clean_docx_text(getattr(getattr(doc, "core_properties", None), "title", "") or "")
+    joined = "\n".join(str(item["text"]) for item in paragraphs[:400])
+    search_source = "\n".join(filter(None, [filename or "", doc_title, joined]))
+
+    part_match = re.search(r"\b([A-Z]{1,4}/[A-Z0-9]{1,8}/\d{1,4}(?:/\d{1,4})?)\b", search_source, flags=re.IGNORECASE)
+    rev_match = re.search(r"(?:\brev(?:ision)?\s*(?:no\.?|number)?\s*[:#-]?\s*)([A-Z0-9._-]+)", search_source, flags=re.IGNORECASE)
+    issue_match = re.search(r"(?:\bissue\s*(?:no\.?|number)?\s*[:#-]?\s*)([A-Z0-9._-]+)", search_source, flags=re.IGNORECASE)
+    date_match = re.search(r"(?:effective(?:\s+date)?|effectivity)\s*[:#-]?\s*(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})", search_source, flags=re.IGNORECASE)
+
+    title = doc_title or (headings[0]["heading"] if headings else (paragraphs[0]["text"] if paragraphs else (filename or "Untitled manual")))
+    manual_type = _normalize_manual_type(search_source) or "GENERAL"
+    excerpt = "\n\n".join(str(item["text"]) for item in paragraphs[:12])
 
     return {
-        "revision_number": rev_match.group(1).strip() if rev_match else None,
-        "effectivity_date": date_match.group(1).strip() if date_match else None,
-        "manual_title": title_match.group(1).strip() if title_match else None,
+        "paragraphs": paragraphs,
+        "headings": headings[:40],
+        "metadata": {
+            "part_number": (part_match.group(1).upper() if part_match else None),
+            "manual_type": manual_type,
+            "title": str(title)[:255],
+            "revision_number": (rev_match.group(1).strip() if rev_match else None),
+            "issue_number": (issue_match.group(1).strip() if issue_match else None),
+            "effective_date": (date_match.group(1).strip() if date_match else None),
+        },
+        "excerpt": excerpt,
     }
 
 
-def _build_prosemirror_json(paragraphs: list[str]) -> dict:
-    content = []
-    section_index = 0
-    for para in paragraphs:
-        text = (para or "").strip()
+def _build_manual_sections(docx_payload: dict[str, object]) -> list[dict[str, object]]:
+    paragraphs = list(docx_payload.get("paragraphs", []))
+    metadata = dict(docx_payload.get("metadata", {}))
+    section_specs: list[dict[str, object]] = []
+    current = {
+        "heading": str(metadata.get("title") or "Overview"),
+        "level": 1,
+        "paragraphs": [],
+    }
+
+    for item in paragraphs:
+        text = str(item.get("text") or "").strip()
         if not text:
             continue
-        if re.match(r"^(?:\d+(?:\.\d+)*\s+)?[A-Z][A-Za-z0-9 ()/_-]{2,}$", text) and len(text) <= 120:
-            section_index += 1
-            content.append({
-                "type": "heading",
-                "attrs": {"level": 2, "section_id": f"sec-{section_index:03d}"},
-                "content": [{"type": "text", "text": text}],
-            })
-        else:
+        level = item.get("level")
+        if level is not None:
+            if current["paragraphs"] or section_specs == []:
+                section_specs.append(current)
+            current = {
+                "heading": text[:255],
+                "level": int(level),
+                "paragraphs": [],
+            }
+            continue
+        current["paragraphs"].append(text)
+
+    if current["paragraphs"] or not section_specs:
+        section_specs.append(current)
+
+    normalized: list[dict[str, object]] = []
+    for index, spec in enumerate(section_specs, start=1):
+        heading = str(spec.get("heading") or f"Section {index}")[:255]
+        normalized.append({
+            "heading": heading,
+            "level": max(1, min(3, int(spec.get("level") or 1))),
+            "anchor_slug": _slugify_heading(heading, f"section-{index}"),
+            "paragraphs": list(spec.get("paragraphs") or []),
+        })
+    return normalized
+
+
+def _build_prosemirror_json(section_specs: list[dict[str, object]]) -> dict:
+    content: list[dict[str, object]] = []
+    for index, spec in enumerate(section_specs, start=1):
+        heading = str(spec.get("heading") or f"Section {index}")
+        level = max(1, min(3, int(spec.get("level") or 1)))
+        section_id = str(spec.get("anchor_slug") or f"sec-{index:03d}")
+        content.append({
+            "type": "heading",
+            "attrs": {"level": level, "section_id": section_id},
+            "content": [{"type": "text", "text": heading}],
+        })
+        for para in list(spec.get("paragraphs") or []):
+            text = str(para).strip()
+            if not text:
+                continue
             content.append({
                 "type": "paragraph",
                 "content": [{"type": "text", "text": text}],
@@ -192,20 +319,150 @@ def _build_prosemirror_json(paragraphs: list[str]) -> dict:
 
 
 def _extract_docx_paragraphs(content: bytes) -> list[str]:
-    try:
-        with zipfile.ZipFile(BytesIO(content)) as zf:
-            xml = zf.read("word/document.xml").decode("utf-8", errors="ignore")
-    except Exception:
+    payload = _extract_docx_content(content)
+    return [str(item.get("text") or "") for item in list(payload.get("paragraphs", []))]
+
+
+def _request_ip_device(request: Request) -> str:
+    return f"{request.client.host if request.client else 'unknown'}::{request.headers.get('user-agent', 'n/a')}"
+
+
+_TABLE_EXISTS_CACHE: dict[str, bool] = {}
+
+
+def _table_exists(db: Session, table_name: str) -> bool:
+    bind = db.get_bind()
+    cache_key = f"{id(bind)}::{table_name}"
+    if cache_key in _TABLE_EXISTS_CACHE:
+        return _TABLE_EXISTS_CACHE[cache_key]
+    exists = inspect(bind).has_table(table_name)
+    _TABLE_EXISTS_CACHE[cache_key] = exists
+    return exists
+
+
+def _query_audit_rows(db: Session, *criterion, limit: int | None = None):
+    if not _table_exists(db, "manual_audit_log"):
         return []
-    xml = re.sub(r"</w:p>", "\n", xml)
-    xml = re.sub(r"<[^>]+>", "", xml)
-    parts = [p.strip() for p in xml.splitlines() if p.strip()]
-    return parts
+    query = db.query(models.ManualAuditLog).filter(*criterion).order_by(models.ManualAuditLog.at.desc())
+    if limit:
+        query = query.limit(limit)
+    return query.all()
 
 
-def _slugify_heading(value: str, fallback: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug or fallback
+def _extract_text_from_pdf_bytes(content: bytes) -> str:
+    try:
+        import fitz  # type: ignore
+        import pytesseract  # type: ignore
+        from PIL import Image  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail="OCR libraries unavailable") from exc
+
+    doc = fitz.open(stream=content, filetype="pdf")
+    text_parts: list[str] = []
+    for page in doc:
+        text_parts.append(page.get_text("text"))
+    text = "\n".join(text_parts).strip()
+    if len(text) >= 80:
+        return text
+
+    ocr_parts: list[str] = []
+    for page in doc:
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+        image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        ocr_parts.append(pytesseract.image_to_string(image))
+    return "\n".join(ocr_parts).strip()
+
+
+def _extract_kcaa_reference(text: str) -> str | None:
+    patterns = [
+        r"(?:\bref(?:erence)?\b|\bfile\s*ref\b)\s*[:#-]?\s*([A-Z0-9/.-]{4,})",
+        r"\b(KCAA/[A-Z0-9/.-]{3,})\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def _extract_first_date(text: str) -> date | None:
+    match = re.search(r"(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})", text)
+    return _parse_date_string(match.group(1)) if match else None
+
+
+def _normalize_ref(value: str | None) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+
+def _render_revision_pdf(revision: models.ManualRevision, sections: list[models.ManualSection], section_blocks: dict[str, list[models.ManualBlock]], *, signer_name: str, signer_role: str, stamp_label: str, tenant_slug: str, manual_id: str) -> tuple[str, str]:
+    try:
+        from reportlab.lib.pagesizes import A4  # type: ignore
+        from reportlab.lib.units import mm  # type: ignore
+        from reportlab.pdfgen import canvas  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail="PDF render library unavailable") from exc
+
+    output_dir = os.path.join(tempfile.gettempdir(), "amo_manual_stamps", tenant_slug, manual_id, revision.id)
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"stamped-{uuid4().hex}.pdf")
+
+    c = canvas.Canvas(output_path, pagesize=A4)
+    width, height = A4
+    left = 18 * mm
+    top = height - 18 * mm
+    bottom = 22 * mm
+    line_height = 5 * mm
+
+    def new_page(page_heading: str) -> tuple[float, int]:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(left, height - 14 * mm, page_heading)
+        c.setFont("Helvetica", 9)
+        c.drawRightString(width - 18 * mm, height - 14 * mm, f"Rev {revision.rev_number}")
+        return top, 1
+
+    y, page_no = new_page("Controlled Manual")
+    c.setFont("Helvetica", 9)
+
+    for section in sections:
+        blocks = section_blocks.get(section.id, [])
+        if y < bottom + 25 * mm:
+            c.showPage()
+            page_no += 1
+            y, _ = new_page(section.heading)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(left, y, section.heading)
+        y -= line_height
+        c.setFont("Helvetica", 9)
+        for block in blocks:
+            for line in re.findall(r".{1,100}(?:\s+|$)", block.text_plain or ""):
+                chunk = line.strip()
+                if not chunk:
+                    continue
+                if y < bottom + 20 * mm:
+                    c.showPage()
+                    page_no += 1
+                    y, _ = new_page(section.heading)
+                    c.setFont("Helvetica", 9)
+                c.drawString(left + 4 * mm, y, chunk[:120])
+                y -= line_height
+            y -= 1.5 * mm
+
+    stamp_x = width - 76 * mm
+    stamp_y = bottom + 8 * mm
+    c.setStrokeColorRGB(0.72, 0.13, 0.13)
+    c.setLineWidth(1.4)
+    c.roundRect(stamp_x, stamp_y, 58 * mm, 24 * mm, 4 * mm, stroke=1, fill=0)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawCentredString(stamp_x + 29 * mm, stamp_y + 17 * mm, stamp_label[:40])
+    c.setFont("Helvetica", 8)
+    c.drawCentredString(stamp_x + 29 * mm, stamp_y + 11 * mm, signer_name[:36])
+    c.drawCentredString(stamp_x + 29 * mm, stamp_y + 7 * mm, signer_role[:36])
+    c.drawCentredString(stamp_x + 29 * mm, stamp_y + 3 * mm, datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"))
+    c.save()
+
+    with open(output_path, "rb") as handle:
+        sha256 = hashlib.sha256(handle.read()).hexdigest()
+    return output_path, sha256
 
 def _tenant_by_slug(db: Session, tenant_slug: str) -> models.Tenant:
     tenant = db.query(models.Tenant).filter(models.Tenant.slug == tenant_slug).first()
@@ -242,13 +499,15 @@ def _tenant_by_slug(db: Session, tenant_slug: str) -> models.Tenant:
 
 
 def _audit(db: Session, tenant_id: str, actor_id: str | None, action: str, entity_type: str, entity_id: str, request: Request, diff: dict | None = None) -> None:
+    if not _table_exists(db, "manual_audit_log"):
+        return
     db.add(models.ManualAuditLog(
         tenant_id=tenant_id,
         actor_id=actor_id,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
-        ip_device=f"{request.client.host if request.client else 'unknown'}::{request.headers.get('user-agent', 'n/a')}",
+        ip_device=_request_ip_device(request),
         diff_json=diff or {},
     ))
 
@@ -278,7 +537,7 @@ def create_manual(tenant_slug: str, payload: ManualCreate, request: Request, db:
 
 
 
-@router.post("/t/{tenant_slug}/upload-docx/preview")
+@router.post("/t/{tenant_slug}/upload-docx/preview", response_model=DocxPreviewOut)
 async def preview_docx_upload(
     tenant_slug: str,
     file: UploadFile = File(...),
@@ -290,16 +549,20 @@ async def preview_docx_upload(
         raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
     content = await file.read()
     _validate_docx_upload(file, content)
-    paragraphs = _extract_docx_paragraphs(content)
-    if not paragraphs:
-        paragraphs = ["No extractable text found in DOCX."]
-    heading = paragraphs[0][:255]
-    return {
-        "filename": file.filename,
-        "heading": heading,
-        "paragraph_count": len(paragraphs),
-        "sample": paragraphs[:20],
-    }
+    parsed = _extract_docx_content(content, file.filename)
+    paragraphs = [str(item.get("text") or "") for item in list(parsed.get("paragraphs", []))]
+    headings = [str(item.get("heading") or "") for item in list(parsed.get("headings", []))]
+    metadata = dict(parsed.get("metadata", {}))
+    heading = str(metadata.get("title") or (headings[0] if headings else (paragraphs[0] if paragraphs else file.filename or "Untitled manual")))
+    return DocxPreviewOut(
+        filename=file.filename or "manual.docx",
+        heading=heading[:255],
+        paragraph_count=len(paragraphs),
+        sample=paragraphs[:20],
+        outline=headings[:20],
+        metadata=metadata,
+        excerpt=str(parsed.get("excerpt") or ""),
+    )
 
 
 @router.post("/t/{tenant_slug}/upload-docx")
@@ -311,7 +574,8 @@ async def upload_docx_revision(
     rev_number: str = Form(...),
     manual_type: str = Form("GENERAL"),
     owner_role: str = Form("Library"),
-    issue_number: str = Form(...),
+    issue_number: str = Form(""),
+    effective_date: str | None = Form(None),
     change_log: str | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -323,64 +587,81 @@ async def upload_docx_revision(
     content = await file.read()
     _validate_docx_upload(file, content)
 
-    manual = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id, models.Manual.code == code.strip()).first()
+    parsed = _extract_docx_content(content, file.filename)
+    metadata = dict(parsed.get("metadata", {}))
+    section_specs = _build_manual_sections(parsed)
+    paragraph_count = sum(len(list(spec.get("paragraphs") or [])) for spec in section_specs)
+
+    manual_code = (str(metadata.get("part_number") or code) or "").strip().upper()
+    manual_title = (str(metadata.get("title") or title) or file.filename or "Untitled manual").strip()
+    manual_type_value = (str(metadata.get("manual_type") or manual_type) or "GENERAL").strip().upper()
+    issue_value = (str(metadata.get("issue_number") or issue_number) or "00").strip()
+    rev_value = (str(metadata.get("revision_number") or rev_number) or "00").strip()
+    effective_value = _parse_date_string(str(metadata.get("effective_date") or effective_date or "").strip())
+
+    manual = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id, models.Manual.code == manual_code).first()
     if not manual:
         manual = models.Manual(
             tenant_id=tenant.id,
-            code=code.strip(),
-            title=title.strip(),
-            manual_type=manual_type.strip() or "GENERAL",
-            owner_role=owner_role.strip() or "Library",
+            code=manual_code,
+            title=manual_title,
+            manual_type=manual_type_value,
+            owner_role=(owner_role.strip() or "Library"),
         )
         db.add(manual)
         db.flush()
-
-    paragraphs = _extract_docx_paragraphs(content)
-    header_meta = _extract_docx_header_metadata(content)
-
-    if header_meta.get("manual_title"):
-        manual.title = str(header_meta["manual_title"])[:255]
+    else:
+        manual.title = manual_title or manual.title
+        manual.manual_type = manual_type_value or manual.manual_type
+        if owner_role.strip():
+            manual.owner_role = owner_role.strip()
 
     rev = models.ManualRevision(
         manual_id=manual.id,
-        rev_number=(header_meta.get("revision_number") or rev_number).strip(),
-        issue_number=issue_number.strip(),
+        rev_number=rev_value,
+        issue_number=issue_value,
+        effective_date=effective_value,
         created_by=get_current_actor_id(),
         status_enum=models.ManualRevisionStatus.DRAFT,
+        source_filename=file.filename,
+        manual_uuid=f"manual::{manual.id}::rev::{uuid4().hex[:12]}",
         notes=(f"Uploaded source: {file.filename}" + (f"\nChange log: {change_log.strip()}" if change_log and change_log.strip() else "")),
     )
     db.add(rev)
     db.flush()
 
-    heading = paragraphs[0] if paragraphs else f"{manual.code} Revision {rev.rev_number}"
-    section = models.ManualSection(
-        revision_id=rev.id,
-        order_index=1,
-        heading=heading[:255],
-        anchor_slug=_slugify_heading(heading, "section-1"),
-        level=1,
-        metadata_json={"source": "docx-upload", "filename": file.filename},
-    )
-    db.add(section)
-    db.flush()
+    created_sections: list[models.ManualSection] = []
+    all_blocks = 0
+    for section_index, spec in enumerate(section_specs, start=1):
+        section = models.ManualSection(
+            revision_id=rev.id,
+            order_index=section_index,
+            heading=str(spec.get("heading") or f"Section {section_index}")[:255],
+            anchor_slug=str(spec.get("anchor_slug") or f"section-{section_index}"),
+            level=int(spec.get("level") or 1),
+            metadata_json={"source": "docx-upload", "filename": file.filename, "paragraphs": len(list(spec.get("paragraphs") or []))},
+        )
+        db.add(section)
+        db.flush()
+        created_sections.append(section)
+        for block_index, para in enumerate(list(spec.get("paragraphs") or []), start=1):
+            safe_text = str(para).strip()
+            if not safe_text:
+                continue
+            all_blocks += 1
+            html_text = f"<p>{escape(safe_text)}</p>"
+            hash_source = f"{rev.id}:{section.id}:{block_index}:{safe_text}".encode("utf-8")
+            db.add(models.ManualBlock(
+                section_id=section.id,
+                order_index=block_index,
+                block_type="paragraph",
+                html_sanitized=html_text,
+                text_plain=safe_text,
+                change_hash=hashlib.sha256(hash_source).hexdigest(),
+            ))
 
-    if not paragraphs:
-        paragraphs = ["No extractable DOCX text found. Upload processed and ready for manual editing."]
-
-    for idx, para in enumerate(paragraphs[:500], start=1):
-        safe_text = para.strip()
-        html_text = f"<p>{escape(safe_text)}</p>"
-        hash_source = f"{rev.id}:{idx}:{safe_text}".encode("utf-8")
-        db.add(models.ManualBlock(
-            section_id=section.id,
-            order_index=idx,
-            block_type="paragraph",
-            html_sanitized=html_text,
-            text_plain=safe_text,
-            change_hash=hashlib.sha256(hash_source).hexdigest(),
-        ))
-    prose_json = _build_prosemirror_json(paragraphs)
-    checksum = hashlib.sha256(str(prose_json).encode("utf-8")).hexdigest()
+    prose_json = _build_prosemirror_json(section_specs)
+    checksum = hashlib.sha256(json.dumps(prose_json, sort_keys=True).encode("utf-8")).hexdigest()
     previous_version = (
         db.query(models.DocumentVersion)
         .filter(models.DocumentVersion.document_id == manual.id)
@@ -406,22 +687,24 @@ async def upload_docx_revision(
     db.add(current_version)
     db.flush()
 
-    section_nodes = [n for n in prose_json.get("content", []) if n.get("type") == "heading"]
-    for n in section_nodes:
-        heading = ((n.get("content") or [{}])[0].get("text") or "Section").strip()
-        words = max(1, len(heading.split()))
+    for section in created_sections:
+        words = max(1, len(section.heading.split()))
         db.add(models.DocumentSection(
             document_version_id=current_version.id,
-            section_id=(n.get("attrs") or {}).get("section_id") or _slugify_heading(heading, "section"),
-            heading=heading[:255],
+            section_id=section.anchor_slug,
+            heading=section.heading[:255],
             word_count=words,
             min_reading_time=max(1, words // 180),
         ))
 
-
-    _audit(db, tenant.id, get_current_actor_id(), "revision.docx_uploaded", "manual_revision", rev.id, request, {"filename": file.filename, "paragraphs": len(paragraphs)})
+    _audit(db, tenant.id, get_current_actor_id(), "revision.docx_uploaded", "manual_revision", rev.id, request, {
+        "filename": file.filename,
+        "paragraphs": paragraph_count,
+        "sections": len(created_sections),
+        "metadata": metadata,
+    })
     db.commit()
-    return {"manual_id": manual.id, "revision_id": rev.id, "status": rev.status_enum.value, "paragraphs": len(paragraphs)}
+    return {"manual_id": manual.id, "revision_id": rev.id, "status": rev.status_enum.value, "paragraphs": paragraph_count}
 
 
 @router.get("/t/{tenant_slug}/{manual_id}/revisions", response_model=list[RevisionOut])
@@ -499,7 +782,7 @@ def transition_revision(tenant_slug: str, manual_id: str, rev_id: str, payload: 
     _audit(db, tenant.id, get_current_actor_id(), f"revision.workflow.{payload.action}", "manual_revision", rev.id, request, {"comment": payload.comment})
     db.commit()
 
-    history = db.query(models.ManualAuditLog).filter(models.ManualAuditLog.entity_id == rev.id).order_by(models.ManualAuditLog.at.desc()).limit(20).all()
+    history = _query_audit_rows(db, models.ManualAuditLog.entity_id == rev.id, limit=20)
     return WorkflowOut(revision_id=rev.id, status=rev.status_enum.value, requires_authority_approval=rev.requires_authority_approval_bool, history=[{"action": item.action, "at": item.at.isoformat(), "actor_id": item.actor_id} for item in history])
 
 
@@ -541,17 +824,21 @@ def transition_revision_lifecycle(
 
 
 @router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/read")
-def read_revision(tenant_slug: str, manual_id: str, rev_id: str, db: Session = Depends(get_db)):
+def read_revision(tenant_slug: str, manual_id: str, rev_id: str, request: Request, db: Session = Depends(get_db)):
     tenant = _tenant_by_slug(db, tenant_slug)
+    manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
     rev = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
-    if not rev:
+    if not rev or not manual:
         raise HTTPException(status_code=404, detail="Revision not found")
     sections = db.query(models.ManualSection).filter(models.ManualSection.revision_id == rev_id).order_by(models.ManualSection.order_index.asc()).all()
     blocks = db.query(models.ManualBlock).join(models.ManualSection, models.ManualSection.id == models.ManualBlock.section_id).filter(models.ManualSection.revision_id == rev_id).order_by(models.ManualBlock.order_index.asc()).all()
+    _audit(db, tenant.id, get_current_actor_id(), "revision.read", "manual_revision", rev.id, request, {"manual_id": manual.id, "section_count": len(sections)})
+    db.commit()
     return {
         "revision_id": rev.id,
         "status": rev.status_enum.value,
         "not_published": rev.status_enum != models.ManualRevisionStatus.PUBLISHED,
+        "manual": {"id": manual.id, "code": manual.code, "title": manual.title, "manual_type": manual.manual_type},
         "sections": [{"id": s.id, "heading": s.heading, "anchor_slug": s.anchor_slug, "level": s.level} for s in sections],
         "blocks": [{"section_id": b.section_id, "html": b.html_sanitized, "text": b.text_plain, "change_hash": b.change_hash} for b in blocks],
     }
@@ -576,7 +863,7 @@ def get_workflow(tenant_slug: str, manual_id: str, rev_id: str, db: Session = De
     rev = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
     if not rev:
         raise HTTPException(status_code=404, detail="Revision not found")
-    history = db.query(models.ManualAuditLog).filter(models.ManualAuditLog.entity_id == rev.id).order_by(models.ManualAuditLog.at.desc()).limit(20).all()
+    history = _query_audit_rows(db, models.ManualAuditLog.entity_id == rev.id, limit=20)
     return WorkflowOut(revision_id=rev.id, status=rev.status_enum.value, requires_authority_approval=rev.requires_authority_approval_bool, history=[{"action": item.action, "at": item.at.isoformat(), "actor_id": item.actor_id} for item in history])
 
 
@@ -662,6 +949,41 @@ def master_list(tenant_slug: str, db: Session = Depends(get_db)):
         result.append(MasterListEntry(manual_id=manual.id, code=manual.code, title=manual.title, current_revision=current_rev.rev_number if current_rev else None, current_status=current_rev.status_enum.value if current_rev else "NO_PUBLISHED_REV", pending_ack_count=pending))
     return result
 
+@router.get("/t/{tenant_slug}/featured", response_model=list[ManualFeaturedEntry])
+def featured_manuals(tenant_slug: str, db: Session = Depends(get_db)):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    manuals = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id).all()
+    usage: dict[str, int] = {manual.id: 0 for manual in manuals}
+    if _table_exists(db, "manual_audit_log"):
+        rows = db.query(models.ManualAuditLog).filter(models.ManualAuditLog.tenant_id == tenant.id, models.ManualAuditLog.action == "revision.read").all()
+        revision_to_manual: dict[str, str] = {}
+        revisions = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.tenant_id == tenant.id).all()
+        for rev in revisions:
+            revision_to_manual[rev.id] = rev.manual_id
+        for row in rows:
+            manual_id = None
+            if isinstance(row.diff_json, dict):
+                manual_id = row.diff_json.get("manual_id")
+            manual_id = manual_id or revision_to_manual.get(row.entity_id)
+            if manual_id:
+                usage[manual_id] = usage.get(manual_id, 0) + 1
+    ranked = sorted(manuals, key=lambda item: (-usage.get(item.id, 0), item.code))[:3]
+    out: list[ManualFeaturedEntry] = []
+    for manual in ranked:
+        current_rev = None
+        if manual.current_published_rev_id:
+            current_rev = db.query(models.ManualRevision).filter(models.ManualRevision.id == manual.current_published_rev_id).first()
+        out.append(ManualFeaturedEntry(
+            manual_id=manual.id,
+            code=manual.code,
+            title=manual.title,
+            manual_type=manual.manual_type,
+            current_revision=current_rev.rev_number if current_rev else None,
+            open_count=usage.get(manual.id, 0),
+        ))
+    return out
+
+
 @router.get("/t/{tenant_slug}/{manual_id}", response_model=ManualOut)
 def get_manual(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
     tenant = _tenant_by_slug(db, tenant_slug)
@@ -689,11 +1011,117 @@ def run_ocr(tenant_slug: str, manual_id: str, rev_id: str, request: Request, db:
     return {"status": "queued", "job_id": str(uuid4())}
 
 
+@router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/ocr/verify", response_model=OCRVerifyOut)
+async def verify_ocr_letter(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    typed_ref: str | None = Form(None),
+    typed_date: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    rev = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Upload the KCAA approval letter as PDF")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Approval letter PDF is empty")
+    extracted = _extract_text_from_pdf_bytes(content)
+    detected_ref = _extract_kcaa_reference(extracted)
+    detected_date = _extract_first_date(extracted)
+    typed_date_obj = _parse_date_string(typed_date)
+    ref_match = bool(detected_ref and typed_ref and _normalize_ref(detected_ref) == _normalize_ref(typed_ref))
+    date_match = bool(detected_date and typed_date_obj and detected_date == typed_date_obj)
+    verified = ref_match and date_match
+
+    rev.ocr_detected_ref = detected_ref
+    rev.ocr_detected_date = detected_date
+    rev.ocr_verified_bool = verified
+    rev.ocr_verified_at = datetime.utcnow() if verified else None
+    if verified and detected_ref:
+        rev.authority_approval_ref = detected_ref
+
+    _audit(db, tenant.id, get_current_actor_id(), "revision.ocr.verified", "manual_revision", rev.id, request, {
+        "filename": file.filename,
+        "detected_ref": detected_ref,
+        "detected_date": detected_date.isoformat() if detected_date else None,
+        "typed_ref": typed_ref,
+        "typed_date": typed_date,
+        "verified": verified,
+    })
+    db.commit()
+    return OCRVerifyOut(
+        revision_id=rev.id,
+        detected_ref=detected_ref,
+        detected_date=detected_date,
+        typed_ref=typed_ref,
+        typed_date=typed_date_obj,
+        ref_match=ref_match,
+        date_match=date_match,
+        verified=verified,
+        text_excerpt=extracted[:1200],
+    )
+
+
+@router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/stamp-overlay", response_model=StampOverlayOut)
+def create_stamped_overlay(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    payload: StampOverlayRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    rev = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    sections = db.query(models.ManualSection).filter(models.ManualSection.revision_id == rev_id).order_by(models.ManualSection.order_index.asc()).all()
+    blocks = db.query(models.ManualBlock).join(models.ManualSection, models.ManualSection.id == models.ManualBlock.section_id).filter(models.ManualSection.revision_id == rev_id).order_by(models.ManualBlock.order_index.asc()).all()
+    block_map: dict[str, list[models.ManualBlock]] = {}
+    for block in blocks:
+        block_map.setdefault(block.section_id, []).append(block)
+    output_path, sha256 = _render_revision_pdf(
+        rev,
+        sections,
+        block_map,
+        signer_name=payload.signer_name,
+        signer_role=payload.signer_role,
+        stamp_label=payload.stamp_label,
+        tenant_slug=tenant_slug,
+        manual_id=manual_id,
+    )
+    exp = models.PrintExport(
+        revision_id=rev.id,
+        controlled_bool=payload.controlled_bool,
+        watermark_uncontrolled_bool=not payload.controlled_bool,
+        generated_by=get_current_actor_id(),
+        generated_at=datetime.utcnow(),
+        storage_uri=output_path,
+        sha256=sha256,
+        render_profile_json={"stamped": True, "signer_name": payload.signer_name, "signer_role": payload.signer_role, "stamp_label": payload.stamp_label},
+        version_label=f"stamped-rev-{rev.rev_number}",
+    )
+    db.add(exp)
+    rev.stamped_export_uri = output_path
+    _audit(db, tenant.id, get_current_actor_id(), "revision.stamp_overlay.created", "manual_revision", rev.id, request, {"export_sha256": sha256, "storage_uri": output_path})
+    db.commit()
+    db.refresh(exp)
+    return StampOverlayOut(revision_id=rev.id, export_id=exp.id, storage_uri=output_path, sha256=sha256)
+
+
 @router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/processing/status")
 def processing_status(tenant_slug: str, manual_id: str, rev_id: str, db: Session = Depends(get_db)):
     tenant = _tenant_by_slug(db, tenant_slug)
     _ = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
-    row = db.query(models.ManualAuditLog).filter(models.ManualAuditLog.entity_id == rev_id, models.ManualAuditLog.action.in_(["revision.processing.run", "revision.ocr.run"]))        .order_by(models.ManualAuditLog.at.desc()).first()
+    rows = _query_audit_rows(db, models.ManualAuditLog.entity_id == rev_id, models.ManualAuditLog.action.in_(["revision.processing.run", "revision.ocr.run"]), limit=1)
+    row = rows[0] if rows else None
     if not row:
         return {"revision_id": rev_id, "stage": "idle", "actor_id": None, "at": None}
     return {"revision_id": rev_id, "stage": row.diff_json.get("stage", "queued"), "actor_id": row.actor_id, "at": row.at}
@@ -707,145 +1135,3 @@ def generate_outline(tenant_slug: str, manual_id: str, rev_id: str, request: Req
     _audit(db, tenant.id, actor_id, "revision.outline.generated", "manual_revision", rev_id, request, {"generated": count})
     db.commit()
     return {"status": "ok", "generated": count}
-
-
-@router.get("/t/{tenant_slug}/publication-selector", response_model=list[PublicationSelectorItem])
-def publication_selector(
-    tenant_slug: str,
-    q: str | None = Query(default=None),
-    model: str | None = Query(default=None),
-    manual_type: str | None = Query(default=None),
-    db: Session = Depends(get_db),
-):
-    tenant = _tenant_by_slug(db, tenant_slug)
-    manuals_q = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id)
-    if manual_type:
-        manuals_q = manuals_q.filter(models.Manual.manual_type.ilike(f"%{manual_type.strip()}%"))
-    if q:
-        needle = f"%{q.strip()}%"
-        manuals_q = manuals_q.filter(
-            (models.Manual.code.ilike(needle))
-            | (models.Manual.title.ilike(needle))
-            | (models.Manual.manual_type.ilike(needle))
-        )
-    manuals = manuals_q.order_by(models.Manual.code.asc()).limit(50).all()
-    items: list[PublicationSelectorItem] = []
-    for manual in manuals:
-        revision = None
-        if manual.current_published_rev_id:
-            revision = db.query(models.ManualRevision).filter(models.ManualRevision.id == manual.current_published_rev_id).first()
-        if revision is None:
-            revision = (
-                db.query(models.ManualRevision)
-                .filter(models.ManualRevision.manual_id == manual.id)
-                .order_by(models.ManualRevision.created_at.desc())
-                .first()
-            )
-        inferred_model = None
-        if model and model.strip():
-            if model.strip().lower() not in (manual.title or "").lower():
-                continue
-            inferred_model = model.strip()
-        items.append(
-            PublicationSelectorItem(
-                manual_id=manual.id,
-                code=manual.code,
-                title=manual.title,
-                manual_type=manual.manual_type,
-                current_revision=revision.rev_number if revision else None,
-                publication_date=revision.effective_date if revision else None,
-                model=inferred_model,
-            )
-        )
-    return items
-
-
-@router.post("/t/{tenant_slug}/publication-change-requests", response_model=PublicationChangeRequestOut)
-def submit_publication_change_request(
-    tenant_slug: str,
-    payload: PublicationChangeRequestCreate,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
-):
-    tenant = _tenant_by_slug(db, tenant_slug)
-    manual = db.query(models.Manual).filter(models.Manual.id == payload.manual_id, models.Manual.tenant_id == tenant.id).first()
-    if not manual:
-        raise HTTPException(status_code=404, detail="Manual not found")
-
-    request_id = str(uuid4())
-    detail = {
-        "requested_by": {
-            "first_name": payload.requested_by_first_name,
-            "last_name": payload.requested_by_last_name,
-            "email": payload.email,
-            "phone": payload.phone,
-        },
-        "publication": {
-            "manual_id": payload.manual_id,
-            "part_number": payload.part_number,
-            "manual_type": payload.manual_type,
-            "title": payload.title,
-            "model": payload.model,
-            "publication_date": payload.publication_date.isoformat() if payload.publication_date else None,
-            "revision_number": payload.revision_number,
-        },
-        "location": {
-            "ata_chapter": payload.ata_chapter,
-            "section": payload.section,
-            "sub_section": payload.sub_section,
-            "figure": payload.figure,
-            "page_number": payload.page_number,
-            "art_figure": payload.art_figure,
-            "other": payload.other,
-        },
-        "other_publications_affected": payload.other_publications_affected,
-        "suggestion_for_change": payload.suggestion_for_change,
-        "request_updates": payload.request_updates,
-    }
-
-    _audit(
-        db,
-        tenant.id,
-        get_current_actor_id(),
-        "publication_change_request.submitted",
-        "manual_publication_change_request",
-        request_id,
-        request,
-        detail,
-    )
-
-    quality_manager = (
-        db.query(account_models.User)
-        .filter(account_models.User.amo_id == tenant.amo_id)
-        .filter(account_models.User.role.in_([account_models.AccountRole.QUALITY_MANAGER, account_models.AccountRole.DOCUMENT_CONTROL_OFFICER]))
-        .order_by(account_models.User.created_at.asc())
-        .first()
-    )
-    if quality_manager and getattr(quality_manager, "email", None):
-        try:
-            notification_service.send_email(
-                template_key="manual_publication_change_request",
-                recipient=quality_manager.email,
-                subject=f"Publication Change Request · {manual.code}",
-                context={
-                    "request_id": request_id,
-                    "manual_code": manual.code,
-                    "manual_title": manual.title,
-                    "requested_by": f"{payload.requested_by_first_name} {payload.requested_by_last_name}".strip(),
-                    "suggestion_for_change": payload.suggestion_for_change,
-                    "location": detail["location"],
-                },
-                correlation_id=request_id,
-                amo_id=str(tenant.amo_id),
-                db=db,
-            )
-        except Exception:
-            pass
-
-    db.commit()
-    return PublicationChangeRequestOut(
-        id=request_id,
-        status="SUBMITTED",
-        message="Publication change request submitted.",
-    )

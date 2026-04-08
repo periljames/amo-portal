@@ -7,9 +7,10 @@ import json
 import os
 import urllib.request
 import uuid
+from threading import Lock
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from fastapi import (
     APIRouter,
@@ -22,7 +23,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, JSONResponse
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -39,13 +40,47 @@ from . import schemas as training_schemas
 from ..workflow import apply_transition, TransitionError
 from .courses_import import import_courses_rows, parse_courses_sheet
 
+public_router = APIRouter(prefix="/public", tags=["training-public"])
+
+
+_TRAINING_SCHEMA_COMPAT_LOCK = Lock()
+_TRAINING_SCHEMA_COMPAT_READY = False
+
+
+def _ensure_training_catalog_schema_compat(db: Session = Depends(get_db)) -> None:
+    """
+    Runtime guard for training catalog import columns.
+
+    Some environments received the model update before the corresponding Alembic
+    migration was applied, which makes any query touching ``training_courses``
+    fail with ``UndefinedColumn`` on ``category_raw``/``status``/``scope``.
+    This dependency heals that drift once per process and keeps the module
+    usable even before the operator runs migrations.
+    """
+    global _TRAINING_SCHEMA_COMPAT_READY
+    if _TRAINING_SCHEMA_COMPAT_READY:
+        return
+
+    with _TRAINING_SCHEMA_COMPAT_LOCK:
+        if _TRAINING_SCHEMA_COMPAT_READY:
+            return
+        bind = db.get_bind()
+        bind.execute(text("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS category_raw VARCHAR(255)"))
+        bind.execute(text("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS status VARCHAR(64)"))
+        bind.execute(text("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS scope VARCHAR(255)"))
+        bind.execute(text("UPDATE training_courses SET status = 'One_Off' WHERE status IS NULL OR btrim(status) = ''"))
+        bind.execute(text("ALTER TABLE training_courses ALTER COLUMN status SET DEFAULT 'One_Off'"))
+        bind.execute(text("ALTER TABLE training_courses ALTER COLUMN is_mandatory SET DEFAULT false"))
+        db.commit()
+        _TRAINING_SCHEMA_COMPAT_READY = True
+
+
 router = APIRouter(
     prefix="/training",
     tags=["training"],
-    dependencies=[Depends(require_module("training"))],
+    dependencies=[Depends(require_module("training")), Depends(_ensure_training_catalog_schema_compat)],
 )
 
-public_router = APIRouter(prefix="/public", tags=["training-public"])
 
 _MAX_PAGE_SIZE = 1000  # hard ceiling for list endpoints to protect DB
 
@@ -347,6 +382,147 @@ def _maybe_send_whatsapp(background_tasks: BackgroundTasks, to_phone: Optional[s
             pass
 
     background_tasks.add_task(_send)
+
+
+def _compute_training_status_map_for_users(
+    db: Session,
+    *,
+    amo_id: str,
+    user_ids: Iterable[str],
+) -> Dict[str, List[training_schemas.TrainingStatusItem]]:
+    requested_user_ids = list(dict.fromkeys([uid for uid in user_ids if uid]))
+    if not requested_user_ids:
+        return {}
+
+    today = date.today()
+    items_by_user: Dict[str, List[training_schemas.TrainingStatusItem]] = {uid: [] for uid in requested_user_ids}
+
+    courses: List[training_models.TrainingCourse] = (
+        db.query(training_models.TrainingCourse)
+        .filter(
+            training_models.TrainingCourse.amo_id == amo_id,
+            training_models.TrainingCourse.is_active.is_(True),
+        )
+        .order_by(training_models.TrainingCourse.course_id.asc())
+        .all()
+    )
+    if not courses:
+        return items_by_user
+
+    course_ids = [c.id for c in courses]
+
+    records = (
+        db.query(training_models.TrainingRecord)
+        .filter(
+            training_models.TrainingRecord.amo_id == amo_id,
+            training_models.TrainingRecord.user_id.in_(requested_user_ids),
+            training_models.TrainingRecord.course_id.in_(course_ids),
+        )
+        .order_by(
+            training_models.TrainingRecord.user_id.asc(),
+            training_models.TrainingRecord.course_id.asc(),
+            training_models.TrainingRecord.completion_date.desc(),
+        )
+        .all()
+    )
+    latest_record: Dict[Tuple[str, str], training_models.TrainingRecord] = {}
+    for record in records:
+        key = (record.user_id, record.course_id)
+        if key not in latest_record:
+            latest_record[key] = record
+
+    deferrals = (
+        db.query(training_models.TrainingDeferralRequest)
+        .filter(
+            training_models.TrainingDeferralRequest.amo_id == amo_id,
+            training_models.TrainingDeferralRequest.user_id.in_(requested_user_ids),
+            training_models.TrainingDeferralRequest.course_id.in_(course_ids),
+            training_models.TrainingDeferralRequest.status == training_models.DeferralStatus.APPROVED,
+        )
+        .order_by(
+            training_models.TrainingDeferralRequest.user_id.asc(),
+            training_models.TrainingDeferralRequest.course_id.asc(),
+            training_models.TrainingDeferralRequest.requested_new_due_date.desc(),
+        )
+        .all()
+    )
+    latest_deferral: Dict[Tuple[str, str], training_models.TrainingDeferralRequest] = {}
+    for deferral in deferrals:
+        key = (deferral.user_id, deferral.course_id)
+        if key not in latest_deferral:
+            latest_deferral[key] = deferral
+
+    upcoming_events = (
+        db.query(training_models.TrainingEvent, training_models.TrainingEventParticipant)
+        .join(
+            training_models.TrainingEventParticipant,
+            training_models.TrainingEvent.id == training_models.TrainingEventParticipant.event_id,
+        )
+        .filter(
+            training_models.TrainingEvent.amo_id == amo_id,
+            training_models.TrainingEvent.course_id.in_(course_ids),
+            training_models.TrainingEvent.starts_on >= today,
+            training_models.TrainingEvent.status == training_models.TrainingEventStatus.PLANNED,
+            training_models.TrainingEventParticipant.user_id.in_(requested_user_ids),
+            training_models.TrainingEventParticipant.status.in_(
+                [
+                    training_models.TrainingParticipantStatus.SCHEDULED,
+                    training_models.TrainingParticipantStatus.INVITED,
+                    training_models.TrainingParticipantStatus.CONFIRMED,
+                ]
+            ),
+        )
+        .order_by(
+            training_models.TrainingEventParticipant.user_id.asc(),
+            training_models.TrainingEvent.course_id.asc(),
+            training_models.TrainingEvent.starts_on.asc(),
+        )
+        .all()
+    )
+    earliest_event: Dict[Tuple[str, str], Tuple[str, date]] = {}
+    for event, participant in upcoming_events:
+        key = (participant.user_id, event.course_id)
+        if key not in earliest_event:
+            earliest_event[key] = (event.id, event.starts_on)
+
+    for user_id in requested_user_ids:
+        user_items: List[training_schemas.TrainingStatusItem] = []
+        for course in courses:
+            key = (user_id, course.id)
+            record = latest_record.get(key)
+            deferral = latest_deferral.get(key)
+            event_info = earliest_event.get(key)
+
+            last_completion_date: Optional[date] = None
+            due_date: Optional[date] = None
+            deferral_due: Optional[date] = None
+            upcoming_event_id: Optional[str] = None
+            upcoming_event_date: Optional[date] = None
+
+            if record:
+                last_completion_date = record.completion_date
+                due_date = record.valid_until or (_add_months(record.completion_date, course.frequency_months) if course.frequency_months else None)
+
+            if deferral:
+                deferral_due = deferral.requested_new_due_date
+
+            if event_info:
+                upcoming_event_id, upcoming_event_date = event_info
+
+            user_items.append(
+                _build_status_item_from_dates(
+                    course=course,
+                    last_completion_date=last_completion_date,
+                    due_date=due_date,
+                    deferral_due=deferral_due,
+                    upcoming_event_id=upcoming_event_id,
+                    upcoming_event_date=upcoming_event_date,
+                    today=today,
+                )
+            )
+        items_by_user[user_id] = user_items
+
+    return items_by_user
 
 
 def _build_status_item_from_dates(
@@ -2207,128 +2383,11 @@ def get_my_training_status(
     db: Session = Depends(get_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
-    today = date.today()
-
-    courses: List[training_models.TrainingCourse] = (
-        db.query(training_models.TrainingCourse)
-        .filter(
-            training_models.TrainingCourse.amo_id == current_user.amo_id,
-            training_models.TrainingCourse.is_active.is_(True),
-        )
-        .order_by(training_models.TrainingCourse.course_id.asc())
-        .all()
-    )
-    if not courses:
-        return []
-
-    course_ids = [c.id for c in courses]
-
-    records = (
-        db.query(training_models.TrainingRecord)
-        .filter(
-            training_models.TrainingRecord.amo_id == current_user.amo_id,
-            training_models.TrainingRecord.user_id == current_user.id,
-            training_models.TrainingRecord.course_id.in_(course_ids),
-        )
-        .order_by(
-            training_models.TrainingRecord.course_id.asc(),
-            training_models.TrainingRecord.completion_date.desc(),
-        )
-        .all()
-    )
-    latest_record: Dict[str, training_models.TrainingRecord] = {}
-    for r in records:
-        if r.course_id not in latest_record:
-            latest_record[r.course_id] = r
-
-    deferrals = (
-        db.query(training_models.TrainingDeferralRequest)
-        .filter(
-            training_models.TrainingDeferralRequest.amo_id == current_user.amo_id,
-            training_models.TrainingDeferralRequest.user_id == current_user.id,
-            training_models.TrainingDeferralRequest.course_id.in_(course_ids),
-            training_models.TrainingDeferralRequest.status == training_models.DeferralStatus.APPROVED,
-        )
-        .order_by(
-            training_models.TrainingDeferralRequest.course_id.asc(),
-            training_models.TrainingDeferralRequest.requested_new_due_date.desc(),
-        )
-        .all()
-    )
-    latest_deferral: Dict[str, training_models.TrainingDeferralRequest] = {}
-    for d in deferrals:
-        if d.course_id not in latest_deferral:
-            latest_deferral[d.course_id] = d
-
-    upcoming_events = (
-        db.query(training_models.TrainingEvent, training_models.TrainingEventParticipant)
-        .join(
-            training_models.TrainingEventParticipant,
-            training_models.TrainingEvent.id == training_models.TrainingEventParticipant.event_id,
-        )
-        .filter(
-            training_models.TrainingEvent.amo_id == current_user.amo_id,
-            training_models.TrainingEvent.course_id.in_(course_ids),
-            training_models.TrainingEvent.starts_on >= today,
-            training_models.TrainingEvent.status == training_models.TrainingEventStatus.PLANNED,
-            training_models.TrainingEventParticipant.user_id == current_user.id,
-            training_models.TrainingEventParticipant.status.in_(
-                [
-                    training_models.TrainingParticipantStatus.SCHEDULED,
-                    training_models.TrainingParticipantStatus.INVITED,
-                    training_models.TrainingParticipantStatus.CONFIRMED,
-                ]
-            ),
-        )
-        .order_by(
-            training_models.TrainingEvent.course_id.asc(),
-            training_models.TrainingEvent.starts_on.asc(),
-        )
-        .all()
-    )
-    earliest_event: Dict[str, Tuple[str, date]] = {}
-    for event, _participant in upcoming_events:
-        if event.course_id not in earliest_event:
-            earliest_event[event.course_id] = (event.id, event.starts_on)
-
-    items: List[training_schemas.TrainingStatusItem] = []
-    for course in courses:
-        record = latest_record.get(course.id)
-        deferral = latest_deferral.get(course.id)
-        event_info = earliest_event.get(course.id)
-
-        last_completion_date: Optional[date] = None
-        due_date: Optional[date] = None
-        deferral_due: Optional[date] = None
-        upcoming_event_id: Optional[str] = None
-        upcoming_event_date: Optional[date] = None
-
-        if record:
-            last_completion_date = record.completion_date
-            if record.valid_until:
-                due_date = record.valid_until
-            elif course.frequency_months:
-                due_date = _add_months(record.completion_date, course.frequency_months)
-
-        if deferral:
-            deferral_due = deferral.requested_new_due_date
-
-        if event_info:
-            upcoming_event_id, upcoming_event_date = event_info
-
-        items.append(
-            _build_status_item_from_dates(
-                course=course,
-                last_completion_date=last_completion_date,
-                due_date=due_date,
-                deferral_due=deferral_due,
-                upcoming_event_id=upcoming_event_id,
-                upcoming_event_date=upcoming_event_date,
-                today=today,
-            )
-        )
-
-    return items
+    return _compute_training_status_map_for_users(
+        db,
+        amo_id=current_user.amo_id,
+        user_ids=[current_user.id],
+    ).get(current_user.id, [])
 
 
 @router.get(
@@ -2494,6 +2553,62 @@ def get_my_required_training_status(
         )
 
     return items
+
+
+@router.get(
+    "/status/users/{user_id}",
+    response_model=List[training_schemas.TrainingStatusItem],
+    summary="Training status for a specific user (Quality / AMO admin only)",
+)
+def get_user_training_status(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    if current_user.id != user_id and not _is_training_editor(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to view another user's training status")
+
+    target = (
+        db.query(accounts_models.User.id)
+        .filter(accounts_models.User.id == user_id, accounts_models.User.amo_id == current_user.amo_id)
+        .first()
+    )
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in your AMO")
+
+    return _compute_training_status_map_for_users(db, amo_id=current_user.amo_id, user_ids=[user_id]).get(user_id, [])
+
+
+@router.post(
+    "/status/users/bulk",
+    response_model=training_schemas.TrainingStatusBulkResponse,
+    summary="Training status for multiple users in a single batched query",
+)
+def get_training_status_bulk(
+    payload: training_schemas.TrainingStatusBulkRequest,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    requested_user_ids = list(dict.fromkeys([uid for uid in payload.user_ids if uid]))
+    if len(requested_user_ids) > 200:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A maximum of 200 user ids may be requested per batch")
+    if not requested_user_ids:
+        return training_schemas.TrainingStatusBulkResponse(users={})
+
+    managed_user_ids = [
+        row[0]
+        for row in db.query(accounts_models.User.id)
+        .filter(
+            accounts_models.User.amo_id == current_user.amo_id,
+            accounts_models.User.id.in_(requested_user_ids),
+            accounts_models.User.is_system_account.is_(False),
+        )
+        .all()
+    ]
+    return training_schemas.TrainingStatusBulkResponse(
+        users=_compute_training_status_map_for_users(db, amo_id=current_user.amo_id, user_ids=managed_user_ids)
+    )
+
 
 
 # ---------------------------------------------------------------------------

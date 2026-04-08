@@ -70,6 +70,13 @@ class ManualRevision(Base):
     superseded_by_rev_id = Column(String(36), ForeignKey("manual_revisions.id", ondelete="SET NULL"), nullable=True)
     requires_authority_approval_bool = Column(Boolean, nullable=False, default=False)
     authority_approval_ref = Column(String(255), nullable=True)
+    source_filename = Column(String(255), nullable=True)
+    manual_uuid = Column(String(64), nullable=True, index=True)
+    ocr_detected_ref = Column(String(255), nullable=True)
+    ocr_detected_date = Column(Date, nullable=True)
+    ocr_verified_bool = Column(Boolean, nullable=False, default=False)
+    ocr_verified_at = Column(DateTime(timezone=True), nullable=True)
+    stamped_export_uri = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     immutable_locked = Column(Boolean, nullable=False, default=False)
 

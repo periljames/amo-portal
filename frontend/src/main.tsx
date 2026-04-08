@@ -58,6 +58,12 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       persistOptions={{
         persister: queryPersister,
         maxAge: 24 * 60 * 60 * 1000,
+        dehydrateOptions: {
+          shouldDehydrateQuery: (query) => {
+            const head = Array.isArray(query.queryKey) ? query.queryKey[0] : query.queryKey;
+            return typeof head === "string" && ["subscription", "entitlements", "qms-audit-personnel-options"].includes(head);
+          },
+        },
       }}
     >
       <RealtimeProvider>

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import or_, func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from amodb.database import get_db
 from amodb.apps.audit import services as audit_services
@@ -22,6 +22,8 @@ from amodb.apps.audit import models as audit_models
 from amodb.apps.audit import schemas as audit_schemas
 from amodb.apps.notifications import service as notification_service
 from amodb.apps.tasks import services as task_services
+from amodb.apps.tasks import models as task_models
+from amodb.apps.realtime import models as realtime_models
 from amodb.security import get_current_active_user, require_admin, require_roles
 from . import models, schemas, services
 from .personnel_import import import_personnel_rows, parse_people_sheet
@@ -976,6 +978,306 @@ def deactivate_amo_asset(
 # USER MANAGEMENT (AMO ADMIN / SUPERUSER)
 # ---------------------------------------------------------------------------
 
+ONLINE_WINDOW_SECONDS = int(os.getenv("USER_ONLINE_WINDOW_SECONDS", "300"))
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _presence_summary(row: Optional[realtime_models.PresenceState], fallback: Optional[datetime] = None) -> tuple[str, Optional[datetime]]:
+    last_seen = _as_utc(getattr(row, "last_seen_at", None)) or _as_utc(fallback)
+    if row is None or last_seen is None:
+        return "offline", last_seen
+    if getattr(row, "state", None) == realtime_models.PresenceKind.AWAY:
+        return "away", last_seen
+    if (_utc_now() - last_seen).total_seconds() <= ONLINE_WINDOW_SECONDS:
+        return "online", last_seen
+    return "offline", last_seen
+
+
+def _serialize_user(user: models.User, *, presence: Optional[realtime_models.PresenceState] = None) -> dict:
+    online_status, last_seen_at = _presence_summary(presence, fallback=user.last_login_at)
+    return {
+        "id": user.id,
+        "amo_id": user.amo_id,
+        "department_id": user.department_id,
+        "staff_code": user.staff_code,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "full_name": user.full_name,
+        "role": user.role,
+        "position_title": user.position_title,
+        "phone": user.phone,
+        "secondary_phone": user.secondary_phone,
+        "regulatory_authority": user.regulatory_authority,
+        "licence_number": user.licence_number,
+        "licence_state_or_country": user.licence_state_or_country,
+        "licence_expires_on": user.licence_expires_on,
+        "is_active": user.is_active,
+        "is_superuser": user.is_superuser,
+        "is_amo_admin": user.is_amo_admin,
+        "is_auditor": user.is_auditor,
+        "must_change_password": user.must_change_password,
+        "password_changed_at": user.password_changed_at,
+        "token_revoked_at": user.token_revoked_at,
+        "last_login_at": user.last_login_at,
+        "last_login_ip": user.last_login_ip,
+        "last_seen_at": last_seen_at,
+        "online_status": online_status,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+    }
+
+
+def _build_user_summary_rows(db: Session, users: list[models.User], *, amo_id: Optional[str] = None) -> list[dict]:
+    if not users:
+        return []
+    user_ids = [str(user.id) for user in users]
+    target_amo_id = amo_id or str(users[0].amo_id)
+    presence_rows = db.query(realtime_models.PresenceState).filter(
+        realtime_models.PresenceState.amo_id == target_amo_id,
+        realtime_models.PresenceState.user_id.in_(user_ids),
+    ).all()
+    presence_map = {str(row.user_id): row for row in presence_rows}
+
+    group_count_rows = db.query(
+        models.UserGroupMember.user_id,
+        func.count(models.UserGroupMember.id),
+    ).join(
+        models.UserGroup, models.UserGroup.id == models.UserGroupMember.group_id
+    ).filter(
+        models.UserGroup.amo_id == target_amo_id,
+        models.UserGroup.is_active.is_(True),
+        models.UserGroupMember.user_id.in_(user_ids),
+    ).group_by(models.UserGroupMember.user_id).all()
+    group_count_map = {str(user_id): int(count or 0) for user_id, count in group_count_rows}
+
+    rows: list[dict] = []
+    for user in users:
+        online_status, last_seen_at = _presence_summary(presence_map.get(str(user.id)), fallback=user.last_login_at)
+        rows.append({
+            "id": user.id,
+            "amo_id": user.amo_id,
+            "department_id": user.department_id,
+            "staff_code": user.staff_code,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role,
+            "position_title": user.position_title,
+            "is_active": user.is_active,
+            "online_status": online_status,
+            "last_seen_at": last_seen_at,
+            "groups_count": group_count_map.get(str(user.id), 0),
+        })
+    return rows
+
+
+def _build_user_group_payloads(db: Session, *, amo_id: str, user_id: Optional[str] = None) -> list[schemas.UserGroupRead]:
+    group_query = db.query(models.UserGroup).filter(models.UserGroup.amo_id == amo_id)
+    if user_id:
+        group_query = group_query.join(models.UserGroupMember, models.UserGroupMember.group_id == models.UserGroup.id).filter(models.UserGroupMember.user_id == user_id)
+    groups = group_query.order_by(models.UserGroup.is_system_managed.desc(), models.UserGroup.name.asc()).all()
+    if not groups:
+        return []
+    group_ids = [group.id for group in groups]
+    memberships = db.query(models.UserGroupMember).filter(models.UserGroupMember.group_id.in_(group_ids)).all()
+    membership_map: dict[str, list[models.UserGroupMember]] = {}
+    for membership in memberships:
+        membership_map.setdefault(str(membership.group_id), []).append(membership)
+    payloads: list[schemas.UserGroupRead] = []
+    for group in groups:
+        members = membership_map.get(str(group.id), [])
+        payloads.append(
+            schemas.UserGroupRead(
+                id=str(group.id),
+                amo_id=str(group.amo_id),
+                owner_user_id=str(group.owner_user_id) if group.owner_user_id else None,
+                code=group.code,
+                name=group.name,
+                description=group.description,
+                group_type=group.group_type,
+                visibility=group.visibility,
+                is_system_managed=bool(group.is_system_managed),
+                is_active=bool(group.is_active),
+                member_count=len(members),
+                members=[
+                    schemas.UserGroupMemberRead(
+                        user_id=str(member.user_id),
+                        full_name=member.user.full_name,
+                        email=member.user.email,
+                        role=member.user.role,
+                        member_role=member.member_role,
+                        added_at=member.added_at,
+                    )
+                    for member in sorted(members, key=lambda item: (item.user.full_name or "", str(item.user_id)))
+                ],
+                created_at=group.created_at,
+                updated_at=group.updated_at,
+            )
+        )
+    return payloads
+
+
+def _group_edit_scope_or_403(group: models.UserGroup, current_user: models.User) -> None:
+    if current_user.is_superuser or current_user.is_amo_admin:
+        return
+    if str(group.owner_user_id or "") == str(current_user.id):
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot manage this group.")
+
+
+def _target_amo_for_group(payload_amo_id: Optional[str], current_user: models.User) -> str:
+    if current_user.is_superuser and payload_amo_id:
+        return payload_amo_id
+    return str(current_user.amo_id)
+
+
+def _slugify_group_code(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", (value or "").strip()).strip("_").upper()
+    return cleaned[:64] or f"GROUP_{uuid4().hex[:8].upper()}"
+
+
+def _build_user_workspace(db: Session, *, current_user: models.User, user: models.User) -> schemas.UserWorkspaceRead:
+    target_amo_id = str(user.amo_id)
+    presence = db.query(realtime_models.PresenceState).filter(
+        realtime_models.PresenceState.amo_id == target_amo_id,
+        realtime_models.PresenceState.user_id == str(user.id),
+    ).first()
+    user_payload = schemas.UserRead(**_serialize_user(user, presence=presence))
+
+    tasks = db.query(task_models.Task).filter(
+        task_models.Task.amo_id == target_amo_id,
+        task_models.Task.owner_user_id == str(user.id),
+    ).order_by(task_models.Task.due_at.asc().nullslast(), task_models.Task.updated_at.desc()).limit(200).all()
+
+    authorisations = db.query(models.UserAuthorisation).join(
+        models.AuthorisationType, models.AuthorisationType.id == models.UserAuthorisation.authorisation_type_id
+    ).filter(models.UserAuthorisation.user_id == str(user.id)).order_by(models.UserAuthorisation.effective_from.desc()).all()
+
+    activity_rows = audit_services.list_audit_events(
+        db, amo_id=target_amo_id, limit=120, offset=0
+    )
+    filtered_activity = [
+        row for row in activity_rows
+        if getattr(row, "actor_user_id", None) == str(user.id) or (getattr(row, "entity_type", "") == "accounts.user" and getattr(row, "entity_id", None) == str(user.id))
+    ][:120]
+
+    login_records = db.query(models.AccountSecurityEvent).filter(
+        models.AccountSecurityEvent.amo_id == target_amo_id,
+        models.AccountSecurityEvent.user_id == str(user.id),
+    ).order_by(models.AccountSecurityEvent.created_at.desc()).limit(80).all()
+
+    groups = _build_user_group_payloads(db, amo_id=target_amo_id, user_id=str(user.id))
+
+    now = _utc_now()
+    thirty_days_ago = now - timedelta(days=30)
+    completed_30d = sum(1 for task in tasks if task.status == task_models.TaskStatus.DONE and task.closed_at and _as_utc(task.closed_at) and _as_utc(task.closed_at) >= thirty_days_ago)
+    login_failures_30d = db.query(func.count(models.AccountSecurityEvent.id)).filter(
+        models.AccountSecurityEvent.amo_id == target_amo_id,
+        models.AccountSecurityEvent.user_id == str(user.id),
+        models.AccountSecurityEvent.event_type == "LOGIN_FAILED",
+        models.AccountSecurityEvent.created_at >= thirty_days_ago,
+    ).scalar() or 0
+    activity_events_30d = sum(1 for row in filtered_activity if _as_utc(getattr(row, "occurred_at", None)) and _as_utc(getattr(row, "occurred_at", None)) >= thirty_days_ago)
+
+    permissions: list[schemas.UserPermissionRowRead] = [
+        schemas.UserPermissionRowRead(
+            category="Account",
+            subject="Portal role",
+            permission_level=str(user.role.value if hasattr(user.role, "value") else user.role),
+            status="Active" if user.is_active else "Inactive",
+            notes=f"Department: {user.department_id or 'unassigned'}",
+        ),
+        schemas.UserPermissionRowRead(
+            category="Account",
+            subject="AMO administration",
+            permission_level="Administrator" if user.is_amo_admin else "Standard",
+            status="Active" if user.is_amo_admin else "Not granted",
+            notes="Controls AMO-wide administration screens.",
+        ),
+        schemas.UserPermissionRowRead(
+            category="Account",
+            subject="Auditor scope",
+            permission_level="Auditor" if user.is_auditor else "Operational",
+            status="Active" if user.is_auditor else "Not granted",
+            notes="Used for audit and assurance workflows.",
+        ),
+    ]
+    for auth in authorisations:
+        atype = auth.authorisation_type
+        permissions.append(
+            schemas.UserPermissionRowRead(
+                category="Authorisation",
+                subject=atype.name,
+                permission_level=atype.maintenance_scope.value if hasattr(atype.maintenance_scope, "value") else str(atype.maintenance_scope),
+                status="Valid" if auth.is_currently_valid() else "Expired/Revoked",
+                effective_from=auth.effective_from,
+                expires_at=auth.expires_at,
+                notes=auth.scope_text or atype.description,
+            )
+        )
+
+    return schemas.UserWorkspaceRead(
+        user=user_payload,
+        metrics=schemas.UserKpiRead(
+            open_tasks=sum(1 for task in tasks if task.status in {task_models.TaskStatus.OPEN, task_models.TaskStatus.IN_PROGRESS}),
+            overdue_tasks=sum(1 for task in tasks if task.due_at and _as_utc(task.due_at) and _as_utc(task.due_at) < now and task.status != task_models.TaskStatus.DONE),
+            completed_tasks_30d=completed_30d,
+            active_authorisations=sum(1 for auth in authorisations if auth.is_currently_valid()),
+            activity_events_30d=activity_events_30d,
+            login_failures_30d=int(login_failures_30d),
+            groups_count=len(groups),
+        ),
+        tasks=[
+            schemas.UserTaskSummaryRead(
+                id=str(task.id),
+                title=task.title,
+                status=task.status.value if hasattr(task.status, "value") else str(task.status),
+                priority=task.priority,
+                due_at=task.due_at,
+                escalated_at=task.escalated_at,
+                entity_type=task.entity_type,
+                entity_id=task.entity_id,
+                updated_at=task.updated_at,
+            )
+            for task in tasks
+        ],
+        permissions=permissions,
+        activity=[
+            schemas.UserActivityRowRead(
+                id=str(row.id),
+                happened_at=row.occurred_at or row.created_at,
+                action=row.action,
+                entity_type=row.entity_type,
+                entity_id=row.entity_id,
+                note=((row.metadata_json or {}).get("module") if hasattr(row, "metadata_json") and isinstance(row.metadata_json, dict) else None),
+            )
+            for row in filtered_activity
+        ],
+        login_records=[
+            schemas.UserLoginRecordRead(
+                id=str(row.id),
+                event_type=row.event_type,
+                description=row.description,
+                ip_address=row.ip_address,
+                user_agent=row.user_agent,
+                created_at=row.created_at,
+            )
+            for row in login_records
+        ],
+        groups=groups,
+    )
+
 
 @router.post(
     "/users",
@@ -1053,21 +1355,40 @@ def list_users_admin(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    """
-    List users.
+    q = db.query(models.User).options(
+        load_only(
+            models.User.id,
+            models.User.amo_id,
+            models.User.department_id,
+            models.User.staff_code,
+            models.User.email,
+            models.User.first_name,
+            models.User.last_name,
+            models.User.full_name,
+            models.User.role,
+            models.User.position_title,
+            models.User.phone,
+            models.User.secondary_phone,
+            models.User.regulatory_authority,
+            models.User.licence_number,
+            models.User.licence_state_or_country,
+            models.User.licence_expires_on,
+            models.User.is_active,
+            models.User.is_superuser,
+            models.User.is_amo_admin,
+            models.User.is_auditor,
+            models.User.must_change_password,
+            models.User.password_changed_at,
+            models.User.token_revoked_at,
+            models.User.last_login_at,
+            models.User.last_login_ip,
+            models.User.created_at,
+            models.User.updated_at,
+        )
+    )
 
-    - Normal AMO admins: see only users in their own AMO.
-    - SUPERUSER: can optionally pass `amo_id` to list users for that AMO;
-      if omitted, sees users for their own (ROOT/system) AMO.
-    - Supports skip/limit/search for frontend paging and filtering.
-    """
-    q = db.query(models.User)
-
-    if current_user.is_superuser:
-        if amo_id:
-            q = q.filter(models.User.amo_id == amo_id)
-    else:
-        q = q.filter(models.User.amo_id == current_user.amo_id)
+    target_amo_id = amo_id if current_user.is_superuser and amo_id else current_user.amo_id
+    q = q.filter(models.User.amo_id == target_amo_id)
 
     if search and search.strip():
         s = f"%{search.strip()}%"
@@ -1079,8 +1400,58 @@ def list_users_admin(
             )
         )
 
-    q = q.order_by(models.User.full_name.asc()).offset(skip).limit(limit)
-    return q.all()
+    users = q.order_by(models.User.full_name.asc()).offset(skip).limit(limit).all()
+    presence_rows = db.query(realtime_models.PresenceState).filter(
+        realtime_models.PresenceState.amo_id == target_amo_id,
+        realtime_models.PresenceState.user_id.in_([str(user.id) for user in users]) if users else False,
+    ).all() if users else []
+    presence_map = {str(row.user_id): row for row in presence_rows}
+    return [schemas.UserRead(**_serialize_user(user, presence=presence_map.get(str(user.id)))) for user in users]
+
+
+@router.get(
+    "/users/summary",
+    response_model=List[schemas.UserSummaryRead],
+    summary="List lightweight user rows for selectors and large tables",
+)
+def list_user_summaries_admin(
+    amo_id: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 200,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    q = db.query(models.User).options(
+        load_only(
+            models.User.id,
+            models.User.amo_id,
+            models.User.department_id,
+            models.User.staff_code,
+            models.User.email,
+            models.User.full_name,
+            models.User.role,
+            models.User.position_title,
+            models.User.is_active,
+            models.User.last_login_at,
+        )
+    )
+
+    target_amo_id = amo_id if current_user.is_superuser and amo_id else current_user.amo_id
+    q = q.filter(models.User.amo_id == target_amo_id)
+
+    if search and search.strip():
+        s = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.User.full_name.ilike(s),
+                models.User.email.ilike(s),
+                models.User.staff_code.ilike(s),
+            )
+        )
+
+    users = q.order_by(models.User.full_name.asc()).offset(skip).limit(limit).all()
+    return [schemas.UserSummaryRead(**row) for row in _build_user_summary_rows(db, users, amo_id=str(target_amo_id))]
 
 
 @router.get(
@@ -1093,7 +1464,26 @@ def get_user_admin(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    return _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    presence = db.query(realtime_models.PresenceState).filter(
+        realtime_models.PresenceState.amo_id == user.amo_id,
+        realtime_models.PresenceState.user_id == str(user.id),
+    ).first()
+    return schemas.UserRead(**_serialize_user(user, presence=presence))
+
+
+@router.get(
+    "/users/{user_id}/workspace",
+    response_model=schemas.UserWorkspaceRead,
+    summary="Get single-page user workspace data for profile, tasks, permissions, activity, login history, and groups",
+)
+def get_user_workspace_admin(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
+    return _build_user_workspace(db, current_user=current_user, user=user)
 
 
 @router.put(
@@ -1189,6 +1579,215 @@ def deactivate_user_admin(
         action="DEACTIVATED",
         after={"is_active": False},
         metadata={"module": "accounts"},
+    )
+    return
+
+
+@router.get(
+    "/groups",
+    response_model=List[schemas.UserGroupRead],
+    summary="List user groups for the current AMO",
+)
+def list_user_groups(
+    amo_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    target_amo_id = amo_id if current_user.is_superuser and amo_id else current_user.amo_id
+    groups = _build_user_group_payloads(db, amo_id=str(target_amo_id), user_id=user_id)
+    if include_inactive:
+        return groups
+    return [group for group in groups if group.is_active]
+
+
+@router.post(
+    "/groups",
+    response_model=schemas.UserGroupRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a system, department, or custom group",
+)
+def create_user_group(
+    payload: schemas.UserGroupCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    target_amo_id = _target_amo_for_group(payload.amo_id, current_user)
+    owner_user_id = payload.owner_user_id if current_user.is_superuser and payload.owner_user_id else str(current_user.id)
+    is_system_group = bool(payload.is_system_managed)
+    if is_system_group and not (current_user.is_superuser or current_user.is_amo_admin):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can create system-managed groups.")
+
+    code = _slugify_group_code(payload.code or payload.name)
+    exists = db.query(models.UserGroup).filter(models.UserGroup.amo_id == target_amo_id, models.UserGroup.code == code).first()
+    if exists:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A group with this code already exists in the AMO.")
+
+    group = models.UserGroup(
+        amo_id=target_amo_id,
+        owner_user_id=owner_user_id,
+        code=code,
+        name=payload.name.strip(),
+        description=(payload.description or "").strip() or None,
+        group_type=payload.group_type,
+        visibility=payload.visibility,
+        is_system_managed=is_system_group,
+        is_active=True,
+    )
+    db.add(group)
+    db.flush()
+
+    seed_user_ids = {str(user_id) for user_id in payload.user_ids if str(user_id).strip()}
+    seed_user_ids.add(str(owner_user_id))
+    users = db.query(models.User).filter(models.User.amo_id == target_amo_id, models.User.id.in_(list(seed_user_ids))).all()
+    users_by_id = {str(user.id): user for user in users}
+    for member_user_id in seed_user_ids:
+        if member_user_id not in users_by_id:
+            continue
+        db.add(models.UserGroupMember(
+            group_id=group.id,
+            user_id=member_user_id,
+            added_by_user_id=str(current_user.id),
+            member_role="owner" if member_user_id == str(owner_user_id) else "member",
+        ))
+
+    db.commit()
+    audit_services.log_event(
+        db,
+        amo_id=target_amo_id,
+        actor_user_id=str(current_user.id),
+        entity_type="accounts.user_group",
+        entity_id=str(group.id),
+        action="CREATED",
+        after={"name": group.name, "group_type": group.group_type.value if hasattr(group.group_type, 'value') else str(group.group_type)},
+        metadata={"module": "accounts"},
+    )
+    groups = _build_user_group_payloads(db, amo_id=str(target_amo_id))
+    for item in groups:
+        if item.id == str(group.id):
+            return item
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found after create.")
+
+
+@router.put(
+    "/groups/{group_id}",
+    response_model=schemas.UserGroupRead,
+    summary="Update a group",
+)
+def update_user_group(
+    group_id: str,
+    payload: schemas.UserGroupUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    group = db.query(models.UserGroup).filter(models.UserGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    _group_edit_scope_or_403(group, current_user)
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(group, key, value)
+    db.add(group)
+    db.commit()
+    audit_services.log_event(
+        db, amo_id=str(group.amo_id), actor_user_id=str(current_user.id), entity_type="accounts.user_group", entity_id=str(group.id), action="UPDATED", after=data, metadata={"module": "accounts"}
+    )
+    groups = _build_user_group_payloads(db, amo_id=str(group.amo_id))
+    for item in groups:
+        if item.id == str(group.id):
+            return item
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found after update.")
+
+
+@router.post(
+    "/groups/{group_id}/members",
+    response_model=schemas.UserGroupRead,
+    summary="Add or update a member in a group",
+)
+def upsert_user_group_member(
+    group_id: str,
+    payload: schemas.UserGroupMemberUpsert,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    group = db.query(models.UserGroup).filter(models.UserGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    _group_edit_scope_or_403(group, current_user)
+    user = db.query(models.User).filter(models.User.id == payload.user_id, models.User.amo_id == group.amo_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in the same AMO.")
+    member = db.query(models.UserGroupMember).filter(models.UserGroupMember.group_id == group.id, models.UserGroupMember.user_id == payload.user_id).first()
+    if not member:
+        member = models.UserGroupMember(group_id=group.id, user_id=payload.user_id, added_by_user_id=str(current_user.id), member_role=payload.member_role)
+        db.add(member)
+    else:
+        member.member_role = payload.member_role
+        member.added_by_user_id = str(current_user.id)
+        db.add(member)
+    db.commit()
+    audit_services.log_event(
+        db, amo_id=str(group.amo_id), actor_user_id=str(current_user.id), entity_type="accounts.user_group", entity_id=str(group.id), action="MEMBER_UPSERTED", after={"user_id": payload.user_id, "member_role": payload.member_role}, metadata={"module": "accounts"}
+    )
+    groups = _build_user_group_payloads(db, amo_id=str(group.amo_id))
+    for item in groups:
+        if item.id == str(group.id):
+            return item
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found after member update.")
+
+
+@router.delete(
+    "/groups/{group_id}/members/{user_id}",
+    response_model=schemas.UserGroupRead,
+    summary="Remove a member from a group",
+)
+def remove_user_group_member(
+    group_id: str,
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    group = db.query(models.UserGroup).filter(models.UserGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    _group_edit_scope_or_403(group, current_user)
+    member = db.query(models.UserGroupMember).filter(models.UserGroupMember.group_id == group.id, models.UserGroupMember.user_id == user_id).first()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group member not found.")
+    if str(group.owner_user_id or "") == str(user_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use group update to change ownership before removing the owner.")
+    db.delete(member)
+    db.commit()
+    audit_services.log_event(
+        db, amo_id=str(group.amo_id), actor_user_id=str(current_user.id), entity_type="accounts.user_group", entity_id=str(group.id), action="MEMBER_REMOVED", after={"user_id": user_id}, metadata={"module": "accounts"}
+    )
+    groups = _build_user_group_payloads(db, amo_id=str(group.amo_id))
+    for item in groups:
+        if item.id == str(group.id):
+            return item
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found after member removal.")
+
+
+@router.delete(
+    "/groups/{group_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Deactivate a group",
+)
+def deactivate_user_group(
+    group_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    group = db.query(models.UserGroup).filter(models.UserGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found.")
+    _group_edit_scope_or_403(group, current_user)
+    group.is_active = False
+    db.add(group)
+    db.commit()
+    audit_services.log_event(
+        db, amo_id=str(group.amo_id), actor_user_id=str(current_user.id), entity_type="accounts.user_group", entity_id=str(group.id), action="DEACTIVATED", after={"is_active": False}, metadata={"module": "accounts"}
     )
     return
 

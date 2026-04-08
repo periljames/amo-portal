@@ -75,8 +75,47 @@ export type ManualReadPayload = {
   revision_id: string;
   status: string;
   not_published: boolean;
+  manual?: { id: string; code: string; title: string; manual_type: string };
   sections: Array<{ id: string; heading: string; anchor_slug: string; level: number }>;
   blocks: Array<{ section_id: string; html: string; text: string; change_hash: string }>;
+};
+
+export type ManualFeaturedEntry = {
+  manual_id: string;
+  code: string;
+  title: string;
+  manual_type: string;
+  current_revision: string | null;
+  open_count: number;
+};
+
+export type ManualDocxPreview = {
+  filename: string;
+  heading: string;
+  paragraph_count: number;
+  sample: string[];
+  outline: string[];
+  metadata: {
+    part_number?: string | null;
+    manual_type?: string | null;
+    title?: string | null;
+    revision_number?: string | null;
+    issue_number?: string | null;
+    effective_date?: string | null;
+  };
+  excerpt: string;
+};
+
+export type ManualOCRVerifyPayload = {
+  revision_id: string;
+  detected_ref?: string | null;
+  detected_date?: string | null;
+  typed_ref?: string | null;
+  typed_date?: string | null;
+  ref_match: boolean;
+  date_match: boolean;
+  verified: boolean;
+  text_excerpt: string;
 };
 
 export type ManualWorkflowPayload = {
@@ -145,6 +184,10 @@ export async function listRevisions(tenantSlug: string, manualId: string): Promi
 
 export async function getMasterList(tenantSlug: string) {
   return request<any[]>(`/manuals/t/${tenantSlug}/master-list`);
+}
+
+export async function listFeaturedManuals(tenantSlug: string) {
+  return request<ManualFeaturedEntry[]>(`/manuals/t/${tenantSlug}/featured`);
 }
 
 export async function getRevisionRead(tenantSlug: string, manualId: string, revId: string) {
@@ -229,6 +272,7 @@ export async function uploadDocxRevision(
     title: string;
     rev_number: string;
     issue_number: string;
+    effective_date?: string;
     manual_type?: string;
     owner_role?: string;
     change_log?: string;
@@ -240,6 +284,7 @@ export async function uploadDocxRevision(
   body.append("title", payload.title);
   body.append("rev_number", payload.rev_number);
   if (payload.issue_number) body.append("issue_number", payload.issue_number);
+  if (payload.effective_date) body.append("effective_date", payload.effective_date);
   if (payload.manual_type) body.append("manual_type", payload.manual_type);
   if (payload.owner_role) body.append("owner_role", payload.owner_role);
   if (payload.change_log) body.append("change_log", payload.change_log);
@@ -258,66 +303,29 @@ export async function uploadDocxRevision(
 export async function previewDocxUpload(tenantSlug: string, file: File) {
   const body = new FormData();
   body.append("file", file);
-
-  return apiPostForm<{
-    filename: string;
-    heading: string;
-    paragraph_count: number;
-    sample: string[];
-  }>(`/manuals/t/${tenantSlug}/upload-docx/preview`, body, { headers: authHeaders() });
+  return apiPostForm<ManualDocxPreview>(`/manuals/t/${tenantSlug}/upload-docx/preview`, body, { headers: authHeaders() });
 }
 
-
-export type PublicationSelectorItem = {
-  manual_id: string;
-  code: string;
-  title: string;
-  manual_type: string;
-  current_revision: string | null;
-  publication_date: string | null;
-  model: string | null;
-};
-
-export type PublicationChangeRequestPayload = {
-  requested_by_first_name: string;
-  requested_by_last_name: string;
-  email: string;
-  phone: string;
-  manual_id: string;
-  part_number: string;
-  manual_type: string;
-  title: string;
-  model?: string | null;
-  publication_date?: string | null;
-  revision_number: string;
-  ata_chapter?: string | null;
-  section?: string | null;
-  sub_section?: string | null;
-  figure?: string | null;
-  page_number?: string | null;
-  art_figure?: string | null;
-  other?: string | null;
-  other_publications_affected?: string | null;
-  suggestion_for_change: string;
-  request_updates?: boolean;
-};
-
-export async function searchPublicationSelector(
+export async function verifyOcrLetter(
   tenantSlug: string,
-  params?: { q?: string; model?: string; manual_type?: string }
+  manualId: string,
+  revId: string,
+  payload: { file: File; typed_ref?: string; typed_date?: string },
 ) {
-  const qs = new URLSearchParams();
-  if (params?.q) qs.set("q", params.q);
-  if (params?.model) qs.set("model", params.model);
-  if (params?.manual_type) qs.set("manual_type", params.manual_type);
-  return request<PublicationSelectorItem[]>(`/manuals/t/${tenantSlug}/publication-selector${qs.toString() ? `?${qs.toString()}` : ""}`);
+  const body = new FormData();
+  body.append("file", payload.file);
+  if (payload.typed_ref) body.append("typed_ref", payload.typed_ref);
+  if (payload.typed_date) body.append("typed_date", payload.typed_date);
+  return apiPostForm<ManualOCRVerifyPayload>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/ocr/verify`, body, { headers: authHeaders() });
 }
 
-export async function submitPublicationChangeRequest(
+export async function createStampedOverlay(
   tenantSlug: string,
-  payload: PublicationChangeRequestPayload,
+  manualId: string,
+  revId: string,
+  payload: { signer_name: string; signer_role: string; stamp_label: string; controlled_bool?: boolean },
 ) {
-  return request<{ id: string; status: string; message: string }>(`/manuals/t/${tenantSlug}/publication-change-requests`, {
+  return request<{ revision_id: string; export_id: string; storage_uri: string; sha256: string }>(`/manuals/t/${tenantSlug}/${manualId}/rev/${revId}/stamp-overlay`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

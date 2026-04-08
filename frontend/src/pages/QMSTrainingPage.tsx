@@ -2,17 +2,17 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
-import type { AdminUserRead } from "../services/adminUsers";
-import { listAdminUsers } from "../services/adminUsers";
+import type { AdminUserSummaryRead } from "../services/adminUsers";
+import { listAdminUserSummaries } from "../services/adminUsers";
 import { getContext } from "../services/auth";
-import { getUserTrainingStatus, listTrainingCourses } from "../services/training";
+import { getBulkTrainingStatusForUsers, listTrainingCourses } from "../services/training";
 import type { TrainingCourseRead, TrainingStatusItem } from "../types/training";
 import "../styles/training.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 type TrainingRow = {
-  user: AdminUserRead;
+  user: AdminUserSummaryRead;
   item: TrainingStatusItem;
 };
 
@@ -102,16 +102,13 @@ const QMSTrainingPage: React.FC = () => {
     try {
       const [courseList, users] = await Promise.all([
         listTrainingCourses({ include_inactive: false }),
-        listAdminUsers({ limit: 20 }),
+        listAdminUserSummaries({ limit: 50 }),
       ]);
-      const statusResults = await Promise.allSettled(
-        users.map((user) => getUserTrainingStatus(user.id))
-      );
+      const statusMap = await getBulkTrainingStatusForUsers(users.map((user) => user.id));
       const rows: TrainingRow[] = [];
-      users.forEach((user, index) => {
-        const res = statusResults[index];
-        if (res.status !== "fulfilled") return;
-        res.value.forEach((item) => rows.push({ user, item }));
+      users.forEach((user) => {
+        const items = statusMap.users[user.id] || [];
+        items.forEach((item) => rows.push({ user, item }));
       });
       setCourses(courseList);
       setTrainingRows(rows);

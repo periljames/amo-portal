@@ -1,132 +1,105 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Tab, TabGroup, TabList, TabPanel, TabPanels } from "@tremor/react";
-import { FileSearch, FileText, Send, SplitSquareVertical } from "lucide-react";
+import { FileSearch, FolderOpen, GitCompareArrows, UploadCloud, Workflow } from "lucide-react";
 
 import {
   getMasterList,
-  getRevisionRead,
-  getRevisionWorkflow,
+  listFeaturedManuals,
   listManuals,
-  listRevisions,
-  searchPublicationSelector,
-  submitPublicationChangeRequest,
+  previewDocxUpload,
   subscribeManualsUpdated,
-  type ManualRevision,
+  uploadDocxRevision,
+  type ManualDocxPreview,
+  type ManualFeaturedEntry,
   type ManualSummary,
-  type PublicationSelectorItem,
 } from "../../services/manuals";
 import { getCachedUser } from "../../services/auth";
 import { useManualRouteContext } from "./context";
 import ManualsPageLayout from "./ManualsPageLayout";
-import DocumentReader from "./DocumentReader";
 import "./manualsDashboard.css";
 
-type MasterRow = { manual_id: string; pending_ack_count: number; current_status: string; current_revision: string | null };
-type ReaderState = { mode: "section" | "continuous"; activeSectionId: string; scrollTop: number };
+type MasterRow = {
+  manual_id: string;
+  code: string;
+  title: string;
+  current_revision: string | null;
+  current_status: string;
+  pending_ack_count: number;
+};
 
-type PcrFormState = {
-  requestedByFirstName: string;
-  requestedByLastName: string;
-  email: string;
-  phone: string;
-  manualId: string;
+export function resolveNextRevisionId(previousRevisionId: string, revisions: Array<{ id: string }>): string {
+  if (!revisions.length) return "";
+  if (previousRevisionId && revisions.some((row) => row.id === previousRevisionId)) return previousRevisionId;
+  return revisions[0].id;
+}
+
+type UploadFormState = {
   partNumber: string;
   manualType: string;
   title: string;
-  model: string;
-  publicationDate: string;
   revisionNumber: string;
-  ataChapter: string;
-  section: string;
-  subSection: string;
-  figure: string;
-  pageNumber: string;
-  artFigure: string;
-  other: string;
-  otherPublicationsAffected: string;
-  suggestionForChange: string;
-  requestUpdates: boolean;
+  issueNumber: string;
+  effectiveDate: string;
+  ownerRole: string;
+  changeLog: string;
 };
 
-function splitName(fullName: string | undefined | null) {
-  const parts = (fullName || "").trim().split(/\s+/).filter(Boolean);
-  return {
-    first: parts[0] || "",
-    last: parts.length > 1 ? parts.slice(1).join(" ") : "",
-  };
+const EMPTY_FORM: UploadFormState = {
+  partNumber: "",
+  manualType: "GENERAL",
+  title: "",
+  revisionNumber: "00",
+  issueNumber: "00",
+  effectiveDate: "",
+  ownerRole: "Library",
+  changeLog: "",
+};
+
+function canWriteManuals() {
+  const user = getCachedUser();
+  const role = String((user as any)?.role || "");
+  return !!user?.is_superuser || !!user?.is_amo_admin || ["QUALITY_MANAGER", "QUALITY_INSPECTOR", "DOCUMENT_CONTROL_OFFICER"].includes(role);
 }
 
-
-export function resolveNextRevisionId<T extends { id: string }>(previousRevisionId: string, rows: T[]): string {
-  if (previousRevisionId && rows.some((row) => row.id === previousRevisionId)) return previousRevisionId;
-  return rows[0]?.id || "";
-}
-
-function inferAtaChapter(label?: string | null): string {
-  const match = String(label || "").match(/(\d{2})/);
-  return match ? match[1] : "";
+function mergeRows(manuals: ManualSummary[], masterRows: MasterRow[]) {
+  const byId = new Map(masterRows.map((row) => [row.manual_id, row]));
+  return manuals.map((manual) => {
+    const meta = byId.get(manual.id);
+    return {
+      manual_id: manual.id,
+      code: manual.code,
+      title: manual.title,
+      manual_type: manual.manual_type,
+      current_revision: meta?.current_revision || null,
+      current_status: meta?.current_status || manual.status,
+      pending_ack_count: meta?.pending_ack_count || 0,
+    };
+  });
 }
 
 export default function ManualsDashboardPage() {
   const navigate = useNavigate();
   const { tenant, basePath } = useManualRouteContext();
-  const user = getCachedUser();
-  const requestor = splitName((user as any)?.full_name || (user as any)?.name);
+  const canWrite = canWriteManuals();
 
-  const [activeTab, setActiveTab] = useState(0);
   const [manuals, setManuals] = useState<ManualSummary[]>([]);
   const [masterRows, setMasterRows] = useState<MasterRow[]>([]);
-  const [revisions, setRevisions] = useState<ManualRevision[]>([]);
-  const [activeManualId, setActiveManualId] = useState<string>("");
-  const [activeRevisionId, setActiveRevisionId] = useState<string>("");
-  const [readPayload, setReadPayload] = useState<any | null>(null);
-  const [workflow, setWorkflow] = useState<any | null>(null);
-  const [librarySearch, setLibrarySearch] = useState("");
-  const [selectorQuery, setSelectorQuery] = useState("");
-  const [selectorItems, setSelectorItems] = useState<PublicationSelectorItem[]>([]);
-  const [selectorOpen, setSelectorOpen] = useState(false);
-  const [selectorLoading, setSelectorLoading] = useState(false);
-  const [submitState, setSubmitState] = useState<"idle" | "submitting" | "done" | "error">("idle");
-  const [submitMessage, setSubmitMessage] = useState("");
-  const [readerState, setReaderState] = useState<ReaderState>({ mode: "section", activeSectionId: "", scrollTop: 0 });
-  const [pcrForm, setPcrForm] = useState<PcrFormState>({
-    requestedByFirstName: requestor.first,
-    requestedByLastName: requestor.last,
-    email: (user as any)?.email || "",
-    phone: (user as any)?.phone || (user as any)?.secondary_phone || "",
-    manualId: "",
-    partNumber: "",
-    manualType: "",
-    title: "",
-    model: "",
-    publicationDate: "",
-    revisionNumber: "",
-    ataChapter: "",
-    section: "",
-    subSection: "",
-    figure: "",
-    pageNumber: "",
-    artFigure: "",
-    other: "",
-    otherPublicationsAffected: "",
-    suggestionForChange: "",
-    requestUpdates: true,
-  });
+  const [featured, setFeatured] = useState<ManualFeaturedEntry[]>([]);
+  const [query, setQuery] = useState("");
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadForm, setUploadForm] = useState<UploadFormState>(EMPTY_FORM);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<ManualDocxPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
 
   const refresh = () => {
     if (!tenant) return;
-    listManuals(tenant)
-      .then((data) => {
-        setManuals(data);
-        const first = data[0]?.id || "";
-        setActiveManualId((prev) => prev || first);
-      })
-      .catch(() => setManuals([]));
-
-    getMasterList(tenant)
-      .then((rows) => setMasterRows(rows as MasterRow[]))
-      .catch(() => setMasterRows([]));
+    listManuals(tenant).then(setManuals).catch(() => setManuals([]));
+    getMasterList(tenant).then((rows) => setMasterRows(rows as MasterRow[])).catch(() => setMasterRows([]));
+    listFeaturedManuals(tenant).then(setFeatured).catch(() => setFeatured([]));
   };
 
   useEffect(() => {
@@ -141,355 +114,367 @@ export default function ManualsDashboardPage() {
     return unsubscribe;
   }, [tenant]);
 
-  useEffect(() => {
-    if (!tenant || !activeManualId) {
-      setRevisions([]);
-      return;
-    }
-    listRevisions(tenant, activeManualId)
-      .then((rows) => {
-        setRevisions(rows);
-        setActiveRevisionId((prev) => resolveNextRevisionId(prev, rows));
-      })
-      .catch(() => setRevisions([]));
-  }, [tenant, activeManualId]);
+  const rows = useMemo(() => mergeRows(manuals, masterRows), [manuals, masterRows]);
+  const filteredRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return rows;
+    return rows.filter((row) =>
+      [row.code, row.title, row.manual_type, row.current_status, row.current_revision || ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [rows, query]);
 
-  useEffect(() => {
-    if (!tenant || !activeManualId || !activeRevisionId) {
-      setReadPayload(null);
-      setWorkflow(null);
-      return;
-    }
-    getRevisionRead(tenant, activeManualId, activeRevisionId).then(setReadPayload).catch(() => setReadPayload(null));
-    getRevisionWorkflow(tenant, activeManualId, activeRevisionId).then(setWorkflow).catch(() => setWorkflow(null));
-  }, [tenant, activeManualId, activeRevisionId]);
+  const nextActions = useMemo(() => {
+    return rows
+      .filter((row) => row.pending_ack_count > 0 || !row.current_revision || row.current_status !== "PUBLISHED")
+      .sort((a, b) => Number(b.pending_ack_count) - Number(a.pending_ack_count))
+      .slice(0, 5);
+  }, [rows]);
 
-  useEffect(() => {
-    const activeManual = manuals.find((row) => row.id === activeManualId);
-    const activeRevision = revisions.find((row) => row.id === activeRevisionId);
-    const firstSection = readPayload?.sections?.[0];
-    setPcrForm((prev) => ({
+  const kpis = useMemo(
+    () => ({
+      total: rows.length,
+      active: rows.filter((row) => row.current_status === "PUBLISHED").length,
+      drafts: rows.filter((row) => row.current_status === "DRAFT").length,
+      pendingKcaa: rows.filter((row) => row.current_status === "REGULATOR_SIGNOFF").length,
+      pendingAcks: rows.reduce((sum, row) => sum + Number(row.pending_ack_count || 0), 0),
+    }),
+    [rows],
+  );
+
+  const applyPreviewMetadata = (payload: ManualDocxPreview) => {
+    const metadata = payload.metadata || {};
+    setUploadForm((prev) => ({
       ...prev,
-      manualId: activeManualId || prev.manualId,
-      partNumber: activeManual?.code || prev.partNumber,
-      manualType: activeManual?.manual_type || prev.manualType,
-      title: activeManual?.title || prev.title,
-      publicationDate: prev.publicationDate || new Date().toISOString().slice(0, 10),
-      revisionNumber: activeRevision?.rev_number || prev.revisionNumber,
-      ataChapter: prev.ataChapter || inferAtaChapter(firstSection?.heading),
-      section: prev.section || firstSection?.heading || "",
+      partNumber: metadata.part_number || prev.partNumber,
+      manualType: metadata.manual_type || prev.manualType,
+      title: metadata.title || payload.heading || prev.title,
+      revisionNumber: metadata.revision_number || prev.revisionNumber,
+      issueNumber: metadata.issue_number || prev.issueNumber,
+      effectiveDate: metadata.effective_date || prev.effectiveDate,
     }));
-  }, [activeManualId, activeRevisionId, manuals, readPayload?.sections, revisions]);
-
-  const filteredManuals = useMemo(() => {
-    const needle = librarySearch.trim().toLowerCase();
-    if (!needle) return manuals;
-    return manuals.filter((manual) => `${manual.code} ${manual.title} ${manual.manual_type}`.toLowerCase().includes(needle));
-  }, [librarySearch, manuals]);
-
-  const activeManual = manuals.find((row) => row.id === activeManualId) || null;
-  const activeRevision = revisions.find((row) => row.id === activeRevisionId) || null;
-  const activeMasterRow = masterRows.find((row) => row.manual_id === activeManualId) || null;
-
-  const selectorSearch = async () => {
-    if (!tenant) return;
-    setSelectorLoading(true);
-    try {
-      const rows = await searchPublicationSelector(tenant, { q: selectorQuery });
-      setSelectorItems(rows);
-    } finally {
-      setSelectorLoading(false);
-    }
   };
 
-  useEffect(() => {
-    if (!selectorOpen || !tenant) return;
-    void selectorSearch();
-  }, [selectorOpen, tenant]);
-
-  const pickPublication = (item: PublicationSelectorItem) => {
-    setActiveManualId(item.manual_id);
-    setPcrForm((prev) => ({
-      ...prev,
-      manualId: item.manual_id,
-      partNumber: item.code,
-      manualType: item.manual_type,
-      title: item.title,
-      model: item.model || prev.model,
-      publicationDate: item.publication_date || prev.publicationDate,
-      revisionNumber: item.current_revision || prev.revisionNumber,
-    }));
-    setSelectorOpen(false);
-    setActiveTab(2);
-  };
-
-  const submitPcr = async () => {
-    if (!tenant || !pcrForm.manualId || !pcrForm.partNumber || !pcrForm.revisionNumber || !pcrForm.suggestionForChange.trim()) {
-      setSubmitState("error");
-      setSubmitMessage("Complete the publication, revision, and suggestion fields before submitting.");
+  const onPickFile = async (file: File | null) => {
+    setSelectedFile(file);
+    setPreview(null);
+    setErrorMessage("");
+    setStatusMessage("");
+    if (!tenant || !file) return;
+    if (!file.name.toLowerCase().endsWith(".docx")) {
+      setErrorMessage("Please select a DOCX file.");
       return;
     }
-    setSubmitState("submitting");
-    setSubmitMessage("");
+    setPreviewLoading(true);
     try {
-      const response = await submitPublicationChangeRequest(tenant, {
-        requested_by_first_name: pcrForm.requestedByFirstName,
-        requested_by_last_name: pcrForm.requestedByLastName,
-        email: pcrForm.email,
-        phone: pcrForm.phone,
-        manual_id: pcrForm.manualId,
-        part_number: pcrForm.partNumber,
-        manual_type: pcrForm.manualType,
-        title: pcrForm.title,
-        model: pcrForm.model || null,
-        publication_date: pcrForm.publicationDate || null,
-        revision_number: pcrForm.revisionNumber,
-        ata_chapter: pcrForm.ataChapter || null,
-        section: pcrForm.section || null,
-        sub_section: pcrForm.subSection || null,
-        figure: pcrForm.figure || null,
-        page_number: pcrForm.pageNumber || null,
-        art_figure: pcrForm.artFigure || null,
-        other: pcrForm.other || null,
-        other_publications_affected: pcrForm.otherPublicationsAffected || null,
-        suggestion_for_change: pcrForm.suggestionForChange,
-        request_updates: pcrForm.requestUpdates,
-      });
-      setSubmitState("done");
-      setSubmitMessage(`${response.message} Ref ${response.id}`);
-      setPcrForm((prev) => ({ ...prev, suggestionForChange: "", otherPublicationsAffected: "", other: "" }));
+      const payload = await previewDocxUpload(tenant, file);
+      setPreview(payload);
+      applyPreviewMetadata(payload);
+      setStatusMessage("Metadata extracted from the uploaded document.");
     } catch (error) {
-      setSubmitState("error");
-      setSubmitMessage(error instanceof Error ? error.message : "Unable to submit the change request.");
+      setErrorMessage(error instanceof Error ? error.message : "Failed to preview the uploaded DOCX.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const resetUploadState = () => {
+    setUploadOpen(false);
+    setSelectedFile(null);
+    setPreview(null);
+    setUploadForm(EMPTY_FORM);
+    setPreviewLoading(false);
+    setUploading(false);
+    setErrorMessage("");
+    setStatusMessage("");
+  };
+
+  const onUpload = async () => {
+    if (!tenant || !selectedFile) {
+      setErrorMessage("Select a DOCX file first.");
+      return;
+    }
+    if (!uploadForm.partNumber || !uploadForm.title || !uploadForm.revisionNumber || !uploadForm.issueNumber) {
+      setErrorMessage("Part number, title, revision number, and issue number are required.");
+      return;
+    }
+    setUploading(true);
+    setErrorMessage("");
+    try {
+      const result = await uploadDocxRevision(tenant, {
+        code: uploadForm.partNumber,
+        title: uploadForm.title,
+        rev_number: uploadForm.revisionNumber,
+        issue_number: uploadForm.issueNumber,
+        effective_date: uploadForm.effectiveDate || undefined,
+        manual_type: uploadForm.manualType,
+        owner_role: uploadForm.ownerRole,
+        change_log: uploadForm.changeLog,
+        file: selectedFile,
+      });
+      resetUploadState();
+      refresh();
+      navigate(`${basePath}/${result.manual_id}/rev/${result.revision_id}/read`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setUploading(false);
     }
   };
 
   return (
     <ManualsPageLayout
       title="Technical Publications"
-      subtitle="Read, route, and raise publication change requests without extra clutter."
       actions={
-        <div className="manuals-header-actions">
-          <button className="manuals-link-btn" onClick={() => setSelectorOpen(true)}>
-            <FileSearch size={16} />
-            Select publication
-          </button>
-          <button className="manuals-link-btn" onClick={() => navigate(`${basePath}/master-list`)}>
-            <SplitSquareVertical size={16} />
+        <div className="manuals-dashboard-actions">
+          <button className="manuals-ghost-btn" type="button" onClick={() => navigate(`${basePath}/master-list`)}>
             Master list
           </button>
+          {canWrite ? (
+            <button className="manuals-primary-btn" type="button" onClick={() => setUploadOpen(true)}>
+              <UploadCloud size={16} /> Upload
+            </button>
+          ) : null}
         </div>
       }
     >
-      <TabGroup index={activeTab} onIndexChange={setActiveTab}>
-        <TabList className="manuals-top-tabs">
-          <Tab>Library</Tab>
-          <Tab>Reader</Tab>
-          <Tab>Publication Change Request</Tab>
-        </TabList>
-        <TabPanels>
-          <TabPanel>
-            <div className="manuals-shell-grid">
-              <aside className="manuals-pane manuals-pane--catalog">
-                <div className="manuals-pane__header">
-                  <strong>Manual library</strong>
-                  <span>{filteredManuals.length}</span>
-                </div>
-                <input className="manuals-search" placeholder="Search code or title" value={librarySearch} onChange={(e) => setLibrarySearch(e.target.value)} />
-                <div className="manuals-scroll-list">
-                  {filteredManuals.map((manual) => (
-                    <button key={manual.id} className={`manuals-library-row${manual.id === activeManualId ? " active" : ""}`} onClick={() => setActiveManualId(manual.id)}>
-                      <strong>{manual.code}</strong>
-                      <span>{manual.title}</span>
-                      <small>{manual.manual_type}</small>
-                    </button>
-                  ))}
-                </div>
-              </aside>
+      <section className="manuals-hero-card">
+        <div>
+          <span className="manuals-eyebrow">Zero state</span>
+          <h2>Upload master manual</h2>
+          <p>Bring in the approved DOCX source, capture the initial metadata, and open the draft directly in the reader for controlled review.</p>
+        </div>
+        {canWrite ? (
+          <button className="manuals-primary-btn" type="button" onClick={() => setUploadOpen(true)}>
+            <UploadCloud size={16} /> Upload
+          </button>
+        ) : null}
+      </section>
 
-              <section className="manuals-pane manuals-pane--content">
-                <div className="manuals-pane__header">
-                  <div>
-                    <strong>{activeManual?.title || "Select a manual"}</strong>
-                    <p className="manuals-muted">{activeManual?.code || ""} {activeManual?.manual_type ? `· ${activeManual.manual_type}` : ""}</p>
-                  </div>
-                  {activeManual && activeRevision ? (
-                    <button className="manuals-primary-btn" onClick={() => navigate(`${basePath}/${activeManual.id}/rev/${activeRevision.id}/read`)}>
-                      <FileText size={16} />
-                      Open reader
-                    </button>
-                  ) : null}
-                </div>
-                <div className="manuals-summary-grid">
-                  <div className="manuals-summary-card"><span>Status</span><strong>{activeMasterRow?.current_status || "No published revision"}</strong></div>
-                  <div className="manuals-summary-card"><span>Current revision</span><strong>{activeMasterRow?.current_revision || "—"}</strong></div>
-                  <div className="manuals-summary-card"><span>Pending acknowledgements</span><strong>{activeMasterRow?.pending_ack_count ?? 0}</strong></div>
-                </div>
-                <div className="manuals-revision-table-wrap">
-                  <table className="manuals-data-table">
-                    <thead>
-                      <tr>
-                        <th>Revision</th>
-                        <th>Issue</th>
-                        <th>Status</th>
-                        <th>Effective</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {revisions.map((revision) => (
-                        <tr key={revision.id} className={revision.id === activeRevisionId ? "is-active" : ""}>
-                          <td>Rev {revision.rev_number}</td>
-                          <td>{revision.issue_number || "—"}</td>
-                          <td>{revision.status_enum}</td>
-                          <td>{revision.effective_date || "—"}</td>
-                          <td>
-                            <button className="manuals-table-link" onClick={() => setActiveRevisionId(revision.id)}>Preview</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
+      <section className="manuals-kpi-grid">
+        <article className="manuals-kpi-card"><span>Total manuals</span><strong>{kpis.total}</strong></article>
+        <article className="manuals-kpi-card"><span>Active</span><strong>{kpis.active}</strong></article>
+        <article className="manuals-kpi-card"><span>Drafts</span><strong>{kpis.drafts}</strong></article>
+        <article className="manuals-kpi-card"><span>Pending KCAA</span><strong>{kpis.pendingKcaa}</strong></article>
+        <article className="manuals-kpi-card"><span>Pending acknowledgements</span><strong>{kpis.pendingAcks}</strong></article>
+      </section>
+
+      <section className="manuals-page-grid">
+        <article className="manuals-panel-card">
+          <div className="manuals-section-head">
+            <div>
+              <h3>Next actions</h3>
+              <p>High-priority lifecycle items that need attention.</p>
             </div>
-          </TabPanel>
-
-          <TabPanel>
-            <div className="manuals-reader-preview-shell">
-              <div className="manuals-reader-preview-header">
-                <div>
-                  <strong>{activeManual?.title || "Reader preview"}</strong>
-                  <p className="manuals-muted">{activeRevision ? `Rev ${activeRevision.rev_number}` : "Choose a manual and revision from the library."}</p>
-                </div>
-                {activeManual && activeRevision ? (
-                  <button className="manuals-primary-btn" onClick={() => navigate(`${basePath}/${activeManual.id}/rev/${activeRevision.id}/read`)}>
-                    Open full reader
-                  </button>
-                ) : null}
-              </div>
-              <DocumentReader
-                file={null}
-                fallbackSections={readPayload?.sections || []}
-                fallbackBlocks={readPayload?.blocks || []}
-                meta={{
-                  revisionNumber: activeRevision?.rev_number,
-                  issueNumber: activeRevision?.issue_number,
-                  approvalStatus: workflow?.status || activeRevision?.status_enum,
-                  pendingAcknowledgements: activeMasterRow?.pending_ack_count || 0,
-                }}
-                readerState={readerState}
-                onReaderStateChange={(next) => setReaderState((prev) => ({ ...prev, ...next }))}
-              />
+          </div>
+          {nextActions.length ? (
+            <div className="manuals-action-list">
+              {nextActions.map((row) => (
+                <button key={`${row.manual_id}-${row.current_revision || "none"}`} type="button" className="manuals-action-row" onClick={() => row.current_revision && navigate(`${basePath}/${row.manual_id}/rev/${row.current_revision}/read`)}>
+                  <span>
+                    <strong>{row.code}</strong>
+                    <small>{row.title}</small>
+                  </span>
+                  <span>
+                    <small>{row.current_status}</small>
+                    <strong>{row.pending_ack_count} open</strong>
+                  </span>
+                </button>
+              ))}
             </div>
-          </TabPanel>
+          ) : (
+            <p className="manuals-empty-note">No pending actions. The library is currently stable.</p>
+          )}
+        </article>
 
-          <TabPanel>
-            <div className="manuals-pcr-layout">
-              <section className="manuals-pane manuals-pane--content">
-                <div className="manuals-pane__header">
-                  <div>
-                    <strong>Publication Change Request</strong>
-                    <p className="manuals-muted">Only the publication and location fields available from the current reader context are shown.</p>
-                  </div>
-                  <button className="manuals-link-btn" onClick={() => setSelectorOpen(true)}>Select publication</button>
-                </div>
-                <div className="manuals-pcr-form">
-                  <div className="manuals-pcr-section">
-                    <h3>Requested by</h3>
-                    <div className="manuals-pcr-grid manuals-pcr-grid--4">
-                      <label><span>First name</span><input value={pcrForm.requestedByFirstName} onChange={(e) => setPcrForm((prev) => ({ ...prev, requestedByFirstName: e.target.value }))} /></label>
-                      <label><span>Last name</span><input value={pcrForm.requestedByLastName} onChange={(e) => setPcrForm((prev) => ({ ...prev, requestedByLastName: e.target.value }))} /></label>
-                      <label><span>Email address</span><input type="email" value={pcrForm.email} onChange={(e) => setPcrForm((prev) => ({ ...prev, email: e.target.value }))} /></label>
-                      <label><span>Phone number</span><input value={pcrForm.phone} onChange={(e) => setPcrForm((prev) => ({ ...prev, phone: e.target.value }))} /></label>
-                    </div>
-                  </div>
-
-                  <div className="manuals-pcr-section">
-                    <h3>Publication affected</h3>
-                    <div className="manuals-pcr-grid manuals-pcr-grid--4">
-                      <label><span>Part number</span><input value={pcrForm.partNumber} onChange={(e) => setPcrForm((prev) => ({ ...prev, partNumber: e.target.value }))} /></label>
-                      <label><span>Manual type</span><input value={pcrForm.manualType} onChange={(e) => setPcrForm((prev) => ({ ...prev, manualType: e.target.value }))} /></label>
-                      <label><span>Title</span><input value={pcrForm.title} onChange={(e) => setPcrForm((prev) => ({ ...prev, title: e.target.value }))} /></label>
-                      <label><span>Model</span><input value={pcrForm.model} onChange={(e) => setPcrForm((prev) => ({ ...prev, model: e.target.value }))} /></label>
-                      <label><span>Publication date</span><input type="date" value={pcrForm.publicationDate} onChange={(e) => setPcrForm((prev) => ({ ...prev, publicationDate: e.target.value }))} /></label>
-                      <label><span>Revision number</span><input value={pcrForm.revisionNumber} onChange={(e) => setPcrForm((prev) => ({ ...prev, revisionNumber: e.target.value }))} /></label>
-                    </div>
-                  </div>
-
-                  <div className="manuals-pcr-section">
-                    <h3>Location</h3>
-                    <div className="manuals-pcr-grid manuals-pcr-grid--4">
-                      <label><span>ATA chapter</span><input value={pcrForm.ataChapter} onChange={(e) => setPcrForm((prev) => ({ ...prev, ataChapter: e.target.value }))} /></label>
-                      <label><span>Section</span><input value={pcrForm.section} onChange={(e) => setPcrForm((prev) => ({ ...prev, section: e.target.value }))} /></label>
-                      <label><span>Sub section</span><input value={pcrForm.subSection} onChange={(e) => setPcrForm((prev) => ({ ...prev, subSection: e.target.value }))} /></label>
-                      <label><span>Figure</span><input value={pcrForm.figure} onChange={(e) => setPcrForm((prev) => ({ ...prev, figure: e.target.value }))} /></label>
-                      <label><span>Page number</span><input value={pcrForm.pageNumber} onChange={(e) => setPcrForm((prev) => ({ ...prev, pageNumber: e.target.value }))} /></label>
-                      <label><span>Art/Figure</span><input value={pcrForm.artFigure} onChange={(e) => setPcrForm((prev) => ({ ...prev, artFigure: e.target.value }))} /></label>
-                      <label className="manuals-pcr-span-2"><span>Other</span><input value={pcrForm.other} onChange={(e) => setPcrForm((prev) => ({ ...prev, other: e.target.value }))} /></label>
-                    </div>
-                  </div>
-
-                  <div className="manuals-pcr-section">
-                    <h3>Change requested</h3>
-                    <div className="manuals-pcr-grid">
-                      <label className="manuals-pcr-span-2"><span>Other publications affected</span><textarea rows={3} value={pcrForm.otherPublicationsAffected} onChange={(e) => setPcrForm((prev) => ({ ...prev, otherPublicationsAffected: e.target.value }))} /></label>
-                      <label className="manuals-pcr-span-2"><span>Suggestion for change</span><textarea rows={6} value={pcrForm.suggestionForChange} onChange={(e) => setPcrForm((prev) => ({ ...prev, suggestionForChange: e.target.value }))} /></label>
-                    </div>
-                    <label className="manuals-checkbox-row"><input type="checkbox" checked={pcrForm.requestUpdates} onChange={(e) => setPcrForm((prev) => ({ ...prev, requestUpdates: e.target.checked }))} /> Receive email updates for this request</label>
-                  </div>
-
-                  {submitMessage ? <div className={`manuals-inline-state manuals-inline-state--${submitState === "done" ? "success" : submitState === "error" ? "error" : "muted"}`}>{submitMessage}</div> : null}
-
-                  <div className="manuals-form-actions">
-                    <button className="manuals-link-btn" onClick={() => setPcrForm((prev) => ({ ...prev, otherPublicationsAffected: "", suggestionForChange: "", other: "" }))}>Reset note fields</button>
-                    <button className="manuals-primary-btn" disabled={submitState === "submitting"} onClick={submitPcr}>
-                      <Send size={16} />
-                      {submitState === "submitting" ? "Submitting…" : "Submit PCR"}
-                    </button>
-                  </div>
-                </div>
-              </section>
+        <article className="manuals-panel-card">
+          <div className="manuals-section-head">
+            <div>
+              <h3>Most used manuals</h3>
+              <p>The 3 most commonly opened manuals for quick access.</p>
             </div>
-          </TabPanel>
-        </TabPanels>
-      </TabGroup>
+          </div>
+          <div className="manuals-featured-grid">
+            {featured.length ? (
+              featured.map((item) => (
+                <button key={item.manual_id} type="button" className="manuals-featured-card" onClick={() => item.current_revision && navigate(`${basePath}/${item.manual_id}/rev/${item.current_revision}/read`)}>
+                  <span className="manuals-featured-code">{item.code}</span>
+                  <strong>{item.title}</strong>
+                  <small>{item.manual_type}</small>
+                  <span className="manuals-featured-meta">Opened {item.open_count} time(s)</span>
+                </button>
+              ))
+            ) : (
+              <p className="manuals-empty-note">Usage will appear here once manuals begin to be opened through the reader.</p>
+            )}
+          </div>
+        </article>
+      </section>
 
-      {selectorOpen ? (
-        <div className="manuals-modal-backdrop" role="presentation" onClick={() => setSelectorOpen(false)}>
-          <div className="manuals-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            <div className="manuals-modal__header">
-              <strong>Select publication</strong>
-              <button className="manuals-link-btn" onClick={() => setSelectorOpen(false)}>Close</button>
-            </div>
-            <div className="manuals-modal__filters">
-              <input className="manuals-search" placeholder="Search publication" value={selectorQuery} onChange={(e) => setSelectorQuery(e.target.value)} />
-              <button className="manuals-primary-btn" onClick={() => void selectorSearch()}>Search</button>
-            </div>
-            <div className="manuals-revision-table-wrap">
-              <table className="manuals-data-table">
-                <thead>
-                  <tr>
-                    <th>Part number</th>
-                    <th>Type</th>
-                    <th>Title</th>
-                    <th>Current rev</th>
-                    <th>Pub date</th>
+      <section className="manuals-panel-card">
+        <div className="manuals-section-head manuals-section-head--register">
+          <div>
+            <h3>Controlled library register</h3>
+            <p>Select a manual from the register to open the reader directly.</p>
+          </div>
+          <label className="manuals-search-field">
+            <FileSearch size={16} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search code, title, type, or stage" />
+          </label>
+        </div>
+        <div className="manuals-register-wrap">
+          <table className="manuals-register-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Revision</th>
+                <th>Status</th>
+                <th>Acks</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRows.length ? (
+                filteredRows.map((row) => (
+                  <tr key={row.manual_id}>
+                    <td>{row.code}</td>
+                    <td>{row.title}</td>
+                    <td>{row.manual_type}</td>
+                    <td>{row.current_revision || "—"}</td>
+                    <td>{row.current_status}</td>
+                    <td>{row.pending_ack_count}</td>
+                    <td>
+                      <div className="manuals-row-actions">
+                        <button type="button" className="manuals-inline-btn" disabled={!row.current_revision} onClick={() => row.current_revision && navigate(`${basePath}/${row.manual_id}/rev/${row.current_revision}/read`)}>
+                          <FolderOpen size={14} /> Open
+                        </button>
+                        <button type="button" className="manuals-inline-btn" disabled={!row.current_revision} onClick={() => row.current_revision && navigate(`${basePath}/${row.manual_id}/rev/${row.current_revision}/workflow`)}>
+                          <Workflow size={14} /> Workflow
+                        </button>
+                        <button type="button" className="manuals-inline-btn" disabled={!row.current_revision} onClick={() => row.current_revision && navigate(`${basePath}/${row.manual_id}/rev/${row.current_revision}/diff`)}>
+                          <GitCompareArrows size={14} /> Diff
+                        </button>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {selectorLoading ? <tr><td colSpan={5}>Loading…</td></tr> : null}
-                  {!selectorLoading && selectorItems.map((item) => (
-                    <tr key={item.manual_id} className="is-clickable" onClick={() => pickPublication(item)}>
-                      <td>{item.code}</td>
-                      <td>{item.manual_type}</td>
-                      <td>{item.title}</td>
-                      <td>{item.current_revision || "—"}</td>
-                      <td>{item.publication_date || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="manuals-empty-row">No manuals available for the current filter.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {uploadOpen ? (
+        <div className="manuals-modal-backdrop" role="presentation" onClick={resetUploadState}>
+          <div className="manuals-upload-modal" role="dialog" aria-modal="true" aria-label="Upload manual" onClick={(event) => event.stopPropagation()}>
+            <div className="manuals-upload-modal__header">
+              <div>
+                <h3>Upload master manual</h3>
+                <p>Metadata is extracted from the uploaded document and can be corrected before saving.</p>
+              </div>
+              <button type="button" className="manuals-ghost-btn" onClick={resetUploadState}>Close</button>
+            </div>
+
+            <div className="manuals-upload-modal__body">
+              <section className="manuals-upload-form-block">
+                <div className="manuals-upload-field-group">
+                  <label>Source file</label>
+                  <input type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => void onPickFile(event.target.files?.[0] || null)} />
+                  <small>{selectedFile ? `${selectedFile.name}` : "Select the DOCX source to extract metadata and build the draft revision."}</small>
+                </div>
+
+                <div className="manuals-upload-grid">
+                  <label>
+                    <span>Part number</span>
+                    <input value={uploadForm.partNumber} onChange={(event) => setUploadForm((prev) => ({ ...prev, partNumber: event.target.value }))} placeholder="SL/MTM/001" />
+                  </label>
+                  <label>
+                    <span>Manual type</span>
+                    <input value={uploadForm.manualType} onChange={(event) => setUploadForm((prev) => ({ ...prev, manualType: event.target.value }))} placeholder="MTM" />
+                  </label>
+                  <label className="manuals-upload-grid__wide">
+                    <span>Title</span>
+                    <input value={uploadForm.title} onChange={(event) => setUploadForm((prev) => ({ ...prev, title: event.target.value }))} placeholder="Maintenance Training Manual" />
+                  </label>
+                  <label>
+                    <span>Revision number</span>
+                    <input value={uploadForm.revisionNumber} onChange={(event) => setUploadForm((prev) => ({ ...prev, revisionNumber: event.target.value }))} placeholder="00" />
+                  </label>
+                  <label>
+                    <span>Issue number</span>
+                    <input value={uploadForm.issueNumber} onChange={(event) => setUploadForm((prev) => ({ ...prev, issueNumber: event.target.value }))} placeholder="00" />
+                  </label>
+                  <label>
+                    <span>Effective date</span>
+                    <input type="date" value={uploadForm.effectiveDate} onChange={(event) => setUploadForm((prev) => ({ ...prev, effectiveDate: event.target.value }))} />
+                  </label>
+                  <label>
+                    <span>Owner role</span>
+                    <input value={uploadForm.ownerRole} onChange={(event) => setUploadForm((prev) => ({ ...prev, ownerRole: event.target.value }))} placeholder="Library" />
+                  </label>
+                </div>
+
+                <div className="manuals-upload-field-group">
+                  <label>Upload note</label>
+                  <textarea rows={5} value={uploadForm.changeLog} onChange={(event) => setUploadForm((prev) => ({ ...prev, changeLog: event.target.value }))} placeholder="Summarize the intake note or change log for this revision." />
+                </div>
+
+                {errorMessage ? <p className="manuals-error">{errorMessage}</p> : null}
+                {statusMessage ? <p className="manuals-success">{statusMessage}</p> : null}
+              </section>
+
+              <aside className="manuals-upload-preview-panel">
+                <div className="manuals-upload-preview-panel__head">
+                  <strong>Readable preview</strong>
+                  {previewLoading ? <span>Extracting…</span> : preview ? <span>{preview.paragraph_count} paragraph(s)</span> : null}
+                </div>
+                {preview ? (
+                  <div className="manuals-preview-scroll">
+                    <section className="manuals-preview-block">
+                      <h4>Detected metadata</h4>
+                      <dl>
+                        <div><dt>Part number</dt><dd>{preview.metadata.part_number || "—"}</dd></div>
+                        <div><dt>Manual type</dt><dd>{preview.metadata.manual_type || "—"}</dd></div>
+                        <div><dt>Title</dt><dd>{preview.metadata.title || preview.heading}</dd></div>
+                        <div><dt>Revision</dt><dd>{preview.metadata.revision_number || "—"}</dd></div>
+                        <div><dt>Issue</dt><dd>{preview.metadata.issue_number || "—"}</dd></div>
+                        <div><dt>Effective date</dt><dd>{preview.metadata.effective_date || "—"}</dd></div>
+                      </dl>
+                    </section>
+                    <section className="manuals-preview-block">
+                      <h4>Outline</h4>
+                      {preview.outline.length ? (
+                        <ol>
+                          {preview.outline.map((line, index) => <li key={`${line}-${index}`}>{line}</li>)}
+                        </ol>
+                      ) : (
+                        <p>No section headings were detected in the uploaded document.</p>
+                      )}
+                    </section>
+                    <section className="manuals-preview-block">
+                      <h4>Excerpt</h4>
+                      <div className="manuals-preview-excerpt">{preview.excerpt || preview.sample.join("\n\n")}</div>
+                    </section>
+                  </div>
+                ) : (
+                  <p className="manuals-empty-note">After you choose a DOCX file, the right panel shows readable metadata, the section outline, and a plain-language text excerpt.</p>
+                )}
+              </aside>
+            </div>
+
+            <div className="manuals-upload-modal__footer">
+              <button type="button" className="manuals-ghost-btn" onClick={resetUploadState}>Cancel</button>
+              <button type="button" className="manuals-primary-btn" disabled={uploading || previewLoading || !selectedFile} onClick={onUpload}>
+                <UploadCloud size={16} /> {uploading ? "Uploading…" : "Upload"}
+              </button>
             </div>
           </div>
         </div>

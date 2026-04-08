@@ -9,13 +9,14 @@ import re
 import shutil
 import io
 import zipfile
+from threading import Lock
 from typing import Optional, List, Iterator
 from uuid import UUID
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request, Response, Header
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from sqlalchemy import func
+from sqlalchemy import func, or_, inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
@@ -43,6 +44,7 @@ from .schemas import (
     CARReviewUpdate,
     AuditorStatsOut,
     QMSNotificationOut,
+    QMSNotificationSummaryOut,
     QMSDashboardOut,
     QMSCockpitSnapshotOut,
     QMSManpowerAvailabilityOut,
@@ -53,11 +55,12 @@ from .schemas import (
     QMSChangeRequestCreate, QMSChangeRequestUpdate, QMSChangeRequestOut,
     QMSAuditCreate, QMSAuditUpdate, QMSAuditOut, QMSAuditRegisterResponse, QMSAuditRegisterRowOut,
     QMSFindingCreate, QMSFindingOut, QMSFindingVerify, QMSFindingAcknowledge,
-    QMSAuditScheduleCreate, QMSAuditScheduleOut,
+    QMSAuditScheduleCreate, QMSAuditScheduleUpdate, QMSAuditScheduleOut,
     QMSCAPUpsert, QMSCAPOut,
     QMSUploadRevisionOut, QMSPhysicalCopyRequest, QMSPhysicalCopyOut,
     QMSCustodyActionCreate, QMSCustodyLogOut, QMSPhysicalVerifyOut,
     QMSIssueRevisionRequest, QMSDamageReportRequest, QMSDamageReportOut,
+    QMSPersonOptionOut,
 )
 from .enums import CARStatus, QMSDomain, QMSAuditStatus, QMSPhysicalCopyStatus, QMSCustodyAction, QMSRevisionLifecycleStatus
 from .schema_compat import ensure_qms_audit_reference_schema
@@ -75,10 +78,38 @@ from .service import (
 )
 from ..workflow import apply_transition, TransitionError
 
+_QMS_SCHEMA_COMPAT_LOCK = Lock()
+_QMS_SCHEMA_COMPAT_READY = False
+
+
+def _ensure_qms_runtime_schema_compat(db: Session = Depends(get_db)) -> None:
+    """
+    Runtime guard for environments where the CAR responses migration was missed.
+
+    Some deployments have the ORM expecting ``quality_car_responses`` while the
+    live database is missing the table, which causes selectin relationship loads
+    to fail on otherwise routine CAR reads. Create the table on first access so
+    the quality module remains available until migrations are fully reconciled.
+    """
+    global _QMS_SCHEMA_COMPAT_READY
+    if _QMS_SCHEMA_COMPAT_READY:
+        return
+
+    with _QMS_SCHEMA_COMPAT_LOCK:
+        if _QMS_SCHEMA_COMPAT_READY:
+            return
+        bind = db.get_bind()
+        inspector = inspect(bind)
+        if inspector.has_table("quality_cars") and not inspector.has_table("quality_car_responses"):
+            models.CARResponse.__table__.create(bind=bind, checkfirst=True)
+            db.commit()
+        _QMS_SCHEMA_COMPAT_READY = True
+
+
 router = APIRouter(
     prefix="/quality",
     tags=["Quality / QMS"],
-    dependencies=[Depends(require_module("quality"))],
+    dependencies=[Depends(require_module("quality")), Depends(_ensure_qms_runtime_schema_compat)],
 )
 
 CAR_ATTACHMENT_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "car_attachments"
@@ -1104,6 +1135,62 @@ def list_audit_schedules(
     return qs.order_by(models.QMSAuditSchedule.next_due_date.asc()).all()
 
 
+@router.get("/audits/personnel/options", response_model=List[QMSPersonOptionOut])
+def list_audit_personnel_options(
+    search: Optional[str] = Query(default=None, max_length=100),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    amo_id = _current_amo_id(current_user)
+    if not amo_id:
+        raise HTTPException(status_code=400, detail="AMO context is required")
+
+    qs = (
+        db.query(account_models.User)
+        .filter(account_models.User.amo_id == amo_id)
+        .filter(account_models.User.is_active.is_(True))
+    )
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        qs = qs.filter(
+            or_(
+                account_models.User.full_name.ilike(pattern),
+                account_models.User.first_name.ilike(pattern),
+                account_models.User.last_name.ilike(pattern),
+                account_models.User.email.ilike(pattern),
+                account_models.User.staff_code.ilike(pattern),
+            )
+        )
+    users = (
+        qs.order_by(
+            func.coalesce(account_models.User.full_name, ""),
+            func.coalesce(account_models.User.first_name, ""),
+            func.coalesce(account_models.User.last_name, ""),
+            account_models.User.email,
+        )
+        .limit(limit)
+        .all()
+    )
+
+    results: list[QMSPersonOptionOut] = []
+    for user in users:
+        full_name = (getattr(user, "full_name", None) or f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip() or getattr(user, "email", None) or getattr(user, "staff_code", None) or str(user.id))
+        role_value = getattr(user, "role", None)
+        role_value = getattr(role_value, "value", role_value)
+        results.append(
+            QMSPersonOptionOut(
+                id=str(user.id),
+                full_name=full_name,
+                email=getattr(user, "email", None),
+                role=str(role_value) if role_value else None,
+                department_id=getattr(user, "department_id", None),
+                position_title=getattr(user, "position_title", None),
+            )
+        )
+    return results
+
+
 @router.post("/audits/schedules", response_model=QMSAuditScheduleOut, status_code=status.HTTP_201_CREATED)
 def create_audit_schedule(
     payload: QMSAuditScheduleCreate,
@@ -1176,6 +1263,99 @@ def create_audit_schedule(
                 )
             except Exception:
                 pass
+    db.commit()
+    db.refresh(schedule)
+    return schedule
+
+
+@router.patch("/audits/schedules/{schedule_id}", response_model=QMSAuditScheduleOut)
+def update_audit_schedule(
+    schedule_id: UUID,
+    payload: QMSAuditScheduleUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_quality_scheduler(current_user)
+    schedule = (
+        db.query(models.QMSAuditSchedule)
+        .filter(models.QMSAuditSchedule.id == schedule_id)
+        .first()
+    )
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Audit schedule not found")
+
+    before = {
+        "title": schedule.title,
+        "kind": schedule.kind.value,
+        "frequency": schedule.frequency.value,
+        "next_due_date": str(schedule.next_due_date),
+        "lead_auditor_user_id": schedule.lead_auditor_user_id,
+        "is_active": schedule.is_active,
+    }
+
+    changes = payload.model_dump(exclude_unset=True)
+    if "title" in changes:
+        schedule.title = (changes["title"] or "").strip()
+    if "kind" in changes:
+        schedule.kind = changes["kind"]
+    if "frequency" in changes:
+        schedule.frequency = changes["frequency"]
+    if "scope" in changes:
+        schedule.scope = changes["scope"]
+    if "criteria" in changes:
+        schedule.criteria = changes["criteria"]
+    if "auditee" in changes:
+        schedule.auditee = changes["auditee"]
+    if "auditee_email" in changes:
+        schedule.auditee_email = changes["auditee_email"]
+    if "auditee_user_id" in changes:
+        schedule.auditee_user_id = changes["auditee_user_id"]
+    if "lead_auditor_user_id" in changes:
+        schedule.lead_auditor_user_id = changes["lead_auditor_user_id"]
+    if "observer_auditor_user_id" in changes:
+        schedule.observer_auditor_user_id = changes["observer_auditor_user_id"]
+    if "assistant_auditor_user_id" in changes:
+        schedule.assistant_auditor_user_id = changes["assistant_auditor_user_id"]
+    if "duration_days" in changes and changes["duration_days"] is not None:
+        schedule.duration_days = changes["duration_days"]
+    if "next_due_date" in changes and changes["next_due_date"] is not None:
+        schedule.next_due_date = changes["next_due_date"]
+    if "is_active" in changes and changes["is_active"] is not None:
+        schedule.is_active = changes["is_active"]
+
+    audit_services.log_event(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        entity_type="qms_audit_schedule",
+        entity_id=str(schedule.id),
+        action="update",
+        before=before,
+        after={
+            "title": schedule.title,
+            "kind": schedule.kind.value,
+            "frequency": schedule.frequency.value,
+            "next_due_date": str(schedule.next_due_date),
+            "lead_auditor_user_id": schedule.lead_auditor_user_id,
+            "is_active": schedule.is_active,
+        },
+        correlation_id=str(uuid.uuid4()),
+        metadata=_audit_metadata(request),
+    )
+
+    if schedule.lead_auditor_user_id and (
+        before["lead_auditor_user_id"] != schedule.lead_auditor_user_id
+        or before["next_due_date"] != str(schedule.next_due_date)
+        or before["title"] != schedule.title
+    ):
+        _notify_user(
+            db,
+            schedule.lead_auditor_user_id,
+            f"Audit schedule updated: {schedule.title} due {schedule.next_due_date.isoformat()}",
+            models.QMSNotificationSeverity.INFO,
+        )
+
     db.commit()
     db.refresh(schedule)
     return schedule
@@ -2923,8 +3103,34 @@ def get_auditor_stats(user_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/notifications/me", response_model=List[QMSNotificationOut])
-def list_my_notifications(
+def _build_qms_notification_summary_payload(db: Session, user_id: str) -> QMSNotificationSummaryOut:
+    unread_count, latest_created_at = (
+        db.query(
+            func.count(models.QMSNotification.id),
+            func.max(models.QMSNotification.created_at),
+        )
+        .filter(
+            models.QMSNotification.user_id == user_id,
+            models.QMSNotification.read_at.is_(None),
+        )
+        .one()
+    )
+    return QMSNotificationSummaryOut(
+        unread_count=int(unread_count or 0),
+        latest_created_at=latest_created_at,
+    )
+
+
+def _make_qms_notification_summary_etag(payload: QMSNotificationSummaryOut) -> str:
+    stamp = payload.latest_created_at.isoformat() if payload.latest_created_at else ""
+    digest = hashlib.sha256(f"{payload.unread_count}:{stamp}".encode("utf-8")).hexdigest()[:20]
+    return f'W/"{digest}"'
+
+
+@router.get("/notifications/me/summary", response_model=QMSNotificationSummaryOut)
+def get_my_notification_summary(
+    response: Response,
+    if_none_match: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
@@ -2932,19 +3138,70 @@ def list_my_notifications(
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
-        notes = (
+        payload = _build_qms_notification_summary_payload(db, user_id)
+    except (OperationalError, ProgrammingError) as exc:
+        if _is_missing_table_error(exc):
+            payload = QMSNotificationSummaryOut(unread_count=0, latest_created_at=None)
+        else:
+            raise
+
+    etag = _make_qms_notification_summary_etag(payload)
+    headers = {"ETag": etag, "Cache-Control": "private, max-age=0, must-revalidate"}
+    if if_none_match == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
+    return payload
+
+
+@router.get("/notifications/me", response_model=List[QMSNotificationOut])
+def list_my_notifications(
+    include_read: bool = Query(default=False),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    user_id = get_actor() or str(current_user.id)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        query = (
             db.query(models.QMSNotification)
             .filter(models.QMSNotification.user_id == user_id)
-            .filter(models.QMSNotification.read_at.is_(None))
             .order_by(models.QMSNotification.created_at.desc())
-            .limit(20)
-            .all()
         )
+        if not include_read:
+            query = query.filter(models.QMSNotification.read_at.is_(None))
+        notes = query.limit(limit).all()
     except (OperationalError, ProgrammingError) as exc:
         if _is_missing_table_error(exc):
             return []
         raise
     return notes
+
+
+@router.post("/notifications/me/read-all")
+def mark_all_notifications_read(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    user_id = get_actor() or str(current_user.id)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        updated = (
+            db.query(models.QMSNotification)
+            .filter(models.QMSNotification.user_id == user_id)
+            .filter(models.QMSNotification.read_at.is_(None))
+            .update({models.QMSNotification.read_at: func.now()}, synchronize_session=False)
+        )
+    except (OperationalError, ProgrammingError) as exc:
+        if _is_missing_table_error(exc):
+            return {"updated": 0}
+        raise
+    db.commit()
+    return {"updated": int(updated or 0)}
 
 
 @router.post("/notifications/{notification_id}/read", response_model=QMSNotificationOut)

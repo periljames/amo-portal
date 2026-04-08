@@ -197,6 +197,36 @@ export interface CAROut {
 type QueryVal = string | number | boolean | null | undefined;
 
 const API_BASE = getApiBaseUrl();
+const NOTIFICATION_SUMMARY_CACHE_KEY = "amo:qms-notification-summary:data";
+const NOTIFICATION_SUMMARY_ETAG_KEY = "amo:qms-notification-summary:etag";
+
+function readStoredNotificationSummary(): QMSNotificationSummaryOut | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(NOTIFICATION_SUMMARY_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as QMSNotificationSummaryOut) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredNotificationSummary(summary: QMSNotificationSummaryOut, etag?: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(NOTIFICATION_SUMMARY_CACHE_KEY, JSON.stringify(summary));
+    if (etag) {
+      window.localStorage.setItem(NOTIFICATION_SUMMARY_ETAG_KEY, etag);
+    }
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function readStoredNotificationSummaryEtag(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(NOTIFICATION_SUMMARY_ETAG_KEY);
+}
+
 
 function toQuery(params: Record<string, QueryVal>): string {
   const qs = new URLSearchParams();
@@ -540,6 +570,45 @@ export async function qmsCreateAuditSchedule(payload: {
     "POST",
     payload
   );
+}
+
+export async function qmsUpdateAuditSchedule(
+  scheduleId: string,
+  payload: {
+    kind?: string | null;
+    frequency?: QMSAuditScheduleFrequency | null;
+    title?: string | null;
+    scope?: string | null;
+    criteria?: string | null;
+    auditee?: string | null;
+    auditee_email?: string | null;
+    auditee_user_id?: string | null;
+    lead_auditor_user_id?: string | null;
+    observer_auditor_user_id?: string | null;
+    assistant_auditor_user_id?: string | null;
+    duration_days?: number | null;
+    next_due_date?: string | null;
+    is_active?: boolean | null;
+  }
+): Promise<QMSAuditScheduleOut> {
+  return sendJson<QMSAuditScheduleOut>(`/quality/audits/schedules/${encodeURIComponent(scheduleId)}`, "PATCH", payload);
+}
+
+export interface QMSPersonOption {
+  id: string;
+  full_name: string;
+  email: string | null;
+  role: string | null;
+  department_id: string | null;
+  position_title: string | null;
+}
+
+export async function qmsListAuditPersonnelOptions(params?: {
+  search?: string;
+  limit?: number;
+}): Promise<QMSPersonOption[]> {
+  const suffix = toQuery({ search: params?.search, limit: params?.limit ?? 50 });
+  return fetchJson<QMSPersonOption[]>(`/quality/audits/personnel/options${suffix}`);
 }
 
 export async function qmsUpdateAudit(
@@ -915,8 +984,62 @@ export interface QMSNotificationOut {
   read_at: string | null;
 }
 
-export async function qmsListNotifications(): Promise<QMSNotificationOut[]> {
-  return fetchJson<QMSNotificationOut[]>("/quality/notifications/me");
+export interface QMSNotificationSummaryOut {
+  unread_count: number;
+  latest_created_at: string | null;
+}
+
+export async function qmsListNotifications(params?: {
+  include_read?: boolean;
+  limit?: number;
+}): Promise<QMSNotificationOut[]> {
+  const suffix = toQuery({ include_read: params?.include_read ?? false, limit: params?.limit ?? 20 });
+  return fetchJson<QMSNotificationOut[]>(`/quality/notifications/me${suffix}`);
+}
+
+export async function qmsGetNotificationSummary(): Promise<QMSNotificationSummaryOut> {
+  const token = getToken();
+  const headers = new Headers({
+    Accept: "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  });
+  const cachedEtag = readStoredNotificationSummaryEtag();
+  if (cachedEtag) {
+    headers.set("If-None-Match", cachedEtag);
+  }
+
+  const res = await fetch(`${API_BASE}/quality/notifications/me/summary`, {
+    method: "GET",
+    headers,
+    credentials: "include",
+  });
+
+  if (res.status === 304) {
+    return readStoredNotificationSummary() ?? { unread_count: 0, latest_created_at: null };
+  }
+
+  if (res.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (res.status === 503) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || "Service unavailable. Please retry or contact support.");
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+  }
+
+  const summary = (await res.json()) as QMSNotificationSummaryOut;
+  writeStoredNotificationSummary(summary, res.headers.get("ETag"));
+  return summary;
+}
+
+export async function qmsMarkAllNotificationsRead(): Promise<{ updated: number }> {
+  return sendJson<{ updated: number }>("/quality/notifications/me/read-all", "POST", {});
 }
 
 export async function qmsMarkNotificationRead(notificationId: string): Promise<QMSNotificationOut> {

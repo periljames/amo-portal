@@ -520,6 +520,65 @@ class PersonnelProfile(Base):
     user = relationship("User", lazy="joined")
 
 
+
+
+class UserGroupType(str, enum.Enum):
+    POST_HOLDERS = "POST_HOLDERS"
+    DEPARTMENT = "DEPARTMENT"
+    CUSTOM = "CUSTOM"
+    PERSONAL = "PERSONAL"
+
+
+class UserGroupVisibility(str, enum.Enum):
+    PRIVATE = "PRIVATE"
+    AMO = "AMO"
+    SYSTEM = "SYSTEM"
+
+
+class UserGroup(Base):
+    __tablename__ = "user_groups"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "code", name="uq_user_groups_amo_code"),
+        Index("ix_user_groups_amo_type", "amo_id", "group_type"),
+        Index("ix_user_groups_amo_active", "amo_id", "is_active"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    owner_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    code = Column(String(64), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    group_type = Column(Enum(UserGroupType, name="user_group_type_enum"), nullable=False, default=UserGroupType.CUSTOM, index=True)
+    visibility = Column(Enum(UserGroupVisibility, name="user_group_visibility_enum"), nullable=False, default=UserGroupVisibility.AMO)
+    is_system_managed = Column(Boolean, nullable=False, default=False, index=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    amo = relationship("AMO", lazy="joined")
+    owner = relationship("User", foreign_keys=[owner_user_id], lazy="joined")
+
+
+class UserGroupMember(Base):
+    __tablename__ = "user_group_members"
+    __table_args__ = (
+        UniqueConstraint("group_id", "user_id", name="uq_user_group_members_group_user"),
+        Index("ix_user_group_members_user", "user_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    group_id = Column(String(36), ForeignKey("user_groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    added_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    member_role = Column(String(32), nullable=False, default="member")
+    added_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    group = relationship("UserGroup", lazy="joined")
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+    added_by = relationship("User", foreign_keys=[added_by_user_id], lazy="joined")
+
+
 class UserActiveContext(Base):
     """
     Persisted per-superuser AMO context + demo/real mode.

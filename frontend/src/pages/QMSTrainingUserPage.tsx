@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import type { AdminUserRead } from "../services/adminUsers";
-import { listAdminUsers } from "../services/adminUsers";
+import { getAdminUser } from "../services/adminUsers";
 import { getContext } from "../services/auth";
 import { downloadTrainingUserEvidencePack, getUserTrainingStatus } from "../services/training";
 import type { TrainingStatusItem } from "../types/training";
@@ -89,11 +89,11 @@ const QMSTrainingUserPage: React.FC = () => {
     setState("loading");
     setError(null);
     try {
-      const [users, status] = await Promise.all([
-        listAdminUsers({ limit: 50 }),
+      const [userRecord, status] = await Promise.all([
+        getAdminUser(userId),
         getUserTrainingStatus(userId),
       ]);
-      setUser(users.find((u) => u.id === userId) || null);
+      setUser(userRecord);
       setItems(status);
       setState("ready");
     } catch (e: any) {

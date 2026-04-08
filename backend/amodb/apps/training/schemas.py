@@ -563,6 +563,14 @@ class TrainingStatusItem(BaseModel):
     upcoming_event_date: Optional[date] = None
 
 
+class TrainingStatusBulkRequest(BaseModel):
+    user_ids: List[str] = Field(default_factory=list, description="User ids to evaluate in a single batch.")
+
+
+class TrainingStatusBulkResponse(BaseModel):
+    users: Dict[str, List[TrainingStatusItem]] = Field(default_factory=dict)
+
+
 class TrainingDashboardSummary(BaseModel):
     """
     High-level summary counts for the Quality / AMO dashboard.

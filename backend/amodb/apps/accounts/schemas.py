@@ -19,6 +19,8 @@ from .models import (
     InvoiceStatus,
     ModuleSubscriptionStatus,
     DataMode,
+    UserGroupType,
+    UserGroupVisibility,
 )
 
 # ---------------------------------------------------------------------------
@@ -220,6 +222,24 @@ class UserSelfUpdate(BaseModel):
     secondary_phone: Optional[str] = None
 
 
+class UserSummaryRead(BaseModel):
+    id: str
+    amo_id: str
+    department_id: Optional[str] = None
+    staff_code: str
+    email: EmailStr
+    full_name: str
+    role: AccountRole
+    position_title: Optional[str] = None
+    is_active: bool
+    online_status: str = "offline"
+    last_seen_at: Optional[datetime] = None
+    groups_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
 class UserRead(UserBase):
     id: str
     amo_id: str
@@ -238,6 +258,8 @@ class UserRead(UserBase):
     token_revoked_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
     last_login_ip: Optional[str] = None
+    last_seen_at: Optional[datetime] = None
+    online_status: str = "offline"
     created_at: datetime
     updated_at: datetime
 
@@ -245,6 +267,117 @@ class UserRead(UserBase):
         from_attributes = True
 
 
+class UserTaskSummaryRead(BaseModel):
+    id: str
+    title: str
+    status: str
+    priority: int
+    due_at: Optional[datetime] = None
+    escalated_at: Optional[datetime] = None
+    entity_type: Optional[str] = None
+    entity_id: Optional[str] = None
+    updated_at: datetime
+
+
+class UserPermissionRowRead(BaseModel):
+    category: str
+    subject: str
+    permission_level: str
+    status: str
+    effective_from: Optional[date] = None
+    expires_at: Optional[date] = None
+    notes: Optional[str] = None
+
+
+class UserActivityRowRead(BaseModel):
+    id: str
+    happened_at: datetime
+    action: str
+    entity_type: str
+    entity_id: str
+    note: Optional[str] = None
+
+
+class UserLoginRecordRead(BaseModel):
+    id: str
+    event_type: str
+    description: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    created_at: datetime
+
+
+class UserGroupMemberRead(BaseModel):
+    user_id: str
+    full_name: str
+    email: EmailStr
+    role: AccountRole
+    member_role: str
+    added_at: datetime
+
+
+class UserGroupRead(BaseModel):
+    id: str
+    amo_id: str
+    owner_user_id: Optional[str] = None
+    code: str
+    name: str
+    description: Optional[str] = None
+    group_type: UserGroupType
+    visibility: UserGroupVisibility
+    is_system_managed: bool
+    is_active: bool
+    member_count: int = 0
+    members: list[UserGroupMemberRead] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserGroupCreate(BaseModel):
+    amo_id: Optional[str] = None
+    owner_user_id: Optional[str] = None
+    code: Optional[str] = None
+    name: str = Field(min_length=2, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    group_type: UserGroupType = UserGroupType.CUSTOM
+    visibility: UserGroupVisibility = UserGroupVisibility.AMO
+    is_system_managed: Optional[bool] = False
+    user_ids: list[str] = Field(default_factory=list)
+
+
+class UserGroupUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    visibility: Optional[UserGroupVisibility] = None
+    is_active: Optional[bool] = None
+
+
+class UserGroupMemberUpsert(BaseModel):
+    user_id: str
+    member_role: str = Field(default="member", min_length=1, max_length=32)
+
+
+class UserKpiRead(BaseModel):
+    open_tasks: int = 0
+    overdue_tasks: int = 0
+    completed_tasks_30d: int = 0
+    active_authorisations: int = 0
+    activity_events_30d: int = 0
+    login_failures_30d: int = 0
+    groups_count: int = 0
+
+
+class UserWorkspaceRead(BaseModel):
+    user: UserRead
+    metrics: UserKpiRead
+    tasks: list[UserTaskSummaryRead] = Field(default_factory=list)
+    permissions: list[UserPermissionRowRead] = Field(default_factory=list)
+    activity: list[UserActivityRowRead] = Field(default_factory=list)
+    login_records: list[UserLoginRecordRead] = Field(default_factory=list)
+    groups: list[UserGroupRead] = Field(default_factory=list)
 
 
 class UserCommandNotifyPayload(BaseModel):

@@ -550,6 +550,22 @@ export async function getMyTrainingStatus(): Promise<TrainingStatusItem[]> {
   });
 }
 
+export interface TrainingStatusBulkResponse {
+  users: Record<string, TrainingStatusItem[]>;
+}
+
+export async function getBulkTrainingStatusForUsers(
+  userIds: string[],
+): Promise<TrainingStatusBulkResponse> {
+  return apiPost<TrainingStatusBulkResponse>(
+    "/training/status/users/bulk",
+    { user_ids: userIds },
+    {
+      headers: authHeaders(),
+    },
+  );
+}
+
 /**
  * Training status for a specific user (Quality / AMO admin only).
  */

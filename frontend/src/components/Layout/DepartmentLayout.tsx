@@ -24,9 +24,8 @@ import {
 import { fetchSubscription, fetchEntitlements } from "../../services/billing";
 import type { Subscription } from "../../types/billing";
 import { endSession, getCachedUser, getContext, markSessionActivity, onSessionEvent } from "../../services/auth";
-import { listDocumentAlerts } from "../../services/fleet";
 import { fetchOverviewSummary, type OverviewSummary } from "../../services/adminOverview";
-import { qmsListNotifications, qmsMarkNotificationRead, type QMSNotificationOut } from "../../services/qms";
+import { qmsGetNotificationSummary, qmsListNotifications, qmsMarkAllNotificationsRead, qmsMarkNotificationRead, type QMSNotificationOut, type QMSNotificationSummaryOut } from "../../services/qms";
 import {
   DEPARTMENT_ITEMS,
   type DepartmentId,
@@ -36,6 +35,7 @@ import {
   isAdminUser,
   isDepartmentId,
 } from "../../utils/departmentAccess";
+import { BrowserPollCoordinator } from "../../services/pollCoordinator";
 
 type Props = {
   amoCode: string;
@@ -769,11 +769,6 @@ const DepartmentLayout: React.FC<Props> = ({
   const sidebarHotzoneRef = useRef<HTMLDivElement | null>(null);
   const sidebarCloseTimerRef = useRef<number | null>(null);
 
-  const isForbiddenError = useCallback((err: unknown): boolean => {
-    const message = err instanceof Error ? err.message : String(err);
-    return message.includes("403") || message.toLowerCase().includes("forbidden");
-  }, []);
-
   const cacheKeyBase = useMemo(() => {
     return `${LAYOUT_CACHE_PREFIX}:${amoCode}:${currentUser?.id || "anonymous"}`;
   }, [amoCode, currentUser?.id]);
@@ -783,6 +778,12 @@ const DepartmentLayout: React.FC<Props> = ({
   const subscriptionCacheKey = `${cacheKeyBase}:subscription`;
   const overviewCacheKey = `${cacheKeyBase}:overview-summary`;
   const unreadCacheKey = `${cacheKeyBase}:unread-count`;
+  const notificationsCacheKey = `${cacheKeyBase}:notifications`;
+
+  const notificationPollCoordinator = useMemo(() => {
+    if (!currentUser?.id) return null;
+    return new BrowserPollCoordinator(`qms-notifications:${amoCode}:${currentUser.id}`);
+  }, [amoCode, currentUser?.id]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -829,12 +830,23 @@ const DepartmentLayout: React.FC<Props> = ({
       cacheProfile.useMemory
     );
     if (typeof cachedUnread === "number") {
+      previousUnreadRef.current = cachedUnread;
       setUnreadNotifications(cachedUnread);
+    }
+
+    const cachedNotifications = readLayoutCache<QMSNotificationOut[]>(
+      notificationsCacheKey,
+      cacheProfile.maxAgeMs,
+      cacheProfile.useMemory
+    );
+    if (cachedNotifications?.length) {
+      setNotifications(cachedNotifications);
     }
   }, [
     cacheProfile.maxAgeMs,
     cacheProfile.useMemory,
     currentUser,
+    notificationsCacheKey,
     overviewCacheKey,
     subscriptionCacheKey,
     unreadCacheKey,
@@ -904,7 +916,22 @@ const DepartmentLayout: React.FC<Props> = ({
     }
   }, [cacheProfile.maxAgeMs, cacheProfile.useMemory, currentUser, overviewCacheKey]);
 
-  const refreshUnreadNotifications = useCallback(async (opts?: { force?: boolean }) => {
+  const applyNotificationSummary = useCallback(
+    (summary: QMSNotificationSummaryOut, opts?: { notify?: boolean }) => {
+      const nextUnread = Math.max(0, Number(summary.unread_count || 0));
+      if (opts?.notify && nextUnread > previousUnreadRef.current) {
+        const delta = nextUnread - previousUnreadRef.current;
+        playNotificationChirp();
+        void pushDesktopNotification("New QMS notifications", `${delta} new item(s) received.`);
+      }
+      previousUnreadRef.current = nextUnread;
+      setUnreadNotifications(nextUnread);
+      writeLayoutCache(unreadCacheKey, nextUnread, cacheProfile.useMemory);
+    },
+    [cacheProfile.useMemory, unreadCacheKey]
+  );
+
+  const refreshUnreadNotifications = useCallback(async (opts?: { force?: boolean; notify?: boolean; broadcast?: boolean }) => {
     if (!currentUser) return;
     if (!opts?.force) {
       const cached = readLayoutCache<number>(
@@ -913,45 +940,18 @@ const DepartmentLayout: React.FC<Props> = ({
         cacheProfile.useMemory
       );
       if (typeof cached === "number") {
+        previousUnreadRef.current = cached;
         setUnreadNotifications(cached);
         return;
       }
     }
-    const handleModuleCall = async <T,>(
-      promise: Promise<T>,
-      onSuccess?: (value: T) => void,
-      onForbidden?: () => void
-    ) => {
-      try {
-        const data = await promise;
-        onSuccess?.(data);
-      } catch (err) {
-        if (isForbiddenError(err)) {
-          onForbidden?.();
-          return;
-        }
-        throw err;
-      }
-    };
 
-    const qmsPromise = handleModuleCall(
-      qmsListNotifications(),
-      (data) => {
-        const nextUnread = data.filter((n) => !n.read_at).length;
-        if (nextUnread > previousUnreadRef.current) {
-          playNotificationChirp();
-          void pushDesktopNotification("New QMS notifications", `${nextUnread - previousUnreadRef.current} new item(s) received.`);
-        }
-        previousUnreadRef.current = nextUnread;
-        setUnreadNotifications(nextUnread);
-        writeLayoutCache(unreadCacheKey, nextUnread, cacheProfile.useMemory);
-      }
-    );
-
-    const documentsPromise = handleModuleCall(listDocumentAlerts());
-
-    await Promise.all([qmsPromise, documentsPromise]);
-  }, [cacheProfile.maxAgeMs, cacheProfile.useMemory, currentUser, isForbiddenError, unreadCacheKey]);
+    const summary = await qmsGetNotificationSummary();
+    applyNotificationSummary(summary, { notify: opts?.notify });
+    if (opts?.broadcast && notificationPollCoordinator?.isLeader()) {
+      notificationPollCoordinator.broadcast("qms-notification-summary", summary);
+    }
+  }, [applyNotificationSummary, cacheProfile.maxAgeMs, cacheProfile.useMemory, currentUser, notificationPollCoordinator, unreadCacheKey]);
 
   const handlePollingFailure = useCallback(
     (err: unknown) => {
@@ -988,41 +988,58 @@ const DepartmentLayout: React.FC<Props> = ({
   );
 
   const refreshNotifications = useCallback(
-    async (opts?: { unreadOnly?: boolean }) => {
+    async (opts?: { preserveVisibleItems?: boolean }) => {
       if (!currentUser) return;
-      const unreadOnly = opts?.unreadOnly ?? false;
-      if (!unreadOnly) {
+      const preserveVisibleItems = opts?.preserveVisibleItems ?? true;
+      const hasVisibleItems = notifications.length > 0;
+      if (!(preserveVisibleItems && hasVisibleItems)) {
         setNotificationsLoading(true);
-        setNotificationsError(null);
       }
+      setNotificationsError(null);
       try {
-        const data = await qmsListNotifications();
-        if (unreadOnly) {
-          if (data.length > previousUnreadRef.current) {
-            playNotificationChirp();
-            void pushDesktopNotification("New notifications", `${data.length - previousUnreadRef.current} new item(s) received.`);
-          }
-          previousUnreadRef.current = data.length;
-          setUnreadNotifications(data.length);
-          writeLayoutCache(unreadCacheKey, data.length, cacheProfile.useMemory);
-        } else {
-          setNotifications(data);
-          const unreadCount = data.filter((n) => !n.read_at).length;
-          previousUnreadRef.current = unreadCount;
-          setUnreadNotifications(unreadCount);
-          writeLayoutCache(unreadCacheKey, unreadCount, cacheProfile.useMemory);
-        }
+        const data = await qmsListNotifications({ include_read: true, limit: 20 });
+        const unreadCount = data.filter((n) => !n.read_at).length;
+        const summary: QMSNotificationSummaryOut = {
+          unread_count: unreadCount,
+          latest_created_at: data[0]?.created_at ?? null,
+        };
+        setNotifications(data);
+        writeLayoutCache(notificationsCacheKey, data, cacheProfile.useMemory);
+        applyNotificationSummary(summary);
+        notificationPollCoordinator?.broadcast("qms-notification-summary", summary);
       } catch (err: any) {
-        if (!unreadOnly) {
-          setNotificationsError(err?.message || "Failed to load notifications.");
-        }
+        setNotificationsError(err?.message || "Failed to load notifications.");
         handlePollingFailure(err);
       } finally {
-        if (!unreadOnly) setNotificationsLoading(false);
+        setNotificationsLoading(false);
       }
     },
-    [cacheProfile.useMemory, currentUser, handlePollingFailure, unreadCacheKey]
+    [applyNotificationSummary, cacheProfile.useMemory, currentUser, handlePollingFailure, notificationPollCoordinator, notifications.length, notificationsCacheKey]
   );
+
+  const markAllNotificationsRead = useCallback(async () => {
+    if (!notifications.some((note) => !note.read_at)) return;
+    try {
+      await qmsMarkAllNotificationsRead();
+      await refreshNotifications({ preserveVisibleItems: true });
+      pushToast({
+        title: "Notifications cleared",
+        message: "All visible unread notifications have been marked as read.",
+        variant: "success",
+      });
+    } catch (err: any) {
+      setNotificationsError(err?.message || "Failed to mark notifications as read.");
+    }
+  }, [notifications, pushToast, refreshNotifications]);
+
+  useEffect(() => {
+    if (!notificationPollCoordinator) return;
+    return notificationPollCoordinator.start((message) => {
+      if (message.type === "qms-notification-summary") {
+        applyNotificationSummary(message.payload as QMSNotificationSummaryOut);
+      }
+    });
+  }, [applyNotificationSummary, notificationPollCoordinator]);
 
   useEffect(() => {
     const handlePrefsChange = () => {
@@ -1034,16 +1051,20 @@ const DepartmentLayout: React.FC<Props> = ({
 
   useEffect(() => {
     if (!currentUser) return;
+    const tick = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (notificationPollCoordinator && !notificationPollCoordinator.isLeader()) return;
+      void refreshUnreadNotifications({ force: true, notify: true, broadcast: true });
+    };
     const intervalMs = notificationPrefs.pollIntervalSeconds * 1000;
-    const id = window.setInterval(() => {
-      void refreshNotifications({ unreadOnly: true });
-    }, intervalMs);
+    tick();
+    const id = window.setInterval(tick, intervalMs);
     return () => window.clearInterval(id);
-  }, [currentUser, notificationPrefs.pollIntervalSeconds, refreshNotifications]);
+  }, [currentUser, notificationPollCoordinator, notificationPrefs.pollIntervalSeconds, refreshUnreadNotifications]);
 
   useEffect(() => {
     if (notificationsOpen) {
-      refreshNotifications();
+      void refreshNotifications({ preserveVisibleItems: true });
     }
   }, [notificationsOpen, refreshNotifications]);
 
@@ -1752,18 +1773,33 @@ const DepartmentLayout: React.FC<Props> = ({
                         <div className="notification-panel" role="menu">
                           <div className="notification-panel__header">
                             <strong>Notifications</strong>
-                            <button type="button" className="notification-panel__dismiss" onClick={() => setNotificationsOpen(false)}>
-                              Close
-                            </button>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                              <button
+                                type="button"
+                                className="notification-panel__dismiss"
+                                onClick={() => void refreshNotifications({ preserveVisibleItems: true })}
+                              >
+                                Refresh
+                              </button>
+                              {notifications.some((note) => !note.read_at) ? (
+                                <button type="button" className="notification-panel__dismiss" onClick={() => void markAllNotificationsRead()}>
+                                  Mark all read
+                                </button>
+                              ) : null}
+                              <button type="button" className="notification-panel__dismiss" onClick={() => setNotificationsOpen(false)}>
+                                Close
+                              </button>
+                            </div>
                           </div>
-                          {notificationsLoading ? <div className="notification-panel__state">Loading…</div> : null}
+                          {notificationsLoading && !notifications.length ? <div className="notification-panel__state">Loading…</div> : null}
+                          {notificationsLoading && notifications.length ? <div className="notification-panel__state">Refreshing…</div> : null}
                           {notificationsError ? <div className="notification-panel__state notification-panel__state--error">{notificationsError}</div> : null}
                           {!notificationsLoading && !notificationsError && !notifications.length ? (
-                            <div className="notification-panel__state">No unread notifications.</div>
+                            <div className="notification-panel__state">No recent notifications.</div>
                           ) : null}
-                          {!notificationsLoading && !notificationsError && notifications.length ? (
+                          {!notificationsError && notifications.length ? (
                             <div className="notification-panel__list">
-                              {notifications.slice(0, 8).map((note) => (
+                              {notifications.slice(0, 12).map((note) => (
                                 <article key={note.id} className={`notification-item${note.read_at ? "" : " notification-item--unread"}`}>
                                   <div className="notification-item__title">{note.message}</div>
                                   <div className="notification-item__meta">
@@ -1772,7 +1808,7 @@ const DepartmentLayout: React.FC<Props> = ({
                                       <button
                                         type="button"
                                         className="notification-item__action"
-                                        onClick={() => qmsMarkNotificationRead(note.id).then(() => refreshNotifications())}
+                                        onClick={() => qmsMarkNotificationRead(note.id).then(() => refreshNotifications({ preserveVisibleItems: true }))}
                                       >
                                         Mark read
                                       </button>
