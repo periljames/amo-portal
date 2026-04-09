@@ -14,7 +14,7 @@ import {
   scheduleAdminUserReview,
   updateAdminUser,
 } from "../services/adminUsers";
-import type { AccountRole, AdminUserUpdatePayload } from "../services/adminUsers";
+import type { AccountRole, AdminUserUpdatePayload, AdminUserWorkspace } from "../services/adminUsers";
 import "../styles/admin-user-management.css";
 
 type ProfileTab = "profile" | "tasks" | "permissions" | "activity" | "login";
@@ -47,6 +47,49 @@ const formatDateTime = (value?: string | null) => {
   }).format(date);
 };
 
+const relativeLabel = (value?: string | null) => {
+  if (!value) return "Never seen";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Never seen";
+  const delta = Date.now() - date.getTime();
+  if (delta < 60_000) return "Just now";
+  const minutes = Math.floor(delta / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+};
+
+const workspaceStatus = (workspace?: AdminUserWorkspace) => {
+  if (!workspace) return "Offline";
+  if (!workspace.user.is_active) return "Inactive";
+  if (workspace.presence.is_online && workspace.presence.state === "away") return "Away";
+  if (workspace.presence.is_online) return "Online";
+  return "Offline";
+};
+
+const statusTone = (workspace?: AdminUserWorkspace) => {
+  const status = workspaceStatus(workspace);
+  if (status === "Online") return "is-online";
+  if (status === "Away") return "is-away";
+  if (status === "Inactive") return "is-inactive";
+  return "is-offline";
+};
+
+const primaryLastSeen = (workspace?: AdminUserWorkspace) => {
+  if (!workspace) return "Never seen";
+  if (workspace.presence.is_online) return "Active now";
+  const seenAt = workspace.presence.last_seen_at || workspace.user.last_login_at;
+  return relativeLabel(seenAt);
+};
+
+const secondaryLastSeen = (workspace?: AdminUserWorkspace) => {
+  if (!workspace || workspace.presence.is_online) return null;
+  const primary = primaryLastSeen(workspace);
+  if (primary === "Never seen") return null;
+  return formatDateTime(workspace.presence.last_seen_at || workspace.user.last_login_at);
+};
+
 const AdminUserDetailPage: React.FC = () => {
   const { amoCode, userId } = useParams<{ amoCode?: string; userId?: string }>();
   const navigate = useNavigate();
@@ -66,6 +109,7 @@ const AdminUserDetailPage: React.FC = () => {
     queryKey: ["admin-user-workspace", resolvedUserId],
     queryFn: () => getAdminUserWorkspace(resolvedUserId),
     enabled: !!resolvedUserId,
+    staleTime: 30_000,
   });
 
   const workspace = workspaceQuery.data;
@@ -104,38 +148,19 @@ const AdminUserDetailPage: React.FC = () => {
     onSuccess: refreshWorkspace,
   });
 
-  const currentStatus = useMemo(() => workspace?.presence_display.status_label || "Offline", [workspace]);
-  const currentLastSeenPrimary = useMemo(() => {
-    if (!workspace || !user) return "Never seen";
-    if (workspace.presence_display.last_seen_label === "Active now") return "Active now";
-    if (workspace.presence_display.last_seen_label === "Never seen") return "Never seen";
-    const seen = workspace.presence_display.last_seen_at || user.last_login_at;
-    if (!seen) return "Never seen";
-    const dt = new Date(seen);
-    if (Number.isNaN(dt.getTime())) return "Never seen";
-    const deltaMs = Date.now() - dt.getTime();
-    if (deltaMs < 60_000) return "Just now";
-    const mins = Math.floor(deltaMs / 60_000);
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.floor(hours / 24)}d ago`;
-  }, [workspace, user]);
-  const currentLastSeenSecondary = useMemo(() => {
-    if (!workspace || !user) return null;
-    if (workspace.presence_display.status_label === "Online") return null;
-    if (currentLastSeenPrimary === "Never seen") return null;
-    return formatDateTime(workspace.presence_display.last_seen_at || user.last_login_at);
-  }, [workspace, user, currentLastSeenPrimary]);
+  const displayTitle = useMemo(() => {
+    if (!workspace) return "Portal User";
+    return workspace.display_title || workspace.user.position_title || String(workspace.user.role).replaceAll("_", " ");
+  }, [workspace]);
 
   return (
     <DepartmentLayout amoCode={resolvedAmoCode} activeDepartment="admin-users">
       <div className="admin-user-profile">
-        <div className="aum-header">
+        <header className="aum-header aum-brand-hero">
           <div>
             <p className="aum-eyebrow">User Profile</p>
             <h1>{user?.full_name || "User profile"}</h1>
-            <p className="aum-subtitle">Single-page review for profile details, assigned tasks, permissions, activity, and login history.</p>
+            <p className="aum-subtitle">Single-page review for profile details, tasks, permissions, activity, and login history.</p>
           </div>
           <div className="aum-header-actions">
             <button type="button" className="aum-button aum-button--secondary" onClick={() => navigate(`/maintenance/${resolvedAmoCode}/admin/users`)}>
@@ -145,11 +170,11 @@ const AdminUserDetailPage: React.FC = () => {
               Refresh
             </button>
           </div>
-        </div>
+        </header>
 
-        {workspaceQuery.isLoading ? (
+        {workspaceQuery.isPending ? (
           <div className="aum-panel"><div className="aum-empty">Loading user workspace…</div></div>
-        ) : workspaceQuery.error ? (
+        ) : workspaceQuery.isError ? (
           <div className="aum-panel"><div className="aum-empty">{(workspaceQuery.error as Error).message}</div></div>
         ) : workspace && user ? (
           <>
@@ -158,12 +183,12 @@ const AdminUserDetailPage: React.FC = () => {
                 <h2>{user.full_name}</h2>
                 <p>{user.email}</p>
                 <div className="aum-chip-row">
-                  <span className={`aum-status ${currentStatus === "Inactive" ? "is-inactive" : currentStatus === "Online" ? "is-online" : workspace.presence.state === "away" ? "is-away" : "is-offline"}`}>{currentStatus}</span>
-                  <span className="aum-chip">Title: {workspace.display_title}</span>
+                  <span className={`aum-status ${statusTone(workspace)}`}>{workspaceStatus(workspace)}</span>
+                  <span className="aum-chip">Title: {displayTitle}</span>
                   <span className="aum-chip">Department: {workspace.department_name || "—"}</span>
-                  <span className="aum-chip">Last seen: {currentLastSeenPrimary}</span>
+                  <span className="aum-chip">Last seen: {primaryLastSeen(workspace)}</span>
                 </div>
-                {currentLastSeenSecondary ? <p className="aum-muted">{currentLastSeenSecondary}</p> : null}
+                {secondaryLastSeen(workspace) ? <p className="aum-muted">{secondaryLastSeen(workspace)}</p> : null}
               </div>
               <div className="aum-profile-metrics">
                 {workspace.metrics.map((metric) => (
@@ -194,7 +219,7 @@ const AdminUserDetailPage: React.FC = () => {
               ))}
             </div>
 
-            {activeTab === "profile" && (
+            {activeTab === "profile" ? (
               <section className="aum-three-col">
                 <article className="aum-panel">
                   <h2>Profile details</h2>
@@ -202,7 +227,7 @@ const AdminUserDetailPage: React.FC = () => {
                     <div><span>First name</span><strong>{user.first_name}</strong></div>
                     <div><span>Last name</span><strong>{user.last_name}</strong></div>
                     <div><span>Staff code</span><strong>{user.staff_code}</strong></div>
-                    <div><span>Title</span><strong>{workspace.display_title}</strong></div>
+                    <div><span>Title</span><strong>{displayTitle}</strong></div>
                     <div><span>Phone</span><strong>{user.phone || "—"}</strong></div>
                     <div><span>Secondary phone</span><strong>{user.secondary_phone || "—"}</strong></div>
                     <div><span>Department</span><strong>{workspace.department_name || "—"}</strong></div>
@@ -214,16 +239,14 @@ const AdminUserDetailPage: React.FC = () => {
                     <label className="aum-field">
                       <span>Role</span>
                       <select className="aum-select" value={selectedRole || user.role} onChange={(event) => setSelectedRole(event.target.value as AccountRole)}>
-                        {ROLE_OPTIONS.map((role) => <option key={role} value={role}>{role}</option>)}
+                        {ROLE_OPTIONS.map((role) => <option key={role} value={role}>{role.replaceAll("_", " ")}</option>)}
                       </select>
                     </label>
                     <button type="button" className="aum-button aum-button--primary" onClick={() => updateUserMutation.mutate({ role: (selectedRole || user.role) as AccountRole })}>
                       Update role
                     </button>
                     <div className="aum-row-actions wrap">
-                      <button type="button" className="aum-button aum-button--ghost" onClick={() => commandMutation.mutate(user.is_active ? "disable" : "enable")}>
-                        {user.is_active ? "Disable" : "Enable"}
-                      </button>
+                      <button type="button" className="aum-button aum-button--ghost" onClick={() => commandMutation.mutate(user.is_active ? "disable" : "enable")}>{user.is_active ? "Disable" : "Enable"}</button>
                       <button type="button" className="aum-button aum-button--ghost" onClick={() => commandMutation.mutate("revoke")}>Revoke access</button>
                       <button type="button" className="aum-button aum-button--ghost" onClick={() => commandMutation.mutate("reset")}>Force password reset</button>
                     </div>
@@ -243,7 +266,7 @@ const AdminUserDetailPage: React.FC = () => {
                     </label>
                     <label className="aum-field">
                       <span>Notification message</span>
-                      <textarea className="aum-input aum-textarea" value={notifyMessage} onChange={(event) => setNotifyMessage(event.target.value)} rows={4} />
+                      <textarea className="aum-textarea" value={notifyMessage} onChange={(event) => setNotifyMessage(event.target.value)} rows={4} />
                     </label>
                     <button type="button" className="aum-button aum-button--primary" onClick={() => notifyMutation.mutate()} disabled={!notifySubject.trim() || !notifyMessage.trim()}>
                       Send notification
@@ -251,9 +274,9 @@ const AdminUserDetailPage: React.FC = () => {
                   </div>
                 </article>
               </section>
-            )}
+            ) : null}
 
-            {activeTab === "tasks" && (
+            {activeTab === "tasks" ? (
               <section className="aum-panel">
                 <div className="aum-panel-header"><div><h2>Tasks assigned</h2><p>Operational tasks owned by this user.</p></div></div>
                 <div className="aum-table-wrap">
@@ -275,9 +298,9 @@ const AdminUserDetailPage: React.FC = () => {
                   </table>
                 </div>
               </section>
-            )}
+            ) : null}
 
-            {activeTab === "permissions" && (
+            {activeTab === "permissions" ? (
               <section className="aum-panel">
                 <div className="aum-panel-header"><div><h2>Project permissions</h2><p>Current authorisations and operational scope linked to this account.</p></div></div>
                 <div className="aum-table-wrap">
@@ -313,9 +336,9 @@ const AdminUserDetailPage: React.FC = () => {
                   </button>
                 </div>
               </section>
-            )}
+            ) : null}
 
-            {activeTab === "activity" && (
+            {activeTab === "activity" ? (
               <section className="aum-panel">
                 <div className="aum-panel-header"><div><h2>Activity log</h2><p>Recent recorded actions involving this user.</p></div></div>
                 <div className="aum-table-wrap">
@@ -336,14 +359,14 @@ const AdminUserDetailPage: React.FC = () => {
                   </table>
                 </div>
               </section>
-            )}
+            ) : null}
 
-            {activeTab === "login" && (
+            {activeTab === "login" ? (
               <section className="aum-panel">
                 <div className="aum-panel-header"><div><h2>Login record</h2><p>Current session state and account access history.</p></div></div>
                 <div className="aum-definition-list two-col">
-                  <div><span>Online status</span><strong>{currentStatus}</strong></div>
-                  <div><span>Last seen</span><strong>{currentLastSeenPrimary}</strong></div>
+                  <div><span>Online status</span><strong>{workspaceStatus(workspace)}</strong></div>
+                  <div><span>Last seen</span><strong>{primaryLastSeen(workspace)}</strong></div>
                   <div><span>Last login</span><strong>{formatDateTime(workspace.login_record.last_login_at)}</strong></div>
                   <div><span>Last login IP</span><strong>{workspace.login_record.last_login_ip || "—"}</strong></div>
                   <div><span>Password change required</span><strong>{workspace.login_record.must_change_password ? "Yes" : "No"}</strong></div>
@@ -352,9 +375,11 @@ const AdminUserDetailPage: React.FC = () => {
                   <div><span>User agent</span><strong>{workspace.login_record.last_login_user_agent || "—"}</strong></div>
                 </div>
               </section>
-            )}
+            ) : null}
           </>
-        ) : null}
+        ) : (
+          <div className="aum-panel"><div className="aum-empty">User workspace is unavailable.</div></div>
+        )}
       </div>
     </DepartmentLayout>
   );

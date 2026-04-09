@@ -31,3 +31,11 @@
 .training-module--qms .qms-card {
   border-radius: 16px;
 }
+
+.training-module--qms .training-history-table tbody tr:nth-child(even) {
+  background: rgba(177, 143, 44, 0.10);
+}
+
+.training-module--qms .training-history-table tbody tr:hover {
+  background: rgba(177, 143, 44, 0.16);
+}

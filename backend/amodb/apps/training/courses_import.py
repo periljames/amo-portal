@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from ..accounts import models as accounts_models
 from . import models, schemas
 
 
@@ -41,6 +42,90 @@ ALLOWED_STATUSES = {
 }
 
 
+
+
+def _normalize_whitespace(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _normalized_scope_text(value: Optional[str]) -> str:
+    return _normalize_whitespace((value or "").lower())
+
+
+def _parse_scope_parts(raw_scope: Optional[str]) -> tuple[Optional[models.TrainingRequirementScope], Optional[str], Optional[str], Optional[str]]:
+    raw = _clean(raw_scope)
+    if not raw:
+        return None, None, None, None
+
+    norm = _normalized_scope_text(raw)
+    if norm in {"all", "all staff", "all employees", "all personnel", "everyone", "entire amo", "amo-wide"}:
+        return models.TrainingRequirementScope.ALL, None, None, None
+
+    department_match = re.match(r"^(?:department|dept)\s*[:=-]\s*(.+)$", raw, flags=re.IGNORECASE)
+    if department_match:
+        value = _normalize_whitespace(department_match.group(1)).upper()
+        return models.TrainingRequirementScope.DEPARTMENT, value or None, None, None
+
+    role_match = re.match(r"^(?:job role|role|position|title)\s*[:=-]\s*(.+)$", raw, flags=re.IGNORECASE)
+    if role_match:
+        value = _normalize_whitespace(role_match.group(1))
+        return models.TrainingRequirementScope.JOB_ROLE, None, value or None, None
+
+    return None, None, None, None
+
+
+def _derive_requirement_rule(
+    db: Session,
+    *,
+    amo_id: str,
+    is_mandatory: bool,
+    raw_scope: Optional[str],
+) -> tuple[Optional[models.TrainingRequirementScope], Optional[str], Optional[str], Optional[str]]:
+    if not is_mandatory:
+        return None, None, None, None
+
+    scope, department_code, job_role, user_id = _parse_scope_parts(raw_scope)
+    if scope is not None:
+        return scope, department_code, job_role, user_id
+
+    raw = _clean(raw_scope)
+    if not raw:
+        return None, None, None, None
+
+    norm = _normalized_scope_text(raw)
+
+    department = (
+        db.query(accounts_models.Department)
+        .filter(accounts_models.Department.amo_id == amo_id, accounts_models.Department.is_active.is_(True))
+        .all()
+    )
+    for item in department:
+        if norm == _normalized_scope_text(item.code) or norm == _normalized_scope_text(item.name):
+            return models.TrainingRequirementScope.DEPARTMENT, item.code.upper(), None, None
+
+    return None, None, None, None
+
+
+def _find_existing_requirement(
+    db: Session,
+    *,
+    amo_id: str,
+    course_pk: str,
+    scope: models.TrainingRequirementScope,
+    department_code: Optional[str],
+    job_role: Optional[str],
+    user_id: Optional[str],
+) -> Optional[models.TrainingRequirement]:
+    query = db.query(models.TrainingRequirement).filter(
+        models.TrainingRequirement.amo_id == amo_id,
+        models.TrainingRequirement.course_id == course_pk,
+        models.TrainingRequirement.scope == scope,
+    )
+
+    query = query.filter(models.TrainingRequirement.department_code == department_code if department_code is not None else models.TrainingRequirement.department_code.is_(None))
+    query = query.filter(models.TrainingRequirement.job_role == job_role if job_role is not None else models.TrainingRequirement.job_role.is_(None))
+    query = query.filter(models.TrainingRequirement.user_id == user_id if user_id is not None else models.TrainingRequirement.user_id.is_(None))
+    return query.first()
 def _clean(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -149,10 +234,13 @@ def import_courses_rows(
     amo_id: str,
     rows: list[dict[str, Any]],
     dry_run: bool,
+    actor_user_id: Optional[str] = None,
 ) -> schemas.CourseImportSummary:
     issues: list[schemas.CourseImportRowIssue] = []
     created_courses = 0
     updated_courses = 0
+    created_requirements = 0
+    updated_requirements = 0
     seen_ids: set[str] = set()
 
     for raw in rows:
@@ -180,32 +268,83 @@ def import_courses_rows(
         )
         if existing is None:
             created_courses += 1
+            if dry_run:
+                scope, department_code, job_role, user_id = _derive_requirement_rule(
+                    db, amo_id=amo_id, is_mandatory=parsed.is_mandatory, raw_scope=parsed.scope
+                )
+                if scope is not None:
+                    created_requirements += 1
+                continue
+
+            existing = models.TrainingCourse(
+                amo_id=amo_id,
+                course_id=parsed.course_id,
+                course_name=parsed.course_name,
+                frequency_months=parsed.frequency_months,
+                status=parsed.status,
+                category_raw=parsed.category_raw,
+                scope=parsed.scope,
+                regulatory_reference=parsed.reference,
+                is_mandatory=parsed.is_mandatory,
+                mandatory_for_all=_normalized_scope_text(parsed.scope) in {"all", "all staff", "all employees", "all personnel", "everyone", "entire amo", "amo-wide"},
+                created_by_user_id=actor_user_id,
+                updated_by_user_id=actor_user_id,
+            )
+            db.add(existing)
+            db.flush()
+        else:
+            updated_courses += 1
+            if not dry_run:
+                existing.course_name = parsed.course_name
+                existing.frequency_months = parsed.frequency_months
+                existing.status = parsed.status
+                existing.category_raw = parsed.category_raw
+                existing.scope = parsed.scope
+                existing.regulatory_reference = parsed.reference
+                existing.is_mandatory = parsed.is_mandatory
+                existing.mandatory_for_all = _normalized_scope_text(parsed.scope) in {"all", "all staff", "all employees", "all personnel", "everyone", "entire amo", "amo-wide"}
+                existing.updated_by_user_id = actor_user_id
+                db.add(existing)
+
+        scope, department_code, job_role, user_id = _derive_requirement_rule(
+            db, amo_id=amo_id, is_mandatory=parsed.is_mandatory, raw_scope=parsed.scope
+        )
+        if scope is None:
+            continue
+
+        requirement = _find_existing_requirement(
+            db,
+            amo_id=amo_id,
+            course_pk=existing.id,
+            scope=scope,
+            department_code=department_code,
+            job_role=job_role,
+            user_id=user_id,
+        )
+
+        if requirement is None:
+            created_requirements += 1
             if not dry_run:
                 db.add(
-                    models.TrainingCourse(
+                    models.TrainingRequirement(
                         amo_id=amo_id,
-                        course_id=parsed.course_id,
-                        course_name=parsed.course_name,
-                        frequency_months=parsed.frequency_months,
-                        status=parsed.status,
-                        category_raw=parsed.category_raw,
-                        scope=parsed.scope,
-                        regulatory_reference=parsed.reference,
-                        is_mandatory=parsed.is_mandatory,
+                        course_id=existing.id,
+                        scope=scope,
+                        department_code=department_code,
+                        job_role=job_role,
+                        user_id=user_id,
+                        is_mandatory=True,
+                        is_active=True,
+                        created_by_user_id=actor_user_id,
                     )
                 )
             continue
 
-        updated_courses += 1
+        updated_requirements += 1
         if not dry_run:
-            existing.course_name = parsed.course_name
-            existing.frequency_months = parsed.frequency_months
-            existing.status = parsed.status
-            existing.category_raw = parsed.category_raw
-            existing.scope = parsed.scope
-            existing.regulatory_reference = parsed.reference
-            existing.is_mandatory = parsed.is_mandatory
-            db.add(existing)
+            requirement.is_mandatory = True
+            requirement.is_active = True
+            db.add(requirement)
 
     if dry_run:
         db.rollback()
@@ -217,6 +356,8 @@ def import_courses_rows(
         total_rows=len(rows),
         created_courses=created_courses,
         updated_courses=updated_courses,
+        created_requirements=created_requirements,
+        updated_requirements=updated_requirements,
         skipped_rows=len(issues),
         issues=issues,
     )

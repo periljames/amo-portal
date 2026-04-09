@@ -4,14 +4,19 @@ import QMSLayout from "../components/QMS/QMSLayout";
 import type { AdminUserRead } from "../services/adminUsers";
 import { getAdminUser } from "../services/adminUsers";
 import { getContext } from "../services/auth";
-import { downloadTrainingUserEvidencePack, getUserTrainingStatus } from "../services/training";
-import type { TrainingStatusItem } from "../types/training";
+import {
+  downloadTrainingUserEvidencePack,
+  downloadTrainingUserRecordPdf,
+  getUserTrainingStatus,
+  listTrainingRecords,
+} from "../services/training";
+import type { TrainingRecordRead, TrainingStatusItem } from "../types/training";
 import "../styles/training.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 function formatDate(value: string | null | undefined): string {
-  if (!value) return "";
+  if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleDateString();
@@ -69,6 +74,15 @@ function daysLabel(days: number | null): string {
   return `${days} days remaining`;
 }
 
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
 const QMSTrainingUserPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string; userId?: string; staffId?: string }>();
   const ctx = getContext();
@@ -81,20 +95,24 @@ const QMSTrainingUserPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<AdminUserRead | null>(null);
   const [items, setItems] = useState<TrainingStatusItem[]>([]);
+  const [records, setRecords] = useState<TrainingRecordRead[]>([]);
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [exporting, setExporting] = useState(false);
+  const [exportingEvidence, setExportingEvidence] = useState(false);
+  const [exportingRecord, setExportingRecord] = useState(false);
 
   const load = async () => {
     if (!userId) return;
     setState("loading");
     setError(null);
     try {
-      const [userRecord, status] = await Promise.all([
+      const [userRecord, status, history] = await Promise.all([
         getAdminUser(userId),
         getUserTrainingStatus(userId),
+        listTrainingRecords({ user_id: userId }),
       ]);
       setUser(userRecord);
       setItems(status);
+      setRecords(history);
       setState("ready");
     } catch (e: any) {
       setError(e?.message || "Failed to load training profile.");
@@ -102,27 +120,38 @@ const QMSTrainingUserPage: React.FC = () => {
     }
   };
 
-  const handleExport = async () => {
+  const handleExportEvidence = async () => {
     if (!userId) return;
     setError(null);
-    setExporting(true);
+    setExportingEvidence(true);
     try {
       const blob = await downloadTrainingUserEvidencePack(userId);
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `training_${userId}_evidence_pack.zip`;
-      link.click();
-      window.URL.revokeObjectURL(url);
+      const safeName = (user?.full_name || userId).replace(/\s+/g, "_");
+      downloadBlob(blob, `${safeName}_training_evidence_pack.zip`);
     } catch (e: any) {
       setError(e?.message || "Failed to export training evidence pack.");
     } finally {
-      setExporting(false);
+      setExportingEvidence(false);
+    }
+  };
+
+  const handleExportRecord = async () => {
+    if (!userId) return;
+    setError(null);
+    setExportingRecord(true);
+    try {
+      const blob = await downloadTrainingUserRecordPdf(userId);
+      const safeName = (user?.full_name || userId).replace(/\s+/g, "_");
+      downloadBlob(blob, `${safeName}_training_record.pdf`);
+    } catch (e: any) {
+      setError(e?.message || "Failed to export individual training record.");
+    } finally {
+      setExportingRecord(false);
     }
   };
 
   useEffect(() => {
-    load();
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
@@ -142,7 +171,7 @@ const QMSTrainingUserPage: React.FC = () => {
         if (item.status === "NOT_DONE") acc.notDone += 1;
         return acc;
       },
-      { overdue: 0, dueSoon: 0, ok: 0, deferred: 0, scheduled: 0, notDone: 0 }
+      { overdue: 0, dueSoon: 0, ok: 0, deferred: 0, scheduled: 0, notDone: 0 },
     );
   }, [items]);
 
@@ -167,7 +196,7 @@ const QMSTrainingUserPage: React.FC = () => {
       .sort(
         (a, b) =>
           new Date(a.upcoming_event_date as string).getTime() -
-          new Date(b.upcoming_event_date as string).getTime()
+          new Date(b.upcoming_event_date as string).getTime(),
       );
     return upcoming[0] || null;
   }, [items]);
@@ -180,6 +209,16 @@ const QMSTrainingUserPage: React.FC = () => {
       .slice(0, 6);
   }, [items]);
 
+  const historyRows = useMemo(() => {
+    return records
+      .slice()
+      .sort((a, b) => {
+        const left = new Date(a.completion_date || "").getTime();
+        const right = new Date(b.completion_date || "").getTime();
+        return right - left;
+      });
+  }, [records]);
+
   return (
     <QMSLayout
       amoCode={amoSlug}
@@ -188,38 +227,43 @@ const QMSTrainingUserPage: React.FC = () => {
       subtitle="Detailed training compliance for individual staff members."
       actions={
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" className="primary-chip-btn" onClick={load}>
+          <button type="button" className="primary-chip-btn" onClick={() => void load()}>
             Refresh profile
           </button>
           <button
             type="button"
             className="secondary-chip-btn"
-            onClick={handleExport}
-            disabled={exporting || !userId}
+            onClick={handleExportRecord}
+            disabled={exportingRecord || !userId}
           >
-            {exporting ? "Exporting…" : "Export evidence pack"}
+            {exportingRecord ? "Preparing PDF…" : "Download training record"}
+          </button>
+          <button
+            type="button"
+            className="secondary-chip-btn"
+            onClick={handleExportEvidence}
+            disabled={exportingEvidence || !userId}
+          >
+            {exportingEvidence ? "Exporting…" : "Export evidence pack"}
           </button>
         </div>
       }
     >
       <div className="training-module training-module--qms">
         <section className="qms-toolbar">
-        <label className="qms-field">
-          <span>Status</span>
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-          >
-            {STATUS_FILTERS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
-          Back to matrix
-        </button>
+          <label className="qms-field">
+            <span>Status</span>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              {STATUS_FILTERS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
+            Back to matrix
+          </button>
         </section>
 
         {state === "loading" && (
@@ -231,7 +275,7 @@ const QMSTrainingUserPage: React.FC = () => {
         {state === "error" && (
           <div className="card card--error">
             <p>{error}</p>
-            <button type="button" className="primary-chip-btn" onClick={load}>
+            <button type="button" className="primary-chip-btn" onClick={() => void load()}>
               Retry
             </button>
           </div>
@@ -239,149 +283,197 @@ const QMSTrainingUserPage: React.FC = () => {
 
         {state === "ready" && (
           <section className="qms-grid">
-          <div className="qms-card qms-card--hero">
-            <div className="qms-card__header">
-              <div>
-                <h3 className="qms-card__title">
-                  {user?.full_name || "Training profile"}
-                </h3>
-                <p className="qms-card__subtitle">
-                  {user?.position_title || "Quality staff"} · {user?.staff_code || "N/A"}
-                </p>
-              </div>
-              <span className="qms-pill qms-pill--info">Compliance {compliance}%</span>
-            </div>
-            <div className="qms-split">
-              <div>
-                <span className="qms-pill qms-pill--danger">Overdue: {summary.overdue}</span>
-                <p className="text-muted">Immediate remediation required.</p>
-              </div>
-              <div>
-                <span className="qms-pill qms-pill--warning">Due soon: {summary.dueSoon}</span>
-                <p className="text-muted">Schedule next available course.</p>
-              </div>
-              <div>
-                <span className="qms-pill">Compliant: {summary.ok}</span>
-                <p className="text-muted">In date and compliant.</p>
-              </div>
-              <div>
-                <span className="qms-pill qms-pill--info">Deferred: {summary.deferred}</span>
-                <p className="text-muted">Monitor approved extensions.</p>
-              </div>
-              <div>
-                <span className="qms-pill qms-pill--info">Scheduled: {summary.scheduled}</span>
-                <p className="text-muted">Upcoming course already planned.</p>
-              </div>
-              <div>
-                <span className="qms-pill">Not done: {summary.notDone}</span>
-                <p className="text-muted">Not yet completed by staff member.</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="qms-card qms-card--attention">
-            <div className="qms-card__header">
-              <div>
-                <h3 className="qms-card__title">Priority actions</h3>
-                <p className="qms-card__subtitle">
-                  Next due items and overdue courses for this staff member.
-                </p>
-              </div>
-            </div>
-            {actionItems.length > 0 ? (
-              <div className="qms-list">
-                {actionItems.map((item) => (
-                  <div key={item.course_id} className="qms-list__item">
-                    <div>
-                      <strong>{item.course_name}</strong>
-                      <span className="qms-list__meta">{daysLabel(item.days_until_due)}</span>
-                    </div>
-                    <span className={statusPillClass(item.status)}>{statusLabel(item.status)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted">No urgent training items for this staff member.</p>
-            )}
-          </div>
-
-          <div className="qms-card">
-            <div className="qms-card__header">
-              <div>
-                <h3 className="qms-card__title">Next milestones</h3>
-                <p className="qms-card__subtitle">Upcoming due dates and scheduled sessions.</p>
-              </div>
-            </div>
-            <div className="qms-list">
-              <div className="qms-list__item">
+            <div className="qms-card qms-card--hero">
+              <div className="qms-card__header">
                 <div>
-                  <strong>Next due</strong>
-                  <span className="qms-list__meta">
-                    {nextDue ? `${nextDue.course_name} · ${dueLabel(nextDue)}` : "No due dates available"}
-                  </span>
+                  <h3 className="qms-card__title">{user?.full_name || "Training profile"}</h3>
+                  <p className="qms-card__subtitle">
+                    {user?.position_title || user?.role || "Staff"} · {user?.staff_code || "N/A"}
+                  </p>
                 </div>
-                <span className="qms-pill">
-                  {nextDue ? daysLabel(nextDue.days_until_due) : "—"}
-                </span>
+                <span className="qms-pill qms-pill--info">Compliance {compliance}%</span>
               </div>
-              <div className="qms-list__item">
+              <div className="qms-split">
                 <div>
-                  <strong>Next event</strong>
-                  <span className="qms-list__meta">
-                    {nextEvent
-                      ? `${nextEvent.course_name} · ${formatDate(nextEvent.upcoming_event_date)}`
-                      : "No upcoming events scheduled"}
-                  </span>
+                  <span className="qms-pill qms-pill--danger">Overdue: {summary.overdue}</span>
+                  <p className="text-muted">Immediate remediation required.</p>
                 </div>
-                <span className="qms-pill">Session</span>
+                <div>
+                  <span className="qms-pill qms-pill--warning">Due soon: {summary.dueSoon}</span>
+                  <p className="text-muted">Schedule next available course.</p>
+                </div>
+                <div>
+                  <span className="qms-pill">Compliant: {summary.ok}</span>
+                  <p className="text-muted">In date and compliant.</p>
+                </div>
+                <div>
+                  <span className="qms-pill qms-pill--info">Deferred: {summary.deferred}</span>
+                  <p className="text-muted">Monitor approved extensions.</p>
+                </div>
+                <div>
+                  <span className="qms-pill qms-pill--info">Scheduled: {summary.scheduled}</span>
+                  <p className="text-muted">Upcoming course already planned.</p>
+                </div>
+                <div>
+                  <span className="qms-pill">Not done: {summary.notDone}</span>
+                  <p className="text-muted">Not yet completed by staff member.</p>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="qms-card qms-card--wide">
-            <div className="table-responsive">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Course</th>
-                    <th>Status</th>
-                    <th>Last completion</th>
-                    <th>Due</th>
-                    <th>Time left</th>
-                    <th>Next event</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredItems.map((item) => (
-                    <tr key={item.course_id}>
-                      <td>
+            <div className="qms-card qms-card--attention">
+              <div className="qms-card__header">
+                <div>
+                  <h3 className="qms-card__title">Priority actions</h3>
+                  <p className="qms-card__subtitle">
+                    Next due items and overdue courses for this staff member.
+                  </p>
+                </div>
+              </div>
+              {actionItems.length > 0 ? (
+                <div className="qms-list">
+                  {actionItems.map((item) => (
+                    <div key={item.course_id} className="qms-list__item">
+                      <div>
                         <strong>{item.course_name}</strong>
-                        <div className="text-muted">{item.course_id}</div>
-                      </td>
-                      <td>
-                        <span className={statusPillClass(item.status)}>
-                          {statusLabel(item.status)}
-                        </span>
-                      </td>
-                      <td>{formatDate(item.last_completion_date)}</td>
-                      <td>{dueLabel(item)}</td>
-                      <td>{daysLabel(item.days_until_due)}</td>
-                      <td>
-                        {item.upcoming_event_date ? formatDate(item.upcoming_event_date) : "—"}
-                      </td>
-                    </tr>
+                        <span className="qms-list__meta">{daysLabel(item.days_until_due)}</span>
+                      </div>
+                      <span className={statusPillClass(item.status)}>{statusLabel(item.status)}</span>
+                    </div>
                   ))}
-                  {filteredItems.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="text-muted">
-                        No training records match the selected status.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                </div>
+              ) : (
+                <p className="text-muted">No urgent training items for this staff member.</p>
+              )}
             </div>
-          </div>
+
+            <div className="qms-card">
+              <div className="qms-card__header">
+                <div>
+                  <h3 className="qms-card__title">Next milestones</h3>
+                  <p className="qms-card__subtitle">Upcoming due dates and scheduled sessions.</p>
+                </div>
+              </div>
+              <div className="qms-list">
+                <div className="qms-list__item">
+                  <div>
+                    <strong>Next due</strong>
+                    <span className="qms-list__meta">
+                      {nextDue ? `${nextDue.course_name} · ${dueLabel(nextDue)}` : "No due dates available"}
+                    </span>
+                  </div>
+                  <span className="qms-pill">{nextDue ? daysLabel(nextDue.days_until_due) : "—"}</span>
+                </div>
+                <div className="qms-list__item">
+                  <div>
+                    <strong>Next event</strong>
+                    <span className="qms-list__meta">
+                      {nextEvent
+                        ? `${nextEvent.course_name} · ${formatDate(nextEvent.upcoming_event_date)}`
+                        : "No upcoming events scheduled"}
+                    </span>
+                  </div>
+                  <span className="qms-pill">Session</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="qms-card qms-card--wide">
+              <div className="qms-card__header">
+                <div>
+                  <h3 className="qms-card__title">Compliance matrix</h3>
+                  <p className="qms-card__subtitle">Current obligation posture for each required course.</p>
+                </div>
+              </div>
+              <div className="table-responsive">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Course</th>
+                      <th>Status</th>
+                      <th>Last completion</th>
+                      <th>Due</th>
+                      <th>Time left</th>
+                      <th>Next event</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredItems.map((item) => (
+                      <tr key={item.course_id}>
+                        <td>
+                          <strong>{item.course_name}</strong>
+                          <div className="text-muted">{item.course_id}</div>
+                        </td>
+                        <td>
+                          <span className={statusPillClass(item.status)}>{statusLabel(item.status)}</span>
+                        </td>
+                        <td>{formatDate(item.last_completion_date)}</td>
+                        <td>{dueLabel(item)}</td>
+                        <td>{daysLabel(item.days_until_due)}</td>
+                        <td>{item.upcoming_event_date ? formatDate(item.upcoming_event_date) : "—"}</td>
+                      </tr>
+                    ))}
+                    {filteredItems.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="text-muted">
+                          No training records match the selected status.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="qms-card qms-card--wide">
+              <div className="qms-card__header">
+                <div>
+                  <h3 className="qms-card__title">Training history</h3>
+                  <p className="qms-card__subtitle">
+                    Full master record with course titles and printable export aligned to the sample record format.
+                  </p>
+                </div>
+                <button type="button" className="secondary-chip-btn" onClick={handleExportRecord} disabled={exportingRecord || !userId}>
+                  {exportingRecord ? "Preparing PDF…" : "Export PDF"}
+                </button>
+              </div>
+              <div className="table-responsive">
+                <table className="table table-striped table-compact training-history-table">
+                  <thead>
+                    <tr>
+                      <th>Course</th>
+                      <th>Completed</th>
+                      <th>Valid until</th>
+                      <th>Hours</th>
+                      <th>Score</th>
+                      <th>Certificate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyRows.map((record) => (
+                      <tr key={record.id}>
+                        <td>
+                          <strong>{record.course_name || record.course_code || record.course_id}</strong>
+                          <div className="text-muted">{record.course_code || record.course_id}</div>
+                        </td>
+                        <td>{formatDate(record.completion_date)}</td>
+                        <td>{formatDate(record.valid_until)}</td>
+                        <td>{record.hours_completed ?? "—"}</td>
+                        <td>{record.exam_score ?? "—"}</td>
+                        <td>{record.certificate_reference || "—"}</td>
+                      </tr>
+                    ))}
+                    {historyRows.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="text-muted">
+                          No training history has been captured for this user yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </section>
         )}
       </div>

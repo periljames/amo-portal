@@ -571,6 +571,19 @@ class TrainingStatusBulkResponse(BaseModel):
     users: Dict[str, List[TrainingStatusItem]] = Field(default_factory=dict)
 
 
+class TrainingAccessState(BaseModel):
+    user_id: str
+    portal_locked: bool
+    portal_lock_reason: Optional[str] = None
+    crs_blocked: bool
+    overdue_mandatory_count: int = 0
+    due_soon_mandatory_count: int = 0
+    deferred_mandatory_count: int = 0
+    not_done_mandatory_count: int = 0
+    ok_mandatory_count: int = 0
+    upcoming_scheduled_count: int = 0
+
+
 class TrainingDashboardSummary(BaseModel):
     """
     High-level summary counts for the Quality / AMO dashboard.
@@ -616,5 +629,56 @@ class CourseImportSummary(BaseModel):
     total_rows: int
     created_courses: int
     updated_courses: int
+    created_requirements: int = 0
+    updated_requirements: int = 0
     skipped_rows: int
     issues: List[CourseImportRowIssue] = Field(default_factory=list)
+
+
+class TrainingRecordImportChange(BaseModel):
+    field: str
+    label: str
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
+
+
+class TrainingRecordImportRowIssue(BaseModel):
+    row_number: int
+    legacy_record_id: Optional[str] = None
+    person_id: Optional[str] = None
+    course_id: Optional[str] = None
+    reason: str
+
+
+class TrainingRecordImportRowPreview(BaseModel):
+    row_number: int
+    legacy_record_id: Optional[str] = None
+    person_id: Optional[str] = None
+    person_name: Optional[str] = None
+    course_id: Optional[str] = None
+    course_name: Optional[str] = None
+    completion_date: Optional[date] = None
+    next_due_date: Optional[date] = None
+    days_to_due: Optional[int] = None
+    source_status: Optional[str] = None
+    action: str
+    matched_user_id: Optional[str] = None
+    matched_user_name: Optional[str] = None
+    matched_user_active: Optional[bool] = None
+    matched_course_pk: Optional[str] = None
+    matched_course_name: Optional[str] = None
+    existing_record_id: Optional[str] = None
+    changes: List[TrainingRecordImportChange] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+class TrainingRecordImportSummary(BaseModel):
+    dry_run: bool
+    total_rows: int
+    created_records: int
+    updated_records: int
+    unchanged_rows: int
+    skipped_rows: int
+    matched_inactive_rows: int = 0
+    issues: List[TrainingRecordImportRowIssue] = Field(default_factory=list)
+    preview_rows: List[TrainingRecordImportRowPreview] = Field(default_factory=list)

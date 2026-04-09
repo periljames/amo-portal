@@ -287,6 +287,16 @@ def create_crs(
             ),
         )
 
+    access_state = training_compliance.build_user_access_state(db, current_user)
+    if access_state.crs_blocked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "CRS sign-off blocked because mandatory training is overdue. "
+                "Obtain an approved deferral or complete the required training first."
+            ),
+        )
+
     # ----------------------------------------------------------
     # 1) Enforce chain: Aircraft -> WorkOrder (+tasks) -> CRS
     # ----------------------------------------------------------

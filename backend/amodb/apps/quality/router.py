@@ -16,7 +16,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request, Response, Header
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from sqlalchemy import func, or_, inspect
+from sqlalchemy import func, or_, inspect, cast, String
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
@@ -1333,6 +1333,7 @@ def list_audit_personnel_options(
                 account_models.User.last_name.ilike(pattern),
                 account_models.User.email.ilike(pattern),
                 account_models.User.staff_code.ilike(pattern),
+                cast(account_models.User.id, String).ilike(pattern),
             )
         )
     users = (
@@ -1354,6 +1355,7 @@ def list_audit_personnel_options(
         results.append(
             QMSPersonOptionOut(
                 id=str(user.id),
+                staff_code=getattr(user, "staff_code", None),
                 full_name=full_name,
                 email=getattr(user, "email", None),
                 role=str(role_value) if role_value else None,

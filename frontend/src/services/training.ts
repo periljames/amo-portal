@@ -52,6 +52,11 @@ import type {
   TrainingNotificationRead,
   TrainingNotificationMarkRead,
   CourseImportSummary,
+  TrainingRequirementCreate,
+  TrainingRequirementRead,
+  TrainingRecordImportSummary,
+  TrainingAccessState,
+  TrainingDashboardSummary,
 } from "../types/training";
 
 export type TrainingFileReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
@@ -171,10 +176,7 @@ export async function importTrainingCoursesWorkbook(
       sheet_name: sheetName,
     });
     xhr.open("POST", `${apiBaseUrl}/training/courses/import?${qs.toString()}`);
-    const headers = authHeaders();
-    Object.entries(headers).forEach(([key, value]) => {
-      xhr.setRequestHeader(key, value);
-    });
+    applyAuthHeaders(xhr, authHeaders());
 
     xhr.upload.addEventListener("progress", (event) => {
       if (!onProgress) return;
@@ -206,13 +208,70 @@ export async function importTrainingCoursesWorkbook(
   });
 }
 
+
+export async function importTrainingRecordsWorkbook(
+  file: File,
+  opts?: { dryRun?: boolean; sheetName?: string; onProgress?: (progress: TransferProgress) => void },
+): Promise<TrainingRecordImportSummary> {
+  const dryRun = opts?.dryRun ?? true;
+  const sheetName = opts?.sheetName ?? "Training";
+  const onProgress = opts?.onProgress;
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const startedAt = performance.now();
+    const apiBaseUrl = getApiBaseUrl();
+    const qs = new URLSearchParams({
+      dry_run: String(dryRun),
+      sheet_name: sheetName,
+    });
+    xhr.open("POST", `${apiBaseUrl}/training/records/import?${qs.toString()}`);
+    applyAuthHeaders(xhr, authHeaders());
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!onProgress) return;
+      const total = event.lengthComputable ? event.total : undefined;
+      onProgress(buildSpeed(event.loaded, total, startedAt));
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(xhr.responseText || `Request failed (${xhr.status})`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as TrainingRecordImportSummary);
+      } catch {
+        reject(new Error("Invalid training history import response."));
+      }
+    });
+    xhr.addEventListener("error", () => reject(new Error("Network error while importing training history workbook.")));
+
+    const fd = new FormData();
+    fd.append("file", file);
+    xhr.send(fd);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // REQUIREMENTS
 // ---------------------------------------------------------------------------
 
 
-export async function listTrainingRequirements(): Promise<any[]> {
-  return apiGet<any[]>("/training/requirements", { headers: authHeaders() });
+export async function listTrainingRequirements(): Promise<TrainingRequirementRead[]> {
+  return apiGet<TrainingRequirementRead[]>("/training/requirements", { headers: authHeaders() });
+}
+
+export async function createTrainingRequirement(
+  payload: TrainingRequirementCreate,
+): Promise<TrainingRequirementRead> {
+  return apiPost<TrainingRequirementRead>("/training/requirements", payload, {
+    headers: authHeaders(),
+  });
 }
 
 export async function listTrainingEventParticipants(eventId: string): Promise<TrainingEventParticipantRead[]> {
@@ -337,6 +396,13 @@ function buildSpeed(
   };
 }
 
+function applyAuthHeaders(xhr: XMLHttpRequest, headers: HeadersInit): void {
+  const resolved = new Headers(headers);
+  resolved.forEach((value, key) => {
+    xhr.setRequestHeader(key, value);
+  });
+}
+
 export async function listTrainingFiles(): Promise<TrainingFileRead[]> {
   return apiGet<TrainingFileRead[]>("/training/files", {
     headers: authHeaders(),
@@ -362,10 +428,7 @@ export async function downloadTrainingFile(
       "GET",
       `${apiBaseUrl}/training/files/${encodeURIComponent(fileId)}/download`,
     );
-    const headers = authHeaders();
-    Object.entries(headers).forEach(([key, value]) => {
-      xhr.setRequestHeader(key, value);
-    });
+    applyAuthHeaders(xhr, authHeaders());
     xhr.responseType = "blob";
 
     xhr.addEventListener("progress", (event) => {
@@ -404,10 +467,7 @@ export async function downloadTrainingUserEvidencePack(userId: string): Promise<
       "GET",
       `${apiBaseUrl}/training/users/${encodeURIComponent(userId)}/evidence-pack`,
     );
-    const headers = authHeaders();
-    Object.entries(headers).forEach(([key, value]) => {
-      xhr.setRequestHeader(key, value);
-    });
+    applyAuthHeaders(xhr, authHeaders());
     xhr.responseType = "blob";
 
     xhr.addEventListener("load", () => {
@@ -432,6 +492,40 @@ export async function downloadTrainingUserEvidencePack(userId: string): Promise<
   });
 }
 
+
+export async function downloadTrainingUserRecordPdf(userId: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const apiBaseUrl = getApiBaseUrl();
+    xhr.open(
+      "GET",
+      `${apiBaseUrl}/training/users/${encodeURIComponent(userId)}/record-report.pdf`,
+    );
+    applyAuthHeaders(xhr, authHeaders());
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading training record PDF."));
+    });
+
+    xhr.send();
+  });
+}
+
 // ---------------------------------------------------------------------------
  // TRAINING RECORDS
 // ---------------------------------------------------------------------------
@@ -439,13 +533,12 @@ export async function downloadTrainingUserEvidencePack(userId: string): Promise<
 export interface ListTrainingRecordsParams {
   user_id?: string;
   course_pk?: string;
+  limit?: number;
+  offset?: number;
 }
 
 /**
  * List training completion records for the current AMO.
- *
- * NOTE: Backend currently does not support pagination on this endpoint;
- * if the dataset becomes massive, we will extend the API with skip/limit.
  */
 export async function listTrainingRecords(
   params: ListTrainingRecordsParams = {},
@@ -453,6 +546,8 @@ export async function listTrainingRecords(
   const sp = new URLSearchParams();
   if (params.user_id) sp.set("user_id", params.user_id);
   if (params.course_pk) sp.set("course_pk", params.course_pk);
+  if (params.limit) sp.set("limit", String(params.limit));
+  if (params.offset) sp.set("offset", String(params.offset));
 
   const qs = sp.toString();
   const path = qs ? `/training/records?${qs}` : "/training/records";
@@ -550,6 +645,12 @@ export async function getMyTrainingStatus(): Promise<TrainingStatusItem[]> {
   });
 }
 
+export async function getMyTrainingAccessState(): Promise<TrainingAccessState> {
+  return apiGet<TrainingAccessState>("/training/status/me/access-state", {
+    headers: authHeaders(),
+  });
+}
+
 export interface TrainingStatusBulkResponse {
   users: Record<string, TrainingStatusItem[]>;
 }
@@ -578,6 +679,27 @@ export async function getUserTrainingStatus(
       headers: authHeaders(),
     },
   );
+}
+
+export async function getUserTrainingAccessState(
+  userId: string,
+): Promise<TrainingAccessState> {
+  return apiGet<TrainingAccessState>(
+    `/training/status/users/${encodeURIComponent(userId)}/access-state`,
+    {
+      headers: authHeaders(),
+    },
+  );
+}
+
+export async function getTrainingDashboardSummary(
+  includeNonMandatory = false,
+): Promise<TrainingDashboardSummary> {
+  const sp = new URLSearchParams();
+  if (includeNonMandatory) sp.set("include_non_mandatory", "true");
+  const qs = sp.toString();
+  const path = qs ? `/training/dashboard/summary?${qs}` : "/training/dashboard/summary";
+  return apiGet<TrainingDashboardSummary>(path, { headers: authHeaders() });
 }
 
 // ---------------------------------------------------------------------------

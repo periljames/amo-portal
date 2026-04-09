@@ -160,7 +160,7 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
   }
 
   if (!onboardingChecked && !isOnboardingRoute) {
-    return null;
+    return <PageRouteLoading label="Preparing workspace…" />;
   }
 
   if (
@@ -209,6 +209,43 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
   return children;
 };
 
+const PageRouteLoading: React.FC<{ label?: string }> = ({ label = "Loading…" }) => (
+  <div className="page-loading" role="status" aria-live="polite">
+    <div className="page-loading__card">
+      <div className="page-loading__spinner" />
+      <div className="page-loading__label">{label}</div>
+    </div>
+  </div>
+);
+
+class PortalRouteErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error?.message || "Unexpected portal rendering error." };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("Portal route render failure", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="page-loading" role="alert">
+          <div className="page-loading__card">
+            <div className="page-loading__label">Portal page could not be rendered. {this.state.message}</div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /**
  * AppRouter
  * - Defines all app routes.
@@ -216,8 +253,9 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
  */
 export const AppRouter: React.FC = () => {
   return (
-    <Suspense fallback={<div className="page-loading"><div className="page-loading__card"><div className="page-loading__spinner" /><div className="page-loading__label">Loading…</div></div></div>}>
-    <Routes>
+    <PortalRouteErrorBoundary>
+      <Suspense fallback={<PageRouteLoading label="Loading portal workspace…" />}>
+        <Routes>
 
       <Route path="/doc-control" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
       <Route path="/doc-control/*" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
@@ -837,8 +875,9 @@ export const AppRouter: React.FC = () => {
 
       {/* Catch-all → login */}
       <Route path="*" element={<Navigate to="/login" replace />} />
-    </Routes>
-    </Suspense>
+        </Routes>
+      </Suspense>
+    </PortalRouteErrorBoundary>
   );
 };
 

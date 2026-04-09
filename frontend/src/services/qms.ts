@@ -601,6 +601,7 @@ export interface QMSPersonOption {
   role: string | null;
   department_id: string | null;
   position_title: string | null;
+  staff_code?: string | null;
 }
 
 export async function qmsListAuditPersonnelOptions(params?: {

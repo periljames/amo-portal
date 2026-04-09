@@ -57,6 +57,13 @@ type ScheduleViewModel = QMSAuditScheduleOut & {
   preview_label?: string;
 };
 
+type PersonSearchField =
+  | "auditee_user_id"
+  | "lead_auditor_user_id"
+  | "observer_auditor_user_id"
+  | "assistant_auditor_user_id";
+
+
 const frequencies: QMSAuditScheduleFrequency[] = ["ONE_TIME", "MONTHLY", "QUARTERLY", "BI_ANNUAL", "ANNUAL"];
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const drawerTabs: Array<{ id: DrawerTab; label: string; helper: string }> = [
@@ -99,6 +106,38 @@ function formatDate(value?: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString();
+}
+
+
+function personSearchLabel(person: QMSPersonOption | null | undefined): string {
+  if (!person) return "";
+  const parts = [person.full_name];
+  if (person.staff_code) parts.push(person.staff_code);
+  if (person.email) parts.push(person.email);
+  parts.push(person.id);
+  return parts.filter(Boolean).join(" · ");
+}
+
+function personDisplayRole(person: QMSPersonOption | null | undefined): string {
+  if (!person) return "";
+  return person.position_title || person.role || "";
+}
+
+function findPersonByQuery(options: QMSPersonOption[], query: string): QMSPersonOption | null {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return null;
+  return (
+    options.find((person) => {
+      const candidates = [
+        person.full_name,
+        person.email || "",
+        person.staff_code || "",
+        person.id,
+        personSearchLabel(person),
+      ];
+      return candidates.some((candidate) => candidate.trim().toLowerCase() === needle);
+    }) || null
+  );
 }
 
 function countdownLabel(nextDueDate?: string | null): { text: string; className: string } {
@@ -211,6 +250,12 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState<Date | null>(null);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [personSearch, setPersonSearch] = useState<Record<PersonSearchField, string>>({
+    auditee_user_id: "",
+    lead_auditor_user_id: "",
+    observer_auditor_user_id: "",
+    assistant_auditor_user_id: "",
+  });
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("overview");
   const queryClient = useQueryClient();
   const draftStorageKey = useMemo(() => `qms-audit-schedule-draft:${amoCode}:${department}`, [amoCode, department]);
@@ -329,13 +374,6 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
   const auditeeUser = form.auditee_user_id ? peopleById.get(form.auditee_user_id) ?? null : null;
   const recipientSummary = useMemo(() => {
     const items: Array<{ key: string; label: string; value: string; muted?: boolean }> = [];
-    if (leadAuditorUser) {
-      items.push({
-        key: "lead",
-        label: "Lead auditor notice",
-        value: leadAuditorUser.email ? `${userLabel(leadAuditorUser)} · ${leadAuditorUser.email}` : userLabel(leadAuditorUser),
-      });
-    }
     if (auditeeUser) {
       items.push({
         key: "auditee-user",
@@ -457,17 +495,44 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const applyPerson = (field: "auditee_user_id" | "lead_auditor_user_id" | "observer_auditor_user_id" | "assistant_auditor_user_id", personId: string) => {
+  const applyPerson = (field: PersonSearchField, personId: string) => {
     const person = peopleById.get(personId);
     setForm((prev) => {
       const next: ScheduleFormState = { ...prev, [field]: personId } as ScheduleFormState;
       if (field === "auditee_user_id") {
-        next.auditee = person?.full_name ?? "";
-        next.auditee_email = person?.email ?? "";
+        next.auditee = person?.full_name ?? prev.auditee;
+        next.auditee_email = person?.email ?? prev.auditee_email;
+      }
+      return next;
+    });
+    setPersonSearch((prev) => ({ ...prev, [field]: personSearchLabel(person) }));
+  };
+
+  const updatePersonLookup = (field: PersonSearchField, rawValue: string) => {
+    setPersonSearch((prev) => ({ ...prev, [field]: rawValue }));
+    const match = findPersonByQuery(personnelOptions, rawValue);
+    if (match) {
+      applyPerson(field, match.id);
+      return;
+    }
+    setForm((prev) => {
+      const next: ScheduleFormState = { ...prev, [field]: "" } as ScheduleFormState;
+      if (field === "auditee_user_id" && !rawValue.trim()) {
+        next.auditee = "";
+        next.auditee_email = "";
       }
       return next;
     });
   };
+
+  useEffect(() => {
+    setPersonSearch({
+      auditee_user_id: personSearchLabel(peopleById.get(form.auditee_user_id) ?? null),
+      lead_auditor_user_id: personSearchLabel(peopleById.get(form.lead_auditor_user_id) ?? null),
+      observer_auditor_user_id: personSearchLabel(peopleById.get(form.observer_auditor_user_id) ?? null),
+      assistant_auditor_user_id: personSearchLabel(peopleById.get(form.assistant_auditor_user_id) ?? null),
+    });
+  }, [form.auditee_user_id, form.lead_auditor_user_id, form.observer_auditor_user_id, form.assistant_auditor_user_id, peopleById]);
 
   const handleDelete = (schedule: QMSAuditScheduleOut) => {
     const confirmDelete = window.confirm(`Delete schedule \"${schedule.title}\" due ${formatDate(schedule.next_due_date)}?`);
@@ -795,12 +860,13 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
               <div className="planner-drawer-form__grid">
                 <label className="profile-inline-field">
                   <span>Auditee from personnel</span>
-                  <select className="input" value={form.auditee_user_id} onChange={(e) => applyPerson("auditee_user_id", e.target.value)}>
-                    <option value="">Select auditee…</option>
-                    {personnelOptions.map((person) => (
-                      <option key={person.id} value={person.id}>{person.full_name}{person.email ? ` · ${person.email}` : ""}</option>
-                    ))}
-                  </select>
+                  <input
+                    className="input"
+                    list="audit-personnel-options"
+                    value={personSearch.auditee_user_id}
+                    onChange={(e) => updatePersonLookup("auditee_user_id", e.target.value)}
+                    placeholder="Type name, staff code, email, or user ID"
+                  />
                 </label>
                 <label className="profile-inline-field">
                   <span>Auditee email</span>
@@ -812,31 +878,41 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                 </label>
                 <label className="profile-inline-field">
                   <span>Lead auditor</span>
-                  <select className="input" value={form.lead_auditor_user_id} onChange={(e) => applyPerson("lead_auditor_user_id", e.target.value)}>
-                    <option value="">Select lead auditor…</option>
-                    {personnelOptions.map((person) => (
-                      <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
-                    ))}
-                  </select>
+                  <input
+                    className="input"
+                    list="audit-personnel-options"
+                    value={personSearch.lead_auditor_user_id}
+                    onChange={(e) => updatePersonLookup("lead_auditor_user_id", e.target.value)}
+                    placeholder="Type name, staff code, email, or user ID"
+                  />
                 </label>
                 <label className="profile-inline-field">
                   <span>Observer auditor</span>
-                  <select className="input" value={form.observer_auditor_user_id} onChange={(e) => applyPerson("observer_auditor_user_id", e.target.value)}>
-                    <option value="">Select observer…</option>
-                    {personnelOptions.map((person) => (
-                      <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
-                    ))}
-                  </select>
+                  <input
+                    className="input"
+                    list="audit-personnel-options"
+                    value={personSearch.observer_auditor_user_id}
+                    onChange={(e) => updatePersonLookup("observer_auditor_user_id", e.target.value)}
+                    placeholder="Type name, staff code, email, or user ID"
+                  />
                 </label>
                 <label className="profile-inline-field">
                   <span>Assistant auditor</span>
-                  <select className="input" value={form.assistant_auditor_user_id} onChange={(e) => applyPerson("assistant_auditor_user_id", e.target.value)}>
-                    <option value="">Select assistant…</option>
-                    {personnelOptions.map((person) => (
-                      <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>
-                    ))}
-                  </select>
+                  <input
+                    className="input"
+                    list="audit-personnel-options"
+                    value={personSearch.assistant_auditor_user_id}
+                    onChange={(e) => updatePersonLookup("assistant_auditor_user_id", e.target.value)}
+                    placeholder="Type name, staff code, email, or user ID"
+                  />
                 </label>
+                <datalist id="audit-personnel-options">
+                  {personnelOptions.map((person) => (
+                    <option key={person.id} value={personSearchLabel(person)}>
+                      {personDisplayRole(person)}
+                    </option>
+                  ))}
+                </datalist>
                 <label className="planner-checkbox-field">
                   <input type="checkbox" checked={form.is_active} onChange={(e) => setField("is_active", e.target.checked)} />
                   <span>Schedule active</span>

@@ -6,9 +6,12 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
 import "../styles/training.css";
 import {
+  getMyTrainingAccessState,
   getMyTrainingStatus,
+  listTrainingCertificates,
   listTrainingCourses,
   listTrainingEvents,
+  listTrainingRecords,
   createTrainingDeferralRequest,
   listMyTrainingDeferrals,
   listTrainingFiles,
@@ -19,7 +22,9 @@ import type {
   TrainingStatusItem,
   TrainingCourseRead,
   TrainingEventRead,
+  TrainingAccessState,
   TrainingDeferralRequestRead,
+  TrainingRecordRead,
 } from "../types/training";
 import type { TrainingFileRead, TransferProgress } from "../services/training";
 
@@ -60,6 +65,32 @@ type CalendarItem = {
 };
 
 const initialSort: SortState = { field: "status", direction: "asc" };
+
+const TRAINING_MY_CACHE_MAX_AGE_MS = 5 * 60_000;
+const TRAINING_MY_SKIP_REFRESH_MS = 45_000;
+
+type CacheEnvelope<T> = { savedAt: number; data: T };
+
+function readSessionCache<T>(key: string, maxAgeMs: number): CacheEnvelope<T> | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CacheEnvelope<T>;
+    if (!parsed || typeof parsed.savedAt !== "number") return null;
+    if (Date.now() - parsed.savedAt > maxAgeMs) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionCache<T>(key: string, data: T): void {
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), data } satisfies CacheEnvelope<T>));
+  } catch {
+    // ignore cache write issues
+  }
+}
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -534,6 +565,7 @@ function MyTrainingPage() {
   const department = (params.department || "planning").trim();
 
   const cachedUser = useMemo(() => getCachedUser(), []);
+  const cacheBaseKey = `${amoCode}:${cachedUser?.id || "me"}`;
 
   const [items, setItems] = useState<TrainingStatusItem[]>([]);
   const [courses, setCourses] = useState<TrainingCourseRead[]>([]);
@@ -583,6 +615,9 @@ function MyTrainingPage() {
   const [deferrals, setDeferrals] = useState<TrainingDeferralRequestRead[]>([]);
   const [deferralsLoading, setDeferralsLoading] = useState<boolean>(false);
   const [deferralsError, setDeferralsError] = useState<string | null>(null);
+  const [accessState, setAccessState] = useState<TrainingAccessState | null>(null);
+  const [historyRecords, setHistoryRecords] = useState<TrainingRecordRead[]>([]);
+  const [certificates, setCertificates] = useState<TrainingRecordRead[]>([]);
 
   // Training evidence files
   const [trainingFiles, setTrainingFiles] = useState<TrainingFileRead[]>([]);
@@ -615,8 +650,18 @@ function MyTrainingPage() {
     setCoursesLoaded(true);
   };
 
-  const reload = async () => {
-    setLoading(true);
+  const reload = async (force = false) => {
+    const cacheKey = `my-training:status:${cacheBaseKey}`;
+    const cached = !force ? readSessionCache<{ status: TrainingStatusItem[]; courses: TrainingCourseRead[] }>(cacheKey, TRAINING_MY_CACHE_MAX_AGE_MS) : null;
+    if (cached) {
+      setItems(cached.data.status);
+      buildCoursePkMap(cached.data.courses);
+      setLastRefreshedAt(new Date(cached.savedAt));
+      setLoading(false);
+      if (Date.now() - cached.savedAt < TRAINING_MY_SKIP_REFRESH_MS) return;
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
       const [status, courses] = await Promise.all([
@@ -626,6 +671,7 @@ function MyTrainingPage() {
       setItems(status);
       buildCoursePkMap(courses);
       setLastRefreshedAt(new Date());
+      writeSessionCache(cacheKey, { status, courses });
     } catch (err: any) {
       setError(err?.message || "Failed to load training status.");
     } finally {
@@ -633,12 +679,21 @@ function MyTrainingPage() {
     }
   };
 
-  const loadTrainingFiles = async () => {
-    setTrainingFilesLoading(true);
+  const loadTrainingFiles = async (force = false) => {
+    const cacheKey = `my-training:files:${cacheBaseKey}`;
+    const cached = !force ? readSessionCache<TrainingFileRead[]>(cacheKey, TRAINING_MY_CACHE_MAX_AGE_MS) : null;
+    if (cached) {
+      setTrainingFiles(cached.data);
+      setTrainingFilesLoading(false);
+      if (Date.now() - cached.savedAt < TRAINING_MY_SKIP_REFRESH_MS) return;
+    } else {
+      setTrainingFilesLoading(true);
+    }
     setTrainingFilesError(null);
     try {
       const data = await listTrainingFiles();
       setTrainingFiles(data);
+      writeSessionCache(cacheKey, data);
     } catch (err: any) {
       setTrainingFilesError(err?.message || "Failed to load training files.");
     } finally {
@@ -646,12 +701,21 @@ function MyTrainingPage() {
     }
   };
 
-  const loadDeferrals = async () => {
-    setDeferralsLoading(true);
+  const loadDeferrals = async (force = false) => {
+    const cacheKey = `my-training:deferrals:${cacheBaseKey}`;
+    const cached = !force ? readSessionCache<TrainingDeferralRequestRead[]>(cacheKey, TRAINING_MY_CACHE_MAX_AGE_MS) : null;
+    if (cached) {
+      setDeferrals(cached.data);
+      setDeferralsLoading(false);
+      if (Date.now() - cached.savedAt < TRAINING_MY_SKIP_REFRESH_MS) return;
+    } else {
+      setDeferralsLoading(true);
+    }
     setDeferralsError(null);
     try {
       const data = await listMyTrainingDeferrals();
       setDeferrals(data);
+      writeSessionCache(cacheKey, data);
     } catch (err: any) {
       setDeferralsError(err?.message || "Failed to load deferrals.");
     } finally {
@@ -659,42 +723,45 @@ function MyTrainingPage() {
     }
   };
 
-  useEffect(() => {
-    let cancelled = false;
 
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const [status, courses] = await Promise.all([
-          getMyTrainingStatus(),
-          listTrainingCourses({ include_inactive: true }),
-        ]);
-
-        if (!cancelled) {
-          setItems(status);
-          buildCoursePkMap(courses);
-          setLastRefreshedAt(new Date());
-        }
-      } catch (err: any) {
-        if (!cancelled) setError(err?.message || "Failed to load training status.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const loadHistory = async (force = false) => {
+    const cacheKey = `my-training:history:${cacheBaseKey}`;
+    const cached = !force ? readSessionCache<{ access: TrainingAccessState; records: TrainingRecordRead[]; certs: TrainingRecordRead[] }>(cacheKey, TRAINING_MY_CACHE_MAX_AGE_MS) : null;
+    if (cached) {
+      setAccessState(cached.data.access);
+      setHistoryRecords(cached.data.records);
+      setCertificates(cached.data.certs);
+      if (Date.now() - cached.savedAt < TRAINING_MY_SKIP_REFRESH_MS) return;
     }
+    try {
+      const [access, records, certs] = await Promise.all([
+        getMyTrainingAccessState(),
+        listTrainingRecords(),
+        listTrainingCertificates(),
+      ]);
+      setAccessState(access);
+      setHistoryRecords(records);
+      setCertificates(certs);
+      writeSessionCache(cacheKey, { access, records, certs });
+    } catch (err) {
+      console.warn("Training history load failed", err);
+    }
+  };
 
-    load();
-    return () => {
-      cancelled = true;
-    };
+  useEffect(() => {
+    void reload(false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    void loadTrainingFiles(false);
   }, []);
 
   useEffect(() => {
-    loadTrainingFiles();
+    void loadDeferrals(false);
   }, []);
 
   useEffect(() => {
-    loadDeferrals();
+    void loadHistory(false);
   }, []);
 
   const handleSortChange = (field: SortField) => {
@@ -777,6 +844,7 @@ function MyTrainingPage() {
     { id: "training-deferrals", label: "Deferrals" },
     { id: "training-calendar", label: "Calendar" },
     { id: "training-courses", label: "All courses" },
+    { id: "training-history", label: "History" },
     { id: "training-evidence", label: "Evidence files" },
   ];
 
@@ -1307,7 +1375,7 @@ function MyTrainingPage() {
         {error ? (
           <div className="card card--error">
             <p>{error}</p>
-            <button type="button" className="primary-chip-btn" onClick={reload}>
+            <button type="button" className="primary-chip-btn" onClick={() => void reload(true)}>
               Retry
             </button>
           </div>
@@ -1366,7 +1434,22 @@ function MyTrainingPage() {
                       <span className="badge badge--neutral">
                         Courses tracked: {metrics.total}
                       </span>
+                      {accessState?.portal_locked ? (
+                        <span className="badge badge--danger">Portal locked</span>
+                      ) : null}
+                      {accessState?.crs_blocked ? (
+                        <span className="badge badge--warning">CRS blocked</span>
+                      ) : null}
+                      {certificates.length ? (
+                        <span className="badge badge--success">Certificates: {certificates.length}</span>
+                      ) : null}
                     </div>
+                    {accessState ? (
+                      <div className="text-muted" style={{ fontSize: 12 }}>
+                        Mandatory posture — overdue {accessState.overdue_mandatory_count}, due soon {accessState.due_soon_mandatory_count}, deferred {accessState.deferred_mandatory_count}, scheduled {accessState.upcoming_scheduled_count}.
+                        {accessState.portal_lock_reason ? ` ${accessState.portal_lock_reason}` : ""}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -1547,7 +1630,7 @@ function MyTrainingPage() {
                       >
                         Download training record
                       </button>
-                      <button type="button" className="primary-chip-btn" onClick={reload}>
+                      <button type="button" className="primary-chip-btn" onClick={() => void reload(true)}>
                         Refresh
                       </button>
                     </div>
@@ -1685,7 +1768,7 @@ function MyTrainingPage() {
                 {deferralsError && (
                   <div className="card card--error">
                     <p style={{ margin: 0 }}>{deferralsError}</p>
-                    <button type="button" className="secondary-chip-btn" onClick={loadDeferrals}>
+                    <button type="button" className="secondary-chip-btn" onClick={() => void loadDeferrals(true)}>
                       Retry
                     </button>
                   </div>
@@ -1999,6 +2082,52 @@ function MyTrainingPage() {
             </section>
 
             {/* Training evidence files */}
+            <section className="page-section" id="training-history">
+              <div className="card">
+                <div className="card-header">
+                  <h2>Training history</h2>
+                  <p className="text-muted">Master training records, validity, and issued certificates.</p>
+                </div>
+                <div className="table-responsive">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Course</th>
+                        <th>Completed</th>
+                        <th>Valid until</th>
+                        <th>Hours</th>
+                        <th>Score</th>
+                        <th>Certificate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historyRecords
+                        .slice()
+                        .sort((a, b) => (b.completion_date || "").localeCompare(a.completion_date || ""))
+                        .map((record) => {
+                          const certificate = certificates.find((cert) => cert.id === record.id || cert.certificate_reference === record.certificate_reference);
+                          return (
+                            <tr key={record.id}>
+                              <td>{courseNameById.get(record.course_id) || record.course_id}</td>
+                              <td>{formatDate(record.completion_date)}</td>
+                              <td>{formatDate(record.valid_until)}</td>
+                              <td>{record.hours_completed ?? "—"}</td>
+                              <td>{record.exam_score ?? "—"}</td>
+                              <td>{certificate?.certificate_reference || record.certificate_reference || "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      {historyRecords.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="text-muted">No training history found.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
             <section className="page-section" id="training-evidence">
               <div className="card">
                 <div className="card-header">
@@ -2100,7 +2229,7 @@ function MyTrainingPage() {
                 {trainingFilesError && (
                   <div className="card card--error">
                     <p style={{ margin: 0 }}>{trainingFilesError}</p>
-                    <button type="button" className="secondary-chip-btn" onClick={loadTrainingFiles}>
+                    <button type="button" className="secondary-chip-btn" onClick={() => void loadTrainingFiles(true)}>
                       Retry
                     </button>
                   </div>

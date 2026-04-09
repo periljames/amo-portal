@@ -25,6 +25,7 @@ from amodb.apps.audit import services as audit_services
 from amodb.apps.audit import schemas as audit_schemas
 from amodb.security import get_current_active_user
 from . import models, schemas, services
+from ..training import compliance as training_compliance
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -270,6 +271,13 @@ def login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email, password or AMO slug.",
+        )
+
+    access_state = training_compliance.build_user_access_state(db, user)
+    if access_state.portal_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=access_state.portal_lock_reason or "Portal access is blocked because mandatory training is overdue.",
         )
 
     token, expires_in = services.issue_access_token_for_user(user)

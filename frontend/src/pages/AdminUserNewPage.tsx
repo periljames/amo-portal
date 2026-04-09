@@ -18,6 +18,8 @@ import type {
 } from "../services/adminUsers";
 import { getCachedUser, getContext } from "../services/auth";
 import { Button, InlineAlert, PageHeader, Panel } from "../components/UI/Admin";
+import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import "../styles/admin-user-management.css";
 
 type UrlParams = {
   amoCode?: string;
@@ -59,10 +61,7 @@ const AdminUserNewPage: React.FC = () => {
     return slug ? `/maintenance/${slug}/admin/users` : "/login";
   }, [amoCode, ctx.amoCode]);
 
-  const pageTitle = useMemo(() => {
-    const slug = amoCode ?? ctx.amoCode ?? "UNKNOWN";
-    return `Create User – ${slug.toUpperCase()}`;
-  }, [amoCode, ctx.amoCode]);
+  const resolvedAmoCode = amoCode ?? ctx.amoCode ?? "UNKNOWN";
 
   const [form, setForm] = useState({
     firstName: "",
@@ -95,6 +94,13 @@ const AdminUserNewPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const selectedAmo = useMemo(() => amos.find((amo) => amo.id === selectedAmoId) ?? null, [amos, selectedAmoId]);
+
+  const pageTitle = useMemo(() => {
+    const label = selectedAmo?.name || resolvedAmoCode.toUpperCase();
+    return `Create user · ${label}`;
+  }, [resolvedAmoCode, selectedAmo]);
 
   const activeDepartments = useMemo(
     () => departments.filter((dept) => dept.is_active),
@@ -353,40 +359,45 @@ const AdminUserNewPage: React.FC = () => {
 
   if (!currentUser) {
     return (
-      <div className="page-root admin-page">
-        <PageHeader title="Create User" />
-        <Panel>
-          <p className="admin-muted">You are not signed in. Please sign in again.</p>
-          <Button onClick={() => navigate("/login")}>Go to login</Button>
-        </Panel>
-      </div>
+      <DepartmentLayout amoCode={resolvedAmoCode} activeDepartment="admin-users">
+        <div className="admin-users-workspace admin-user-create-page">
+          <PageHeader title="Create user" subtitle="Your session has expired or is unavailable." className="aum-brand-page-header admin-page-header--centered" />
+          <Panel className="aum-brand-panel">
+            <p className="admin-muted">You are not signed in. Please sign in again.</p>
+            <Button onClick={() => navigate("/login")}>Go to login</Button>
+          </Panel>
+        </div>
+      </DepartmentLayout>
     );
   }
 
   if (!isAdmin) {
     return (
-      <div className="page-root admin-page">
-        <PageHeader title="Access denied" />
-        <Panel>
-          <p className="admin-muted">
-            You do not have permission to create users. Please contact the AMO
-            Administrator or Quality/IT support.
-          </p>
-          <Button onClick={() => navigate(backTarget)}>Back</Button>
-        </Panel>
-      </div>
+      <DepartmentLayout amoCode={resolvedAmoCode} activeDepartment="admin-users">
+        <div className="admin-users-workspace admin-user-create-page">
+          <PageHeader title="Access denied" subtitle="Only tenant administrators can create users from this workspace." className="aum-brand-page-header admin-page-header--centered" />
+          <Panel className="aum-brand-panel">
+            <p className="admin-muted">
+              You do not have permission to create users. Please contact the AMO
+              Administrator or Quality/IT support.
+            </p>
+            <Button onClick={() => navigate(backTarget)}>Back</Button>
+          </Panel>
+        </div>
+      </DepartmentLayout>
     );
   }
 
   return (
-    <div className="page-root admin-page">
-      <PageHeader
-        title={pageTitle}
-        subtitle="Create an AMO user and assign their role and temporary password."
-        className="admin-page-header--centered"
-      />
+    <DepartmentLayout amoCode={resolvedAmoCode} activeDepartment="admin-users">
+      <div className="admin-users-workspace admin-user-create-page">
+        <PageHeader
+          title={pageTitle}
+          subtitle="Create an AMO user with the active tenant branding, access profile, and initial password policy already aligned."
+          className="aum-brand-page-header admin-page-header--centered"
+        />
 
-      <Panel className="admin-user-form">
+        <Panel className="admin-user-form aum-brand-panel">
         <form onSubmit={handleSubmit} className="form-grid form-grid--two-column">
           {error && (
             <InlineAlert tone="danger" title="Error" className="form-row--span-2">
@@ -705,8 +716,9 @@ const AdminUserNewPage: React.FC = () => {
             </Button>
           </div>
         </form>
-      </Panel>
-    </div>
+        </Panel>
+      </div>
+    </DepartmentLayout>
   );
 };
 

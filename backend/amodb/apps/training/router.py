@@ -8,6 +8,7 @@ import os
 import urllib.request
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -21,7 +22,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -38,6 +39,14 @@ from . import models as training_models
 from . import schemas as training_schemas
 from ..workflow import apply_transition, TransitionError
 from .courses_import import import_courses_rows, parse_courses_sheet
+from .records_import import import_training_records_rows, parse_training_records_sheet
+from . import compliance as training_compliance
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 router = APIRouter(
     prefix="/training",
@@ -454,6 +463,8 @@ def _participant_to_read(p: training_models.TrainingEventParticipant) -> trainin
 
 
 def _record_to_read(r: training_models.TrainingRecord) -> training_schemas.TrainingRecordRead:
+    course = getattr(r, "course", None)
+    user_obj = getattr(r, "user", None)
     return training_schemas.TrainingRecordRead(
         id=r.id,
         amo_id=r.amo_id,
@@ -469,6 +480,11 @@ def _record_to_read(r: training_models.TrainingRecord) -> training_schemas.Train
         is_manual_entry=r.is_manual_entry,
         created_by_user_id=r.created_by_user_id,
         created_at=r.created_at,
+        course_id=r.course_id,
+        course_code=getattr(course, "course_id", None),
+        course_name=getattr(course, "course_name", None),
+        user_staff_code=getattr(user_obj, "staff_code", None),
+        user_full_name=getattr(user_obj, "full_name", None),
         verification_status=r.verification_status,
         verified_at=r.verified_at,
         verified_by_user_id=r.verified_by_user_id,
@@ -694,6 +710,39 @@ async def import_courses(
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Courses import database error: {exc}")
+
+
+@router.post(
+    "/records/import",
+    response_model=training_schemas.TrainingRecordImportSummary,
+    summary="Import individual training history from Training worksheet (dry-run by default)",
+)
+async def import_training_records(
+    file: UploadFile = File(...),
+    dry_run: bool = True,
+    sheet_name: str = "Training",
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+    try:
+        rows = parse_training_records_sheet(content, filename=file.filename or "training.xlsx", sheet_name=sheet_name)
+        summary = import_training_records_rows(
+            db,
+            amo_id=current_user.amo_id,
+            rows=rows,
+            dry_run=dry_run,
+            actor_user_id=current_user.id,
+        )
+        return summary
+    except (ValueError, RuntimeError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Training records import database error: {exc}")
 
 
 @router.put(
@@ -2352,6 +2401,91 @@ def get_my_training_status(
 
 
 @router.get(
+    "/status/me/access-state",
+    response_model=training_schemas.TrainingAccessState,
+    summary="Portal/CRS access state for the current user based on mandatory training",
+)
+def get_my_training_access_state(
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    return training_compliance.build_user_access_state(db, current_user)
+
+
+@router.get(
+    "/status/users/{user_id}",
+    response_model=List[training_schemas.TrainingStatusItem],
+    summary="Training status for a specific user (Quality / AMO admin only)",
+)
+def get_user_training_status(
+    user_id: str,
+    required_only: bool = False,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    if current_user.id != user_id and not _is_training_editor(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to view this user's training status.")
+    user = (
+        db.query(accounts_models.User)
+        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id == user_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in your AMO.")
+    evaluation = training_compliance.evaluate_user_training_policy(db, user, required_only=required_only)
+    return evaluation.items
+
+
+@router.post(
+    "/status/users/bulk",
+    response_model=training_schemas.TrainingStatusBulkResponse,
+    summary="Bulk training status for multiple users (Quality / AMO admin only)",
+)
+def get_bulk_user_training_status(
+    payload: training_schemas.TrainingStatusBulkRequest,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    user_ids = [str(uid) for uid in (payload.user_ids or []) if str(uid).strip()]
+    if not user_ids:
+        return training_schemas.TrainingStatusBulkResponse(users={})
+    users = (
+        db.query(accounts_models.User)
+        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id.in_(user_ids))
+        .all()
+    )
+    result: Dict[str, List[training_schemas.TrainingStatusItem]] = {}
+    for user in users:
+        if getattr(user, "is_system_account", False):
+            continue
+        evaluation = training_compliance.evaluate_user_training_policy(db, user, required_only=True)
+        result[str(user.id)] = evaluation.items
+    return training_schemas.TrainingStatusBulkResponse(users=result)
+
+
+@router.get(
+    "/status/users/{user_id}/access-state",
+    response_model=training_schemas.TrainingAccessState,
+    summary="Portal/CRS access state for a specific user (Quality / AMO admin only)",
+)
+def get_user_training_access_state(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    if current_user.id != user_id and not _is_training_editor(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to view this user's access state.")
+    user = (
+        db.query(accounts_models.User)
+        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id == user_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in your AMO.")
+    return training_compliance.build_user_access_state(db, user)
+
+
+@router.get(
     "/status/me/required",
     response_model=List[training_schemas.TrainingStatusItem],
     summary="Training status for the current user, filtered by requirement matrix (IOSA-style)",
@@ -2516,6 +2650,168 @@ def get_my_required_training_status(
     return items
 
 
+def _build_training_record_pdf_bytes(*, user: accounts_models.User, records: List[training_models.TrainingRecord]) -> bytes:
+    brand_gold = colors.HexColor("#b18f2c")
+    band_fill = colors.HexColor("#f8f5e9")
+    line_color = colors.HexColor("#d1d5db")
+    text_dark = colors.HexColor("#111827")
+    muted = colors.HexColor("#6b7280")
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=16 * mm,
+        bottomMargin=14 * mm,
+        title="Individual Training Record",
+        author="AMO Portal",
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "training_title",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        leading=20,
+        alignment=TA_CENTER,
+        textColor=text_dark,
+        spaceAfter=8,
+    )
+    brand_style = ParagraphStyle(
+        "training_brand",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=22,
+        leading=24,
+        textColor=brand_gold,
+        spaceAfter=0,
+    )
+    meta_style = ParagraphStyle(
+        "training_meta",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        textColor=text_dark,
+    )
+    small_right = ParagraphStyle(
+        "training_small_right",
+        parent=meta_style,
+        alignment=TA_RIGHT,
+        textColor=muted,
+    )
+    header_cell = ParagraphStyle(
+        "training_header_cell",
+        parent=styles["BodyText"],
+        fontName="Helvetica-Bold",
+        fontSize=8.2,
+        leading=10,
+        textColor=colors.white,
+        alignment=TA_LEFT,
+    )
+    body_cell = ParagraphStyle(
+        "training_body_cell",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=8.6,
+        leading=11,
+        textColor=text_dark,
+        alignment=TA_LEFT,
+    )
+
+    licence_no = getattr(user, "licence_number", None) or "-"
+    generated_on = datetime.now().strftime("%m/%d/%Y %I:%M %p")
+
+    def p(value: str, style: ParagraphStyle):
+        return Paragraph(value, style)
+
+    story = [
+        Table(
+            [
+                [
+                    p("Safarilink", brand_style),
+                    p(
+                        "Training Record Form No: QAM/49A<br/>Issue Date: 1 Sept 25<br/>Revision: 00",
+                        small_right,
+                    ),
+                ],
+                [
+                    p("INDIVIDUAL TRAINING RECORD", title_style),
+                    p(f"Printed on {generated_on}", small_right),
+                ],
+                [
+                    p(f"<b>Name:</b> {user.full_name or '-'}", meta_style),
+                    p(f"<b>Licence No:</b> {licence_no}", meta_style),
+                ],
+            ],
+            colWidths=[110 * mm, 70 * mm],
+            style=TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("SPAN", (0, 1), (0, 1)),
+            ]),
+        ),
+        Spacer(1, 6),
+    ]
+
+    rows = [[
+        p("CourseID", header_cell),
+        p("CourseName", header_cell),
+        p("LastTrainingDate", header_cell),
+        p("NextDueDate", header_cell),
+        p("Status", header_cell),
+    ]]
+
+    def fmt_date(value):
+        if not value:
+            return "OK" if False else "-"
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+    for rec in records:
+        rows.append([
+            p(str(getattr(getattr(rec, "course", None), "course_id", None) or rec.course_id or "-"), body_cell),
+            p(str(getattr(getattr(rec, "course", None), "course_name", None) or "-"), body_cell),
+            p(fmt_date(rec.completion_date), body_cell),
+            p(fmt_date(rec.valid_until), body_cell),
+            p(str(getattr(getattr(rec, "status_snapshot", None), "status", None) or ("OK" if rec.valid_until is None or rec.valid_until >= date.today() else "Overdue")), body_cell),
+        ])
+
+    if len(rows) == 1:
+        rows.append([p("-", body_cell), p("No training records available.", body_cell), p("-", body_cell), p("-", body_cell), p("-", body_cell)])
+
+    table = Table(rows, repeatRows=1, colWidths=[24 * mm, 86 * mm, 28 * mm, 28 * mm, 24 * mm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), brand_gold),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, line_color),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, band_fill]),
+    ]))
+    story.append(table)
+
+    def _draw_footer(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(muted)
+        canvas.drawRightString(A4[0] - doc.rightMargin, 9 * mm, f"AMO Portal generated report · {generated_on}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
+    return buffer.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # EVIDENCE PACK EXPORTS
 # ---------------------------------------------------------------------------
@@ -2540,6 +2836,39 @@ def export_training_user_evidence_pack(
         correlation_id=str(uuid.uuid4()),
         amo_id=current_user.amo_id,
     )
+
+
+@router.get(
+    "/users/{user_id}/record-report.pdf",
+    summary="Export an individual training record PDF for a specific user",
+)
+def export_training_user_record_report(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    if current_user.id != user_id and not _is_training_editor(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to export training record report")
+
+    user = (
+        db.query(accounts_models.User)
+        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id == user_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in your AMO.")
+
+    records = (
+        db.query(training_models.TrainingRecord)
+        .filter(training_models.TrainingRecord.amo_id == current_user.amo_id, training_models.TrainingRecord.user_id == user_id)
+        .order_by(training_models.TrainingRecord.completion_date.desc(), training_models.TrainingRecord.created_at.desc())
+        .all()
+    )
+
+    pdf_bytes = _build_training_record_pdf_bytes(user=user, records=records)
+    filename_stub = (getattr(user, "full_name", None) or "training_record").strip().replace(" ", "_")
+    headers = {"Content-Disposition": f'attachment; filename="{filename_stub}_training_record.pdf"'}
+    return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
 
 
 # ---------------------------------------------------------------------------

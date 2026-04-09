@@ -51,6 +51,9 @@ export const BrandHeader: React.FC<BrandHeaderProps> = ({
               src={preferredLogo}
               alt={`${brand.name} logo`}
               className="brand-header__topbar-logo"
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
               onLoad={() => setLogoFailed(false)}
               onError={() => setLogoFailed(true)}
             />
@@ -70,6 +73,9 @@ export const BrandHeader: React.FC<BrandHeaderProps> = ({
             src={preferredLogo}
             alt={`${brand.name} logo`}
             className="brand-header__topbar-logo"
+            loading="eager"
+            fetchPriority="high"
+            decoding="async"
             onError={() => setLogoFailed(true)}
           />
         </div>

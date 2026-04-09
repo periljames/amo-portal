@@ -770,6 +770,7 @@ class QMSNotificationSummaryOut(BaseModel):
 
 class QMSPersonOptionOut(BaseModel):
     id: str
+    staff_code: Optional[str] = None
     full_name: str
     email: Optional[str] = None
     role: Optional[str] = None
