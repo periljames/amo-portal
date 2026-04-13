@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..accounts import models as accounts_models
 from . import models, schemas
-from .compliance import add_months
+from .compliance import add_months, is_initial_course
 
 EXPECTED_HEADERS = [
     "RecordID",
@@ -23,6 +23,56 @@ EXPECTED_HEADERS = [
     "DaysToDue",
     "Status",
 ]
+
+
+def _normalize_header(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def _sheet_name_candidates(sheet_name: str) -> set[str]:
+    base = (sheet_name or "Training").strip().lower()
+    return {
+        base,
+        base.rstrip("s"),
+        f"{base}s",
+        "training",
+        "trainings",
+        "traininghistory",
+        "training history",
+    }
+
+
+def _locate_training_sheet(workbook, requested_sheet_name: str):
+    if requested_sheet_name in workbook.sheetnames:
+        return workbook[requested_sheet_name]
+
+    candidate_names = _sheet_name_candidates(requested_sheet_name)
+    for name in workbook.sheetnames:
+        if name.strip().lower() in candidate_names:
+            return workbook[name]
+
+    expected = {_normalize_header(header) for header in EXPECTED_HEADERS}
+    for name in workbook.sheetnames:
+        ws = workbook[name]
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            continue
+        normalized_headers = {_normalize_header(cell) for cell in rows[0] if cell not in (None, "")}
+        if expected.issubset(normalized_headers):
+            return ws
+
+    raise ValueError(f"Sheet '{requested_sheet_name}' not found and no compatible training sheet was detected.")
+
+
+def _resolve_training_headers(header_row: list[Any]) -> tuple[list[str], dict[str, int]]:
+    actual_headers = [str(c).strip() if c is not None else "" for c in header_row]
+    normalized_to_index = {_normalize_header(value): idx for idx, value in enumerate(actual_headers)}
+    missing = [header for header in EXPECTED_HEADERS if _normalize_header(header) not in normalized_to_index]
+    if missing:
+        raise ValueError(
+            f"Unexpected headers in training sheet. Missing required columns {missing}. Found {actual_headers}"
+        )
+    return actual_headers, {header: normalized_to_index[_normalize_header(header)] for header in EXPECTED_HEADERS}
 
 
 @dataclass(frozen=True)
@@ -100,21 +150,15 @@ def parse_training_records_sheet(file_bytes: bytes, *, filename: str, sheet_name
         raise RuntimeError("openpyxl is required for training history import. Install openpyxl.") from exc
 
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-    if sheet_name not in wb.sheetnames:
-        raise ValueError(f"Sheet '{sheet_name}' not found.")
-    ws = wb[sheet_name]
+    ws = _locate_training_sheet(wb, sheet_name)
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
         return []
-    headers = [str(c).strip() if c is not None else "" for c in rows[0]]
-    if headers != EXPECTED_HEADERS:
-        raise ValueError(
-            f"Unexpected headers in '{sheet_name}'. Expected exact order {EXPECTED_HEADERS}, got {headers}"
-        )
+    headers, header_index = _resolve_training_headers(list(rows[0]))
 
     parsed: list[dict[str, Any]] = []
     for idx, values in enumerate(rows[1:], start=2):
-        row = {headers[i]: values[i] if i < len(values) else None for i in range(len(headers))}
+        row = {header: (values[position] if position < len(values) else None) for header, position in header_index.items()}
         if not any(v is not None and str(v).strip() for v in row.values()):
             continue
         parsed.append({"row_number": idx, **row})
@@ -222,6 +266,109 @@ def _match_course(
     return by_name.get(_normalize_text(parsed.course_name))
 
 
+def _is_one_off_course(course: models.TrainingCourse) -> bool:
+    status = (_clean(getattr(course, "status", None)) or "").upper()
+    if status == "ONE_OFF":
+        return True
+    if is_initial_course(course):
+        return True
+    return not bool(getattr(course, "frequency_months", None))
+
+
+def _derive_latest_status(valid_until: Optional[date], *, course: models.TrainingCourse, today: date) -> str:
+    if _is_one_off_course(course):
+        return "OK"
+    if not valid_until:
+        return "OK"
+    days = (valid_until - today).days
+    if days < 0:
+        return "OVERDUE"
+    if days <= 60:
+        return "DUE_SOON"
+    return "OK"
+
+
+
+
+def _upsert_remark_token(remarks: Optional[str], key: str, value: Optional[str]) -> str:
+    tokens: list[str] = []
+    if remarks:
+        tokens = [part.strip() for part in str(remarks).split("|") if part and str(part).strip()]
+    normalized_key = key.strip().lower()
+    kept: list[str] = []
+    replaced = False
+    for token in tokens:
+        if "=" not in token:
+            kept.append(token)
+            continue
+        token_key, _token_value = token.split("=", 1)
+        if token_key.strip().lower() == normalized_key:
+            if value is not None:
+                kept.append(f"{key}={value}")
+                replaced = True
+            continue
+        kept.append(token)
+    if value is not None and not replaced:
+        kept.append(f"{key}={value}")
+    return " | ".join(kept)
+
+def _compute_purge_after(user: accounts_models.User, completion_date: date) -> date:
+    deactivated_at = getattr(user, "deactivated_at", None)
+    if deactivated_at is not None:
+        base_date = max(completion_date, deactivated_at.date())
+        return add_months(base_date, 24)
+    if not bool(getattr(user, "is_active", True)):
+        return add_months(completion_date, 24)
+    return add_months(completion_date, 60)
+
+
+def _apply_record_lifecycle(
+    db: Session,
+    *,
+    amo_id: str,
+    user: accounts_models.User,
+    course: models.TrainingCourse,
+    actor_user_id: Optional[str],
+    dry_run: bool,
+) -> Dict[str, str]:
+    rows = (
+        db.query(models.TrainingRecord)
+        .filter(
+            models.TrainingRecord.amo_id == amo_id,
+            models.TrainingRecord.user_id == str(user.id),
+            models.TrainingRecord.course_id == str(course.id),
+        )
+        .order_by(models.TrainingRecord.completion_date.asc(), models.TrainingRecord.created_at.asc(), models.TrainingRecord.id.asc())
+        .all()
+    )
+    if not rows:
+        return {}
+    latest = rows[-1]
+    today = date.today()
+    status_map: Dict[str, str] = {}
+
+    for row in rows[:-1]:
+        status_map[row.id] = "RENEWED"
+        if not dry_run:
+            row.valid_until = None
+            row.remarks = _upsert_remark_token(row.remarks, "LifecycleStatus", "RENEWED")
+            db.add(row)
+
+    computed_valid_until = latest.valid_until
+    if computed_valid_until is None and not _is_one_off_course(course) and course.frequency_months:
+        computed_valid_until = add_months(latest.completion_date, int(course.frequency_months))
+    latest_status = _derive_latest_status(computed_valid_until, course=course, today=today)
+    status_map[latest.id] = latest_status
+    if not dry_run:
+        latest.valid_until = computed_valid_until if latest_status != "RENEWED" else None
+        latest.remarks = _upsert_remark_token(latest.remarks, "LifecycleStatus", latest_status)
+        latest.verified_at = latest.verified_at or datetime.now(timezone.utc)
+        latest.verified_by_user_id = latest.verified_by_user_id or actor_user_id
+        db.add(latest)
+
+    return status_map
+
+
 def import_training_records_rows(
     db: Session,
     *,
@@ -278,17 +425,13 @@ def import_training_records_rows(
         .filter(accounts_models.User.amo_id == amo_id, accounts_models.User.is_system_account.is_(False))
         .all()
     )
-    courses = (
-        db.query(models.TrainingCourse)
-        .filter(models.TrainingCourse.amo_id == amo_id)
-        .all()
-    )
+    courses = db.query(models.TrainingCourse).filter(models.TrainingCourse.amo_id == amo_id).all()
+
     by_staff, by_user_id, by_name = _index_users(users)
     by_course_code, by_course_name = _index_courses(courses)
 
-    matched_user_ids: set[str] = set()
-    matched_course_ids: set[str] = set()
     matched_pairs: list[tuple[ParsedTrainingImportRow, accounts_models.User, models.TrainingCourse]] = []
+    affected_exact_pairs: set[tuple[str, str]] = set()
 
     for parsed in parsed_rows:
         user = _match_user(parsed, by_staff=by_staff, by_id=by_user_id, by_name=by_name)
@@ -366,17 +509,20 @@ def import_training_records_rows(
             continue
 
         matched_pairs.append((parsed, user, course))
-        matched_user_ids.add(str(user.id))
-        matched_course_ids.add(str(course.id))
+        affected_exact_pairs.add((str(user.id), str(course.id)))
+        if not bool(getattr(user, "is_active", False)):
+            matched_inactive_rows += 1
 
     existing_records = []
-    if matched_user_ids and matched_course_ids:
+    if affected_exact_pairs:
+        affected_user_ids = sorted({user_id for user_id, _ in affected_exact_pairs})
+        affected_course_ids = sorted({course_id for _, course_id in affected_exact_pairs})
         existing_records = (
             db.query(models.TrainingRecord)
             .filter(
                 models.TrainingRecord.amo_id == amo_id,
-                models.TrainingRecord.user_id.in_(sorted(matched_user_ids)),
-                models.TrainingRecord.course_id.in_(sorted(matched_course_ids)),
+                models.TrainingRecord.user_id.in_(affected_user_ids),
+                models.TrainingRecord.course_id.in_(affected_course_ids),
             )
             .all()
         )
@@ -387,19 +533,16 @@ def import_training_records_rows(
         if current is None or record.created_at > current.created_at:
             existing_by_key[key] = record
 
+    lifecycle_status_by_id: Dict[str, str] = {}
     now = datetime.now(timezone.utc)
 
     for parsed, user, course in matched_pairs:
         target_valid_until = parsed.next_due_date or (
-            add_months(parsed.completion_date, int(course.frequency_months)) if course.frequency_months else None
+            add_months(parsed.completion_date, int(course.frequency_months)) if course.frequency_months and not _is_one_off_course(course) else None
         )
         target_remarks = _legacy_import_remark(parsed)
         existing = existing_by_key.get((str(user.id), str(course.id), parsed.completion_date))
         changes: list[schemas.TrainingRecordImportChange] = []
-
-        if not getattr(user, "is_active", False):
-            matched_inactive_rows += 1
-
         if existing is None:
             action = "CREATE"
             created_records += 1
@@ -411,7 +554,7 @@ def import_training_records_rows(
                     event_id=None,
                     completion_date=parsed.completion_date,
                     valid_until=target_valid_until,
-                    hours_completed=None,
+                    hours_completed=getattr(course, 'nominal_hours', None),
                     exam_score=None,
                     certificate_reference=None,
                     remarks=target_remarks,
@@ -428,48 +571,26 @@ def import_training_records_rows(
                 existing_by_key[(str(user.id), str(course.id), parsed.completion_date)] = record
         else:
             action = "UNCHANGED"
-            if existing.valid_until != target_valid_until:
-                changes.append(
-                    schemas.TrainingRecordImportChange(
-                        field="valid_until",
-                        label="Next due date",
-                        old_value=existing.valid_until.isoformat() if existing.valid_until else None,
-                        new_value=target_valid_until.isoformat() if target_valid_until else None,
-                    )
-                )
-            if (existing.remarks or None) != target_remarks:
-                changes.append(
-                    schemas.TrainingRecordImportChange(
-                        field="remarks",
-                        label="Import note",
-                        old_value=existing.remarks,
-                        new_value=target_remarks,
-                    )
-                )
+            compare_pairs = [
+                ("valid_until", "Next due date", existing.valid_until.isoformat() if existing.valid_until else None, target_valid_until.isoformat() if target_valid_until else None),
+                ("remarks", "Import note", existing.remarks or None, target_remarks),
+                ("hours_completed", "Nominal hours", str(existing.hours_completed) if existing.hours_completed is not None else None, str(getattr(course, 'nominal_hours', None)) if getattr(course, 'nominal_hours', None) is not None else None),
+            ]
+            for field, label, old_value, new_value in compare_pairs:
+                if old_value != new_value:
+                    changes.append(schemas.TrainingRecordImportChange(field=field, label=label, old_value=old_value, new_value=new_value))
             if not existing.is_manual_entry:
-                changes.append(
-                    schemas.TrainingRecordImportChange(
-                        field="is_manual_entry",
-                        label="Manual entry flag",
-                        old_value="false",
-                        new_value="true",
-                    )
-                )
+                changes.append(schemas.TrainingRecordImportChange(field="is_manual_entry", label="Manual entry flag", old_value="false", new_value="true"))
             if existing.verification_status != models.TrainingRecordVerificationStatus.VERIFIED:
-                changes.append(
-                    schemas.TrainingRecordImportChange(
-                        field="verification_status",
-                        label="Verification status",
-                        old_value=str(existing.verification_status),
-                        new_value=str(models.TrainingRecordVerificationStatus.VERIFIED),
-                    )
-                )
+                changes.append(schemas.TrainingRecordImportChange(field="verification_status", label="Verification status", old_value=str(existing.verification_status), new_value=str(models.TrainingRecordVerificationStatus.VERIFIED)))
             if changes:
                 action = "UPDATE"
                 updated_records += 1
                 if not dry_run:
                     existing.valid_until = target_valid_until
                     existing.remarks = target_remarks
+                    if getattr(course, 'nominal_hours', None) is not None:
+                        existing.hours_completed = existing.hours_completed or getattr(course, 'nominal_hours', None)
                     existing.is_manual_entry = True
                     existing.verification_status = models.TrainingRecordVerificationStatus.VERIFIED
                     existing.verified_at = now
@@ -499,14 +620,35 @@ def import_training_records_rows(
                 matched_user_active=bool(getattr(user, "is_active", False)),
                 matched_course_pk=str(course.id),
                 matched_course_name=course.course_name,
-                existing_record_id=str(existing.id) if existing is not None else None,
+                existing_record_id=existing.id if existing is not None else None,
                 changes=changes,
-                reason=None,
+                reason="Matched inactive/dormant user; record will be retained without alerting." if not bool(getattr(user, "is_active", False)) else None,
             )
         )
 
     if not dry_run:
+        db.flush()
+
+    affected_user_objs = {str(user.id): user for _parsed, user, _course in matched_pairs}
+    affected_course_objs = {str(course.id): course for _parsed, _user, course in matched_pairs}
+    for user_id, course_id in sorted(affected_exact_pairs):
+        user = affected_user_objs[user_id]
+        course = affected_course_objs[course_id]
+        status_map = _apply_record_lifecycle(db, amo_id=amo_id, user=user, course=course, actor_user_id=actor_user_id, dry_run=dry_run)
+        lifecycle_status_by_id.update(status_map)
+
+    if not dry_run:
+        for record in existing_by_key.values():
+            if record.id in lifecycle_status_by_id:
+                db.add(record)
         db.commit()
+
+    for preview in preview_rows:
+        if preview.existing_record_id and preview.existing_record_id in lifecycle_status_by_id:
+            lifecycle = lifecycle_status_by_id[preview.existing_record_id]
+            if preview.action != "SKIP":
+                preview.source_status = lifecycle
+                preview.next_due_date = None if lifecycle == "RENEWED" else preview.next_due_date
 
     return schemas.TrainingRecordImportSummary(
         dry_run=dry_run,

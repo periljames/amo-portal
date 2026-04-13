@@ -6,7 +6,7 @@
 // - Uses RequireAuth wrapper to redirect unauthenticated users back to login.
 
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import * as DocControlPages from "./pages/DocControlPages";
 import * as TechnicalRecordsPages from "./pages/TechnicalRecordsPages";
 import * as PlanningProductionPages from "./pages/PlanningProductionPages";
@@ -17,9 +17,12 @@ import {
   fetchOnboardingStatus,
   getCachedOnboardingStatus,
   getCachedUser,
+  getContext,
   isAuthenticated,
+  normalizeDepartmentCode,
   type OnboardingStatus,
 } from "./services/auth";
+import { canViewFeature, getFirstAccessibleModuleRoute, type ModuleFeature } from "./utils/roleAccess";
 
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const PasswordResetPage = lazy(() => import("./pages/PasswordResetPage"));
@@ -54,7 +57,6 @@ const QMSDocumentsPage = lazy(() => import("./pages/QMSDocumentsPage"));
 const QMSAuditsPage = lazy(() => import("./pages/QMSAuditsPage"));
 const QMSChangeControlPage = lazy(() => import("./pages/QMSChangeControlPage"));
 const MyTasksPage = lazy(() => import("./pages/MyTasksPage"));
-const QMSTrainingPage = lazy(() => import("./pages/QMSTrainingPage"));
 const TrainingCompetencePage = lazy(() => import("./pages/TrainingCompetencePage"));
 const QMSTrainingUserPage = lazy(() => import("./pages/QMSTrainingUserPage"));
 const QMSEventsPage = lazy(() => import("./pages/QMSEventsPage"));
@@ -84,8 +86,21 @@ const ManualWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage
 const ManualExportsPage = lazy(() => import("./pages/manuals/ManualExportsPage"));
 const ManualMasterListPage = lazy(() => import("./pages/manuals/ManualMasterListPage"));
 const ProductionWorkspacePage = lazy(() => import("./pages/ProductionWorkspacePage"));
-
-
+const UserProfilePage = lazy(() => import("./pages/UserProfilePage"));
+const MaintenanceDashboardPage = lazy(() => import("./pages/maintenance/MaintenanceDashboardPage"));
+const MaintenanceWorkOrdersPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrdersPage"));
+const MaintenanceWorkOrderDetailPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrderDetailPage"));
+const MaintenanceWorkPackagesPage = lazy(() => import("./pages/maintenance/MaintenanceWorkPackagesPage"));
+const MaintenanceDefectsPage = lazy(() => import("./pages/maintenance/MaintenanceDefectsPage"));
+const MaintenanceDefectDetailPage = lazy(() => import("./pages/maintenance/MaintenanceDefectDetailPage"));
+const MaintenanceNonRoutinesPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutinesPage"));
+const MaintenanceNonRoutineDetailPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutineDetailPage"));
+const MaintenanceInspectionsPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionsPage"));
+const MaintenanceInspectionDetailPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionDetailPage"));
+const MaintenancePartsToolsPage = lazy(() => import("./pages/maintenance/MaintenancePartsToolsPage"));
+const MaintenanceCloseoutPage = lazy(() => import("./pages/maintenance/MaintenanceCloseoutPage"));
+const MaintenanceReportsPage = lazy(() => import("./pages/maintenance/MaintenanceReportsPage"));
+const MaintenanceSettingsPage = lazy(() => import("./pages/maintenance/MaintenanceSettingsPage"));
 
 type RequireAuthProps = {
   children: React.ReactElement;
@@ -94,6 +109,13 @@ type RequireAuthProps = {
 type RequireTenantAdminProps = {
   children: React.ReactElement;
 };
+
+function LegacyTrainingCompetenceRedirect(): React.ReactElement {
+  const { amoCode, department } = useParams<{ amoCode?: string; department?: string }>();
+  const location = useLocation();
+  const target = `/maintenance/${amoCode || "UNKNOWN"}/${department || "quality"}/qms/training${location.search}`;
+  return <Navigate to={target} replace />;
+}
 
 
 function inferAmoCodeFromPath(pathname: string): string | null {
@@ -209,6 +231,51 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
   return children;
 };
 
+function resolveDefaultDepartment(amoCode: string): string {
+  const currentUser = getCachedUser();
+  if (currentUser?.is_superuser || currentUser?.is_amo_admin) {
+    return "admin/overview";
+  }
+  const target = getFirstAccessibleModuleRoute(amoCode, currentUser, getContext().department);
+  return target.replace(`/maintenance/${amoCode}/`, "");
+}
+
+const DepartmentHomeRedirect: React.FC = () => {
+  const location = useLocation();
+  const amoCode = inferAmoCodeFromPath(location.pathname) || "system";
+  return <Navigate to={`/maintenance/${amoCode}/${resolveDefaultDepartment(amoCode)}`} replace />;
+};
+
+const LegacyEngineeringRedirect: React.FC = () => {
+  const location = useLocation();
+  const parts = location.pathname.split("/").filter(Boolean);
+  const nextParts = parts.map((part) => (part === "engineering" ? "maintenance" : part));
+  const target = `/${nextParts.join("/")}${location.search}`;
+  return <Navigate to={target} replace />;
+};
+
+const LegacyTechnicalRecordsRedirect: React.FC = () => {
+  const location = useLocation();
+  const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
+  const parts = location.pathname.split("/").filter(Boolean);
+  const recordsIndex = parts.index("records");
+  const suffix = recordsIndex >= 0 ? parts.slice(recordsIndex + 1).join("/") : "";
+  const base = `/maintenance/${amoCode}/production/records`;
+  const target = suffix ? `${base}/${suffix}${location.search}` : `${base}${location.search}`;
+  return <Navigate to={target} replace />;
+};
+
+
+const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.ReactElement }> = ({ feature, children }) => {
+  const location = useLocation();
+  const currentUser = getCachedUser();
+  const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
+  if (!canViewFeature(currentUser, feature, getContext().department)) {
+    return <Navigate to={getFirstAccessibleModuleRoute(amoCode, currentUser, getContext().department)} replace />;
+  }
+  return children;
+};
+
 const PageRouteLoading: React.FC<{ label?: string }> = ({ label = "Loading…" }) => (
   <div className="page-loading" role="status" aria-live="polite">
     <div className="page-loading__card">
@@ -321,7 +388,7 @@ export const AppRouter: React.FC = () => {
       {/* If someone visits /maintenance/:amoCode directly, send them somewhere safe */}
       <Route
         path="/maintenance/:amoCode"
-        element={<Navigate to="planning" replace />}
+        element={<DepartmentHomeRedirect />}
       />
 
       {/* Admin dashboard (System Admin area) */}
@@ -471,30 +538,38 @@ export const AppRouter: React.FC = () => {
           </RequireAuth>
         }
       />
+      <Route
+        path="/maintenance/:amoCode/profile"
+        element={
+          <RequireAuth>
+            <UserProfilePage />
+          </RequireAuth>
+        }
+      />
 
-      <Route path="/maintenance/:amoCode/planning" element={<RequireAuth><PlanningProductionPages.PlanningDashboardPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/dashboard" element={<RequireAuth><PlanningProductionPages.PlanningDashboardPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/utilisation-monitoring" element={<RequireAuth><PlanningProductionPages.PlanningUtilisationPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/forecast-due-list" element={<RequireAuth><PlanningProductionPages.PlanningForecastPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/amp" element={<RequireAuth><PlanningProductionPages.PlanningAmpPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/task-library" element={<RequireAuth><PlanningProductionPages.PlanningTaskLibraryPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/ad-sb-eo-control" element={<RequireAuth><PlanningProductionPages.PlanningAdSbPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/work-packages" element={<RequireAuth><PlanningProductionPages.PlanningWorkPackagesPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/work-orders" element={<RequireAuth><PlanningProductionPages.PlanningWorkOrdersPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/deferments" element={<RequireAuth><PlanningProductionPages.PlanningDefermentsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/non-routine-review" element={<RequireAuth><PlanningProductionPages.PlanningNonRoutinePage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/watchlists" element={<RequireAuth><PlanningProductionPages.WatchlistsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/publication-review" element={<RequireAuth><PlanningProductionPages.PublicationReviewPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/planning/compliance-actions" element={<RequireAuth><PlanningProductionPages.ComplianceActionsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning" element={<RequireAuth><RequireFeatureAccess feature="planning.dashboard"><PlanningProductionPages.PlanningDashboardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/dashboard" element={<RequireAuth><RequireFeatureAccess feature="planning.dashboard"><PlanningProductionPages.PlanningDashboardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/utilisation-monitoring" element={<RequireAuth><RequireFeatureAccess feature="planning.utilisation-monitoring"><PlanningProductionPages.PlanningUtilisationPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/forecast-due-list" element={<RequireAuth><RequireFeatureAccess feature="planning.forecast-due-list"><PlanningProductionPages.PlanningForecastPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/amp" element={<RequireAuth><RequireFeatureAccess feature="planning.amp"><PlanningProductionPages.PlanningAmpPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/task-library" element={<RequireAuth><RequireFeatureAccess feature="planning.task-library"><PlanningProductionPages.PlanningTaskLibraryPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/ad-sb-eo-control" element={<RequireAuth><RequireFeatureAccess feature="planning.ad-sb-eo-control"><PlanningProductionPages.PlanningAdSbPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/work-packages" element={<RequireAuth><RequireFeatureAccess feature="planning.work-packages"><PlanningProductionPages.PlanningWorkPackagesPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/work-orders" element={<RequireAuth><RequireFeatureAccess feature="planning.work-orders"><PlanningProductionPages.PlanningWorkOrdersPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/deferments" element={<RequireAuth><RequireFeatureAccess feature="planning.deferments"><PlanningProductionPages.PlanningDefermentsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/non-routine-review" element={<RequireAuth><RequireFeatureAccess feature="planning.non-routine-review"><PlanningProductionPages.PlanningNonRoutinePage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/watchlists" element={<RequireAuth><RequireFeatureAccess feature="planning.watchlists"><PlanningProductionPages.WatchlistsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/publication-review" element={<RequireAuth><RequireFeatureAccess feature="planning.publication-review"><PlanningProductionPages.PublicationReviewPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/planning/compliance-actions" element={<RequireAuth><RequireFeatureAccess feature="planning.compliance-actions"><PlanningProductionPages.ComplianceActionsPage /></RequireFeatureAccess></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/production/dashboard" element={<RequireAuth><PlanningProductionPages.ProductionDashboardPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/production/control-board" element={<RequireAuth><PlanningProductionPages.ProductionControlBoardPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/production/work-order-execution" element={<RequireAuth><PlanningProductionPages.ProductionExecutionPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/production/findings" element={<RequireAuth><PlanningProductionPages.ProductionFindingsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/production/materials" element={<RequireAuth><PlanningProductionPages.ProductionMaterialsPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/production/review-inspection" element={<RequireAuth><PlanningProductionPages.ProductionReviewInspectionPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/production/release-prep" element={<RequireAuth><PlanningProductionPages.ProductionReleasePrepPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/production/compliance-items" element={<RequireAuth><PlanningProductionPages.ProductionComplianceItemsPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/dashboard" element={<RequireAuth><RequireFeatureAccess feature="production.dashboard"><PlanningProductionPages.ProductionDashboardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/control-board" element={<RequireAuth><RequireFeatureAccess feature="production.control-board"><PlanningProductionPages.ProductionControlBoardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/work-order-execution" element={<RequireAuth><RequireFeatureAccess feature="production.work-order-execution"><PlanningProductionPages.ProductionExecutionPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/findings" element={<RequireAuth><RequireFeatureAccess feature="production.findings"><PlanningProductionPages.ProductionFindingsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/materials" element={<RequireAuth><RequireFeatureAccess feature="production.materials"><PlanningProductionPages.ProductionMaterialsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/review-inspection" element={<RequireAuth><RequireFeatureAccess feature="production.review-inspection"><PlanningProductionPages.ProductionReviewInspectionPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/release-prep" element={<RequireAuth><RequireFeatureAccess feature="production.release-prep"><PlanningProductionPages.ProductionReleasePrepPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/compliance-items" element={<RequireAuth><RequireFeatureAccess feature="production.compliance-items"><PlanningProductionPages.ProductionComplianceItemsPage /></RequireFeatureAccess></RequireAuth>} />
 
 
       <Route
@@ -534,7 +609,47 @@ export const AppRouter: React.FC = () => {
       <Route path="/production/fleet" element={<RequireAuth><ProductionWorkspacePage /></RequireAuth>} />
       <Route path="/production/fleet/:tailId" element={<RequireAuth><ProductionWorkspacePage /></RequireAuth>} />
 
-      {/* Department dashboard, e.g. /maintenance/safarilink/engineering */}
+      <Route path="/maintenance/:amoCode/maintenance" element={<RequireAuth><RequireFeatureAccess feature="maintenance.dashboard"><MaintenanceDashboardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/dashboard" element={<RequireAuth><RequireFeatureAccess feature="maintenance.dashboard"><MaintenanceDashboardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/work-orders" element={<RequireAuth><RequireFeatureAccess feature="maintenance.work-orders"><MaintenanceWorkOrdersPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/work-orders/:woId" element={<RequireAuth><RequireFeatureAccess feature="maintenance.work-orders"><MaintenanceWorkOrderDetailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/work-packages" element={<RequireAuth><RequireFeatureAccess feature="maintenance.work-packages"><MaintenanceWorkPackagesPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/defects" element={<RequireAuth><RequireFeatureAccess feature="maintenance.defects"><MaintenanceDefectsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/defects/:defectId" element={<RequireAuth><RequireFeatureAccess feature="maintenance.defects"><MaintenanceDefectDetailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/non-routines" element={<RequireAuth><RequireFeatureAccess feature="maintenance.non-routines"><MaintenanceNonRoutinesPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/non-routines/:nrId" element={<RequireAuth><RequireFeatureAccess feature="maintenance.non-routines"><MaintenanceNonRoutineDetailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/inspections" element={<RequireAuth><RequireFeatureAccess feature="maintenance.inspections"><MaintenanceInspectionsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/inspections/:inspectionId" element={<RequireAuth><RequireFeatureAccess feature="maintenance.inspections"><MaintenanceInspectionDetailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/parts-tools" element={<RequireAuth><RequireFeatureAccess feature="maintenance.parts-tools"><MaintenancePartsToolsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/closeout" element={<RequireAuth><RequireFeatureAccess feature="maintenance.closeout"><MaintenanceCloseoutPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/reports" element={<RequireAuth><RequireFeatureAccess feature="maintenance.reports"><MaintenanceReportsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/maintenance/settings" element={<RequireAuth><RequireFeatureAccess feature="maintenance.settings"><MaintenanceSettingsPage /></RequireFeatureAccess></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/engineering" element={<LegacyEngineeringRedirect />} />
+      <Route path="/maintenance/:amoCode/engineering/*" element={<LegacyEngineeringRedirect />} />
+
+      <Route path="/maintenance/:amoCode/production/records" element={<RequireAuth><RequireFeatureAccess feature="production.records.dashboard"><TechnicalRecordsPages.TechnicalRecordsDashboardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/aircraft" element={<RequireAuth><RequireFeatureAccess feature="production.records.aircraft"><TechnicalRecordsPages.AircraftRecordsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/aircraft/:tailId" element={<RequireAuth><RequireFeatureAccess feature="production.records.aircraft"><TechnicalRecordsPages.AircraftRecordDetailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/logbooks" element={<RequireAuth><RequireFeatureAccess feature="production.records.logbooks"><TechnicalRecordsPages.LogbooksPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/logbooks/:tailId" element={<RequireAuth><RequireFeatureAccess feature="production.records.logbooks"><TechnicalRecordsPages.LogbookByTailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/deferrals" element={<RequireAuth><RequireFeatureAccess feature="production.records.deferrals"><TechnicalRecordsPages.DeferralsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/deferrals/:deferralId" element={<RequireAuth><RequireFeatureAccess feature="production.records.deferrals"><TechnicalRecordsPages.DeferralDetailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/maintenance-records" element={<RequireAuth><RequireFeatureAccess feature="production.records.maintenance-records"><TechnicalRecordsPages.MaintenanceRecordsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/maintenance-records/:recordId" element={<RequireAuth><RequireFeatureAccess feature="production.records.maintenance-records"><TechnicalRecordsPages.MaintenanceRecordDetailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/airworthiness" element={<RequireAuth><RequireFeatureAccess feature="production.records.airworthiness"><TechnicalRecordsPages.AirworthinessPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/airworthiness/ad" element={<RequireAuth><RequireFeatureAccess feature="production.records.airworthiness"><TechnicalRecordsPages.ADRegisterPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/airworthiness/ad/:adId" element={<RequireAuth><RequireFeatureAccess feature="production.records.airworthiness"><TechnicalRecordsPages.ADDetailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/airworthiness/sb" element={<RequireAuth><RequireFeatureAccess feature="production.records.airworthiness"><TechnicalRecordsPages.SBRegisterPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/airworthiness/sb/:sbId" element={<RequireAuth><RequireFeatureAccess feature="production.records.airworthiness"><TechnicalRecordsPages.SBDetailPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/llp" element={<RequireAuth><RequireFeatureAccess feature="production.records.llp-components"><TechnicalRecordsPages.LLPPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/components" element={<RequireAuth><RequireFeatureAccess feature="production.records.llp-components"><TechnicalRecordsPages.ComponentsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/reconciliation" element={<RequireAuth><RequireFeatureAccess feature="production.records.reconciliation"><TechnicalRecordsPages.ReconciliationPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/traceability" element={<RequireAuth><RequireFeatureAccess feature="production.records.traceability"><TechnicalRecordsPages.TraceabilityPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/packs" element={<RequireAuth><RequireFeatureAccess feature="production.records.packs"><TechnicalRecordsPages.PacksPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/production/records/settings" element={<RequireAuth><RequireFeatureAccess feature="production.records.settings"><TechnicalRecordsPages.TechnicalRecordsSettingsPage /></RequireFeatureAccess></RequireAuth>} />
+
+      {/* Department dashboard, e.g. /maintenance/safarilink/maintenance */}
       <Route
         path="/maintenance/:amoCode/:department"
         element={
@@ -676,7 +791,7 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      {/* Aircraft import, e.g. /maintenance/safarilink/engineering/aircraft-import */}
+      {/* Aircraft import, e.g. /maintenance/safarilink/maintenance/aircraft-import */}
       <Route
         path="/maintenance/:amoCode/:department/aircraft-import"
         element={
@@ -782,7 +897,7 @@ export const AppRouter: React.FC = () => {
         path="/maintenance/:amoCode/:department/training-competence"
         element={
           <RequireAuth>
-            <TrainingCompetencePage />
+            <LegacyTrainingCompetenceRedirect />
           </RequireAuth>
         }
       />
@@ -791,7 +906,7 @@ export const AppRouter: React.FC = () => {
         path="/maintenance/:amoCode/:department/qms/training"
         element={
           <RequireAuth>
-            <QMSTrainingPage />
+            <TrainingCompetencePage />
           </RequireAuth>
         }
       />
@@ -852,26 +967,8 @@ export const AppRouter: React.FC = () => {
       <Route path="/t/:tenantSlug/manuals/:manualId/rev/:revId/exports" element={<RequireAuth><ManualExportsPage /></RequireAuth>} />
 
 
-      <Route path="/records" element={<RequireAuth><TechnicalRecordsPages.TechnicalRecordsDashboardPage /></RequireAuth>} />
-      <Route path="/records/aircraft" element={<RequireAuth><TechnicalRecordsPages.AircraftRecordsPage /></RequireAuth>} />
-      <Route path="/records/aircraft/:tailId" element={<RequireAuth><TechnicalRecordsPages.AircraftRecordDetailPage /></RequireAuth>} />
-      <Route path="/records/logbooks" element={<RequireAuth><TechnicalRecordsPages.LogbooksPage /></RequireAuth>} />
-      <Route path="/records/logbooks/:tailId" element={<RequireAuth><TechnicalRecordsPages.LogbookByTailPage /></RequireAuth>} />
-      <Route path="/records/deferrals" element={<RequireAuth><TechnicalRecordsPages.DeferralsPage /></RequireAuth>} />
-      <Route path="/records/deferrals/:deferralId" element={<RequireAuth><TechnicalRecordsPages.DeferralDetailPage /></RequireAuth>} />
-      <Route path="/records/maintenance-records" element={<RequireAuth><TechnicalRecordsPages.MaintenanceRecordsPage /></RequireAuth>} />
-      <Route path="/records/maintenance-records/:recordId" element={<RequireAuth><TechnicalRecordsPages.MaintenanceRecordDetailPage /></RequireAuth>} />
-      <Route path="/records/airworthiness" element={<RequireAuth><TechnicalRecordsPages.AirworthinessPage /></RequireAuth>} />
-      <Route path="/records/airworthiness/ad" element={<RequireAuth><TechnicalRecordsPages.ADRegisterPage /></RequireAuth>} />
-      <Route path="/records/airworthiness/ad/:adId" element={<RequireAuth><TechnicalRecordsPages.ADDetailPage /></RequireAuth>} />
-      <Route path="/records/airworthiness/sb" element={<RequireAuth><TechnicalRecordsPages.SBRegisterPage /></RequireAuth>} />
-      <Route path="/records/airworthiness/sb/:sbId" element={<RequireAuth><TechnicalRecordsPages.SBDetailPage /></RequireAuth>} />
-      <Route path="/records/llp" element={<RequireAuth><TechnicalRecordsPages.LLPPage /></RequireAuth>} />
-      <Route path="/records/components" element={<RequireAuth><TechnicalRecordsPages.ComponentsPage /></RequireAuth>} />
-      <Route path="/records/reconciliation" element={<RequireAuth><TechnicalRecordsPages.ReconciliationPage /></RequireAuth>} />
-      <Route path="/records/traceability" element={<RequireAuth><TechnicalRecordsPages.TraceabilityPage /></RequireAuth>} />
-      <Route path="/records/packs" element={<RequireAuth><TechnicalRecordsPages.PacksPage /></RequireAuth>} />
-      <Route path="/records/settings" element={<RequireAuth><TechnicalRecordsPages.TechnicalRecordsSettingsPage /></RequireAuth>} />
+      <Route path="/records" element={<LegacyTechnicalRecordsRedirect />} />
+      <Route path="/records/*" element={<LegacyTechnicalRecordsRedirect />} />
 
       {/* Catch-all → login */}
       <Route path="*" element={<Navigate to="/login" replace />} />

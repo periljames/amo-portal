@@ -71,6 +71,9 @@ class TrainingCourseBase(BaseModel):
     )
     default_provider: Optional[str] = None
     default_duration_days: Optional[int] = 1
+    nominal_hours: Optional[int] = Field(None, description="Nominal classroom/OJT hours for the course.")
+    planning_lead_days: Optional[int] = Field(45, description="Default lead window used to schedule before due date.")
+    candidate_requirement_text: Optional[str] = Field(None, description="MTM candidate qualification / scope / audience notes.")
 
     is_mandatory: bool = Field(False, description="True if this is a required course for some staff group.")
     mandatory_for_all: bool = Field(False, description="True if all staff in the AMO must hold this training.")
@@ -101,6 +104,9 @@ class TrainingCourseUpdate(BaseModel):
     regulatory_reference: Optional[str] = None
     default_provider: Optional[str] = None
     default_duration_days: Optional[int] = None
+    nominal_hours: Optional[int] = None
+    planning_lead_days: Optional[int] = None
+    candidate_requirement_text: Optional[str] = None
     is_mandatory: Optional[bool] = None
     mandatory_for_all: Optional[bool] = None
     prerequisite_course_id: Optional[str] = None
@@ -184,6 +190,13 @@ class TrainingRequirementRead(TrainingRequirementBase):
 
     class Config:
         from_attributes = True
+
+
+class TrainingMutationResult(BaseModel):
+    id: str
+    action: str
+    message: str
+    soft_deleted: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +328,10 @@ class TrainingRecordBase(BaseModel):
     exam_score: Optional[int] = Field(None, description="Optional exam/assessment score.")
 
     certificate_reference: Optional[str] = None
+    attachment_file_id: Optional[str] = Field(
+        None,
+        description="Optional uploaded evidence/certificate file id to link to the created training record. Required when certificate_reference is supplied.",
+    )
     remarks: Optional[str] = None
     is_manual_entry: bool = Field(False, description="True if imported from legacy Excel or keyed manually by QA.")
 
@@ -353,6 +370,17 @@ class TrainingRecordRead(TrainingRecordBase):
     amo_id: str
     created_by_user_id: Optional[str] = None
     created_at: datetime
+    course_id: Optional[str] = None
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
+    user_staff_code: Optional[str] = None
+    user_full_name: Optional[str] = None
+    legacy_record_id: Optional[str] = None
+    source_status: Optional[str] = None
+    record_status: Optional[str] = None
+    superseded_by_record_id: Optional[str] = None
+    superseded_at: Optional[datetime] = None
+    purge_after: Optional[date] = None
 
     verification_status: TrainingRecordVerificationStatus
     verified_at: Optional[datetime] = None
@@ -629,18 +657,8 @@ class CourseImportSummary(BaseModel):
     total_rows: int
     created_courses: int
     updated_courses: int
-    created_requirements: int = 0
-    updated_requirements: int = 0
     skipped_rows: int
     issues: List[CourseImportRowIssue] = Field(default_factory=list)
-
-
-class TrainingRecordImportChange(BaseModel):
-    field: str
-    label: str
-    old_value: Optional[str] = None
-    new_value: Optional[str] = None
-
 
 class TrainingRecordImportRowIssue(BaseModel):
     row_number: int
@@ -650,14 +668,21 @@ class TrainingRecordImportRowIssue(BaseModel):
     reason: str
 
 
+class TrainingRecordImportChange(BaseModel):
+    field: str
+    label: str
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
+
+
 class TrainingRecordImportRowPreview(BaseModel):
     row_number: int
     legacy_record_id: Optional[str] = None
-    person_id: Optional[str] = None
+    person_id: str
     person_name: Optional[str] = None
-    course_id: Optional[str] = None
-    course_name: Optional[str] = None
-    completion_date: Optional[date] = None
+    course_id: str
+    course_name: str
+    completion_date: date
     next_due_date: Optional[date] = None
     days_to_due: Optional[int] = None
     source_status: Optional[str] = None
@@ -682,3 +707,4 @@ class TrainingRecordImportSummary(BaseModel):
     matched_inactive_rows: int = 0
     issues: List[TrainingRecordImportRowIssue] = Field(default_factory=list)
     preview_rows: List[TrainingRecordImportRowPreview] = Field(default_factory=list)
+

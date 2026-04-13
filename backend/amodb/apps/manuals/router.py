@@ -10,8 +10,11 @@ import re
 import tempfile
 import zipfile
 from io import BytesIO
+from pathlib import Path
+import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -26,6 +29,10 @@ from .schemas import (
     AcknowledgeRequest,
     DiffSummaryOut,
     DocxPreviewOut,
+    ManualReaderProgressOut,
+    ManualReaderProgressRequest,
+    ManualSearchHitOut,
+    ManualUploadPreviewOut,
     ExportCreate,
     LifecycleTransitionOut,
     LifecycleTransitionRequest,
@@ -46,6 +53,8 @@ from .schemas import (
 router = APIRouter(prefix="/manuals", tags=["Manuals"], dependencies=[Depends(get_current_active_user)])
 
 MAX_DOCX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_PDF_UPLOAD_BYTES = 50 * 1024 * 1024
+MANUAL_UPLOAD_DIR = Path(os.getenv("MANUAL_UPLOAD_DIR", "uploads/manuals")).resolve()
 
 
 def _role_value(current_user: account_models.User) -> str:
@@ -155,79 +164,242 @@ def _validate_docx_upload(file: UploadFile, content: bytes) -> None:
         raise HTTPException(status_code=400, detail="Invalid DOCX file") from exc
 
 
-def _slugify_heading(value: str, fallback: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug or fallback
+def _validate_pdf_upload(file: UploadFile, content: bytes) -> None:
+    filename = (file.filename or "").strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded PDF is empty")
+    if len(content) > MAX_PDF_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"PDF file is too large (max {MAX_PDF_UPLOAD_BYTES // (1024 * 1024)} MB)")
+    if not content.startswith(b"%PDF"):
+        raise HTTPException(status_code=400, detail="Invalid PDF file")
 
 
-def _clean_docx_text(value: str) -> str:
-    text = (value or "").replace("\xa0", " ")
-    text = re.sub(r"PAGEREF\s+_Toc\d+.*", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\\[huz]", " ", text)
-    text = re.sub(r"_Toc\d+", " ", text)
-    text = re.sub(r"TOC\s+\\o.*", " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+def _xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
-def _heading_level(style_name: str, text: str) -> int | None:
+def _find_first_child(element: ET.Element, local_name: str) -> ET.Element | None:
+    for child in list(element):
+        if _xml_local_name(child.tag) == local_name:
+            return child
+    return None
+
+
+def _find_descendants(element: ET.Element, local_name: str) -> list[ET.Element]:
+    return [node for node in element.iter() if _xml_local_name(node.tag) == local_name]
+
+
+def _clean_docx_text(value: str | None) -> str:
+    text = str(value or "")
+    text = text.replace(" ", " ").replace("​", " ").replace("‌", " ").replace("‍", " ")
+    text = re.sub(r"[\t\r\f\v]+", " ", text)
+    text = re.sub(r"\s*\n\s*", "\n", text)
+    text = re.sub(r"[ ]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _heading_level(style_name: str | None, text: str | None) -> int | None:
     style = (style_name or "").strip().lower()
-    match = re.search(r"heading\s*(\d)", style)
+    candidate = _clean_docx_text(text)
+    if not candidate:
+        return None
+
+    match = re.search(r"(?:^|\b)heading\s*([1-6])\b", style)
     if match:
         return max(1, min(3, int(match.group(1))))
-    if re.match(r"^\d+(?:\.\d+)*\s+.+", text) and len(text) <= 180:
-        depth = min(3, text.split(" ", 1)[0].count(".") + 1)
-        return depth
-    if text.isupper() and 4 <= len(text) <= 120:
+
+    if style in {"title", "subtitle"}:
         return 1
-    return None
 
-
-def _normalize_manual_type(value: str | None) -> str | None:
-    if not value:
+    if len(candidate) > 220:
         return None
-    upper = value.upper()
-    for token in ["OMA", "CAME", "MEL", "MOE", "MTM", "MCM", "MPM", "CLM", "QMSM", "SMS", "AMP", "MM"]:
-        if token in upper:
-            return token
+
+    numbered = re.match(r"^(?:part|chapter|section|appendix|annex)\b", candidate, flags=re.IGNORECASE)
+    roman = re.match(r"^(?:[IVXLCM]+)[.)]?\s+", candidate)
+    alpha = re.match(r"^[A-Z][.)]\s+", candidate)
+    heading_case = candidate == candidate.upper() and len(candidate.split()) <= 14
+
+    if numbered or re.match(r"^\d+(?:\.\d+){0,3}[.)]?\s+", candidate) or roman or alpha or heading_case:
+        if re.match(r"^\d+\.\d+\.\d+", candidate):
+            return 3
+        if re.match(r"^\d+\.\d+", candidate):
+            return 2
+        return 1
+
+    short_words = len(candidate.split()) <= 12
+    ends_clean = not re.search(r"[.!?;:]$", candidate)
+    title_case_like = candidate[:1].isupper()
+    if short_words and ends_clean and title_case_like:
+        return 2
     return None
+
+
+def _slugify_heading(heading: str | None, fallback: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", _clean_docx_text((heading or "").lower())).strip("-")
+    return slug[:120] or fallback
+
+
+def _normalize_manual_type(source_text: str | None) -> str | None:
+    text = _clean_docx_text(source_text).lower()
+    if not text:
+        return None
+
+    rules: list[tuple[str, tuple[str, ...]]] = [
+        ("AMO", ("approved maintenance organization", "approved maintenance organizations", "approved maintenance organisations", "maintenance organization procedures manual", "maintenance organisation procedures manual", "mopm", "mpm", "amo")),
+        ("AIRWORTHINESS", ("airworthiness", "continuing airworthiness", "service bulletin", "airworthiness directive")),
+        ("PERSONNEL_LICENSING", ("personnel licensing", "personnel licencing", "licence", "licensing", "amel")),
+        ("AERONAUTICAL_INFORMATION_SERVICE", ("aeronautical information service", "aeronautical information services", "notam", "aip", "aim")),
+        ("UNITS_OF_MEASUREMENT", ("units of measurement", "air and ground operations")),
+        ("QUALITY_MANUAL", ("quality manual", "qmsm", "quality management system")),
+        ("SAFETY_MANUAL", ("safety manual", "sms manual", "safety management system")),
+        ("TRAINING_MANUAL", ("training manual", "mtm", "training and competence")),
+        ("OPERATIONS_MANUAL", ("operations manual", "mcm", "operations control", "operations procedures")),
+        ("REGULATION", ("legal notice no.", "kenya gazette supplement", "the civil aviation act")),
+    ]
+    for label, keywords in rules:
+        if any(keyword in text for keyword in keywords):
+            return label
+    return "GENERAL"
 
 
 def _parse_date_string(value: str | None) -> date | None:
-    if not value:
+    raw = _clean_docx_text(value)
+    if not raw:
         return None
-    raw = value.strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"):
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %B %Y", "%d %b %Y"):
         try:
             return datetime.strptime(raw, fmt).date()
         except ValueError:
             continue
+    match = re.search(r"(\d{4})[-/](\d{2})[-/](\d{2})", raw)
+    if match:
+        try:
+            return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            return None
+    match = re.search(r"(\d{2})[-/](\d{2})[-/](\d{4})", raw)
+    if match:
+        try:
+            return date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        except ValueError:
+            return None
     return None
+
+
+def _extract_docx_style_map(zf: zipfile.ZipFile) -> dict[str, str]:
+    style_map: dict[str, str] = {}
+    if "word/styles.xml" not in zf.namelist():
+        return style_map
+    try:
+        root = ET.fromstring(zf.read("word/styles.xml"))
+    except Exception:
+        return style_map
+    for style in _find_descendants(root, "style"):
+        style_id = style.attrib.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId") or style.attrib.get("styleId")
+        if not style_id:
+            continue
+        name_node = None
+        for child in list(style):
+            if _xml_local_name(child.tag) == "name":
+                name_node = child
+                break
+        if name_node is None:
+            continue
+        value = name_node.attrib.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val") or name_node.attrib.get("val")
+        if value:
+            style_map[style_id] = value
+    return style_map
+
+
+def _extract_docx_header_metadata(content: bytes) -> dict[str, str | None]:
+    title = None
+    revision_number = None
+    issue_number = None
+    effectivity_date = None
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as zf:
+            header_names = [name for name in zf.namelist() if name.startswith("word/header") and name.endswith(".xml")]
+            header_text = []
+            for name in header_names:
+                try:
+                    root = ET.fromstring(zf.read(name))
+                except Exception:
+                    continue
+                text_parts = [node.text for node in _find_descendants(root, "t") if node.text]
+                if text_parts:
+                    header_text.append(_clean_docx_text(" ".join(text_parts)))
+            combined = "\n".join(part for part in header_text if part)
+    except Exception:
+        combined = ""
+
+    if combined:
+        title_match = re.search(r"(?:manual\s*title|title)\s*[:#-]?\s*(.+?)(?=(?:revision|rev\.?|issue|effectivity|effective\s+date)\b|$)", combined, flags=re.IGNORECASE)
+        rev_match = re.search(r"(?:\brev(?:ision)?\s*(?:no\.?|number)?\s*[:#-]?\s*)([A-Z0-9._-]+)", combined, flags=re.IGNORECASE)
+        issue_match = re.search(r"(?:\bissue\s*(?:no\.?|number)?\s*[:#-]?\s*)([A-Z0-9._-]+)", combined, flags=re.IGNORECASE)
+        effectivity_match = re.search(r"(?:effectivity|effective(?:\s+date)?)\s*[:#-]?\s*(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})", combined, flags=re.IGNORECASE)
+        if title_match:
+            title = _clean_docx_text(title_match.group(1))
+        if rev_match:
+            revision_number = rev_match.group(1).strip()
+        if issue_match:
+            issue_number = issue_match.group(1).strip()
+        if effectivity_match:
+            effectivity_date = effectivity_match.group(1).strip()
+
+    return {
+        "manual_title": title,
+        "revision_number": revision_number,
+        "issue_number": issue_number,
+        "effectivity_date": effectivity_date,
+    }
 
 
 def _extract_docx_content(content: bytes, filename: str | None = None) -> dict[str, object]:
     try:
-        from docx import Document  # type: ignore
-    except Exception as exc:  # pragma: no cover
-        raise HTTPException(status_code=500, detail="DOCX parsing library unavailable") from exc
+        with zipfile.ZipFile(BytesIO(content)) as zf:
+            root = ET.fromstring(zf.read("word/document.xml"))
+            style_map = _extract_docx_style_map(zf)
+            header_metadata = _extract_docx_header_metadata(content)
+            core_title = None
+            if "docProps/core.xml" in zf.namelist():
+                try:
+                    core_root = ET.fromstring(zf.read("docProps/core.xml"))
+                    for node in core_root.iter():
+                        if _xml_local_name(node.tag) == "title" and (node.text or "").strip():
+                            core_title = _clean_docx_text(node.text or "")
+                            break
+                except Exception:
+                    core_title = None
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid DOCX file") from exc
 
-    doc = Document(BytesIO(content))
     paragraphs: list[dict[str, object]] = []
     headings: list[dict[str, object]] = []
-
-    for paragraph in doc.paragraphs:
-        raw = " ".join(run.text for run in paragraph.runs) or paragraph.text
-        text = _clean_docx_text(raw)
+    for paragraph in _find_descendants(root, "p"):
+        texts = [node.text or "" for node in _find_descendants(paragraph, "t") if (node.text or "").strip()]
+        raw_text = " ".join(texts)
+        text = _clean_docx_text(raw_text)
         if not text:
             continue
-        style_name = getattr(getattr(paragraph, "style", None), "name", "") or ""
+        style_id = None
+        ppr = _find_first_child(paragraph, "pPr")
+        if ppr is not None:
+            pstyle = _find_first_child(ppr, "pStyle")
+            if pstyle is not None:
+                style_id = pstyle.attrib.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val") or pstyle.attrib.get("val")
+        style_name = style_map.get(style_id or "", style_id or "")
         level = _heading_level(style_name, text)
         entry = {"text": text, "style": style_name, "level": level}
         paragraphs.append(entry)
         if level is not None:
             headings.append({"heading": text, "level": level})
 
-    doc_title = _clean_docx_text(getattr(getattr(doc, "core_properties", None), "title", "") or "")
+    doc_title = _clean_docx_text(core_title or header_metadata.get("manual_title") or "")
     joined = "\n".join(str(item["text"]) for item in paragraphs[:400])
     search_source = "\n".join(filter(None, [filename or "", doc_title, joined]))
 
@@ -247,9 +419,9 @@ def _extract_docx_content(content: bytes, filename: str | None = None) -> dict[s
             "part_number": (part_match.group(1).upper() if part_match else None),
             "manual_type": manual_type,
             "title": str(title)[:255],
-            "revision_number": (rev_match.group(1).strip() if rev_match else None),
-            "issue_number": (issue_match.group(1).strip() if issue_match else None),
-            "effective_date": (date_match.group(1).strip() if date_match else None),
+            "revision_number": (header_metadata.get("revision_number") or (rev_match.group(1).strip() if rev_match else None)),
+            "issue_number": (header_metadata.get("issue_number") or (issue_match.group(1).strip() if issue_match else None)),
+            "effective_date": (header_metadata.get("effectivity_date") or (date_match.group(1).strip() if date_match else None)),
         },
         "excerpt": excerpt,
     }
@@ -296,9 +468,41 @@ def _build_manual_sections(docx_payload: dict[str, object]) -> list[dict[str, ob
     return normalized
 
 
-def _build_prosemirror_json(section_specs: list[dict[str, object]]) -> dict:
+def _build_prosemirror_json(section_specs) -> dict:
+    if section_specs and isinstance(section_specs, list) and isinstance(section_specs[0], str):
+        normalized_sections: list[dict[str, object]] = []
+        current_heading = None
+        current_paragraphs: list[str] = []
+        for item in section_specs:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            level = _heading_level("", text)
+            if level is not None:
+                if current_heading is not None or current_paragraphs:
+                    heading = current_heading or "Overview"
+                    normalized_sections.append({
+                        "heading": heading,
+                        "level": 1,
+                        "anchor_slug": _slugify_heading(heading, f"section-{len(normalized_sections)+1}"),
+                        "paragraphs": current_paragraphs,
+                    })
+                current_heading = text
+                current_paragraphs = []
+            else:
+                current_paragraphs.append(text)
+        if current_heading is not None or current_paragraphs:
+            heading = current_heading or "Overview"
+            normalized_sections.append({
+                "heading": heading,
+                "level": 1,
+                "anchor_slug": _slugify_heading(heading, f"section-{len(normalized_sections)+1}"),
+                "paragraphs": current_paragraphs,
+            })
+        section_specs = normalized_sections
+
     content: list[dict[str, object]] = []
-    for index, spec in enumerate(section_specs, start=1):
+    for index, spec in enumerate(section_specs or [], start=1):
         heading = str(spec.get("heading") or f"Section {index}")
         level = max(1, min(3, int(spec.get("level") or 1)))
         section_id = str(spec.get("anchor_slug") or f"sec-{index:03d}")
@@ -321,6 +525,187 @@ def _build_prosemirror_json(section_specs: list[dict[str, object]]) -> dict:
 def _extract_docx_paragraphs(content: bytes) -> list[str]:
     payload = _extract_docx_content(content)
     return [str(item.get("text") or "") for item in list(payload.get("paragraphs", []))]
+
+
+def _ensure_upload_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _store_manual_source(*, tenant_slug: str, manual_code: str, revision_id: str, filename: str, content: bytes) -> tuple[str, str]:
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", (filename or "manual.bin").strip()) or "manual.bin"
+    target_dir = MANUAL_UPLOAD_DIR / tenant_slug / re.sub(r"[^A-Za-z0-9._-]+", "_", manual_code or "manual") / revision_id
+    _ensure_upload_dir(target_dir)
+    target = target_dir / safe_name
+    target.write_bytes(content)
+    return str(target), hashlib.sha256(content).hexdigest()
+
+
+def _extract_pdf_content(content: bytes, filename: str | None = None) -> dict[str, object]:
+    try:
+        import fitz  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail="PDF reader library unavailable") from exc
+
+    try:
+        doc = fitz.open(stream=content, filetype="pdf")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid PDF file") from exc
+
+    page_texts: list[dict[str, object]] = []
+    outline: list[dict[str, object]] = []
+    metadata = doc.metadata or {}
+    title = _clean_docx_text(metadata.get("title") or "") if isinstance(metadata, dict) else None
+
+    try:
+        toc = doc.get_toc(simple=True) or []
+    except Exception:
+        toc = []
+    for item in toc[:120]:
+        if len(item) >= 3:
+            level, heading, page_number = item[0], _clean_docx_text(str(item[1])), int(item[2] or 1)
+            if heading:
+                outline.append({"heading": heading, "level": max(1, min(3, int(level or 1))), "page_number": max(1, page_number)})
+
+    for page_index in range(doc.page_count):
+        page = doc.load_page(page_index)
+        page_text = _clean_docx_text(page.get_text("text") or "")
+        page_texts.append({"page_number": page_index + 1, "text": page_text})
+
+    joined = "\n".join(str(item["text"]) for item in page_texts[:25])
+    search_source = "\n".join(filter(None, [filename or "", title or "", joined]))
+    part_match = re.search(r"\b([A-Z]{1,4}/[A-Z0-9]{1,8}/\d{1,4}(?:/\d{1,4})?)\b", search_source, flags=re.IGNORECASE)
+    rev_match = re.search(r"(?:\brev(?:ision)?\s*(?:no\.?|number)?\s*[:#-]?\s*)([A-Z0-9._-]+)", search_source, flags=re.IGNORECASE)
+    issue_match = re.search(r"(?:\bissue\s*(?:no\.?|number)?\s*[:#-]?\s*)([A-Z0-9._-]+)", search_source, flags=re.IGNORECASE)
+    date_match = re.search(r"(?:effective(?:\s+date)?|effectivity|issued)\s*[:#-]?\s*(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})", search_source, flags=re.IGNORECASE)
+
+    resolved_title = title or (outline[0]["heading"] if outline else (filename or "Untitled manual"))
+    manual_type = _normalize_manual_type(search_source) or "GENERAL"
+    excerpt = "\n\n".join(item["text"] for item in page_texts[:3] if item.get("text"))
+
+    return {
+        "page_count": doc.page_count,
+        "outline": outline,
+        "pages": page_texts,
+        "metadata": {
+            "part_number": (part_match.group(1).upper() if part_match else None),
+            "manual_type": manual_type,
+            "title": str(resolved_title)[:255],
+            "revision_number": (rev_match.group(1).strip() if rev_match else None),
+            "issue_number": (issue_match.group(1).strip() if issue_match else None),
+            "effective_date": (date_match.group(1).strip() if date_match else None),
+        },
+        "excerpt": excerpt,
+    }
+
+
+def _build_pdf_sections(pdf_payload: dict[str, object]) -> list[dict[str, object]]:
+    outline = list(pdf_payload.get("outline", []))
+    pages = list(pdf_payload.get("pages", []))
+    page_map = {int(item.get("page_number") or 0): str(item.get("text") or "") for item in pages}
+    if not outline:
+        return [
+            {
+                "heading": f"Page {page_number}",
+                "level": 1,
+                "anchor_slug": f"page-{page_number}",
+                "page_start": page_number,
+                "page_end": page_number,
+                "paragraphs": [page_map.get(page_number, "")],
+            }
+            for page_number in sorted(page_map)
+        ]
+
+    sections: list[dict[str, object]] = []
+    total_pages = max(page_map) if page_map else int(pdf_payload.get("page_count") or 0)
+    for index, item in enumerate(outline, start=1):
+        page_start = max(1, int(item.get("page_number") or 1))
+        next_page = max(1, int(outline[index].get("page_number") or page_start)) if index < len(outline) else total_pages + 1
+        page_end = max(page_start, next_page - 1)
+        paragraphs = [page_map.get(page_no, "") for page_no in range(page_start, page_end + 1) if page_map.get(page_no, "")]
+        heading = str(item.get("heading") or f"Section {index}")[:255]
+        sections.append({
+            "heading": heading,
+            "level": max(1, min(3, int(item.get("level") or 1))),
+            "anchor_slug": _slugify_heading(heading, f"section-{index}"),
+            "page_start": page_start,
+            "page_end": page_end,
+            "paragraphs": paragraphs,
+        })
+    return sections
+
+
+def _upsert_reader_progress(
+    *,
+    tenant: models.Tenant,
+    manual: models.Manual,
+    revision: models.ManualRevision,
+    user_id: str | None,
+    db: Session,
+    last_section_id: str | None = None,
+    last_anchor_slug: str | None = None,
+    last_page_number: int | None = None,
+    scroll_percent: int | None = None,
+    zoom_percent: int | None = None,
+    bookmark_label: str | None = None,
+    bookmarks: list[dict] | None = None,
+) -> models.ManualReaderProgress | None:
+    if not user_id or not _table_exists(db, "manual_reader_progress"):
+        return None
+    progress = (
+        db.query(models.ManualReaderProgress)
+        .filter(
+            models.ManualReaderProgress.revision_id == revision.id,
+            models.ManualReaderProgress.user_id == user_id,
+        )
+        .first()
+    )
+    if not progress:
+        progress = models.ManualReaderProgress(
+            tenant_id=tenant.id,
+            manual_id=manual.id,
+            revision_id=revision.id,
+            user_id=user_id,
+            scroll_percent=max(0, min(100, int(scroll_percent or 0))),
+            zoom_percent=max(25, min(400, int(zoom_percent or 100))),
+            bookmarks_json=list(bookmarks or []),
+        )
+        db.add(progress)
+    if last_section_id is not None:
+        progress.last_section_id = last_section_id
+    if last_anchor_slug is not None:
+        progress.last_anchor_slug = last_anchor_slug
+    if last_page_number is not None:
+        progress.last_page_number = last_page_number
+    if scroll_percent is not None:
+        progress.scroll_percent = max(0, min(100, int(scroll_percent)))
+    if zoom_percent is not None:
+        progress.zoom_percent = max(25, min(400, int(zoom_percent)))
+    if bookmark_label is not None:
+        progress.bookmark_label = bookmark_label.strip() or None
+    if bookmarks is not None:
+        progress.bookmarks_json = list(bookmarks)
+    progress.last_opened_at = datetime.utcnow()
+    progress.updated_at = datetime.utcnow()
+    db.flush()
+    return progress
+
+
+def _reader_progress_payload(progress: models.ManualReaderProgress | None, revision_id: str, user_id: str | None) -> dict:
+    if not progress or not user_id:
+        return ManualReaderProgressOut(revision_id=revision_id, user_id=user_id or "", bookmarks=[]).model_dump()
+    return ManualReaderProgressOut(
+        revision_id=revision_id,
+        user_id=user_id,
+        last_section_id=progress.last_section_id,
+        last_anchor_slug=progress.last_anchor_slug,
+        last_page_number=progress.last_page_number,
+        scroll_percent=progress.scroll_percent,
+        zoom_percent=progress.zoom_percent,
+        bookmark_label=progress.bookmark_label,
+        bookmarks=list(progress.bookmarks_json or []),
+        last_opened_at=progress.last_opened_at,
+        updated_at=progress.updated_at,
+    ).model_dump()
 
 
 def _request_ip_device(request: Request) -> str:
@@ -554,15 +939,48 @@ async def preview_docx_upload(
     headings = [str(item.get("heading") or "") for item in list(parsed.get("headings", []))]
     metadata = dict(parsed.get("metadata", {}))
     heading = str(metadata.get("title") or (headings[0] if headings else (paragraphs[0] if paragraphs else file.filename or "Untitled manual")))
-    return DocxPreviewOut(
-        filename=file.filename or "manual.docx",
-        heading=heading[:255],
-        paragraph_count=len(paragraphs),
-        sample=paragraphs[:20],
-        outline=headings[:20],
-        metadata=metadata,
-        excerpt=str(parsed.get("excerpt") or ""),
-    )
+    return {
+        "filename": file.filename or "manual.docx",
+        "heading": heading[:255],
+        "paragraph_count": len(paragraphs),
+        "sample": paragraphs[:20],
+        "outline": headings[:20],
+        "metadata": metadata,
+        "excerpt": str(parsed.get("excerpt") or ""),
+        "source_type": "DOCX",
+        "page_count": None,
+    }
+
+
+@router.post("/t/{tenant_slug}/upload-pdf/preview", response_model=ManualUploadPreviewOut)
+async def preview_pdf_upload(
+    tenant_slug: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _ = _tenant_by_slug(db, tenant_slug)
+    if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
+        raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
+    content = await file.read()
+    _validate_pdf_upload(file, content)
+    parsed = _extract_pdf_content(content, file.filename)
+    pages = list(parsed.get("pages", []))
+    outline = [str(item.get("heading") or "") for item in list(parsed.get("outline", []))]
+    metadata = dict(parsed.get("metadata", {}))
+    heading = str(metadata.get("title") or (outline[0] if outline else file.filename or "Untitled manual"))
+    sample = [str(item.get("text") or "") for item in pages[:5] if str(item.get("text") or "").strip()]
+    return {
+        "filename": file.filename or "manual.pdf",
+        "heading": heading[:255],
+        "paragraph_count": sum(1 for item in pages if str(item.get("text") or "").strip()),
+        "sample": sample[:20],
+        "outline": outline[:20],
+        "metadata": metadata,
+        "excerpt": str(parsed.get("excerpt") or ""),
+        "source_type": "PDF",
+        "page_count": int(parsed.get("page_count") or 0),
+    }
 
 
 @router.post("/t/{tenant_slug}/upload-docx")
@@ -626,9 +1044,22 @@ async def upload_docx_revision(
         source_filename=file.filename,
         manual_uuid=f"manual::{manual.id}::rev::{uuid4().hex[:12]}",
         notes=(f"Uploaded source: {file.filename}" + (f"\nChange log: {change_log.strip()}" if change_log and change_log.strip() else "")),
+        source_type_enum=models.ManualSourceType.DOCX,
+        source_mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
     db.add(rev)
     db.flush()
+
+    storage_path, source_sha = _store_manual_source(
+        tenant_slug=tenant_slug,
+        manual_code=manual_code,
+        revision_id=rev.id,
+        filename=file.filename or f"{manual_code}.docx",
+        content=content,
+    )
+    rev.source_storage_path = storage_path
+    rev.source_sha256 = source_sha
+    rev.source_page_count = None
 
     created_sections: list[models.ManualSection] = []
     all_blocks = 0
@@ -701,14 +1132,199 @@ async def upload_docx_revision(
         "filename": file.filename,
         "paragraphs": paragraph_count,
         "sections": len(created_sections),
+        "blocks": all_blocks,
         "metadata": metadata,
+        "storage_path": storage_path,
+        "source_sha256": source_sha,
     })
     db.commit()
-    return {"manual_id": manual.id, "revision_id": rev.id, "status": rev.status_enum.value, "paragraphs": paragraph_count}
+    return {
+        "manual_id": manual.id,
+        "revision_id": rev.id,
+        "status": rev.status_enum.value,
+        "paragraphs": paragraph_count,
+        "source_type": "DOCX",
+        "source_storage_path": storage_path,
+        "source_sha256": source_sha,
+    }
+
+
+@router.post("/t/{tenant_slug}/upload-pdf")
+async def upload_pdf_revision(
+    tenant_slug: str,
+    request: Request,
+    code: str = Form(...),
+    title: str = Form(...),
+    rev_number: str = Form(...),
+    manual_type: str = Form("GENERAL"),
+    owner_role: str = Form("Library"),
+    issue_number: str = Form(""),
+    effective_date: str | None = Form(None),
+    change_log: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    if str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY:
+        raise HTTPException(status_code=403, detail="Insufficient privileges to upload manuals")
+    content = await file.read()
+    _validate_pdf_upload(file, content)
+
+    parsed = _extract_pdf_content(content, file.filename)
+    metadata = dict(parsed.get("metadata", {}))
+    section_specs = _build_pdf_sections(parsed)
+    page_count = int(parsed.get("page_count") or 0)
+
+    manual_code = (str(metadata.get("part_number") or code) or "").strip().upper()
+    manual_title = (str(metadata.get("title") or title) or file.filename or "Untitled manual").strip()
+    manual_type_value = (str(metadata.get("manual_type") or manual_type) or "GENERAL").strip().upper()
+    issue_value = (str(metadata.get("issue_number") or issue_number) or "00").strip()
+    rev_value = (str(metadata.get("revision_number") or rev_number) or "00").strip()
+    effective_value = _parse_date_string(str(metadata.get("effective_date") or effective_date or "").strip())
+
+    manual = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id, models.Manual.code == manual_code).first()
+    if not manual:
+        manual = models.Manual(
+            tenant_id=tenant.id,
+            code=manual_code,
+            title=manual_title,
+            manual_type=manual_type_value,
+            owner_role=(owner_role.strip() or "Library"),
+        )
+        db.add(manual)
+        db.flush()
+    else:
+        manual.title = manual_title or manual.title
+        manual.manual_type = manual_type_value or manual.manual_type
+        if owner_role.strip():
+            manual.owner_role = owner_role.strip()
+
+    rev = models.ManualRevision(
+        manual_id=manual.id,
+        rev_number=rev_value,
+        issue_number=issue_value,
+        effective_date=effective_value,
+        created_by=get_current_actor_id(),
+        status_enum=models.ManualRevisionStatus.DRAFT,
+        source_filename=file.filename,
+        manual_uuid=f"manual::{manual.id}::rev::{uuid4().hex[:12]}",
+        notes=(f"Uploaded source: {file.filename}" + (f"\nChange log: {change_log.strip()}" if change_log and change_log.strip() else "")),
+        source_type_enum=models.ManualSourceType.PDF,
+        source_mime_type="application/pdf",
+        source_page_count=page_count,
+    )
+    db.add(rev)
+    db.flush()
+
+    storage_path, source_sha = _store_manual_source(
+        tenant_slug=tenant_slug,
+        manual_code=manual_code,
+        revision_id=rev.id,
+        filename=file.filename or f"{manual_code}.pdf",
+        content=content,
+    )
+    rev.source_storage_path = storage_path
+    rev.source_sha256 = source_sha
+
+    created_sections: list[models.ManualSection] = []
+    all_blocks = 0
+    for section_index, spec in enumerate(section_specs, start=1):
+        section = models.ManualSection(
+            revision_id=rev.id,
+            order_index=section_index,
+            heading=str(spec.get("heading") or f"Section {section_index}")[:255],
+            anchor_slug=str(spec.get("anchor_slug") or f"section-{section_index}"),
+            level=int(spec.get("level") or 1),
+            metadata_json={
+                "source": "pdf-upload",
+                "filename": file.filename,
+                "page_start": spec.get("page_start"),
+                "page_end": spec.get("page_end"),
+                "paragraphs": len(list(spec.get("paragraphs") or [])),
+            },
+        )
+        db.add(section)
+        db.flush()
+        created_sections.append(section)
+        for block_index, para in enumerate(list(spec.get("paragraphs") or []), start=1):
+            safe_text = str(para).strip()
+            if not safe_text:
+                continue
+            all_blocks += 1
+            html_text = f"<p>{escape(safe_text)}</p>"
+            hash_source = f"{rev.id}:{section.id}:{block_index}:{safe_text}".encode("utf-8")
+            db.add(models.ManualBlock(
+                section_id=section.id,
+                order_index=block_index,
+                block_type="page-text",
+                html_sanitized=html_text,
+                text_plain=safe_text,
+                change_hash=hashlib.sha256(hash_source).hexdigest(),
+            ))
+
+    prose_json = _build_prosemirror_json(section_specs)
+    checksum = hashlib.sha256(json.dumps(prose_json, sort_keys=True).encode("utf-8")).hexdigest()
+    previous_version = (
+        db.query(models.DocumentVersion)
+        .filter(models.DocumentVersion.document_id == manual.id)
+        .order_by(models.DocumentVersion.created_at.desc())
+        .first()
+    )
+    if previous_version:
+        previous_version.is_active = False
+
+    current_version = models.DocumentVersion(
+        document_id=manual.id,
+        revision_id=rev.id,
+        version_label=f"Rev {rev.rev_number}",
+        content_json=prose_json,
+        delta_patch={
+            "from_version_id": previous_version.id if previous_version else None,
+            "changed_nodes": len(prose_json.get("content", [])),
+        },
+        checksum_sha256=checksum,
+        state="Draft",
+        is_active=True,
+    )
+    db.add(current_version)
+    db.flush()
+
+    for section in created_sections:
+        block_count = db.query(models.ManualBlock).filter(models.ManualBlock.section_id == section.id).count()
+        words = max(1, len(section.heading.split()))
+        db.add(models.DocumentSection(
+            document_version_id=current_version.id,
+            section_id=section.anchor_slug,
+            heading=section.heading[:255],
+            word_count=words + block_count,
+            min_reading_time=max(1, (words + block_count) // 180),
+        ))
+
+    _audit(db, tenant.id, get_current_actor_id(), "revision.pdf_uploaded", "manual_revision", rev.id, request, {
+        "filename": file.filename,
+        "page_count": page_count,
+        "sections": len(created_sections),
+        "blocks": all_blocks,
+        "metadata": metadata,
+        "storage_path": storage_path,
+        "source_sha256": source_sha,
+    })
+    db.commit()
+    return {
+        "manual_id": manual.id,
+        "revision_id": rev.id,
+        "status": rev.status_enum.value,
+        "page_count": page_count,
+        "source_type": "PDF",
+        "source_storage_path": storage_path,
+        "source_sha256": source_sha,
+    }
 
 
 @router.get("/t/{tenant_slug}/{manual_id}/revisions", response_model=list[RevisionOut])
 def list_revisions(tenant_slug: str, manual_id: str, db: Session = Depends(get_db)):
+
     tenant = _tenant_by_slug(db, tenant_slug)
     revisions = (
         db.query(models.ManualRevision)
@@ -824,24 +1440,221 @@ def transition_revision_lifecycle(
 
 
 @router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/read")
-def read_revision(tenant_slug: str, manual_id: str, rev_id: str, request: Request, db: Session = Depends(get_db)):
+def read_revision(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     tenant = _tenant_by_slug(db, tenant_slug)
     manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
-    rev = db.query(models.ManualRevision).join(models.Manual, models.Manual.id == models.ManualRevision.manual_id).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id).first()
+    rev = (
+        db.query(models.ManualRevision)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id)
+        .first()
+    )
     if not rev or not manual:
         raise HTTPException(status_code=404, detail="Revision not found")
-    sections = db.query(models.ManualSection).filter(models.ManualSection.revision_id == rev_id).order_by(models.ManualSection.order_index.asc()).all()
-    blocks = db.query(models.ManualBlock).join(models.ManualSection, models.ManualSection.id == models.ManualBlock.section_id).filter(models.ManualSection.revision_id == rev_id).order_by(models.ManualBlock.order_index.asc()).all()
-    _audit(db, tenant.id, get_current_actor_id(), "revision.read", "manual_revision", rev.id, request, {"manual_id": manual.id, "section_count": len(sections)})
+
+    sections = (
+        db.query(models.ManualSection)
+        .filter(models.ManualSection.revision_id == rev_id)
+        .order_by(models.ManualSection.order_index.asc())
+        .all()
+    )
+    blocks = (
+        db.query(models.ManualBlock)
+        .join(models.ManualSection, models.ManualSection.id == models.ManualBlock.section_id)
+        .filter(models.ManualSection.revision_id == rev_id)
+        .order_by(models.ManualSection.order_index.asc(), models.ManualBlock.order_index.asc())
+        .all()
+    )
+
+    progress = _upsert_reader_progress(
+        tenant=tenant,
+        manual=manual,
+        revision=rev,
+        user_id=getattr(current_user, "id", None),
+        db=db,
+    )
+    source_type = rev.source_type_enum.value if getattr(rev, "source_type_enum", None) else None
+    source_path = (rev.source_storage_path or "").strip() or None
+    source_exists = bool(source_path and Path(source_path).exists())
+
+    _audit(
+        db,
+        tenant.id,
+        get_current_actor_id(),
+        "revision.read",
+        "manual_revision",
+        rev.id,
+        request,
+        {"manual_id": manual.id, "section_count": len(sections), "source_type": source_type},
+    )
     db.commit()
     return {
         "revision_id": rev.id,
         "status": rev.status_enum.value,
         "not_published": rev.status_enum != models.ManualRevisionStatus.PUBLISHED,
-        "manual": {"id": manual.id, "code": manual.code, "title": manual.title, "manual_type": manual.manual_type},
-        "sections": [{"id": s.id, "heading": s.heading, "anchor_slug": s.anchor_slug, "level": s.level} for s in sections],
-        "blocks": [{"section_id": b.section_id, "html": b.html_sanitized, "text": b.text_plain, "change_hash": b.change_hash} for b in blocks],
+        "manual": {
+            "id": manual.id,
+            "code": manual.code,
+            "title": manual.title,
+            "manual_type": manual.manual_type,
+            "owner_role": manual.owner_role,
+        },
+        "revision": {
+            "id": rev.id,
+            "rev_number": rev.rev_number,
+            "issue_number": rev.issue_number,
+            "effective_date": rev.effective_date.isoformat() if rev.effective_date else None,
+            "published_at": rev.published_at.isoformat() if rev.published_at else None,
+            "source_filename": rev.source_filename,
+            "source_type": source_type,
+            "source_mime_type": rev.source_mime_type,
+            "source_page_count": rev.source_page_count,
+            "source_available": source_exists,
+            "source_url": f"/manuals/t/{tenant_slug}/{manual_id}/rev/{rev_id}/source" if source_exists else None,
+        },
+        "sections": [
+            {
+                "id": s.id,
+                "heading": s.heading,
+                "anchor_slug": s.anchor_slug,
+                "level": s.level,
+                "page_start": int((s.metadata_json or {}).get("page_start") or 0) or None,
+                "page_end": int((s.metadata_json or {}).get("page_end") or 0) or None,
+            }
+            for s in sections
+        ],
+        "blocks": [
+            {
+                "section_id": b.section_id,
+                "html": b.html_sanitized,
+                "text": b.text_plain,
+                "change_hash": b.change_hash,
+            }
+            for b in blocks
+        ],
+        "progress": _reader_progress_payload(progress, rev.id, getattr(current_user, "id", None)),
     }
+
+
+@router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/progress", response_model=ManualReaderProgressOut)
+def get_reader_progress(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
+    rev = (
+        db.query(models.ManualRevision)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id)
+        .first()
+    )
+    if not manual or not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    progress = None
+    if _table_exists(db, "manual_reader_progress"):
+        progress = (
+            db.query(models.ManualReaderProgress)
+            .filter(
+                models.ManualReaderProgress.revision_id == rev.id,
+                models.ManualReaderProgress.user_id == getattr(current_user, "id", None),
+            )
+            .first()
+        )
+    return ManualReaderProgressOut(**_reader_progress_payload(progress, rev.id, getattr(current_user, "id", None)))
+
+
+@router.post("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/progress", response_model=ManualReaderProgressOut)
+def update_reader_progress(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    payload: ManualReaderProgressRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    manual = db.query(models.Manual).filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id).first()
+    rev = (
+        db.query(models.ManualRevision)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id)
+        .first()
+    )
+    if not manual or not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    progress = _upsert_reader_progress(
+        tenant=tenant,
+        manual=manual,
+        revision=rev,
+        user_id=getattr(current_user, "id", None),
+        db=db,
+        last_section_id=payload.last_section_id,
+        last_anchor_slug=payload.last_anchor_slug,
+        last_page_number=payload.last_page_number,
+        scroll_percent=payload.scroll_percent,
+        zoom_percent=payload.zoom_percent,
+        bookmark_label=payload.bookmark_label,
+        bookmarks=payload.bookmarks,
+    )
+    _audit(
+        db,
+        tenant.id,
+        get_current_actor_id(),
+        "revision.reader_progress_updated",
+        "manual_revision",
+        rev.id,
+        request,
+        {
+            "manual_id": manual.id,
+            "anchor": payload.last_anchor_slug,
+            "page": payload.last_page_number,
+            "zoom": payload.zoom_percent,
+        },
+    )
+    db.commit()
+    return ManualReaderProgressOut(**_reader_progress_payload(progress, rev.id, getattr(current_user, "id", None)))
+
+
+@router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/source")
+def get_revision_source(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    db: Session = Depends(get_db),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    rev = (
+        db.query(models.ManualRevision)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.id == manual_id, models.Manual.tenant_id == tenant.id, models.ManualRevision.id == rev_id)
+        .first()
+    )
+    if not rev:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    if not rev.source_storage_path:
+        raise HTTPException(status_code=404, detail="Revision source file not available")
+    source_path = Path(rev.source_storage_path)
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Revision source file missing from storage")
+    download_name = rev.source_filename or source_path.name
+    return FileResponse(
+        path=str(source_path),
+        media_type=rev.source_mime_type or "application/octet-stream",
+        filename=download_name,
+        headers={"Content-Disposition": f'inline; filename="{download_name}"'},
+    )
 
 
 @router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/diff", response_model=DiffSummaryOut)
@@ -936,17 +1749,94 @@ def recall_print(export_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/t/{tenant_slug}/master-list", response_model=list[MasterListEntry])
-def master_list(tenant_slug: str, db: Session = Depends(get_db)):
+def master_list(
+    tenant_slug: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     tenant = _tenant_by_slug(db, tenant_slug)
-    manuals = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id).all()
-    result = []
+    manuals = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id).order_by(models.Manual.code.asc()).all()
+    revisions = (
+        db.query(models.ManualRevision)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.tenant_id == tenant.id)
+        .all()
+    )
+    revisions_by_id = {rev.id: rev for rev in revisions}
+    revisions_by_manual: dict[str, list[models.ManualRevision]] = {}
+    for rev in revisions:
+        revisions_by_manual.setdefault(rev.manual_id, []).append(rev)
+
+    section_counts: dict[str, int] = {}
+    block_counts: dict[str, int] = {}
+    open_counts: dict[str, int] = {manual.id: 0 for manual in manuals}
+    progress_by_revision: dict[str, models.ManualReaderProgress] = {}
+
+    if _table_exists(db, "manual_sections"):
+        for row in db.query(models.ManualSection.revision_id).all():
+            section_counts[row[0]] = section_counts.get(row[0], 0) + 1
+    if _table_exists(db, "manual_blocks"):
+        for row in db.query(models.ManualSection.revision_id).join(models.ManualBlock, models.ManualBlock.section_id == models.ManualSection.id).all():
+            block_counts[row[0]] = block_counts.get(row[0], 0) + 1
+    if _table_exists(db, "manual_audit_log"):
+        revision_to_manual = {rev.id: rev.manual_id for rev in revisions}
+        for row in db.query(models.ManualAuditLog).filter(models.ManualAuditLog.tenant_id == tenant.id, models.ManualAuditLog.action == "revision.read").all():
+            manual_id = None
+            if isinstance(row.diff_json, dict):
+                manual_id = row.diff_json.get("manual_id")
+            manual_id = manual_id or revision_to_manual.get(row.entity_id)
+            if manual_id:
+                open_counts[manual_id] = open_counts.get(manual_id, 0) + 1
+    if _table_exists(db, "manual_reader_progress") and getattr(current_user, "id", None):
+        for row in (
+            db.query(models.ManualReaderProgress)
+            .filter(
+                models.ManualReaderProgress.tenant_id == tenant.id,
+                models.ManualReaderProgress.user_id == getattr(current_user, "id", None),
+            )
+            .all()
+        ):
+            progress_by_revision[row.revision_id] = row
+
+    result: list[MasterListEntry] = []
     for manual in manuals:
-        current_rev = None
+        current_rev = revisions_by_id.get(manual.current_published_rev_id) if manual.current_published_rev_id else None
+        if not current_rev and revisions_by_manual.get(manual.id):
+            current_rev = sorted(revisions_by_manual.get(manual.id, []), key=lambda item: item.created_at or datetime.min, reverse=True)[0]
         pending = 0
-        if manual.current_published_rev_id:
-            current_rev = db.query(models.ManualRevision).filter(models.ManualRevision.id == manual.current_published_rev_id).first()
-            pending = db.query(models.Acknowledgement).filter(models.Acknowledgement.revision_id == manual.current_published_rev_id, models.Acknowledgement.status_enum != "ACKNOWLEDGED").count()
-        result.append(MasterListEntry(manual_id=manual.id, code=manual.code, title=manual.title, current_revision=current_rev.rev_number if current_rev else None, current_status=current_rev.status_enum.value if current_rev else "NO_PUBLISHED_REV", pending_ack_count=pending))
+        if current_rev:
+            pending = (
+                db.query(models.Acknowledgement)
+                .filter(models.Acknowledgement.revision_id == current_rev.id, models.Acknowledgement.status_enum != "ACKNOWLEDGED")
+                .count()
+            )
+        progress = progress_by_revision.get(current_rev.id) if current_rev else None
+        source_type = current_rev.source_type_enum.value if current_rev and getattr(current_rev, "source_type_enum", None) else None
+        result.append(
+            MasterListEntry(
+                manual_id=manual.id,
+                code=manual.code,
+                title=manual.title,
+                current_revision=current_rev.rev_number if current_rev else None,
+                current_status=current_rev.status_enum.value if current_rev else "NO_PUBLISHED_REV",
+                pending_ack_count=pending,
+                manual_type=manual.manual_type,
+                owner_role=manual.owner_role,
+                current_issue_number=current_rev.issue_number if current_rev else None,
+                current_effective_date=current_rev.effective_date if current_rev else None,
+                source_type=source_type,
+                source_filename=current_rev.source_filename if current_rev else None,
+                source_mime_type=current_rev.source_mime_type if current_rev else None,
+                page_count=current_rev.source_page_count if current_rev else None,
+                section_count=section_counts.get(current_rev.id, 0) if current_rev else 0,
+                block_count=block_counts.get(current_rev.id, 0) if current_rev else 0,
+                last_published_at=current_rev.published_at if current_rev else None,
+                last_opened_at=progress.last_opened_at if progress else None,
+                resume_anchor_slug=progress.last_anchor_slug if progress else None,
+                resume_page_number=progress.last_page_number if progress else None,
+                open_count=open_counts.get(manual.id, 0),
+            )
+        )
     return result
 
 @router.get("/t/{tenant_slug}/featured", response_model=list[ManualFeaturedEntry])
@@ -982,6 +1872,159 @@ def featured_manuals(tenant_slug: str, db: Session = Depends(get_db)):
             open_count=usage.get(manual.id, 0),
         ))
     return out
+
+
+@router.get("/t/{tenant_slug}/search", response_model=list[ManualSearchHitOut])
+def search_manuals(
+    tenant_slug: str,
+    q: str,
+    limit: int = 25,
+    db: Session = Depends(get_db),
+):
+    tenant = _tenant_by_slug(db, tenant_slug)
+    query_text = (q or "").strip()
+    if not query_text:
+        return []
+    query_lc = query_text.lower()
+    limit = max(1, min(100, int(limit or 25)))
+
+    manuals = db.query(models.Manual).filter(models.Manual.tenant_id == tenant.id).all()
+    revisions = (
+        db.query(models.ManualRevision)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.tenant_id == tenant.id)
+        .all()
+    )
+    revisions_by_manual: dict[str, list[models.ManualRevision]] = {}
+    revisions_by_id: dict[str, models.ManualRevision] = {}
+    for rev in revisions:
+        revisions_by_manual.setdefault(rev.manual_id, []).append(rev)
+        revisions_by_id[rev.id] = rev
+
+    sections = (
+        db.query(models.ManualSection)
+        .join(models.ManualRevision, models.ManualRevision.id == models.ManualSection.revision_id)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.tenant_id == tenant.id)
+        .order_by(models.ManualSection.order_index.asc())
+        .all()
+    )
+    sections_by_id = {section.id: section for section in sections}
+    sections_by_revision: dict[str, list[models.ManualSection]] = {}
+    for section in sections:
+        sections_by_revision.setdefault(section.revision_id, []).append(section)
+
+    blocks = (
+        db.query(models.ManualBlock)
+        .join(models.ManualSection, models.ManualSection.id == models.ManualBlock.section_id)
+        .join(models.ManualRevision, models.ManualRevision.id == models.ManualSection.revision_id)
+        .join(models.Manual, models.Manual.id == models.ManualRevision.manual_id)
+        .filter(models.Manual.tenant_id == tenant.id)
+        .order_by(models.ManualSection.order_index.asc(), models.ManualBlock.order_index.asc())
+        .all()
+    )
+
+    manual_by_id = {manual.id: manual for manual in manuals}
+    hits: list[ManualSearchHitOut] = []
+    seen: set[tuple[str, str | None, str | None, str | None]] = set()
+
+    def _excerpt(text: str) -> str:
+        value = re.sub(r"\s+", " ", text or "").strip()
+        if not value:
+            return ""
+        pos = value.lower().find(query_lc)
+        if pos < 0:
+            return value[:220]
+        start = max(0, pos - 90)
+        end = min(len(value), pos + len(query_text) + 130)
+        excerpt = value[start:end]
+        if start > 0:
+            excerpt = "…" + excerpt
+        if end < len(value):
+            excerpt = excerpt + "…"
+        return excerpt
+
+    for manual in manuals:
+        haystack = " ".join(filter(None, [manual.code, manual.title, manual.manual_type, manual.owner_role])).lower()
+        if query_lc in haystack:
+            revision = None
+            if manual.current_published_rev_id:
+                revision = revisions_by_id.get(manual.current_published_rev_id)
+            elif revisions_by_manual.get(manual.id):
+                revision = sorted(revisions_by_manual.get(manual.id, []), key=lambda item: item.created_at or datetime.min, reverse=True)[0]
+            key = (manual.id, revision.id if revision else None, None, None)
+            if key not in seen:
+                seen.add(key)
+                hits.append(ManualSearchHitOut(
+                    manual_id=manual.id,
+                    revision_id=revision.id if revision else None,
+                    manual_code=manual.code,
+                    manual_title=manual.title,
+                    manual_type=manual.manual_type,
+                    excerpt=_excerpt(f"{manual.code} {manual.title} {manual.manual_type}"),
+                    source_type=revision.source_type_enum.value if revision and getattr(revision, "source_type_enum", None) else None,
+                    score=300 if query_lc in (manual.code or "").lower() else 220,
+                ))
+
+    for section in sections:
+        heading_text = (section.heading or "").strip()
+        if query_lc not in heading_text.lower():
+            continue
+        revision = revisions_by_id.get(section.revision_id)
+        manual = manual_by_id.get(revision.manual_id) if revision else None
+        if not manual:
+            continue
+        key = (manual.id, revision.id if revision else None, section.id, None)
+        if key in seen:
+            continue
+        seen.add(key)
+        hits.append(ManualSearchHitOut(
+            manual_id=manual.id,
+            revision_id=revision.id if revision else None,
+            manual_code=manual.code,
+            manual_title=manual.title,
+            manual_type=manual.manual_type,
+            section_id=section.id,
+            section_heading=section.heading,
+            anchor_slug=section.anchor_slug,
+            page_number=int((section.metadata_json or {}).get("page_start") or 0) or None,
+            excerpt=_excerpt(heading_text),
+            source_type=revision.source_type_enum.value if revision and getattr(revision, "source_type_enum", None) else None,
+            score=180,
+        ))
+
+    for block in blocks:
+        text_plain = (block.text_plain or "").strip()
+        if query_lc not in text_plain.lower():
+            continue
+        section = sections_by_id.get(block.section_id)
+        if not section:
+            continue
+        revision = revisions_by_id.get(section.revision_id)
+        manual = manual_by_id.get(revision.manual_id) if revision else None
+        if not manual:
+            continue
+        key = (manual.id, revision.id if revision else None, section.id, block.change_hash)
+        if key in seen:
+            continue
+        seen.add(key)
+        hits.append(ManualSearchHitOut(
+            manual_id=manual.id,
+            revision_id=revision.id if revision else None,
+            manual_code=manual.code,
+            manual_title=manual.title,
+            manual_type=manual.manual_type,
+            section_id=section.id,
+            section_heading=section.heading,
+            anchor_slug=section.anchor_slug,
+            page_number=int((section.metadata_json or {}).get("page_start") or 0) or None,
+            excerpt=_excerpt(text_plain),
+            source_type=revision.source_type_enum.value if revision and getattr(revision, "source_type_enum", None) else None,
+            score=120,
+        ))
+
+    hits.sort(key=lambda item: (-item.score, item.manual_code, item.section_heading or "", item.excerpt))
+    return hits[:limit]
 
 
 @router.get("/t/{tenant_slug}/{manual_id}", response_model=ManualOut)

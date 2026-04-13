@@ -43,7 +43,13 @@ export type AccountRole =
   | "CERTIFYING_TECHNICIAN"
   | "TECHNICIAN"
   | "STORES"
-  | "VIEW_ONLY";
+  | "VIEW_ONLY"
+  | "FINANCE_MANAGER"
+  | "ACCOUNTS_OFFICER"
+  | "STORES_MANAGER"
+  | "STOREKEEPER"
+  | "PROCUREMENT_OFFICER"
+  | "QUALITY_INSPECTOR";
 
 export type RegulatoryAuthority = "FAA" | "EASA" | "KCAA" | "CAA_UK" | "OTHER";
 

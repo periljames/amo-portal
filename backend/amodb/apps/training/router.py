@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
+import re
+import threading
+import time
+import tempfile
 import urllib.request
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -23,11 +27,21 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
+from reportlab.graphics import renderPDF
+from reportlab.graphics.barcode import qr
+from reportlab.graphics.shapes import Drawing
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from sqlalchemy import inspect, select, text
+from sqlalchemy.orm import Session, load_only, noload
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
-from ...database import get_db
+from ...database import SessionLocal, get_db
 from ...entitlements import require_module
 from ...security import get_current_active_user
 from ..accounts import models as accounts_models
@@ -37,16 +51,10 @@ from ..tasks import services as task_services
 from ..exports import build_evidence_pack
 from . import models as training_models
 from . import schemas as training_schemas
+from . import compliance as training_compliance
 from ..workflow import apply_transition, TransitionError
 from .courses_import import import_courses_rows, parse_courses_sheet
 from .records_import import import_training_records_rows, parse_training_records_sheet
-from . import compliance as training_compliance
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 router = APIRouter(
     prefix="/training",
@@ -57,6 +65,27 @@ router = APIRouter(
 public_router = APIRouter(prefix="/public", tags=["training-public"])
 
 _MAX_PAGE_SIZE = 1000  # hard ceiling for list endpoints to protect DB
+
+_TRAINING_RECORD_PDF_CACHE_DIR = Path(tempfile.gettempdir()) / "amodb-training-record-pdf-cache"
+_TRAINING_RECORD_PDF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_TRAINING_RECORD_PDF_CACHE_LOCK = threading.Lock()
+_TRAINING_RECORD_PDF_WARMING: set[str] = set()
+
+_TRAINING_RECORD_FORM_NO = os.getenv("TRAINING_RECORD_FORM_NO", "QAM/49A")
+_TRAINING_RECORD_ISSUE_DATE = os.getenv("TRAINING_RECORD_ISSUE_DATE", "1 Sept 25")
+_TRAINING_RECORD_REVISION = os.getenv("TRAINING_RECORD_REVISION", "00")
+_TRAINING_RECORD_PUBLIC_BASE_URL = os.getenv("APP_PUBLIC_BASE_URL", "").rstrip("/")
+_TRAINING_RECORD_BRAND_PRIMARY = colors.HexColor("#b28f2c")
+_TRAINING_RECORD_BRAND_PRIMARY_DARK = colors.HexColor("#8a6f20")
+_TRAINING_RECORD_BRAND_PRIMARY_SOFT = colors.HexColor("#f6f0dc")
+_TRAINING_RECORD_BRAND_ROW_ALT = colors.HexColor("#fbf7ea")
+_TRAINING_RECORD_OK = colors.HexColor("#15803d")
+_TRAINING_RECORD_DUE_SOON = colors.HexColor("#b45309")
+_TRAINING_RECORD_OVERDUE = colors.HexColor("#b42318")
+
+
+_TRAINING_SCHEMA_COMPAT_CHECKED = False
+_TRAINING_SCHEMA_COMPAT_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -101,18 +130,562 @@ def _next_certificate_number(db: Session, amo_id: str) -> str:
 
 def _ensure_training_catalog_schema_compat(db: Session) -> None:
     """
-    Best-effort runtime safety for environments where the training catalog
-    migration has not yet been applied. Uses a SQLAlchemy 2.x connection
-    instead of the removed Engine.execute API.
+    One-time, best-effort schema compatibility guard.
+
+    Important: avoid issuing ALTER TABLE statements on every request because
+    the training page fires many concurrent reads in development, which can
+    deadlock against runtime DDL. We inspect first and only mutate once when
+    genuinely required.
     """
-    bind = db.get_bind()
-    if bind is None:
+    global _TRAINING_SCHEMA_COMPAT_CHECKED
+
+    if _TRAINING_SCHEMA_COMPAT_CHECKED:
         return
 
-    with bind.begin() as conn:
-        conn.execute(text("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS category_raw VARCHAR(255)"))
-        conn.execute(text("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS status VARCHAR(64) DEFAULT 'One_Off'"))
-        conn.execute(text("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS scope VARCHAR(255)"))
+    with _TRAINING_SCHEMA_COMPAT_LOCK:
+        if _TRAINING_SCHEMA_COMPAT_CHECKED:
+            return
+
+        bind = db.get_bind()
+        if bind is None:
+            return
+
+        try:
+            existing = {col["name"] for col in inspect(bind).get_columns("training_courses")}
+        except Exception:
+            return
+
+        statements: list[str] = []
+        if "category_raw" not in existing:
+            statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS category_raw VARCHAR(255)")
+        if "status" not in existing:
+            statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS status VARCHAR(64) DEFAULT 'One_Off'")
+        if "scope" not in existing:
+            statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS scope VARCHAR(255)")
+
+        if statements:
+            with bind.begin() as conn:
+                for statement in statements:
+                    conn.execute(text(statement))
+
+        _TRAINING_SCHEMA_COMPAT_CHECKED = True
+
+
+def _run_deadlock_retry(db: Session, fn, *, attempts: int = 2):
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except OperationalError as exc:
+            db.rollback()
+            last_exc = exc
+            if "deadlock detected" not in str(exc).lower() or attempt >= attempts - 1:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+    if last_exc is not None:
+        raise last_exc
+
+
+
+def _fmt_date(value: Optional[date | datetime | str]) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, datetime):
+        return value.strftime("%d %b %Y %H:%M")
+    if isinstance(value, date):
+        return value.strftime("%d %b %Y")
+    raw = str(value).strip()
+    return raw or "-"
+
+
+def _status_counter(items: List[training_schemas.TrainingStatusItem]) -> Dict[str, int]:
+    counts = {"OVERDUE": 0, "DUE_SOON": 0, "DEFERRED": 0, "SCHEDULED_ONLY": 0, "NOT_DONE": 0, "OK": 0}
+    for item in items:
+        key = item.status.value if hasattr(item.status, "value") else str(item.status)
+        key = (key or "").upper()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _extract_record_remark_token(remarks: Optional[str], key: str) -> Optional[str]:
+    if not remarks:
+        return None
+    match = re.search(rf"(?:^|\|)\s*{re.escape(key)}\s*=\s*([^|]+?)\s*(?:\||$)", remarks, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1).strip() or None
+
+
+def _normalize_record_state(value: Optional[str]) -> Optional[str]:
+    raw = (value or "").strip().upper().replace(" ", "_")
+    if not raw:
+        return None
+    aliases = {
+        "DUE_SOON": "DUE_SOON",
+        "DUE": "DUE_SOON",
+        "OK": "OK",
+        "CURRENT": "OK",
+        "COMPLIANT": "OK",
+        "RENEWED": "RENEWED",
+        "SUPERSEDED": "RENEWED",
+        "INACTIVE": "RENEWED",
+    }
+    return aliases.get(raw, raw)
+
+
+def _record_source_status(record: training_models.TrainingRecord) -> Optional[str]:
+    return _normalize_record_state(_extract_record_remark_token(getattr(record, "remarks", None), "Status"))
+
+
+def _record_lifecycle_status(record: training_models.TrainingRecord) -> Optional[str]:
+    lifecycle = _normalize_record_state(_extract_record_remark_token(getattr(record, "remarks", None), "LifecycleStatus"))
+    return lifecycle or _record_source_status(record)
+
+
+def _is_record_active_for_display(record: training_models.TrainingRecord) -> bool:
+    state = _record_lifecycle_status(record)
+    return state not in {"RENEWED"}
+
+
+def _status_label_for_pdf(status: Optional[str]) -> str:
+    key = (status or "").upper()
+    if key == "OVERDUE":
+        return "Overdue"
+    if key == "DUE_SOON":
+        return "Due soon"
+    if key == "DEFERRED":
+        return "Deferred"
+    if key == "SCHEDULED_ONLY":
+        return "Scheduled"
+    if key == "NOT_DONE":
+        return "Not done"
+    return "Current"
+
+
+def _status_color_for_pdf(status: Optional[str]):
+    key = (status or "").upper()
+    if key == "OVERDUE":
+        return _TRAINING_RECORD_OVERDUE
+    if key == "DUE_SOON":
+        return _TRAINING_RECORD_DUE_SOON
+    if key == "DEFERRED":
+        return colors.HexColor("#175cd3")
+    if key == "NOT_DONE":
+        return _TRAINING_RECORD_OVERDUE
+    return _TRAINING_RECORD_OK
+
+
+class _TrainingRecordNumberedCanvas(canvas.Canvas):
+    def __init__(self, *args, training_pdf_meta: Optional[dict] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._saved_page_states: list[dict] = []
+        self._training_pdf_meta = training_pdf_meta or {}
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        total_pages = len(self._saved_page_states)
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self._draw_header_footer(total_pages)
+            super().showPage()
+        super().save()
+
+    def _draw_header_footer(self, total_pages: int) -> None:
+        meta = self._training_pdf_meta or {}
+        page_width, page_height = self._pagesize
+        left = 14 * mm
+        right = page_width - 14 * mm
+        top = page_height - 10 * mm
+
+        logo_path = meta.get("logo_path")
+        amo_name = meta.get("amo_name") or "AMO"
+        self.saveState()
+        if logo_path and Path(str(logo_path)).exists():
+            try:
+                self.drawImage(ImageReader(str(logo_path)), left, page_height - 24 * mm, width=24 * mm, height=12 * mm, preserveAspectRatio=True, mask='auto')
+                title_x = left + 28 * mm
+            except Exception:
+                title_x = left
+        else:
+            title_x = left
+
+        self.setFillColor(_TRAINING_RECORD_BRAND_PRIMARY_DARK)
+        self.setFont("Helvetica-Bold", 12)
+        self.drawString(title_x, top, str(amo_name).upper())
+        self.setFont("Helvetica", 8)
+        self.setFillColor(colors.HexColor("#475467"))
+        self.drawString(title_x, top - 4.8 * mm, "Individual Training Record")
+
+        meta_x = right - 64 * mm
+        self.setFont("Helvetica-Bold", 8)
+        self.setFillColor(colors.HexColor("#111827"))
+        self.drawRightString(right, top, f"Form No: {_TRAINING_RECORD_FORM_NO}")
+        self.drawRightString(right, top - 4.2 * mm, f"Issue date: {_TRAINING_RECORD_ISSUE_DATE}")
+        self.drawRightString(right, top - 8.4 * mm, f"Revision: {_TRAINING_RECORD_REVISION}")
+        self.drawRightString(right, top - 12.6 * mm, f"Page {self._pageNumber} of {total_pages}")
+
+        self.setStrokeColor(_TRAINING_RECORD_BRAND_PRIMARY)
+        self.setLineWidth(1)
+        self.line(left, page_height - 26 * mm, right, page_height - 26 * mm)
+
+        self.setFont("Helvetica", 7.5)
+        self.setFillColor(colors.HexColor("#667085"))
+        printed_at = meta.get("printed_at") or datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
+        self.drawString(left, 8 * mm, f"Printed on {printed_at}")
+        self.drawRightString(right, 8 * mm, f"Training_Tracker_DB_v1.2    {self._pageNumber} of {total_pages}")
+        self.restoreState()
+
+
+def _training_canvas_maker(meta: dict):
+    def _maker(*args, **kwargs):
+        return _TrainingRecordNumberedCanvas(*args, training_pdf_meta=meta, **kwargs)
+    return _maker
+
+
+def _build_training_profile_qr_drawing(value: str, size_mm: float = 28) -> Drawing:
+    qr_widget = qr.QrCodeWidget(value)
+    bounds = qr_widget.getBounds()
+    qr_width = max(bounds[2] - bounds[0], 1)
+    qr_height = max(bounds[3] - bounds[1], 1)
+    size = size_mm * mm
+    drawing = Drawing(size, size, transform=[size / qr_width, 0, 0, size / qr_height, 0, 0])
+    drawing.add(qr_widget)
+    return drawing
+
+
+def _build_training_user_record_pdf_bytes(
+    *,
+    user: accounts_models.User,
+    amo: Optional[accounts_models.AMO],
+    logo_path: Optional[str],
+    status_items: List[training_schemas.TrainingStatusItem],
+    records: List[training_models.TrainingRecord],
+    course_by_id: Dict[str, training_models.TrainingCourse],
+    upcoming_events: List[training_models.TrainingEvent],
+    deferrals: List[training_models.TrainingDeferralRequest],
+) -> bytes:
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=30 * mm,
+        bottomMargin=18 * mm,
+        title="Personnel Training Record",
+        author="AMO Portal",
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "TrainingTitle",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        leading=19,
+        textColor=colors.HexColor("#17212b"),
+        spaceAfter=3,
+    )
+    subtitle_style = ParagraphStyle(
+        "TrainingSubtitle",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=11,
+        textColor=colors.HexColor("#667085"),
+        spaceAfter=8,
+    )
+    section_style = ParagraphStyle(
+        "TrainingSection",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=10.5,
+        leading=13,
+        textColor=colors.HexColor("#17212b"),
+        spaceBefore=6,
+        spaceAfter=5,
+    )
+    body_style = ParagraphStyle(
+        "TrainingBody",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10.2,
+        textColor=colors.HexColor("#111827"),
+    )
+    compact_style = ParagraphStyle(
+        "TrainingCompact",
+        parent=body_style,
+        fontSize=7.5,
+        leading=9.4,
+    )
+    label_style = ParagraphStyle(
+        "TrainingLabel",
+        parent=body_style,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#475467"),
+    )
+
+    counts = _status_counter(status_items)
+    generated_at = datetime.now(timezone.utc)
+    printed_at = generated_at.strftime("%d %b %Y %H:%M UTC")
+    next_due = next(
+        iter(
+            sorted(
+                [item for item in status_items if item.extended_due_date or item.valid_until],
+                key=lambda item: str(item.extended_due_date or item.valid_until or ""),
+            )
+        ),
+        None,
+    )
+
+    public_identifier = getattr(amo, "login_slug", None) or getattr(amo, "amo_code", None) or getattr(amo, "id", None) or getattr(user, "amo_id", None) or "amo"
+    profile_path = f"/maintenance/{public_identifier}/quality/qms/training/{user.id}"
+    qr_value = f"{_TRAINING_RECORD_PUBLIC_BASE_URL}{profile_path}" if _TRAINING_RECORD_PUBLIC_BASE_URL else f"Training profile {user.id}"
+
+    story: list = [
+        Paragraph("Personnel Training Record", title_style),
+        Paragraph(
+            "Controlled training record generated from the QMS training profile. Only current and due items are shown in the main log; superseded renewed history is excluded from this export.",
+            subtitle_style,
+        ),
+    ]
+
+    details_table = Table(
+        [
+            [
+                Paragraph("<b>Name</b>", label_style),
+                Paragraph(user.full_name or "-", body_style),
+                Paragraph("<b>Staff code</b>", label_style),
+                Paragraph(user.staff_code or "-", body_style),
+            ],
+            [
+                Paragraph("<b>Position</b>", label_style),
+                Paragraph(getattr(user, "position_title", None) or "-", body_style),
+                Paragraph("<b>Licence No</b>", label_style),
+                Paragraph(getattr(user, "licence_number", None) or "NIL", body_style),
+            ],
+            [
+                Paragraph("<b>Profile status</b>", label_style),
+                Paragraph("Active" if getattr(user, "is_active", False) else "Inactive", body_style),
+                Paragraph("<b>Generated at</b>", label_style),
+                Paragraph(printed_at, body_style),
+            ],
+        ],
+        colWidths=[22 * mm, 56 * mm, 22 * mm, 40 * mm],
+    )
+    details_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("BOX", (0, 0), (-1, -1), 0.45, colors.HexColor("#d0d5dd")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#e4e7ec")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+
+    qr_caption = Paragraph(
+        "<b>Record QR</b><br/>Scan to open the live training profile used to generate this record.",
+        compact_style,
+    )
+    front_table = Table(
+        [[details_table, _build_training_profile_qr_drawing(qr_value, size_mm=28)], ["", qr_caption]],
+        colWidths=[140 * mm, 30 * mm],
+    )
+    front_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    story.extend([front_table, Spacer(1, 6)])
+
+    summary_table = Table(
+        [
+            [
+                Paragraph("<b>Current</b>", label_style), Paragraph(str(counts.get("OK", 0)), body_style),
+                Paragraph("<b>Due soon</b>", label_style), Paragraph(str(counts.get("DUE_SOON", 0)), body_style),
+                Paragraph("<b>Overdue</b>", label_style), Paragraph(str(counts.get("OVERDUE", 0)), body_style),
+            ],
+            [
+                Paragraph("<b>Deferred</b>", label_style), Paragraph(str(counts.get("DEFERRED", 0)), body_style),
+                Paragraph("<b>Scheduled</b>", label_style), Paragraph(str(counts.get("SCHEDULED_ONLY", 0)), body_style),
+                Paragraph("<b>Records shown</b>", label_style), Paragraph(str(len(records)), body_style),
+            ],
+            [
+                Paragraph("<b>Next due</b>", label_style),
+                Paragraph(next_due.course_name if next_due else "No due dates available", body_style),
+                Paragraph("<b>Due date</b>", label_style),
+                Paragraph(_fmt_date(next_due.extended_due_date or next_due.valid_until) if next_due else "-", body_style),
+                Paragraph("<b>Status</b>", label_style),
+                Paragraph(
+                    f'<font color="{_status_color_for_pdf(next_due.status).hexval()[2:]}">{_status_label_for_pdf(next_due.status)}</font>' if next_due else "-",
+                    body_style,
+                ),
+            ],
+        ],
+        colWidths=[22 * mm, 38 * mm, 22 * mm, 28 * mm, 20 * mm, 24 * mm],
+    )
+    summary_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), _TRAINING_RECORD_BRAND_PRIMARY_SOFT),
+                ("BOX", (0, 0), (-1, -1), 0.45, _TRAINING_RECORD_BRAND_PRIMARY),
+                ("INNERGRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#e4e7ec")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.extend([Paragraph("Compliance summary", section_style), summary_table, Spacer(1, 6)])
+
+    history_header = [
+        Paragraph("<b>Course code</b>", compact_style),
+        Paragraph("<b>Course title</b>", compact_style),
+        Paragraph("<b>Completed</b>", compact_style),
+        Paragraph("<b>Next due</b>", compact_style),
+        Paragraph("<b>Status</b>", compact_style),
+        Paragraph("<b>Hours</b>", compact_style),
+        Paragraph("<b>Score</b>", compact_style),
+        Paragraph("<b>Certificate</b>", compact_style),
+    ]
+    history_rows = [history_header]
+    active_records = sorted(records, key=lambda r: (r.completion_date or date.min, getattr(r, "created_at", None) or datetime.min), reverse=True)
+    for record in active_records:
+        course = course_by_id.get(record.course_id)
+        source_status = _record_source_status(record)
+        item = None
+        if course is not None:
+            item = next((entry for entry in status_items if entry.course_id == course.course_id and entry.course_name == course.course_name), None)
+        display_status = (item.status if item else None) or source_status or "OK"
+        history_rows.append(
+            [
+                Paragraph(getattr(course, "course_id", None) or str(record.course_id), compact_style),
+                Paragraph(getattr(course, "course_name", None) or str(record.course_id), compact_style),
+                Paragraph(_fmt_date(record.completion_date), compact_style),
+                Paragraph(_fmt_date((item.extended_due_date if item else None) or (item.valid_until if item else None) or record.valid_until), compact_style),
+                Paragraph(f'<font color="{_status_color_for_pdf(display_status).hexval()[2:]}"><b>{_status_label_for_pdf(display_status)}</b></font>', compact_style),
+                Paragraph('-' if record.hours_completed is None else str(record.hours_completed), compact_style),
+                Paragraph('-' if record.exam_score is None else str(record.exam_score), compact_style),
+                Paragraph(record.certificate_reference or '-', compact_style),
+            ]
+        )
+    if len(history_rows) == 1:
+        history_rows.append([
+            Paragraph('-', compact_style),
+            Paragraph('No active training records were found for this profile.', compact_style),
+            Paragraph('-', compact_style),
+            Paragraph('-', compact_style),
+            Paragraph('-', compact_style),
+            Paragraph('-', compact_style),
+            Paragraph('-', compact_style),
+            Paragraph('-', compact_style),
+        ])
+    history_table = Table(history_rows, repeatRows=1, colWidths=[20 * mm, 66 * mm, 18 * mm, 18 * mm, 18 * mm, 12 * mm, 12 * mm, 18 * mm])
+    history_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), _TRAINING_RECORD_BRAND_PRIMARY_DARK),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _TRAINING_RECORD_BRAND_ROW_ALT]),
+                ("BOX", (0, 0), (-1, -1), 0.45, colors.HexColor('#d0d5dd')),
+                ("INNERGRID", (0, 0), (-1, -1), 0.35, colors.HexColor('#e4e7ec')),
+                ("VALIGN", (0, 0), (-1, -1), 'MIDDLE'),
+                ("ALIGN", (2, 1), (7, -1), 'CENTER'),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.extend([Paragraph("Training record log", section_style), history_table, Spacer(1, 6)])
+
+    schedule_header = [Paragraph("<b>Course</b>", compact_style), Paragraph("<b>Event</b>", compact_style), Paragraph("<b>Starts</b>", compact_style), Paragraph("<b>Ends</b>", compact_style), Paragraph("<b>Status</b>", compact_style), Paragraph("<b>Location</b>", compact_style)]
+    schedule_rows = [schedule_header]
+    for event in sorted(upcoming_events, key=lambda e: (e.starts_on or date.max, e.title or '')):
+        course = course_by_id.get(event.course_id)
+        schedule_rows.append([
+            Paragraph(getattr(course, 'course_name', None) or str(event.course_id), compact_style),
+            Paragraph(event.title or '-', compact_style),
+            Paragraph(_fmt_date(event.starts_on), compact_style),
+            Paragraph(_fmt_date(event.ends_on), compact_style),
+            Paragraph(str(event.status).replace('_', ' '), compact_style),
+            Paragraph(event.location or '-', compact_style),
+        ])
+    if len(schedule_rows) == 1:
+        schedule_rows.append([Paragraph('-', compact_style), Paragraph('No upcoming scheduled training events linked to this profile.', compact_style), Paragraph('-', compact_style), Paragraph('-', compact_style), Paragraph('-', compact_style), Paragraph('-', compact_style)])
+    schedule_table = Table(schedule_rows, repeatRows=1, colWidths=[46 * mm, 50 * mm, 18 * mm, 18 * mm, 18 * mm, 30 * mm])
+    schedule_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#344054')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+        ('BOX', (0, 0), (-1, -1), 0.45, colors.HexColor('#d0d5dd')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#e4e7ec')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.extend([Paragraph("Scheduled training and events", section_style), schedule_table, Spacer(1, 6)])
+
+    deferral_header = [Paragraph("<b>Course</b>", compact_style), Paragraph("<b>Original due</b>", compact_style), Paragraph("<b>Requested due</b>", compact_style), Paragraph("<b>Status</b>", compact_style), Paragraph("<b>Requested at</b>", compact_style), Paragraph("<b>Decision</b>", compact_style)]
+    deferral_rows = [deferral_header]
+    for item in deferrals:
+        course = course_by_id.get(item.course_id)
+        deferral_rows.append([
+            Paragraph(getattr(course, 'course_name', None) or str(item.course_id), compact_style),
+            Paragraph(_fmt_date(item.original_due_date), compact_style),
+            Paragraph(_fmt_date(item.requested_new_due_date), compact_style),
+            Paragraph(str(item.status), compact_style),
+            Paragraph(_fmt_date(item.requested_at), compact_style),
+            Paragraph(item.decision_comment or '-', compact_style),
+        ])
+    if len(deferral_rows) == 1:
+        deferral_rows.append([Paragraph('-', compact_style), Paragraph('-', compact_style), Paragraph('-', compact_style), Paragraph('No deferral requests on record.', compact_style), Paragraph('-', compact_style), Paragraph('-', compact_style)])
+    deferral_table = Table(deferral_rows, repeatRows=1, colWidths=[46 * mm, 22 * mm, 22 * mm, 22 * mm, 22 * mm, 42 * mm])
+    deferral_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#175cd3')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#eff8ff')]),
+        ('BOX', (0, 0), (-1, -1), 0.45, colors.HexColor('#d0d5dd')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#e4e7ec')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.extend([Paragraph("Deferral and extension history", section_style), deferral_table])
+
+    canvas_meta = {
+        'logo_path': logo_path,
+        'amo_name': getattr(amo, 'name', None) or getattr(amo, 'amo_code', None) or getattr(user, 'amo_id', None),
+        'printed_at': printed_at,
+    }
+    doc.build(story, canvasmaker=_training_canvas_maker(canvas_meta))
+    buffer.seek(0)
+    return buffer.read()
+
 
 def _normalize_pagination(limit: int, offset: int) -> Tuple[int, int]:
     if limit <= 0:
@@ -194,27 +767,7 @@ def _get_user_job_role(user: accounts_models.User) -> Optional[str]:
 
 
 def _add_months(base: date, months: int) -> date:
-    if months <= 0:
-        return base
-
-    year = base.year + (base.month - 1 + months) // 12
-    month = (base.month - 1 + months) % 12 + 1
-    days_in_month = [
-        31,
-        29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ][month - 1]
-    day = min(base.day, days_in_month)
-    return date(year, month, day)
+    return training_compliance.add_months(base, months)
 
 
 def _audit(
@@ -342,6 +895,12 @@ def _maybe_send_email(background_tasks: BackgroundTasks, to_email: Optional[str]
     background_tasks.add_task(_send)
 
 
+def _preferred_phone(user: object) -> Optional[str]:
+    primary = _preferred_phone(user)
+    secondary = getattr(user, "secondary_phone", None)
+    return primary or secondary
+
+
 def _maybe_send_whatsapp(background_tasks: BackgroundTasks, to_phone: Optional[str], message: str) -> None:
     """
     Optional WhatsApp hook (safe-by-default).
@@ -385,44 +944,14 @@ def _build_status_item_from_dates(
     upcoming_event_date: Optional[date],
     today: date,
 ) -> training_schemas.TrainingStatusItem:
-    extended_due_date: Optional[date] = None
-
-    if due_date:
-        extended_due_date = due_date
-
-    if deferral_due:
-        if extended_due_date is None or deferral_due > extended_due_date:
-            extended_due_date = deferral_due
-
-    status_label = "NOT_DONE"
-    days_until_due: Optional[int] = None
-
-    if extended_due_date:
-        days_until_due = (extended_due_date - today).days
-        if days_until_due < 0:
-            status_label = "OVERDUE"
-        elif days_until_due <= 60:
-            status_label = "DUE_SOON"
-        else:
-            status_label = "OK"
-
-    if deferral_due and extended_due_date and days_until_due is not None and days_until_due >= 0:
-        status_label = "DEFERRED"
-
-    if last_completion_date is None and upcoming_event_date and status_label == "NOT_DONE":
-        status_label = "SCHEDULED_ONLY"
-
-    return training_schemas.TrainingStatusItem(
-        course_id=course.course_id,
-        course_name=course.course_name,
-        frequency_months=course.frequency_months,
+    return training_compliance.build_status_item_from_dates(
+        course=course,
         last_completion_date=last_completion_date,
-        valid_until=due_date,
-        extended_due_date=extended_due_date,
-        days_until_due=days_until_due,
-        status=status_label,
+        due_date=due_date,
+        deferral_due=deferral_due,
         upcoming_event_id=upcoming_event_id,
         upcoming_event_date=upcoming_event_date,
+        today=today,
     )
 
 
@@ -462,9 +991,9 @@ def _participant_to_read(p: training_models.TrainingEventParticipant) -> trainin
     )
 
 
+
+
 def _record_to_read(r: training_models.TrainingRecord) -> training_schemas.TrainingRecordRead:
-    course = getattr(r, "course", None)
-    user_obj = getattr(r, "user", None)
     return training_schemas.TrainingRecordRead(
         id=r.id,
         amo_id=r.amo_id,
@@ -480,11 +1009,14 @@ def _record_to_read(r: training_models.TrainingRecord) -> training_schemas.Train
         is_manual_entry=r.is_manual_entry,
         created_by_user_id=r.created_by_user_id,
         created_at=r.created_at,
+        updated_at=getattr(r, "updated_at", None),
         course_id=r.course_id,
-        course_code=getattr(course, "course_id", None),
-        course_name=getattr(course, "course_name", None),
-        user_staff_code=getattr(user_obj, "staff_code", None),
-        user_full_name=getattr(user_obj, "full_name", None),
+        legacy_record_id=_extract_record_remark_token(getattr(r, "remarks", None), "RecordID"),
+        source_status=_record_source_status(r),
+        record_status=_record_lifecycle_status(r),
+        superseded_by_record_id=getattr(r, "superseded_by_record_id", None),
+        superseded_at=getattr(r, "superseded_at", None),
+        purge_after=getattr(r, "purge_after", None),
         verification_status=r.verification_status,
         verified_at=r.verified_at,
         verified_by_user_id=r.verified_by_user_id,
@@ -712,10 +1244,12 @@ async def import_courses(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Courses import database error: {exc}")
 
 
+
+
 @router.post(
     "/records/import",
     response_model=training_schemas.TrainingRecordImportSummary,
-    summary="Import individual training history from Training worksheet (dry-run by default)",
+    summary="Import training history from Training worksheet (dry-run by default)",
 )
 async def import_training_records(
     file: UploadFile = File(...),
@@ -1193,7 +1727,7 @@ def update_event(
             trainee = db.query(accounts_models.User).filter(accounts_models.User.id == p.user_id).first()
             if trainee:
                 _maybe_send_email(background_tasks, getattr(trainee, "email", None), title, body)
-                _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), body)
+                _maybe_send_whatsapp(background_tasks, _preferred_phone(trainee), body)
 
     db.commit()
     db.refresh(event)
@@ -1273,7 +1807,7 @@ def add_event_participant(
 
     # Optional email hook
     _maybe_send_email(background_tasks, getattr(trainee, "email", None), notif_title, notif_body)
-    _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), notif_body)
+    _maybe_send_whatsapp(background_tasks, _preferred_phone(trainee), notif_body)
 
     _audit(
         db,
@@ -1427,21 +1961,49 @@ def list_training_records(
     if not is_editor:
         user_id = current_user.id
 
-    q = db.query(training_models.TrainingRecord).filter(training_models.TrainingRecord.amo_id == current_user.amo_id)
-    if user_id:
-        q = q.filter(training_models.TrainingRecord.user_id == user_id)
-    if course_pk:
-        q = q.filter(training_models.TrainingRecord.course_id == course_pk)
-
-    records = (
-        q.order_by(
-            training_models.TrainingRecord.user_id.asc(),
-            training_models.TrainingRecord.completion_date.desc(),
+    def _fetch_records():
+        q = (
+            db.query(training_models.TrainingRecord)
+            .options(
+                noload("*"),
+                load_only(
+                    training_models.TrainingRecord.id,
+                    training_models.TrainingRecord.amo_id,
+                    training_models.TrainingRecord.user_id,
+                    training_models.TrainingRecord.course_id,
+                    training_models.TrainingRecord.event_id,
+                    training_models.TrainingRecord.completion_date,
+                    training_models.TrainingRecord.valid_until,
+                    training_models.TrainingRecord.hours_completed,
+                    training_models.TrainingRecord.exam_score,
+                    training_models.TrainingRecord.certificate_reference,
+                    training_models.TrainingRecord.remarks,
+                    training_models.TrainingRecord.is_manual_entry,
+                    training_models.TrainingRecord.created_by_user_id,
+                    training_models.TrainingRecord.created_at,
+                    training_models.TrainingRecord.verification_status,
+                    training_models.TrainingRecord.verified_at,
+                    training_models.TrainingRecord.verified_by_user_id,
+                    training_models.TrainingRecord.verification_comment,
+                ),
+            )
+            .filter(training_models.TrainingRecord.amo_id == current_user.amo_id)
         )
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+        if user_id:
+            q = q.filter(training_models.TrainingRecord.user_id == user_id)
+        if course_pk:
+            q = q.filter(training_models.TrainingRecord.course_id == course_pk)
+        return (
+            q.order_by(
+                training_models.TrainingRecord.user_id.asc(),
+                training_models.TrainingRecord.completion_date.desc(),
+            )
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+    records = _run_deadlock_retry(db, _fetch_records)
     return [_record_to_read(r) for r in records]
 
 
@@ -1457,14 +2019,40 @@ def list_my_training_records(
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
     limit, offset = _normalize_pagination(limit, offset)
-    records = (
-        db.query(training_models.TrainingRecord)
-        .filter(training_models.TrainingRecord.amo_id == current_user.amo_id, training_models.TrainingRecord.user_id == current_user.id)
-        .order_by(training_models.TrainingRecord.completion_date.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    def _fetch_records():
+        return (
+            db.query(training_models.TrainingRecord)
+            .options(
+                noload("*"),
+                load_only(
+                    training_models.TrainingRecord.id,
+                    training_models.TrainingRecord.amo_id,
+                    training_models.TrainingRecord.user_id,
+                    training_models.TrainingRecord.course_id,
+                    training_models.TrainingRecord.event_id,
+                    training_models.TrainingRecord.completion_date,
+                    training_models.TrainingRecord.valid_until,
+                    training_models.TrainingRecord.hours_completed,
+                    training_models.TrainingRecord.exam_score,
+                    training_models.TrainingRecord.certificate_reference,
+                    training_models.TrainingRecord.remarks,
+                    training_models.TrainingRecord.is_manual_entry,
+                    training_models.TrainingRecord.created_by_user_id,
+                    training_models.TrainingRecord.created_at,
+                    training_models.TrainingRecord.verification_status,
+                    training_models.TrainingRecord.verified_at,
+                    training_models.TrainingRecord.verified_by_user_id,
+                    training_models.TrainingRecord.verification_comment,
+                ),
+            )
+            .filter(training_models.TrainingRecord.amo_id == current_user.amo_id, training_models.TrainingRecord.user_id == current_user.id)
+            .order_by(training_models.TrainingRecord.completion_date.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+    records = _run_deadlock_retry(db, _fetch_records)
     return [_record_to_read(r) for r in records]
 
 
@@ -1500,9 +2088,30 @@ def create_training_record(
     if not trainee:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target user not found in your AMO.")
 
-    valid_until = payload.valid_until
-    if valid_until is None and course.frequency_months:
-        valid_until = _add_months(payload.completion_date, course.frequency_months)
+    valid_until = _add_months(payload.completion_date, course.frequency_months) if course.frequency_months else None
+    hours_completed = course.nominal_hours if course.nominal_hours is not None else None
+
+    linked_file = None
+    if payload.attachment_file_id:
+        linked_file = (
+            db.query(training_models.TrainingFile)
+            .filter(
+                training_models.TrainingFile.id == payload.attachment_file_id,
+                training_models.TrainingFile.amo_id == current_user.amo_id,
+            )
+            .first()
+        )
+        if not linked_file:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected attachment could not be found for this AMO.")
+        if linked_file.owner_user_id != trainee.id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected attachment belongs to a different person.")
+        if linked_file.course_id and linked_file.course_id != course.id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected attachment is linked to a different course.")
+
+    if payload.certificate_reference and not linked_file:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A certificate attachment is required when a certificate reference is provided.")
+    if payload.certificate_reference and linked_file and linked_file.kind != training_models.TrainingFileKind.CERTIFICATE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The linked attachment must be uploaded as a certificate file.")
 
     record = training_models.TrainingRecord(
         amo_id=current_user.amo_id,
@@ -1511,7 +2120,7 @@ def create_training_record(
         event_id=payload.event_id,
         completion_date=payload.completion_date,
         valid_until=valid_until,
-        hours_completed=payload.hours_completed,
+        hours_completed=hours_completed,
         exam_score=payload.exam_score,
         certificate_reference=payload.certificate_reference,
         remarks=payload.remarks,
@@ -1521,6 +2130,12 @@ def create_training_record(
     )
 
     db.add(record)
+    db.flush()
+
+    if linked_file is not None:
+        linked_file.record_id = record.id
+        linked_file.course_id = course.id
+        db.add(linked_file)
 
     # Notify user (in-app + optional email)
     notif_title = "Training record updated"
@@ -1537,7 +2152,7 @@ def create_training_record(
         created_by_user_id=current_user.id,
     )
     _maybe_send_email(background_tasks, getattr(trainee, "email", None), notif_title, notif_body)
-    _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), notif_body)
+    _maybe_send_whatsapp(background_tasks, _preferred_phone(trainee), notif_body)
 
     _audit(
         db,
@@ -1601,7 +2216,7 @@ def verify_training_record(
             created_by_user_id=current_user.id,
         )
         _maybe_send_email(background_tasks, getattr(trainee, "email", None), title, body)
-        _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), body)
+        _maybe_send_whatsapp(background_tasks, _preferred_phone(trainee), body)
 
     _audit(
         db,
@@ -1779,7 +2394,7 @@ def update_deferral_request(
             created_by_user_id=current_user.id,
         )
         _maybe_send_email(background_tasks, getattr(trainee, "email", None), title, body)
-        _maybe_send_whatsapp(background_tasks, getattr(trainee, "phone", None), body)
+        _maybe_send_whatsapp(background_tasks, _preferred_phone(trainee), body)
 
     _audit(
         db,
@@ -2276,213 +2891,7 @@ def get_my_training_status(
     db: Session = Depends(get_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
-    today = date.today()
-
-    courses: List[training_models.TrainingCourse] = (
-        db.query(training_models.TrainingCourse)
-        .filter(
-            training_models.TrainingCourse.amo_id == current_user.amo_id,
-            training_models.TrainingCourse.is_active.is_(True),
-        )
-        .order_by(training_models.TrainingCourse.course_id.asc())
-        .all()
-    )
-    if not courses:
-        return []
-
-    course_ids = [c.id for c in courses]
-
-    records = (
-        db.query(training_models.TrainingRecord)
-        .filter(
-            training_models.TrainingRecord.amo_id == current_user.amo_id,
-            training_models.TrainingRecord.user_id == current_user.id,
-            training_models.TrainingRecord.course_id.in_(course_ids),
-        )
-        .order_by(
-            training_models.TrainingRecord.course_id.asc(),
-            training_models.TrainingRecord.completion_date.desc(),
-        )
-        .all()
-    )
-    latest_record: Dict[str, training_models.TrainingRecord] = {}
-    for r in records:
-        if r.course_id not in latest_record:
-            latest_record[r.course_id] = r
-
-    deferrals = (
-        db.query(training_models.TrainingDeferralRequest)
-        .filter(
-            training_models.TrainingDeferralRequest.amo_id == current_user.amo_id,
-            training_models.TrainingDeferralRequest.user_id == current_user.id,
-            training_models.TrainingDeferralRequest.course_id.in_(course_ids),
-            training_models.TrainingDeferralRequest.status == training_models.DeferralStatus.APPROVED,
-        )
-        .order_by(
-            training_models.TrainingDeferralRequest.course_id.asc(),
-            training_models.TrainingDeferralRequest.requested_new_due_date.desc(),
-        )
-        .all()
-    )
-    latest_deferral: Dict[str, training_models.TrainingDeferralRequest] = {}
-    for d in deferrals:
-        if d.course_id not in latest_deferral:
-            latest_deferral[d.course_id] = d
-
-    upcoming_events = (
-        db.query(training_models.TrainingEvent, training_models.TrainingEventParticipant)
-        .join(
-            training_models.TrainingEventParticipant,
-            training_models.TrainingEvent.id == training_models.TrainingEventParticipant.event_id,
-        )
-        .filter(
-            training_models.TrainingEvent.amo_id == current_user.amo_id,
-            training_models.TrainingEvent.course_id.in_(course_ids),
-            training_models.TrainingEvent.starts_on >= today,
-            training_models.TrainingEvent.status == training_models.TrainingEventStatus.PLANNED,
-            training_models.TrainingEventParticipant.user_id == current_user.id,
-            training_models.TrainingEventParticipant.status.in_(
-                [
-                    training_models.TrainingParticipantStatus.SCHEDULED,
-                    training_models.TrainingParticipantStatus.INVITED,
-                    training_models.TrainingParticipantStatus.CONFIRMED,
-                ]
-            ),
-        )
-        .order_by(
-            training_models.TrainingEvent.course_id.asc(),
-            training_models.TrainingEvent.starts_on.asc(),
-        )
-        .all()
-    )
-    earliest_event: Dict[str, Tuple[str, date]] = {}
-    for event, _participant in upcoming_events:
-        if event.course_id not in earliest_event:
-            earliest_event[event.course_id] = (event.id, event.starts_on)
-
-    items: List[training_schemas.TrainingStatusItem] = []
-    for course in courses:
-        record = latest_record.get(course.id)
-        deferral = latest_deferral.get(course.id)
-        event_info = earliest_event.get(course.id)
-
-        last_completion_date: Optional[date] = None
-        due_date: Optional[date] = None
-        deferral_due: Optional[date] = None
-        upcoming_event_id: Optional[str] = None
-        upcoming_event_date: Optional[date] = None
-
-        if record:
-            last_completion_date = record.completion_date
-            if record.valid_until:
-                due_date = record.valid_until
-            elif course.frequency_months:
-                due_date = _add_months(record.completion_date, course.frequency_months)
-
-        if deferral:
-            deferral_due = deferral.requested_new_due_date
-
-        if event_info:
-            upcoming_event_id, upcoming_event_date = event_info
-
-        items.append(
-            _build_status_item_from_dates(
-                course=course,
-                last_completion_date=last_completion_date,
-                due_date=due_date,
-                deferral_due=deferral_due,
-                upcoming_event_id=upcoming_event_id,
-                upcoming_event_date=upcoming_event_date,
-                today=today,
-            )
-        )
-
-    return items
-
-
-@router.get(
-    "/status/me/access-state",
-    response_model=training_schemas.TrainingAccessState,
-    summary="Portal/CRS access state for the current user based on mandatory training",
-)
-def get_my_training_access_state(
-    db: Session = Depends(get_db),
-    current_user: accounts_models.User = Depends(get_current_active_user),
-):
-    return training_compliance.build_user_access_state(db, current_user)
-
-
-@router.get(
-    "/status/users/{user_id}",
-    response_model=List[training_schemas.TrainingStatusItem],
-    summary="Training status for a specific user (Quality / AMO admin only)",
-)
-def get_user_training_status(
-    user_id: str,
-    required_only: bool = False,
-    db: Session = Depends(get_db),
-    current_user: accounts_models.User = Depends(get_current_active_user),
-):
-    if current_user.id != user_id and not _is_training_editor(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to view this user's training status.")
-    user = (
-        db.query(accounts_models.User)
-        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id == user_id)
-        .first()
-    )
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in your AMO.")
-    evaluation = training_compliance.evaluate_user_training_policy(db, user, required_only=required_only)
-    return evaluation.items
-
-
-@router.post(
-    "/status/users/bulk",
-    response_model=training_schemas.TrainingStatusBulkResponse,
-    summary="Bulk training status for multiple users (Quality / AMO admin only)",
-)
-def get_bulk_user_training_status(
-    payload: training_schemas.TrainingStatusBulkRequest,
-    db: Session = Depends(get_db),
-    current_user: accounts_models.User = Depends(_require_training_editor),
-):
-    user_ids = [str(uid) for uid in (payload.user_ids or []) if str(uid).strip()]
-    if not user_ids:
-        return training_schemas.TrainingStatusBulkResponse(users={})
-    users = (
-        db.query(accounts_models.User)
-        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id.in_(user_ids))
-        .all()
-    )
-    result: Dict[str, List[training_schemas.TrainingStatusItem]] = {}
-    for user in users:
-        if getattr(user, "is_system_account", False):
-            continue
-        evaluation = training_compliance.evaluate_user_training_policy(db, user, required_only=True)
-        result[str(user.id)] = evaluation.items
-    return training_schemas.TrainingStatusBulkResponse(users=result)
-
-
-@router.get(
-    "/status/users/{user_id}/access-state",
-    response_model=training_schemas.TrainingAccessState,
-    summary="Portal/CRS access state for a specific user (Quality / AMO admin only)",
-)
-def get_user_training_access_state(
-    user_id: str,
-    db: Session = Depends(get_db),
-    current_user: accounts_models.User = Depends(get_current_active_user),
-):
-    if current_user.id != user_id and not _is_training_editor(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to view this user's access state.")
-    user = (
-        db.query(accounts_models.User)
-        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id == user_id)
-        .first()
-    )
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in your AMO.")
-    return training_compliance.build_user_access_state(db, user)
+    return training_compliance.evaluate_user_training_policy(db, current_user, required_only=False).items
 
 
 @router.get(
@@ -2494,327 +2903,451 @@ def get_my_required_training_status(
     db: Session = Depends(get_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
-    """
-    Uses TrainingRequirement rules to compute which courses apply to this user.
-    If no requirements exist, falls back to mandatory_for_all + is_mandatory courses.
-    """
+    return training_compliance.evaluate_user_training_policy(db, current_user, required_only=True).items
+
+
+@router.get(
+    "/status/users/{user_id}",
+    response_model=List[training_schemas.TrainingStatusItem],
+    summary="Training status for a specific user (Quality / AMO admin only)",
+)
+def get_user_training_status(
+    user_id: str,
+    required_only: bool = True,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    user = (
+        db.query(accounts_models.User)
+        .filter(accounts_models.User.id == user_id, accounts_models.User.amo_id == current_user.amo_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training user not found for this AMO.")
+    return training_compliance.evaluate_user_training_policy(db, user, required_only=required_only).items
+
+
+@router.post(
+    "/status/users/bulk",
+    response_model=training_schemas.TrainingStatusBulkResponse,
+    summary="Training status for multiple users in one batch (Quality / AMO admin only)",
+)
+def get_bulk_training_status_for_users(
+    payload: training_schemas.TrainingStatusBulkRequest,
+    required_only: bool = True,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    user_ids = sorted({(user_id or "").strip() for user_id in payload.user_ids if (user_id or "").strip()})
+    if not user_ids:
+        return training_schemas.TrainingStatusBulkResponse(users={})
+    users = (
+        db.query(accounts_models.User)
+        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id.in_(user_ids))
+        .all()
+    )
+    result: Dict[str, List[training_schemas.TrainingStatusItem]] = {}
+    for user in users:
+        result[str(user.id)] = training_compliance.evaluate_user_training_policy(db, user, required_only=required_only).items
+    for missing_id in user_ids:
+        result.setdefault(missing_id, [])
+    return training_schemas.TrainingStatusBulkResponse(users=result)
+
+
+@router.get(
+    "/status/access/me",
+    response_model=training_schemas.TrainingAccessState,
+    summary="Training access state for the current user",
+)
+def get_my_training_access_state(
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    return training_compliance.build_user_access_state(db, current_user)
+
+
+@router.get(
+    "/status/access/users/{user_id}",
+    response_model=training_schemas.TrainingAccessState,
+    summary="Training access state for a specific user (Quality / AMO admin only)",
+)
+def get_user_training_access_state(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    user = (
+        db.query(accounts_models.User)
+        .filter(accounts_models.User.id == user_id, accounts_models.User.amo_id == current_user.amo_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training user not found for this AMO.")
+    return training_compliance.build_user_access_state(db, user)
+
+
+@router.post(
+    "/compliance/notifications/sweep",
+    summary="Dispatch 60/30/15-day and day-1-overdue training notifications (Quality / AMO admin only)",
+)
+def run_training_notification_sweep(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    users = (
+        db.query(accounts_models.User)
+        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.is_active.is_(True))
+        .all()
+    )
+    sent = 0
+    evaluated = 0
     today = date.today()
-
-    dept_code = _get_user_department_code(current_user)
-    job_role = _get_user_job_role(current_user)
-
-    reqs = (
-        db.query(training_models.TrainingRequirement)
-        .filter(
-            training_models.TrainingRequirement.amo_id == current_user.amo_id,
-            training_models.TrainingRequirement.is_active.is_(True),
-        )
-        .all()
-    )
-
-    required_course_ids: List[str] = []
-
-    if reqs:
-        for r in reqs:
-            if r.scope == training_models.TrainingRequirementScope.ALL:
-                required_course_ids.append(r.course_id)
-            elif r.scope == training_models.TrainingRequirementScope.USER and r.user_id == current_user.id:
-                required_course_ids.append(r.course_id)
-            elif r.scope == training_models.TrainingRequirementScope.DEPARTMENT and dept_code and r.department_code and r.department_code.upper() == dept_code:
-                required_course_ids.append(r.course_id)
-            elif r.scope == training_models.TrainingRequirementScope.JOB_ROLE and job_role and r.job_role and r.job_role.strip().lower() == job_role.lower():
-                required_course_ids.append(r.course_id)
-
-        required_course_ids = sorted(list(set(required_course_ids)))
-    else:
-        # fallback to course flags
-        required_course_ids = [
-            c.id
-            for c in db.query(training_models.TrainingCourse)
-            .filter(
-                training_models.TrainingCourse.amo_id == current_user.amo_id,
-                training_models.TrainingCourse.is_active.is_(True),
-                training_models.TrainingCourse.is_mandatory.is_(True),
+    for user in users:
+        if getattr(user, "is_system_account", False):
+            continue
+        evaluation = training_compliance.evaluate_user_training_policy(db, user, required_only=True, today=today)
+        evaluated += 1
+        for item in evaluation.mandatory_items:
+            if item.days_until_due is None:
+                continue
+            if item.days_until_due not in training_compliance.REMINDER_DAY_MARKS:
+                continue
+            if item.status in {"OK", "DEFERRED"}:
+                continue
+            if item.days_until_due >= 0:
+                title = f"Training due in {item.days_until_due} day(s)"
+                body = f"{item.course_name} is due on {item.extended_due_date or item.valid_until}. Please schedule or complete it before your authorization is affected."
+                severity = training_models.TrainingNotificationSeverity.ACTION_REQUIRED
+                dedupe_key = f"training-reminder:{user.id}:{item.course_id}:{item.days_until_due}"
+            else:
+                overdue_days = abs(item.days_until_due)
+                title = "Training overdue"
+                body = f"{item.course_name} became overdue {overdue_days} day(s) ago. Portal and authorization gates may apply unless an approved deferral exists."
+                severity = training_models.TrainingNotificationSeverity.WARNING
+                dedupe_key = f"training-overdue:{user.id}:{item.course_id}:{overdue_days}"
+            _create_notification(
+                db,
+                amo_id=current_user.amo_id,
+                user_id=user.id,
+                title=title,
+                body=body,
+                severity=severity,
+                link_path="/maintenance/{amo}/training" if False else "/training",
+                dedupe_key=dedupe_key,
+                created_by_user_id=current_user.id,
             )
-            .all()
-        ]
-
-    if not required_course_ids:
-        return []
-
-    courses = (
-        db.query(training_models.TrainingCourse)
-        .filter(
-            training_models.TrainingCourse.amo_id == current_user.amo_id,
-            training_models.TrainingCourse.id.in_(required_course_ids),
-            training_models.TrainingCourse.is_active.is_(True),
-        )
-        .order_by(training_models.TrainingCourse.course_id.asc())
-        .all()
-    )
-    if not courses:
-        return []
-
-    course_ids = [c.id for c in courses]
-
-    records = (
-        db.query(training_models.TrainingRecord)
-        .filter(
-            training_models.TrainingRecord.amo_id == current_user.amo_id,
-            training_models.TrainingRecord.user_id == current_user.id,
-            training_models.TrainingRecord.course_id.in_(course_ids),
-        )
-        .order_by(training_models.TrainingRecord.course_id.asc(), training_models.TrainingRecord.completion_date.desc())
-        .all()
-    )
-    latest_record: Dict[str, training_models.TrainingRecord] = {}
-    for r in records:
-        if r.course_id not in latest_record:
-            latest_record[r.course_id] = r
-
-    deferrals = (
-        db.query(training_models.TrainingDeferralRequest)
-        .filter(
-            training_models.TrainingDeferralRequest.amo_id == current_user.amo_id,
-            training_models.TrainingDeferralRequest.user_id == current_user.id,
-            training_models.TrainingDeferralRequest.course_id.in_(course_ids),
-            training_models.TrainingDeferralRequest.status == training_models.DeferralStatus.APPROVED,
-        )
-        .order_by(training_models.TrainingDeferralRequest.course_id.asc(), training_models.TrainingDeferralRequest.requested_new_due_date.desc())
-        .all()
-    )
-    latest_deferral: Dict[str, training_models.TrainingDeferralRequest] = {}
-    for d in deferrals:
-        if d.course_id not in latest_deferral:
-            latest_deferral[d.course_id] = d
-
-    upcoming_events = (
-        db.query(training_models.TrainingEvent, training_models.TrainingEventParticipant)
-        .join(training_models.TrainingEventParticipant, training_models.TrainingEvent.id == training_models.TrainingEventParticipant.event_id)
-        .filter(
-            training_models.TrainingEvent.amo_id == current_user.amo_id,
-            training_models.TrainingEvent.course_id.in_(course_ids),
-            training_models.TrainingEvent.starts_on >= today,
-            training_models.TrainingEvent.status == training_models.TrainingEventStatus.PLANNED,
-            training_models.TrainingEventParticipant.user_id == current_user.id,
-            training_models.TrainingEventParticipant.status.in_(
-                [
-                    training_models.TrainingParticipantStatus.SCHEDULED,
-                    training_models.TrainingParticipantStatus.INVITED,
-                    training_models.TrainingParticipantStatus.CONFIRMED,
-                ]
-            ),
-        )
-        .order_by(training_models.TrainingEvent.course_id.asc(), training_models.TrainingEvent.starts_on.asc())
-        .all()
-    )
-    earliest_event: Dict[str, Tuple[str, date]] = {}
-    for event, _participant in upcoming_events:
-        if event.course_id not in earliest_event:
-            earliest_event[event.course_id] = (event.id, event.starts_on)
-
-    items: List[training_schemas.TrainingStatusItem] = []
-    for course in courses:
-        record = latest_record.get(course.id)
-        deferral = latest_deferral.get(course.id)
-        event_info = earliest_event.get(course.id)
-
-        last_completion_date: Optional[date] = None
-        due_date: Optional[date] = None
-        deferral_due: Optional[date] = None
-        upcoming_event_id: Optional[str] = None
-        upcoming_event_date: Optional[date] = None
-
-        if record:
-            last_completion_date = record.completion_date
-            due_date = record.valid_until or (_add_months(record.completion_date, course.frequency_months) if course.frequency_months else None)
-
-        if deferral:
-            deferral_due = deferral.requested_new_due_date
-
-        if event_info:
-            upcoming_event_id, upcoming_event_date = event_info
-
-        items.append(
-            _build_status_item_from_dates(
-                course=course,
-                last_completion_date=last_completion_date,
-                due_date=due_date,
-                deferral_due=deferral_due,
-                upcoming_event_id=upcoming_event_id,
-                upcoming_event_date=upcoming_event_date,
-                today=today,
-            )
-        )
-
-    return items
-
-
-def _build_training_record_pdf_bytes(*, user: accounts_models.User, records: List[training_models.TrainingRecord]) -> bytes:
-    brand_gold = colors.HexColor("#b18f2c")
-    band_fill = colors.HexColor("#f8f5e9")
-    line_color = colors.HexColor("#d1d5db")
-    text_dark = colors.HexColor("#111827")
-    muted = colors.HexColor("#6b7280")
-
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        leftMargin=14 * mm,
-        rightMargin=14 * mm,
-        topMargin=16 * mm,
-        bottomMargin=14 * mm,
-        title="Individual Training Record",
-        author="AMO Portal",
-    )
-
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "training_title",
-        parent=styles["Heading1"],
-        fontName="Helvetica-Bold",
-        fontSize=16,
-        leading=20,
-        alignment=TA_CENTER,
-        textColor=text_dark,
-        spaceAfter=8,
-    )
-    brand_style = ParagraphStyle(
-        "training_brand",
-        parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
-        fontSize=22,
-        leading=24,
-        textColor=brand_gold,
-        spaceAfter=0,
-    )
-    meta_style = ParagraphStyle(
-        "training_meta",
-        parent=styles["BodyText"],
-        fontName="Helvetica",
-        fontSize=9,
-        leading=12,
-        textColor=text_dark,
-    )
-    small_right = ParagraphStyle(
-        "training_small_right",
-        parent=meta_style,
-        alignment=TA_RIGHT,
-        textColor=muted,
-    )
-    header_cell = ParagraphStyle(
-        "training_header_cell",
-        parent=styles["BodyText"],
-        fontName="Helvetica-Bold",
-        fontSize=8.2,
-        leading=10,
-        textColor=colors.white,
-        alignment=TA_LEFT,
-    )
-    body_cell = ParagraphStyle(
-        "training_body_cell",
-        parent=styles["BodyText"],
-        fontName="Helvetica",
-        fontSize=8.6,
-        leading=11,
-        textColor=text_dark,
-        alignment=TA_LEFT,
-    )
-
-    licence_no = getattr(user, "licence_number", None) or "-"
-    generated_on = datetime.now().strftime("%m/%d/%Y %I:%M %p")
-
-    def p(value: str, style: ParagraphStyle):
-        return Paragraph(value, style)
-
-    story = [
-        Table(
-            [
-                [
-                    p("Safarilink", brand_style),
-                    p(
-                        "Training Record Form No: QAM/49A<br/>Issue Date: 1 Sept 25<br/>Revision: 00",
-                        small_right,
-                    ),
-                ],
-                [
-                    p("INDIVIDUAL TRAINING RECORD", title_style),
-                    p(f"Printed on {generated_on}", small_right),
-                ],
-                [
-                    p(f"<b>Name:</b> {user.full_name or '-'}", meta_style),
-                    p(f"<b>Licence No:</b> {licence_no}", meta_style),
-                ],
-            ],
-            colWidths=[110 * mm, 70 * mm],
-            style=TableStyle([
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-                ("SPAN", (0, 1), (0, 1)),
-            ]),
-        ),
-        Spacer(1, 6),
-    ]
-
-    rows = [[
-        p("CourseID", header_cell),
-        p("CourseName", header_cell),
-        p("LastTrainingDate", header_cell),
-        p("NextDueDate", header_cell),
-        p("Status", header_cell),
-    ]]
-
-    def fmt_date(value):
-        if not value:
-            return "OK" if False else "-"
-        if isinstance(value, datetime):
-            return value.date().isoformat()
-        return value.isoformat() if hasattr(value, "isoformat") else str(value)
-
-    for rec in records:
-        rows.append([
-            p(str(getattr(getattr(rec, "course", None), "course_id", None) or rec.course_id or "-"), body_cell),
-            p(str(getattr(getattr(rec, "course", None), "course_name", None) or "-"), body_cell),
-            p(fmt_date(rec.completion_date), body_cell),
-            p(fmt_date(rec.valid_until), body_cell),
-            p(str(getattr(getattr(rec, "status_snapshot", None), "status", None) or ("OK" if rec.valid_until is None or rec.valid_until >= date.today() else "Overdue")), body_cell),
-        ])
-
-    if len(rows) == 1:
-        rows.append([p("-", body_cell), p("No training records available.", body_cell), p("-", body_cell), p("-", body_cell), p("-", body_cell)])
-
-    table = Table(rows, repeatRows=1, colWidths=[24 * mm, 86 * mm, 28 * mm, 28 * mm, 24 * mm])
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), brand_gold),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), 0.5, line_color),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, band_fill]),
-    ]))
-    story.append(table)
-
-    def _draw_footer(canvas, _doc):
-        canvas.saveState()
-        canvas.setFont("Helvetica", 8)
-        canvas.setFillColor(muted)
-        canvas.drawRightString(A4[0] - doc.rightMargin, 9 * mm, f"AMO Portal generated report · {generated_on}")
-        canvas.restoreState()
-
-    doc.build(story, onFirstPage=_draw_footer, onLaterPages=_draw_footer)
-    return buffer.getvalue()
+            _maybe_send_email(background_tasks, getattr(user, "email", None), title, body)
+            _maybe_send_whatsapp(background_tasks, _preferred_phone(user), body)
+            sent += 1
+    db.commit()
+    return {"ok": True, "evaluated_users": evaluated, "notifications_attempted": sent}
 
 
 # ---------------------------------------------------------------------------
 # EVIDENCE PACK EXPORTS
 # ---------------------------------------------------------------------------
+
+
+def _serialize_for_pdf_signature(value):
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if hasattr(value, "value"):
+        return getattr(value, "value")
+    return value
+
+
+def _build_training_user_pdf_cache_key(*, user, status_items, records, courses, upcoming_events, deferrals) -> str:
+    payload = {
+        "today": date.today().isoformat(),
+        "user": {
+            "id": user.id,
+            "updated_at": _serialize_for_pdf_signature(getattr(user, "updated_at", None)),
+            "full_name": getattr(user, "full_name", None),
+            "staff_code": getattr(user, "staff_code", None),
+            "role": getattr(user, "role", None),
+            "position_title": getattr(user, "position_title", None),
+            "is_active": getattr(user, "is_active", None),
+        },
+        "status_items": [
+            {
+                "course_id": item.course_id,
+                "status": item.status,
+                "last_completion_date": _serialize_for_pdf_signature(item.last_completion_date),
+                "valid_until": _serialize_for_pdf_signature(item.valid_until),
+                "extended_due_date": _serialize_for_pdf_signature(item.extended_due_date),
+                "days_until_due": item.days_until_due,
+                "upcoming_event_id": item.upcoming_event_id,
+                "upcoming_event_date": _serialize_for_pdf_signature(item.upcoming_event_date),
+            }
+            for item in status_items
+        ],
+        "records": [
+            {
+                "id": row.id,
+                "completion_date": _serialize_for_pdf_signature(row.completion_date),
+                "valid_until": _serialize_for_pdf_signature(row.valid_until),
+                "hours_completed": row.hours_completed,
+                "exam_score": row.exam_score,
+                "certificate_reference": row.certificate_reference,
+                "verification_status": _serialize_for_pdf_signature(getattr(row, "verification_status", None)),
+                "created_at": _serialize_for_pdf_signature(getattr(row, "created_at", None)),
+                "updated_at": _serialize_for_pdf_signature(getattr(row, "updated_at", None)),
+            }
+            for row in records
+        ],
+        "courses": [
+            {
+                "id": row.id,
+                "updated_at": _serialize_for_pdf_signature(getattr(row, "updated_at", None)),
+                "course_id": row.course_id,
+                "course_name": row.course_name,
+                "frequency_months": row.frequency_months,
+                "nominal_hours": getattr(row, "nominal_hours", None),
+            }
+            for row in courses
+        ],
+        "events": [
+            {
+                "id": row.id,
+                "updated_at": _serialize_for_pdf_signature(getattr(row, "updated_at", None)),
+                "starts_on": _serialize_for_pdf_signature(getattr(row, "starts_on", None)),
+                "title": getattr(row, "title", None),
+                "status": _serialize_for_pdf_signature(getattr(row, "status", None)),
+            }
+            for row in upcoming_events
+        ],
+        "deferrals": [
+            {
+                "id": row.id,
+                "updated_at": _serialize_for_pdf_signature(getattr(row, "updated_at", None)),
+                "requested_at": _serialize_for_pdf_signature(getattr(row, "requested_at", None)),
+                "requested_new_due_date": _serialize_for_pdf_signature(getattr(row, "requested_new_due_date", None)),
+                "status": _serialize_for_pdf_signature(getattr(row, "status", None)),
+            }
+            for row in deferrals
+        ],
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=_serialize_for_pdf_signature).encode("utf-8")).hexdigest()
+
+
+def _training_user_pdf_cache_path(user_id: str, cache_key: str) -> Path:
+    return _TRAINING_RECORD_PDF_CACHE_DIR / f"{user_id}-{cache_key}.pdf"
+
+
+def _clear_training_user_pdf_cache(user_id: str) -> None:
+    for path in _TRAINING_RECORD_PDF_CACHE_DIR.glob(f"{user_id}-*.pdf"):
+        try:
+            path.unlink()
+        except OSError:
+            continue
+
+
+def _get_training_user_record_export_context(db: Session, *, amo_id: str, user_id: str):
+    user = (
+        db.query(accounts_models.User)
+        .filter(accounts_models.User.id == user_id, accounts_models.User.amo_id == amo_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training user not found in your AMO.")
+
+    amo = db.query(accounts_models.AMO).filter(accounts_models.AMO.id == amo_id).first()
+    logo_asset = (
+        db.query(accounts_models.AMOAsset)
+        .filter(
+            accounts_models.AMOAsset.amo_id == amo_id,
+            accounts_models.AMOAsset.kind == accounts_models.AMOAssetKind.CRS_LOGO,
+            accounts_models.AMOAsset.is_active.is_(True),
+        )
+        .order_by(accounts_models.AMOAsset.created_at.desc())
+        .first()
+    )
+    logo_path = None
+    if logo_asset and getattr(logo_asset, "storage_path", None):
+        candidate = Path(str(logo_asset.storage_path))
+        if candidate.exists():
+            logo_path = str(candidate)
+
+    records = (
+        db.query(training_models.TrainingRecord)
+        .options(
+            noload("*"),
+            load_only(
+                training_models.TrainingRecord.id,
+                training_models.TrainingRecord.user_id,
+                training_models.TrainingRecord.course_id,
+                training_models.TrainingRecord.event_id,
+                training_models.TrainingRecord.completion_date,
+                training_models.TrainingRecord.valid_until,
+                training_models.TrainingRecord.hours_completed,
+                training_models.TrainingRecord.exam_score,
+                training_models.TrainingRecord.certificate_reference,
+                training_models.TrainingRecord.remarks,
+                training_models.TrainingRecord.verification_status,
+                training_models.TrainingRecord.created_at,
+            ),
+        )
+        .filter(training_models.TrainingRecord.amo_id == amo_id, training_models.TrainingRecord.user_id == user.id)
+        .order_by(training_models.TrainingRecord.completion_date.desc(), training_models.TrainingRecord.created_at.desc())
+        .all()
+    )
+    display_records = [record for record in records if _is_record_active_for_display(record)]
+
+    evaluation = training_compliance.evaluate_user_training_policy(db, user, required_only=False)
+    course_ids = {record.course_id for record in records}
+    course_ids.update({course.id for course in training_compliance.get_courses_for_user(db, user, required_only=False)})
+    courses = []
+    if course_ids:
+        courses = (
+            db.query(training_models.TrainingCourse)
+            .options(noload("*"))
+            .filter(training_models.TrainingCourse.amo_id == amo_id, training_models.TrainingCourse.id.in_(list(course_ids)))
+            .all()
+        )
+    course_by_id = {course.id: course for course in courses}
+
+    upcoming_event_ids = [item.upcoming_event_id for item in evaluation.items if item.upcoming_event_id]
+    upcoming_events = []
+    if upcoming_event_ids:
+        upcoming_events = (
+            db.query(training_models.TrainingEvent)
+            .options(noload("*"))
+            .filter(training_models.TrainingEvent.amo_id == amo_id, training_models.TrainingEvent.id.in_(upcoming_event_ids))
+            .all()
+        )
+
+    deferrals = (
+        db.query(training_models.TrainingDeferralRequest)
+        .options(noload("*"))
+        .filter(training_models.TrainingDeferralRequest.amo_id == amo_id, training_models.TrainingDeferralRequest.user_id == user.id)
+        .order_by(training_models.TrainingDeferralRequest.requested_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    cache_key = _build_training_user_pdf_cache_key(
+        user=user,
+        status_items=evaluation.items,
+        records=display_records,
+        courses=courses,
+        upcoming_events=upcoming_events,
+        deferrals=deferrals,
+    )
+
+    return {
+        "user": user,
+        "amo": amo,
+        "logo_path": logo_path,
+        "records": display_records,
+        "evaluation": evaluation,
+        "course_by_id": course_by_id,
+        "upcoming_events": upcoming_events,
+        "deferrals": deferrals,
+        "cache_key": cache_key,
+    }
+
+
+def _write_training_user_pdf_cache(*, user_id: str, cache_key: str, pdf_bytes: bytes) -> Path:
+    cache_path = _training_user_pdf_cache_path(user_id, cache_key)
+    with _TRAINING_RECORD_PDF_CACHE_LOCK:
+        _clear_training_user_pdf_cache(user_id)
+        cache_path.write_bytes(pdf_bytes)
+    return cache_path
+
+
+def _build_and_cache_training_user_record_pdf(*, amo_id: str, user_id: str) -> Optional[Path]:
+    db = SessionLocal()
+    try:
+        context = _get_training_user_record_export_context(db, amo_id=amo_id, user_id=user_id)
+        cache_path = _training_user_pdf_cache_path(user_id, context["cache_key"])
+        if cache_path.exists():
+            return cache_path
+        pdf_bytes = _build_training_user_record_pdf_bytes(
+            user=context["user"],
+            amo=context.get("amo"),
+            logo_path=context.get("logo_path"),
+            status_items=context["evaluation"].items,
+            records=context["records"],
+            course_by_id=context["course_by_id"],
+            upcoming_events=context["upcoming_events"],
+            deferrals=context["deferrals"],
+        )
+        return _write_training_user_pdf_cache(user_id=user_id, cache_key=context["cache_key"], pdf_bytes=pdf_bytes)
+    except Exception:
+        return None
+    finally:
+        db.close()
+        with _TRAINING_RECORD_PDF_CACHE_LOCK:
+            _TRAINING_RECORD_PDF_WARMING.discard(user_id)
+
+
+def _queue_training_user_pdf_warm(*, amo_id: str, user_id: str) -> bool:
+    with _TRAINING_RECORD_PDF_CACHE_LOCK:
+        if user_id in _TRAINING_RECORD_PDF_WARMING:
+            return False
+        _TRAINING_RECORD_PDF_WARMING.add(user_id)
+    thread = threading.Thread(target=_build_and_cache_training_user_record_pdf, kwargs={"amo_id": amo_id, "user_id": user_id}, daemon=True)
+    thread.start()
+    return True
+
+
+@router.post(
+    "/users/{user_id}/record-pdf/warm",
+    summary="Warm and cache a personnel training record PDF for a specific user",
+)
+def warm_training_user_record_pdf(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    if current_user.id != user_id and not _is_training_editor(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to prepare training records")
+
+    context = _get_training_user_record_export_context(db, amo_id=current_user.amo_id, user_id=user_id)
+    cache_path = _training_user_pdf_cache_path(user_id, context["cache_key"])
+    if cache_path.exists():
+        return {"queued": False, "ready": True}
+
+    queued = _queue_training_user_pdf_warm(amo_id=current_user.amo_id, user_id=user_id)
+    return {"queued": queued, "ready": False}
+
+
+@router.get(
+    "/users/{user_id}/record-pdf",
+    summary="Download personnel training record PDF for a specific user",
+)
+def export_training_user_record_pdf(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    if current_user.id != user_id and not _is_training_editor(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to export training records")
+
+    context = _get_training_user_record_export_context(db, amo_id=current_user.amo_id, user_id=user_id)
+    user = context["user"]
+    cache_path = _training_user_pdf_cache_path(user_id, context["cache_key"])
+    if cache_path.exists():
+        pdf_bytes = cache_path.read_bytes()
+    else:
+        pdf_bytes = _build_training_user_record_pdf_bytes(
+            user=user,
+            amo=context.get("amo"),
+            logo_path=context.get("logo_path"),
+            status_items=context["evaluation"].items,
+            records=context["records"],
+            course_by_id=context["course_by_id"],
+            upcoming_events=context["upcoming_events"],
+            deferrals=context["deferrals"],
+        )
+        _write_training_user_pdf_cache(user_id=user_id, cache_key=context["cache_key"], pdf_bytes=pdf_bytes)
+    filename = f"{(user.full_name or user.id).replace(' ', '_')}_training_record.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get(
@@ -2836,39 +3369,6 @@ def export_training_user_evidence_pack(
         correlation_id=str(uuid.uuid4()),
         amo_id=current_user.amo_id,
     )
-
-
-@router.get(
-    "/users/{user_id}/record-report.pdf",
-    summary="Export an individual training record PDF for a specific user",
-)
-def export_training_user_record_report(
-    user_id: str,
-    db: Session = Depends(get_db),
-    current_user: accounts_models.User = Depends(get_current_active_user),
-):
-    if current_user.id != user_id and not _is_training_editor(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to export training record report")
-
-    user = (
-        db.query(accounts_models.User)
-        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id == user_id)
-        .first()
-    )
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found in your AMO.")
-
-    records = (
-        db.query(training_models.TrainingRecord)
-        .filter(training_models.TrainingRecord.amo_id == current_user.amo_id, training_models.TrainingRecord.user_id == user_id)
-        .order_by(training_models.TrainingRecord.completion_date.desc(), training_models.TrainingRecord.created_at.desc())
-        .all()
-    )
-
-    pdf_bytes = _build_training_record_pdf_bytes(user=user, records=records)
-    filename_stub = (getattr(user, "full_name", None) or "training_record").strip().replace(" ", "_")
-    headers = {"Content-Disposition": f'attachment; filename="{filename_stub}_training_record.pdf"'}
-    return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
 
 
 # ---------------------------------------------------------------------------

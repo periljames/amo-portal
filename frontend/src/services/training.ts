@@ -33,6 +33,11 @@
 import { apiGet, apiPost } from "./crs";
 import { authHeaders, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 import type {
   TrainingCourseRead,
   TrainingCourseCreate,
@@ -52,11 +57,11 @@ import type {
   TrainingNotificationRead,
   TrainingNotificationMarkRead,
   CourseImportSummary,
-  TrainingRequirementCreate,
-  TrainingRequirementRead,
-  TrainingRecordImportSummary,
   TrainingAccessState,
-  TrainingDashboardSummary,
+  TrainingRequirementRead,
+  TrainingRequirementCreate,
+  TrainingRequirementUpdate,
+  TrainingRecordImportSummary,
 } from "../types/training";
 
 export type TrainingFileReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
@@ -90,6 +95,13 @@ export type TransferProgress = {
   megaBytesPerSecond: number;
   megaBitsPerSecond: number;
 };
+
+function applyXhrHeaders(xhr: XMLHttpRequest, headersInit?: HeadersInit): void {
+  const headers = new Headers(headersInit);
+  headers.forEach((value, key) => {
+    xhr.setRequestHeader(key, value);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // COURSES
@@ -176,7 +188,7 @@ export async function importTrainingCoursesWorkbook(
       sheet_name: sheetName,
     });
     xhr.open("POST", `${apiBaseUrl}/training/courses/import?${qs.toString()}`);
-    applyAuthHeaders(xhr, authHeaders());
+    applyXhrHeaders(xhr, authHeaders());
 
     xhr.upload.addEventListener("progress", (event) => {
       if (!onProgress) return;
@@ -209,9 +221,10 @@ export async function importTrainingCoursesWorkbook(
 }
 
 
+
 export async function importTrainingRecordsWorkbook(
   file: File,
-  opts?: { dryRun?: boolean; sheetName?: string; onProgress?: (progress: TransferProgress) => void },
+  opts?: { dryRun?: boolean; sheetName?: string; onProgress?: (progress: TransferProgress) => void }
 ): Promise<TrainingRecordImportSummary> {
   const dryRun = opts?.dryRun ?? true;
   const sheetName = opts?.sheetName ?? "Training";
@@ -225,7 +238,7 @@ export async function importTrainingRecordsWorkbook(
       sheet_name: sheetName,
     });
     xhr.open("POST", `${apiBaseUrl}/training/records/import?${qs.toString()}`);
-    applyAuthHeaders(xhr, authHeaders());
+    applyXhrHeaders(xhr, authHeaders());
 
     xhr.upload.addEventListener("progress", (event) => {
       if (!onProgress) return;
@@ -246,10 +259,10 @@ export async function importTrainingRecordsWorkbook(
       try {
         resolve(JSON.parse(xhr.responseText) as TrainingRecordImportSummary);
       } catch {
-        reject(new Error("Invalid training history import response."));
+        reject(new Error("Invalid training records import response."));
       }
     });
-    xhr.addEventListener("error", () => reject(new Error("Network error while importing training history workbook.")));
+    xhr.addEventListener("error", () => reject(new Error("Network error while importing training records workbook.")));
 
     const fd = new FormData();
     fd.append("file", file);
@@ -262,8 +275,18 @@ export async function importTrainingRecordsWorkbook(
 // ---------------------------------------------------------------------------
 
 
-export async function listTrainingRequirements(): Promise<TrainingRequirementRead[]> {
-  return apiGet<TrainingRequirementRead[]>("/training/requirements", { headers: authHeaders() });
+export interface ListTrainingRequirementsParams {
+  include_inactive?: boolean;
+}
+
+export async function listTrainingRequirements(
+  params: ListTrainingRequirementsParams = {},
+): Promise<TrainingRequirementRead[]> {
+  const sp = new URLSearchParams();
+  if (params.include_inactive) sp.set("include_inactive", "true");
+  const qs = sp.toString();
+  const path = qs ? `/training/requirements?${qs}` : "/training/requirements";
+  return apiGet<TrainingRequirementRead[]>(path, { headers: authHeaders() });
 }
 
 export async function createTrainingRequirement(
@@ -272,6 +295,20 @@ export async function createTrainingRequirement(
   return apiPost<TrainingRequirementRead>("/training/requirements", payload, {
     headers: authHeaders(),
   });
+}
+
+export async function updateTrainingRequirement(
+  requirementId: string,
+  payload: TrainingRequirementUpdate,
+): Promise<TrainingRequirementRead> {
+  return apiPost<TrainingRequirementRead>(
+    `/training/requirements/${encodeURIComponent(requirementId)}`,
+    payload,
+    {
+      method: "PUT",
+      headers: authHeaders(),
+    } as RequestInit,
+  );
 }
 
 export async function listTrainingEventParticipants(eventId: string): Promise<TrainingEventParticipantRead[]> {
@@ -396,15 +433,20 @@ function buildSpeed(
   };
 }
 
-function applyAuthHeaders(xhr: XMLHttpRequest, headers: HeadersInit): void {
-  const resolved = new Headers(headers);
-  resolved.forEach((value, key) => {
-    xhr.setRequestHeader(key, value);
-  });
+export interface ListTrainingFilesParams {
+  owner_user_id?: string;
+  kind?: string;
+  review_status?: TrainingFileReviewStatus;
 }
 
-export async function listTrainingFiles(): Promise<TrainingFileRead[]> {
-  return apiGet<TrainingFileRead[]>("/training/files", {
+export async function listTrainingFiles(params: ListTrainingFilesParams = {}): Promise<TrainingFileRead[]> {
+  const sp = new URLSearchParams();
+  if (params.owner_user_id) sp.set("owner_user_id", params.owner_user_id);
+  if (params.kind) sp.set("kind", params.kind);
+  if (params.review_status) sp.set("review_status", params.review_status);
+  const qs = sp.toString();
+  const path = qs ? `/training/files?${qs}` : "/training/files";
+  return apiGet<TrainingFileRead[]>(path, {
     headers: authHeaders(),
   });
 }
@@ -428,7 +470,7 @@ export async function downloadTrainingFile(
       "GET",
       `${apiBaseUrl}/training/files/${encodeURIComponent(fileId)}/download`,
     );
-    applyAuthHeaders(xhr, authHeaders());
+    applyXhrHeaders(xhr, authHeaders());
     xhr.responseType = "blob";
 
     xhr.addEventListener("progress", (event) => {
@@ -459,6 +501,54 @@ export async function downloadTrainingFile(
   });
 }
 
+export interface TrainingRecordPdfWarmResponse {
+  queued: boolean;
+  ready: boolean;
+}
+
+export async function warmTrainingUserRecordPdf(userId: string): Promise<TrainingRecordPdfWarmResponse> {
+  return apiPost<TrainingRecordPdfWarmResponse>(
+    `/training/users/${encodeURIComponent(userId)}/record-pdf/warm`,
+    {},
+    {
+      headers: authHeaders(),
+    },
+  );
+}
+
+export async function downloadTrainingUserRecordPdf(userId: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const apiBaseUrl = getApiBaseUrl();
+    xhr.open(
+      "GET",
+      `${apiBaseUrl}/training/users/${encodeURIComponent(userId)}/record-pdf`,
+    );
+    applyXhrHeaders(xhr, authHeaders());
+    xhr.responseType = "blob";
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 401) {
+        handleAuthFailure("expired");
+        reject(new Error("Session expired. Please sign in again."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = xhr.responseText || `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+      resolve(xhr.response as Blob);
+    });
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Network error while downloading individual training record."));
+    });
+
+    xhr.send();
+  });
+}
+
 export async function downloadTrainingUserEvidencePack(userId: string): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -467,7 +557,7 @@ export async function downloadTrainingUserEvidencePack(userId: string): Promise<
       "GET",
       `${apiBaseUrl}/training/users/${encodeURIComponent(userId)}/evidence-pack`,
     );
-    applyAuthHeaders(xhr, authHeaders());
+    applyXhrHeaders(xhr, authHeaders());
     xhr.responseType = "blob";
 
     xhr.addEventListener("load", () => {
@@ -492,40 +582,6 @@ export async function downloadTrainingUserEvidencePack(userId: string): Promise<
   });
 }
 
-
-export async function downloadTrainingUserRecordPdf(userId: string): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const apiBaseUrl = getApiBaseUrl();
-    xhr.open(
-      "GET",
-      `${apiBaseUrl}/training/users/${encodeURIComponent(userId)}/record-report.pdf`,
-    );
-    applyAuthHeaders(xhr, authHeaders());
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Request failed (${xhr.status})`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading training record PDF."));
-    });
-
-    xhr.send();
-  });
-}
-
 // ---------------------------------------------------------------------------
  // TRAINING RECORDS
 // ---------------------------------------------------------------------------
@@ -533,12 +589,12 @@ export async function downloadTrainingUserRecordPdf(userId: string): Promise<Blo
 export interface ListTrainingRecordsParams {
   user_id?: string;
   course_pk?: string;
-  limit?: number;
-  offset?: number;
 }
 
 /**
  * List training completion records for the current AMO.
+ *
+ * Supports server filtering; avoid loading records for all users when viewing a single profile.
  */
 export async function listTrainingRecords(
   params: ListTrainingRecordsParams = {},
@@ -546,15 +602,25 @@ export async function listTrainingRecords(
   const sp = new URLSearchParams();
   if (params.user_id) sp.set("user_id", params.user_id);
   if (params.course_pk) sp.set("course_pk", params.course_pk);
-  if (params.limit) sp.set("limit", String(params.limit));
-  if (params.offset) sp.set("offset", String(params.offset));
+  if (!sp.has("limit")) sp.set("limit", "1000");
 
   const qs = sp.toString();
-  const path = qs ? `/training/records?${qs}` : "/training/records";
+  const path = qs ? `/training/records?${qs}` : "/training/records?limit=1000";
 
-  return apiGet<TrainingRecordRead[]>(path, {
-    headers: authHeaders(),
-  });
+  try {
+    return await apiGet<TrainingRecordRead[]>(path, {
+      headers: authHeaders(),
+    });
+  } catch (error: any) {
+    const message = String(error?.message || "").toLowerCase();
+    if (message.includes("deadlock")) {
+      await delay(120);
+      return apiGet<TrainingRecordRead[]>(path, {
+        headers: authHeaders(),
+      });
+    }
+    throw error;
+  }
 }
 
 /**
@@ -645,12 +711,6 @@ export async function getMyTrainingStatus(): Promise<TrainingStatusItem[]> {
   });
 }
 
-export async function getMyTrainingAccessState(): Promise<TrainingAccessState> {
-  return apiGet<TrainingAccessState>("/training/status/me/access-state", {
-    headers: authHeaders(),
-  });
-}
-
 export interface TrainingStatusBulkResponse {
   users: Record<string, TrainingStatusItem[]>;
 }
@@ -658,13 +718,27 @@ export interface TrainingStatusBulkResponse {
 export async function getBulkTrainingStatusForUsers(
   userIds: string[],
 ): Promise<TrainingStatusBulkResponse> {
-  return apiPost<TrainingStatusBulkResponse>(
-    "/training/status/users/bulk",
-    { user_ids: userIds },
-    {
-      headers: authHeaders(),
-    },
-  );
+  try {
+    return await apiPost<TrainingStatusBulkResponse>(
+      "/training/status/users/bulk",
+      { user_ids: userIds },
+      {
+        headers: authHeaders(),
+      },
+    );
+  } catch {
+    const users: Record<string, TrainingStatusItem[]> = {};
+    await Promise.all(
+      userIds.map(async (userId) => {
+        try {
+          users[userId] = await getUserTrainingStatus(userId);
+        } catch {
+          users[userId] = [];
+        }
+      }),
+    );
+    return { users };
+  }
 }
 
 /**
@@ -681,25 +755,22 @@ export async function getUserTrainingStatus(
   );
 }
 
-export async function getUserTrainingAccessState(
-  userId: string,
-): Promise<TrainingAccessState> {
-  return apiGet<TrainingAccessState>(
-    `/training/status/users/${encodeURIComponent(userId)}/access-state`,
-    {
-      headers: authHeaders(),
-    },
-  );
+export async function getMyTrainingAccessState(): Promise<TrainingAccessState> {
+  return apiGet<TrainingAccessState>("/training/status/access/me", {
+    headers: authHeaders(),
+  });
 }
 
-export async function getTrainingDashboardSummary(
-  includeNonMandatory = false,
-): Promise<TrainingDashboardSummary> {
-  const sp = new URLSearchParams();
-  if (includeNonMandatory) sp.set("include_non_mandatory", "true");
-  const qs = sp.toString();
-  const path = qs ? `/training/dashboard/summary?${qs}` : "/training/dashboard/summary";
-  return apiGet<TrainingDashboardSummary>(path, { headers: authHeaders() });
+export async function getUserTrainingAccessState(userId: string): Promise<TrainingAccessState> {
+  return apiGet<TrainingAccessState>(`/training/status/access/users/${encodeURIComponent(userId)}`, {
+    headers: authHeaders(),
+  });
+}
+
+export async function runTrainingNotificationSweep(): Promise<{ notifications_created: number }> {
+  return apiPost<{ notifications_created: number }>("/training/compliance/notifications/sweep", {}, {
+    headers: authHeaders(),
+  });
 }
 
 // ---------------------------------------------------------------------------

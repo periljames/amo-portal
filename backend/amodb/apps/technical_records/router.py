@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts.models import AccountRole, User
 from amodb.apps.audit.models import AuditEvent
-from amodb.apps.crs.models import CRS
+from amodb.apps.crs.models import CRS, CRSSignoff
 from amodb.apps.work.models import WorkOrder
 
 from ...database import get_db
@@ -110,14 +110,34 @@ def _get_settings(db: Session, amo_id: str) -> models.TechnicalRecordSetting:
 def technical_records_dashboard(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     amo_id = current_user.effective_amo_id
     now = datetime.now(UTC)
-    due_soon = db.query(models.AirworthinessItem).filter(models.AirworthinessItem.amo_id == amo_id, models.AirworthinessItem.next_due_date <= date.today() + timedelta(days=14)).count()
-    unmatched_crs = db.query(CRS).filter(CRS.amo_id == amo_id, CRS.work_order_id.is_(None)).count()
+    due_soon = db.query(models.AirworthinessItem).filter(
+        models.AirworthinessItem.amo_id == amo_id,
+        models.AirworthinessItem.next_due_date <= date.today() + timedelta(days=14),
+    ).count()
+    work_orders_missing_crs = (
+        db.query(WorkOrder)
+        .outerjoin(CRS, CRS.work_order_id == WorkOrder.id)
+        .filter(
+            WorkOrder.amo_id == amo_id,
+            WorkOrder.status.in_(["INSPECTED", "CLOSED"]),
+            CRS.id.is_(None),
+        )
+        .count()
+    )
+    crs_missing_signoff = (
+        db.query(CRS)
+        .join(WorkOrder, CRS.work_order_id == WorkOrder.id)
+        .outerjoin(CRSSignoff, CRSSignoff.crs_id == CRS.id)
+        .filter(WorkOrder.amo_id == amo_id, CRSSignoff.id.is_(None))
+        .count()
+    )
+    unmatched_crs = work_orders_missing_crs + crs_missing_signoff
     deferrals_expiring = db.query(models.Deferral).filter(models.Deferral.amo_id == amo_id, models.Deferral.status == "Open", models.Deferral.expiry_at <= now + timedelta(days=7)).count()
     open_exceptions = db.query(models.ExceptionQueueItem).filter(models.ExceptionQueueItem.amo_id == amo_id, models.ExceptionQueueItem.status == "Open").count()
     recently_closed = db.query(models.MaintenanceRecord).filter(models.MaintenanceRecord.amo_id == amo_id, models.MaintenanceRecord.performed_at >= now - timedelta(days=30)).count()
     return schemas.TechnicalDashboardRead(tiles=[
         schemas.TechnicalDashboardTile(key="compliance_due", label="Overdue / Due soon compliance items", count=due_soon),
-        schemas.TechnicalDashboardTile(key="unmatched_crs", label="Missing or unmatched CRS/sign-offs", count=unmatched_crs),
+        schemas.TechnicalDashboardTile(key="unmatched_crs", label="Work orders pending CRS / sign-off reconciliation", count=unmatched_crs),
         schemas.TechnicalDashboardTile(key="deferred_expiry", label="Open deferred defects nearing expiry", count=deferrals_expiring),
         schemas.TechnicalDashboardTile(key="data_quality", label="Data quality exceptions", count=open_exceptions),
         schemas.TechnicalDashboardTile(key="recent_close", label="Recently closed maintenance events", count=recently_closed),
@@ -320,13 +340,19 @@ def traceability(
         records = records.filter(models.MaintenanceRecord.tail_id == tail_id)
     records_data = records.limit(50).all()
 
-    crs_rows = db.query(CRS).filter(CRS.amo_id == amo_id)
+    crs_rows = db.query(CRS).join(WorkOrder, CRS.work_order_id == WorkOrder.id).filter(WorkOrder.amo_id == amo_id)
     if work_order_id:
         crs_rows = crs_rows.filter(CRS.work_order_id == work_order_id)
+    if tail_id:
+        crs_rows = crs_rows.filter(CRS.aircraft_serial_number == tail_id)
+    if start_date:
+        crs_rows = crs_rows.filter(CRS.crs_issue_date >= start_date)
+    if end_date:
+        crs_rows = crs_rows.filter(CRS.crs_issue_date <= end_date)
 
     return {
         "work_orders": [{"id": wo.id, "wo_number": wo.wo_number, "tail_id": wo.aircraft_serial_number, "status": str(wo.status)} for wo in work_orders],
-        "crs": [{"id": c.id, "crs_number": c.crs_number, "work_order_id": c.work_order_id} for c in crs_rows.limit(100).all()],
+        "crs": [{"id": c.id, "crs_number": c.crs_serial, "work_order_id": c.work_order_id, "tail_id": c.aircraft_serial_number, "issue_date": c.crs_issue_date.isoformat() if c.crs_issue_date else None} for c in crs_rows.limit(100).all()],
         "records": [{"id": r.id, "tail_id": r.tail_id, "linked_wo_id": r.linked_wo_id, "performed_at": r.performed_at.isoformat()} for r in records_data],
     }
 

@@ -66,7 +66,7 @@ type CalendarItem = {
 
 const initialSort: SortState = { field: "status", direction: "asc" };
 
-const TRAINING_MY_CACHE_MAX_AGE_MS = 5 * 60_000;
+const TRAINING_MY_CACHE_MAX_AGE_MS = 15 * 60_000;
 const TRAINING_MY_SKIP_REFRESH_MS = 45_000;
 
 type CacheEnvelope<T> = { savedAt: number; data: T };

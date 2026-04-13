@@ -79,6 +79,11 @@ class ManualRevision(Base):
     stamped_export_uri = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     immutable_locked = Column(Boolean, nullable=False, default=False)
+    source_type_enum = Column(Enum(ManualSourceType, name="manual_source_type_enum"), nullable=True)
+    source_storage_path = Column(Text, nullable=True)
+    source_mime_type = Column(String(128), nullable=True)
+    source_sha256 = Column(String(64), nullable=True, index=True)
+    source_page_count = Column(Integer, nullable=True)
 
 
 class ManualSection(Base):
@@ -158,6 +163,26 @@ class Acknowledgement(Base):
     acknowledgement_text = Column(Text, nullable=True)
     evidence_uri = Column(Text, nullable=True)
     status_enum = Column(String(32), nullable=False, default="PENDING")
+
+
+class ManualReaderProgress(Base):
+    __tablename__ = "manual_reader_progress"
+    __table_args__ = (UniqueConstraint("revision_id", "user_id", name="uq_manual_reader_progress_revision_user"),)
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    tenant_id = Column(String(36), ForeignKey("manual_tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    manual_id = Column(String(36), ForeignKey("manuals.id", ondelete="CASCADE"), nullable=False, index=True)
+    revision_id = Column(String(36), ForeignKey("manual_revisions.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    last_section_id = Column(String(36), ForeignKey("manual_sections.id", ondelete="SET NULL"), nullable=True)
+    last_anchor_slug = Column(String(255), nullable=True)
+    last_page_number = Column(Integer, nullable=True)
+    scroll_percent = Column(Integer, nullable=False, default=0)
+    zoom_percent = Column(Integer, nullable=False, default=100)
+    bookmark_label = Column(String(255), nullable=True)
+    bookmarks_json = Column(JSON, nullable=False, default=list)
+    last_opened_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 class PrintExport(Base):

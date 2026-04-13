@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 from datetime import date
+import re
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only, noload
 
 from ..accounts import models as accounts_models
 from . import models as training_models
@@ -14,13 +14,6 @@ from . import schemas as training_schemas
 
 REMINDER_DAY_MARKS: tuple[int, ...] = (60, 30, 15, -1)
 PORTAL_LOCKOUT_DAYS_OVERDUE = 1
-
-
-def _make_access_state(**kwargs):
-    model = getattr(training_schemas, "TrainingAccessState", None)
-    if model is None:
-        return SimpleNamespace(**kwargs)
-    return model(**kwargs)
 
 
 @dataclass(frozen=True)
@@ -88,6 +81,78 @@ def add_months(base: date, months: int) -> date:
     return date(year, month, day)
 
 
+def _normalized_course_text(course: training_models.TrainingCourse) -> str:
+    values: list[str] = []
+    for attr in (
+        "course_id",
+        "course_name",
+        "category_raw",
+        "scope",
+        "regulatory_reference",
+    ):
+        value = getattr(course, attr, None)
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip().lower())
+    return " ".join(values)
+
+
+def is_initial_course(course: training_models.TrainingCourse) -> bool:
+    """Best-effort classifier for initial / first-time courses.
+
+    Legacy datasets mix enum kind, raw import status, and naming conventions.
+    The importer relies on this helper when deciding whether a course is one-off
+    or part of a recurrent chain, so it should accept the common legacy labels
+    without requiring perfect normalization.
+    """
+    kind = getattr(course, "kind", None)
+    if kind == training_models.TrainingKind.INITIAL:
+        return True
+
+    status = getattr(course, "status", None)
+    if isinstance(status, str) and status.strip().upper() == "INITIAL":
+        return True
+
+    text = _normalized_course_text(course)
+    if not text:
+        return False
+
+    padded = f" {text.replace('-', ' ').replace('_', ' ')} "
+    initial_markers = (
+        " initial ",
+        " init ",
+        " induction ",
+        " ab initio ",
+        " new hire ",
+        " onboarding ",
+        " familiarization ",
+        " familiarisation ",
+    )
+    return any(marker in padded for marker in initial_markers)
+
+
+
+
+def _extract_status_from_remarks(remarks: Optional[str]) -> Optional[str]:
+    if not remarks:
+        return None
+    match = re.search(r"(?:^|\|)\s*(?:LifecycleStatus|Status)\s*=\s*([^|]+?)\s*(?:\||$)", remarks, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1).strip() or None
+
+def _normalize_training_state_label(value: Optional[str]) -> Optional[str]:
+    raw = (value or "").strip().upper()
+    if not raw:
+        return None
+    aliases = {
+        "COMPLIANT": "OK",
+        "CURRENT": "OK",
+        "IN_DATE": "OK",
+        "IN-DATE": "OK",
+    }
+    return aliases.get(raw, raw)
+
+
 def build_status_item_from_dates(
     *,
     course: training_models.TrainingCourse,
@@ -97,6 +162,8 @@ def build_status_item_from_dates(
     upcoming_event_id: Optional[str],
     upcoming_event_date: Optional[date],
     today: date,
+    source_record_status: Optional[str] = None,
+    source_status: Optional[str] = None,
 ) -> training_schemas.TrainingStatusItem:
     controlling_due = due_date
     if deferral_due and (controlling_due is None or deferral_due > controlling_due):
@@ -115,6 +182,12 @@ def build_status_item_from_dates(
 
     if deferral_due and controlling_due and days_until_due is not None and days_until_due >= 0:
         status_label = "DEFERRED"
+
+    explicit_status = _normalize_training_state_label(source_record_status) or _normalize_training_state_label(source_status)
+    if explicit_status == "OK" and last_completion_date is not None and status_label not in {"DEFERRED", "SCHEDULED_ONLY"}:
+        status_label = "OK"
+    elif explicit_status in {"OVERDUE", "DUE_SOON", "NOT_DONE", "SCHEDULED_ONLY", "DEFERRED"}:
+        status_label = explicit_status
 
     if last_completion_date is None and upcoming_event_date and status_label == "NOT_DONE":
         status_label = "SCHEDULED_ONLY"
@@ -136,6 +209,18 @@ def build_status_item_from_dates(
 def get_required_course_ids_for_user(db: Session, user: accounts_models.User) -> List[str]:
     reqs = (
         db.query(training_models.TrainingRequirement)
+        .options(
+            noload("*"),
+            load_only(
+                training_models.TrainingRequirement.id,
+                training_models.TrainingRequirement.course_id,
+                training_models.TrainingRequirement.scope,
+                training_models.TrainingRequirement.department_code,
+                training_models.TrainingRequirement.job_role,
+                training_models.TrainingRequirement.user_id,
+                training_models.TrainingRequirement.is_active,
+            ),
+        )
         .filter(
             training_models.TrainingRequirement.amo_id == user.amo_id,
             training_models.TrainingRequirement.is_active.is_(True),
@@ -161,6 +246,7 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
         required_course_ids = [
             c.id
             for c in db.query(training_models.TrainingCourse)
+            .options(noload("*"), load_only(training_models.TrainingCourse.id))
             .filter(
                 training_models.TrainingCourse.amo_id == user.amo_id,
                 training_models.TrainingCourse.is_active.is_(True),
@@ -173,7 +259,20 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
 
 
 def get_courses_for_user(db: Session, user: accounts_models.User, *, required_only: bool = False) -> List[training_models.TrainingCourse]:
-    q = db.query(training_models.TrainingCourse).filter(
+    q = db.query(training_models.TrainingCourse).options(
+        noload("*"),
+        load_only(
+            training_models.TrainingCourse.id,
+            training_models.TrainingCourse.course_id,
+            training_models.TrainingCourse.course_name,
+            training_models.TrainingCourse.frequency_months,
+            training_models.TrainingCourse.is_mandatory,
+            training_models.TrainingCourse.is_active,
+            training_models.TrainingCourse.status,
+            training_models.TrainingCourse.category_raw,
+            training_models.TrainingCourse.scope,
+        ),
+    ).filter(
         training_models.TrainingCourse.amo_id == user.amo_id,
         training_models.TrainingCourse.is_active.is_(True),
     )
@@ -190,6 +289,15 @@ def _latest_records_for_user(db: Session, user: accounts_models.User, course_ids
         return {}
     rows = (
         db.query(training_models.TrainingRecord)
+        .options(
+            noload("*"),
+            load_only(
+                training_models.TrainingRecord.course_id,
+                training_models.TrainingRecord.completion_date,
+                training_models.TrainingRecord.valid_until,
+                training_models.TrainingRecord.remarks,
+            ),
+        )
         .filter(
             training_models.TrainingRecord.amo_id == user.amo_id,
             training_models.TrainingRecord.user_id == user.id,
@@ -209,6 +317,13 @@ def _latest_deferrals_for_user(db: Session, user: accounts_models.User, course_i
         return {}
     rows = (
         db.query(training_models.TrainingDeferralRequest)
+        .options(
+            noload("*"),
+            load_only(
+                training_models.TrainingDeferralRequest.course_id,
+                training_models.TrainingDeferralRequest.requested_new_due_date,
+            ),
+        )
         .filter(
             training_models.TrainingDeferralRequest.amo_id == user.amo_id,
             training_models.TrainingDeferralRequest.user_id == user.id,
@@ -228,7 +343,11 @@ def _earliest_events_for_user(db: Session, user: accounts_models.User, course_id
     if not course_ids:
         return {}
     rows = (
-        db.query(training_models.TrainingEvent, training_models.TrainingEventParticipant)
+        db.query(
+            training_models.TrainingEvent.id,
+            training_models.TrainingEvent.course_id,
+            training_models.TrainingEvent.starts_on,
+        )
         .join(training_models.TrainingEventParticipant, training_models.TrainingEvent.id == training_models.TrainingEventParticipant.event_id)
         .filter(
             training_models.TrainingEvent.amo_id == user.amo_id,
@@ -248,8 +367,8 @@ def _earliest_events_for_user(db: Session, user: accounts_models.User, course_id
         .all()
     )
     earliest: Dict[str, Tuple[str, date]] = {}
-    for event, _participant in rows:
-        earliest.setdefault(event.course_id, (event.id, event.starts_on))
+    for event_id, course_id, starts_on in rows:
+        earliest.setdefault(course_id, (event_id, starts_on))
     return earliest
 
 
@@ -290,6 +409,8 @@ def evaluate_user_training_policy(
                 upcoming_event_id=upcoming_event_id,
                 upcoming_event_date=upcoming_event_date,
                 today=today,
+                source_record_status=_extract_status_from_remarks(getattr(record, "remarks", None)) if record else None,
+                source_status=None,
             )
         )
 
@@ -334,7 +455,7 @@ def evaluate_user_training_policy(
 def build_user_access_state(db: Session, user: accounts_models.User, *, today: Optional[date] = None) -> training_schemas.TrainingAccessState:
     evaluation = evaluate_user_training_policy(db, user, required_only=True, today=today)
     primary_reason = evaluation.portal_lock_reasons[0] if evaluation.portal_lock_reasons else None
-    return _make_access_state(
+    return training_schemas.TrainingAccessState(
         user_id=str(user.id),
         portal_locked=evaluation.portal_locked,
         portal_lock_reason=primary_reason,

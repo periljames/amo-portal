@@ -9,11 +9,9 @@ export type TrainingParticipantStatus =
   | "CONFIRMED"
   | "ATTENDED"
   | "NO_SHOW"
-  | "CANCELLED"
-  | "SCHEDULED"
-  | "DEFERRED";
+  | "CANCELLED";
 
-export type DeferralStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+export type DeferralStatus = "PENDING" | "APPROVED" | "REJECTED";
 
 export type DeferralReasonCategory =
   | "ILLNESS"
@@ -33,29 +31,37 @@ export type TrainingStatusLabel =
 
 export type TrainingNotificationSeverity = "INFO" | "ACTION_REQUIRED" | "WARNING";
 
-export type TrainingRequirementScope = "ALL" | "DEPARTMENT" | "JOB_ROLE" | "USER";
-export type TrainingRecordVerificationStatus = "PENDING" | "VERIFIED" | "REJECTED";
-
 export interface TrainingCourseBase {
-  course_id: string;
-  course_name: string;
+  course_id: string;            // e.g. "HF-REF"
+  course_name: string;          // e.g. "Human Factors in Aviation (Refresher)"
   frequency_months: number | null;
-  category?: string | null;
-  category_raw?: string | null;
-  status?: string;
-  scope?: string | null;
-  kind?: string | null;
-  delivery_method?: string | null;
-  regulatory_reference?: string | null;
-  default_provider?: string | null;
+
+  category?: string | null;     // e.g. "REGULATORY", "INTERNAL"
+  category_raw?: string | null; // raw spreadsheet category
+  status?: string;              // Initial / Recurrent / One_Off
+  scope?: string | null;        // e.g. All Staff
+  kind?: string | null;         // e.g. "INITIAL", "REFRESHER"
+  delivery_method?: string | null; // e.g. "CLASSROOM", "ONLINE", "CBT"
+
+  regulatory_reference?: string | null; // e.g. "KCARs Part II", "IOSA"
+  default_provider?: string | null;     // Safarilink / external provider name
   default_duration_days?: number | null;
+  nominal_hours?: number | null;
+  planning_lead_days?: number | null;
+  candidate_requirement_text?: string | null;
+
   is_mandatory: boolean;
   mandatory_for_all: boolean;
+
+  // For chains like: Induction -> MPM, or Initial -> Refresher
   prerequisite_course_id?: string | null;
+
   is_active: boolean;
 }
 
-export interface TrainingCourseCreate extends Omit<TrainingCourseBase, "is_active"> {}
+export interface TrainingCourseCreate extends Omit<TrainingCourseBase, "is_active"> {
+  // is_active default is true server-side
+}
 
 export interface TrainingCourseUpdate {
   course_name?: string;
@@ -69,6 +75,9 @@ export interface TrainingCourseUpdate {
   regulatory_reference?: string | null;
   default_provider?: string | null;
   default_duration_days?: number | null;
+  nominal_hours?: number | null;
+  planning_lead_days?: number | null;
+  candidate_requirement_text?: string | null;
   is_mandatory?: boolean;
   mandatory_for_all?: boolean;
   prerequisite_course_id?: string | null;
@@ -76,32 +85,13 @@ export interface TrainingCourseUpdate {
 }
 
 export interface TrainingCourseRead extends TrainingCourseBase {
-  id: string;
+  id: string;        // backend UUID/PK
   amo_id: string;
+
   created_by_user_id: string | null;
   updated_by_user_id: string | null;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface TrainingRequirementCreate {
-  course_pk: string;
-  scope: TrainingRequirementScope;
-  department_code?: string | null;
-  job_role?: string | null;
-  user_id?: string | null;
-  is_mandatory: boolean;
-  is_active: boolean;
-  effective_from?: string | null;
-  effective_to?: string | null;
-}
-
-export interface TrainingRequirementRead extends TrainingRequirementCreate {
-  id: string;
-  amo_id: string;
-  created_by_user_id?: string | null;
-  created_at?: string;
-  updated_at?: string;
+  created_at?: string; // ISO datetime
+  updated_at?: string; // ISO datetime
 }
 
 export interface CourseImportRowIssue {
@@ -115,59 +105,10 @@ export interface CourseImportSummary {
   total_rows: number;
   created_courses: number;
   updated_courses: number;
-  created_requirements: number;
-  updated_requirements: number;
+  created_requirements?: number;
+  updated_requirements?: number;
   skipped_rows: number;
   issues: CourseImportRowIssue[];
-}
-
-export interface TrainingRecordImportChange {
-  field: string;
-  label: string;
-  old_value?: string | null;
-  new_value?: string | null;
-}
-
-export interface TrainingRecordImportRowIssue {
-  row_number: number;
-  legacy_record_id?: string | null;
-  person_id?: string | null;
-  course_id?: string | null;
-  reason: string;
-}
-
-export interface TrainingRecordImportRowPreview {
-  row_number: number;
-  legacy_record_id?: string | null;
-  person_id?: string | null;
-  person_name?: string | null;
-  course_id?: string | null;
-  course_name?: string | null;
-  completion_date?: string | null;
-  next_due_date?: string | null;
-  days_to_due?: number | null;
-  source_status?: string | null;
-  action: "CREATE" | "UPDATE" | "UNCHANGED" | "SKIP" | string;
-  matched_user_id?: string | null;
-  matched_user_name?: string | null;
-  matched_user_active?: boolean | null;
-  matched_course_pk?: string | null;
-  matched_course_name?: string | null;
-  existing_record_id?: string | null;
-  changes: TrainingRecordImportChange[];
-  reason?: string | null;
-}
-
-export interface TrainingRecordImportSummary {
-  dry_run: boolean;
-  total_rows: number;
-  created_records: number;
-  updated_records: number;
-  unchanged_rows: number;
-  skipped_rows: number;
-  matched_inactive_rows: number;
-  issues: TrainingRecordImportRowIssue[];
-  preview_rows: TrainingRecordImportRowPreview[];
 }
 
 // ---------------------------------------------------------------------------
@@ -178,14 +119,14 @@ export interface TrainingEventBase {
   title: string;
   location: string | null;
   provider: string | null;
-  starts_on: string;
+  starts_on: string;     // ISO date ("YYYY-MM-DD")
   ends_on: string | null;
   status: TrainingEventStatus;
   notes: string | null;
 }
 
 export interface TrainingEventCreate {
-  course_pk: string;
+  course_pk: string; // TrainingCourseRead.id
   title?: string | null;
   location?: string | null;
   provider?: string | null;
@@ -208,11 +149,15 @@ export interface TrainingEventUpdate {
 export interface TrainingEventRead extends TrainingEventBase {
   id: string;
   amo_id: string;
-  course_id: string;
+  course_id: string;          // FK to TrainingCourseRead.id
   created_by_user_id: string | null;
   created_at?: string;
   updated_at?: string;
 }
+
+// ---------------------------------------------------------------------------
+// EVENT PARTICIPANTS
+// ---------------------------------------------------------------------------
 
 export interface TrainingEventParticipantBase {
   status: TrainingParticipantStatus;
@@ -225,29 +170,19 @@ export interface TrainingEventParticipantCreate {
   user_id: string;
   status: TrainingParticipantStatus;
   attendance_note?: string | null;
-  notes?: string | null;
   deferral_request_id?: string | null;
 }
 
 export interface TrainingEventParticipantUpdate {
   status?: TrainingParticipantStatus;
   attendance_note?: string | null;
-  notes?: string | null;
   deferral_request_id?: string | null;
-  attendance_marked_at?: string | null;
-  attendance_marked_by_user_id?: string | null;
-  attended_at?: string | null;
 }
 
 export interface TrainingEventParticipantRead extends TrainingEventParticipantBase {
   id: string;
-  amo_id: string;
   event_id: string;
   user_id: string;
-  notes?: string | null;
-  attendance_marked_at?: string | null;
-  attendance_marked_by_user_id?: string | null;
-  attended_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -257,8 +192,8 @@ export interface TrainingEventParticipantRead extends TrainingEventParticipantBa
 // ---------------------------------------------------------------------------
 
 export interface TrainingRecordBase {
-  completion_date: string;
-  valid_until: string | null;
+  completion_date: string;       // ISO date
+  valid_until: string | null;    // ISO date
   hours_completed: number | null;
   exam_score: number | null;
   certificate_reference: string | null;
@@ -268,13 +203,16 @@ export interface TrainingRecordBase {
 
 export interface TrainingRecordCreate {
   user_id: string;
-  course_pk: string;
+  course_pk: string;       // TrainingCourseRead.id
   event_id?: string | null;
+
   completion_date: string;
   valid_until?: string | null;
+
   hours_completed?: number | null;
   exam_score?: number | null;
   certificate_reference?: string | null;
+  attachment_file_id?: string | null;
   remarks?: string | null;
   is_manual_entry?: boolean;
 }
@@ -285,17 +223,26 @@ export interface TrainingRecordRead extends TrainingRecordBase {
   user_id: string;
   course_id: string;
   event_id: string | null;
+
   course_code?: string | null;
   course_name?: string | null;
   user_staff_code?: string | null;
   user_full_name?: string | null;
-  created_by_user_id: string | null;
-  created_at?: string;
-  updated_at?: string;
-  verification_status?: TrainingRecordVerificationStatus;
+
+  verification_status?: string | null;
   verified_at?: string | null;
   verified_by_user_id?: string | null;
   verification_comment?: string | null;
+  legacy_record_id?: string | null;
+  source_status?: string | null;
+  record_status?: string | null;
+  superseded_by_record_id?: string | null;
+  superseded_at?: string | null;
+  purge_after?: string | null;
+
+  created_by_user_id: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,8 +250,8 @@ export interface TrainingRecordRead extends TrainingRecordBase {
 // ---------------------------------------------------------------------------
 
 export interface TrainingDeferralRequestBase {
-  original_due_date: string;
-  requested_new_due_date: string;
+  original_due_date: string;       // ISO date
+  requested_new_due_date: string;  // ISO date
   reason_category: DeferralReasonCategory;
   reason_text: string | null;
 }
@@ -329,10 +276,12 @@ export interface TrainingDeferralRequestRead extends TrainingDeferralRequestBase
   amo_id: string;
   user_id: string;
   course_id: string;
+
   status: DeferralStatus;
   decision_comment: string | null;
   decided_at?: string | null;
   decided_by_user_id?: string | null;
+
   created_at?: string;
   updated_at?: string;
 }
@@ -359,20 +308,57 @@ export interface TrainingNotificationMarkRead {
 }
 
 // ---------------------------------------------------------------------------
-// STATUS / DASHBOARD
+// STATUS VIEW (per user, per course)
 // ---------------------------------------------------------------------------
 
 export interface TrainingStatusItem {
-  course_id: string;
+  course_id: string;                 // logical course code, e.g. "HF-REF"
   course_name: string;
   frequency_months: number | null;
-  last_completion_date: string | null;
-  valid_until: string | null;
-  extended_due_date: string | null;
+
+  last_completion_date: string | null;   // ISO date
+  valid_until: string | null;            // original validity
+  extended_due_date: string | null;      // after deferral, if any
   days_until_due: number | null;
-  status: TrainingStatusLabel | string;
+
+  status: TrainingStatusLabel;
+
   upcoming_event_id: string | null;
-  upcoming_event_date: string | null;
+  upcoming_event_date: string | null;    // ISO date
+}
+
+
+export type TrainingRequirementScope = "ALL" | "DEPARTMENT" | "JOB_ROLE" | "USER";
+
+export interface TrainingRequirementCreate {
+  course_pk: string;
+  scope: TrainingRequirementScope;
+  department_code?: string | null;
+  job_role?: string | null;
+  user_id?: string | null;
+  is_mandatory: boolean;
+  is_active: boolean;
+  effective_from?: string | null;
+  effective_to?: string | null;
+}
+
+export interface TrainingRequirementUpdate {
+  scope?: TrainingRequirementScope;
+  department_code?: string | null;
+  job_role?: string | null;
+  user_id?: string | null;
+  is_mandatory?: boolean;
+  is_active?: boolean;
+  effective_from?: string | null;
+  effective_to?: string | null;
+}
+
+export interface TrainingRequirementRead extends TrainingRequirementCreate {
+  id: string;
+  amo_id: string;
+  created_by_user_id: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface TrainingAccessState {
@@ -394,6 +380,18 @@ export interface TrainingDashboardSummary {
   due_soon_count: number;
   overdue_count: number;
   deferred_count: number;
-  scheduled_count: number;
-  not_done_count: number;
+  scheduled_count?: number;
+  not_done_count?: number;
+}
+
+export interface TrainingRecordImportSummary {
+  dry_run: boolean;
+  total_rows: number;
+  created_records: number;
+  updated_records: number;
+  unchanged_rows?: number;
+  matched_inactive_rows?: number;
+  skipped_rows: number;
+  issues: Array<{ row_number: number; person_id?: string | null; staff_code?: string | null; course_id?: string | null; reason: string }>;
+  preview_rows?: any[];
 }

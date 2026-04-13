@@ -83,6 +83,21 @@ class MasterListEntry(BaseModel):
     current_revision: str | None
     current_status: str
     pending_ack_count: int
+    manual_type: str | None = None
+    owner_role: str | None = None
+    current_issue_number: str | None = None
+    current_effective_date: date | None = None
+    source_type: str | None = None
+    source_filename: str | None = None
+    source_mime_type: str | None = None
+    page_count: int | None = None
+    section_count: int = 0
+    block_count: int = 0
+    last_published_at: datetime | None = None
+    last_opened_at: datetime | None = None
+    resume_anchor_slug: str | None = None
+    resume_page_number: int | None = None
+    open_count: int = 0
 
 
 class LifecycleTransitionRequest(BaseModel):
@@ -114,6 +129,8 @@ class DocxPreviewOut(BaseModel):
     outline: list[str] = []
     metadata: dict = Field(default_factory=dict)
     excerpt: str = ""
+    source_type: str = "DOCX"
+    page_count: int | None = None
 
 
 class OCRVerifyOut(BaseModel):
@@ -140,3 +157,54 @@ class StampOverlayOut(BaseModel):
     export_id: str
     storage_uri: str
     sha256: str
+
+
+class ManualUploadPreviewOut(BaseModel):
+    filename: str
+    heading: str
+    paragraph_count: int
+    sample: list[str]
+    outline: list[str] = []
+    metadata: dict = Field(default_factory=dict)
+    excerpt: str = ""
+    source_type: str
+    page_count: int | None = None
+
+
+class ManualReaderProgressRequest(BaseModel):
+    last_section_id: str | None = None
+    last_anchor_slug: str | None = None
+    last_page_number: int | None = None
+    scroll_percent: int = 0
+    zoom_percent: int = 100
+    bookmark_label: str | None = None
+    bookmarks: list[dict] = Field(default_factory=list)
+
+
+class ManualReaderProgressOut(BaseModel):
+    revision_id: str
+    user_id: str
+    last_section_id: str | None = None
+    last_anchor_slug: str | None = None
+    last_page_number: int | None = None
+    scroll_percent: int = 0
+    zoom_percent: int = 100
+    bookmark_label: str | None = None
+    bookmarks: list[dict] = Field(default_factory=list)
+    last_opened_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ManualSearchHitOut(BaseModel):
+    manual_id: str
+    revision_id: str | None = None
+    manual_code: str
+    manual_title: str
+    manual_type: str | None = None
+    section_id: str | None = None
+    section_heading: str | None = None
+    anchor_slug: str | None = None
+    page_number: int | None = None
+    excerpt: str
+    source_type: str | None = None
+    score: int = 0

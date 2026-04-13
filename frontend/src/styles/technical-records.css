@@ -1,0 +1,256 @@
+.technical-records-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.technical-records-page__tabs-wrap {
+  margin-top: -0.2rem;
+}
+
+.technical-records-page__meta {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.technical-records-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+}
+
+.technical-records-stats__card {
+  min-height: 114px;
+}
+
+.technical-records-stats__helper {
+  margin-top: 0.45rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.technical-records-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 1rem;
+}
+
+.technical-records-dashboard-grid__wide {
+  grid-column: span 1;
+}
+
+.technical-records-dashboard-grid__summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.95rem;
+}
+
+.technical-records-summary-pill {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-elevated) 74%, transparent);
+}
+
+.technical-records-summary-pill strong {
+  font-size: 1.05rem;
+}
+
+.technical-records-summary-pill span {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.technical-records-quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.technical-records-quick-link,
+.technical-records-quick-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 38px;
+  padding: 0.55rem 0.82rem;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-elevated) 80%, transparent);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.technical-records-quick-link:hover,
+.technical-records-quick-links a:hover {
+  background: var(--hover);
+}
+
+.technical-records-search {
+  min-width: 260px;
+}
+
+.technical-records-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.technical-records-hours-grid .input {
+  min-width: 88px;
+}
+
+.technical-records-hours-grid th,
+.technical-records-hours-grid td {
+  white-space: nowrap;
+}
+
+.technical-records-hours-grid td:last-child .input {
+  min-width: 180px;
+}
+
+.technical-records-messages {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.9rem;
+}
+
+.technical-records-messages > div {
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--surface-elevated) 82%, transparent);
+  color: var(--text-secondary);
+}
+
+.technical-records-definition-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.technical-records-definition-list > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.technical-records-definition-list dt {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.technical-records-definition-list dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.technical-records-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.technical-records-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-elevated) 80%, transparent);
+  color: var(--text-primary);
+  font-size: 0.86rem;
+}
+
+.technical-records-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.technical-records-pack-card {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-elevated) 76%, transparent);
+}
+
+.technical-records-pack-card--wide {
+  grid-column: 1 / -1;
+}
+
+.technical-records-pack-card strong {
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.technical-records-pack-card span {
+  color: var(--text-primary);
+}
+
+.technical-records-form-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.technical-records-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-elevated) 78%, transparent);
+}
+
+.technical-records-toggle input {
+  margin-top: 0.22rem;
+}
+
+.technical-records-toggle span {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.technical-records-toggle small {
+  color: var(--text-secondary);
+}
+
+.technical-records-number-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.technical-records-number-field span {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.technical-records-select {
+  min-width: 150px;
+}
+
+@media (max-width: 1080px) {
+  .technical-records-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .technical-records-search {
+    min-width: 100%;
+  }
+
+  .technical-records-hours-grid .input {
+    min-width: 74px;
+  }
+}

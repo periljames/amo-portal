@@ -10,6 +10,7 @@
 import { apiPost, apiGet, apiPostForm } from "./crs";
 import { apiDelete, apiPut } from "./crs";
 import { authHeaders, getCachedUser } from "./auth";
+import { getApiBaseUrl } from "./config";
 import type { AccountRole, RegulatoryAuthority } from "./auth";
 import { BRANDING_EVENT } from "./branding";
 
@@ -728,6 +729,7 @@ export interface AdminUserDirectoryItem {
   is_superuser: boolean;
   is_amo_admin: boolean;
   display_title: string;
+  availability_status?: string | null;
   last_login_at: string | null;
   created_at: string;
   updated_at: string;
@@ -741,6 +743,7 @@ export interface AdminUserDirectoryMetrics {
   inactive_users: number;
   online_users: number;
   away_users: number;
+  on_leave_users: number;
   recently_active_users: number;
   departmentless_users: number;
   managers: number;
@@ -802,6 +805,198 @@ export interface AdminUserGroupChip {
   value: string | null;
 }
 
+export interface AdminPersonnelProfileSummary {
+  id: string;
+  person_id: string;
+  employment_status: string | null;
+  status: string | null;
+  hire_date: string | null;
+  department: string | null;
+  position_title: string | null;
+}
+
+export interface AdminUserAvailabilitySummary {
+  id: string;
+  status: string;
+  effective_from: string;
+  effective_to: string | null;
+  note: string | null;
+  updated_at: string;
+}
+
+export interface AdminUserGroupRead {
+  id: string;
+  amo_id: string;
+  owner_user_id: string | null;
+  code: string;
+  name: string;
+  description: string | null;
+  group_type: string;
+  is_system_managed: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  member_count: number;
+}
+
+export interface AdminUserGroupCreatePayload {
+  amo_id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  group_type?: "POST_HOLDERS" | "DEPARTMENT" | "CUSTOM" | "PERSONAL";
+  is_active?: boolean;
+}
+
+export interface AdminUserGroupUpdatePayload {
+  code?: string | null;
+  name?: string | null;
+  description?: string | null;
+  is_active?: boolean | null;
+}
+
+export interface AdminUserGroupMemberRead {
+  id: string;
+  group_id: string;
+  user_id: string;
+  full_name: string;
+  email: string;
+  staff_code: string;
+  member_role: string;
+  added_at: string;
+}
+
+export interface AdminUserGroupMemberCreatePayload {
+  user_id: string;
+  member_role?: string;
+}
+
+export interface AdminAuthorisationTypeRead {
+  id: string;
+  amo_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  maintenance_scope: string | null;
+  regulation_reference: string | null;
+  can_issue_crs: boolean;
+  requires_dual_sign: boolean;
+  requires_valid_licence: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminAuthorisationTypeCreatePayload {
+  amo_id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  maintenance_scope?: string | null;
+  regulation_reference?: string | null;
+  can_issue_crs?: boolean;
+  requires_dual_sign?: boolean;
+  requires_valid_licence?: boolean;
+}
+
+export interface AdminAuthorisationTypeUpdatePayload {
+  code?: string | null;
+  name?: string | null;
+  description?: string | null;
+  maintenance_scope?: string | null;
+  regulation_reference?: string | null;
+  can_issue_crs?: boolean | null;
+  requires_dual_sign?: boolean | null;
+  requires_valid_licence?: boolean | null;
+  is_active?: boolean | null;
+}
+
+export interface AdminUserAuthorisationRead {
+  id: string;
+  user_id: string;
+  authorisation_type_id: string;
+  scope_text: string | null;
+  effective_from: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  revoked_reason: string | null;
+  granted_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  authorisation_type: AdminAuthorisationTypeRead;
+}
+
+export interface AdminUserAuthorisationCreatePayload {
+  user_id: string;
+  authorisation_type_id: string;
+  scope_text?: string | null;
+  effective_from: string;
+  expires_at?: string | null;
+}
+
+export interface AdminUserAuthorisationUpdatePayload {
+  scope_text?: string | null;
+  effective_from?: string | null;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+  revoked_reason?: string | null;
+}
+
+export interface BulkUserActionPayload {
+  user_ids: string[];
+  action:
+    | "enable"
+    | "disable"
+    | "delete"
+    | "assign_department"
+    | "clear_department"
+    | "change_role"
+    | "add_group"
+    | "remove_group"
+    | "schedule_leave"
+    | "return_from_leave";
+  department_id?: string | null;
+  role?: AccountRole | null;
+  group_id?: string | null;
+  note?: string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+}
+
+export interface BulkUserActionResult {
+  action: string;
+  processed: number;
+  affected_user_ids: string[];
+  detail: string;
+}
+
+export interface UserEmploymentActionPayload {
+  action:
+    | "new_hire"
+    | "promote"
+    | "demote"
+    | "transfer"
+    | "resign"
+    | "reinstate"
+    | "schedule_leave"
+    | "return_from_leave";
+  role?: AccountRole | null;
+  department_id?: string | null;
+  position_title?: string | null;
+  note?: string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  employment_status?: string | null;
+}
+
+export interface UserEmploymentActionResult {
+  user_id: string;
+  action: string;
+  effective_at: string;
+  status: string;
+  note: string | null;
+}
+
 export interface AdminUserWorkspace {
   user: AdminUserRead;
   department_name: string | null;
@@ -814,6 +1009,9 @@ export interface AdminUserWorkspace {
   activity_log: AdminUserActivitySummary[];
   login_record: AdminUserLoginRecord;
   groups: AdminUserGroupChip[];
+  profile: AdminPersonnelProfileSummary | null;
+  availability: AdminUserAvailabilitySummary[];
+  group_memberships: AdminUserGroupRead[];
 }
 
 export async function getAdminUserDirectory(params: {
@@ -837,4 +1035,192 @@ export async function getAdminUserWorkspace(userId: string): Promise<AdminUserWo
   return apiGet<AdminUserWorkspace>(`/accounts/admin/users/${encodeURIComponent(userId)}/workspace`, {
     headers: authHeaders(),
   });
+}
+
+
+function resolveDownloadFilename(disposition: string | null, fallback: string): string {
+  const match = disposition?.match(/filename="?([^";]+)"?/i);
+  return match?.[1] || fallback;
+}
+
+async function downloadBlob(path: string, fallbackFilename: string): Promise<{ filename: string; blob: Blob }> {
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const contentType = res.headers.get("Content-Type") || "";
+    const text = await res.text();
+    let message = text || `HTTP ${res.status}`;
+    if (contentType.toLowerCase().includes("application/json")) {
+      try {
+        const parsed = JSON.parse(text) as { detail?: string; message?: string };
+        message = parsed.detail || parsed.message || message;
+      } catch {
+        // ignore parse fallback
+      }
+    }
+    throw new Error(message || `HTTP ${res.status}`);
+  }
+  return {
+    filename: resolveDownloadFilename(res.headers.get("Content-Disposition"), fallbackFilename),
+    blob: await res.blob(),
+  };
+}
+
+export async function listAdminAuthorisationTypes(amoId?: string | null): Promise<AdminAuthorisationTypeRead[]> {
+  const sp = new URLSearchParams();
+  if (amoId && amoId.trim()) sp.set("amo_id", amoId.trim());
+  const qs = sp.toString();
+  return apiGet<AdminAuthorisationTypeRead[]>(`/accounts/admin/authorisation-types${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(),
+  });
+}
+
+export async function createAdminAuthorisationType(
+  payload: AdminAuthorisationTypeCreatePayload,
+): Promise<AdminAuthorisationTypeRead> {
+  return apiPost<AdminAuthorisationTypeRead>(`/accounts/admin/authorisation-types`, JSON.stringify(payload), {
+    headers: authHeaders(),
+  });
+}
+
+export async function updateAdminAuthorisationType(
+  authorisationTypeId: string,
+  payload: AdminAuthorisationTypeUpdatePayload,
+): Promise<AdminAuthorisationTypeRead> {
+  return apiPut<AdminAuthorisationTypeRead>(
+    `/accounts/admin/authorisation-types/${encodeURIComponent(authorisationTypeId)}`,
+    JSON.stringify(payload),
+    { headers: authHeaders() },
+  );
+}
+
+export async function deleteAdminAuthorisationType(authorisationTypeId: string): Promise<void> {
+  await apiDelete<void>(`/accounts/admin/authorisation-types/${encodeURIComponent(authorisationTypeId)}`, undefined, {
+    headers: authHeaders(),
+  });
+}
+
+export async function listAdminUserAuthorisations(userId?: string | null): Promise<AdminUserAuthorisationRead[]> {
+  const sp = new URLSearchParams();
+  if (userId && userId.trim()) sp.set("user_id", userId.trim());
+  const qs = sp.toString();
+  return apiGet<AdminUserAuthorisationRead[]>(`/accounts/admin/user-authorisations${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(),
+  });
+}
+
+export async function grantAdminUserAuthorisation(
+  payload: AdminUserAuthorisationCreatePayload,
+): Promise<AdminUserAuthorisationRead> {
+  return apiPost<AdminUserAuthorisationRead>(`/accounts/admin/user-authorisations`, JSON.stringify(payload), {
+    headers: authHeaders(),
+  });
+}
+
+export async function updateAdminUserAuthorisation(
+  userAuthorisationId: string,
+  payload: AdminUserAuthorisationUpdatePayload,
+): Promise<AdminUserAuthorisationRead> {
+  return apiPut<AdminUserAuthorisationRead>(
+    `/accounts/admin/user-authorisations/${encodeURIComponent(userAuthorisationId)}`,
+    JSON.stringify(payload),
+    { headers: authHeaders() },
+  );
+}
+
+export async function deleteAdminUserAuthorisation(userAuthorisationId: string): Promise<void> {
+  await apiDelete<void>(`/accounts/admin/user-authorisations/${encodeURIComponent(userAuthorisationId)}`, undefined, {
+    headers: authHeaders(),
+  });
+}
+
+export async function listAdminGroups(amoId?: string | null): Promise<AdminUserGroupRead[]> {
+  const sp = new URLSearchParams();
+  if (amoId && amoId.trim()) sp.set("amo_id", amoId.trim());
+  const qs = sp.toString();
+  return apiGet<AdminUserGroupRead[]>(`/accounts/admin/groups${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(),
+  });
+}
+
+export async function createAdminGroup(payload: AdminUserGroupCreatePayload): Promise<AdminUserGroupRead> {
+  return apiPost<AdminUserGroupRead>(`/accounts/admin/groups`, JSON.stringify(payload), {
+    headers: authHeaders(),
+  });
+}
+
+export async function updateAdminGroup(groupId: string, payload: AdminUserGroupUpdatePayload): Promise<AdminUserGroupRead> {
+  return apiPut<AdminUserGroupRead>(`/accounts/admin/groups/${encodeURIComponent(groupId)}`, JSON.stringify(payload), {
+    headers: authHeaders(),
+  });
+}
+
+export async function deleteAdminGroup(groupId: string): Promise<void> {
+  await apiDelete<void>(`/accounts/admin/groups/${encodeURIComponent(groupId)}`, undefined, {
+    headers: authHeaders(),
+  });
+}
+
+export async function listAdminGroupMembers(groupId: string): Promise<AdminUserGroupMemberRead[]> {
+  return apiGet<AdminUserGroupMemberRead[]>(`/accounts/admin/groups/${encodeURIComponent(groupId)}/members`, {
+    headers: authHeaders(),
+  });
+}
+
+export async function addAdminGroupMember(
+  groupId: string,
+  payload: AdminUserGroupMemberCreatePayload,
+): Promise<AdminUserGroupMemberRead> {
+  return apiPost<AdminUserGroupMemberRead>(
+    `/accounts/admin/groups/${encodeURIComponent(groupId)}/members`,
+    JSON.stringify(payload),
+    { headers: authHeaders() },
+  );
+}
+
+export async function removeAdminGroupMember(groupId: string, membershipId: string): Promise<void> {
+  await apiDelete<void>(
+    `/accounts/admin/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(membershipId)}`,
+    undefined,
+    { headers: authHeaders() },
+  );
+}
+
+export async function bulkAdminUserAction(payload: BulkUserActionPayload): Promise<BulkUserActionResult> {
+  return apiPost<BulkUserActionResult>(`/accounts/admin/users/bulk`, JSON.stringify(payload), {
+    headers: authHeaders(),
+  });
+}
+
+export async function applyAdminUserEmploymentAction(
+  userId: string,
+  payload: UserEmploymentActionPayload,
+): Promise<UserEmploymentActionResult> {
+  return apiPost<UserEmploymentActionResult>(
+    `/accounts/admin/users/${encodeURIComponent(userId)}/employment-actions`,
+    JSON.stringify(payload),
+    { headers: authHeaders() },
+  );
+}
+
+export async function permanentDeleteAdminUser(userId: string): Promise<void> {
+  await apiDelete<void>(`/accounts/admin/users/${encodeURIComponent(userId)}`, undefined, {
+    headers: authHeaders(),
+  });
+}
+
+export async function downloadAdminUserExport(userId: string): Promise<{ filename: string; blob: Blob }> {
+  return downloadBlob(`/accounts/admin/users/${encodeURIComponent(userId)}/export`, `user_${userId}.json`);
+}
+
+export async function downloadAdminUsersExport(
+  userIds: string[],
+  format: "json" | "csv" = "json",
+): Promise<{ filename: string; blob: Blob }> {
+  const sp = new URLSearchParams();
+  sp.set("ids", userIds.join(","));
+  sp.set("format", format);
+  return downloadBlob(`/accounts/admin/users/export?${sp.toString()}`, `users_export.${format}`);
 }

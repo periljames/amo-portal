@@ -1,29 +1,27 @@
 import { normalizeDepartmentCode, type PortalUser } from "../services/auth";
+import { getRoleDrivenDepartments } from "./roleAccess";
 
 export type DepartmentId =
   | "planning"
   | "production"
+  | "maintenance"
   | "document-control"
   | "quality"
   | "reliability"
   | "safety"
   | "stores"
-  | "engineering"
   | "workshops"
   | "admin";
 
 export const DEPARTMENT_ITEMS: Array<{ id: DepartmentId; label: string }> = [
   { id: "planning", label: "Planning" },
-  {
-    id: "production",
-    label: "Production",
-  },
+  { id: "production", label: "Production" },
+  { id: "maintenance", label: "Maintenance" },
   { id: "document-control", label: "Document Control" },
   { id: "quality", label: "Quality & Compliance" },
   { id: "reliability", label: "Reliability" },
   { id: "safety", label: "Safety Management" },
   { id: "stores", label: "Procurement & Stores" },
-  { id: "engineering", label: "Engineering (Tasks)" },
   { id: "workshops", label: "Workshops" },
   { id: "admin", label: "System Admin" },
 ];
@@ -51,6 +49,33 @@ export function isAdminUser(user: PortalUser | null): boolean {
   );
 }
 
+function inferDepartmentFromRole(user: PortalUser | null): DepartmentId | null {
+  if (!user) return null;
+  switch (user.role) {
+    case "PLANNING_ENGINEER":
+      return "planning";
+    case "PRODUCTION_ENGINEER":
+      return "production";
+    case "CERTIFYING_ENGINEER":
+    case "CERTIFYING_TECHNICIAN":
+    case "TECHNICIAN":
+      return "maintenance";
+    case "QUALITY_MANAGER":
+    case "QUALITY_INSPECTOR":
+    case "AUDITOR":
+      return "quality";
+    case "SAFETY_MANAGER":
+      return "safety";
+    case "STORES":
+    case "STORES_MANAGER":
+    case "STOREKEEPER":
+    case "PROCUREMENT_OFFICER":
+      return "stores";
+    default:
+      return null;
+  }
+}
+
 export function getAssignedDepartment(
   user: PortalUser | null,
   contextDepartment?: string | null
@@ -67,7 +92,7 @@ export function getAssignedDepartment(
     return userDepartmentRaw;
   }
 
-  return null;
+  return inferDepartmentFromRole(user);
 }
 
 export function getAllowedDepartments(
@@ -78,9 +103,12 @@ export function getAllowedDepartments(
     return DEPARTMENT_ITEMS.map((dept) => dept.id);
   }
 
-  if (!assignedDepartment) return [];
-
-  return [assignedDepartment];
+  const departments = new Set<DepartmentId>();
+  if (assignedDepartment) departments.add(assignedDepartment);
+  for (const dept of getRoleDrivenDepartments(user, assignedDepartment)) {
+    departments.add(dept);
+  }
+  return Array.from(departments);
 }
 
 export function canAccessDepartment(

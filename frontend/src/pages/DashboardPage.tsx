@@ -25,7 +25,7 @@ import {
   type AuditorStatsOut,
   type QMSNotificationOut,
 } from "../services/qms";
-import { DASHBOARD_WIDGETS, getWidgetStorageKey } from "../utils/dashboardWidgets";
+import { DASHBOARD_WIDGETS, canSeeDashboardWidget, getWidgetStorageKey } from "../utils/dashboardWidgets";
 import { isUiShellV2Enabled } from "../utils/featureFlags";
 
 const niceLabel = (dept: string) =>
@@ -891,7 +891,7 @@ const DashboardPage: React.FC = () => {
                   {renderMetric("Inbound shipments", 0)}
                 </>
               )}
-              {department === "engineering" && (
+              {department === "maintenance" && (
                 <>
                   {renderMetric("Work packages", 0)}
                   {renderMetric("Tech logs", 0)}
@@ -1407,7 +1407,8 @@ const DashboardPage: React.FC = () => {
             const widgets = DASHBOARD_WIDGETS.filter(
               (widget) =>
                 selected.includes(widget.id) &&
-                widget.departments.includes(department as any)
+                widget.departments.includes(department as any) &&
+                canSeeDashboardWidget(widget, currentUser, department)
             );
             if (widgets.length === 0) {
               return (

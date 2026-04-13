@@ -865,6 +865,7 @@ class AdminUserDirectoryItem(BaseModel):
     is_superuser: bool
     is_amo_admin: bool
     display_title: str
+    availability_status: Optional[str] = None
     last_login_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -878,6 +879,7 @@ class AdminUserDirectoryMetrics(BaseModel):
     inactive_users: int = 0
     online_users: int = 0
     away_users: int = 0
+    on_leave_users: int = 0
     recently_active_users: int = 0
     departmentless_users: int = 0
     managers: int = 0
@@ -939,6 +941,132 @@ class UserGroupChipRead(BaseModel):
     value: Optional[str] = None
 
 
+class PersonnelProfileSummaryRead(BaseModel):
+    id: str
+    person_id: str
+    employment_status: Optional[str] = None
+    status: Optional[str] = None
+    hire_date: Optional[date] = None
+    department: Optional[str] = None
+    position_title: Optional[str] = None
+
+
+class UserAvailabilitySummaryRead(BaseModel):
+    id: str
+    status: str
+    effective_from: datetime
+    effective_to: Optional[datetime] = None
+    note: Optional[str] = None
+    updated_at: datetime
+
+
+class UserGroupRead(BaseModel):
+    id: str
+    amo_id: str
+    owner_user_id: Optional[str] = None
+    code: str
+    name: str
+    description: Optional[str] = None
+    group_type: str
+    is_system_managed: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    member_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class UserGroupCreate(BaseModel):
+    amo_id: str
+    code: str
+    name: str
+    description: Optional[str] = None
+    group_type: Literal["POST_HOLDERS", "DEPARTMENT", "CUSTOM", "PERSONAL"] = "CUSTOM"
+    is_active: bool = True
+
+
+class UserGroupUpdate(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class UserGroupMemberCreate(BaseModel):
+    user_id: str
+    member_role: str = Field(default="member", max_length=32)
+
+
+class UserGroupMemberRead(BaseModel):
+    id: str
+    group_id: str
+    user_id: str
+    full_name: str
+    email: EmailStr
+    staff_code: str
+    member_role: str
+    added_at: datetime
+
+
+class BulkUserActionRequest(BaseModel):
+    user_ids: List[str] = Field(default_factory=list)
+    action: Literal[
+        "enable",
+        "disable",
+        "delete",
+        "assign_department",
+        "clear_department",
+        "change_role",
+        "add_group",
+        "remove_group",
+        "schedule_leave",
+        "return_from_leave",
+    ]
+    department_id: Optional[str] = None
+    role: Optional[AccountRole] = None
+    group_id: Optional[str] = None
+    note: Optional[str] = None
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+
+
+class BulkUserActionResult(BaseModel):
+    action: str
+    processed: int
+    affected_user_ids: List[str] = Field(default_factory=list)
+    detail: str
+
+
+class UserEmploymentActionRequest(BaseModel):
+    action: Literal[
+        "new_hire",
+        "promote",
+        "demote",
+        "transfer",
+        "resign",
+        "reinstate",
+        "schedule_leave",
+        "return_from_leave",
+    ]
+    role: Optional[AccountRole] = None
+    department_id: Optional[str] = None
+    position_title: Optional[str] = None
+    note: Optional[str] = None
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    employment_status: Optional[str] = None
+
+
+class UserEmploymentActionResult(BaseModel):
+    user_id: str
+    action: str
+    effective_at: datetime
+    status: str
+    note: Optional[str] = None
+
+
 class AdminUserWorkspaceRead(BaseModel):
     user: UserRead
     department_name: Optional[str] = None
@@ -951,3 +1079,6 @@ class AdminUserWorkspaceRead(BaseModel):
     activity_log: List[UserActivitySummaryRead] = Field(default_factory=list)
     login_record: UserLoginRecordRead
     groups: List[UserGroupChipRead] = Field(default_factory=list)
+    profile: Optional[PersonnelProfileSummaryRead] = None
+    availability: List[UserAvailabilitySummaryRead] = Field(default_factory=list)
+    group_memberships: List[UserGroupRead] = Field(default_factory=list)

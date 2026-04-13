@@ -381,7 +381,7 @@ class TrainingRequirement(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    course = relationship("TrainingCourse", back_populates="requirements", lazy="joined")
+    course = relationship("TrainingCourse", back_populates="requirements", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<TrainingRequirement {self.id} course={self.course_id} scope={self.scope}>"
@@ -448,7 +448,7 @@ class TrainingEvent(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    course = relationship("TrainingCourse", back_populates="events", lazy="joined")
+    course = relationship("TrainingCourse", back_populates="events", lazy="selectin")
     participants = relationship(
         "TrainingEventParticipant",
         back_populates="event",
@@ -531,8 +531,8 @@ class TrainingEventParticipant(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    event = relationship("TrainingEvent", back_populates="participants", lazy="joined")
-    deferral_request = relationship("TrainingDeferralRequest", lazy="joined")
+    event = relationship("TrainingEvent", back_populates="participants", lazy="selectin")
+    deferral_request = relationship("TrainingDeferralRequest", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<TrainingEventParticipant event={self.event_id} user={self.user_id} status={self.status}>"
@@ -643,8 +643,8 @@ class TrainingRecord(Base):
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
-    course = relationship("TrainingCourse", back_populates="records", lazy="joined")
-    event = relationship("TrainingEvent", back_populates="records", lazy="joined")
+    course = relationship("TrainingCourse", back_populates="records", lazy="selectin")
+    event = relationship("TrainingEvent", back_populates="records", lazy="selectin")
 
     files = relationship("TrainingFile", back_populates="record", lazy="selectin")
 
@@ -741,7 +741,7 @@ class TrainingDeferralRequest(Base):
     requested_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    course = relationship("TrainingCourse", back_populates="deferral_requests", lazy="joined")
+    course = relationship("TrainingCourse", back_populates="deferral_requests", lazy="selectin")
 
     files = relationship("TrainingFile", back_populates="deferral_request", lazy="selectin")
 
@@ -857,10 +857,10 @@ class TrainingFile(Base):
     )
     uploaded_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
-    course = relationship("TrainingCourse", back_populates="files", lazy="joined")
-    event = relationship("TrainingEvent", back_populates="files", lazy="joined")
-    record = relationship("TrainingRecord", back_populates="files", lazy="joined")
-    deferral_request = relationship("TrainingDeferralRequest", back_populates="files", lazy="joined")
+    course = relationship("TrainingCourse", back_populates="files", lazy="selectin")
+    event = relationship("TrainingEvent", back_populates="files", lazy="selectin")
+    record = relationship("TrainingRecord", back_populates="files", lazy="selectin")
+    deferral_request = relationship("TrainingDeferralRequest", back_populates="files", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<TrainingFile {self.id} kind={self.kind} owner={self.owner_user_id}>"

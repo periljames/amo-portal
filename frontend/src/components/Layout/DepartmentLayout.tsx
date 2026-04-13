@@ -645,13 +645,8 @@ const DepartmentLayout: React.FC<Props> = ({
       },
       {
         id: "qms-training",
-        label: "Training Matrix",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms/training`,
-      },
-      {
-        id: "qms-training-hub",
         label: "Training & Competence",
-        path: `/maintenance/${amoCode}/${activeDepartment}/training-competence`,
+        path: `/maintenance/${amoCode}/${activeDepartment}/qms/training`,
       },
       {
         id: "qms-events",
@@ -1490,24 +1485,30 @@ const DepartmentLayout: React.FC<Props> = ({
                   </div>
                 )}
 
-                {!isAdminArea &&
-                  (activeDepartment === "production" ||
-                    activeDepartment === "engineering") && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/work-orders`)
-                      }
-                      className={
-                        "sidebar__item" +
-                        (isWorkOrdersRoute ? " sidebar__item--active" : "")
-                      }
-                      aria-label="Work Orders"
-                      title="Work Orders"
-                    >
-                      <span className="sidebar__item-label">Work Orders</span>
-                    </button>
-                  )}
+                {!isAdminArea && activeDepartment === "maintenance" && (
+                  <div className="sidebar__qms-nav" aria-label="Maintenance modules">
+                    <div className="sidebar__group-title">Maintenance module routes</div>
+                    {[
+                      { id: "m-dash", label: "Maintenance Dashboard", path: `/maintenance/${amoCode}/maintenance/dashboard` },
+                      { id: "m-wo", label: "Work Orders", path: `/maintenance/${amoCode}/maintenance/work-orders` },
+                      { id: "m-wp", label: "Work Packages", path: `/maintenance/${amoCode}/maintenance/work-packages` },
+                      { id: "m-def", label: "Defects", path: `/maintenance/${amoCode}/maintenance/defects` },
+                      { id: "m-nr", label: "Non-Routines", path: `/maintenance/${amoCode}/maintenance/non-routines` },
+                      { id: "m-ins", label: "Inspections", path: `/maintenance/${amoCode}/maintenance/inspections` },
+                      { id: "m-parts", label: "Parts / Tools", path: `/maintenance/${amoCode}/maintenance/parts-tools` },
+                      { id: "m-close", label: "Closeout", path: `/maintenance/${amoCode}/maintenance/closeout` },
+                      { id: "m-reports", label: "Reports", path: `/maintenance/${amoCode}/maintenance/reports` },
+                      { id: "m-settings", label: "Settings", path: `/maintenance/${amoCode}/maintenance/settings` },
+                    ].map((item) => {
+                      const active = location.pathname === item.path;
+                      return (
+                        <button key={item.id} type="button" onClick={() => navigateWithSidebarClose(item.path)} className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "") }>
+                          <span className="sidebar__item-label">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {!isAdminArea && activeDepartment === "production" && (
                   <div className="sidebar__qms-nav" aria-label="Production modules">
@@ -1524,6 +1525,32 @@ const DepartmentLayout: React.FC<Props> = ({
                       { id: "p-workspace", label: "Fleet Workspace", path: `/maintenance/${amoCode}/production/workspace` },
                     ].map((item) => {
                       const active = location.pathname === item.path;
+                      return (
+                        <button key={item.id} type="button" onClick={() => navigateWithSidebarClose(item.path)} className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "") }>
+                          <span className="sidebar__item-label">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {!isAdminArea && activeDepartment === "production" && (
+                  <div className="sidebar__qms-nav" aria-label="Technical records modules">
+                    <div className="sidebar__group-title">Technical Records</div>
+                    {[
+                      { id: "tr-dash", label: "Records Dashboard", path: `/maintenance/${amoCode}/production/records` },
+                      { id: "tr-aircraft", label: "Aircraft Records", path: `/maintenance/${amoCode}/production/records/aircraft` },
+                      { id: "tr-logbooks", label: "Logbooks", path: `/maintenance/${amoCode}/production/records/logbooks` },
+                      { id: "tr-deferrals", label: "Deferrals", path: `/maintenance/${amoCode}/production/records/deferrals` },
+                      { id: "tr-maint", label: "Maintenance Records", path: `/maintenance/${amoCode}/production/records/maintenance-records` },
+                      { id: "tr-airworthiness", label: "Airworthiness", path: `/maintenance/${amoCode}/production/records/airworthiness` },
+                      { id: "tr-llp", label: "LLP / Components", path: `/maintenance/${amoCode}/production/records/llp` },
+                      { id: "tr-recon", label: "Reconciliation", path: `/maintenance/${amoCode}/production/records/reconciliation` },
+                      { id: "tr-trace", label: "Traceability", path: `/maintenance/${amoCode}/production/records/traceability` },
+                      { id: "tr-packs", label: "Packs", path: `/maintenance/${amoCode}/production/records/packs` },
+                      { id: "tr-settings", label: "Record Settings", path: `/maintenance/${amoCode}/production/records/settings` },
+                    ].map((item) => {
+                      const active = location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
                       return (
                         <button key={item.id} type="button" onClick={() => navigateWithSidebarClose(item.path)} className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "") }>
                           <span className="sidebar__item-label">{item.label}</span>
@@ -1553,9 +1580,9 @@ const DepartmentLayout: React.FC<Props> = ({
                 {!isAdminArea && (
                   <button
                     type="button"
-                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/training-competence`)}
+                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/qms/training`)}
                     className={
-                      "sidebar__item" + (location.pathname.includes("/training-competence") ? " sidebar__item--active" : "")
+                      "sidebar__item" + (isTrainingRoute ? " sidebar__item--active" : "")
                     }
                     aria-label="Training & Competence"
                     title="Training & Competence"
