@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import LoginLayout from "../features/auth/LoginLayout";
 import {
-  fetchOnboardingStatus,
   getCachedUser,
   getContext,
   getLastLoginIdentifier,
@@ -11,10 +10,10 @@ import {
   getToken,
   login,
   type LoginContextResponse,
-  type OnboardingStatus,
   type PortalUser,
 } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
+import { preloadWorkspaceForUser } from "../services/routePreloader";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PLATFORM_SUPPORT_SLUG = "system";
@@ -64,9 +63,13 @@ const SOCIAL_AUTH_CONFIG: Record<SocialProvider, SocialConfig> = {
   facebook: { url: import.meta.env.VITE_AUTH_FACEBOOK_URL, title: "Facebook" },
 };
 
+function isPlatformUser(u: PortalUser | null): boolean {
+  return !!u?.is_superuser || u?.role === "SUPERUSER";
+}
+
 function isAdminUser(u: PortalUser | null): boolean {
   if (!u) return false;
-  return !!u.is_superuser || !!u.is_amo_admin || u.role === "SUPERUSER" || u.role === "AMO_ADMIN";
+  return !!u.is_amo_admin || u.role === "AMO_ADMIN";
 }
 
 const LoginPage: React.FC = () => {
@@ -111,15 +114,12 @@ const LoginPage: React.FC = () => {
       if (!slug || !active) return;
 
       const u = getCachedUser();
-      const admin = isAdminUser(u);
-      let onboardingStatus: OnboardingStatus | null = null;
-      try {
-        onboardingStatus = await fetchOnboardingStatus();
-      } catch (err) {
-        console.warn("Onboarding status fetch failed:", err);
+      if (isPlatformUser(u)) {
+        navigate("/platform/control", { replace: true });
+        return;
       }
-
-      const requiresOnboarding = onboardingStatus ? !onboardingStatus.is_complete : !!u?.must_change_password;
+      const admin = isAdminUser(u);
+      const requiresOnboarding = !!u?.must_change_password;
       if (requiresOnboarding && !redirectedRef.current) {
         redirectedRef.current = true;
         navigate(`/maintenance/${slug}/onboarding/setup`, { replace: true });
@@ -198,15 +198,9 @@ const LoginPage: React.FC = () => {
       setLoading(true);
       const slugToUse = effectiveAmoSlug.trim();
       const auth = await login(slugToUse, trimmedIdentifier, password);
+      preloadWorkspaceForUser(auth.user, slugToUse);
 
-      let onboardingStatus: OnboardingStatus | null = null;
-      try {
-        onboardingStatus = await fetchOnboardingStatus({ force: true });
-      } catch (err) {
-        console.warn("Onboarding status fetch failed:", err);
-      }
-
-      const requiresOnboarding = onboardingStatus ? !onboardingStatus.is_complete : !!auth.user?.must_change_password;
+      const requiresOnboarding = !!auth.user?.must_change_password;
       if (requiresOnboarding && !redirectedRef.current) {
         redirectedRef.current = true;
         navigate(`/maintenance/${slugToUse}/onboarding/setup`, { replace: true });
@@ -218,7 +212,12 @@ const LoginPage: React.FC = () => {
       }
 
       const ctx = getContext();
-      const admin = isAdminUser(getCachedUser());
+      const signedInUser = getCachedUser();
+      if (isPlatformUser(signedInUser)) {
+        navigate("/platform/control", { replace: true });
+        return;
+      }
+      const admin = isAdminUser(signedInUser);
       if (!admin) {
         if (!ctx.department) {
           setErrorMsg("Your account is missing a department assignment. Please contact the AMO Administrator or Quality/IT.");
@@ -286,7 +285,7 @@ const LoginPage: React.FC = () => {
 
   return (
     <LoginLayout
-      title="Hello Again!"
+      title={loginContext?.is_platform ? "Platform Control" : "AMO Portal Login"}
       subtitle={subtitle}
       identifier={identifier}
       password={password}
@@ -318,3 +317,5 @@ const LoginPage: React.FC = () => {
 };
 
 export default LoginPage;
+
+

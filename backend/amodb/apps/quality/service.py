@@ -1,8 +1,10 @@
 # backend/amodb/apps/quality/service.py
 from __future__ import annotations
 
+import copy
 import importlib.util
 import os
+import time
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -48,6 +50,23 @@ CAR_LEVEL_REMINDER_DAYS: dict[FindingLevel, int] = {
     FindingLevel.LEVEL_3: 14,
 }
 
+_PERF_CACHE_TTL_SEC = float(os.getenv("QMS_PERF_CACHE_TTL_SEC", "5"))
+_PERF_CACHE: dict[tuple[str, str, str], tuple[float, dict]] = {}
+
+
+def _get_perf_cache(key: tuple[str, str, str]) -> Optional[dict]:
+    cached = _PERF_CACHE.get(key)
+    if not cached:
+        return None
+    expires_at, payload = cached
+    if time.time() >= expires_at:
+        _PERF_CACHE.pop(key, None)
+        return None
+    return copy.deepcopy(payload)
+
+
+def _set_perf_cache(key: tuple[str, str, str], payload: dict) -> None:
+    _PERF_CACHE[key] = (time.time() + _PERF_CACHE_TTL_SEC, copy.deepcopy(payload))
 
 
 
@@ -113,7 +132,11 @@ def normalize_finding_level(severity, level: Optional[FindingLevel]) -> FindingL
     return infer_level_from_severity(severity)
 
 
-def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
+def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optional[str] = None) -> dict:
+    cache_key = ("dashboard", str(amo_id or ""), str(domain.value if domain else "ALL"))
+    cached = _get_perf_cache(cache_key)
+    if cached is not None:
+        return cached
     ensure_qms_audit_reference_schema(db)
     # Documents
     doc_q = db.query(models.QMSDocument)
@@ -148,6 +171,8 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
 
     # Audits
     a_q = db.query(models.QMSAudit)
+    if amo_id:
+        a_q = a_q.filter(models.QMSAudit.amo_id == amo_id)
     if domain:
         a_q = a_q.filter(models.QMSAudit.domain == domain)
     audits_total = a_q.count()
@@ -161,8 +186,12 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
 
     # Findings (open = not closed)
     f_q = db.query(models.QMSAuditFinding)
-    if domain:
-        f_q = f_q.join(models.QMSAudit).filter(models.QMSAudit.domain == domain)
+    if domain or amo_id:
+        f_q = f_q.join(models.QMSAudit)
+        if amo_id:
+            f_q = f_q.filter(models.QMSAudit.amo_id == amo_id)
+        if domain:
+            f_q = f_q.filter(models.QMSAudit.domain == domain)
 
     findings_open = f_q.filter(models.QMSAuditFinding.closed_at.is_(None))
     findings_open_total = findings_open.count()
@@ -178,7 +207,7 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
     )
     findings_overdue_total = overdue_q.count()
 
-    return {
+    result = {
         "domain": domain,
         "documents_total": documents_total,
         "documents_active": documents_active,
@@ -195,6 +224,8 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None) -> dict:
         "findings_open_level_3": findings_open_level_3,
         "findings_overdue_total": findings_overdue_total,
     }
+    _set_perf_cache(cache_key, result)
+    return result
 
 
 
@@ -389,10 +420,47 @@ def _build_manpower_snapshot(db: Session, amo_id: Optional[str], department_code
     }
 
 
+def _select_next_due_audit(db: Session, amo_id: Optional[str], domain: Optional[QMSDomain]) -> Optional[dict]:
+    query = db.query(models.QMSAudit)
+    if amo_id:
+        query = query.filter(models.QMSAudit.amo_id == amo_id)
+    if domain:
+        query = query.filter(models.QMSAudit.domain == domain)
+    query = query.filter(models.QMSAudit.status.in_([QMSAuditStatus.PLANNED, QMSAuditStatus.IN_PROGRESS, QMSAuditStatus.CAP_OPEN]))
+    audit = (
+        query.order_by(
+            models.QMSAudit.planned_start.asc().nulls_last(),
+            models.QMSAudit.planned_end.asc().nulls_last(),
+            models.QMSAudit.created_at.desc(),
+        )
+        .first()
+    )
+    if not audit:
+        return None
+    return {
+        "id": audit.id,
+        "audit_ref": audit.audit_ref,
+        "title": audit.title,
+        "status": audit.status,
+        "planned_start": audit.planned_start,
+        "planned_end": audit.planned_end,
+    }
+
+
 def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optional[str] = None, department_code: Optional[str] = None) -> dict:
-    dashboard = get_dashboard(db, domain=domain)
+    cache_key = ("cockpit", str(amo_id or ""), str(domain.value if domain else "ALL"))
+    cached = _get_perf_cache(cache_key)
+    if cached is not None:
+        return cached
+    dashboard = get_dashboard(db, domain=domain, amo_id=amo_id)
     open_statuses = [CARStatus.OPEN, CARStatus.IN_PROGRESS, CARStatus.PENDING_VERIFICATION]
     cars_q = db.query(models.CorrectiveActionRequest).filter(models.CorrectiveActionRequest.status.in_(open_statuses))
+    if amo_id:
+        cars_q = (
+            cars_q.join(models.QMSAuditFinding, models.QMSAuditFinding.id == models.CorrectiveActionRequest.finding_id)
+            .join(models.QMSAudit, models.QMSAudit.id == models.QMSAuditFinding.audit_id)
+            .filter(models.QMSAudit.amo_id == amo_id)
+        )
     try:
         action_rows = (
             cars_q.order_by(
@@ -531,9 +599,12 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
             }
             for row in compliance_rows
         ],
+        "next_due_audit": _select_next_due_audit(db, amo_id=amo_id, domain=domain),
     }
 
-    return _apply_demo_seed(snapshot, db=db, amo_id=amo_id)
+    result = _apply_demo_seed(snapshot, db=db, amo_id=amo_id)
+    _set_perf_cache(cache_key, result)
+    return result
 
 
 # -----------------------------
@@ -541,20 +612,18 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
 # -----------------------------
 
 
-def _next_car_number(db: Session, program: CARProgram) -> str:
+def _next_car_number(db: Session, program: CARProgram, amo_id: Optional[str] = None) -> str:
     year = date.today().year
     prefix = "Q" if program == CARProgram.QUALITY else "R"
 
     pattern = f"{prefix}-{year}-"
-    last = (
-        db.query(models.CorrectiveActionRequest)
-        .filter(
-            models.CorrectiveActionRequest.program == program,
-            models.CorrectiveActionRequest.car_number.like(f"{pattern}%"),
-        )
-        .order_by(models.CorrectiveActionRequest.car_number.desc())
-        .first()
+    qs = db.query(models.CorrectiveActionRequest).filter(
+        models.CorrectiveActionRequest.program == program,
+        models.CorrectiveActionRequest.car_number.like(f"{pattern}%"),
     )
+    if amo_id:
+        qs = qs.filter(models.CorrectiveActionRequest.amo_id == amo_id)
+    last = qs.order_by(models.CorrectiveActionRequest.car_number.desc()).first()
     if last and last.car_number.startswith(pattern):
         try:
             seq = int(last.car_number.split("-")[-1]) + 1
@@ -576,18 +645,23 @@ def create_car(
     due_date: Optional[date],
     target_closure_date: Optional[date],
     finding_id: Optional[str],
+    amo_id: Optional[str] = None,
 ) -> models.CorrectiveActionRequest:
     reminder_days = 7
     if finding_id:
         finding = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.id == finding_id).first()
         if finding:
             reminder_days = CAR_LEVEL_REMINDER_DAYS.get(finding.level, 7)
+            amo_id = amo_id or getattr(finding, "amo_id", None)
+    if not amo_id:
+        raise ValueError("amo_id is required to create a tenant-scoped CAR")
 
     invite_token = uuid.uuid4().hex
     next_reminder_at = datetime.now(timezone.utc) + timedelta(days=reminder_days)
     car = models.CorrectiveActionRequest(
+        amo_id=amo_id,
         program=program,
-        car_number=_next_car_number(db, program),
+        car_number=_next_car_number(db, program, amo_id=amo_id),
         title=title,
         summary=summary,
         priority=priority,

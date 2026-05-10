@@ -39,6 +39,17 @@ export type Subscription = {
   canceled_at?: string | null;
 };
 
+export type BillingAccessStatus = {
+  subscription?: Subscription | null;
+  access_state: string;
+  has_access: boolean;
+  redirect_to_billing: boolean;
+  lock_reason?: string | null;
+  payment_method_count: number;
+  overdue_invoice_count: number;
+  actionable_invoice_id?: string | null;
+};
+
 export type ResolvedEntitlement = {
   key: string;
   is_unlimited: boolean;
@@ -75,7 +86,11 @@ export type PaymentMethod = {
 
 export type Invoice = {
   id: string;
+  invoice_number?: string | null;
   amo_id: string;
+  buyer_name?: string | null;
+  buyer_email?: string | null;
+  buyer_phone?: string | null;
   license_id?: string | null;
   ledger_entry_id?: string | null;
   amount_cents: number;
@@ -87,6 +102,11 @@ export type Invoice = {
   paid_at?: string | null;
   created_at: string;
   updated_at: string;
+  subtotal_cents?: number;
+  tax_amount_cents?: number;
+  total_cents?: number;
+  etims_status?: string | null;
+  etims_reference?: string | null;
 };
 
 export type LedgerEntry = {

@@ -30,8 +30,9 @@
 //   - Mutating endpoints require Quality / AMO Admin / Superuser etc.
 //     Enforcement lives in backend _require_training_editor.
 
-import { apiGet, apiPost } from "./crs";
+import { apiDelete, apiGet, apiPost, apiPut } from "./crs";
 import { authHeaders, handleAuthFailure } from "./auth";
+import { downloadWithXhr, downloadWithFetch, type DownloadedFile, saveDownloadedFile } from "../utils/downloads";
 import { getApiBaseUrl } from "./config";
 
 function delay(ms: number): Promise<void> {
@@ -45,10 +46,15 @@ import type {
   TrainingEventRead,
   TrainingEventCreate,
   TrainingEventUpdate,
+  TrainingEventBatchScheduleCreate,
+  TrainingEventBatchScheduleRead,
+  TrainingAutoGroupScheduleCreate,
+  TrainingAutoGroupScheduleRead,
   TrainingEventParticipantRead,
   TrainingEventParticipantCreate,
   TrainingEventParticipantUpdate,
   TrainingRecordRead,
+  TrainingRecordUpdate,
   TrainingRecordCreate,
   TrainingDeferralRequestRead,
   TrainingDeferralRequestCreate,
@@ -58,11 +64,27 @@ import type {
   TrainingNotificationMarkRead,
   CourseImportSummary,
   TrainingAccessState,
-  TrainingRequirementRead,
   TrainingRequirementCreate,
+  TrainingRequirementRead,
   TrainingRequirementUpdate,
   TrainingRecordImportSummary,
+  TrainingCertificateArtifactOptions,
 } from "../types/training";
+
+export interface TrainingUserDetailBundle {
+  user: import("./adminUsers").AdminUserRead;
+  hire_date: string | null;
+  status_items: TrainingStatusItem[];
+  records: TrainingRecordRead[];
+  records_total: number;
+  deferrals: TrainingDeferralRequestRead[];
+  deferrals_total: number;
+  files: TrainingFileRead[];
+  files_total: number;
+  upcoming_events: TrainingEventRead[];
+  upcoming_events_total: number;
+}
+
 
 export type TrainingFileReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
 
@@ -103,12 +125,91 @@ function applyXhrHeaders(xhr: XMLHttpRequest, headersInit?: HeadersInit): void {
   });
 }
 
+const TRAINING_SERVICE_CACHE_PREFIX = "amoportal:training-service-cache:";
+const trainingMemoryCache = new Map<string, { expiresAt: number; value: unknown }>();
+const trainingInFlight = new Map<string, Promise<unknown>>();
+
+function cloneCachedValue<T>(value: T): T {
+  try {
+    return typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
+}
+
+function readTrainingCache<T>(key: string): T | null {
+  const now = Date.now();
+  const memory = trainingMemoryCache.get(key);
+  if (memory && memory.expiresAt > now) return cloneCachedValue(memory.value as T);
+  if (memory) trainingMemoryCache.delete(key);
+  try {
+    const raw = window.sessionStorage.getItem(`${TRAINING_SERVICE_CACHE_PREFIX}${key}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { expiresAt?: number; value?: T };
+    if (!parsed || typeof parsed.expiresAt !== "number" || parsed.expiresAt <= now) {
+      window.sessionStorage.removeItem(`${TRAINING_SERVICE_CACHE_PREFIX}${key}`);
+      return null;
+    }
+    trainingMemoryCache.set(key, { expiresAt: parsed.expiresAt, value: parsed.value });
+    return cloneCachedValue(parsed.value as T);
+  } catch {
+    return null;
+  }
+}
+
+function writeTrainingCache<T>(key: string, ttlMs: number, value: T): T {
+  const expiresAt = Date.now() + ttlMs;
+  trainingMemoryCache.set(key, { expiresAt, value: cloneCachedValue(value) });
+  try {
+    window.sessionStorage.setItem(`${TRAINING_SERVICE_CACHE_PREFIX}${key}`, JSON.stringify({ expiresAt, value }));
+  } catch {
+    // ignore storage failures
+  }
+  return cloneCachedValue(value);
+}
+
+export function invalidateTrainingServiceCache(match?: string): void {
+  const matcher = match ? `${TRAINING_SERVICE_CACHE_PREFIX}${match}` : null;
+  for (const key of [...trainingMemoryCache.keys()]) {
+    if (!match || key.includes(match)) trainingMemoryCache.delete(key);
+  }
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const storageKey = window.sessionStorage.key(index);
+      if (!storageKey) continue;
+      if (!storageKey.startsWith(TRAINING_SERVICE_CACHE_PREFIX)) continue;
+      if (!matcher || storageKey.includes(matcher)) window.sessionStorage.removeItem(storageKey);
+    }
+  } catch {
+    // ignore storage failures
+  }
+}
+
+async function cachedTrainingGet<T>(key: string, ttlMs: number, fetcher: () => Promise<T>, force = false): Promise<T> {
+  if (!force) {
+    const cached = readTrainingCache<T>(key);
+    if (cached != null) return cached;
+  }
+  const inFlight = trainingInFlight.get(key) as Promise<T> | undefined;
+  if (inFlight) return inFlight.then((value) => cloneCachedValue(value));
+  const promise = fetcher()
+    .then((value) => writeTrainingCache(key, ttlMs, value))
+    .finally(() => {
+      trainingInFlight.delete(key);
+    });
+  trainingInFlight.set(key, promise as Promise<unknown>);
+  return promise.then((value) => cloneCachedValue(value));
+}
+
+
 // ---------------------------------------------------------------------------
 // COURSES
 // ---------------------------------------------------------------------------
 
 export interface ListCoursesParams {
   include_inactive?: boolean;
+  limit?: number;
+  offset?: number;
 }
 
 /**
@@ -121,13 +222,21 @@ export async function listTrainingCourses(
   if (params.include_inactive) {
     sp.set("include_inactive", "true");
   }
+  if (typeof params.limit === "number" && Number.isFinite(params.limit)) {
+    sp.set("limit", String(Math.max(1, Math.trunc(params.limit))));
+  }
+  if (typeof params.offset === "number" && Number.isFinite(params.offset) && params.offset > 0) {
+    sp.set("offset", String(Math.trunc(params.offset)));
+  }
 
   const qs = sp.toString();
   const path = qs ? `/training/courses?${qs}` : "/training/courses";
 
-  return apiGet<TrainingCourseRead[]>(path, {
-    headers: authHeaders(),
-  });
+  return cachedTrainingGet(`courses:${qs || "all"}`, 5 * 60_000, () =>
+    apiGet<TrainingCourseRead[]>(path, {
+      headers: authHeaders(),
+    }),
+  );
 }
 
 /**
@@ -147,9 +256,11 @@ export async function getTrainingCourse(
 export async function createTrainingCourse(
   payload: TrainingCourseCreate,
 ): Promise<TrainingCourseRead> {
-  return apiPost<TrainingCourseRead>("/training/courses", payload, {
+  const created = await apiPost<TrainingCourseRead>("/training/courses", payload, {
     headers: authHeaders(),
   });
+  invalidateTrainingServiceCache();
+  return created;
 }
 
 /**
@@ -162,7 +273,7 @@ export async function updateTrainingCourse(
   // There is no dedicated apiPut helper exported, so we reuse apiPost
   // with the conventional REST pattern of using PUT at the fetch layer
   // (see implementation of request<T> in crs.ts).
-  return apiPost<TrainingCourseRead>(
+  const updated = await apiPost<TrainingCourseRead>(
     `/training/courses/${encodeURIComponent(coursePk)}`,
     payload,
     {
@@ -170,6 +281,8 @@ export async function updateTrainingCourse(
       headers: authHeaders(),
     } as RequestInit,
   );
+  invalidateTrainingServiceCache();
+  return updated;
 }
 
 export async function importTrainingCoursesWorkbook(
@@ -277,6 +390,8 @@ export async function importTrainingRecordsWorkbook(
 
 export interface ListTrainingRequirementsParams {
   include_inactive?: boolean;
+  limit?: number;
+  offset?: number;
 }
 
 export async function listTrainingRequirements(
@@ -284,37 +399,50 @@ export async function listTrainingRequirements(
 ): Promise<TrainingRequirementRead[]> {
   const sp = new URLSearchParams();
   if (params.include_inactive) sp.set("include_inactive", "true");
+  if (typeof params.limit === "number") sp.set("limit", String(params.limit));
+  if (typeof params.offset === "number") sp.set("offset", String(params.offset));
   const qs = sp.toString();
   const path = qs ? `/training/requirements?${qs}` : "/training/requirements";
-  return apiGet<TrainingRequirementRead[]>(path, { headers: authHeaders() });
-}
-
-export async function createTrainingRequirement(
-  payload: TrainingRequirementCreate,
-): Promise<TrainingRequirementRead> {
-  return apiPost<TrainingRequirementRead>("/training/requirements", payload, {
-    headers: authHeaders(),
-  });
-}
-
-export async function updateTrainingRequirement(
-  requirementId: string,
-  payload: TrainingRequirementUpdate,
-): Promise<TrainingRequirementRead> {
-  return apiPost<TrainingRequirementRead>(
-    `/training/requirements/${encodeURIComponent(requirementId)}`,
-    payload,
-    {
-      method: "PUT",
-      headers: authHeaders(),
-    } as RequestInit,
+  return cachedTrainingGet(`requirements:${qs || "all"}`, 3 * 60_000, () =>
+    apiGet<TrainingRequirementRead[]>(path, { headers: authHeaders() }),
   );
 }
 
-export async function listTrainingEventParticipants(eventId: string): Promise<TrainingEventParticipantRead[]> {
-  return apiGet<TrainingEventParticipantRead[]>(`/training/events/${encodeURIComponent(eventId)}/participants`, {
+export async function createTrainingRequirement(payload: TrainingRequirementCreate): Promise<TrainingRequirementRead> {
+  const created = await apiPost<TrainingRequirementRead>("/training/requirements", payload, {
     headers: authHeaders(),
   });
+  invalidateTrainingServiceCache();
+  return created;
+}
+
+export async function updateTrainingRequirement(requirementId: string, payload: TrainingRequirementUpdate): Promise<TrainingRequirementRead> {
+  const updated = await apiPost<TrainingRequirementRead>(
+    `/training/requirements/${encodeURIComponent(requirementId)}`,
+    payload,
+    { method: "PUT", headers: authHeaders() } as RequestInit,
+  );
+  invalidateTrainingServiceCache();
+  return updated;
+}
+
+export async function deleteTrainingRequirement(requirementId: string): Promise<{ id: string; action: string; message: string; soft_deleted: boolean }> {
+  const result = await apiPost<{ id: string; action: string; message: string; soft_deleted: boolean }>(
+    `/training/requirements/${encodeURIComponent(requirementId)}`,
+    {},
+    { method: "DELETE", headers: authHeaders() } as RequestInit,
+  );
+  invalidateTrainingServiceCache();
+  return result;
+}
+
+export async function listTrainingEventParticipants(eventId: string): Promise<TrainingEventParticipantRead[]> {
+  const key = `event-participants:${eventId}`;
+  return cachedTrainingGet(key, 30_000, () =>
+    apiGet<TrainingEventParticipantRead[]>(`/training/events/${encodeURIComponent(eventId)}/participants`, {
+      headers: authHeaders(),
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +453,8 @@ export interface ListEventsParams {
   course_pk?: string;
   from_date?: string; // ISO date
   to_date?: string;   // ISO date
+  limit?: number;
+  offset?: number;
 }
 
 /**
@@ -338,13 +468,17 @@ export async function listTrainingEvents(
   if (params.course_pk) sp.set("course_pk", params.course_pk);
   if (params.from_date) sp.set("from_date", params.from_date);
   if (params.to_date) sp.set("to_date", params.to_date);
+  if (typeof params.limit === "number") sp.set("limit", String(params.limit));
+  if (typeof params.offset === "number") sp.set("offset", String(params.offset));
 
   const qs = sp.toString();
   const path = qs ? `/training/events?${qs}` : "/training/events";
 
-  return apiGet<TrainingEventRead[]>(path, {
-    headers: authHeaders(),
-  });
+  return cachedTrainingGet(`events:${qs || "all"}`, 60_000, () =>
+    apiGet<TrainingEventRead[]>(path, {
+      headers: authHeaders(),
+    }),
+  );
 }
 
 /**
@@ -353,9 +487,31 @@ export async function listTrainingEvents(
 export async function createTrainingEvent(
   payload: TrainingEventCreate,
 ): Promise<TrainingEventRead> {
-  return apiPost<TrainingEventRead>("/training/events", payload, {
+  const created = await apiPost<TrainingEventRead>("/training/events", payload, {
     headers: authHeaders(),
   });
+  invalidateTrainingServiceCache();
+  return created;
+}
+
+export async function createTrainingEventBatch(
+  payload: TrainingEventBatchScheduleCreate,
+): Promise<TrainingEventBatchScheduleRead> {
+  const created = await apiPost<TrainingEventBatchScheduleRead>("/training/events/batch-schedule", payload, {
+    headers: authHeaders(),
+  });
+  invalidateTrainingServiceCache();
+  return created;
+}
+
+export async function autoGroupTrainingEvents(
+  payload: TrainingAutoGroupScheduleCreate,
+): Promise<TrainingAutoGroupScheduleRead> {
+  const created = await apiPost<TrainingAutoGroupScheduleRead>("/training/events/auto-group-schedule", payload, {
+    headers: authHeaders(),
+  });
+  invalidateTrainingServiceCache();
+  return created;
 }
 
 /**
@@ -365,7 +521,7 @@ export async function updateTrainingEvent(
   eventId: string,
   payload: TrainingEventUpdate,
 ): Promise<TrainingEventRead> {
-  return apiPost<TrainingEventRead>(
+  const updated = await apiPost<TrainingEventRead>(
     `/training/events/${encodeURIComponent(eventId)}`,
     payload,
     {
@@ -373,6 +529,8 @@ export async function updateTrainingEvent(
       headers: authHeaders(),
     } as RequestInit,
   );
+  invalidateTrainingServiceCache();
+  return updated;
 }
 
 // ---------------------------------------------------------------------------
@@ -385,13 +543,15 @@ export async function updateTrainingEvent(
 export async function addTrainingEventParticipant(
   payload: TrainingEventParticipantCreate,
 ): Promise<TrainingEventParticipantRead> {
-  return apiPost<TrainingEventParticipantRead>(
+  const created = await apiPost<TrainingEventParticipantRead>(
     "/training/event-participants",
     payload,
     {
       headers: authHeaders(),
     },
   );
+  invalidateTrainingServiceCache();
+  return created;
 }
 
 /**
@@ -401,7 +561,7 @@ export async function updateTrainingEventParticipant(
   participantId: string,
   payload: TrainingEventParticipantUpdate,
 ): Promise<TrainingEventParticipantRead> {
-  return apiPost<TrainingEventParticipantRead>(
+  const updated = await apiPost<TrainingEventParticipantRead>(
     `/training/event-participants/${encodeURIComponent(participantId)}`,
     payload,
     {
@@ -409,6 +569,8 @@ export async function updateTrainingEventParticipant(
       headers: authHeaders(),
     } as RequestInit,
   );
+  invalidateTrainingServiceCache();
+  return updated;
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +599,8 @@ export interface ListTrainingFilesParams {
   owner_user_id?: string;
   kind?: string;
   review_status?: TrainingFileReviewStatus;
+  limit?: number;
+  offset?: number;
 }
 
 export async function listTrainingFiles(params: ListTrainingFilesParams = {}): Promise<TrainingFileRead[]> {
@@ -444,141 +608,87 @@ export async function listTrainingFiles(params: ListTrainingFilesParams = {}): P
   if (params.owner_user_id) sp.set("owner_user_id", params.owner_user_id);
   if (params.kind) sp.set("kind", params.kind);
   if (params.review_status) sp.set("review_status", params.review_status);
+  if (typeof params.limit === "number") sp.set("limit", String(params.limit));
+  if (typeof params.offset === "number") sp.set("offset", String(params.offset));
   const qs = sp.toString();
   const path = qs ? `/training/files?${qs}` : "/training/files";
-  return apiGet<TrainingFileRead[]>(path, {
-    headers: authHeaders(),
-  });
+  return cachedTrainingGet(`files:${qs || "all"}`, 45_000, () =>
+    apiGet<TrainingFileRead[]>(path, {
+      headers: authHeaders(),
+    }),
+  );
 }
 
 export async function uploadTrainingFile(payload: FormData): Promise<TrainingFileRead> {
-  return apiPost<TrainingFileRead>("/training/files/upload", payload, {
+  const uploaded = await apiPost<TrainingFileRead>("/training/files/upload", payload, {
     method: "POST",
     headers: authHeaders(),
   } as RequestInit);
+  invalidateTrainingServiceCache();
+  return uploaded;
 }
 
 export async function downloadTrainingFile(
   fileId: string,
   onProgress?: (progress: TransferProgress) => void
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const startedAt = performance.now();
-    const apiBaseUrl = getApiBaseUrl();
-    xhr.open(
-      "GET",
-      `${apiBaseUrl}/training/files/${encodeURIComponent(fileId)}/download`,
-    );
-    applyXhrHeaders(xhr, authHeaders());
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("progress", (event) => {
-      if (!onProgress) return;
-      const total = event.lengthComputable ? event.total : undefined;
-      onProgress(buildSpeed(event.loaded, total, startedAt));
-    });
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Request failed (${xhr.status})`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading training file."));
-    });
-
-    xhr.send();
+): Promise<DownloadedFile> {
+  const startedAt = performance.now();
+  return downloadWithXhr({
+    url: `${getApiBaseUrl()}/training/files/${encodeURIComponent(fileId)}/download`,
+    headers: authHeaders() as Record<string, string>,
+    fallbackFilename: `training_file_${fileId}`,
+    onProgress: onProgress
+      ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt))
+      : undefined,
   });
 }
 
-export interface TrainingRecordPdfWarmResponse {
-  queued: boolean;
-  ready: boolean;
-}
-
-export async function warmTrainingUserRecordPdf(userId: string): Promise<TrainingRecordPdfWarmResponse> {
-  return apiPost<TrainingRecordPdfWarmResponse>(
+export async function warmTrainingUserRecordPdf(userId: string): Promise<{ queued: boolean; ready: boolean }> {
+  return apiPost<{ queued: boolean; ready: boolean }>(
     `/training/users/${encodeURIComponent(userId)}/record-pdf/warm`,
     {},
-    {
-      headers: authHeaders(),
-    },
+    { headers: authHeaders() }
   );
 }
 
-export async function downloadTrainingUserRecordPdf(userId: string): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const apiBaseUrl = getApiBaseUrl();
-    xhr.open(
-      "GET",
-      `${apiBaseUrl}/training/users/${encodeURIComponent(userId)}/record-pdf`,
-    );
-    applyXhrHeaders(xhr, authHeaders());
-    xhr.responseType = "blob";
+export async function waitForTrainingUserRecordPdfReady(
+  userId: string,
+  opts: { attempts?: number; intervalMs?: number } = {},
+): Promise<boolean> {
+  const attempts = Math.max(1, opts.attempts ?? 12);
+  const intervalMs = Math.max(150, opts.intervalMs ?? 500);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await warmTrainingUserRecordPdf(userId);
+    if (response.ready) return true;
+    await delay(intervalMs);
+  }
+  return false;
+}
 
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Request failed (${xhr.status})`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading individual training record."));
-    });
-
-    xhr.send();
+export async function downloadTrainingUserRecordPdf(userId: string, onProgress?: (progress: TransferProgress) => void): Promise<DownloadedFile> {
+  const startedAt = performance.now();
+  return downloadWithXhr({
+    url: `${getApiBaseUrl()}/training/users/${encodeURIComponent(userId)}/record-pdf`,
+    headers: authHeaders() as Record<string, string>,
+    fallbackFilename: `training-record-${userId}.pdf`,
+    onProgress: onProgress
+      ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt))
+      : undefined,
+    retries: 3,
+    retryStatuses: [404, 408, 409, 423, 425, 429, 500, 502, 503, 504],
   });
 }
 
-export async function downloadTrainingUserEvidencePack(userId: string): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const apiBaseUrl = getApiBaseUrl();
-    xhr.open(
-      "GET",
-      `${apiBaseUrl}/training/users/${encodeURIComponent(userId)}/evidence-pack`,
-    );
-    applyXhrHeaders(xhr, authHeaders());
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Request failed (${xhr.status})`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading training evidence pack."));
-    });
-
-    xhr.send();
+export async function downloadTrainingUserEvidencePack(userId: string, onProgress?: (progress: TransferProgress) => void): Promise<DownloadedFile> {
+  const startedAt = performance.now();
+  return downloadWithXhr({
+    url: `${getApiBaseUrl()}/training/users/${encodeURIComponent(userId)}/evidence-pack`,
+    headers: authHeaders() as Record<string, string>,
+    fallbackFilename: `training-evidence-${userId}.zip`,
+    onProgress: onProgress
+      ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt))
+      : undefined,
+    retries: 3,
   });
 }
 
@@ -589,6 +699,8 @@ export async function downloadTrainingUserEvidencePack(userId: string): Promise<
 export interface ListTrainingRecordsParams {
   user_id?: string;
   course_pk?: string;
+  limit?: number;
+  offset?: number;
 }
 
 /**
@@ -602,22 +714,29 @@ export async function listTrainingRecords(
   const sp = new URLSearchParams();
   if (params.user_id) sp.set("user_id", params.user_id);
   if (params.course_pk) sp.set("course_pk", params.course_pk);
-  if (!sp.has("limit")) sp.set("limit", "1000");
+  if (typeof params.limit === "number") sp.set("limit", String(params.limit));
+  if (typeof params.offset === "number") sp.set("offset", String(params.offset));
+  if (!sp.has("limit")) sp.set("limit", "50");
 
   const qs = sp.toString();
-  const path = qs ? `/training/records?${qs}` : "/training/records?limit=1000";
+  const path = qs ? `/training/records?${qs}` : "/training/records?limit=50";
 
   try {
-    return await apiGet<TrainingRecordRead[]>(path, {
-      headers: authHeaders(),
-    });
+    return await cachedTrainingGet(`records:${qs || "all"}`, 45_000, () =>
+      apiGet<TrainingRecordRead[]>(path, {
+        headers: authHeaders(),
+      }),
+    );
   } catch (error: any) {
     const message = String(error?.message || "").toLowerCase();
     if (message.includes("deadlock")) {
       await delay(120);
-      return apiGet<TrainingRecordRead[]>(path, {
-        headers: authHeaders(),
-      });
+      return cachedTrainingGet(`records:${qs || "all"}`, 45_000, () =>
+        apiGet<TrainingRecordRead[]>(path, {
+          headers: authHeaders(),
+        }),
+        true,
+      );
     }
     throw error;
   }
@@ -629,9 +748,29 @@ export async function listTrainingRecords(
 export async function createTrainingRecord(
   payload: TrainingRecordCreate,
 ): Promise<TrainingRecordRead> {
-  return apiPost<TrainingRecordRead>("/training/records", payload, {
+  const created = await apiPost<TrainingRecordRead>("/training/records", payload, {
     headers: authHeaders(),
   });
+  invalidateTrainingServiceCache();
+  return created;
+}
+
+export async function updateTrainingRecord(
+  recordId: string,
+  payload: TrainingRecordUpdate,
+): Promise<TrainingRecordRead> {
+  const updated = await apiPut<TrainingRecordRead>(`/training/records/${encodeURIComponent(recordId)}`, payload, {
+    headers: authHeaders(),
+  });
+  invalidateTrainingServiceCache();
+  return updated;
+}
+
+export async function deleteTrainingRecord(recordId: string): Promise<void> {
+  await apiDelete<void>(`/training/records/${encodeURIComponent(recordId)}`, undefined, {
+    headers: authHeaders(),
+  });
+  invalidateTrainingServiceCache();
 }
 
 // ---------------------------------------------------------------------------
@@ -645,9 +784,11 @@ export async function createTrainingRecord(
 export async function createTrainingDeferralRequest(
   payload: TrainingDeferralRequestCreate,
 ): Promise<TrainingDeferralRequestRead> {
-  return apiPost<TrainingDeferralRequestRead>("/training/deferrals", payload, {
+  const created = await apiPost<TrainingDeferralRequestRead>("/training/deferrals", payload, {
     headers: authHeaders(),
   });
+  invalidateTrainingServiceCache();
+  return created;
 }
 
 /**
@@ -657,7 +798,7 @@ export async function updateTrainingDeferralRequest(
   deferralId: string,
   payload: TrainingDeferralRequestUpdate,
 ): Promise<TrainingDeferralRequestRead> {
-  return apiPost<TrainingDeferralRequestRead>(
+  const updated = await apiPost<TrainingDeferralRequestRead>(
     `/training/deferrals/${encodeURIComponent(deferralId)}`,
     payload,
     {
@@ -665,6 +806,8 @@ export async function updateTrainingDeferralRequest(
       headers: authHeaders(),
     } as RequestInit,
   );
+  invalidateTrainingServiceCache();
+  return updated;
 }
 
 /**
@@ -693,9 +836,11 @@ export async function listTrainingDeferrals(
   if (params.offset) sp.set("offset", String(params.offset));
   const qs = sp.toString();
   const path = qs ? `/training/deferrals?${qs}` : "/training/deferrals";
-  return apiGet<TrainingDeferralRequestRead[]>(path, {
-    headers: authHeaders(),
-  });
+  return cachedTrainingGet(`deferrals:${qs || "all"}`, 45_000, () =>
+    apiGet<TrainingDeferralRequestRead[]>(path, {
+      headers: authHeaders(),
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -706,9 +851,11 @@ export async function listTrainingDeferrals(
  * Training status for the current logged-in user.
  */
 export async function getMyTrainingStatus(): Promise<TrainingStatusItem[]> {
-  return apiGet<TrainingStatusItem[]>("/training/status/me", {
-    headers: authHeaders(),
-  });
+  return cachedTrainingGet("status:me", 30_000, () =>
+    apiGet<TrainingStatusItem[]>("/training/status/me", {
+      headers: authHeaders(),
+    }),
+  );
 }
 
 export interface TrainingStatusBulkResponse {
@@ -718,13 +865,17 @@ export interface TrainingStatusBulkResponse {
 export async function getBulkTrainingStatusForUsers(
   userIds: string[],
 ): Promise<TrainingStatusBulkResponse> {
+  const sortedIds = [...userIds].sort();
+  const cacheKey = `status:bulk:${sortedIds.join(",")}`;
   try {
-    return await apiPost<TrainingStatusBulkResponse>(
-      "/training/status/users/bulk",
-      { user_ids: userIds },
-      {
-        headers: authHeaders(),
-      },
+    return await cachedTrainingGet(cacheKey, 30_000, () =>
+      apiPost<TrainingStatusBulkResponse>(
+        "/training/status/users/bulk",
+        { user_ids: sortedIds },
+        {
+          headers: authHeaders(),
+        },
+      ),
     );
   } catch {
     const users: Record<string, TrainingStatusItem[]> = {};
@@ -747,11 +898,13 @@ export async function getBulkTrainingStatusForUsers(
 export async function getUserTrainingStatus(
   userId: string,
 ): Promise<TrainingStatusItem[]> {
-  return apiGet<TrainingStatusItem[]>(
-    `/training/status/users/${encodeURIComponent(userId)}`,
-    {
-      headers: authHeaders(),
-    },
+  return cachedTrainingGet(`status:user:${userId}`, 30_000, () =>
+    apiGet<TrainingStatusItem[]>(
+      `/training/status/users/${encodeURIComponent(userId)}`,
+      {
+        headers: authHeaders(),
+      },
+    ),
   );
 }
 
@@ -821,19 +974,24 @@ export async function markAllTrainingNotificationsRead(): Promise<{ ok: boolean 
   );
 }
 
-export async function listTrainingCertificates(userId?: string): Promise<TrainingRecordRead[]> {
-  const path = userId
-    ? `/training/certificates?user_id=${encodeURIComponent(userId)}`
-    : "/training/certificates";
-  return apiGet<TrainingRecordRead[]>(path, { headers: authHeaders() });
+export async function listTrainingCertificates(userId?: string, opts: { limit?: number; offset?: number } = {}): Promise<TrainingRecordRead[]> {
+  const sp = new URLSearchParams();
+  if (userId) sp.set("user_id", userId);
+  if (typeof opts.limit === "number") sp.set("limit", String(opts.limit));
+  if (typeof opts.offset === "number") sp.set("offset", String(opts.offset));
+  const qs = sp.toString();
+  const path = qs ? `/training/certificates?${qs}` : "/training/certificates";
+  return cachedTrainingGet(`certificates:${qs || "all"}`, 45_000, () => apiGet<TrainingRecordRead[]>(path, { headers: authHeaders() }));
 }
 
 export async function issueTrainingCertificate(recordId: string): Promise<TrainingRecordRead> {
-  return apiPost<TrainingRecordRead>(
+  const issued = await apiPost<TrainingRecordRead>(
     `/training/certificates/issue/${encodeURIComponent(recordId)}`,
     {},
     { headers: authHeaders() },
   );
+  invalidateTrainingServiceCache();
+  return issued;
 }
 
 export type PublicCertificateVerification = {
@@ -859,4 +1017,62 @@ export async function verifyCertificatePublic(certificateNumber: string): Promis
     throw new Error((data as any)?.message || "Verification service unavailable");
   }
   return data;
+}
+
+export async function downloadTrainingCertificateArtifact(
+  recordId: string,
+  options: TrainingCertificateArtifactOptions = {},
+): Promise<DownloadedFile> {
+  const sp = new URLSearchParams();
+  Object.entries(options).forEach(([key, value]) => {
+    if (value) sp.set(key, String(value));
+  });
+  const qs = sp.toString();
+  const url = `${getApiBaseUrl()}${qs ? `/training/certificates/artifact/${encodeURIComponent(recordId)}?${qs}` : `/training/certificates/artifact/${encodeURIComponent(recordId)}`}`;
+  return downloadWithFetch(url, { headers: authHeaders() }, `training-certificate-${recordId}.pdf`, 180_000);
+}
+
+
+export async function listTrainingRecordsByUsers(
+  userIds: string[],
+  opts: { limit?: number; offset?: number } = {},
+): Promise<TrainingRecordRead[]> {
+  const sortedIds = [...new Set(userIds.map((id) => String(id).trim()).filter(Boolean))].sort();
+  if (sortedIds.length === 0) return [];
+  const key = `records:users:${sortedIds.join(",")}:${opts.limit ?? 500}:${opts.offset ?? 0}`;
+  return cachedTrainingGet(key, 45_000, () =>
+    apiPost<TrainingRecordRead[]>(
+      "/training/records/by-users",
+      { user_ids: sortedIds, limit: opts.limit ?? 500, offset: opts.offset ?? 0 },
+      { headers: authHeaders() },
+    ),
+  );
+}
+
+export async function getTrainingUserDetailBundle(
+  userId: string,
+  opts: { recordsLimit?: number; deferralsLimit?: number; filesLimit?: number; eventsLimit?: number } = {},
+): Promise<TrainingUserDetailBundle> {
+  const sp = new URLSearchParams();
+  sp.set("records_limit", String(opts.recordsLimit ?? 50));
+  sp.set("deferrals_limit", String(opts.deferralsLimit ?? 50));
+  sp.set("files_limit", String(opts.filesLimit ?? 50));
+  sp.set("events_limit", String(opts.eventsLimit ?? 20));
+  const qs = sp.toString();
+  return cachedTrainingGet(`detail-bundle:${userId}:${qs}`, 30_000, () =>
+    apiGet<TrainingUserDetailBundle>(`/training/users/${encodeURIComponent(userId)}/detail-bundle?${qs}`, {
+      headers: authHeaders(),
+    }),
+  );
+}
+
+export async function prefetchTrainingUserDetailBundle(
+  userId: string,
+  opts: { warmPdf?: boolean } = {},
+): Promise<void> {
+  const tasks: Array<Promise<unknown>> = [
+    getTrainingUserDetailBundle(userId, { recordsLimit: 25, deferralsLimit: 25, filesLimit: 25, eventsLimit: 10 }),
+  ];
+  if (opts.warmPdf) tasks.push(warmTrainingUserRecordPdf(userId));
+  await Promise.allSettled(tasks);
 }

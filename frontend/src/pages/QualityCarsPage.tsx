@@ -7,6 +7,7 @@ import ActionPanel, { type ActionPanelContext } from "../components/panels/Actio
 import { getCachedUser, getContext } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 import { deriveCarMetrics, isCarOverdue, isCarClosedStatus } from "../utils/carMetrics";
+import { saveDownloadedFile } from "../utils/downloads";
 import {
   type CAROut,
   type CARAssignee,
@@ -348,13 +349,8 @@ const QualityCarsPage: React.FC = () => {
     setError(null);
     setExportingId(car.id);
     try {
-      const blob = await downloadCarEvidencePack(car.id);
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `car_${car.car_number}_evidence_pack.zip`;
-      link.click();
-      window.URL.revokeObjectURL(url);
+      const downloaded = await downloadCarEvidencePack(car.id);
+      saveDownloadedFile(downloaded);
     } catch (e: any) {
       setError(e?.message || "Failed to export CAR evidence pack.");
     } finally {
@@ -463,7 +459,7 @@ const QualityCarsPage: React.FC = () => {
     const next = new URLSearchParams(searchParams);
     next.set("carId", entityId);
     navigate({
-      pathname: `/maintenance/${amoSlug}/${department}/cars`,
+      pathname: `/maintenance/${amoSlug}/qms/cars`,
       search: `?${next.toString()}`,
     });
   };
@@ -484,7 +480,7 @@ const QualityCarsPage: React.FC = () => {
           <button
             type="button"
             className="secondary-chip-btn"
-            onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms`)}
+            onClick={() => navigate(`/maintenance/${amoSlug}/qms`)}
           >
             Back to QMS overview
           </button>

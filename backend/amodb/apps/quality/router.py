@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timezone, timedelta
 import calendar
+import json
 from pathlib import Path
 import hashlib
 import re
@@ -10,13 +11,13 @@ import shutil
 import io
 import zipfile
 from threading import Lock
-from typing import Optional, List, Iterator
+from typing import Optional, List, Iterator, Any
 from uuid import UUID
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request, Response, Header
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from sqlalchemy import func, or_, inspect, cast, String
+from sqlalchemy import func, or_, inspect, cast, String, text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
@@ -27,7 +28,7 @@ from amodb.apps.audit import services as audit_services
 from amodb.apps.notifications import service as notification_service
 from amodb.apps.exports import build_evidence_pack
 from amodb.apps.tasks import services as task_services
-from amodb.database import get_db
+from amodb.database import get_db, get_read_db
 
 from . import models
 from . import transitions as car_transitions
@@ -53,7 +54,7 @@ from .schemas import (
     QMSDocumentRevisionCreate, QMSDocumentRevisionOut, QMSPublishRevision,
     QMSDistributionCreate, QMSDistributionOut,
     QMSChangeRequestCreate, QMSChangeRequestUpdate, QMSChangeRequestOut,
-    QMSAuditCreate, QMSAuditUpdate, QMSAuditOut, QMSAuditRegisterResponse, QMSAuditRegisterRowOut,
+    QMSAuditCreate, QMSAuditUpdate, QMSAuditOut, QMSAuditRegisterResponse, QMSAuditRegisterRowOut, QMSAuditWorkspaceOut, QMSAuditWorkflowSummaryOut, QMSAuditWorkflowStageOut,
     QMSFindingCreate, QMSFindingOut, QMSFindingVerify, QMSFindingAcknowledge,
     QMSAuditScheduleCreate, QMSAuditScheduleUpdate, QMSAuditScheduleOut,
     QMSCAPUpsert, QMSCAPOut,
@@ -102,7 +103,45 @@ def _ensure_qms_runtime_schema_compat(db: Session = Depends(get_db)) -> None:
         inspector = inspect(bind)
         if inspector.has_table("quality_cars") and not inspector.has_table("quality_car_responses"):
             models.CARResponse.__table__.create(bind=bind, checkfirst=True)
-            db.commit()
+
+        def _has_column(table_name: str, column_name: str) -> bool:
+            return column_name in {column["name"] for column in inspector.get_columns(table_name)}
+
+        def _add_column_if_missing(table_name: str, column_name: str, ddl: str) -> None:
+            if not inspector.has_table(table_name):
+                return
+            if _has_column(table_name, column_name):
+                return
+            db.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}"))
+
+        _add_column_if_missing("qms_audit_schedules", "amo_id", "VARCHAR(36)")
+        _add_column_if_missing("qms_audit_schedules", "external_auditees_json", "TEXT")
+        _add_column_if_missing("qms_audit_schedules", "notify_auditors", "BOOLEAN DEFAULT TRUE")
+        _add_column_if_missing("qms_audit_schedules", "notify_auditees", "BOOLEAN DEFAULT TRUE")
+        _add_column_if_missing("qms_audit_schedules", "reminder_interval_days", "INTEGER DEFAULT 7")
+        _add_column_if_missing("qms_audits", "external_auditees_json", "TEXT")
+        _add_column_if_missing("qms_audits", "notify_auditors", "BOOLEAN DEFAULT TRUE")
+        _add_column_if_missing("qms_audits", "notify_auditees", "BOOLEAN DEFAULT TRUE")
+        _add_column_if_missing("qms_audits", "reminder_interval_days", "INTEGER DEFAULT 7")
+
+        inspector = inspect(bind)
+
+        if inspector.has_table("qms_audit_schedules") and _has_column("qms_audit_schedules", "amo_id"):
+            db.execute(
+                text(
+                    """
+                    UPDATE qms_audit_schedules s
+                    SET amo_id = u.amo_id
+                    FROM users u
+                    WHERE s.amo_id IS NULL
+                      AND s.created_by_user_id IS NOT NULL
+                      AND u.id = s.created_by_user_id
+                      AND u.amo_id IS NOT NULL
+                    """
+                )
+            )
+
+        db.commit()
         _QMS_SCHEMA_COMPAT_READY = True
 
 
@@ -329,9 +368,14 @@ def _ensure_qms_notification_assets(db: Session) -> None:
 def _notify_user(db: Session, user_id: Optional[str], message: str, severity=models.QMSNotificationSeverity):
     if not user_id:
         return
+    recipient = _load_user(db, user_id)
+    amo_id = getattr(recipient, "effective_amo_id", None) or getattr(recipient, "amo_id", None)
+    if not amo_id:
+        return
 
     def _insert_notification() -> None:
         note = models.QMSNotification(
+            amo_id=amo_id,
             user_id=user_id,
             message=message,
             severity=severity,
@@ -374,6 +418,82 @@ def _normalized_email(value: Optional[str]) -> Optional[str]:
     return cleaned or None
 
 
+def _serialize_external_auditees(value: Optional[list[Any]]) -> Optional[str]:
+    cleaned: list[dict[str, str | None]] = []
+    for row in value or []:
+        if hasattr(row, "model_dump"):
+            item = row.model_dump()
+        elif isinstance(row, dict):
+            item = dict(row)
+        else:
+            continue
+        email = _normalized_email(item.get("email"))
+        first_name = (item.get("first_name") or "").strip()
+        last_name = (item.get("last_name") or "").strip()
+        designation = (item.get("designation") or "").strip()
+        phone_contact = _normalized_email(item.get("phone_contact"))
+        if not (first_name and last_name and email and designation):
+            continue
+        cleaned.append(
+            {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "phone_contact": phone_contact,
+                "designation": designation,
+            }
+        )
+    return json.dumps(cleaned) if cleaned else None
+
+
+def _deserialize_external_auditees(raw_value: Optional[str]) -> list[dict[str, Optional[str]]]:
+    if not raw_value:
+        return []
+    try:
+        rows = json.loads(raw_value)
+    except Exception:
+        return []
+    if not isinstance(rows, list):
+        return []
+    result: list[dict[str, Optional[str]]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        first_name = (row.get("first_name") or "").strip()
+        last_name = (row.get("last_name") or "").strip()
+        email = _normalized_email(row.get("email"))
+        designation = (row.get("designation") or "").strip()
+        phone_contact = _normalized_email(row.get("phone_contact"))
+        if not (first_name and last_name and email and designation):
+            continue
+        result.append(
+            {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "phone_contact": phone_contact,
+                "designation": designation,
+            }
+        )
+    return result
+
+
+def _external_auditee_summary(external_auditees: list[dict[str, Optional[str]]]) -> tuple[Optional[str], Optional[str]]:
+    if not external_auditees:
+        return None, None
+    first = external_auditees[0]
+    label = f"{first.get('first_name', '')} {first.get('last_name', '')}".strip() or None
+    return label, _normalized_email(first.get("email"))
+
+
+def _serialize_schedule(schedule: models.QMSAuditSchedule) -> QMSAuditScheduleOut:
+    return QMSAuditScheduleOut.model_validate(schedule, from_attributes=True)
+
+
+def _serialize_audit(audit: models.QMSAudit) -> QMSAuditOut:
+    return QMSAuditOut.model_validate(audit, from_attributes=True)
+
+
 def _collect_audit_notice_recipients(
     db: Session,
     *,
@@ -381,6 +501,9 @@ def _collect_audit_notice_recipients(
     auditee_user_id: Optional[str],
     auditee_email: Optional[str],
     auditee_label: Optional[str],
+    external_auditees: Optional[list[dict[str, Optional[str]]]] = None,
+    notify_auditors: bool = True,
+    notify_auditees: bool = True,
 ) -> list[dict[str, Optional[str]]]:
     recipients: list[dict[str, Optional[str]]] = []
     seen: set[tuple[Optional[str], Optional[str], Optional[str]]] = set()
@@ -402,7 +525,7 @@ def _collect_audit_notice_recipients(
         )
 
     lead_user = _load_user(db, lead_auditor_user_id)
-    if lead_user is not None:
+    if notify_auditors and lead_user is not None:
         _add(
             "lead_auditor",
             user=lead_user,
@@ -412,7 +535,7 @@ def _collect_audit_notice_recipients(
 
     auditee_user = _load_user(db, auditee_user_id)
     provided_auditee_email = _normalized_email(auditee_email)
-    if auditee_user is not None:
+    if notify_auditees and auditee_user is not None:
         internal_email = _normalized_email(getattr(auditee_user, "email", None))
         _add(
             "auditee",
@@ -422,8 +545,13 @@ def _collect_audit_notice_recipients(
         )
         if provided_auditee_email and provided_auditee_email.lower() != (internal_email or "").lower():
             _add("auditee_external", email=provided_auditee_email, label=auditee_label or provided_auditee_email)
-    elif provided_auditee_email:
+    elif notify_auditees and provided_auditee_email:
         _add("auditee_external", email=provided_auditee_email, label=auditee_label or provided_auditee_email)
+
+    if notify_auditees:
+        for item in external_auditees or []:
+            label = f"{item.get('first_name', '')} {item.get('last_name', '')}".strip() or item.get("designation") or item.get("email")
+            _add("auditee_external", email=item.get("email"), label=label)
 
     return recipients
 
@@ -460,6 +588,9 @@ def _dispatch_schedule_notice(db: Session, *, schedule: models.QMSAuditSchedule,
         auditee_user_id=schedule.auditee_user_id,
         auditee_email=schedule.auditee_email,
         auditee_label=schedule.auditee,
+        external_auditees=_deserialize_external_auditees(schedule.external_auditees_json),
+        notify_auditors=bool(schedule.notify_auditors),
+        notify_auditees=bool(schedule.notify_auditees),
     )
     for recipient in recipients:
         role = recipient["role"] or "recipient"
@@ -494,7 +625,9 @@ def _dispatch_schedule_notice(db: Session, *, schedule: models.QMSAuditSchedule,
                 "scope": schedule.scope,
                 "criteria": schedule.criteria,
                 "auditee": schedule.auditee,
+                "external_auditees": _deserialize_external_auditees(schedule.external_auditees_json),
                 "lead_auditor": lead_label,
+                "reminder_interval_days": schedule.reminder_interval_days,
             },
             correlation_id=str(schedule.id),
         )
@@ -511,6 +644,9 @@ def _dispatch_audit_notice(db: Session, *, audit: models.QMSAudit, amo_id: str) 
         auditee_user_id=audit.auditee_user_id,
         auditee_email=audit.auditee_email,
         auditee_label=audit.auditee,
+        external_auditees=_deserialize_external_auditees(audit.external_auditees_json),
+        notify_auditors=bool(audit.notify_auditors),
+        notify_auditees=bool(audit.notify_auditees),
     )
     for recipient in recipients:
         role = recipient["role"] or "recipient"
@@ -545,7 +681,9 @@ def _dispatch_audit_notice(db: Session, *, audit: models.QMSAudit, amo_id: str) 
                 "scope": audit.scope,
                 "criteria": audit.criteria,
                 "auditee": audit.auditee,
+                "external_auditees": _deserialize_external_auditees(audit.external_auditees_json),
                 "lead_auditor": lead_label,
+                "reminder_interval_days": audit.reminder_interval_days,
             },
             correlation_id=str(audit.id),
         )
@@ -743,7 +881,9 @@ def create_document(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    amo_id = _current_amo_id(current_user)
     doc = models.QMSDocument(
+        amo_id=amo_id,
         domain=payload.domain,
         doc_type=payload.doc_type,
         doc_code=payload.doc_code.strip(),
@@ -774,12 +914,13 @@ def create_document(
 @router.get("/qms/documents", response_model=List[QMSDocumentOut])
 def list_documents(
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
     domain: Optional[QMSDomain] = None,
     doc_type: Optional[models.QMSDocType] = None,
     status_: Optional[models.QMSDocStatus] = None,
     q: Optional[str] = None,
 ):
-    qs = db.query(models.QMSDocument)
+    qs = db.query(models.QMSDocument).filter(models.QMSDocument.amo_id == _current_amo_id(current_user))
 
     if domain:
         qs = qs.filter(models.QMSDocument.domain == domain)
@@ -795,8 +936,15 @@ def list_documents(
 
 
 @router.get("/qms/documents/{doc_id}", response_model=QMSDocumentOut)
-def get_document(doc_id: UUID, db: Session = Depends(get_db)):
-    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
+def get_document(
+    doc_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    doc = db.query(models.QMSDocument).filter(
+        models.QMSDocument.id == doc_id,
+        models.QMSDocument.amo_id == _current_amo_id(current_user),
+    ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
@@ -811,7 +959,10 @@ def update_document(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _enforce_aerodoc_control(current_user)
-    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
+    doc = db.query(models.QMSDocument).filter(
+        models.QMSDocument.id == doc_id,
+        models.QMSDocument.amo_id == _current_amo_id(current_user),
+    ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     before = {"status": doc.status.value, "title": doc.title, "doc_code": doc.doc_code}
@@ -852,7 +1003,10 @@ def add_revision(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _enforce_aerodoc_control(current_user)
-    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
+    doc = db.query(models.QMSDocument).filter(
+        models.QMSDocument.id == doc_id,
+        models.QMSDocument.amo_id == _current_amo_id(current_user),
+    ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -860,6 +1014,7 @@ def add_revision(
         raise HTTPException(status_code=400, detail="temporary_expires_on is required for temporary revisions")
 
     rev = models.QMSDocumentRevision(
+        amo_id=doc.amo_id,
         document_id=doc.id,
         issue_no=payload.issue_no,
         rev_no=payload.rev_no,
@@ -904,10 +1059,17 @@ def add_revision(
 
 
 @router.get("/qms/documents/{doc_id}/revisions", response_model=List[QMSDocumentRevisionOut])
-def list_revisions(doc_id: UUID, db: Session = Depends(get_db)):
+def list_revisions(
+    doc_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
     return (
         db.query(models.QMSDocumentRevision)
-        .filter(models.QMSDocumentRevision.document_id == doc_id)
+        .filter(
+            models.QMSDocumentRevision.document_id == doc_id,
+            models.QMSDocumentRevision.amo_id == _current_amo_id(current_user),
+        )
         .order_by(models.QMSDocumentRevision.created_at.desc())
         .all()
     )
@@ -922,13 +1084,20 @@ def publish_revision(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
+    doc = db.query(models.QMSDocument).filter(
+        models.QMSDocument.id == doc_id,
+        models.QMSDocument.amo_id == _current_amo_id(current_user),
+    ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     rev = (
         db.query(models.QMSDocumentRevision)
-        .filter(models.QMSDocumentRevision.id == revision_id, models.QMSDocumentRevision.document_id == doc_id)
+        .filter(
+            models.QMSDocumentRevision.id == revision_id,
+            models.QMSDocumentRevision.document_id == doc_id,
+            models.QMSDocumentRevision.amo_id == _current_amo_id(current_user),
+        )
         .first()
     )
     if not rev:
@@ -1003,11 +1172,15 @@ def create_distribution(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == payload.document_id).first()
+    doc = db.query(models.QMSDocument).filter(
+        models.QMSDocument.id == payload.document_id,
+        models.QMSDocument.amo_id == _current_amo_id(current_user),
+    ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     dist = models.QMSDocumentDistribution(
+        amo_id=doc.amo_id,
         document_id=payload.document_id,
         revision_id=payload.revision_id,
         copy_number=payload.copy_number,
@@ -1042,11 +1215,14 @@ def create_distribution(
 @router.get("/qms/distributions", response_model=List[QMSDistributionOut])
 def list_distributions(
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
     document_id: Optional[UUID] = None,
     holder_user_id: Optional[str] = None,
     outstanding_only: bool = False,
 ):
-    qs = db.query(models.QMSDocumentDistribution)
+    qs = db.query(models.QMSDocumentDistribution).filter(
+        models.QMSDocumentDistribution.amo_id == _current_amo_id(current_user)
+    )
     if document_id:
         qs = qs.filter(models.QMSDocumentDistribution.document_id == document_id)
     if holder_user_id:
@@ -1161,6 +1337,10 @@ def create_audit(
         amo_id=scoped_amo_id,
         target_date=payload.planned_start,
     )
+    external_auditees = [item.model_dump() if hasattr(item, "model_dump") else dict(item) for item in (payload.external_auditees or [])]
+    external_auditee_name, external_auditee_email = _external_auditee_summary(external_auditees)
+    derived_auditee = payload.auditee or (external_auditee_name if payload.kind in {models.QMSAuditKind.EXTERNAL, models.QMSAuditKind.THIRD_PARTY} else None)
+    derived_email = payload.auditee_email or (external_auditee_email if payload.kind in {models.QMSAuditKind.EXTERNAL, models.QMSAuditKind.THIRD_PARTY} else None)
     audit = models.QMSAudit(
         amo_id=scoped_amo_id,
         domain=payload.domain,
@@ -1173,12 +1353,16 @@ def create_audit(
         title=payload.title.strip(),
         scope=payload.scope,
         criteria=payload.criteria,
-        auditee=payload.auditee,
-        auditee_email=payload.auditee_email,
+        auditee=derived_auditee,
+        auditee_email=derived_email,
         auditee_user_id=payload.auditee_user_id,
+        external_auditees_json=_serialize_external_auditees(external_auditees),
         lead_auditor_user_id=payload.lead_auditor_user_id,
         observer_auditor_user_id=payload.observer_auditor_user_id,
         assistant_auditor_user_id=payload.assistant_auditor_user_id,
+        notify_auditors=payload.notify_auditors,
+        notify_auditees=payload.notify_auditees,
+        reminder_interval_days=payload.reminder_interval_days,
         planned_start=payload.planned_start,
         planned_end=payload.planned_end,
         created_by_user_id=get_actor(),
@@ -1199,7 +1383,7 @@ def create_audit(
     _dispatch_audit_notice(db, audit=audit, amo_id=str(current_user.amo_id))
     db.commit()
     db.refresh(audit)
-    return audit
+    return _serialize_audit(audit)
 
 
 @router.get("/audits", response_model=List[QMSAuditOut])
@@ -1218,7 +1402,8 @@ def list_audits(
         qs = qs.filter(models.QMSAudit.status == status_)
     if kind:
         qs = qs.filter(models.QMSAudit.kind == kind)
-    return qs.order_by(models.QMSAudit.created_at.desc()).all()
+    audits = qs.order_by(models.QMSAudit.created_at.desc()).all()
+    return [_serialize_audit(audit) for audit in audits]
 
 
 @router.get("/audits/findings", response_model=List[QMSFindingOut])
@@ -1299,13 +1484,16 @@ def list_audit_schedules(
     db: Session = Depends(get_db),
     domain: Optional[QMSDomain] = None,
     active: Optional[bool] = None,
+    current_user: account_models.User = Depends(get_current_active_user),
 ):
-    qs = db.query(models.QMSAuditSchedule)
+    scoped_amo_id = _current_amo_id(current_user)
+    qs = db.query(models.QMSAuditSchedule).filter(models.QMSAuditSchedule.amo_id == scoped_amo_id)
     if domain:
         qs = qs.filter(models.QMSAuditSchedule.domain == domain)
     if active is not None:
         qs = qs.filter(models.QMSAuditSchedule.is_active.is_(active))
-    return qs.order_by(models.QMSAuditSchedule.next_due_date.asc()).all()
+    schedules = qs.order_by(models.QMSAuditSchedule.next_due_date.asc()).all()
+    return [_serialize_schedule(schedule) for schedule in schedules]
 
 
 @router.get("/audits/personnel/options", response_model=List[QMSPersonOptionOut])
@@ -1374,19 +1562,29 @@ def create_audit_schedule(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_quality_scheduler(current_user)
+    scoped_amo_id = _current_amo_id(current_user)
+    external_auditees = [item.model_dump() if hasattr(item, "model_dump") else dict(item) for item in (payload.external_auditees or [])]
+    external_auditee_name, external_auditee_email = _external_auditee_summary(external_auditees)
+    derived_auditee = payload.auditee or (external_auditee_name if payload.kind in {models.QMSAuditKind.EXTERNAL, models.QMSAuditKind.THIRD_PARTY} else None)
+    derived_email = payload.auditee_email or (external_auditee_email if payload.kind in {models.QMSAuditKind.EXTERNAL, models.QMSAuditKind.THIRD_PARTY} else None)
     schedule = models.QMSAuditSchedule(
+        amo_id=scoped_amo_id,
         domain=payload.domain,
         kind=payload.kind,
         frequency=payload.frequency,
         title=payload.title.strip(),
         scope=payload.scope,
         criteria=payload.criteria,
-        auditee=payload.auditee,
-        auditee_email=payload.auditee_email,
+        auditee=derived_auditee,
+        auditee_email=derived_email,
         auditee_user_id=payload.auditee_user_id,
+        external_auditees_json=_serialize_external_auditees(external_auditees),
         lead_auditor_user_id=payload.lead_auditor_user_id,
         observer_auditor_user_id=payload.observer_auditor_user_id,
         assistant_auditor_user_id=payload.assistant_auditor_user_id,
+        notify_auditors=payload.notify_auditors,
+        notify_auditees=payload.notify_auditees,
+        reminder_interval_days=payload.reminder_interval_days,
         duration_days=payload.duration_days,
         next_due_date=payload.next_due_date,
         created_by_user_id=get_actor(),
@@ -1411,7 +1609,7 @@ def create_audit_schedule(
     _dispatch_schedule_notice(db, schedule=schedule, amo_id=str(current_user.amo_id))
     db.commit()
     db.refresh(schedule)
-    return schedule
+    return _serialize_schedule(schedule)
 
 
 @router.patch("/audits/schedules/{schedule_id}", response_model=QMSAuditScheduleOut)
@@ -1423,9 +1621,11 @@ def update_audit_schedule(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _require_quality_scheduler(current_user)
+    scoped_amo_id = _current_amo_id(current_user)
     schedule = (
         db.query(models.QMSAuditSchedule)
         .filter(models.QMSAuditSchedule.id == schedule_id)
+        .filter(models.QMSAuditSchedule.amo_id == scoped_amo_id)
         .first()
     )
     if not schedule:
@@ -1440,14 +1640,17 @@ def update_audit_schedule(
         "auditee_user_id": schedule.auditee_user_id,
         "auditee_email": schedule.auditee_email,
         "is_active": schedule.is_active,
+        "notify_auditors": schedule.notify_auditors,
+        "notify_auditees": schedule.notify_auditees,
+        "reminder_interval_days": schedule.reminder_interval_days,
     }
 
     changes = payload.model_dump(exclude_unset=True)
     if "title" in changes:
         schedule.title = (changes["title"] or "").strip()
-    if "kind" in changes:
+    if "kind" in changes and changes["kind"] is not None:
         schedule.kind = changes["kind"]
-    if "frequency" in changes:
+    if "frequency" in changes and changes["frequency"] is not None:
         schedule.frequency = changes["frequency"]
     if "scope" in changes:
         schedule.scope = changes["scope"]
@@ -1465,12 +1668,33 @@ def update_audit_schedule(
         schedule.observer_auditor_user_id = changes["observer_auditor_user_id"]
     if "assistant_auditor_user_id" in changes:
         schedule.assistant_auditor_user_id = changes["assistant_auditor_user_id"]
+    if "notify_auditors" in changes and changes["notify_auditors"] is not None:
+        schedule.notify_auditors = changes["notify_auditors"]
+    if "notify_auditees" in changes and changes["notify_auditees"] is not None:
+        schedule.notify_auditees = changes["notify_auditees"]
+    if "reminder_interval_days" in changes and changes["reminder_interval_days"] is not None:
+        schedule.reminder_interval_days = changes["reminder_interval_days"]
     if "duration_days" in changes and changes["duration_days"] is not None:
         schedule.duration_days = changes["duration_days"]
     if "next_due_date" in changes and changes["next_due_date"] is not None:
         schedule.next_due_date = changes["next_due_date"]
     if "is_active" in changes and changes["is_active"] is not None:
         schedule.is_active = changes["is_active"]
+
+    if "external_auditees" in changes:
+        external_auditees = [item.model_dump() if hasattr(item, "model_dump") else dict(item) for item in (changes.get("external_auditees") or [])]
+        schedule.external_auditees_json = _serialize_external_auditees(external_auditees)
+        external_auditee_name, external_auditee_email = _external_auditee_summary(external_auditees)
+        if schedule.kind in {models.QMSAuditKind.EXTERNAL, models.QMSAuditKind.THIRD_PARTY}:
+            schedule.auditee = changes.get("auditee") if "auditee" in changes else (schedule.auditee or external_auditee_name)
+            schedule.auditee_email = changes.get("auditee_email") if "auditee_email" in changes else (schedule.auditee_email or external_auditee_email)
+
+    if schedule.kind in {models.QMSAuditKind.EXTERNAL, models.QMSAuditKind.THIRD_PARTY} and schedule.external_auditees:
+        external_auditee_name, external_auditee_email = _external_auditee_summary(schedule.external_auditees)
+        if not schedule.auditee:
+            schedule.auditee = external_auditee_name
+        if not schedule.auditee_email:
+            schedule.auditee_email = external_auditee_email
 
     audit_services.log_event(
         db,
@@ -1487,6 +1711,9 @@ def update_audit_schedule(
             "next_due_date": str(schedule.next_due_date),
             "lead_auditor_user_id": schedule.lead_auditor_user_id,
             "is_active": schedule.is_active,
+            "notify_auditors": schedule.notify_auditors,
+            "notify_auditees": schedule.notify_auditees,
+            "reminder_interval_days": schedule.reminder_interval_days,
         },
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
@@ -1498,12 +1725,15 @@ def update_audit_schedule(
         or before["auditee_email"] != schedule.auditee_email
         or before["next_due_date"] != str(schedule.next_due_date)
         or before["title"] != schedule.title
+        or before["notify_auditors"] != schedule.notify_auditors
+        or before["notify_auditees"] != schedule.notify_auditees
+        or before["reminder_interval_days"] != schedule.reminder_interval_days
     ):
         _dispatch_schedule_notice(db, schedule=schedule, amo_id=str(current_user.amo_id))
 
     db.commit()
     db.refresh(schedule)
-    return schedule
+    return _serialize_schedule(schedule)
 
 
 @router.delete("/audits/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1517,6 +1747,7 @@ def delete_audit_schedule(
     schedule = (
         db.query(models.QMSAuditSchedule)
         .filter(models.QMSAuditSchedule.id == schedule_id)
+        .filter(models.QMSAuditSchedule.amo_id == _current_amo_id(current_user))
         .first()
     )
     if not schedule:
@@ -1552,9 +1783,11 @@ def run_audit_schedule(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    scoped_amo_id = _current_amo_id(current_user)
     schedule = (
         db.query(models.QMSAuditSchedule)
         .filter(models.QMSAuditSchedule.id == schedule_id)
+        .filter(models.QMSAuditSchedule.amo_id == scoped_amo_id)
         .first()
     )
     if not schedule:
@@ -1566,11 +1799,11 @@ def run_audit_schedule(
     planned_end = planned_start + timedelta(days=max(schedule.duration_days, 1) - 1)
     audit_ref, unit_code, ref_year, ref_sequence = _generate_audit_reference(
         db,
-        amo_id=_current_amo_id(current_user),
+        amo_id=scoped_amo_id,
         target_date=planned_start,
     )
     audit = models.QMSAudit(
-        amo_id=_current_amo_id(current_user),
+        amo_id=scoped_amo_id,
         domain=schedule.domain,
         kind=schedule.kind,
         audit_ref=audit_ref,
@@ -1584,9 +1817,13 @@ def run_audit_schedule(
         auditee=schedule.auditee,
         auditee_email=schedule.auditee_email,
         auditee_user_id=schedule.auditee_user_id,
+        external_auditees_json=schedule.external_auditees_json,
         lead_auditor_user_id=schedule.lead_auditor_user_id,
         observer_auditor_user_id=schedule.observer_auditor_user_id,
         assistant_auditor_user_id=schedule.assistant_auditor_user_id,
+        notify_auditors=schedule.notify_auditors,
+        notify_auditees=schedule.notify_auditees,
+        reminder_interval_days=schedule.reminder_interval_days,
         planned_start=planned_start,
         planned_end=planned_end,
         created_by_user_id=get_actor(),
@@ -1629,7 +1866,7 @@ def run_audit_schedule(
     _dispatch_audit_notice(db, audit=audit, amo_id=str(current_user.amo_id))
     db.commit()
     db.refresh(audit)
-    return audit
+    return _serialize_audit(audit)
 
 
 @router.post("/audits/reminders/run")
@@ -1718,6 +1955,117 @@ def run_audit_reminders(
     return {"day_of_sent": day_of_sent, "upcoming_sent": upcoming_sent}
 
 
+
+
+def _build_audit_workflow_summary(db: Session, audit: models.QMSAudit) -> QMSAuditWorkflowSummaryOut:
+    findings = db.query(models.QMSAuditFinding).filter(models.QMSAuditFinding.audit_id == audit.id).all()
+    finding_ids = [finding.id for finding in findings]
+    cars = (
+        db.query(models.CorrectiveActionRequest)
+        .filter(models.CorrectiveActionRequest.finding_id.in_(finding_ids) if finding_ids else False)
+        .all()
+        if finding_ids
+        else []
+    )
+    findings_open = sum(1 for finding in findings if not finding.closed_at)
+    cars_open = sum(1 for car in cars if car.status != models.CARStatus.CLOSED)
+    checklist_uploaded = bool(audit.checklist_file_ref)
+    report_uploaded = bool(audit.report_file_ref)
+
+    stage_defs = [
+        {
+            "id": "planned",
+            "label": "Scheduled",
+            "complete": bool(audit.planned_start and audit.planned_end),
+            "helper": "Audit window, type, participants, and notice plan are set.",
+            "metric": date.today().isoformat() if not audit.planned_start else audit.planned_start.isoformat(),
+        },
+        {
+            "id": "prepared",
+            "label": "Prepared",
+            "complete": checklist_uploaded,
+            "helper": "Checklist and supporting preparation documents are in place.",
+            "metric": "Checklist ready" if checklist_uploaded else "Checklist pending",
+        },
+        {
+            "id": "fieldwork",
+            "label": "Fieldwork",
+            "complete": bool(findings),
+            "helper": "Findings have been captured against the audit scope.",
+            "metric": f"{len(findings)} finding(s)",
+        },
+        {
+            "id": "corrective_action",
+            "label": "Corrective action",
+            "complete": bool(findings) and cars_open == 0,
+            "helper": "CARs are issued, responded to, and verified where required.",
+            "metric": f"{cars_open} CAR(s) open" if cars else "No CARs issued",
+        },
+        {
+            "id": "closed",
+            "label": "Closed",
+            "complete": audit.status == models.QMSAuditStatus.CLOSED,
+            "helper": "Report issued, evidence pack ready, and closure accepted.",
+            "metric": "Closed" if audit.status == models.QMSAuditStatus.CLOSED else "Open",
+        },
+    ]
+
+    if audit.status == models.QMSAuditStatus.CLOSED:
+        current_stage_id = "closed"
+    elif cars:
+        current_stage_id = "corrective_action"
+    elif findings:
+        current_stage_id = "fieldwork"
+    elif checklist_uploaded:
+        current_stage_id = "prepared"
+    else:
+        current_stage_id = "planned"
+
+    stages: list[QMSAuditWorkflowStageOut] = []
+    for entry in stage_defs:
+        stages.append(
+            QMSAuditWorkflowStageOut(
+                id=entry["id"],
+                label=entry["label"],
+                complete=bool(entry["complete"]),
+                active=entry["id"] == current_stage_id,
+                helper=entry["helper"],
+                metric=entry["metric"],
+            )
+        )
+
+    percent_complete = int(round((sum(1 for stage in stages if stage.complete) / max(len(stages), 1)) * 100))
+    latest_ack = next((finding for finding in sorted(findings, key=lambda row: row.created_at, reverse=True) if finding.acknowledged_by_name or finding.acknowledged_by_email), None)
+
+    return QMSAuditWorkflowSummaryOut(
+        audit_id=audit.id,
+        current_stage_id=current_stage_id,
+        current_stage_label=next(stage.label for stage in stages if stage.id == current_stage_id),
+        percent_complete=percent_complete,
+        findings_total=len(findings),
+        findings_open=findings_open,
+        cars_total=len(cars),
+        cars_open=cars_open,
+        checklist_uploaded=checklist_uploaded,
+        report_uploaded=report_uploaded,
+        acknowledged_by_name=getattr(latest_ack, "acknowledged_by_name", None),
+        acknowledged_by_email=getattr(latest_ack, "acknowledged_by_email", None),
+        created_at=audit.created_at,
+        stages=stages,
+    )
+
+
+@router.get("/audits/{audit_id}/workflow-check", response_model=QMSAuditWorkspaceOut)
+def get_audit_workflow_check(
+    audit_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    audit = _get_audit_for_amo(db, amo_id=_current_amo_id(current_user), audit_id=audit_id)
+    workflow = _build_audit_workflow_summary(db, audit)
+    return QMSAuditWorkspaceOut(audit=_serialize_audit(audit), workflow=workflow)
+
+
 @router.get("/audits/{audit_id}/evidence-pack")
 def export_audit_evidence_pack(
     audit_id: UUID,
@@ -1777,7 +2125,7 @@ def upload_audit_checklist(
     )
     db.commit()
     db.refresh(audit)
-    return audit
+    return _serialize_audit(audit)
 
 
 @router.get("/audits/{audit_id}/checklist", response_class=FileResponse)
@@ -1795,7 +2143,7 @@ def download_audit_checklist(
         raise HTTPException(status_code=404, detail="Checklist file missing on server.")
     return FileResponse(
         path=file_path,
-        filename=file_path.name,
+        filename=_audit_download_filename(audit, "checklist", file_path),
         media_type="application/octet-stream",
     )
 
@@ -1839,7 +2187,7 @@ def upload_audit_report(
     )
     db.commit()
     db.refresh(audit)
-    return audit
+    return _serialize_audit(audit)
 
 
 @router.get("/audits/{audit_id}/report", response_class=FileResponse)
@@ -1857,7 +2205,7 @@ def download_audit_report(
         raise HTTPException(status_code=404, detail="Report file missing on server.")
     return FileResponse(
         path=file_path,
-        filename=file_path.name,
+        filename=_audit_download_filename(audit, "report", file_path),
         media_type="application/octet-stream",
     )
 
@@ -1984,6 +2332,7 @@ def add_finding(
         target_close_date = compute_target_close_date(level)
 
     finding = models.QMSAuditFinding(
+        amo_id=audit.amo_id,
         audit_id=audit_id,
         finding_ref=payload.finding_ref,
         finding_type=payload.finding_type,
@@ -2201,7 +2550,7 @@ def upsert_cap(
     cap = db.query(models.QMSCorrectiveAction).filter(models.QMSCorrectiveAction.finding_id == finding_id).first()
     created_cap = False
     if not cap:
-        cap = models.QMSCorrectiveAction(finding_id=finding_id)
+        cap = models.QMSCorrectiveAction(amo_id=finding.amo_id, finding_id=finding_id)
         db.add(cap)
         created_cap = True
 
@@ -2345,6 +2694,7 @@ def create_car_request(
             due_date=payload.due_date,
             target_closure_date=payload.target_closure_date,
             finding_id=payload.finding_id,
+            amo_id=_current_amo_id(current_user),
         )
         car.evidence_required = payload.evidence_required
         if car.assigned_to_user_id:
@@ -2381,12 +2731,15 @@ def create_car_request(
 @router.get("/cars", response_model=List[CAROut])
 def list_cars(
     db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
     program: Optional[models.CARProgram] = None,
     status_: Optional[models.CARStatus] = None,
     assigned_to_user_id: Optional[str] = None,
 ):
     try:
-        qs = db.query(models.CorrectiveActionRequest)
+        qs = db.query(models.CorrectiveActionRequest).filter(
+            models.CorrectiveActionRequest.amo_id == _current_amo_id(current_user)
+        )
         if program:
             qs = qs.filter(models.CorrectiveActionRequest.program == program)
         if status_:
@@ -3277,7 +3630,7 @@ def _make_qms_notification_summary_etag(payload: QMSNotificationSummaryOut) -> s
 def get_my_notification_summary(
     response: Response,
     if_none_match: Optional[str] = Header(default=None),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_read_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     user_id = get_actor() or str(current_user.id)
@@ -3504,10 +3857,13 @@ def upload_doc_revision(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     _enforce_aerodoc_control(current_user)
-    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id).first()
+    doc = db.query(models.QMSDocument).filter(
+        models.QMSDocument.id == doc_id,
+        models.QMSDocument.amo_id == _current_amo_id(current_user),
+    ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    rev = models.QMSDocumentRevision(document_id=doc.id, issue_no=issue_no, rev_no=rev_no, created_by_user_id=get_actor(), version_semver=version_semver)
+    rev = models.QMSDocumentRevision(amo_id=doc.amo_id, document_id=doc.id, issue_no=issue_no, rev_no=rev_no, created_by_user_id=get_actor(), version_semver=version_semver)
     db.add(rev)
     db.flush()
     sha256, byte_size, storage_path = _store_aerodoc_upload(doc.id, rev.id, file)
@@ -3627,12 +3983,16 @@ def verify_physical_copy(serial: str, db: Session = Depends(get_db), current_use
 @router.post("/qms/revisions/issue", response_model=QMSDocumentRevisionOut, dependencies=[Depends(_require_aerodoc_module)])
 def issue_revision(payload: QMSIssueRevisionRequest, request: Request, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
     _enforce_aerodoc_control(current_user)
-    doc = db.query(models.QMSDocument).filter(models.QMSDocument.id == payload.doc_id).first()
+    doc = db.query(models.QMSDocument).filter(
+        models.QMSDocument.id == payload.doc_id,
+        models.QMSDocument.amo_id == _current_amo_id(current_user),
+    ).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     db.query(models.QMSDocumentRevision).filter(
         models.QMSDocumentRevision.document_id == payload.doc_id,
+        models.QMSDocumentRevision.amo_id == _current_amo_id(current_user),
         models.QMSDocumentRevision.lifecycle_status == QMSRevisionLifecycleStatus.APPROVED,
     ).update({
         models.QMSDocumentRevision.lifecycle_status: QMSRevisionLifecycleStatus.SUPERSEDED,
@@ -3640,6 +4000,7 @@ def issue_revision(payload: QMSIssueRevisionRequest, request: Request, db: Sessi
     }, synchronize_session=False)
 
     rev = models.QMSDocumentRevision(
+        amo_id=doc.amo_id,
         document_id=payload.doc_id,
         issue_no=payload.issue_no,
         rev_no=payload.rev_no,

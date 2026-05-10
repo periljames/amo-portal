@@ -19,5 +19,5 @@ export function buildAuditWorkspacePath(params: {
   department: string;
   auditRef: string;
 }): string {
-  return `/maintenance/${params.amoCode}/${params.department}/qms/audits/${toAuditReferenceSlug(params.auditRef)}`;
+  return `/maintenance/${params.amoCode}/qms/audits/${toAuditReferenceSlug(params.auditRef)}`;
 }

@@ -117,76 +117,29 @@ export async function listReliabilityReports(options?: { force?: boolean }): Pro
 export async function downloadReliabilityReport(
   reportId: number,
   onProgress?: (progress: TransferProgress) => void
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const startedAt = performance.now();
-    markSessionActivity("reliability-report-download");
-    xhr.open("GET", `${API_BASE}/reliability/reports/${reportId}/download`);
-    const headers = buildAuthHeader();
-    Object.entries(headers).forEach(([key, value]) => {
-      xhr.setRequestHeader(key, value);
-    });
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("progress", (event) => {
-      if (!onProgress) return;
-      const total = event.lengthComputable ? event.total : undefined;
-      markSessionActivity("reliability-report-download-progress");
-      onProgress(buildSpeed(event.loaded, total, startedAt));
-    });
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Request failed (${xhr.status})`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading report."));
-    });
-
-    xhr.send();
+): Promise<DownloadedFile> {
+  const startedAt = performance.now();
+  markSessionActivity("reliability-report-download");
+  return downloadWithXhr({
+    url: `${API_BASE}/reliability/reports/${reportId}/download`,
+    headers: buildAuthHeader(),
+    fallbackFilename: `reliability-report-${reportId}.pdf`,
+    onProgress: onProgress
+      ? (loaded, total) => {
+          markSessionActivity("reliability-report-download-progress");
+          onProgress(buildSpeed(loaded, total, startedAt));
+        }
+      : undefined,
+    retries: 3,
   });
 }
 
-export async function downloadFracasEvidencePack(caseId: number): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    markSessionActivity("fracas-export");
-    xhr.open("GET", `${API_BASE}/reliability/fracas/${caseId}/evidence-pack`);
-    const headers = buildAuthHeader();
-    Object.entries(headers).forEach(([key, value]) => {
-      xhr.setRequestHeader(key, value);
-    });
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Request failed (${xhr.status})`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading FRACAS evidence pack."));
-    });
-
-    xhr.send();
+export async function downloadFracasEvidencePack(caseId: number): Promise<DownloadedFile> {
+  markSessionActivity("fracas-export");
+  return downloadWithXhr({
+    url: `${API_BASE}/reliability/fracas/${caseId}/evidence-pack`,
+    headers: buildAuthHeader(),
+    fallbackFilename: `fracas-${caseId}-evidence-pack.zip`,
+    retries: 3,
   });
 }

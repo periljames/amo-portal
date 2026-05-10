@@ -16,7 +16,7 @@ import {
   qmsGetDashboard,
   qmsListAudits,
   qmsListCars,
-  qmsListFindings,
+  qmsListFindingsBulk,
   qmsListAuditSchedules,
   type CAROut,
   type QMSAuditOut,
@@ -177,19 +177,26 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
 
   const schedulesQuery = useQuery({
     queryKey: ["qms-audit-schedules", amoCode],
-    queryFn: () => qmsListAuditSchedules({ domain: "AMO", active: true }),
+    queryFn: () => qmsListAuditSchedules({ domain: "AMO", active: true }, { silent: true }),
     staleTime: 60_000,
   });
 
   const auditsQuery = useQuery({
     queryKey: ["qms-audits", "schedule-detail", amoCode],
-    queryFn: () => qmsListAudits({ domain: "AMO" }),
+    queryFn: () => qmsListAudits({ domain: "AMO", limit: 300 }, { silent: true }),
     staleTime: 60_000,
   });
 
   const carsQuery = useQuery({
     queryKey: ["qms-cars", "schedule-detail", amoCode],
-    queryFn: () => qmsListCars({}),
+    queryFn: async () => {
+      if (scheduleAudits.length === 0) return [];
+      const batches = await Promise.all(
+        scheduleAudits.map((audit) => qmsListCars({ audit_id: audit.id, limit: 200 }, { silent: true }))
+      );
+      return batches.flat();
+    },
+    enabled: scheduleAudits.length > 0,
     staleTime: 60_000,
   });
 
@@ -215,13 +222,18 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
   const findingsQueries = useQuery({
     queryKey: ["qms-findings", "schedule-detail", amoCode, scheduleId, scheduleAudits.map((item) => item.id).join(",")],
     queryFn: async () => {
-      const rows = await Promise.all(
-        scheduleAudits.map(async (audit) => ({
-          audit,
-          findings: await qmsListFindings(audit.id),
-        }))
-      );
-      return rows;
+      const auditIds = scheduleAudits.map((audit) => audit.id);
+      const findings = await qmsListFindingsBulk({ domain: "AMO", audit_ids: auditIds, limit: 500 }, { silent: true });
+      const findingsByAudit = new Map<string, QMSFindingOut[]>();
+      findings.forEach((finding) => {
+        const bucket = findingsByAudit.get(finding.audit_id) ?? [];
+        bucket.push(finding);
+        findingsByAudit.set(finding.audit_id, bucket);
+      });
+      return scheduleAudits.map((audit) => ({
+        audit,
+        findings: findingsByAudit.get(audit.id) ?? [],
+      }));
     },
     enabled: scheduleAudits.length > 0,
     staleTime: 60_000,
@@ -329,7 +341,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     setSearchParams(next);
   };
 
-  const baseQmsPath = `/maintenance/${amoCode}/${department}/qms`;
+  const baseQmsPath = `/maintenance/${amoCode}/qms`;
   const goToRegister = () => navigate(`${baseQmsPath}/audits/register`);
   const goToEvidence = () => navigate(`${baseQmsPath}/evidence`);
 
@@ -338,7 +350,7 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
       <div className="qms-card">
         <h3>Schedule not found</h3>
         <p>The schedule is missing, inactive, or outside your AMO scope.</p>
-        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/plan?view=list`)}>
+        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/plan?view=list`)}>
           Back to list
         </button>
       </div>

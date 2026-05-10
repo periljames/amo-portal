@@ -49,6 +49,48 @@ def create_config(
     return config
 
 
+@router.put(
+    "/configs/{config_id}",
+    response_model=schemas.IntegrationConfigRead,
+)
+def update_config(
+    config_id: str,
+    payload: schemas.IntegrationConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
+    try:
+        config = services.update_integration_config(
+            db,
+            amo_id=current_user.amo_id,
+            config_id=config_id,
+            data=payload,
+            updated_by_user_id=current_user.id,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+@router.get("/outbox", response_model=List[schemas.IntegrationOutboundEventRead])
+def list_outbox(
+    integration_id: Optional[str] = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(AccountRole.SUPERUSER, AccountRole.AMO_ADMIN)),
+):
+    return services.list_outbound_events(
+        db,
+        amo_id=current_user.amo_id,
+        integration_id=integration_id,
+        limit=limit,
+    )
+
+
 @router.post(
     "/{integration_key}/ingest",
     response_model=schemas.IntegrationInboundEventRead,

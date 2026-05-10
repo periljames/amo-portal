@@ -5,6 +5,7 @@ import { useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
 import "../styles/training.css";
+import { saveDownloadedFile } from "../utils/downloads";
 import {
   getMyTrainingAccessState,
   getMyTrainingStatus,
@@ -1192,15 +1193,10 @@ function MyTrainingPage() {
     setTrainingFilesError(null);
     setDownloadProgress(null);
     try {
-      const blob = await downloadTrainingFile(file.id, (progress) =>
+      const downloaded = await downloadTrainingFile(file.id, (progress) =>
         setDownloadProgress({ fileId: file.id, progress })
       );
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = file.original_filename || `training_file_${file.id}`;
-      link.click();
-      window.URL.revokeObjectURL(url);
+      saveDownloadedFile(downloaded);
     } catch (err: any) {
       setTrainingFilesError(err?.message || "Could not download training file.");
     } finally {

@@ -24,14 +24,14 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 from sqlalchemy.orm.attributes import set_committed_value
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHash
 import bcrypt
 
-from .database import get_db  # write DB for auth flows
+from .database import get_db, get_read_db
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.models import AccountRole
 
@@ -175,6 +175,9 @@ def get_user_by_id(
 
     normalised_id = str(user_id).strip()
 
+    user = db.get(account_models.User, normalised_id)
+    if user is not None:
+        return user
     return (
         db.query(account_models.User)
         .filter(account_models.User.id == normalised_id)
@@ -197,7 +200,7 @@ def _credentials_exception() -> HTTPException:
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_read_db),
 ) -> account_models.User:
     """
     Decode the JWT access token and return the corresponding User.
@@ -226,7 +229,13 @@ def get_current_user(
         else:
             issued_at_dt = None
         revoked_dt = revoked_at if revoked_at.tzinfo else revoked_at.replace(tzinfo=timezone.utc)
-        if issued_at_dt is None or issued_at_dt <= revoked_dt:
+        # JWT libraries commonly serialise iat to whole seconds while the
+        # database stores token_revoked_at with microsecond precision. Without a
+        # small leeway, a token issued immediately after login can be rejected
+        # when a previous logout happened in the same second. Successful login
+        # also clears token_revoked_at, but the leeway protects concurrent tabs
+        # and legacy rows.
+        if issued_at_dt is None or issued_at_dt + timedelta(seconds=2) <= revoked_dt:
             raise _credentials_exception()
 
     return user
@@ -234,12 +243,12 @@ def get_current_user(
 
 def get_current_active_user(
     current_user: account_models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ) -> account_models.User:
     """
     Ensure the current user is active.
 
-    Locked / deactivated users are blocked here rather than deeper in the app.
+    Uses the session already attached to `current_user` instead of opening a
+    second database session for every authenticated request.
     """
     if not getattr(current_user, "is_active", False):
         raise HTTPException(
@@ -247,33 +256,17 @@ def get_current_active_user(
             detail="Inactive user account",
         )
     CURRENT_ACTOR_ID.set(str(current_user.id))
+    active_amo_id = current_user.amo_id
     effective_amo_id = current_user.amo_id
     if getattr(current_user, "is_superuser", False):
-        context = (
-            db.query(account_models.UserActiveContext)
-            .filter(account_models.UserActiveContext.user_id == current_user.id)
-            .first()
-        )
-        if context and context.active_amo_id:
-            effective_amo_id = context.active_amo_id
-            amo = (
-                db.query(account_models.AMO)
-                .filter(account_models.AMO.id == effective_amo_id)
-                .first()
-            )
-            if amo and context.data_mode:
-                if context.data_mode == account_models.DataMode.DEMO and not amo.is_demo:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Active AMO does not match DEMO mode.",
-                    )
-                if context.data_mode == account_models.DataMode.REAL and amo.is_demo:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Active AMO does not match REAL mode.",
-                    )
+        # A platform superuser is not an AMO user. Keep tenant support context
+        # explicit and never mutate the ORM user into a customer tenant.
+        active_amo_id = None
+        effective_amo_id = None
+        set_committed_value(current_user, "amo_id", None)
+        set_committed_value(current_user, "amo", None)
 
-    set_committed_value(current_user, "amo_id", effective_amo_id)
+    setattr(current_user, "active_amo_id", active_amo_id)
     setattr(current_user, "effective_amo_id", effective_amo_id)
     return current_user
 
@@ -326,7 +319,7 @@ def require_capability(
 
     def dependency(
         current_user: account_models.User = Depends(get_current_active_user),
-        db: Session = Depends(get_db),
+        db: Session = Depends(get_read_db),
     ) -> account_models.User:
         if getattr(current_user, "is_superuser", False):
             return current_user

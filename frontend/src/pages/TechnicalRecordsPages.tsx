@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import PageHeader from "../components/shared/PageHeader";
 import SectionCard from "../components/shared/SectionCard";
@@ -37,6 +37,8 @@ type DirtyUsageRow = Partial<UsageRow> & {
   block_hours: number;
   cycles: number;
 };
+
+type EditableUsageField = Exclude<keyof DirtyUsageRow, "_new">;
 
 const RECORD_TABS: RecordTab[] = [
   { label: "Dashboard", suffix: "", feature: "production.records.dashboard" },
@@ -555,20 +557,24 @@ function AircraftUsageEditor({ tailId }: { tailId: string }) {
                 {mergedRows.map((row, index) => {
                   const editable = canEdit;
                   const current = row as UsageRow & DirtyUsageRow;
-                  const bind = (key: keyof DirtyUsageRow, parser: (value: string) => unknown = (value) => value) => ({
-                    value: current[key as keyof typeof current] ?? "",
-                    onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
-                      updateDraft({
-                        id: current.id > 0 ? current.id : undefined,
-                        _new: current.id <= 0,
-                        date: String(current.date).slice(0, 10),
-                        techlog_no: current.techlog_no,
-                        block_hours: Number(current.block_hours || 0),
-                        cycles: Number(current.cycles || 0),
-                        ...(key === "note" ? { note: String(parser(e.target.value) ?? "") } : { [key]: parser(e.target.value) }),
-                      } as DirtyUsageRow);
-                    },
-                  });
+                  const bind = (key: EditableUsageField, parser: (value: string) => unknown = (value) => value) => {
+                    const rawValue = current[key];
+                    const safeValue = typeof rawValue === "boolean" ? "" : rawValue ?? "";
+                    return {
+                      value: safeValue as string | number | readonly string[] | undefined,
+                      onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                        updateDraft({
+                          id: current.id > 0 ? current.id : undefined,
+                          _new: current.id <= 0,
+                          date: String(current.date).slice(0, 10),
+                          techlog_no: current.techlog_no,
+                          block_hours: Number(current.block_hours || 0),
+                          cycles: Number(current.cycles || 0),
+                          ...(key === "note" ? { note: String(parser(e.target.value) ?? "") } : { [key]: parser(e.target.value) }),
+                        } as DirtyUsageRow);
+                      },
+                    };
+                  };
                   return (
                     <tr key={`${row.id}-${index}`}>
                       <td className="production-grid__sticky">

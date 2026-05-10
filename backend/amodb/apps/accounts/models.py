@@ -174,8 +174,8 @@ class AMOAsset(Base):
     )
     amo_id = Column(
         String(36),
-        ForeignKey("amos.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("amos.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
 
@@ -1550,6 +1550,20 @@ class PlatformSettings(Base):
     gzip_minimum_size = Column(Integer, nullable=True)
     gzip_compresslevel = Column(Integer, nullable=True)
     max_request_body_bytes = Column(Integer, nullable=True)
+
+    email_provider = Column(String(64), nullable=True)
+    email_from_name = Column(String(255), nullable=True)
+    email_from_email = Column(String(255), nullable=True)
+    email_reply_to = Column(String(255), nullable=True)
+    smtp_host = Column(String(255), nullable=True)
+    smtp_port = Column(Integer, nullable=True)
+    smtp_username = Column(String(255), nullable=True)
+    smtp_password_secret = Column(String(512), nullable=True)
+    smtp_use_tls = Column(Boolean, nullable=True)
+    smtp_allow_self_signed = Column(Boolean, nullable=True)
+    smtp_test_recipient = Column(String(255), nullable=True)
+    support_email = Column(String(255), nullable=True)
+    ops_alert_email = Column(String(255), nullable=True)
 
     acme_directory_url = Column(String(255), nullable=True)
     acme_client = Column(String(128), nullable=True)

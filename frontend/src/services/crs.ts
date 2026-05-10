@@ -12,7 +12,7 @@
 import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
 import { authHeaders, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
-import { beginLoading, endLoading } from "./loading";
+import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
@@ -32,17 +32,24 @@ async function request<T>(
   method: HttpMethod,
   path: string,
   body?: BodyInit,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  loadingMode?: "foreground" | "background"
 ): Promise<T> {
   const url = `${getApiBaseUrl()}${path}`;
 
-  beginLoading();
+  const mode = loadingMode ?? (method === "GET" ? "background" : "foreground");
+  if (mode === "background") beginBackgroundLoading();
+  else beginLoading();
   try {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort("timeout"), method === "GET" ? 20000 : 45000);
     const res = await fetch(url, {
       method,
       body,
+      signal: init.signal ?? controller.signal,
       ...init,
     });
+    window.clearTimeout(timeout);
 
     if (res.status === 401) {
       handleAuthFailure("expired");
@@ -92,7 +99,8 @@ async function request<T>(
       throw err;
     }
   } finally {
-    endLoading();
+    if (mode === "background") endBackgroundLoading();
+    else endLoading();
   }
 }
 

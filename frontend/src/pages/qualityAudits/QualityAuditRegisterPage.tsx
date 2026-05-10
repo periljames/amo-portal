@@ -194,7 +194,7 @@ const QualityAuditRegisterPage: React.FC = () => {
                             <button
                               key={car.id}
                               type="button"
-                              onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/cars?carId=${car.id}`)}
+                              onClick={() => navigate(`/maintenance/${amoCode}/qms/cars?carId=${car.id}`)}
                               className="secondary-chip-btn"
                               title={`${car.car_number} · ${car.title}`}
                             >

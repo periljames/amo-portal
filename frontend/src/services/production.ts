@@ -23,6 +23,11 @@ export type UsageRow = {
   tcesn_after?: number | null;
   ttsoh_after?: number | null;
   ttshsi_after?: number | null;
+  tcsoh_after?: number | null;
+  pttsn_after?: number | null;
+  aircraft_serial_number?: string;
+  verification_status?: string | null;
+  created_at?: string;
   updated_at: string;
   note?: string | null;
 };

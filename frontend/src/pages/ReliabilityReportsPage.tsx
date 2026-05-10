@@ -10,6 +10,7 @@ import {
   listReliabilityReports,
 } from "../services/reliability";
 import type { ReliabilityReportRead, TransferProgress } from "../services/reliability";
+import { saveDownloadedFile } from "../utils/downloads";
 
 type UrlParams = {
   amoCode?: string;
@@ -99,15 +100,10 @@ const ReliabilityReportsPage: React.FC = () => {
     setError(null);
     setDownloadProgress(null);
     try {
-      const blob = await downloadReliabilityReport(report.id, (progress) =>
+      const downloaded = await downloadReliabilityReport(report.id, (progress) =>
         setDownloadProgress({ reportId: report.id, progress })
       );
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `reliability_report_${report.id}.pdf`;
-      link.click();
-      window.URL.revokeObjectURL(url);
+      saveDownloadedFile(downloaded);
     } catch (e: any) {
       console.error("Failed to download report", e);
       setError(e?.message || "Could not download report.");
@@ -125,13 +121,8 @@ const ReliabilityReportsPage: React.FC = () => {
     setFracasExporting(true);
     setError(null);
     try {
-      const blob = await downloadFracasEvidencePack(caseId);
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `fracas_${caseId}_evidence_pack.zip`;
-      link.click();
-      window.URL.revokeObjectURL(url);
+      const downloaded = await downloadFracasEvidencePack(caseId);
+      saveDownloadedFile(downloaded);
     } catch (e: any) {
       console.error("Failed to export FRACAS evidence pack", e);
       setError(e?.message || "Could not export FRACAS evidence pack.");

@@ -171,6 +171,7 @@ class TrainingRequirementCreate(TrainingRequirementBase):
 
 
 class TrainingRequirementUpdate(BaseModel):
+    course_pk: Optional[str] = None
     scope: Optional[TrainingRequirementScope] = None
     department_code: Optional[str] = None
     job_role: Optional[str] = None
@@ -253,6 +254,83 @@ class TrainingEventRead(TrainingEventBase):
 
     class Config:
         from_attributes = True
+
+
+class TrainingEventBatchScheduleCreate(BaseModel):
+    course_pk: str = Field(..., description="Database id of TrainingCourse to be delivered in this class/session.")
+    user_ids: List[str] = Field(..., min_length=1, description="Users to batch-enrol into the created session.")
+    title: Optional[str] = Field(None, description="Session title. Defaults to course name when omitted.")
+    provider: Optional[str] = Field(None, description="Trainer / ATO / provider name.")
+    provider_kind: Optional[str] = Field("INTERNAL", description="INTERNAL or EXTERNAL provider delivery.")
+    delivery_mode: Optional[str] = Field("CLASSROOM", description="CLASSROOM, ONLINE, OJT, MIXED, or other free text.")
+    venue_mode: Optional[str] = Field("OFFLINE", description="OFFLINE, ONLINE, or BLENDED presentation mode.")
+    instructor_name: Optional[str] = Field(None, description="Internal instructor or external trainer name.")
+    location: Optional[str] = Field(None, description="Room / hangar / campus / venue.")
+    meeting_link: Optional[str] = Field(None, description="Optional meeting link for online delivery.")
+    starts_on: date = Field(..., description="Planned session start date.")
+    ends_on: Optional[date] = Field(None, description="Optional end date for multi-day delivery.")
+    notes: Optional[str] = Field(None, description="Free-text schedule notes shown in the portal.")
+    participant_status: TrainingParticipantStatus = Field(
+        TrainingParticipantStatus.SCHEDULED,
+        description="Initial participant workflow status applied to all enrolled users.",
+    )
+    auto_issue_certificates: bool = Field(True, description="Auto-issue certificate numbers when attendance is later marked attended.")
+    allow_self_attendance: bool = Field(True, description="Whether attendees may self-mark attendance from the portal.")
+
+
+class TrainingEventBatchScheduleRead(BaseModel):
+    event: TrainingEventRead
+    participants: List["TrainingEventParticipantRead"]
+    created_count: int
+
+
+class TrainingAutoGroupScheduleCreate(BaseModel):
+    user_ids: List[str] = Field(..., min_length=1, description="Users whose due and overdue courses should be auto-grouped into sessions.")
+    include_due_soon: bool = Field(True, description="Include due-soon items in the auto-group scheduler.")
+    include_overdue: bool = Field(True, description="Include overdue items in the auto-group scheduler.")
+    base_start_on: Optional[date] = Field(None, description="Optional scheduling floor date. Defaults to today.")
+    provider: Optional[str] = Field(None, description="Trainer / ATO / provider name applied to created sessions.")
+    provider_kind: Optional[str] = Field("INTERNAL", description="INTERNAL or EXTERNAL provider delivery.")
+    delivery_mode: Optional[str] = Field("CLASSROOM", description="CLASSROOM, ONLINE, OJT, MIXED, or other free text.")
+    venue_mode: Optional[str] = Field("OFFLINE", description="OFFLINE, ONLINE, or BLENDED presentation mode.")
+    instructor_name: Optional[str] = Field(None, description="Internal instructor or external trainer name.")
+    location: Optional[str] = Field(None, description="Room / hangar / campus / venue.")
+    meeting_link: Optional[str] = Field(None, description="Optional meeting link for online delivery.")
+    notes: Optional[str] = Field(None, description="Free-text schedule notes shown in the portal.")
+    participant_status: TrainingParticipantStatus = Field(
+        TrainingParticipantStatus.SCHEDULED,
+        description="Initial participant workflow status applied to all enrolled users.",
+    )
+    auto_issue_certificates: bool = Field(True, description="Auto-issue certificate numbers when attendance is later marked attended.")
+    allow_self_attendance: bool = Field(True, description="Whether attendees may self-mark attendance from the portal.")
+
+
+class TrainingAutoGroupSkippedRead(BaseModel):
+    user_id: str
+    course_pk: Optional[str] = None
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
+    reason: str
+    availability_status: Optional[str] = None
+    next_available_on: Optional[date] = None
+
+
+class TrainingAutoGroupedSessionRead(BaseModel):
+    course_pk: str
+    course_code: str
+    course_name: str
+    availability_bucket: str
+    start_on: date
+    end_on: Optional[date] = None
+    event: TrainingEventRead
+    participants: List["TrainingEventParticipantRead"]
+
+
+class TrainingAutoGroupScheduleRead(BaseModel):
+    sessions: List[TrainingAutoGroupedSessionRead] = Field(default_factory=list)
+    skipped: List[TrainingAutoGroupSkippedRead] = Field(default_factory=list)
+    total_sessions: int = 0
+    total_enrolled: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +428,8 @@ class TrainingRecordUpdate(BaseModel):
     hours_completed: Optional[int] = None
     exam_score: Optional[int] = None
     certificate_reference: Optional[str] = None
+    attachment_file_id: Optional[str] = None
+    clear_attachment: bool = False
     remarks: Optional[str] = None
 
 
@@ -598,6 +678,52 @@ class TrainingStatusBulkRequest(BaseModel):
 class TrainingStatusBulkResponse(BaseModel):
     users: Dict[str, List[TrainingStatusItem]] = Field(default_factory=dict)
 
+
+class TrainingUserProfileLiteRead(BaseModel):
+    id: str
+    amo_id: str
+    department_id: Optional[str] = None
+    staff_code: str
+    email: str
+    first_name: str
+    last_name: str
+    full_name: str
+    role: str
+    position_title: Optional[str] = None
+    phone: Optional[str] = None
+    secondary_phone: Optional[str] = None
+    regulatory_authority: Optional[str] = None
+    licence_number: Optional[str] = None
+    licence_state_or_country: Optional[str] = None
+    licence_expires_on: Optional[date] = None
+    is_active: bool
+    is_superuser: bool
+    is_amo_admin: bool
+    must_change_password: bool
+    last_login_at: Optional[datetime] = None
+    last_login_ip: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TrainingUserDetailBundleRead(BaseModel):
+    user: TrainingUserProfileLiteRead
+    hire_date: Optional[date] = None
+    status_items: List[TrainingStatusItem] = Field(default_factory=list)
+    records: List[TrainingRecordRead] = Field(default_factory=list)
+    records_total: int = 0
+    deferrals: List[TrainingDeferralRequestRead] = Field(default_factory=list)
+    deferrals_total: int = 0
+    files: List[TrainingFileRead] = Field(default_factory=list)
+    files_total: int = 0
+    upcoming_events: List[TrainingEventRead] = Field(default_factory=list)
+    upcoming_events_total: int = 0
+
+
+class TrainingRecordsByUsersRequest(BaseModel):
+    user_ids: List[str] = Field(default_factory=list, description="Users to fetch training records for.")
+    limit: int = Field(500, ge=1, le=2000)
+    offset: int = Field(0, ge=0)
 
 class TrainingAccessState(BaseModel):
     user_id: str

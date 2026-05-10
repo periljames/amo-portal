@@ -13,6 +13,7 @@ import {
 } from "../services/adminUsers";
 import type { AdminAmoRead } from "../services/adminUsers";
 import type { Invoice } from "../types/billing";
+import { saveDownloadedFile } from "../utils/downloads";
 
 type UrlParams = {
   amoCode?: string;
@@ -134,20 +135,11 @@ const AdminInvoicesPage: React.FC = () => {
 
   const handleDownloadInvoice = async (invoice: Invoice) => {
     setError(null);
-    let url: string | null = null;
     try {
-      const blob = await fetchInvoiceDocument(invoice.id, "pdf");
-      url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `invoice-${invoice.id}.pdf`;
-      link.click();
+      const downloaded = await fetchInvoiceDocument(invoice.id, "pdf");
+      saveDownloadedFile(downloaded);
     } catch (err: any) {
       setError(err?.message || "Unable to download invoice.");
-    } finally {
-      if (url) {
-        URL.revokeObjectURL(url);
-      }
     }
   };
 
@@ -201,6 +193,12 @@ const AdminInvoicesPage: React.FC = () => {
               <Button type="button" onClick={loadInvoices} disabled={loading}>
                 {loading ? "Refreshing..." : "Refresh invoices"}
               </Button>
+              <Button type="button" variant="secondary" onClick={async () => {
+                const downloaded = await exportInvoicesCsv();
+                saveDownloadedFile(downloaded);
+              }}>
+                Export CSV
+              </Button>
               <Button type="button" variant="secondary" onClick={handlePrint}>
                 Print view
               </Button>
@@ -221,9 +219,10 @@ const AdminInvoicesPage: React.FC = () => {
               <Table>
                 <thead>
                   <tr>
+                    <th>Invoice #</th>
                     <th>Description</th>
                     <th>Status</th>
-                    <th>Amount</th>
+                    <th>Total</th>
                     <th>Issued</th>
                     <th>Actions</th>
                   </tr>
@@ -231,9 +230,10 @@ const AdminInvoicesPage: React.FC = () => {
                 <tbody>
                   {invoices.map((invoice) => (
                     <tr key={invoice.id}>
+                      <td>{invoice.invoice_number || invoice.id}</td>
                       <td>{invoice.description || "Invoice"}</td>
                       <td>{invoice.status}</td>
-                      <td>{formatMoney(invoice.amount_cents, invoice.currency)}</td>
+                      <td>{formatMoney(invoice.total_cents ?? invoice.amount_cents, invoice.currency)}</td>
                       <td>{formatDateTime(invoice.issued_at)}</td>
                       <td>
                         <div className="page-section__actions">

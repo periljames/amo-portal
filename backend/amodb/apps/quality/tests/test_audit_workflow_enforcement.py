@@ -20,10 +20,11 @@ def _req() -> Request:
 
 
 def _user(db_session, amo_id: str, role: account_models.AccountRole) -> account_models.User:
+    next_index = db_session.query(account_models.User).filter(account_models.User.amo_id == amo_id).count() + 1
     user = account_models.User(
         amo_id=amo_id,
-        email=f"{role.value.lower()}@example.com",
-        staff_code=role.value[:6],
+        email=f"{role.value.lower()}.{next_index}@example.com",
+        staff_code=f"{role.value[:4]}{next_index:02d}",
         first_name="Test",
         last_name=role.value,
         full_name="Test User",

@@ -5,7 +5,9 @@
 // - Purchase + cancellation helpers (idempotent)
 
 import { apiDelete, apiGet, apiPost, apiPut } from "./crs";
+import { getApiBaseUrl } from "./config";
 import { authHeaders, handleAuthFailure } from "./auth";
+import { downloadWithFetch, type DownloadedFile } from "../utils/downloads";
 import type {
   CatalogSKU,
   Subscription,
@@ -15,6 +17,7 @@ import type {
   Invoice,
   BillingAuditLog,
   InvoiceDetail,
+  BillingAccessStatus,
 } from "../types/billing";
 
 const makeIdempotencyKey = (): string => {
@@ -68,6 +71,7 @@ export async function updateCatalogSku(
 type SubscriptionFetchResult = {
   subscription: Subscription | null;
   subscriptionMissing: boolean;
+  accessStatus: BillingAccessStatus | null;
 };
 
 export async function fetchSubscription(): Promise<Subscription | null> {
@@ -75,23 +79,31 @@ export async function fetchSubscription(): Promise<Subscription | null> {
   return subscription;
 }
 
+export async function fetchBillingAccessStatus(): Promise<BillingAccessStatus> {
+  return apiGet<BillingAccessStatus>("/billing/access-status", {
+    headers: authHeaders(),
+  });
+}
+
 export async function fetchSubscriptionStatus(): Promise<SubscriptionFetchResult> {
   try {
-    const subscription = await apiGet<Subscription>("/billing/subscription", {
-      headers: authHeaders(),
-    });
-    return { subscription, subscriptionMissing: false };
+    const accessStatus = await fetchBillingAccessStatus();
+    return {
+      subscription: accessStatus.subscription ?? null,
+      subscriptionMissing: accessStatus.access_state === "NO_SUBSCRIPTION",
+      accessStatus,
+    };
   } catch (err: any) {
     const message = err?.message || "";
     if (message.includes("401")) {
       handleAuthFailure("expired");
-      return { subscription: null, subscriptionMissing: false };
+      return { subscription: null, subscriptionMissing: false, accessStatus: null };
     }
     if (message.includes("404")) {
-      return { subscription: null, subscriptionMissing: true };
+      return { subscription: null, subscriptionMissing: true, accessStatus: null };
     }
     if (message.includes("No active subscription")) {
-      return { subscription: null, subscriptionMissing: true };
+      return { subscription: null, subscriptionMissing: true, accessStatus: null };
     }
     throw err;
   }
@@ -138,23 +150,19 @@ export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceDeta
 }
 
 export function getInvoiceDocumentUrl(invoiceId: string, format: "html" | "pdf") {
-  return `/billing/invoices/${encodeURIComponent(invoiceId)}/document?format=${format}`;
+  return `${getApiBaseUrl()}/billing/invoices/${encodeURIComponent(invoiceId)}/document?format=${format}`;
 }
 
 export async function fetchInvoiceDocument(
   invoiceId: string,
   format: "html" | "pdf"
-): Promise<Blob> {
-  const response = await fetch(getInvoiceDocumentUrl(invoiceId, format), {
-    headers: authHeaders(),
-  });
-  if (response.status === 401) {
-    handleAuthFailure("expired");
-  }
-  if (!response.ok) {
-    throw new Error("Failed to download invoice document.");
-  }
-  return response.blob();
+): Promise<DownloadedFile> {
+  return downloadWithFetch(
+    getInvoiceDocumentUrl(invoiceId, format),
+    { headers: authHeaders() },
+    `invoice-${invoiceId}.${format}`,
+    120_000,
+  );
 }
 
 export async function fetchPaymentMethods(): Promise<PaymentMethod[]> {
@@ -238,5 +246,29 @@ export async function cancelSubscription(
       idempotency_key: makeIdempotencyKey(),
     },
     { headers: authHeaders() }
+  );
+}
+
+
+export async function exportInvoicesCsv(): Promise<DownloadedFile> {
+  return downloadWithFetch(
+    `${getApiBaseUrl()}/billing/invoices/export?format=csv`,
+    { headers: authHeaders() },
+    "billing-invoices.csv",
+    120_000,
+  );
+}
+
+export async function exportBillingAuditCsv(params?: { amo_id?: string; event_type?: string; limit?: number }): Promise<DownloadedFile> {
+  const query = new URLSearchParams();
+  if (params?.amo_id) query.set("amo_id", params.amo_id);
+  if (params?.event_type) query.set("event_type", params.event_type);
+  if (params?.limit) query.set("limit", String(params.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return downloadWithFetch(
+    `${getApiBaseUrl()}/billing/audit/export${suffix}`,
+    { headers: authHeaders() },
+    "billing-audit.csv",
+    120_000,
   );
 }

@@ -17,6 +17,50 @@ const USER_KEY = "amo_current_user";
 const SESSION_EVENT_KEY = "amo_session_event";
 const ONBOARDING_STATUS_KEY = "amo_onboarding_status";
 const LAST_LOGIN_IDENTIFIER_KEY = "amo_last_login_identifier";
+const LOGIN_CONTEXT_CACHE_KEY = "amo_login_context_cache";
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+const LOGIN_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+type TimedRequestOptions = RequestInit & { timeoutMs?: number; signal?: AbortSignal | null };
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError";
+}
+
+function makeAbortError(message: string): DOMException {
+  return new DOMException(message, "AbortError");
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: TimedRequestOptions = {}): Promise<Response> {
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, signal, ...rest } = init;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort(makeAbortError(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds`));
+  }, timeoutMs);
+
+  const abortFromCaller = () => controller.abort(makeAbortError("Request was cancelled"));
+  if (signal) {
+    if (signal.aborted) abortFromCaller();
+    else signal.addEventListener("abort", abortFromCaller, { once: true });
+  }
+
+  try {
+    return await fetch(input, { ...rest, signal: controller.signal });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(timedOut ? "Request timed out. Confirm the backend is reachable, then retry." : "Request was cancelled.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    if (signal) signal.removeEventListener("abort", abortFromCaller);
+  }
+}
 
 // Shared with adminUsers.ts enhancements (kept as a plain key to avoid circular imports)
 const ACTIVE_AMO_ID_KEY = "amodb_active_amo_id";
@@ -59,7 +103,7 @@ export type RegulatoryAuthority = "FAA" | "EASA" | "KCAA" | "CAA_UK" | "OTHER";
  */
 export interface PortalUser {
   id: string;
-  amo_id: string;
+  amo_id: string | null;
   department_id: string | null;
   staff_code: string;
 
@@ -250,6 +294,36 @@ export function clearOnboardingStatus(): void {
   sessionStorage.removeItem(ONBOARDING_STATUS_KEY);
 }
 
+function getLoginContextCache(): Record<string, { at: number; value: LoginContextResponse }> {
+  if (typeof sessionStorage === "undefined") return {};
+  const raw = sessionStorage.getItem(LOGIN_CONTEXT_CACHE_KEY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, { at: number; value: LoginContextResponse }>;
+  } catch {
+    sessionStorage.removeItem(LOGIN_CONTEXT_CACHE_KEY);
+    return {};
+  }
+}
+
+function getCachedLoginContextForIdentifier(identifier: string): LoginContextResponse | null {
+  const key = identifier.trim().toLowerCase();
+  if (!key) return null;
+  const cached = getLoginContextCache()[key];
+  if (!cached) return null;
+  if (Date.now() - cached.at > LOGIN_CONTEXT_CACHE_TTL_MS) return null;
+  return cached.value;
+}
+
+function cacheLoginContextForIdentifier(identifier: string, value: LoginContextResponse): void {
+  if (typeof sessionStorage === "undefined") return;
+  const key = identifier.trim().toLowerCase();
+  if (!key) return;
+  const cache = getLoginContextCache();
+  cache[key] = { at: Date.now(), value };
+  sessionStorage.setItem(LOGIN_CONTEXT_CACHE_KEY, JSON.stringify(cache));
+}
+
 export function isAuthenticated(): boolean {
   return !!getToken();
 }
@@ -355,7 +429,7 @@ export async function login(
     password,
   };
 
-  const res = await fetch(`${getApiBaseUrl()}/auth/login`, {
+  const res = await fetchWithTimeout(`${getApiBaseUrl()}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -393,12 +467,15 @@ export async function login(
 
   if (data.user) {
     cacheCurrentUser(data.user);
+    cacheOnboardingStatus({
+      is_complete: !data.user.must_change_password,
+      missing: data.user.must_change_password ? ["password_change"] : [],
+    });
   }
 
   saveLastLoginIdentifier(trimmedIdentifier);
   emitSessionEvent({ type: "authenticated" });
   emitSessionEvent({ type: "activity", reason: "login" });
-  void sendPresenceBeacon("online", "login");
 
   return data;
 }
@@ -411,14 +488,22 @@ export async function login(
 export async function getLoginContext(
   identifier: string
 ): Promise<LoginContextResponse> {
-  const query = new URLSearchParams({ identifier: identifier.trim() }).toString();
-  const res = await fetch(`${getApiBaseUrl()}/auth/login-context?${query}`);
+  const trimmed = identifier.trim();
+  const cached = getCachedLoginContextForIdentifier(trimmed);
+  if (cached) return cached;
+
+  const query = new URLSearchParams({ identifier: trimmed }).toString();
+  const res = await fetchWithTimeout(`${getApiBaseUrl()}/auth/login-context?${query}`, {
+    timeoutMs: 15000,
+  });
 
   if (!res.ok) {
     throw new Error(await readErrorMessage(res));
   }
 
-  return (await res.json()) as LoginContextResponse;
+  const context = (await res.json()) as LoginContextResponse;
+  cacheLoginContextForIdentifier(trimmed, context);
+  return context;
 }
 
 /**
@@ -432,7 +517,7 @@ export async function fetchCurrentUser(): Promise<PortalUser> {
     throw new Error("No auth token");
   }
 
-  const res = await fetch(`${getApiBaseUrl()}/auth/me`, {
+  const res = await fetchWithTimeout(`${getApiBaseUrl()}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -463,7 +548,7 @@ export async function requestPasswordReset(
     delivery_method: deliveryMethod,
   };
 
-  const res = await fetch(`${getApiBaseUrl()}/auth/password-reset/request`, {
+  const res = await fetchWithTimeout(`${getApiBaseUrl()}/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -490,7 +575,7 @@ export async function confirmPasswordReset(
     new_password: newPassword,
   };
 
-  const res = await fetch(`${getApiBaseUrl()}/auth/password-reset/confirm`, {
+  const res = await fetchWithTimeout(`${getApiBaseUrl()}/auth/password-reset/confirm`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -510,7 +595,7 @@ export async function changePassword(
     new_password: newPassword,
   };
 
-  const res = await fetch(`${getApiBaseUrl()}/auth/password-change`, {
+  const res = await fetchWithTimeout(`${getApiBaseUrl()}/auth/password-change`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
@@ -534,9 +619,10 @@ export async function fetchOnboardingStatus(options?: {
     return cached;
   }
 
-  const res = await fetch(`${getApiBaseUrl()}/accounts/onboarding/status`, {
+  const res = await fetchWithTimeout(`${getApiBaseUrl()}/accounts/onboarding/status`, {
     method: "GET",
     headers: authHeaders(),
+    timeoutMs: 8000,
   });
 
   if (res.status === 401) {
@@ -558,7 +644,7 @@ async function sendPresenceBeacon(state: "online" | "away", reason?: string): Pr
   if (!token) return;
 
   try {
-    await fetch(`${getApiBaseUrl()}/api/realtime/presence`, {
+    await fetchWithTimeout(`${getApiBaseUrl()}/api/realtime/presence`, { timeoutMs: 5000,
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -570,6 +656,20 @@ async function sendPresenceBeacon(state: "online" | "away", reason?: string): Pr
     });
   } catch {
     // best-effort only
+  }
+}
+
+async function serverLogoutBestEffort(): Promise<void> {
+  const token = getToken();
+  if (!token) return;
+  try {
+    await fetchWithTimeout(`${getApiBaseUrl()}/auth/logout`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      timeoutMs: 5000,
+    });
+  } catch {
+    // best-effort only; local logout must still complete
   }
 }
 
@@ -611,6 +711,7 @@ export function markSessionActivity(reason = "interaction"): void {
 
 export function endSession(reason: "manual" | "idle" = "manual"): void {
   void sendPresenceBeacon("away", reason);
+  void serverLogoutBestEffort();
   logout();
   emitSessionEvent({ type: reason === "idle" ? "idle-logout" : "manual-logout", reason });
 }

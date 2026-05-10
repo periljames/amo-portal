@@ -6,8 +6,11 @@ import {
   addPaymentMethod,
   cancelSubscription,
   createCatalogSku,
+  exportBillingAuditCsv,
+  exportInvoicesCsv,
   fetchCatalog,
   fetchEntitlements,
+  fetchInvoiceDocument,
   fetchInvoices,
   fetchPaymentMethods,
   fetchSubscriptionStatus,
@@ -18,6 +21,7 @@ import {
   updateCatalogSku,
 } from "../services/billing";
 import type {
+  BillingAccessStatus,
   CatalogSKU,
   Invoice,
   PaymentMethod,
@@ -25,6 +29,15 @@ import type {
   Subscription,
   UsageMeter,
 } from "../types/billing";
+import { saveDownloadedFile } from "../utils/downloads";
+import {
+  createIntegrationConfig,
+  listIntegrationConfigs,
+  listIntegrationOutbox,
+  updateIntegrationConfig,
+  type IntegrationConfig,
+  type IntegrationOutboundEvent,
+} from "../services/integrations";
 
 type UrlParams = {
   amoCode?: string;
@@ -104,6 +117,13 @@ const SubscriptionManagementPage: React.FC = () => {
   const [usageMeters, setUsageMeters] = useState<UsageMeter[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [accessStatus, setAccessStatus] = useState<BillingAccessStatus | null>(null);
+  const [billingWarnings, setBillingWarnings] = useState<string[]>([]);
+  const [integrations, setIntegrations] = useState<IntegrationConfig[]>([]);
+  const [integrationOutbox, setIntegrationOutbox] = useState<IntegrationOutboundEvent[]>([]);
+  const [integrationForms, setIntegrationForms] = useState<Record<string, { enabled: boolean; baseUrl: string; secret: string; environment: string; invoicePrefix: string }>>({});
+  const [integrationSaving, setIntegrationSaving] = useState<string | null>(null);
+  const [integrationError, setIntegrationError] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -168,43 +188,150 @@ const SubscriptionManagementPage: React.FC = () => {
     navigate("/login", { replace: true });
   }, [amoCode, currentUser, isTenantAdmin, navigate]);
 
+  const hydrateIntegrationForms = (configs: IntegrationConfig[]) => {
+    const next: Record<string, { enabled: boolean; baseUrl: string; secret: string; environment: string; invoicePrefix: string }> = {};
+    configs.forEach((config) => {
+      next[config.integration_key] = {
+        enabled: !!config.enabled,
+        baseUrl: config.base_url || "",
+        secret: config.signing_secret || "",
+        environment: String(config.metadata_json?.environment || "sandbox"),
+        invoicePrefix: String(config.metadata_json?.invoice_prefix || ""),
+      };
+    });
+    setIntegrationForms(next);
+  };
+
+  const setIntegrationField = (key: string, field: "enabled" | "baseUrl" | "secret" | "environment" | "invoicePrefix", value: string | boolean) => {
+    setIntegrationForms((prev) => ({
+      ...prev,
+      [key]: {
+        enabled: false,
+        baseUrl: "",
+        secret: "",
+        environment: "sandbox",
+        invoicePrefix: "",
+        ...(prev[key] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const saveIntegration = async (integrationKey: string, displayName: string) => {
+    const form = integrationForms[integrationKey] || {
+      enabled: false,
+      baseUrl: "",
+      secret: "",
+      environment: "sandbox",
+      invoicePrefix: "",
+    };
+    setIntegrationSaving(integrationKey);
+    setIntegrationError(null);
+    try {
+      const existing = integrations.find((item) => item.integration_key === integrationKey);
+      const payload = {
+        integration_key: integrationKey,
+        display_name: displayName,
+        enabled: form.enabled,
+        status: form.enabled ? "ACTIVE" as const : "DISABLED" as const,
+        base_url: form.baseUrl || null,
+        signing_secret: form.secret || null,
+        metadata_json: {
+          environment: form.environment || "sandbox",
+          invoice_prefix: form.invoicePrefix || null,
+        },
+      };
+      const saved = existing
+        ? await updateIntegrationConfig(existing.id, payload)
+        : await createIntegrationConfig(payload);
+      const refreshed = existing
+        ? integrations.map((item) => (item.id === saved.id ? saved : item))
+        : [saved, ...integrations];
+      setIntegrations(refreshed);
+      hydrateIntegrationForms(refreshed);
+      setNotice(`${displayName} settings saved.`);
+    } catch (err: any) {
+      setIntegrationError(err?.message || `Unable to save ${displayName} settings.`);
+    } finally {
+      setIntegrationSaving(null);
+    }
+  };
+
+  const handleInvoiceDownload = async (invoice: Invoice, format: "html" | "pdf" = "pdf") => {
+    setError(null);
+    try {
+      const downloaded = await fetchInvoiceDocument(invoice.id, format);
+      saveDownloadedFile(downloaded);
+    } catch (err: any) {
+      setError(err?.message || "Unable to download invoice.");
+    }
+  };
+
+  const handleExportInvoices = async () => {
+    try {
+      const downloaded = await exportInvoicesCsv();
+      saveDownloadedFile(downloaded);
+    } catch (err: any) {
+      setError(err?.message || "Unable to export invoices.");
+    }
+  };
+
+  const handleExportAudit = async () => {
+    try {
+      const downloaded = await exportBillingAuditCsv({ limit: 500 });
+      saveDownloadedFile(downloaded);
+    } catch (err: any) {
+      setError(err?.message || "Unable to export billing audit.");
+    }
+  };
+
   const loadBillingData = async () => {
     setLoading(true);
     setError(null);
+    setBillingWarnings([]);
     try {
-      const [
-        catalogData,
-        subscriptionResult,
-        entitlementsData,
-        metersData,
-        paymentData,
-      ] = await Promise.all([
+      const subscriptionResult = await fetchSubscriptionStatus();
+      setSubscription(subscriptionResult.subscription);
+      setAccessStatus(subscriptionResult.accessStatus);
+
+      const warnings: string[] = [];
+      const [catalogResult, entitlementsResult, metersResult, paymentResult, invoiceResult, configsResult, outboxResult] = await Promise.allSettled([
         fetchCatalog(!!currentUser?.is_superuser),
-        fetchSubscriptionStatus(),
         fetchEntitlements(),
         fetchUsageMeters(),
         fetchPaymentMethods(),
+        fetchInvoices(),
+        isTenantAdmin ? listIntegrationConfigs() : Promise.resolve([] as IntegrationConfig[]),
+        isTenantAdmin ? listIntegrationOutbox(25) : Promise.resolve([] as IntegrationOutboundEvent[]),
       ]);
 
-      const subscriptionData = subscriptionResult.subscription;
-      const shouldFetchInvoices =
-        !!subscriptionData && !subscriptionResult.subscriptionMissing;
-      const invoiceData = shouldFetchInvoices ? await fetchInvoices() : [];
+      const catalogData = catalogResult.status === "fulfilled" ? catalogResult.value : [];
+      if (catalogResult.status !== "fulfilled") warnings.push(catalogResult.reason?.message || "Catalog unavailable.");
+      const entitlementsData = entitlementsResult.status === "fulfilled" ? entitlementsResult.value : [];
+      if (entitlementsResult.status !== "fulfilled") warnings.push(entitlementsResult.reason?.message || "Entitlements unavailable.");
+      const metersData = metersResult.status === "fulfilled" ? metersResult.value : [];
+      if (metersResult.status !== "fulfilled") warnings.push(metersResult.reason?.message || "Usage meters unavailable.");
+      const paymentData = paymentResult.status === "fulfilled" ? paymentResult.value : [];
+      if (paymentResult.status !== "fulfilled") warnings.push(paymentResult.reason?.message || "Payment methods unavailable.");
+      const invoiceData = invoiceResult.status === "fulfilled" ? invoiceResult.value : [];
+      if (invoiceResult.status !== "fulfilled") warnings.push(invoiceResult.reason?.message || "Invoices unavailable.");
+      const configData = configsResult.status === "fulfilled" ? configsResult.value : [];
+      if (configsResult.status !== "fulfilled") warnings.push(configsResult.reason?.message || "Integrations unavailable.");
+      const outboxData = outboxResult.status === "fulfilled" ? outboxResult.value : [];
 
       setCatalog(catalogData);
-      setSubscription(subscriptionData);
       setEntitlements(entitlementsData);
       setUsageMeters(metersData);
       setPaymentMethods(paymentData);
       setInvoices(invoiceData);
-      setSelectedPaymentMethodId(
-        paymentData.find((pm) => pm.is_default)?.id || paymentData[0]?.id
-      );
+      setIntegrations(configData);
+      setIntegrationOutbox(outboxData);
+      hydrateIntegrationForms(configData);
+      setBillingWarnings(warnings);
+      setSelectedPaymentMethodId(paymentData.find((pm) => pm.is_default)?.id || paymentData[0]?.id);
 
-      if (subscriptionData && subscriptionData.sku_id) {
-        const altSku =
-          catalogData.find((sku) => sku.id !== subscriptionData.sku_id) ||
-          catalogData[0];
+      if (subscriptionResult.subscription && subscriptionResult.subscription.sku_id) {
+        const altSku = catalogData.find((sku) => sku.id !== subscriptionResult.subscription?.sku_id) || catalogData[0];
         setSelectedSkuId(altSku?.id || "");
       } else if (catalogData[0]) {
         setSelectedSkuId(catalogData[0].id);
@@ -1004,52 +1131,151 @@ const SubscriptionManagementPage: React.FC = () => {
           <div className="card">
             <div className="card-header">
               <h3 style={{ margin: 0 }}>Invoices</h3>
-              <span className="badge">
-                {invoices.length ? `${invoices.length} invoices` : "No invoices yet"}
-              </span>
+              <div className="page-section__actions">
+                <span className="badge">
+                  {invoices.length ? `${invoices.length} invoices` : "No invoices yet"}
+                </span>
+                <button className="btn btn-secondary" onClick={handleExportInvoices}>
+                  Export CSV
+                </button>
+                {currentUser?.is_superuser && (
+                  <button className="btn btn-secondary" onClick={handleExportAudit}>
+                    Export audit
+                  </button>
+                )}
+              </div>
             </div>
             <div className="table-responsive">
               <table className="table">
                 <thead>
                   <tr>
+                    <th>Invoice #</th>
                     <th>Description</th>
                     <th>Status</th>
-                    <th>Amount</th>
+                    <th>Total</th>
                     <th>Issued</th>
                     <th>Due</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {invoices.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="text-muted">
+                      <td colSpan={7} className="text-muted">
                         No invoices generated yet.
                       </td>
                     </tr>
                   )}
                   {invoices.map((invoice) => (
                     <tr key={invoice.id}>
+                      <td>{invoice.invoice_number || invoice.id}</td>
                       <td>{invoice.description || "Invoice"}</td>
                       <td>
-                        <span
-                          className={
-                            invoice.status === "PAID"
-                              ? "badge badge--success"
-                              : "badge"
-                          }
-                        >
+                        <span className={invoice.status === "PAID" ? "badge badge--success" : "badge"}>
                           {invoice.status.toLowerCase()}
                         </span>
                       </td>
-                      <td>{formatMoney(invoice.amount_cents, invoice.currency)}</td>
+                      <td>{formatMoney(invoice.total_cents ?? invoice.amount_cents, invoice.currency)}</td>
                       <td>{formatDate(invoice.issued_at)}</td>
                       <td>{formatDate(invoice.due_at)}</td>
+                      <td>
+                        <div className="page-section__actions">
+                          <button className="btn btn-secondary" onClick={() => navigate(`/maintenance/${amoCode ?? "UNKNOWN"}/admin/invoices/${invoice.id}`)}>
+                            View
+                          </button>
+                          <button className="btn btn-secondary" onClick={() => handleInvoiceDownload(invoice, "pdf")}>
+                            PDF
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
+
+          {isTenantAdmin && (
+            <div className="card card--form">
+              <div className="card-header">
+                <div>
+                  <h3 style={{ margin: 0 }}>Compliance integrations</h3>
+                  <p className="text-muted" style={{ margin: 0 }}>
+                    Prepare official integrations for KRA eTIMS and your payment service provider. This keeps billing and invoice records auditable and integration-ready.
+                  </p>
+                </div>
+              </div>
+              {integrationError && (
+                <div className="card card--error">
+                  <strong>Integration error:</strong> {integrationError}
+                </div>
+              )}
+              {[{ key: "KRA_ETIMS", label: "KRA eTIMS" }, { key: "PAYMENT_PSP", label: "Payment provider" }].map((entry) => {
+                const form = integrationForms[entry.key] || { enabled: false, baseUrl: "", secret: "", environment: "sandbox", invoicePrefix: "" };
+                const saving = integrationSaving === entry.key;
+                return (
+                  <div key={entry.key} className="card" style={{ marginTop: 12 }}>
+                    <div className="card-header">
+                      <h4 style={{ margin: 0 }}>{entry.label}</h4>
+                      <span className="badge">{form.enabled ? "Enabled" : "Disabled"}</span>
+                    </div>
+                    <div className="form-grid">
+                      <div className="form-row">
+                        <label>Base URL</label>
+                        <input type="text" value={form.baseUrl} onChange={(e) => setIntegrationField(entry.key, "baseUrl", e.target.value)} placeholder={entry.key === "KRA_ETIMS" ? "https://etims-sbx.kra.go.ke/..." : "https://api.provider.example/..."} />
+                      </div>
+                      <div className="form-row">
+                        <label>Signing secret</label>
+                        <input type="text" value={form.secret} onChange={(e) => setIntegrationField(entry.key, "secret", e.target.value)} placeholder="Secret / token reference" />
+                      </div>
+                      <div className="form-row">
+                        <label>Environment</label>
+                        <select value={form.environment} onChange={(e) => setIntegrationField(entry.key, "environment", e.target.value)}>
+                          <option value="sandbox">Sandbox</option>
+                          <option value="live">Live</option>
+                        </select>
+                      </div>
+                      <div className="form-row">
+                        <label>Invoice prefix</label>
+                        <input type="text" value={form.invoicePrefix} onChange={(e) => setIntegrationField(entry.key, "invoicePrefix", e.target.value)} placeholder="INV-SAF" />
+                      </div>
+                      <div className="form-row form-row--checkbox">
+                        <label>
+                          <input type="checkbox" checked={form.enabled} onChange={(e) => setIntegrationField(entry.key, "enabled", e.target.checked)} /> Enable integration
+                        </label>
+                      </div>
+                    </div>
+                    <div className="page-section__actions">
+                      <button className="btn btn-primary" disabled={saving} onClick={() => saveIntegration(entry.key, entry.label)}>
+                        {saving ? "Saving..." : "Save settings"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="table-responsive" style={{ marginTop: 16 }}>
+                <table className="table">
+                  <thead>
+                    <tr><th>Outbound event</th><th>Status</th><th>Attempts</th><th>Last error</th><th>Created</th></tr>
+                  </thead>
+                  <tbody>
+                    {integrationOutbox.length === 0 && (
+                      <tr><td colSpan={5} className="text-muted">No outbound integration events recorded yet.</td></tr>
+                    )}
+                    {integrationOutbox.map((event) => (
+                      <tr key={event.id}>
+                        <td>{event.event_type}</td>
+                        <td>{event.status}</td>
+                        <td>{event.attempt_count}</td>
+                        <td>{event.last_error || "—"}</td>
+                        <td>{formatDate(event.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {currentUser?.is_superuser && (
             <div className="card card--form">

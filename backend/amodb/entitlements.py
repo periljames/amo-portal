@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import services as account_services
 
-from .database import get_db
+from .database import get_read_db
 from .security import get_current_active_user
 
 
@@ -79,7 +79,7 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
 
     def dependency(
         current_user: account_models.User = Depends(get_current_active_user),
-        db: Session = Depends(get_db),
+        db: Session = Depends(get_read_db),
     ) -> account_models.User:
         # Global superusers can always access modules for diagnostics/support.
         if getattr(current_user, "is_superuser", False):
@@ -92,16 +92,26 @@ def require_module(module_key: str) -> Callable[[account_models.User, Session], 
                 detail="No AMO selected for the current session.",
             )
 
+        access_status = account_services.get_billing_access_status(db, amo_id=amo_id)
+        if not access_status.has_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=access_status.lock_reason or "Billing access is locked for this account.",
+            )
+
         subscription_allowed = _has_module_subscription(db, amo_id, module_key)
-        if subscription_allowed is not None:
-            if not subscription_allowed:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Module '{module_key}' is not enabled for this account.",
-                )
+        entitlement_allowed = _has_module_entitlement(db, amo_id, module_key)
+
+        if subscription_allowed is False:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Module '{module_key}' is not enabled for this account.",
+            )
+
+        if subscription_allowed is not None and subscription_allowed:
             return current_user
 
-        if not _has_module_entitlement(db, amo_id, module_key):
+        if not entitlement_allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Module '{module_key}' is not enabled for this account.",

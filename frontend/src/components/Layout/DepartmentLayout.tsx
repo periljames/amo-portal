@@ -21,8 +21,8 @@ import {
   pushDesktopNotification,
   type NotificationPreferences,
 } from "../../services/notificationPreferences";
-import { fetchSubscription, fetchEntitlements } from "../../services/billing";
-import type { Subscription } from "../../types/billing";
+import { fetchSubscriptionStatus, fetchEntitlements } from "../../services/billing";
+import type { BillingAccessStatus, Subscription } from "../../types/billing";
 import { endSession, getCachedUser, getContext, markSessionActivity, onSessionEvent } from "../../services/auth";
 import { fetchOverviewSummary, type OverviewSummary } from "../../services/adminOverview";
 import { qmsGetNotificationSummary, qmsListNotifications, qmsMarkAllNotificationsRead, qmsMarkNotificationRead, type QMSNotificationOut, type QMSNotificationSummaryOut } from "../../services/qms";
@@ -174,6 +174,29 @@ function getUserInitials(u: any): string {
   return (a + b).toUpperCase();
 }
 
+
+function scheduleNonCritical(task: () => void, delayMs = 600): () => void {
+  if (typeof window === "undefined") {
+    task();
+    return () => undefined;
+  }
+  const run = () => window.setTimeout(task, delayMs);
+  const id = "requestIdleCallback" in window
+    ? (window as Window & { requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback(() => task(), { timeout: delayMs + 1200 })
+    : run();
+  return () => {
+    if ("cancelIdleCallback" in window) {
+      try {
+        (window as Window & { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(id as number);
+        return;
+      } catch {
+        // fall through
+      }
+    }
+    window.clearTimeout(id as number);
+  };
+}
+
 function getStoredProfileAvatar(userId?: string | null): string | null {
   if (typeof window === "undefined" || !userId) return null;
   const value = window.localStorage.getItem(`amo_portal_profile_avatar:${userId}`);
@@ -206,6 +229,9 @@ const DepartmentLayout: React.FC<Props> = ({
   );
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [billingAccessStatus, setBillingAccessStatus] = useState<BillingAccessStatus | null>(null);
+  const [subscriptionMissing, setSubscriptionMissing] = useState(false);
+  const [billingGateResolved, setBillingGateResolved] = useState(false);
   const [aerodocEnabled, setAerodocEnabled] = useState(false);
   const [pollingError, setPollingError] = useState<string | null>(null);
   const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(null);
@@ -355,7 +381,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const handleNav = (deptId: DepartmentId) => {
     const targetPath = `/maintenance/${amoCode}/${deptId}`;
     if (
-      subscription?.is_read_only &&
+      (subscription?.is_read_only || subscriptionMissing || billingAccessStatus?.redirect_to_billing) &&
       !targetPath.includes("/billing") &&
       !targetPath.includes("/upsell")
     ) {
@@ -387,7 +413,7 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const handleAdminNav = (navId: AdminNavId, overrideRoute?: string) => {
-    if (subscription?.is_read_only && navId !== "admin-billing") {
+    if ((subscription?.is_read_only || subscriptionMissing || billingAccessStatus?.redirect_to_billing) && navId !== "admin-billing") {
       navigate(`/maintenance/${amoCode}/admin/billing?lockout=1`, {
         replace: true,
         state: { from: location.pathname + location.search },
@@ -490,9 +516,6 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/training");
   }, [location.pathname]);
 
-  const isWorkOrdersRoute = useMemo(() => {
-    return location.pathname.includes("/work-orders") || location.pathname.includes("/tasks/");
-  }, [location.pathname]);
 
   const isManualsRoute = useMemo(() => {
     return location.pathname.includes("/manuals");
@@ -590,126 +613,260 @@ const DepartmentLayout: React.FC<Props> = ({
   const qmsNavItems = useMemo<QmsNavItem[]>(
     () => [
       {
-        id: "qms-dashboard",
-        label: "Dashboard",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms`,
+        id: "qms-command",
+        label: "Command Centre",
+        path: `/maintenance/${amoCode}/qms`,
+        matchPrefixes: [`/maintenance/${amoCode}/qms/cockpit`],
       },
       {
-        id: "qms-tasks",
-        label: "My Tasks",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms/tasks`,
+        id: "qms-inbox",
+        label: "My QMS Work",
+        path: `/maintenance/${amoCode}/qms/inbox/assigned-to-me`,
+        children: [
+          {
+            id: "qms-inbox-approvals",
+            label: "Approvals",
+            path: `/maintenance/${amoCode}/qms/inbox/approvals`,
+          },
+          {
+            id: "qms-inbox-overdue",
+            label: "Overdue Work",
+            path: `/maintenance/${amoCode}/qms/inbox/overdue`,
+          },
+          {
+            id: "qms-inbox-completed",
+            label: "Completed Work",
+            path: `/maintenance/${amoCode}/qms/inbox/completed`,
+          },
+        ],
+      },
+      {
+        id: "qms-calendar",
+        label: "Calendar",
+        path: `/maintenance/${amoCode}/qms/calendar/list`,
+        children: [
+          {
+            id: "qms-calendar-audits",
+            label: "Audit Dates",
+            path: `/maintenance/${amoCode}/qms/calendar/audits`,
+          },
+          {
+            id: "qms-calendar-cars",
+            label: "CAR Deadlines",
+            path: `/maintenance/${amoCode}/qms/calendar/cars`,
+          },
+          {
+            id: "qms-calendar-training",
+            label: "Training Expiry",
+            path: `/maintenance/${amoCode}/qms/calendar/training`,
+          },
+          {
+            id: "qms-calendar-reviews",
+            label: "Review Dates",
+            path: `/maintenance/${amoCode}/qms/calendar/management-review`,
+          },
+        ],
+      },
+      {
+        id: "qms-system",
+        label: "System & Processes",
+        path: `/maintenance/${amoCode}/qms/system/processes`,
+        children: [
+          {
+            id: "qms-system-process-map",
+            label: "Process Map",
+            path: `/maintenance/${amoCode}/qms/system/processes`,
+          },
+          {
+            id: "qms-system-objectives",
+            label: "Objectives",
+            path: `/maintenance/${amoCode}/qms/system/quality-objectives`,
+          },
+        ],
       },
       {
         id: "qms-documents",
-        label: "Document Control",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms/documents`,
+        label: "Controlled Documents",
+        path: `/maintenance/${amoCode}/qms/documents/library`,
+        children: [
+          {
+            id: "qms-documents-change-requests",
+            label: "Change Requests",
+            path: `/maintenance/${amoCode}/qms/documents/change-requests`,
+          },
+          {
+            id: "qms-documents-approvals",
+            label: "Approval Queue",
+            path: `/maintenance/${amoCode}/qms/documents/approvals`,
+          },
+          {
+            id: "qms-documents-distribution",
+            label: "Distribution",
+            path: `/maintenance/${amoCode}/qms/documents/distribution`,
+          },
+          {
+            id: "qms-documents-obsolete",
+            label: "Archive / Obsolete",
+            path: `/maintenance/${amoCode}/qms/documents/obsolete`,
+          },
+        ],
       },
       {
         id: "qms-audits",
-        label: "Audits & Inspections",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms/audits`,
-        
+        label: "Audits",
+        path: `/maintenance/${amoCode}/qms/audits/dashboard`,
         children: [
           {
-            id: "qms-audits-plan-schedule",
-            label: "Plan / Schedule",
-            path: `/maintenance/${amoCode}/${activeDepartment}/qms/audits/plan?view=calendar`,
-            matchPrefixes: [
-              `/maintenance/${amoCode}/${activeDepartment}/qms/audits/plan?view=list`,
-              `/maintenance/${amoCode}/${activeDepartment}/qms/audits/schedules/`,
-            ],
+            id: "qms-audits-programme",
+            label: "Programme",
+            path: `/maintenance/${amoCode}/qms/audits/program`,
           },
           {
-            id: "qms-audits-register",
-            label: "Register",
-            path: `/maintenance/${amoCode}/${activeDepartment}/qms/audits/register?tab=findings`,
-            matchPrefixes: [`/maintenance/${amoCode}/${activeDepartment}/qms/audits/register?tab=cars`],
+            id: "qms-audits-schedule",
+            label: "Schedule",
+            path: `/maintenance/${amoCode}/qms/audits/schedule`,
+            matchPrefixes: [`/maintenance/${amoCode}/qms/audits/schedules/`],
           },
           {
-            id: "qms-audits-evidence-library",
-            label: "Evidence Library",
-            path: `/maintenance/${amoCode}/${activeDepartment}/qms/evidence`,
-            matchPrefixes: [`/maintenance/${amoCode}/${activeDepartment}/qms/evidence/`],
+            id: "qms-audits-checklists",
+            label: "Checklists",
+            path: `/maintenance/${amoCode}/qms/audits/checklists`,
+          },
+          {
+            id: "qms-audits-reports",
+            label: "Reports",
+            path: `/maintenance/${amoCode}/qms/audits/reports`,
+          },
+        ],
+      },
+      {
+        id: "qms-findings",
+        label: "Findings",
+        path: `/maintenance/${amoCode}/qms/findings/register`,
+      },
+      {
+        id: "qms-cars",
+        label: "CAR / CAPA",
+        path: `/maintenance/${amoCode}/qms/cars/register`,
+        children: [
+          {
+            id: "qms-cars-overdue",
+            label: "Overdue",
+            path: `/maintenance/${amoCode}/qms/cars/overdue`,
+          },
+          {
+            id: "qms-cars-due-soon",
+            label: "Due Soon",
+            path: `/maintenance/${amoCode}/qms/cars/due-soon`,
+          },
+          {
+            id: "qms-cars-review",
+            label: "Quality Review",
+            path: `/maintenance/${amoCode}/qms/cars/awaiting-quality-review`,
+          },
+          {
+            id: "qms-cars-closed",
+            label: "Closed",
+            path: `/maintenance/${amoCode}/qms/cars/closed`,
+          },
+        ],
+      },
+      {
+        id: "qms-risk",
+        label: "Risk & Opportunities",
+        path: `/maintenance/${amoCode}/qms/risk/register`,
+        children: [
+          {
+            id: "qms-risk-matrix",
+            label: "Risk Matrix",
+            path: `/maintenance/${amoCode}/qms/risk/risk-matrix`,
+          },
+          {
+            id: "qms-risk-treatment",
+            label: "Treatment Plans",
+            path: `/maintenance/${amoCode}/qms/risk/treatment-plans`,
           },
         ],
       },
       {
         id: "qms-change",
         label: "Change Control",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms/change-control`,
-      },
-      {
-        id: "qms-cars",
-        label: "CAR Register",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms/cars`,
+        path: `/maintenance/${amoCode}/qms/change-control/register`,
       },
       {
         id: "qms-training",
         label: "Training & Competence",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms/training`,
+        path: `/maintenance/${amoCode}/qms/training-competence/dashboard`,
+        children: [
+          {
+            id: "qms-training-matrix",
+            label: "Matrix",
+            path: `/maintenance/${amoCode}/qms/training-competence/matrix`,
+          },
+          {
+            id: "qms-training-due",
+            label: "Due / Overdue",
+            path: `/maintenance/${amoCode}/qms/training-competence/overdue`,
+          },
+        ],
       },
       {
-        id: "qms-events",
-        label: "Quality Events",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms/events`,
+        id: "qms-suppliers",
+        label: "Suppliers",
+        path: `/maintenance/${amoCode}/qms/suppliers/approved-list`,
       },
       {
-        id: "qms-kpis",
-        label: "KPIs & Review",
-        path: `/maintenance/${amoCode}/${activeDepartment}/qms/kpis`,
+        id: "qms-equipment",
+        label: "Equipment & Calibration",
+        path: `/maintenance/${amoCode}/qms/equipment-calibration/register`,
+      },
+      {
+        id: "qms-external",
+        label: "External Interface",
+        path: `/maintenance/${amoCode}/qms/external-interface/regulator-findings`,
+      },
+      {
+        id: "qms-review",
+        label: "Management Review",
+        path: `/maintenance/${amoCode}/qms/management-review/dashboard`,
+      },
+      {
+        id: "qms-reports",
+        label: "Reports & Analytics",
+        path: `/maintenance/${amoCode}/qms/reports/executive-dashboard`,
+      },
+      {
+        id: "qms-evidence",
+        label: "Evidence Vault",
+        path: `/maintenance/${amoCode}/qms/evidence-vault/search`,
+        matchPrefixes: [`/maintenance/${amoCode}/qms/evidence-vault/`],
+      },
+      {
+        id: "qms-settings",
+        label: "Settings",
+        path: `/maintenance/${amoCode}/qms/settings/general`,
       },
       ...(aerodocEnabled
         ? [
             {
               id: "qms-aerodoc-hangar",
               label: "AeroDoc Hangar",
-              path: `/maintenance/${amoCode}/${activeDepartment}/qms/aerodoc/hangar`,
+              path: `/maintenance/${amoCode}/qms/aerodoc/hangar`,
             },
             {
               id: "qms-aerodoc-compliance",
               label: "AeroDoc Compliance",
-              path: `/maintenance/${amoCode}/${activeDepartment}/qms/aerodoc/compliance`,
+              path: `/maintenance/${amoCode}/qms/aerodoc/compliance`,
             },
             {
               id: "qms-aerodoc-audit",
               label: "AeroDoc Audit Mode",
-              path: `/maintenance/${amoCode}/${activeDepartment}/qms/aerodoc/audit-mode`,
+              path: `/maintenance/${amoCode}/qms/aerodoc/audit-mode`,
             },
           ]
         : []),
-      {
-        id: "qms-doc-control",
-        label: "Document Control",
-        path: `/maintenance/${amoCode}/${activeDepartment}/doc-control`,
-        children: [
-          {
-            id: "qms-doc-control-library",
-            label: "Library",
-            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/library`,
-            matchPrefixes: ["/doc-control/library", `/maintenance/${amoCode}/${activeDepartment}/doc-control/library`],
-          },
-          {
-            id: "qms-doc-control-drafts",
-            label: "Drafts & Approval",
-            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/drafts`,
-            matchPrefixes: ["/doc-control/drafts", `/maintenance/${amoCode}/${activeDepartment}/doc-control/drafts`],
-          },
-          {
-            id: "qms-doc-control-distribution",
-            label: "Distribution",
-            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/distribution`,
-            matchPrefixes: ["/doc-control/distribution", `/maintenance/${amoCode}/${activeDepartment}/doc-control/distribution`],
-          },
-          {
-            id: "qms-doc-control-registers",
-            label: "Registers",
-            path: `/maintenance/${amoCode}/${activeDepartment}/doc-control/registers`,
-            matchPrefixes: ["/doc-control/registers", `/maintenance/${amoCode}/${activeDepartment}/doc-control/registers`],
-          },
-        ],
-      },
     ],
-    [activeDepartment, amoCode, aerodocEnabled]
+    [amoCode, aerodocEnabled]
   );
 
 
@@ -787,6 +944,10 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [currentUser]);
 
   useEffect(() => {
+    setBillingGateResolved(!currentUser);
+  }, [currentUser]);
+
+  useEffect(() => {
     return onSessionEvent((detail) => {
       if (detail.type === "activity") {
         resetIdleTimers();
@@ -806,6 +967,8 @@ const DepartmentLayout: React.FC<Props> = ({
     );
     if (cachedSubscription) {
       setSubscription(cachedSubscription);
+      setSubscriptionMissing(false);
+      setBillingAccessStatus(null);
       setSubscriptionError(null);
     }
 
@@ -856,34 +1019,78 @@ const DepartmentLayout: React.FC<Props> = ({
       );
       if (cached) {
         setSubscription(cached);
+        setSubscriptionMissing(false);
+        setBillingAccessStatus(null);
         setSubscriptionError(null);
+        setBillingGateResolved(true);
         return;
       }
     }
     try {
-      const sub = await fetchSubscription();
-      setSubscription(sub);
-      setSubscriptionError(null);
-      writeLayoutCache(subscriptionCacheKey, sub, cacheProfile.useMemory);
+      const result = await fetchSubscriptionStatus();
+      setSubscription(result.subscription);
+      setSubscriptionMissing(result.subscriptionMissing);
+      setBillingAccessStatus(result.accessStatus);
+      setSubscriptionError(result.accessStatus?.lock_reason || null);
+      if (result.subscription) {
+        writeLayoutCache(subscriptionCacheKey, result.subscription, cacheProfile.useMemory);
+      }
+      setBillingGateResolved(true);
     } catch (err: any) {
       setSubscription(null);
+      setSubscriptionMissing(false);
+      setBillingAccessStatus(null);
       setSubscriptionError(err?.message || "Unable to load subscription status.");
+      setBillingGateResolved(true);
       throw err;
     }
   }, [cacheProfile.maxAgeMs, cacheProfile.useMemory, subscriptionCacheKey]);
+  useEffect(() => {
+    if (!currentUser || isBillingRoute || isUpsellRoute) return;
+    if (currentUser.is_superuser) {
+      setBillingGateResolved(true);
+      setSubscriptionError(null);
+      setBillingAccessStatus(null);
+      return;
+    }
+    let active = true;
+    const timeout = window.setTimeout(() => {
+      if (!active || billingGateResolved) return;
+      setSubscriptionError("Billing access check timed out. Retry or contact support if this continues.");
+      setBillingGateResolved(true);
+    }, 12000);
+    refreshSubscription({ force: false })
+      .catch(() => undefined)
+      .finally(() => window.clearTimeout(timeout));
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [currentUser, isBillingRoute, isUpsellRoute, billingGateResolved, refreshSubscription]);
+
 
   useEffect(() => {
     let active = true;
-    fetchEntitlements().then((rows) => {
-      if (!active) return;
-      const entitlement = rows.find((row) => row.key === "aerodoc_hybrid_dms");
-      setAerodocEnabled(Boolean(entitlement && (entitlement.is_unlimited || (entitlement.limit ?? 0) > 0)));
-    }).catch(() => {
-      if (!active) return;
-      setAerodocEnabled(false);
-    });
-    return () => { active = false; };
-  }, []);
+    const cacheKey = `:aerodoc-enabled`;
+    const cached = readLayoutCache<boolean>(cacheKey, cacheProfile.maxAgeMs, cacheProfile.useMemory);
+    if (typeof cached === "boolean") {
+      setAerodocEnabled(cached);
+    }
+    return scheduleNonCritical(() => {
+      fetchEntitlements()
+        .then((rows) => {
+          if (!active) return;
+          const entitlement = rows.find((row) => row.key === "aerodoc_hybrid_dms");
+          const enabled = Boolean(entitlement && (entitlement.is_unlimited || (entitlement.limit ?? 0) > 0));
+          setAerodocEnabled(enabled);
+          writeLayoutCache(cacheKey, enabled, cacheProfile.useMemory);
+        })
+        .catch(() => {
+          if (!active) return;
+          if (cached == null) setAerodocEnabled(false);
+        });
+    }, 900);
+  }, [cacheKeyBase, cacheProfile.maxAgeMs, cacheProfile.useMemory]);
 
   const refreshOverviewSummary = useCallback(async (opts?: { force?: boolean }) => {
     if (!isAdminUser(currentUser)) return;
@@ -928,6 +1135,11 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const refreshUnreadNotifications = useCallback(async (opts?: { force?: boolean; notify?: boolean; broadcast?: boolean }) => {
     if (!currentUser) return;
+    if (billingAccessStatus?.redirect_to_billing) {
+      previousUnreadRef.current = 0;
+      setUnreadNotifications(0);
+      return;
+    }
     if (!opts?.force) {
       const cached = readLayoutCache<number>(
         unreadCacheKey,
@@ -946,7 +1158,7 @@ const DepartmentLayout: React.FC<Props> = ({
     if (opts?.broadcast && notificationPollCoordinator?.isLeader()) {
       notificationPollCoordinator.broadcast("qms-notification-summary", summary);
     }
-  }, [applyNotificationSummary, cacheProfile.maxAgeMs, cacheProfile.useMemory, currentUser, notificationPollCoordinator, unreadCacheKey]);
+  }, [applyNotificationSummary, billingAccessStatus?.redirect_to_billing, cacheProfile.maxAgeMs, cacheProfile.useMemory, currentUser, notificationPollCoordinator, unreadCacheKey]);
 
   const handlePollingFailure = useCallback(
     (err: unknown) => {
@@ -964,6 +1176,10 @@ const DepartmentLayout: React.FC<Props> = ({
       try {
         const force = reason === "manual";
         await refreshSubscription({ force });
+        if (billingAccessStatus?.redirect_to_billing) {
+          setPollingError(null);
+          return;
+        }
         await refreshUnreadNotifications({ force });
         await refreshOverviewSummary({ force });
         setPollingError(null);
@@ -979,6 +1195,7 @@ const DepartmentLayout: React.FC<Props> = ({
       refreshSubscription,
       refreshUnreadNotifications,
       refreshOverviewSummary,
+      billingAccessStatus?.redirect_to_billing,
     ]
   );
 
@@ -1051,10 +1268,13 @@ const DepartmentLayout: React.FC<Props> = ({
       if (notificationPollCoordinator && !notificationPollCoordinator.isLeader()) return;
       void refreshUnreadNotifications({ force: true, notify: true, broadcast: true });
     };
-    const intervalMs = notificationPrefs.pollIntervalSeconds * 1000;
-    tick();
+    const intervalMs = Math.max(notificationPrefs.pollIntervalSeconds * 1000, 45_000);
+    const warmupId = window.setTimeout(tick, 4000);
     const id = window.setInterval(tick, intervalMs);
-    return () => window.clearInterval(id);
+    return () => {
+      window.clearTimeout(warmupId);
+      window.clearInterval(id);
+    };
   }, [currentUser, notificationPollCoordinator, notificationPrefs.pollIntervalSeconds, refreshUnreadNotifications]);
 
   useEffect(() => {
@@ -1243,7 +1463,8 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [idleWarningOpen, logoutReason]);
 
   useEffect(() => {
-    if (!subscription?.is_read_only) return;
+    const shouldRedirect = !!subscription?.is_read_only || subscriptionMissing || !!billingAccessStatus?.redirect_to_billing;
+    if (!shouldRedirect) return;
     if (isBillingRoute || isUpsellRoute) return;
 
     const key = `${location.pathname}${location.search}`;
@@ -1253,7 +1474,7 @@ const DepartmentLayout: React.FC<Props> = ({
         path: location.pathname,
         query: location.search || undefined,
         amo_code: amoCode,
-        reason: "read_only_subscription",
+        reason: billingAccessStatus?.access_state || (subscriptionMissing ? "no_subscription" : "read_only_subscription"),
       });
     }
 
@@ -1263,6 +1484,9 @@ const DepartmentLayout: React.FC<Props> = ({
     });
   }, [
     subscription?.is_read_only,
+    subscriptionMissing,
+    billingAccessStatus?.redirect_to_billing,
+    billingAccessStatus?.access_state,
     isBillingRoute,
     isUpsellRoute,
     amoCode,
@@ -1271,6 +1495,30 @@ const DepartmentLayout: React.FC<Props> = ({
     navigate,
     trackEvent,
   ]);
+
+  const holdProtectedContent =
+    !!currentUser &&
+    !isBillingRoute &&
+    !isUpsellRoute &&
+    !billingGateResolved;
+
+  const protectedContent = holdProtectedContent ? (
+    <div className="card" style={{ minHeight: 220 }}>
+      <div className="card-header">
+        <div>
+          <h3 style={{ margin: "4px 0" }}>Checking access</h3>
+          <p className="text-muted" style={{ margin: 0 }}>
+            {subscriptionError || "Verifying billing, subscription, and workspace access before loading this module."}
+          </p>
+          {subscriptionError ? (
+            <button className="btn btn-primary" type="button" onClick={() => { setBillingGateResolved(false); void refreshSubscription({ force: true }); }}>Retry access check</button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  ) : (
+    <>{children}</>
+  );
 
   const deptLabel =
     ADMIN_NAV_ITEMS.find((d) => d.id === (activeDepartment as AdminNavId))
@@ -1577,10 +1825,10 @@ const DepartmentLayout: React.FC<Props> = ({
                 )}
 
 
-                {!isAdminArea && (
+                {!isAdminArea && activeDepartment !== "quality" && (
                   <button
                     type="button"
-                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/qms/training`)}
+                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/qms/training-competence`)}
                     className={
                       "sidebar__item" + (isTrainingRoute ? " sidebar__item--active" : "")
                     }
@@ -1609,14 +1857,14 @@ const DepartmentLayout: React.FC<Props> = ({
                   <>
                     <button
                       type="button"
-                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/qms/audits`)}
+                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/qms`)}
                       className={
                         "sidebar__item" + ((isQmsRoute || isDocControlRoute) ? " sidebar__item--active" : "")
                       }
                       aria-label="Quality Management System"
                       title="Quality Management System"
                     >
-                      <span className="sidebar__item-label">QMS Overview</span>
+                      <span className="sidebar__item-label">QMS Command Centre</span>
                     </button>
                     {(isQmsRoute || isDocControlRoute) && (
                       <div className="sidebar__qms-nav" aria-label="QMS modules">
@@ -2022,7 +2270,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     </div>
                   )}
 
-                  <div className="app-shell__main-inner">{children}</div>
+                  <div className="app-shell__main-inner">{protectedContent}</div>
 
                   <footer className="app-shell__footer">
                     <span>© {currentYear} {brand.name}.</span>
@@ -2091,7 +2339,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   </div>
                 )}
 
-                {children}
+                {protectedContent}
 
                 <footer className="app-shell__footer">
                   <span>© {currentYear} {brand.name}.</span>

@@ -416,3 +416,173 @@
     min-width: 620px;
   }
 }
+
+
+.training-progress-button {
+  position: relative;
+  overflow: hidden;
+  min-width: 220px;
+  isolation: isolate;
+}
+
+.training-progress-button__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-primary, #2563eb) 82%, transparent 18%) 0%, color-mix(in srgb, var(--brand-accent, #b28f2c) 72%, transparent 28%) 100%);
+  opacity: 0.22;
+  z-index: 0;
+  transition: width 180ms ease, opacity 180ms ease;
+}
+
+.training-progress-button.is-busy .training-progress-button__fill {
+  opacity: 0.32;
+}
+
+.training-progress-button__content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.training-progress-button__label,
+.training-progress-button__value {
+  white-space: nowrap;
+}
+
+.training-progress-button__value {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+body[data-color-scheme="dark"] .training-profile-toolbar--surface,
+body[data-color-scheme="dark"] .training-collapse-toggle,
+body[data-color-scheme="dark"] .training-profile-inner-card,
+body[data-color-scheme="dark"] .training-profile-hero__meta-card,
+body[data-color-scheme="dark"] .training-quick-link {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-elevated, #0f172a) 94%, transparent 6%) 0%, color-mix(in srgb, var(--surface, #111827) 96%, transparent 4%) 100%);
+  border-color: color-mix(in srgb, var(--surface-border, #475569) 85%, white 15%);
+  color: var(--text-primary, #f8fafc);
+}
+
+body[data-color-scheme="dark"] .training-collapse-toggle strong,
+body[data-color-scheme="dark"] .training-quick-link span,
+body[data-color-scheme="dark"] .training-profile-hero__label,
+body[data-color-scheme="dark"] .training-profile-hero strong,
+body[data-color-scheme="dark"] .training-profile-sidecard .qms-card__title,
+body[data-color-scheme="dark"] .training-profile-main .qms-card__title {
+  color: var(--text-primary, #f8fafc);
+}
+
+body[data-color-scheme="dark"] .training-collapse-toggle__eyebrow,
+body[data-color-scheme="dark"] .training-collapse-toggle__meta,
+body[data-color-scheme="dark"] .training-profile-hero__label,
+body[data-color-scheme="dark"] .text-muted,
+body[data-color-scheme="dark"] .qms-card__subtitle {
+  color: var(--text-secondary, #cbd5e1) !important;
+}
+
+body[data-color-scheme="dark"] .training-history-table--responsive tbody td,
+body[data-color-scheme="dark"] .training-history-table--responsive thead th {
+  color: var(--text-primary, #f8fafc);
+}
+
+body[data-color-scheme="dark"] .training-history-table--responsive tbody td .text-muted {
+  color: var(--text-secondary, #cbd5e1) !important;
+}
+
+body[data-color-scheme="dark"] .training-progress-button__fill {
+  opacity: 0.38;
+}
+
+.training-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.training-icon-btn,
+.training-file-icon-btn {
+  border: 1px solid var(--line-soft, rgba(148, 163, 184, 0.28));
+  background: var(--card-0, rgba(255,255,255,0.92));
+  color: var(--text-strong, #1f2937);
+  border-radius: 999px;
+  min-width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.training-icon-btn--danger {
+  color: #c2410c;
+}
+
+.training-file-icon-btn:hover,
+.training-icon-btn:hover {
+  background: rgba(177, 143, 44, 0.12);
+}
+
+.training-file-viewer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 24px;
+}
+
+.training-file-viewer {
+  width: min(1100px, 96vw);
+  max-height: 92vh;
+  background: var(--card-0, #fff);
+  border: 1px solid var(--line-soft, rgba(148, 163, 184, 0.28));
+  border-radius: 20px;
+  box-shadow: 0 32px 80px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.training-file-viewer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line-soft, rgba(148, 163, 184, 0.28));
+  background: rgba(248, 250, 252, 0.94);
+}
+
+.training-file-viewer__title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.training-file-viewer__title strong,
+.tc-link-button {
+  color: var(--text-strong, #0f172a);
+}
+
+.tc-link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.training-file-viewer__body {
+  padding: 12px;
+  overflow: auto;
+  max-height: calc(92vh - 66px);
+  display: flex;
+  justify-content: center;
+}

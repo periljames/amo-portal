@@ -26,8 +26,18 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def effective_amo_id(user: account_models.User) -> str:
-    return str(getattr(user, "effective_amo_id", None) or user.amo_id)
+def effective_amo_id(user: account_models.User) -> str | None:
+    raw = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", None)
+    if raw in (None, "", "None", "none", "null", "NULL"):
+        return None
+    return str(raw)
+
+
+def _require_tenant_realtime(user: account_models.User) -> str:
+    amo_id = effective_amo_id(user)
+    if not amo_id:
+        raise HTTPException(status_code=403, detail="Realtime workspace features require a tenant context.")
+    return amo_id
 
 
 def _infer_public_hostname(request: Request | None) -> str | None:
@@ -74,7 +84,7 @@ def issue_connect_token(
     user: account_models.User,
     request: Request | None = None,
 ) -> schemas.RealtimeTokenResponse:
-    amo_id = effective_amo_id(user)
+    amo_id = _require_tenant_realtime(user)
     ttl = max(30, DEFAULT_TOKEN_TTL_SECONDS)
     expires_at = utcnow() + timedelta(seconds=ttl)
     raw = secrets.token_urlsafe(32)
@@ -103,6 +113,8 @@ def issue_connect_token(
 
 def build_bootstrap(db: Session, *, user: account_models.User) -> schemas.RealtimeBootstrapResponse:
     amo_id = effective_amo_id(user)
+    if not amo_id:
+        return schemas.RealtimeBootstrapResponse(threads=[], unread_counts={}, presence={}, pending_prompts=[])
     memberships = (
         db.query(models.ChatThreadMember, models.ChatThread)
         .join(models.ChatThread, models.ChatThread.id == models.ChatThreadMember.thread_id)
@@ -178,6 +190,16 @@ def update_presence_state(
 ) -> schemas.PresenceStateRead:
     amo_id = effective_amo_id(user)
     now = utcnow()
+    if not amo_id:
+        # Platform superusers deliberately have no AMO. Do not write tenant FK rows.
+        return schemas.PresenceStateRead(
+            user_id=str(user.id),
+            amo_id="platform",
+            state="online" if payload.state == "online" else "away",
+            last_seen_at=now,
+            updated_at=now,
+            reason=payload.reason,
+        )
 
     row = (
         db.query(models.PresenceState)
@@ -210,7 +232,7 @@ def update_presence_state(
 
 
 def create_thread(db: Session, *, user: account_models.User, payload: schemas.ThreadCreateRequest) -> schemas.ThreadRead:
-    amo_id = effective_amo_id(user)
+    amo_id = _require_tenant_realtime(user)
     thread = models.ChatThread(amo_id=amo_id, title=payload.title, created_by=str(user.id))
     db.add(thread)
     db.flush()
@@ -229,6 +251,8 @@ def create_thread(db: Session, *, user: account_models.User, payload: schemas.Th
 
 def list_threads(db: Session, *, user: account_models.User) -> list[schemas.ThreadRead]:
     amo_id = effective_amo_id(user)
+    if not amo_id:
+        return []
     rows = (
         db.query(models.ChatThread)
         .join(models.ChatThreadMember, models.ChatThreadMember.thread_id == models.ChatThread.id)
@@ -287,7 +311,7 @@ def list_thread_messages(db: Session, *, user: account_models.User, thread_id: s
 
 
 def perform_prompt_action(db: Session, *, user: account_models.User, prompt_id: str, action: dict[str, Any]) -> dict[str, Any]:
-    amo_id = effective_amo_id(user)
+    amo_id = _require_tenant_realtime(user)
     delivery = (
         db.query(models.PromptDelivery)
         .filter(models.PromptDelivery.prompt_id == prompt_id, models.PromptDelivery.user_id == str(user.id), models.PromptDelivery.amo_id == amo_id)
@@ -400,6 +424,8 @@ def enqueue_outbox(db: Session, *, amo_id: str, kind: str, topic: str, payload: 
 
 def sync_since(db: Session, *, user: account_models.User, since_ts_ms: int) -> schemas.RealtimeSyncResponse:
     amo_id = effective_amo_id(user)
+    if not amo_id:
+        return schemas.RealtimeSyncResponse(messages=[], prompt_deliveries=[], receipt_updates=[], cursor=str(since_ts_ms))
     since_dt = datetime.fromtimestamp(since_ts_ms / 1000.0, tz=timezone.utc)
     messages = (
         db.query(models.ChatMessage)

@@ -10,6 +10,7 @@ import {
   downloadAircraftDocumentsZip,
 } from "../services/fleet";
 import type { AircraftDocument, AircraftRead, TransferProgress } from "../services/fleet";
+import { saveDownloadedFile } from "../utils/downloads";
 
 type UrlParams = {
   amoCode?: string;
@@ -132,15 +133,10 @@ const AircraftDocumentsPage: React.FC = () => {
     setDocumentsError(null);
     setDownloadProgress(null);
     try {
-      const blob = await downloadAircraftDocumentFile(doc.id, (progress) =>
+      const downloaded = await downloadAircraftDocumentFile(doc.id, (progress) =>
         setDownloadProgress({ documentId: doc.id, progress })
       );
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = doc.file_original_name || `aircraft_document_${doc.id}`;
-      link.click();
-      window.URL.revokeObjectURL(url);
+      saveDownloadedFile(downloaded);
     } catch (e: any) {
       console.error("Failed to download document evidence", e);
       setDocumentsError(e?.message || "Could not download evidence.");
@@ -165,15 +161,10 @@ const AircraftDocumentsPage: React.FC = () => {
     setDocumentsError(null);
     setDownloadProgress(null);
     try {
-      const blob = await downloadAircraftDocumentsZip(ids, (progress) =>
+      const downloaded = await downloadAircraftDocumentsZip(ids, (progress) =>
         setDownloadProgress({ bundle: true, progress })
       );
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${selectedAircraft || "aircraft"}_documents.zip`;
-      link.click();
-      window.URL.revokeObjectURL(url);
+      saveDownloadedFile(downloaded);
     } catch (e: any) {
       console.error("Failed to download document bundle", e);
       setDocumentsError(e?.message || "Could not download documents.");

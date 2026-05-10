@@ -39,8 +39,9 @@ export type OverviewSummary = {
   recent_activity_available: boolean;
 };
 
-export async function fetchOverviewSummary(): Promise<OverviewSummary> {
+export async function fetchOverviewSummary(opts?: { silent?: boolean }): Promise<OverviewSummary> {
   return apiGet<OverviewSummary>("/accounts/admin/overview-summary", {
     headers: authHeaders(),
+    silent: opts?.silent ?? false,
   });
 }

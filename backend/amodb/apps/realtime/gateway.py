@@ -63,6 +63,24 @@ class RealtimeGateway:
         data = msgpack.unpackb(payload, raw=False, strict_map_key=False)
         return schemas.RealtimeEnvelope.model_validate(data)
 
+    def disconnect(self) -> None:
+        client = self._client
+        self._client = None
+        self._connected = False
+        if not client:
+            return
+        try:
+            try:
+                client.loop_stop(force=True)
+            except TypeError:
+                client.loop_stop()
+        except Exception:
+            logger.debug("mqtt loop_stop failed during shutdown", exc_info=True)
+        try:
+            client.disconnect()
+        except Exception:
+            logger.debug("mqtt disconnect failed during shutdown", exc_info=True)
+
     def health(self) -> dict[str, object]:
         return {
             "enabled": self.enabled,
@@ -72,3 +90,4 @@ class RealtimeGateway:
 
 
 gateway = RealtimeGateway()
+

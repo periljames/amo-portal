@@ -125,7 +125,7 @@ const FindingDrawer: React.FC<Props> = ({ isOpen, amoCode, department, finding, 
   const openEvidence = (item: EvidenceItem) => {
     if (item.mime === "text/plain") return;
     navigate(
-      `/maintenance/${amoCode}/${department}/qms/evidence/${item.id}?name=${encodeURIComponent(item.filename)}&mime=${encodeURIComponent(item.mime)}&url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(item.source)}`
+      `/maintenance/${amoCode}/qms/evidence-vault/${item.id}?name=${encodeURIComponent(item.filename)}&mime=${encodeURIComponent(item.mime)}&url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(item.source)}`
     );
   };
 

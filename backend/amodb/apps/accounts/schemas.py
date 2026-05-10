@@ -222,9 +222,9 @@ class UserSelfUpdate(BaseModel):
 
 class UserRead(UserBase):
     id: str
-    amo_id: str
+    amo_id: Optional[str] = None
     department_id: Optional[str] = None
-    staff_code: str
+    staff_code: Optional[str] = None
 
     # For reads we guarantee full_name is present
     full_name: str
@@ -413,7 +413,7 @@ class Token(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserRead
-    amo: AMORead
+    amo: Optional[AMORead] = None
     department: Optional[DepartmentRead] = None
 
 
@@ -652,9 +652,28 @@ class SubscriptionRead(BaseModel):
         from_attributes = True
 
 
+class BillingAccessStatusRead(BaseModel):
+    subscription: Optional[SubscriptionRead] = None
+    access_state: str
+    has_access: bool
+    redirect_to_billing: bool
+    lock_reason: Optional[str] = None
+    payment_method_count: int = 0
+    overdue_invoice_count: int = 0
+    actionable_invoice_id: Optional[str] = None
+    current_period_end: Optional[datetime] = None
+    trial_grace_expires_at: Optional[datetime] = None
+    checked_at: Optional[datetime] = None
+    source: Optional[str] = None
+
+
 class InvoiceRead(BaseModel):
     id: str
+    invoice_number: Optional[str] = None
     amo_id: str
+    buyer_name: Optional[str] = None
+    buyer_email: Optional[str] = None
+    buyer_phone: Optional[str] = None
     license_id: Optional[str]
     ledger_entry_id: Optional[str]
     amount_cents: int
@@ -666,6 +685,11 @@ class InvoiceRead(BaseModel):
     paid_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+    subtotal_cents: int = 0
+    tax_amount_cents: int = 0
+    total_cents: int = 0
+    etims_status: Optional[str] = None
+    etims_reference: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -766,6 +790,22 @@ class PlatformSettingsBase(BaseModel):
     gzip_minimum_size: Optional[int] = None
     gzip_compresslevel: Optional[int] = None
     max_request_body_bytes: Optional[int] = None
+    email_provider: Optional[str] = None
+    email_from_name: Optional[str] = None
+    email_from_email: Optional[str] = None
+    email_reply_to: Optional[str] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    smtp_username: Optional[str] = None
+    smtp_password_secret: Optional[str] = Field(default=None, exclude=True)
+    smtp_password_input: Optional[str] = Field(default=None, exclude=True)
+    smtp_password_changed: Optional[bool] = False
+    has_smtp_secret: Optional[bool] = None
+    smtp_use_tls: Optional[bool] = None
+    smtp_allow_self_signed: Optional[bool] = None
+    smtp_test_recipient: Optional[str] = None
+    support_email: Optional[str] = None
+    ops_alert_email: Optional[str] = None
     acme_directory_url: Optional[str] = None
     acme_client: Optional[str] = None
     certificate_status: Optional[str] = None
@@ -786,6 +826,51 @@ class PlatformSettingsRead(PlatformSettingsBase):
 
     class Config:
         from_attributes = True
+
+
+class PlatformTenantModuleWrite(BaseModel):
+    module_code: str = Field(..., min_length=1, max_length=64)
+    status: ModuleSubscriptionStatus = ModuleSubscriptionStatus.ENABLED
+    plan_code: Optional[str] = None
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    metadata_json: Optional[str] = None
+
+
+class PlatformTenantModulesBulkUpdate(BaseModel):
+    modules: List[PlatformTenantModuleWrite] = Field(default_factory=list)
+
+
+class PlatformTenantSubscriptionUpdate(BaseModel):
+    sku_code: Optional[str] = Field(None, description="Optional catalog SKU code. If supplied, creates or replaces the active tenant license anchor.")
+    status: Optional[LicenseStatus] = None
+    is_read_only: Optional[bool] = None
+    current_period_end: Optional[datetime] = None
+    trial_ends_at: Optional[datetime] = None
+    trial_grace_expires_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    clear_overdue_invoices: bool = False
+
+
+class PlatformTenantInvoiceCreate(BaseModel):
+    amount_cents: int = Field(..., ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=8)
+    description: Optional[str] = None
+    due_at: Optional[datetime] = None
+    status: InvoiceStatus = InvoiceStatus.PENDING
+    mark_paid: bool = False
+
+
+class PlatformDiagnosticsRunRequest(BaseModel):
+    internet_url: Optional[str] = Field(default="https://example.com", max_length=255)
+    timeout_seconds: float = Field(default=4.0, ge=1.0, le=15.0)
+    include_throughput: bool = True
+
+
+class PlatformEmailTestRequest(BaseModel):
+    recipient: Optional[str] = Field(default=None, max_length=255)
+    subject: Optional[str] = Field(default="AMO Portal test email", max_length=255)
+    body: Optional[str] = Field(default="This is a platform email configuration test.", max_length=2000)
 
 
 # ---------------------------------------------------------------------------
@@ -1082,3 +1167,4 @@ class AdminUserWorkspaceRead(BaseModel):
     profile: Optional[PersonnelProfileSummaryRead] = None
     availability: List[UserAvailabilitySummaryRead] = Field(default_factory=list)
     group_memberships: List[UserGroupRead] = Field(default_factory=list)
+

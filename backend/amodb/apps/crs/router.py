@@ -25,6 +25,12 @@ from .pdf_renderer import (
 router = APIRouter(prefix="/crs", tags=["crs"])
 
 
+def _safe_crs_download_name(value: str) -> str:
+    import re
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip()).strip("._-")
+    return cleaned[:120] or "crs"
+
+
 def _get_amo_template_path(db: Session, amo_id: Optional[str]) -> Optional[Path]:
     if not amo_id:
         return None
@@ -591,5 +597,5 @@ def download_crs_pdf(
     return FileResponse(
         path=str(pdf_path),
         media_type="application/pdf",
-        filename=pdf_path.name,
+        filename=f"{_safe_crs_download_name(crs.crs_serial or f'crs_{crs.id}')}.pdf",
     )

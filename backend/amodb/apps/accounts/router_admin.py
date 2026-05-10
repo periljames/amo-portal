@@ -6,10 +6,15 @@ import os
 import json
 import csv
 import io
+import socket
+import smtplib
+import ssl
+import time
+import urllib.request
 from pathlib import Path
 from datetime import datetime, timedelta, timezone, date
 from uuid import uuid4
-from typing import List, Optional
+from typing import Any, List, Optional
 import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -25,12 +30,32 @@ from amodb.apps.audit import models as audit_models
 from amodb.apps.audit import schemas as audit_schemas
 from amodb.apps.notifications import service as notification_service
 from amodb.apps.tasks import services as task_services
+from amodb.apps.tasks import models as task_models
 from amodb.security import get_current_active_user, require_admin, require_roles
 from . import models, schemas, services
 from .personnel_import import import_personnel_rows, parse_people_sheet
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
 RESERVED_PLATFORM_SLUGS = {"system", "root"}
+PLATFORM_MODULE_CATALOG = [
+    {"code": "qms", "label": "QMS Cockpit", "category": "Quality"},
+    {"code": "quality", "label": "Quality Legacy Tools", "category": "Quality"},
+    {"code": "training", "label": "Training & Competence", "category": "Quality"},
+    {"code": "manuals", "label": "Controlled Manuals", "category": "Documents"},
+    {"code": "aerodoc_hybrid_dms", "label": "AeroDoc Hybrid DMS", "category": "Documents"},
+    {"code": "maintenance_program", "label": "Maintenance Programme", "category": "Maintenance"},
+    {"code": "work", "label": "Work Orders", "category": "Maintenance"},
+    {"code": "fleet", "label": "Fleet", "category": "Maintenance"},
+    {"code": "reliability", "label": "Reliability", "category": "Continuing Airworthiness"},
+    {"code": "finance_inventory", "label": "Finance & Inventory", "category": "Commercial"},
+    {"code": "production", "label": "Production", "category": "Maintenance"},
+    {"code": "planning", "label": "Planning", "category": "Maintenance"},
+    {"code": "technical_records", "label": "Technical Records", "category": "Records"},
+    {"code": "equipment_calibration", "label": "Equipment & Calibration", "category": "Quality"},
+    {"code": "suppliers", "label": "Suppliers", "category": "Quality"},
+    {"code": "management_review", "label": "Management Review", "category": "Quality"},
+]
+PLATFORM_MODULE_CODES = {item["code"] for item in PLATFORM_MODULE_CATALOG}
 AMO_ASSET_UPLOAD_DIR = Path(os.getenv("AMO_ASSET_UPLOAD_DIR", "uploads/amo_assets")).resolve()
 PLATFORM_ASSET_UPLOAD_DIR = Path(
     os.getenv("PLATFORM_ASSET_UPLOAD_DIR", "uploads/platform_assets")
@@ -405,6 +430,19 @@ def _platform_settings_defaults() -> dict:
         "gzip_minimum_size": _parse_env_int(os.getenv("GZIP_MINIMUM_SIZE")),
         "gzip_compresslevel": _parse_env_int(os.getenv("GZIP_COMPRESSLEVEL")),
         "max_request_body_bytes": _parse_env_int(os.getenv("MAX_REQUEST_BODY_BYTES")),
+        "email_provider": os.getenv("PLATFORM_EMAIL_PROVIDER", os.getenv("EMAIL_PROVIDER")),
+        "email_from_name": os.getenv("PLATFORM_EMAIL_FROM_NAME", os.getenv("EMAIL_FROM_NAME")),
+        "email_from_email": os.getenv("PLATFORM_EMAIL_FROM_EMAIL", os.getenv("EMAIL_FROM_EMAIL")),
+        "email_reply_to": os.getenv("PLATFORM_EMAIL_REPLY_TO", os.getenv("EMAIL_REPLY_TO")),
+        "smtp_host": os.getenv("PLATFORM_SMTP_HOST", os.getenv("SMTP_HOST")),
+        "smtp_port": _parse_env_int(os.getenv("PLATFORM_SMTP_PORT", os.getenv("SMTP_PORT"))),
+        "smtp_username": os.getenv("PLATFORM_SMTP_USERNAME", os.getenv("SMTP_USERNAME")),
+        "smtp_password_secret": os.getenv("PLATFORM_SMTP_PASSWORD", os.getenv("SMTP_PASSWORD")),
+        "smtp_use_tls": (os.getenv("PLATFORM_SMTP_USE_TLS", os.getenv("SMTP_USE_TLS", "true")).lower() in {"1", "true", "yes", "on"}),
+        "smtp_allow_self_signed": (os.getenv("PLATFORM_SMTP_ALLOW_SELF_SIGNED", os.getenv("SMTP_ALLOW_SELF_SIGNED", "false")).lower() in {"1", "true", "yes", "on"}),
+        "smtp_test_recipient": os.getenv("PLATFORM_SMTP_TEST_RECIPIENT"),
+        "support_email": os.getenv("PLATFORM_SUPPORT_EMAIL"),
+        "ops_alert_email": os.getenv("PLATFORM_OPS_ALERT_EMAIL"),
         "acme_directory_url": os.getenv("ACME_DIRECTORY_URL"),
         "acme_client": os.getenv("ACME_CLIENT"),
         "certificate_status": os.getenv("ACME_CERT_STATUS"),
@@ -470,6 +508,257 @@ def _delete_platform_asset(path: Optional[str]) -> None:
             p.unlink()
     except Exception:
         return
+
+
+
+def _enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def _dt_value(value: Any) -> Optional[str]:
+    return value.isoformat() if value and hasattr(value, "isoformat") else None
+
+
+def _latest_license_for_amo(db: Session, *, amo_id: str) -> Optional[models.TenantLicense]:
+    return services.get_latest_subscription(db, amo_id=amo_id)
+
+
+def _get_or_create_platform_managed_sku(db: Session) -> models.CatalogSKU:
+    """
+    Ensure Super Admin can unblock or activate a tenant even before the commercial
+    catalog has been configured. This SKU is internal, inactive by default, and
+    exists only as the required foreign key anchor for a tenant license.
+    """
+    sku = db.query(models.CatalogSKU).filter(models.CatalogSKU.code == "PLATFORM_MANAGED").first()
+    if sku:
+        return sku
+    sku = models.CatalogSKU(
+        code="PLATFORM_MANAGED",
+        name="Platform Managed Access",
+        description="Internal superadmin-managed access anchor used before a commercial billing plan is assigned.",
+        term=models.BillingTerm.MONTHLY,
+        trial_days=0,
+        amount_cents=0,
+        currency="USD",
+        min_usage_limit=None,
+        max_usage_limit=None,
+        is_active=False,
+    )
+    db.add(sku)
+    db.flush()
+    return sku
+
+
+def _license_summary(license: Optional[models.TenantLicense]) -> Optional[dict[str, Any]]:
+    if not license:
+        return None
+    sku = getattr(license, "catalog_sku", None)
+    return {
+        "id": license.id,
+        "amo_id": license.amo_id,
+        "sku_id": license.sku_id,
+        "sku_code": getattr(sku, "code", None),
+        "sku_name": getattr(sku, "name", None),
+        "term": _enum_value(license.term),
+        "status": _enum_value(license.status),
+        "is_read_only": bool(license.is_read_only),
+        "trial_started_at": _dt_value(license.trial_started_at),
+        "trial_ends_at": _dt_value(license.trial_ends_at),
+        "trial_grace_expires_at": _dt_value(license.trial_grace_expires_at),
+        "current_period_start": _dt_value(license.current_period_start),
+        "current_period_end": _dt_value(license.current_period_end),
+        "canceled_at": _dt_value(license.canceled_at),
+        "notes": license.notes,
+        "created_at": _dt_value(license.created_at),
+        "updated_at": _dt_value(license.updated_at),
+    }
+
+
+def _module_summary(subscription: models.ModuleSubscription) -> dict[str, Any]:
+    return {
+        "id": subscription.id,
+        "amo_id": subscription.amo_id,
+        "module_code": subscription.module_code,
+        "status": _enum_value(subscription.status),
+        "effective_from": _dt_value(subscription.effective_from),
+        "effective_to": _dt_value(subscription.effective_to),
+        "plan_code": subscription.plan_code,
+        "metadata_json": subscription.metadata_json,
+        "created_at": _dt_value(subscription.created_at),
+        "updated_at": _dt_value(subscription.updated_at),
+    }
+
+
+def _invoice_summary(invoice: models.BillingInvoice) -> dict[str, Any]:
+    return {
+        **services.build_invoice_view(invoice),
+        "created_at": _dt_value(invoice.created_at),
+        "updated_at": _dt_value(invoice.updated_at),
+    }
+
+
+def _platform_settings_summary(settings: models.PlatformSettings) -> dict[str, Any]:
+    return {
+        "id": settings.id,
+        "api_base_url": settings.api_base_url,
+        "platform_name": settings.platform_name,
+        "platform_tagline": settings.platform_tagline,
+        "brand_accent": settings.brand_accent,
+        "brand_accent_soft": settings.brand_accent_soft,
+        "brand_accent_secondary": settings.brand_accent_secondary,
+        "platform_logo_filename": settings.platform_logo_filename,
+        "platform_logo_content_type": settings.platform_logo_content_type,
+        "platform_logo_uploaded_at": _dt_value(settings.platform_logo_uploaded_at),
+        "gzip_minimum_size": settings.gzip_minimum_size,
+        "gzip_compresslevel": settings.gzip_compresslevel,
+        "max_request_body_bytes": settings.max_request_body_bytes,
+        "email_provider": settings.email_provider,
+        "email_from_name": settings.email_from_name,
+        "email_from_email": settings.email_from_email,
+        "email_reply_to": settings.email_reply_to,
+        "smtp_host": settings.smtp_host,
+        "smtp_port": settings.smtp_port,
+        "smtp_username": settings.smtp_username,
+        "smtp_password_secret": "********" if settings.smtp_password_secret else None,
+        "smtp_use_tls": settings.smtp_use_tls,
+        "smtp_allow_self_signed": settings.smtp_allow_self_signed,
+        "smtp_test_recipient": settings.smtp_test_recipient,
+        "support_email": settings.support_email,
+        "ops_alert_email": settings.ops_alert_email,
+        "acme_directory_url": settings.acme_directory_url,
+        "acme_client": settings.acme_client,
+        "certificate_status": settings.certificate_status,
+        "certificate_issuer": settings.certificate_issuer,
+        "certificate_expires_at": _dt_value(settings.certificate_expires_at),
+        "last_renewed_at": _dt_value(settings.last_renewed_at),
+        "notes": settings.notes,
+        "created_at": _dt_value(settings.created_at),
+        "updated_at": _dt_value(settings.updated_at),
+    }
+
+
+def _catalog_sku_summary(sku: models.CatalogSKU) -> dict[str, Any]:
+    return {
+        "id": sku.id,
+        "code": sku.code,
+        "name": sku.name,
+        "description": sku.description,
+        "term": _enum_value(sku.term),
+        "trial_days": sku.trial_days,
+        "amount_cents": sku.amount_cents,
+        "currency": sku.currency,
+        "min_usage_limit": sku.min_usage_limit,
+        "max_usage_limit": sku.max_usage_limit,
+        "is_active": bool(sku.is_active),
+        "created_at": _dt_value(sku.created_at),
+        "updated_at": _dt_value(sku.updated_at),
+    }
+
+
+def _tenant_control_summary(db: Session, *, amo: models.AMO, include_detail: bool = False) -> dict[str, Any]:
+    users_total = db.query(func.count(models.User.id)).filter(models.User.amo_id == amo.id).scalar() or 0
+    admins_total = (
+        db.query(func.count(models.User.id))
+        .filter(models.User.amo_id == amo.id, models.User.is_amo_admin.is_(True), models.User.is_superuser.is_(False))
+        .scalar()
+        or 0
+    )
+    active_users = (
+        db.query(func.count(models.User.id))
+        .filter(models.User.amo_id == amo.id, models.User.is_active.is_(True))
+        .scalar()
+        or 0
+    )
+    modules = (
+        db.query(models.ModuleSubscription)
+        .filter(models.ModuleSubscription.amo_id == amo.id)
+        .order_by(models.ModuleSubscription.module_code.asc())
+        .all()
+    )
+    latest_license = _latest_license_for_amo(db, amo_id=amo.id)
+    open_invoices = (
+        db.query(func.count(models.BillingInvoice.id))
+        .filter(models.BillingInvoice.amo_id == amo.id, models.BillingInvoice.status == models.InvoiceStatus.PENDING)
+        .scalar()
+        or 0
+    )
+    latest_invoice = (
+        db.query(models.BillingInvoice)
+        .filter(models.BillingInvoice.amo_id == amo.id)
+        .order_by(models.BillingInvoice.issued_at.desc(), models.BillingInvoice.created_at.desc())
+        .first()
+    )
+    payload: dict[str, Any] = {
+        "id": amo.id,
+        "amo_code": amo.amo_code,
+        "name": amo.name,
+        "icao_code": amo.icao_code,
+        "country": amo.country,
+        "login_slug": amo.login_slug,
+        "contact_email": amo.contact_email,
+        "contact_phone": amo.contact_phone,
+        "time_zone": amo.time_zone,
+        "is_demo": bool(amo.is_demo),
+        "is_active": bool(amo.is_active),
+        "created_at": _dt_value(amo.created_at),
+        "updated_at": _dt_value(amo.updated_at),
+        "counts": {
+            "users_total": int(users_total),
+            "active_users": int(active_users),
+            "tenant_admins": int(admins_total),
+            "modules_total": len(modules),
+            "modules_enabled": sum(1 for item in modules if item.status == models.ModuleSubscriptionStatus.ENABLED),
+            "open_invoices": int(open_invoices),
+        },
+        "subscription": _license_summary(latest_license),
+        "access_status": services.get_billing_access_status(db, amo_id=amo.id).model_dump(mode="json"),
+        "latest_invoice": _invoice_summary(latest_invoice) if latest_invoice else None,
+        "modules": [_module_summary(item) for item in modules],
+    }
+    if include_detail:
+        payload["invoices"] = [
+            _invoice_summary(invoice)
+            for invoice in db.query(models.BillingInvoice)
+            .filter(models.BillingInvoice.amo_id == amo.id)
+            .order_by(models.BillingInvoice.issued_at.desc(), models.BillingInvoice.created_at.desc())
+            .limit(25).all()
+        ]
+        payload["usage_meters"] = [
+            {
+                "id": meter.id,
+                "meter_key": meter.meter_key,
+                "used_units": meter.used_units,
+                "last_recorded_at": _dt_value(meter.last_recorded_at),
+                "license_id": meter.license_id,
+            }
+            for meter in db.query(models.UsageMeter)
+            .filter(models.UsageMeter.amo_id == amo.id)
+            .order_by(models.UsageMeter.meter_key.asc()).all()
+        ]
+        payload["module_performance"] = _module_performance_summary(db, amo_id=amo.id)
+        payload["support_items"] = [item for item in _support_items_summary(db, limit=250) if item.get("amo_id") == amo.id]
+        payload["recent_users"] = [
+            {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "role": _enum_value(user.role),
+                "is_active": bool(user.is_active),
+                "is_amo_admin": bool(user.is_amo_admin),
+                "last_login_at": _dt_value(user.last_login_at),
+            }
+            for user in db.query(models.User)
+            .filter(models.User.amo_id == amo.id)
+            .order_by(models.User.created_at.desc()).limit(25).all()
+        ]
+    return payload
+
+
+def _get_tenant_or_404(db: Session, *, amo_id: str) -> models.AMO:
+    amo = db.query(models.AMO).filter(models.AMO.id == amo_id).first()
+    if not amo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found.")
+    return amo
 
 
 def _latest_availability_map_for_users(
@@ -916,30 +1205,28 @@ def create_amo(
         default_sku = os.getenv("AMODB_DEFAULT_TRIAL_SKU", "").strip()
         if not default_sku:
             skus = services.list_catalog_skus(db, include_inactive=False)
-            if not skus:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No active SKU available to start a subscription trial.",
-                )
-            default_sku = skus[0].code
+            default_sku = skus[0].code if skus else ""
 
-        services.start_trial(
-            db,
-            amo_id=amo.id,
-            sku_code=default_sku,
-            idempotency_key=f"amo-create-{amo.id}-{uuid4().hex}",
+        if default_sku:
+            services.start_trial(
+                db,
+                amo_id=amo.id,
+                sku_code=default_sku,
+                idempotency_key=f"amo-create-{amo.id}-{uuid4().hex}",
+            )
+    except Exception as exc:
+        # Tenant creation must not fail merely because commercial setup is not
+        # complete yet. The platform superuser can attach a subscription from
+        # /platform/control after creating the tenant.
+        db.rollback()
+        db.add(
+            models.BillingAuditLog(
+                amo_id=amo.id,
+                event_type="TENANT_SUBSCRIPTION_BOOTSTRAP_SKIPPED",
+                details=json.dumps({"error": str(getattr(exc, "detail", exc))}),
+            )
         )
-    except HTTPException:
-        db.delete(amo)
         db.commit()
-        raise
-    except ValueError as exc:
-        db.delete(amo)
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
     audit_services.create_audit_event(
         db,
         amo_id=amo.id,
@@ -953,6 +1240,7 @@ def create_amo(
                 "amo_code": amo.amo_code,
                 "login_slug": amo.login_slug,
                 "name": amo.name,
+                "billing_bootstrap": {"status": "created", "note": "tenant creation does not depend on billing bootstrap"},
             },
         ),
     )
@@ -1479,20 +1767,8 @@ def create_user_admin(
             detail="Only platform superuser can create superuser accounts.",
         )
 
-    existing = (
-        db.query(models.User)
-        .filter(
-            models.User.amo_id == payload.amo_id,
-            (models.User.email == payload.email)
-            | (models.User.staff_code == payload.staff_code),
-        )
-        .first()
-    )
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User with this email or staff code already exists in the AMO.",
-        )
+    if payload.role == models.AccountRole.SUPERUSER:
+        payload = payload.copy(update={"amo_id": None, "department_id": None})
 
     try:
         user = services.create_user(db, payload)
@@ -2281,6 +2557,547 @@ def export_users(
 
     payload = [_build_user_export_payload(db, user=user) for user in users]
     return _json_download_response(filename='users_export.json', payload=payload)
+
+
+# ---------------------------------------------------------------------------
+# PLATFORM SAAS CONTROL PLANE (SUPERUSER ONLY)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/platform/control-plane", summary="Full platform SaaS control-plane state for superusers")
+def get_platform_control_plane(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    tenants = db.query(models.AMO).order_by(models.AMO.is_active.desc(), models.AMO.amo_code.asc()).all()
+    catalog = services.list_catalog_skus(db, include_inactive=True)
+    settings = _get_or_create_platform_settings(db)
+    recent_invoices = (
+        db.query(models.BillingInvoice)
+        .order_by(models.BillingInvoice.issued_at.desc(), models.BillingInvoice.created_at.desc())
+        .limit(25).all()
+    )
+    return {
+        "scope": "platform",
+        "settings": _platform_settings_summary(settings),
+        "module_catalog": PLATFORM_MODULE_CATALOG,
+        "tenants": [_tenant_control_summary(db, amo=amo) for amo in tenants],
+        "catalog": [_catalog_sku_summary(sku) for sku in catalog],
+        "recent_invoices": [_invoice_summary(invoice) for invoice in recent_invoices],
+        "diagnostics": _run_platform_diagnostics(db, settings=settings),
+        "support_items": _support_items_summary(db, limit=100),
+    }
+
+
+@router.get("/platform/tenants/{amo_id}", summary="Get one tenant with modules, subscription, users, invoices and usage meters")
+def get_platform_tenant_detail(
+    amo_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    amo = _get_tenant_or_404(db, amo_id=amo_id)
+    return _tenant_control_summary(db, amo=amo, include_detail=True)
+
+
+@router.post("/platform/tenants/{amo_id}/reactivate", summary="Reactivate a deactivated tenant")
+def reactivate_platform_tenant(
+    amo_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    amo = _get_tenant_or_404(db, amo_id=amo_id)
+    amo.is_active = True
+    db.add(amo)
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo.id,
+        data=audit_schemas.AuditEventCreate(entity_type="AMO", entity_id=str(amo.id), action="reactivate", actor_user_id=current_user.id, before_json=None, after_json={"is_active": True}),
+    )
+    db.commit()
+    db.refresh(amo)
+    return _tenant_control_summary(db, amo=amo, include_detail=True)
+
+
+@router.post("/platform/tenants/{amo_id}/modules/bulk", summary="Bulk update tenant module controls")
+def bulk_update_platform_tenant_modules(
+    amo_id: str,
+    payload: schemas.PlatformTenantModulesBulkUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    amo = _get_tenant_or_404(db, amo_id=amo_id)
+    changed: list[dict[str, Any]] = []
+    now = datetime.now(timezone.utc)
+    for item in payload.modules:
+        module_code = item.module_code.strip()
+        if not module_code:
+            continue
+        if module_code not in PLATFORM_MODULE_CODES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown module code: {module_code}")
+        subscription = (
+            db.query(models.ModuleSubscription)
+            .filter(models.ModuleSubscription.amo_id == amo.id, models.ModuleSubscription.module_code == module_code)
+            .first()
+        )
+        if not subscription:
+            subscription = models.ModuleSubscription(amo_id=amo.id, module_code=module_code, effective_from=item.effective_from or now)
+        subscription.status = item.status
+        subscription.plan_code = item.plan_code
+        subscription.effective_from = item.effective_from or subscription.effective_from or now
+        subscription.effective_to = item.effective_to
+        subscription.metadata_json = item.metadata_json
+        db.add(subscription)
+        changed.append({"module_code": module_code, "status": _enum_value(item.status)})
+    if changed:
+        audit_services.create_audit_event(
+            db,
+            amo_id=amo.id,
+            data=audit_schemas.AuditEventCreate(entity_type="ModuleSubscription", entity_id=str(amo.id), action="bulk_update", actor_user_id=current_user.id, before_json=None, after_json={"modules": changed}),
+        )
+    db.commit()
+    db.refresh(amo)
+    return _tenant_control_summary(db, amo=amo, include_detail=True)
+
+
+@router.post("/platform/tenants/{amo_id}/subscription", summary="Platform superuser subscription override or SKU assignment")
+def update_platform_tenant_subscription(
+    amo_id: str,
+    payload: schemas.PlatformTenantSubscriptionUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    amo = _get_tenant_or_404(db, amo_id=amo_id)
+    now = datetime.now(timezone.utc)
+    license = _latest_license_for_amo(db, amo_id=amo.id)
+    if payload.sku_code:
+        sku = db.query(models.CatalogSKU).filter(models.CatalogSKU.code == payload.sku_code).first()
+        if not sku:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SKU not found.")
+        active = (
+            db.query(models.TenantLicense)
+            .filter(models.TenantLicense.amo_id == amo.id, models.TenantLicense.status.in_([models.LicenseStatus.ACTIVE, models.LicenseStatus.TRIALING]))
+            .all()
+        )
+        for old_license in active:
+            old_license.status = models.LicenseStatus.CANCELLED
+            old_license.canceled_at = now
+            db.add(old_license)
+        period_end = payload.current_period_end or now + (
+            timedelta(days=365) if sku.term == models.BillingTerm.ANNUAL else timedelta(days=182) if sku.term == models.BillingTerm.BI_ANNUAL else timedelta(days=30)
+        )
+        license = models.TenantLicense(
+            amo_id=amo.id,
+            sku_id=sku.id,
+            term=sku.term,
+            status=payload.status or models.LicenseStatus.ACTIVE,
+            trial_started_at=now if (payload.status or models.LicenseStatus.ACTIVE) == models.LicenseStatus.TRIALING else None,
+            trial_ends_at=payload.trial_ends_at,
+            trial_grace_expires_at=payload.trial_grace_expires_at,
+            is_read_only=bool(payload.is_read_only) if payload.is_read_only is not None else False,
+            current_period_start=now,
+            current_period_end=period_end,
+            notes=payload.notes,
+        )
+        db.add(license)
+    elif license:
+        if payload.status is not None:
+            license.status = payload.status
+        if payload.is_read_only is not None:
+            license.is_read_only = payload.is_read_only
+        if payload.current_period_end is not None:
+            license.current_period_end = payload.current_period_end
+        if payload.trial_ends_at is not None:
+            license.trial_ends_at = payload.trial_ends_at
+        if payload.trial_grace_expires_at is not None:
+            license.trial_grace_expires_at = payload.trial_grace_expires_at
+        if payload.notes is not None:
+            license.notes = payload.notes
+        db.add(license)
+    else:
+        sku = _get_or_create_platform_managed_sku(db)
+        period_end = payload.current_period_end or now + timedelta(days=30)
+        license = models.TenantLicense(
+            amo_id=amo.id,
+            sku_id=sku.id,
+            term=sku.term,
+            status=payload.status or models.LicenseStatus.ACTIVE,
+            trial_started_at=now if (payload.status or models.LicenseStatus.ACTIVE) == models.LicenseStatus.TRIALING else None,
+            trial_ends_at=payload.trial_ends_at,
+            trial_grace_expires_at=payload.trial_grace_expires_at,
+            is_read_only=bool(payload.is_read_only) if payload.is_read_only is not None else False,
+            current_period_start=now,
+            current_period_end=period_end,
+            notes=payload.notes or "Created by platform superadmin because no tenant license existed.",
+        )
+        db.add(license)
+
+    if payload.clear_overdue_invoices:
+        overdue_rows = (
+            db.query(models.BillingInvoice)
+            .filter(
+                models.BillingInvoice.amo_id == amo.id,
+                models.BillingInvoice.status == models.InvoiceStatus.PENDING,
+                models.BillingInvoice.due_at.isnot(None),
+                models.BillingInvoice.due_at <= now,
+            )
+            .all()
+        )
+        for invoice in overdue_rows:
+            invoice.status = models.InvoiceStatus.VOID
+            invoice.description = f"{invoice.description or ''}\nVoided by platform superadmin access-clear action.".strip()
+            db.add(invoice)
+
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo.id,
+        data=audit_schemas.AuditEventCreate(entity_type="TenantLicense", entity_id=str(license.id if license else amo.id), action="platform_override", actor_user_id=current_user.id, before_json=None, after_json=payload.model_dump(mode="json", exclude_unset=True)),
+    )
+    db.commit()
+    db.refresh(amo)
+    return _tenant_control_summary(db, amo=amo, include_detail=True)
+
+
+@router.post("/platform/tenants/{amo_id}/invoices", summary="Create a manual tenant invoice")
+def create_platform_tenant_invoice(
+    amo_id: str,
+    payload: schemas.PlatformTenantInvoiceCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    amo = _get_tenant_or_404(db, amo_id=amo_id)
+    now = datetime.now(timezone.utc)
+    license = _latest_license_for_amo(db, amo_id=amo.id)
+    idempotency_key = f"platform-manual-invoice-{amo.id}-{uuid4().hex}"
+    ledger = models.LedgerEntry(
+        amo_id=amo.id,
+        license_id=license.id if license else None,
+        amount_cents=payload.amount_cents,
+        currency=payload.currency.upper(),
+        entry_type=models.LedgerEntryType.CHARGE,
+        description=payload.description or "Manual platform invoice",
+        idempotency_key=idempotency_key,
+        recorded_at=now,
+    )
+    db.add(ledger)
+    db.flush()
+    status_value = models.InvoiceStatus.PAID if payload.mark_paid else payload.status
+    invoice = models.BillingInvoice(
+        amo_id=amo.id,
+        license_id=license.id if license else None,
+        ledger_entry_id=ledger.id,
+        amount_cents=payload.amount_cents,
+        currency=payload.currency.upper(),
+        status=status_value,
+        description=payload.description or "Manual platform invoice",
+        idempotency_key=idempotency_key,
+        issued_at=now,
+        due_at=payload.due_at,
+        paid_at=now if status_value == models.InvoiceStatus.PAID else None,
+    )
+    db.add(invoice)
+    audit_services.create_audit_event(
+        db,
+        amo_id=amo.id,
+        data=audit_schemas.AuditEventCreate(entity_type="BillingInvoice", entity_id=str(invoice.id), action="manual_create", actor_user_id=current_user.id, before_json=None, after_json={"amount_cents": payload.amount_cents, "currency": payload.currency.upper(), "status": _enum_value(status_value)}),
+    )
+    db.commit()
+    db.refresh(invoice)
+    return _invoice_summary(invoice)
+
+
+
+def _safe_count_table(db: Session, *, table_name: str, amo_id: Optional[str] = None, amo_column: str = "amo_id") -> int | None:
+    try:
+        inspector = sa.inspect(db.get_bind())
+        if not inspector.has_table(table_name):
+            return None
+        columns = {column["name"] for column in inspector.get_columns(table_name)}
+        if amo_id and amo_column not in columns:
+            return None
+        if amo_id:
+            return int(db.execute(text(f"SELECT COUNT(*) FROM {table_name} WHERE {amo_column} = :amo_id"), {"amo_id": amo_id}).scalar() or 0)
+        return int(db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0)
+    except Exception:
+        return None
+
+
+def _module_performance_summary(db: Session, *, amo_id: str) -> dict[str, Any]:
+    table_map = {
+        "qms": ["qms_audits", "qms_findings", "qms_cars", "qms_documents", "qms_activity_logs"],
+        "quality": ["qms_audits", "qms_findings", "qms_cars", "quality_audits", "audit_events"],
+        "training": ["training_courses", "training_requirements", "training_records", "competence_gaps"],
+        "manuals": ["manuals", "manual_versions", "manual_change_requests"],
+        "aerodoc_hybrid_dms": ["manuals", "manual_versions", "doc_control_documents"],
+        "finance_inventory": ["billing_invoices", "ledger_entries", "usage_meters", "inventory_items"],
+        "fleet": ["aircraft", "aircraft_documents"],
+        "maintenance_program": ["maintenance_programs", "maintenance_program_tasks"],
+        "work": ["tasks", "task_cards", "task_assignments"],
+        "reliability": ["reliability_events", "reliability_alerts"],
+        "technical_records": ["technical_records", "aircraft_documents"],
+        "equipment_calibration": ["qms_equipment", "qms_calibration_records"],
+        "suppliers": ["qms_suppliers", "qms_supplier_evaluations"],
+        "management_review": ["qms_management_reviews", "qms_management_review_actions"],
+    }
+    result: dict[str, Any] = {}
+    for module_code, tables in table_map.items():
+        counts: dict[str, int] = {}
+        for table_name in tables:
+            value = _safe_count_table(db, table_name=table_name, amo_id=amo_id)
+            if value is not None:
+                counts[table_name] = value
+        result[module_code] = {"record_count": sum(counts.values()), "tables": counts, "health": "wired" if counts else "not_detected"}
+    return result
+
+
+def _support_items_summary(db: Session, *, limit: int = 100) -> list[dict[str, Any]]:
+    try:
+        query = (db.query(task_models.Task, models.AMO).join(models.AMO, models.AMO.id == task_models.Task.amo_id).filter(or_(task_models.Task.entity_type.ilike("%support%"), task_models.Task.title.ilike("%support%"), task_models.Task.title.ilike("%issue%"), task_models.Task.title.ilike("%error%"), task_models.Task.description.ilike("%support%"), task_models.Task.description.ilike("%issue%"), task_models.Task.description.ilike("%error%"))).order_by(task_models.Task.updated_at.desc()).limit(max(1, min(limit, 500))))
+        return [{"id": task.id, "amo_id": task.amo_id, "amo_code": amo.amo_code, "tenant_name": amo.name, "title": task.title, "description": task.description, "status": _enum_value(task.status), "priority": task.priority, "entity_type": task.entity_type, "entity_id": task.entity_id, "due_at": _dt_value(task.due_at), "created_at": _dt_value(task.created_at), "updated_at": _dt_value(task.updated_at)} for task, amo in query.all()]
+    except Exception as exc:
+        return [{"error": "support_items_unavailable", "detail": str(getattr(exc, "orig", exc))}]
+
+
+def _check_database(db: Session) -> dict[str, Any]:
+    start = time.perf_counter()
+    try:
+        value = db.execute(text("SELECT 1")).scalar()
+        return {"status": "ok" if value == 1 else "degraded", "latency_ms": round((time.perf_counter() - start) * 1000, 2)}
+    except Exception as exc:
+        return {"status": "error", "latency_ms": round((time.perf_counter() - start) * 1000, 2), "detail": str(getattr(exc, "orig", exc))}
+
+
+def _check_tcp_host(host: str | None, port: int | None, timeout_seconds: float = 4.0) -> dict[str, Any]:
+    if not host or not port:
+        return {"status": "not_configured"}
+    start = time.perf_counter()
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout_seconds): pass
+        return {"status": "ok", "latency_ms": round((time.perf_counter() - start) * 1000, 2)}
+    except Exception as exc:
+        return {"status": "error", "latency_ms": round((time.perf_counter() - start) * 1000, 2), "detail": str(exc)}
+
+
+def _check_internet(url: str | None, timeout_seconds: float = 4.0) -> dict[str, Any]:
+    target = (url or "https://example.com").strip() or "https://example.com"
+    start = time.perf_counter()
+    try:
+        req = urllib.request.Request(target, method="HEAD", headers={"User-Agent": "AMO-Portal-Diagnostics/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
+            status_code = int(getattr(response, "status", 0) or 0)
+        return {"status": "ok" if 200 <= status_code < 500 else "degraded", "status_code": status_code, "latency_ms": round((time.perf_counter() - start) * 1000, 2), "url": target}
+    except Exception as exc:
+        return {"status": "error", "latency_ms": round((time.perf_counter() - start) * 1000, 2), "url": target, "detail": str(exc)}
+
+
+def _check_storage() -> dict[str, Any]:
+    targets = [AMO_ASSET_UPLOAD_DIR, PLATFORM_ASSET_UPLOAD_DIR, TRAINING_UPLOAD_DIR]
+    checks = []
+    for target in targets:
+        start = time.perf_counter()
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            probe = target / f".diag_{uuid4().hex}.tmp"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            checks.append({"path": str(target), "status": "ok", "latency_ms": round((time.perf_counter() - start) * 1000, 2)})
+        except Exception as exc:
+            checks.append({"path": str(target), "status": "error", "latency_ms": round((time.perf_counter() - start) * 1000, 2), "detail": str(exc)})
+    return {"status": "ok" if all(item["status"] == "ok" for item in checks) else "degraded", "checks": checks}
+
+
+def _check_server_throughput(sample_seconds: float = 0.5) -> dict[str, Any]:
+    duration = max(0.1, min(float(sample_seconds or 0.5), 3.0))
+    start = time.perf_counter()
+    iterations = 0
+    checksum = 0
+    while (time.perf_counter() - start) < duration:
+        checksum = (checksum * 33 + iterations) % 1_000_000_007
+        iterations += 1
+    elapsed = max(time.perf_counter() - start, 0.001)
+    return {
+        "status": "ok",
+        "sample_seconds": round(elapsed, 3),
+        "operations": iterations,
+        "ops_per_second": round(iterations / elapsed, 2),
+        "checksum": checksum,
+    }
+
+
+def _check_database_throughput(db: Session, sample_seconds: float = 0.5) -> dict[str, Any]:
+    duration = max(0.1, min(float(sample_seconds or 0.5), 3.0))
+    start = time.perf_counter()
+    queries = 0
+    try:
+        while (time.perf_counter() - start) < duration:
+            db.execute(text("SELECT 1")).scalar()
+            queries += 1
+        elapsed = max(time.perf_counter() - start, 0.001)
+        return {
+            "status": "ok",
+            "sample_seconds": round(elapsed, 3),
+            "queries": queries,
+            "queries_per_second": round(queries / elapsed, 2),
+        }
+    except Exception as exc:
+        elapsed = max(time.perf_counter() - start, 0.001)
+        return {
+            "status": "error",
+            "sample_seconds": round(elapsed, 3),
+            "queries": queries,
+            "queries_per_second": round(queries / elapsed, 2),
+            "detail": str(getattr(exc, "orig", exc)),
+        }
+
+
+def _check_internet_throughput(url: str | None, timeout_seconds: float = 4.0, max_bytes: int = 131_072) -> dict[str, Any]:
+    target = (url or "https://example.com").strip() or "https://example.com"
+    start = time.perf_counter()
+    total = 0
+    try:
+        req = urllib.request.Request(
+            target,
+            method="GET",
+            headers={
+                "User-Agent": "AMO-Portal-Diagnostics/1.0",
+                "Range": f"bytes=0-{max_bytes - 1}",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
+            while total < max_bytes:
+                chunk = response.read(min(16_384, max_bytes - total))
+                if not chunk:
+                    break
+                total += len(chunk)
+            status_code = int(getattr(response, "status", 0) or 0)
+        elapsed = max(time.perf_counter() - start, 0.001)
+        return {
+            "status": "ok" if 200 <= status_code < 500 else "degraded",
+            "url": target,
+            "status_code": status_code,
+            "bytes_read": total,
+            "latency_ms": round(elapsed * 1000, 2),
+            "kbps": round((total / 1024) / elapsed, 2),
+        }
+    except Exception as exc:
+        elapsed = max(time.perf_counter() - start, 0.001)
+        return {
+            "status": "error",
+            "url": target,
+            "bytes_read": total,
+            "latency_ms": round(elapsed * 1000, 2),
+            "kbps": 0,
+            "detail": str(exc),
+        }
+
+
+def _run_platform_diagnostics(
+    db: Session,
+    *,
+    settings: models.PlatformSettings,
+    internet_url: str | None = None,
+    timeout_seconds: float = 4.0,
+    include_throughput: bool = False,
+    sample_seconds: float = 0.5,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "server": {"status": "ok", "process": os.getpid()},
+        "database": _check_database(db),
+        "storage": _check_storage(),
+        "internet": _check_internet(internet_url, timeout_seconds=timeout_seconds),
+        "smtp_tcp": _check_tcp_host(settings.smtp_host, settings.smtp_port, timeout_seconds=timeout_seconds),
+        "email_config": {
+            "provider": settings.email_provider or "none",
+            "from_email": settings.email_from_email,
+            "smtp_host": settings.smtp_host,
+            "smtp_port": settings.smtp_port,
+            "smtp_username": settings.smtp_username,
+            "has_secret": bool(settings.smtp_password_secret),
+            "support_email": settings.support_email,
+            "ops_alert_email": settings.ops_alert_email,
+        },
+    }
+    if include_throughput:
+        payload["throughput"] = {
+            "server": _check_server_throughput(sample_seconds=sample_seconds),
+            "database": _check_database_throughput(db, sample_seconds=sample_seconds),
+            "internet": _check_internet_throughput(internet_url, timeout_seconds=timeout_seconds),
+        }
+    return payload
+
+# ---------------------------------------------------------------------------
+# PLATFORM DIAGNOSTICS (SUPERUSER ONLY)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/platform/diagnostics",
+    summary="Platform diagnostics for global superuser control plane",
+)
+def get_platform_diagnostics(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    _require_superuser(current_user)
+
+    def safe_scalar(query, label: str):
+        try:
+            return query.scalar() or 0
+        except Exception as exc:  # pragma: no cover - defensive diagnostics
+            return {"error": label, "detail": str(getattr(exc, "orig", exc))}
+
+    total_tenants = safe_scalar(db.query(func.count(models.AMO.id)), "tenants")
+    active_tenants = safe_scalar(
+        db.query(func.count(models.AMO.id)).filter(models.AMO.is_active.is_(True)),
+        "active_tenants",
+    )
+    total_users = safe_scalar(db.query(func.count(models.User.id)), "users")
+    platform_superusers = safe_scalar(
+        db.query(func.count(models.User.id)).filter(models.User.is_superuser.is_(True)),
+        "platform_superusers",
+    )
+    tenant_admins = safe_scalar(
+        db.query(func.count(models.User.id)).filter(
+            models.User.is_amo_admin.is_(True),
+            models.User.is_superuser.is_(False),
+        ),
+        "tenant_admins",
+    )
+    superusers_with_tenant = safe_scalar(
+        db.query(func.count(models.User.id)).filter(
+            models.User.is_superuser.is_(True),
+            models.User.amo_id.isnot(None),
+        ),
+        "superusers_with_tenant",
+    )
+
+    return {
+        "scope": "platform",
+        "authenticated_user_id": str(current_user.id),
+        "authenticated_user_amo_id": current_user.amo_id,
+        "separation": {
+            "superusers_with_tenant": superusers_with_tenant,
+            "expected_superuser_amo_id": None,
+        },
+        "counts": {
+            "tenants_total": total_tenants,
+            "tenants_active": active_tenants,
+            "users_total": total_users,
+            "platform_superusers": platform_superusers,
+            "tenant_admins": tenant_admins,
+        },
+        "controls": {
+            "tenant_billing_gated": True,
+            "platform_billing_gated": False,
+            "global_superuser_context": "amo_id=None",
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -3116,6 +3933,84 @@ def download_platform_logo(
         media_type=settings.platform_logo_content_type or "application/octet-stream",
         filename=settings.platform_logo_filename or path.name,
     )
+
+
+
+
+@router.post("/platform/diagnostics/run", summary="Run platform network, database, internet and SMTP diagnostics")
+def run_platform_diagnostics_endpoint(payload: schemas.PlatformDiagnosticsRunRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_active_user)):
+    _require_superuser(current_user)
+    settings = _get_or_create_platform_settings(db)
+    return _run_platform_diagnostics(
+        db,
+        settings=settings,
+        internet_url=payload.internet_url,
+        timeout_seconds=payload.timeout_seconds,
+        include_throughput=payload.include_throughput,
+        sample_seconds=payload.sample_seconds,
+    )
+
+
+@router.get("/platform/email-settings", summary="Get platform outbound email settings")
+def get_platform_email_settings(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_active_user)):
+    _require_superuser(current_user)
+    return _platform_settings_summary(_get_or_create_platform_settings(db))
+
+
+@router.put("/platform/email-settings", summary="Update platform outbound email settings")
+def update_platform_email_settings(payload: schemas.PlatformSettingsUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_active_user)):
+    _require_superuser(current_user)
+    settings = _get_or_create_platform_settings(db)
+    allowed = {"email_provider", "email_from_name", "email_from_email", "email_reply_to", "smtp_host", "smtp_port", "smtp_username", "smtp_password_secret", "smtp_use_tls", "smtp_allow_self_signed", "smtp_test_recipient", "support_email", "ops_alert_email"}
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        if key in allowed:
+            setattr(settings, key, value)
+    db.commit(); db.refresh(settings)
+    return _platform_settings_summary(settings)
+
+
+@router.post("/platform/email-settings/test", summary="Test platform SMTP settings without persisting an email")
+def test_platform_email_settings(payload: schemas.PlatformEmailTestRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_active_user)):
+    _require_superuser(current_user)
+    settings = _get_or_create_platform_settings(db)
+    if (settings.email_provider or "none").lower() not in {"smtp", "custom_smtp"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SMTP provider is not configured.")
+    if not settings.smtp_host or not settings.smtp_port:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SMTP host and port are required.")
+    recipient = (payload.recipient or settings.smtp_test_recipient or settings.ops_alert_email or settings.support_email or settings.email_from_email or "").strip()
+    if not recipient:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide a test recipient or configure support/ops/from email.")
+    started = time.perf_counter()
+    try:
+        context = ssl.create_default_context()
+        if settings.smtp_allow_self_signed:
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        server = smtplib.SMTP(str(settings.smtp_host), int(settings.smtp_port), timeout=8)
+        try:
+            if settings.smtp_use_tls: server.starttls(context=context)
+            if settings.smtp_username and settings.smtp_password_secret: server.login(settings.smtp_username, settings.smtp_password_secret)
+            sender = settings.email_from_email or settings.smtp_username or recipient
+            message = f"From: {sender}\r\nTo: {recipient}\r\nSubject: {payload.subject}\r\n\r\n{payload.body}\r\n"
+            server.sendmail(sender, [recipient], message)
+        finally:
+            server.quit()
+        return {"status": "ok", "recipient": recipient, "latency_ms": round((time.perf_counter() - started) * 1000, 2)}
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"SMTP test failed: {exc}") from exc
+
+
+@router.get("/platform/support-items", summary="List support or issue items raised by tenants")
+def list_platform_support_items(limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_active_user)):
+    _require_superuser(current_user)
+    return {"items": _support_items_summary(db, limit=limit)}
+
+
+@router.get("/platform/tenants/{amo_id}/module-performance", summary="Inspect module-level record counts and wiring for a tenant")
+def get_platform_tenant_module_performance(amo_id: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_active_user)):
+    _require_superuser(current_user)
+    amo = _get_tenant_or_404(db, amo_id=amo_id)
+    return {"tenant": {"id": amo.id, "amo_code": amo.amo_code, "name": amo.name}, "modules": _module_performance_summary(db, amo_id=amo.id)}
 
 
 # ---------------------------------------------------------------------------

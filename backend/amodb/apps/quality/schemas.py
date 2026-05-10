@@ -256,9 +256,13 @@ class QMSAuditCreate(BaseModel):
     auditee: Optional[str] = None
     auditee_email: Optional[str] = None
     auditee_user_id: Optional[str] = None
+    external_auditees: List[QMSExternalAuditeeContact] = Field(default_factory=list)
     lead_auditor_user_id: Optional[str] = None
     observer_auditor_user_id: Optional[str] = None
     assistant_auditor_user_id: Optional[str] = None
+    notify_auditors: bool = True
+    notify_auditees: bool = True
+    reminder_interval_days: int = Field(default=7, ge=1, le=60)
 
     planned_start: Optional[date] = None
     planned_end: Optional[date] = None
@@ -272,9 +276,13 @@ class QMSAuditUpdate(BaseModel):
     auditee: Optional[str] = None
     auditee_email: Optional[str] = None
     auditee_user_id: Optional[str] = None
+    external_auditees: Optional[List[QMSExternalAuditeeContact]] = None
     lead_auditor_user_id: Optional[str] = None
     observer_auditor_user_id: Optional[str] = None
     assistant_auditor_user_id: Optional[str] = None
+    notify_auditors: Optional[bool] = None
+    notify_auditees: Optional[bool] = None
+    reminder_interval_days: Optional[int] = Field(default=None, ge=1, le=60)
 
     planned_start: Optional[date] = None
     planned_end: Optional[date] = None
@@ -289,6 +297,7 @@ class QMSAuditOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    amo_id: Optional[str]
     domain: QMSDomain
     kind: QMSAuditKind
     status: QMSAuditStatus
@@ -305,10 +314,14 @@ class QMSAuditOut(BaseModel):
     auditee: Optional[str]
     auditee_email: Optional[str]
     auditee_user_id: Optional[str]
+    external_auditees: List[QMSExternalAuditeeContact] = Field(default_factory=list)
 
     lead_auditor_user_id: Optional[str]
     observer_auditor_user_id: Optional[str]
     assistant_auditor_user_id: Optional[str]
+    notify_auditors: bool = True
+    notify_auditees: bool = True
+    reminder_interval_days: int = 7
 
     planned_start: Optional[date]
     planned_end: Optional[date]
@@ -323,6 +336,37 @@ class QMSAuditOut(BaseModel):
 
     created_by_user_id: Optional[str]
     created_at: datetime
+
+
+class QMSAuditWorkflowStageOut(BaseModel):
+    id: str
+    label: str
+    complete: bool
+    active: bool
+    helper: Optional[str] = None
+    metric: Optional[str] = None
+
+
+class QMSAuditWorkflowSummaryOut(BaseModel):
+    audit_id: UUID
+    current_stage_id: str
+    current_stage_label: str
+    percent_complete: int
+    findings_total: int
+    findings_open: int
+    cars_total: int
+    cars_open: int
+    checklist_uploaded: bool
+    report_uploaded: bool
+    acknowledged_by_name: Optional[str] = None
+    acknowledged_by_email: Optional[str] = None
+    created_at: datetime
+    stages: List[QMSAuditWorkflowStageOut] = Field(default_factory=list)
+
+
+class QMSAuditWorkspaceOut(BaseModel):
+    audit: QMSAuditOut
+    workflow: QMSAuditWorkflowSummaryOut
 
 
 class QMSAuditRegisterRowOut(BaseModel):
@@ -392,6 +436,18 @@ class QMSFindingOut(BaseModel):
     created_at: datetime
 
 
+class QMSExternalAuditeeContact(BaseModel):
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    email: EmailStr
+    phone_contact: Optional[str] = Field(default=None, max_length=50)
+    designation: str = Field(min_length=1, max_length=150)
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.first_name.strip()} {self.last_name.strip()}".strip()
+
+
 class QMSAuditScheduleCreate(BaseModel):
     domain: QMSDomain
     kind: QMSAuditKind = QMSAuditKind.INTERNAL
@@ -402,9 +458,13 @@ class QMSAuditScheduleCreate(BaseModel):
     auditee: Optional[str] = None
     auditee_email: Optional[EmailStr] = None
     auditee_user_id: Optional[str] = None
+    external_auditees: List[QMSExternalAuditeeContact] = Field(default_factory=list)
     lead_auditor_user_id: Optional[str] = None
     observer_auditor_user_id: Optional[str] = None
     assistant_auditor_user_id: Optional[str] = None
+    notify_auditors: bool = True
+    notify_auditees: bool = True
+    reminder_interval_days: int = Field(default=7, ge=1, le=60)
     duration_days: int = Field(default=1, ge=1, le=90)
     next_due_date: date
 
@@ -418,9 +478,13 @@ class QMSAuditScheduleUpdate(BaseModel):
     auditee: Optional[str] = None
     auditee_email: Optional[EmailStr] = None
     auditee_user_id: Optional[str] = None
+    external_auditees: Optional[List[QMSExternalAuditeeContact]] = None
     lead_auditor_user_id: Optional[str] = None
     observer_auditor_user_id: Optional[str] = None
     assistant_auditor_user_id: Optional[str] = None
+    notify_auditors: Optional[bool] = None
+    notify_auditees: Optional[bool] = None
+    reminder_interval_days: Optional[int] = Field(default=None, ge=1, le=60)
     duration_days: Optional[int] = Field(default=None, ge=1, le=90)
     next_due_date: Optional[date] = None
     is_active: Optional[bool] = None
@@ -430,6 +494,7 @@ class QMSAuditScheduleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    amo_id: Optional[str]
     domain: QMSDomain
     kind: QMSAuditKind
     frequency: QMSAuditScheduleFrequency
@@ -439,9 +504,13 @@ class QMSAuditScheduleOut(BaseModel):
     auditee: Optional[str]
     auditee_email: Optional[str]
     auditee_user_id: Optional[str]
+    external_auditees: List[QMSExternalAuditeeContact] = Field(default_factory=list)
     lead_auditor_user_id: Optional[str]
     observer_auditor_user_id: Optional[str]
     assistant_auditor_user_id: Optional[str]
+    notify_auditors: bool = True
+    notify_auditees: bool = True
+    reminder_interval_days: int = 7
     duration_days: int
     next_due_date: date
     last_run_at: Optional[datetime]
@@ -568,6 +637,15 @@ class QMSManpowerOut(BaseModel):
     updated_at: datetime
 
 
+class QMSNextDueAuditOut(BaseModel):
+    id: UUID
+    audit_ref: str
+    title: str
+    status: QMSAuditStatus
+    planned_start: Optional[date] = None
+    planned_end: Optional[date] = None
+
+
 class QMSCockpitSnapshotOut(BaseModel):
     generated_at: datetime
     pending_acknowledgements: int
@@ -599,6 +677,7 @@ class QMSCockpitSnapshotOut(BaseModel):
     audit_closure_trend: list[AuditClosureTrendPointOut]
     most_common_finding_trend_12m: list[MostCommonFindingTrendPointOut]
     action_queue: list[CockpitActionItemOut]
+    next_due_audit: Optional[QMSNextDueAuditOut] = None
 
 
 # -----------------------------

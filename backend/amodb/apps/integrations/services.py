@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import services as account_services
 
 from . import models
-from .schemas import IntegrationConfigCreate
+from .schemas import IntegrationConfigCreate, IntegrationConfigUpdate
 
 
 def _utcnow() -> datetime:
@@ -115,6 +115,50 @@ def create_integration_config(
     db.add(config)
     db.flush()
     return config
+
+
+def update_integration_config(
+    db: Session,
+    *,
+    amo_id: str,
+    config_id: str,
+    data: IntegrationConfigUpdate,
+    updated_by_user_id: Optional[str],
+    idempotency_key: Optional[str] = None,
+) -> models.IntegrationConfig:
+    config = _get_config_by_id(db, integration_id=config_id)
+    if not config or config.amo_id != amo_id:
+        raise ValueError("Integration config not found.")
+
+    payload = data.model_dump(exclude_unset=True)
+    if idempotency_key:
+        account_services.register_idempotency_key(
+            db,
+            scope=f"integration_config_update:{amo_id}:{config_id}",
+            key=idempotency_key,
+            payload=payload,
+            commit=False,
+        )
+
+    for field, value in payload.items():
+        setattr(config, field, value)
+    config.updated_by_user_id = updated_by_user_id
+    db.add(config)
+    db.flush()
+    return config
+
+
+def list_outbound_events(
+    db: Session,
+    *,
+    amo_id: str,
+    integration_id: Optional[str] = None,
+    limit: int = 100,
+) -> list[models.IntegrationOutboundEvent]:
+    query = db.query(models.IntegrationOutboundEvent).filter(models.IntegrationOutboundEvent.amo_id == amo_id)
+    if integration_id:
+        query = query.filter(models.IntegrationOutboundEvent.integration_id == integration_id)
+    return query.order_by(models.IntegrationOutboundEvent.created_at.desc()).limit(max(1, min(limit, 500))).all()
 
 
 def enqueue_outbound_event(

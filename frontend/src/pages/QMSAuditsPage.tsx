@@ -110,7 +110,7 @@ const QMSAuditsPage: React.FC = () => {
     setState("loading");
     setError(null);
     try {
-      const data = await qmsListAudits({ domain: "AMO" });
+      const data = await qmsListAudits({ domain: "AMO", limit: 400 }, { silent: true });
       setAudits(data);
       setState("ready");
     } catch (e: any) {
@@ -236,11 +236,11 @@ const QMSAuditsPage: React.FC = () => {
       subtitle="Direct access to the register, planning, and current audit workspace."
       actions={
         <>
-          <Button onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/plan`)}>Plan audit</Button>
-          <Button variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/register?tab=findings`)}>
+          <Button onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/plan`)}>Plan audit</Button>
+          <Button variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/register?tab=findings`)}>
             Register & closeout
           </Button>
-          <Button variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/${department}/qms/audits/register`)}>
+          <Button variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/register`)}>
             Register
           </Button>
         </>

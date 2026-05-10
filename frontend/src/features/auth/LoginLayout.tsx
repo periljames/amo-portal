@@ -179,6 +179,7 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
   const { ref: illustrationWrapRef, width: illustrationWidth } = useElementWidth<HTMLDivElement>();
   const { buttonHeight, socialButtonSize, viewportWidth } = useResponsiveLoginSizing();
   const submitButtonWidth = submitWrapWidth ?? Math.min(420, Math.max(220, Math.round(viewportWidth * 0.82)));
+  const enabledSocialProviders = (Object.keys(SOCIAL_META) as SocialProvider[]).filter((provider) => socialAvailability[provider]);
 
   return (
     <div className={styles.pageBg}>
@@ -263,28 +264,34 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                   </LiquidGlassButton>
                 </div>
 
-                <div className={styles.dividerRow}>
-                  <span className={styles.dividerLine} />
-                  <span className={styles.dividerText}>Or continue with</span>
-                  <span className={styles.dividerLine} />
-                </div>
+                {enabledSocialProviders.length > 0 ? (
+                  <>
+                    <div className={styles.dividerRow}>
+                      <span className={styles.dividerLine} />
+                      <span className={styles.dividerText}>Or continue with</span>
+                      <span className={styles.dividerLine} />
+                    </div>
 
-                <div className={styles.socialRow}>
-                  {(Object.keys(SOCIAL_META) as SocialProvider[]).map((provider) => (
-                    <GlassIconButton
-                      key={provider}
-                      size={socialButtonSize}
-                      radius={SOCIAL_RADIUS}
-                      className={provider === "apple" ? styles.socialButtonActive : ""}
-                      title={SOCIAL_META[provider].label}
-                      ariaLabel={SOCIAL_META[provider].label}
-                      onClick={() => onSocialLogin(provider)}
-                      disabled={!socialAvailability[provider] || loading || loadingContext}
-                    >
-                      {SOCIAL_META[provider].icon}
-                    </GlassIconButton>
-                  ))}
-                </div>
+                    <div className={styles.socialRow}>
+                      {enabledSocialProviders.map((provider) => (
+                        <GlassIconButton
+                          key={provider}
+                          size={socialButtonSize}
+                          radius={SOCIAL_RADIUS}
+                          className={provider === "apple" ? styles.socialButtonActive : ""}
+                          title={SOCIAL_META[provider].label}
+                          ariaLabel={SOCIAL_META[provider].label}
+                          onClick={() => onSocialLogin(provider)}
+                          disabled={loading || loadingContext}
+                        >
+                          {SOCIAL_META[provider].icon}
+                        </GlassIconButton>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className={styles.authNotice}>Password login is active. Social sign-in buttons are hidden until an OAuth provider is configured.</p>
+                )}
 
                 {(onSwitchAccount || onFindAmo || onDemoQuickAccess) ? (
                   <div className={styles.switchRow}>
@@ -304,7 +311,7 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
               >
                 <img src={illustrationSrc} alt="Winter landscape illustration" className={styles.illustration} />
                 <div className={styles.illustrationOverlay}>
-                  <p className={styles.overlayText}>Finally, all your work in one place.</p>
+                  <p className={styles.overlayText}>Controlled access for AMO quality, maintenance, records, and platform administration.</p>
                   <div className={styles.overlayControls}>
                     <button type="button" className={styles.circleBtn} aria-label="Previous">
                       <ArrowLeft size={18} />

@@ -17,7 +17,7 @@ export function ManualsReaderRoutes() {
       <Route path="/t/:tenantSlug/publications/:manualId/:chapterId/:sectionId" element={<ManualReaderPage />} />
       <Route path="/t/:tenantSlug/publications/:manualId/:chapterId/:sectionId/:subSectionId" element={<ManualReaderPage />} />
       <Route path="/t/:tenantSlug/publications/:manualId/figure/:figureId" element={<ManualReaderPage />} />
-      <Route path="/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view" element={<ManualReaderPage />} />
+      <Route path="/maintenance/:amoCode/qms/documents/:docId/revisions/:revId/view" element={<ManualReaderPage />} />
       <Route path="/maintenance/:amoCode/manuals" element={<ManualsDashboardPage />} />
       <Route path="/maintenance/:amoCode/manuals/master-list" element={<ManualMasterListPage />} />
       <Route path="/maintenance/:amoCode/manuals/:manualId" element={<ManualOverviewPage />} />

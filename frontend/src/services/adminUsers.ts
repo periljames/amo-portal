@@ -632,11 +632,87 @@ export async function updateAdminUser(
   );
 }
 
-export async function getAdminUser(userId: string): Promise<AdminUserRead> {
-  return apiGet<AdminUserRead>(`/accounts/admin/users/${encodeURIComponent(userId)}`, {
-    headers: authHeaders(),
-  });
+
+const ADMIN_USER_CACHE_PREFIX = "amoportal:admin-users:";
+const adminUserMemoryCache = new Map<string, { expiresAt: number; value: unknown }>();
+const adminUserInFlight = new Map<string, Promise<unknown>>();
+
+function cloneAdminCachedValue<T>(value: T): T {
+  try {
+    return typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
 }
+
+function readAdminUserCache<T>(key: string): T | null {
+  const now = Date.now();
+  const memory = adminUserMemoryCache.get(key);
+  if (memory && memory.expiresAt > now) return cloneAdminCachedValue(memory.value as T);
+  if (memory) adminUserMemoryCache.delete(key);
+  try {
+    const raw = window.sessionStorage.getItem(`${ADMIN_USER_CACHE_PREFIX}${key}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { expiresAt?: number; value?: T };
+    if (!parsed || typeof parsed.expiresAt !== "number" || parsed.expiresAt <= now) {
+      window.sessionStorage.removeItem(`${ADMIN_USER_CACHE_PREFIX}${key}`);
+      return null;
+    }
+    adminUserMemoryCache.set(key, { expiresAt: parsed.expiresAt, value: parsed.value });
+    return cloneAdminCachedValue(parsed.value as T);
+  } catch {
+    return null;
+  }
+}
+
+function writeAdminUserCache<T>(key: string, ttlMs: number, value: T): T {
+  const expiresAt = Date.now() + ttlMs;
+  adminUserMemoryCache.set(key, { expiresAt, value: cloneAdminCachedValue(value) });
+  try {
+    window.sessionStorage.setItem(`${ADMIN_USER_CACHE_PREFIX}${key}`, JSON.stringify({ expiresAt, value }));
+  } catch {
+    // ignore storage failures
+  }
+  return cloneAdminCachedValue(value);
+}
+
+async function cachedAdminUserGet<T>(key: string, ttlMs: number, fetcher: () => Promise<T>, force = false): Promise<T> {
+  if (!force) {
+    const cached = readAdminUserCache<T>(key);
+    if (cached != null) return cached;
+  }
+  const inFlight = adminUserInFlight.get(key) as Promise<T> | undefined;
+  if (inFlight) return inFlight.then((value) => cloneAdminCachedValue(value));
+  const promise = fetcher()
+    .then((value) => writeAdminUserCache(key, ttlMs, value))
+    .finally(() => {
+      adminUserInFlight.delete(key);
+    });
+  adminUserInFlight.set(key, promise as Promise<unknown>);
+  return promise.then((value) => cloneAdminCachedValue(value));
+}
+
+export function invalidateAdminUserCache(match?: string): void {
+  for (const key of [...adminUserMemoryCache.keys()]) {
+    if (!match || key.includes(match)) adminUserMemoryCache.delete(key);
+  }
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const storageKey = window.sessionStorage.key(index);
+      if (!storageKey || !storageKey.startsWith(ADMIN_USER_CACHE_PREFIX)) continue;
+      if (!match || storageKey.includes(match)) window.sessionStorage.removeItem(storageKey);
+    }
+  } catch {
+    // ignore storage failures
+  }
+}
+
+export async function getAdminUser(userId: string): Promise<AdminUserRead> {
+  return cachedAdminUserGet(`user:${userId}`, 3 * 60_000, () => apiGet<AdminUserRead>(`/accounts/admin/users/${encodeURIComponent(userId)}`, {
+    headers: authHeaders(),
+  }));
+}
+
 
 export async function deactivateAdminUser(userId: string): Promise<void> {
   await apiDelete<void>(`/accounts/admin/users/${encodeURIComponent(userId)}`, undefined, {
@@ -1032,9 +1108,15 @@ export async function getAdminUserDirectory(params: {
 }
 
 export async function getAdminUserWorkspace(userId: string): Promise<AdminUserWorkspace> {
-  return apiGet<AdminUserWorkspace>(`/accounts/admin/users/${encodeURIComponent(userId)}/workspace`, {
+  return cachedAdminUserGet(`workspace:${userId}`, 90_000, () => apiGet<AdminUserWorkspace>(`/accounts/admin/users/${encodeURIComponent(userId)}/workspace`, {
     headers: authHeaders(),
-  });
+  }));
+}
+
+export async function prefetchAdminUserProfile(userId: string): Promise<void> {
+  await Promise.allSettled([
+    getAdminUser(userId),
+  ]);
 }
 
 

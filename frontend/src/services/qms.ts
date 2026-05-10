@@ -2,15 +2,15 @@
 // QMS (Quality Management System) API helpers.
 //
 // This module is intentionally small and uses fetch + the existing auth token.
-// It matches the backend routing under the Quality router:
-//   - GET /quality/qms/documents
-//   - GET /quality/qms/distributions
-//   - GET /quality/qms change-requests
-//   - GET /quality/audits
+// Mature workflow helpers still use the legacy backend compatibility API
+// while the visible frontend route surface has been consolidated under
+// /maintenance/:amoCode/qms. Do not delete these compatibility calls until
+// the canonical /api/maintenance/:amoCode/qms endpoints have response-shape
+// parity for the detailed document, audit, CAR, AeroDoc, and manpower flows.
 
 import { getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
-import { beginLoading, endLoading } from "./loading";
+import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
 
 export type QMSDocumentStatus = "DRAFT" | "ACTIVE" | "OBSOLETE";
 export type QMSAuditStatus = "PLANNED" | "IN_PROGRESS" | "CAP_OPEN" | "CLOSED";
@@ -121,6 +121,84 @@ export interface QMSAuditScheduleOut {
   is_active: boolean;
   created_by_user_id?: string | null;
   created_at: string;
+}
+
+export interface QMSAuditParticipantOut {
+  role: string;
+  user_id: string | null;
+  name: string | null;
+  email: string | null;
+}
+
+export interface QMSAuditWorkspaceSummaryOut {
+  audit_id: string;
+  audit_ref: string;
+  title: string;
+  status: string;
+  domain: string;
+  kind: string;
+  planned_start: string | null;
+  planned_end: string | null;
+  actual_start: string | null;
+  actual_end: string | null;
+  report_uploaded: boolean;
+  checklist_uploaded: boolean;
+  findings_total: number;
+  findings_open: number;
+  cars_total: number;
+  cars_open: number;
+  evidence_files_total: number;
+}
+
+export interface QMSAuditWorkspaceReadinessOut {
+  planning_complete: boolean;
+  fieldwork_ready: boolean;
+  closure_ready: boolean;
+  report_ready: boolean;
+  public_response_window_open: boolean;
+}
+
+export interface QMSAuditWorkspaceActionOut {
+  code: string;
+  label: string;
+  enabled: boolean;
+  variant: string;
+  count: number | null;
+}
+
+export interface QMSAuditNoticeStateOut {
+  upcoming_notice_sent_at: string | null;
+  day_of_notice_sent_at: string | null;
+}
+
+export interface QMSAuditWorkspaceOut {
+  audit: QMSAuditOut;
+  summary: QMSAuditWorkspaceSummaryOut;
+  readiness: QMSAuditWorkspaceReadinessOut;
+  actions: QMSAuditWorkspaceActionOut[];
+  participants: QMSAuditParticipantOut[];
+  notice_state: QMSAuditNoticeStateOut;
+}
+
+export interface QMSAuditWorkflowCheckItemOut {
+  code: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface QMSAuditWorkflowCheckOut {
+  audit_id: string;
+  audit_status: string;
+  checks: QMSAuditWorkflowCheckItemOut[];
+  passed: boolean;
+}
+
+export interface QMSAuditNoticeDispatchOut {
+  audit_id: string;
+  stage: string;
+  notified_user_ids: string[];
+  sent_at: string;
 }
 
 export interface QMSFindingOut {
@@ -266,21 +344,27 @@ function downloadEvidencePack(path: string): Promise<Blob> {
       reject(new Error("Network error while downloading evidence pack."));
     });
 
+    xhr.timeout = 45000;
+    xhr.addEventListener("timeout", () => { reject(new Error("Timed out while downloading evidence pack.")); });
     xhr.send();
   });
 }
 
 async function downloadBinary(path: string): Promise<Blob> {
   const token = getToken();
-  beginLoading();
+  beginBackgroundLoading();
   try {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort("timeout"), 30000);
   const res = await fetch(`${API_BASE}${path}`, {
     method: "GET",
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     credentials: "include",
+    signal: controller.signal,
   });
+  window.clearTimeout(timeout);
 
   if (res.status === 401) {
     handleAuthFailure("expired");
@@ -293,14 +377,16 @@ async function downloadBinary(path: string): Promise<Blob> {
   }
   return res.blob();
   } finally {
-    endLoading();
+    endBackgroundLoading();
   }
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
   const token = getToken();
-  beginLoading();
+  beginBackgroundLoading();
   try {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort("timeout"), 20000);
   const res = await fetch(`${getApiBaseUrl()}${path}`, {
     method: "GET",
     headers: {
@@ -308,7 +394,9 @@ async function fetchJson<T>(path: string): Promise<T> {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     credentials: "include",
+    signal: controller.signal,
   });
+  window.clearTimeout(timeout);
 
   if (res.status === 401) {
     handleAuthFailure("expired");
@@ -326,7 +414,7 @@ async function fetchJson<T>(path: string): Promise<T> {
   }
   return (await res.json()) as T;
   } finally {
-    endLoading();
+    endBackgroundLoading();
   }
 }
 
@@ -338,6 +426,8 @@ async function sendJson<T>(
   const token = getToken();
   beginLoading();
   try {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort("timeout"), 45000);
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
@@ -347,7 +437,9 @@ async function sendJson<T>(
     },
     body: JSON.stringify(body ?? {}),
     credentials: "include",
+    signal: controller.signal,
   });
+  window.clearTimeout(timeout);
 
   if (res.status === 401) {
     handleAuthFailure("expired");
@@ -644,6 +736,25 @@ export async function qmsRunAuditReminders(upcomingDays: number): Promise<{
     `/quality/audits/reminders/run?upcoming_days=${upcomingDays}`,
     "POST",
     {}
+  );
+}
+
+export async function qmsGetAuditWorkspace(auditId: string): Promise<QMSAuditWorkspaceOut> {
+  return fetchJson<QMSAuditWorkspaceOut>(`/quality/audits/${encodeURIComponent(auditId)}/workspace`);
+}
+
+export async function qmsGetAuditWorkflowCheck(auditId: string): Promise<QMSAuditWorkflowCheckOut> {
+  return fetchJson<QMSAuditWorkflowCheckOut>(`/quality/audits/${encodeURIComponent(auditId)}/workflow-check`);
+}
+
+export async function qmsIssueAuditNotice(
+  auditId: string,
+  payload?: { stage?: "manual" | "upcoming" | "day_of" }
+): Promise<QMSAuditNoticeDispatchOut> {
+  return sendJson<QMSAuditNoticeDispatchOut>(
+    `/quality/audits/${encodeURIComponent(auditId)}/issue-notice`,
+    "POST",
+    payload ?? {}
   );
 }
 
@@ -1031,6 +1142,9 @@ export async function qmsGetNotificationSummary(): Promise<QMSNotificationSummar
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    if (res.status === 403 && /subscription is locked|go to billing/i.test(text)) {
+      return readStoredNotificationSummary() ?? { unread_count: 0, latest_created_at: null };
+    }
     throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
   }
 

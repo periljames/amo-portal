@@ -370,7 +370,7 @@ const DashboardPage: React.FC = () => {
   };
 
   const handleOpenQms = () => {
-    navigate(`/maintenance/${amoSlug}/${department}/qms`);
+    navigate(`/maintenance/${amoSlug}/qms`);
   };
 
   const handleFixDocuments = () => {

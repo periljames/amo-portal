@@ -311,7 +311,7 @@ export function getFirstAccessibleModuleRoute(
     if (canViewFeature(user, feature, contextDepartment)) return route;
   }
   const depts = getRoleDrivenDepartments(user, contextDepartment);
-  if (depts.includes("quality")) return `/maintenance/${amoCode}/quality`;
+  if (depts.includes("quality")) return `/maintenance/${amoCode}/qms`;
   if (depts.includes("stores")) return `/maintenance/${amoCode}/stores`;
   if (depts.includes("safety")) return `/maintenance/${amoCode}/safety`;
   if (depts.includes("document-control")) return `/maintenance/${amoCode}/document-control`;

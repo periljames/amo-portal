@@ -2,6 +2,7 @@
 // Fleet-facing API helpers (aircraft compliance documents and alerts).
 
 import { getToken, handleAuthFailure } from "./auth";
+import { downloadWithXhr, type DownloadedFile } from "../utils/downloads";
 import { getApiBaseUrl } from "./config";
 
 export type AircraftDocumentStatus =
@@ -302,85 +303,35 @@ export async function uploadAircraftDocumentFile(
 export async function downloadAircraftDocumentFile(
   documentId: number,
   onProgress?: (progress: TransferProgress) => void
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const startedAt = performance.now();
-    xhr.open("GET", `${API_BASE}/aircraft/documents/${documentId}/download`);
-    const token = getToken();
-    if (token) {
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    }
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("progress", (event) => {
-      if (!onProgress) return;
-      const total = event.lengthComputable ? event.total : undefined;
-      onProgress(buildSpeed(event.loaded, total, startedAt));
-    });
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Fleet API ${xhr.status}`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading document evidence."));
-    });
-
-    xhr.send();
+): Promise<DownloadedFile> {
+  const startedAt = performance.now();
+  const token = getToken();
+  return downloadWithXhr({
+    url: `${API_BASE}/aircraft/documents/${documentId}/download`,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    fallbackFilename: `aircraft-document-${documentId}`,
+    onProgress: onProgress ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt)) : undefined,
+    retries: 2,
   });
 }
 
 export async function downloadAircraftDocumentsZip(
   documentIds: number[],
   onProgress?: (progress: TransferProgress) => void
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const startedAt = performance.now();
-    xhr.open("POST", `${API_BASE}/aircraft/documents/download-zip`);
-    const token = getToken();
-    if (token) {
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    }
-    xhr.setRequestHeader("Content-Type", "application/json");
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("progress", (event) => {
-      if (!onProgress) return;
-      const total = event.lengthComputable ? event.total : undefined;
-      onProgress(buildSpeed(event.loaded, total, startedAt));
-    });
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Fleet API ${xhr.status}`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading document bundle."));
-    });
-
-    xhr.send(JSON.stringify({ document_ids: documentIds }));
+): Promise<DownloadedFile> {
+  const startedAt = performance.now();
+  const token = getToken();
+  return downloadWithXhr({
+    url: `${API_BASE}/aircraft/documents/download-zip`,
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ document_ids: documentIds }),
+    fallbackFilename: "aircraft-documents.zip",
+    onProgress: onProgress ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt)) : undefined,
+    retries: 2,
   });
 }
 

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import enum
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -79,6 +80,7 @@ class QMSDocument(Base):
     __tablename__ = "qms_documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
 
     domain = Column(
         SAEnum(QMSDomain, name="qms_domain", native_enum=False),
@@ -142,7 +144,7 @@ class QMSDocument(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("domain", "doc_type", "doc_code", name="uq_qms_doc_code"),
+        UniqueConstraint("amo_id", "domain", "doc_type", "doc_code", name="uq_qms_doc_code_per_amo"),
         Index("ix_qms_documents_domain_status", "domain", "status"),
         Index("ix_qms_documents_type_status", "doc_type", "status"),
         CheckConstraint("current_issue_no IS NULL OR current_issue_no >= 0", name="ck_qms_doc_issue_nonneg"),
@@ -157,6 +159,7 @@ class QMSDocumentRevision(Base):
     __tablename__ = "qms_document_revisions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
 
     document_id = Column(
         UUID(as_uuid=True),
@@ -285,6 +288,7 @@ class QMSDocumentDistribution(Base):
     __tablename__ = "qms_document_distributions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
 
     document_id = Column(
         UUID(as_uuid=True),
@@ -442,9 +446,13 @@ class QMSAudit(Base):
     auditee = Column(String(255), nullable=True)
     auditee_email = Column(String(255), nullable=True)
     auditee_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    external_auditees_json = Column(Text, nullable=True)
     lead_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     observer_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     assistant_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    notify_auditors = Column(Boolean, nullable=False, default=True)
+    notify_auditees = Column(Boolean, nullable=False, default=True)
+    reminder_interval_days = Column(Integer, nullable=False, default=7)
 
     planned_start = Column(Date, nullable=True)
     planned_end = Column(Date, nullable=True)
@@ -495,11 +503,22 @@ class QMSAudit(Base):
     def __repr__(self) -> str:
         return f"<QMSAudit id={self.id} ref={self.audit_ref} status={self.status}>"
 
+    @property
+    def external_auditees(self) -> list[dict]:
+        if not self.external_auditees_json:
+            return []
+        try:
+            value = json.loads(self.external_auditees_json)
+        except Exception:
+            return []
+        return value if isinstance(value, list) else []
+
 
 class QMSAuditFinding(Base):
     __tablename__ = "qms_audit_findings"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
 
     audit_id = Column(
         UUID(as_uuid=True),
@@ -579,6 +598,7 @@ class QMSAuditSchedule(Base):
     __tablename__ = "qms_audit_schedules"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=True, index=True)
     domain = Column(
         SAEnum(QMSDomain, name="qms_audit_schedule_domain", native_enum=False),
         nullable=False,
@@ -602,9 +622,13 @@ class QMSAuditSchedule(Base):
     auditee = Column(String(255), nullable=True)
     auditee_email = Column(String(255), nullable=True)
     auditee_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    external_auditees_json = Column(Text, nullable=True)
     lead_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     observer_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     assistant_auditor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    notify_auditors = Column(Boolean, nullable=False, default=True)
+    notify_auditees = Column(Boolean, nullable=False, default=True)
+    reminder_interval_days = Column(Integer, nullable=False, default=7)
     duration_days = Column(Integer, nullable=False, default=1)
     next_due_date = Column(Date, nullable=False, index=True)
     last_run_at = Column(DateTime(timezone=True), nullable=True)
@@ -619,11 +643,22 @@ class QMSAuditSchedule(Base):
     def __repr__(self) -> str:
         return f"<QMSAuditSchedule id={self.id} frequency={self.frequency} next_due={self.next_due_date}>"
 
+    @property
+    def external_auditees(self) -> list[dict]:
+        if not self.external_auditees_json:
+            return []
+        try:
+            value = json.loads(self.external_auditees_json)
+        except Exception:
+            return []
+        return value if isinstance(value, list) else []
+
 
 class QMSCorrectiveAction(Base):
     __tablename__ = "qms_corrective_actions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
 
     finding_id = Column(
         UUID(as_uuid=True),
@@ -671,6 +706,7 @@ class QMSNotification(Base):
     __tablename__ = "qms_notifications"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String(36), _user_id_fk(), nullable=False, index=True)
     message = Column(Text, nullable=False)
     severity = Column(
@@ -703,6 +739,7 @@ class CorrectiveActionRequest(Base):
     __tablename__ = "quality_cars"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
 
     program = Column(
         SAEnum(CARProgram, name="quality_car_program", native_enum=False),
@@ -791,7 +828,7 @@ class CorrectiveActionRequest(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("program", "car_number", name="uq_quality_car_number"),
+        UniqueConstraint("amo_id", "program", "car_number", name="uq_quality_car_number_per_amo"),
         Index("ix_quality_cars_program_status", "program", "status"),
         Index("ix_quality_cars_program_due", "program", "due_date"),
         Index("ix_quality_cars_reminders", "next_reminder_at"),

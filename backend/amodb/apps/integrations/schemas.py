@@ -24,6 +24,17 @@ class IntegrationConfigCreate(IntegrationConfigBase):
     pass
 
 
+class IntegrationConfigUpdate(BaseModel):
+    display_name: Optional[str] = Field(None, max_length=128)
+    status: Optional[IntegrationConfigStatus] = None
+    enabled: Optional[bool] = None
+    base_url: Optional[str] = None
+    signing_secret: Optional[str] = None
+    allowed_ips: Optional[str] = None
+    credentials_json: Optional[Dict[str, Any]] = None
+    metadata_json: Optional[Dict[str, Any]] = None
+
+
 class IntegrationConfigRead(IntegrationConfigBase):
     id: str
     amo_id: str

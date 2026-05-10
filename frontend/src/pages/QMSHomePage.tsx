@@ -119,8 +119,8 @@ const QMSHomePage: React.FC = () => {
         qmsListDocuments({ domain }),
         qmsListDistributions({ outstanding_only: true }),
         qmsListChangeRequests({ domain }),
-        qmsListAudits({ domain }),
-        qmsListCars(),
+        qmsListAudits({ domain, limit: 300 }, { silent: true }),
+        qmsListCars({ limit: 300 }, { silent: true }),
         listTrainingCourses({ include_inactive: false }),
         listTrainingEvents(),
       ]);

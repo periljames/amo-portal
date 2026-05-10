@@ -9,6 +9,7 @@ import {
   fetchInvoiceDocument,
 } from "../services/billing";
 import type { InvoiceDetail } from "../types/billing";
+import { saveDownloadedFile } from "../utils/downloads";
 
 type UrlParams = {
   amoCode?: string;
@@ -82,20 +83,11 @@ const AdminInvoiceDetailPage: React.FC = () => {
   const handleDownload = async (format: "html" | "pdf") => {
     if (!invoice) return;
     setError(null);
-    let url: string | null = null;
     try {
-      const blob = await fetchInvoiceDocument(invoice.id, format);
-      url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `invoice-${invoice.id}.${format}`;
-      link.click();
+      const downloaded = await fetchInvoiceDocument(invoice.id, format);
+      saveDownloadedFile(downloaded);
     } catch (err: any) {
       setError(err?.message || "Unable to download invoice document.");
-    } finally {
-      if (url) {
-        URL.revokeObjectURL(url);
-      }
     }
   };
 
@@ -108,7 +100,7 @@ const AdminInvoiceDetailPage: React.FC = () => {
       <div className="admin-page">
         <PageHeader
           title="Invoice detail"
-          subtitle={invoice ? invoice.description || "Invoice detail" : "Invoice detail"}
+          subtitle={invoice ? invoice.invoice_number || invoice.description || "Invoice detail" : "Invoice detail"}
           actions={
             <Button
               type="button"
@@ -133,16 +125,24 @@ const AdminInvoiceDetailPage: React.FC = () => {
             {!loading && invoice && (
               <div className="form-grid">
                 <div className="form-row">
+                  <label>Invoice #</label>
+                  <input type="text" value={invoice.invoice_number || invoice.id} disabled />
+                </div>
+                <div className="form-row">
                   <label>Status</label>
                   <input type="text" value={invoice.status} disabled />
                 </div>
                 <div className="form-row">
-                  <label>Amount</label>
-                  <input
-                    type="text"
-                    value={formatMoney(invoice.amount_cents, invoice.currency)}
-                    disabled
-                  />
+                  <label>Subtotal</label>
+                  <input type="text" value={formatMoney(invoice.subtotal_cents ?? invoice.amount_cents, invoice.currency)} disabled />
+                </div>
+                <div className="form-row">
+                  <label>Tax</label>
+                  <input type="text" value={formatMoney(invoice.tax_amount_cents ?? 0, invoice.currency)} disabled />
+                </div>
+                <div className="form-row">
+                  <label>Total</label>
+                  <input type="text" value={formatMoney(invoice.total_cents ?? invoice.amount_cents, invoice.currency)} disabled />
                 </div>
                 <div className="form-row">
                   <label>Issued</label>
@@ -166,6 +166,7 @@ const AdminInvoiceDetailPage: React.FC = () => {
                 <li>Issued: {formatDateTime(invoice.issued_at)}</li>
                 <li>Due: {formatDateTime(invoice.due_at)}</li>
                 <li>Paid: {formatDateTime(invoice.paid_at)}</li>
+                <li>eTIMS status: {invoice.etims_status || "NOT_CONNECTED"}</li>
               </ul>
             )}
           </Panel>

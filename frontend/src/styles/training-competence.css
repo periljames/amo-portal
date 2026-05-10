@@ -90,6 +90,17 @@
   gap: 4px;
 }
 
+.tc-kpi-card--button {
+  width: 100%;
+  border: 1px solid var(--border-subtle, #d7dde7);
+  cursor: pointer;
+  text-align: left;
+}
+
+.tc-kpi-card--button small {
+  color: var(--text-secondary, #667085);
+}
+
 .tc-kpi-card span {
   font-size: 0.78rem;
 }
@@ -184,6 +195,27 @@
   flex-wrap: wrap;
 }
 
+.tc-bulkbar,
+.tc-form-grid-2,
+.tc-drawer-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.tc-bulkbar {
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-subtle, #d7dde7);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-soft, #f7f9fc) 88%, #ffffff 12%);
+}
+
+.tc-form-grid-2 > .tc-field {
+  flex: 1 1 240px;
+}
+
 .tc-filterbar {
   align-items: flex-end;
 }
@@ -250,7 +282,7 @@
   border-collapse: collapse;
 }
 
-.tc-table th,
+ .tc-table th,
 .tc-table td {
   padding: 10px 12px;
   text-align: left;
@@ -276,6 +308,15 @@
 
 .tc-table tbody tr.is-selected {
   background: rgba(59, 130, 246, 0.08);
+}
+
+.tc-col-checkbox {
+  width: 42px;
+}
+
+.tc-col-checkbox input {
+  width: 16px;
+  height: 16px;
 }
 
 .tc-link-button {
@@ -377,6 +418,15 @@
   }
 
   .tc-filterbar {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .tc-bulkbar,
+  .tc-form-grid-2,
+  .tc-drawer-summary {
     display: grid;
     grid-template-columns: 1fr;
   }

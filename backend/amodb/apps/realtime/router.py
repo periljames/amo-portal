@@ -7,16 +7,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
-from amodb.database import get_db
+from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user, get_current_user
 
 from . import schemas, services
-
-# Backwards-compat alias: some local/dev copies referenced
-# get_current_active_realtime_user in Depends(...).
-# Keep this alias to avoid runtime import crashes during hot-reload
-# if stale code paths still reference the older symbol.
-get_current_active_realtime_user = get_current_active_user
 
 router = APIRouter(prefix="/api", tags=["realtime"])
 realtime_bearer = HTTPBearer(auto_error=False)
@@ -24,7 +18,7 @@ realtime_bearer = HTTPBearer(auto_error=False)
 
 def get_current_active_realtime_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(realtime_bearer),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_read_db),
 ) -> account_models.User:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
@@ -34,7 +28,7 @@ def get_current_active_realtime_user(
         )
 
     current_user = get_current_user(token=credentials.credentials, db=db)
-    return get_current_active_user(current_user=current_user, db=db)
+    return get_current_active_user(current_user=current_user)
 
 
 @router.post("/realtime/token", response_model=schemas.RealtimeTokenResponse)
@@ -49,7 +43,7 @@ def issue_realtime_token(
 @router.get("/realtime/bootstrap", response_model=schemas.RealtimeBootstrapResponse)
 def realtime_bootstrap(
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.RealtimeBootstrapResponse:
     return services.build_bootstrap(db, user=current_user)
 
@@ -58,7 +52,7 @@ def realtime_bootstrap(
 def realtime_sync(
     since: str = Query(..., description="cursor/timestamp in epoch ms"),
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.RealtimeSyncResponse:
     try:
         since_ms = int(since)
@@ -71,7 +65,7 @@ def realtime_sync(
 def realtime_presence_update(
     payload: schemas.PresenceStateUpdateRequest,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.PresenceStateRead:
     return services.update_presence_state(db, user=current_user, payload=payload)
 
@@ -80,7 +74,7 @@ def realtime_presence_update(
 def create_thread(
     payload: schemas.ThreadCreateRequest,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.ThreadRead:
     return services.create_thread(db, user=current_user, payload=payload)
 
@@ -88,7 +82,7 @@ def create_thread(
 @router.get("/chat/threads", response_model=list[schemas.ThreadRead])
 def list_threads(
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> list[schemas.ThreadRead]:
     return services.list_threads(db, user=current_user)
 
@@ -98,7 +92,7 @@ def list_thread_messages(
     thread_id: str,
     limit: int = Query(default=200, ge=1, le=500),
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> list[schemas.ChatMessageRead]:
     return services.list_thread_messages(db, user=current_user, thread_id=thread_id, limit=limit)
 
@@ -108,6 +102,6 @@ def prompt_action(
     prompt_id: str,
     payload: schemas.PromptActionRequest,
     db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
+    current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> dict[str, str]:
     return services.perform_prompt_action(db, user=current_user, prompt_id=prompt_id, action=payload.action)

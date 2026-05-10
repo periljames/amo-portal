@@ -16,6 +16,7 @@ from jose import JWTError, jwt  # noqa: F401  (imported for future token use)
 from fastapi import HTTPException
 from sqlalchemy import or_, func, text
 from sqlalchemy.orm import Session, joinedload, noload
+from sqlalchemy import func
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from amodb.security import (
@@ -233,7 +234,17 @@ def resolve_login_context(db: Session, identifier: str) -> models.User | None:
         users = (
             db.query(models.User)
             .outerjoin(models.AMO, models.User.amo_id == models.AMO.id)
-            .options(joinedload(models.User.amo))
+            .options(
+                joinedload(models.User.amo),
+                # Login context only needs the matching active account and AMO.
+                # Do not load security_events here. The User.security_events relationship
+                # is configured as selectin on the model, which otherwise triggers an
+                # additional account_security_events query during pre-login context lookup.
+                # That extra eager load made /auth/login-context fail when PostgreSQL
+                # closed an idle SSL connection after migrations/restarts.
+                noload(models.User.security_events),
+                noload(models.User.authorisations),
+            )
             .filter(
                 query_filter,
                 models.User.is_active.is_(True),
@@ -242,6 +253,7 @@ def resolve_login_context(db: Session, identifier: str) -> models.User | None:
                     models.AMO.is_active.is_(True),
                 ),
             )
+            .limit(3)
             .all()
         )
     except (OperationalError, ProgrammingError) as exc:
@@ -503,7 +515,7 @@ def create_user(db: Session, data: schemas.UserCreate) -> models.User:
             else data.role == models.AccountRole.AUDITOR
         ),
         must_change_password=True,
-        # is_system_account defaults to False in the model – human by default.
+        # is_system_account defaults to False in the model â€“ human by default.
     )
     db.add(user)
     db.commit()
@@ -748,6 +760,8 @@ def _reset_failed_logins(
     user.login_attempts = 0
     user.locked_until = None
     user.lockout_count = 0
+    if hasattr(user, "token_revoked_at"):
+        user.token_revoked_at = None
     user.last_login_at = datetime.now(timezone.utc)
     user.last_login_ip = ip
     user.last_login_user_agent = user_agent
@@ -844,7 +858,10 @@ def authenticate_user(
 
     Special path:
     - If amo_slug is blank / "system" / "root", allow a GLOBAL SUPERUSER
-      (is_superuser=True, possibly amo_id=None) to log in by email.
+      (is_superuser=True, amo_id=None) to log in by email.
+
+    Global superusers are not allowed to authenticate through tenant slugs.
+    This prevents root/platform users from being treated as AMO tenant members.
 
     Returns a user on success, or None on failure (lockout, bad credentials).
     System/service accounts are not allowed to authenticate via this flow.
@@ -910,25 +927,19 @@ def authenticate_user(
             if user:
                 amo = user.amo
             else:
-                # God-mode fallback: global superuser email may authenticate against any AMO slug.
-                if email:
-                    superuser = get_global_superuser_by_email(db, email=email)
-                    if superuser:
-                        user = superuser
-                        amo = _find_amo_by_slug_or_code(db, amo_slug_raw) or superuser.amo
-                if not user:
-                    # If AMO exists, log a generic failed login.
-                    amo = amo or _find_amo_by_slug_or_code(db, amo_slug_raw)
-                    _log_security_event(
-                        db,
-                        user=None,
-                        amo=amo,
-                        event_type="LOGIN_FAILED",
-                        description="Unknown user or inactive account.",
-                        ip=ip,
-                        user_agent=user_agent,
-                    )
-                    return None
+                # Fail closed. A global superuser must use the platform login
+                # context and must not be silently converted into a tenant user.
+                amo = amo or _find_amo_by_slug_or_code(db, amo_slug_raw)
+                _log_security_event(
+                    db,
+                    user=None,
+                    amo=amo,
+                    event_type="LOGIN_FAILED",
+                    description="Unknown user, inactive account, or platform account used on a tenant login slug.",
+                    ip=ip,
+                    user_agent=user_agent,
+                )
+                return None
 
         # Block system/AI/service accounts from using human login flows.
         if getattr(user, "is_system_account", False):
@@ -985,7 +996,7 @@ def issue_access_token_for_user(user: models.User) -> Tuple[str, int]:
 
     payload = {
         "sub": str(user.id),
-        "amo_id": user.amo_id,
+        "amo_id": None if bool(getattr(user, "is_superuser", False)) else user.amo_id,
         "department_id": user.department_id,
         "role": (
             user.role.value if hasattr(user.role, "value") else str(user.role)
@@ -2191,6 +2202,87 @@ def cancel_subscription(
     return license
 
 
+def format_invoice_number(invoice: models.BillingInvoice) -> str:
+    issued = invoice.issued_at or invoice.created_at or datetime.now(timezone.utc)
+    amo_code = getattr(getattr(invoice, "amo", None), "amo_code", None) or "AMO"
+    return f"INV-{amo_code}-{issued.strftime('%Y%m')}-{str(invoice.id)[-6:].upper()}"
+
+
+def build_invoice_view(invoice: models.BillingInvoice) -> dict:
+    amo = getattr(invoice, "amo", None)
+    subtotal_cents = int(invoice.amount_cents or 0)
+    tax_amount_cents = 0
+    total_cents = subtotal_cents + tax_amount_cents
+    etims_reference = None
+    etims_status = "NOT_CONNECTED"
+    return {
+        "id": invoice.id,
+        "invoice_number": format_invoice_number(invoice),
+        "amo_id": invoice.amo_id,
+        "buyer_name": getattr(amo, "name", None),
+        "buyer_email": getattr(amo, "contact_email", None),
+        "buyer_phone": getattr(amo, "contact_phone", None),
+        "license_id": invoice.license_id,
+        "ledger_entry_id": invoice.ledger_entry_id,
+        "amount_cents": int(invoice.amount_cents or 0),
+        "currency": invoice.currency,
+        "status": invoice.status,
+        "description": invoice.description,
+        "issued_at": invoice.issued_at,
+        "due_at": invoice.due_at,
+        "paid_at": invoice.paid_at,
+        "created_at": invoice.created_at,
+        "updated_at": invoice.updated_at,
+        "subtotal_cents": subtotal_cents,
+        "tax_amount_cents": tax_amount_cents,
+        "total_cents": total_cents,
+        "etims_status": etims_status,
+        "etims_reference": etims_reference,
+    }
+
+
+def build_invoice_export_csv(invoices: List[models.BillingInvoice]) -> str:
+    import csv
+    from io import StringIO
+
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "invoice_number", "invoice_id", "amo_code", "amo_name", "status", "currency",
+        "subtotal_cents", "tax_amount_cents", "total_cents", "issued_at", "due_at", "paid_at", "description"
+    ])
+    for invoice in invoices:
+        view = build_invoice_view(invoice)
+        amo = getattr(invoice, "amo", None)
+        writer.writerow([
+            view["invoice_number"], invoice.id, getattr(amo, "amo_code", ""), getattr(amo, "name", ""),
+            getattr(invoice.status, "value", invoice.status), invoice.currency,
+            view["subtotal_cents"], view["tax_amount_cents"], view["total_cents"],
+            invoice.issued_at.isoformat() if invoice.issued_at else "",
+            invoice.due_at.isoformat() if invoice.due_at else "",
+            invoice.paid_at.isoformat() if invoice.paid_at else "",
+            invoice.description or "",
+        ])
+    return output.getvalue()
+
+
+def build_billing_audit_export_csv(logs: List[models.BillingAuditLog]) -> str:
+    import csv
+    from io import StringIO
+
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["created_at", "amo_id", "event_type", "details"])
+    for log in logs:
+        writer.writerow([
+            log.created_at.isoformat() if log.created_at else "",
+            log.amo_id or "",
+            log.event_type,
+            log.details or "",
+        ])
+    return output.getvalue()
+
+
 def list_invoices(db: Session, *, amo_id: str) -> List[models.BillingInvoice]:
     try:
         return (
@@ -2229,6 +2321,212 @@ def get_current_subscription(db: Session, *, amo_id: str) -> Optional[models.Ten
         )
         .order_by(models.TenantLicense.trial_grace_expires_at.desc())
         .first()
+    )
+
+
+def get_latest_subscription(db: Session, *, amo_id: str) -> Optional[models.TenantLicense]:
+    sort_key = func.coalesce(
+        models.TenantLicense.current_period_end,
+        models.TenantLicense.trial_grace_expires_at,
+        models.TenantLicense.trial_ends_at,
+        models.TenantLicense.updated_at,
+        models.TenantLicense.created_at,
+    )
+    return (
+        db.query(models.TenantLicense)
+        .filter(models.TenantLicense.amo_id == amo_id)
+        .order_by(sort_key.desc(), models.TenantLicense.updated_at.desc())
+        .first()
+    )
+
+
+def _term_delta(term: BillingTerm) -> timedelta:
+    return {
+        BillingTerm.MONTHLY: timedelta(days=30),
+        BillingTerm.BI_ANNUAL: timedelta(days=182),
+        BillingTerm.ANNUAL: timedelta(days=365),
+    }.get(term, timedelta(days=30))
+
+
+def _project_subscription_runtime(
+    db: Session,
+    *,
+    license: models.TenantLicense,
+    as_of: Optional[datetime] = None,
+) -> schemas.SubscriptionRead:
+    now = as_of or datetime.now(timezone.utc)
+    status = license.status
+    read_only = bool(license.is_read_only)
+    trial_grace_expires_at = license.trial_grace_expires_at
+    current_period_end = license.current_period_end
+
+    payment_method_count = (
+        db.query(models.PaymentMethod)
+        .filter(models.PaymentMethod.amo_id == license.amo_id)
+        .count()
+    )
+    has_payment_method = payment_method_count > 0
+
+    overdue_invoice = (
+        db.query(models.BillingInvoice)
+        .filter(
+            models.BillingInvoice.amo_id == license.amo_id,
+            models.BillingInvoice.status == InvoiceStatus.PENDING,
+            models.BillingInvoice.due_at.isnot(None),
+            models.BillingInvoice.due_at <= now,
+        )
+        .order_by(models.BillingInvoice.due_at.asc())
+        .first()
+    )
+
+    if status == LicenseStatus.TRIALING and license.trial_ends_at and license.trial_ends_at <= now:
+        if has_payment_method:
+            status = LicenseStatus.ACTIVE
+            read_only = False
+            if current_period_end is None or current_period_end <= license.trial_ends_at:
+                current_period_end = license.trial_ends_at + _term_delta(license.term)
+        else:
+            status = LicenseStatus.EXPIRED
+            if trial_grace_expires_at is None:
+                trial_grace_expires_at = license.trial_ends_at + timedelta(days=7)
+            current_period_end = license.trial_ends_at
+            read_only = now >= trial_grace_expires_at
+    elif status == LicenseStatus.EXPIRED and license.trial_ends_at:
+        if trial_grace_expires_at is None:
+            trial_grace_expires_at = license.trial_ends_at + timedelta(days=7)
+        read_only = now >= trial_grace_expires_at
+        current_period_end = current_period_end or license.trial_ends_at
+    elif status == LicenseStatus.CANCELLED:
+        read_only = True
+    elif overdue_invoice is not None:
+        read_only = True
+
+    return schemas.SubscriptionRead(
+        id=license.id,
+        amo_id=license.amo_id,
+        sku_id=license.sku_id,
+        term=license.term,
+        status=status,
+        trial_started_at=license.trial_started_at,
+        trial_ends_at=license.trial_ends_at,
+        trial_grace_expires_at=trial_grace_expires_at,
+        is_read_only=read_only,
+        current_period_start=license.current_period_start,
+        current_period_end=current_period_end,
+        canceled_at=license.canceled_at,
+    )
+
+
+def get_effective_subscription(
+    db: Session,
+    *,
+    amo_id: str,
+    as_of: Optional[datetime] = None,
+) -> Optional[schemas.SubscriptionRead]:
+    active = get_current_subscription(db, amo_id=amo_id)
+    if active is not None:
+        return _project_subscription_runtime(db, license=active, as_of=as_of)
+
+    latest = get_latest_subscription(db, amo_id=amo_id)
+    if latest is None:
+        return None
+
+    return _project_subscription_runtime(db, license=latest, as_of=as_of)
+
+
+def get_billing_access_status(
+    db: Session,
+    *,
+    amo_id: str,
+    as_of: Optional[datetime] = None,
+) -> schemas.BillingAccessStatusRead:
+    now = as_of or datetime.now(timezone.utc)
+    subscription = get_effective_subscription(db, amo_id=amo_id, as_of=now)
+    payment_method_count = (
+        db.query(models.PaymentMethod)
+        .filter(models.PaymentMethod.amo_id == amo_id)
+        .count()
+    )
+    overdue_invoice = (
+        db.query(models.BillingInvoice)
+        .filter(
+            models.BillingInvoice.amo_id == amo_id,
+            models.BillingInvoice.status == InvoiceStatus.PENDING,
+            models.BillingInvoice.due_at.isnot(None),
+            models.BillingInvoice.due_at <= now,
+        )
+        .order_by(models.BillingInvoice.due_at.asc())
+        .first()
+    )
+    overdue_invoice_count = 0
+    if overdue_invoice is not None:
+        overdue_invoice_count = (
+            db.query(models.BillingInvoice)
+            .filter(
+                models.BillingInvoice.amo_id == amo_id,
+                models.BillingInvoice.status == InvoiceStatus.PENDING,
+                models.BillingInvoice.due_at.isnot(None),
+                models.BillingInvoice.due_at <= now,
+            )
+            .count()
+        )
+
+    if subscription is None:
+        return schemas.BillingAccessStatusRead(
+            subscription=None,
+            access_state="NO_SUBSCRIPTION",
+            has_access=False,
+            redirect_to_billing=True,
+            lock_reason="No active or trial subscription exists for this AMO.",
+            payment_method_count=payment_method_count,
+            overdue_invoice_count=overdue_invoice_count,
+            actionable_invoice_id=getattr(overdue_invoice, 'id', None),
+        )
+
+    if overdue_invoice is not None:
+        return schemas.BillingAccessStatusRead(
+            subscription=subscription,
+            access_state="PAYMENT_OVERDUE",
+            has_access=False,
+            redirect_to_billing=True,
+            lock_reason="Billing is overdue. Please settle outstanding invoices to continue.",
+            payment_method_count=payment_method_count,
+            overdue_invoice_count=overdue_invoice_count,
+            actionable_invoice_id=overdue_invoice.id,
+        )
+
+    if subscription.is_read_only:
+        access_state = "LOCKED"
+        if subscription.status == LicenseStatus.EXPIRED:
+            access_state = "TRIAL_EXPIRED"
+        elif subscription.status == LicenseStatus.CANCELLED:
+            access_state = "CANCELLED"
+        return schemas.BillingAccessStatusRead(
+            subscription=subscription,
+            access_state=access_state,
+            has_access=False,
+            redirect_to_billing=True,
+            lock_reason="This AMO subscription is locked. Go to Billing to settle dues or renew access.",
+            payment_method_count=payment_method_count,
+            overdue_invoice_count=overdue_invoice_count,
+            actionable_invoice_id=None,
+        )
+
+    access_state = "ACTIVE"
+    if subscription.status == LicenseStatus.TRIALING:
+        access_state = "TRIALING"
+    elif subscription.status == LicenseStatus.EXPIRED:
+        access_state = "TRIAL_GRACE"
+
+    return schemas.BillingAccessStatusRead(
+        subscription=subscription,
+        access_state=access_state,
+        has_access=True,
+        redirect_to_billing=False,
+        lock_reason=None,
+        payment_method_count=payment_method_count,
+        overdue_invoice_count=overdue_invoice_count,
+        actionable_invoice_id=None,
     )
 
 
@@ -2515,3 +2813,4 @@ def seed_default_departments(db: Session, *, amo_id: str) -> List[models.Departm
     if created:
         db.flush()
     return created
+

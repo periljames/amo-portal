@@ -31,13 +31,19 @@ export async function fetchRealtimeToken(): Promise<RealtimeTokenResponse> {
 }
 
 export async function fetchHealthz(): Promise<{ status: string }> {
-  const res = await fetch(`${getApiBaseUrl()}/healthz`, { credentials: "include" });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort("timeout"), 5000);
+  const res = await fetch(`${getApiBaseUrl()}/healthz`, { credentials: "include", signal: controller.signal });
+  window.clearTimeout(timeout);
   if (!res.ok) throw new Error(`healthz failed ${res.status}`);
   return res.json();
 }
 
 export async function fetchServerTime(): Promise<{ epoch_ms: number }> {
-  const res = await fetch(`${getApiBaseUrl()}/time`, { credentials: "include" });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort("timeout"), 5000);
+  const res = await fetch(`${getApiBaseUrl()}/time`, { credentials: "include", signal: controller.signal });
+  window.clearTimeout(timeout);
   if (!res.ok) throw new Error(`time failed ${res.status}`);
   return res.json();
 }

@@ -25,6 +25,7 @@ from amodb.apps.reliability import models as reliability_models  # noqa: E402
 from amodb.apps.audit import models as audit_models  # noqa: E402
 from amodb.apps.tasks import models as task_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
+from amodb.apps.notifications import models as notification_models  # noqa: E402
 from amodb.apps.integrations import models as integration_models  # noqa: E402
 from amodb.apps.maintenance_program import models as maintenance_program_models  # noqa: E402
 from amodb.apps.realtime import models as realtime_models  # noqa: E402
@@ -73,6 +74,7 @@ def db_session():
             quality_models.QMSDocumentRevision.__table__,
             quality_models.QMSDocumentDistribution.__table__,
             quality_models.QMSAuditReferenceCounter.__table__,
+            quality_models.QMSAuditSchedule.__table__,
             quality_models.QMSAudit.__table__,
             quality_models.QMSAuditFinding.__table__,
             quality_models.QMSCorrectiveAction.__table__,
@@ -80,6 +82,8 @@ def db_session():
             quality_models.CARActionLog.__table__,
             quality_models.CARResponse.__table__,
             quality_models.CARAttachment.__table__,
+            quality_models.QMSNotification.__table__,
+            notification_models.EmailLog.__table__,
             integration_models.IntegrationConfig.__table__,
             integration_models.IntegrationOutboundEvent.__table__,
             integration_models.IntegrationInboundEvent.__table__,

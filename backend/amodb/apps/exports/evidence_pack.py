@@ -22,6 +22,17 @@ MAX_EVIDENCE_PACK_BYTES = int(os.getenv("EVIDENCE_PACK_MAX_BYTES", str(50 * 1024
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
+def _safe_filename(value: str, fallback: str) -> str:
+    import re
+    candidate = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip()).strip("._-")
+    return (candidate[:140] or fallback)
+
+
+def _basename_only(value: str, fallback: str) -> str:
+    name = Path(value or fallback).name
+    return _safe_filename(name, fallback)
+
+
 def _serialize_value(value: Any) -> Any:
     if isinstance(value, enum.Enum):
         return value.value
@@ -160,9 +171,9 @@ def _build_audit_pack(
 
     attachments: list[tuple[str, Path]] = []
     if audit.report_file_ref:
-        attachments.append((f"audit_report_{audit.id}.pdf", Path(audit.report_file_ref)))
+        attachments.append((f"{_safe_filename(audit.audit_ref or str(audit.id), str(audit.id))}_report{Path(audit.report_file_ref).suffix or ".pdf"}", Path(audit.report_file_ref)))
     if audit.checklist_file_ref:
-        attachments.append((f"audit_checklist_{audit.id}.pdf", Path(audit.checklist_file_ref)))
+        attachments.append((f"{_safe_filename(audit.audit_ref or str(audit.id), str(audit.id))}_checklist{Path(audit.checklist_file_ref).suffix or ".pdf"}", Path(audit.checklist_file_ref)))
 
     return summary, linked, timeline, attachments
 
@@ -209,7 +220,7 @@ def _build_car_pack(
     timeline = _collect_timeline(db, amo_id=amo_id, entities=[("qms_car", str(car.id))])
 
     attachment_files = [
-        (f"{attachment.id}_{attachment.filename}", Path(attachment.file_ref))
+        (_basename_only(attachment.filename, f"car_attachment_{attachment.id}"), Path(attachment.file_ref))
         for attachment in attachments
     ]
 
@@ -315,7 +326,7 @@ def _build_training_user_pack(
     timeline = _collect_timeline(db, amo_id=amo_id, entities=entities)
 
     attachment_files = [
-        (f"{file.id}_{Path(file.original_filename).name}", Path(file.storage_path))
+        (_basename_only(file.original_filename, f"training_file_{file.id}"), Path(file.storage_path))
         for file in files
     ]
 
@@ -455,8 +466,21 @@ def build_evidence_pack(
     db.commit()
 
     zip_bytes = _write_zip(entries)
-    filename = f"{entity_type}_{entity_id}_evidence_pack.zip"
-    headers = {"Content-Disposition": f"attachment; filename={filename}"}
+    if entity_type == "qms_audit":
+        label = _safe_filename(str(summary.get("audit_ref") or summary.get("title") or entity_id), f"audit_{entity_id}")
+        filename = f"{label}_evidence_pack.zip"
+    elif entity_type == "qms_car":
+        label = _safe_filename(str(summary.get("car_number") or summary.get("title") or entity_id), f"car_{entity_id}")
+        filename = f"{label}_evidence_pack.zip"
+    elif entity_type == "training_user":
+        label = _safe_filename(str(summary.get("staff_code") or summary.get("name") or entity_id), f"training_user_{entity_id}")
+        filename = f"{label}_evidence_pack.zip"
+    elif entity_type == "fracas_case":
+        label = _safe_filename(str(summary.get("reference") or summary.get("title") or entity_id), f"fracas_{entity_id}")
+        filename = f"{label}_evidence_pack.zip"
+    else:
+        filename = f"{entity_type}_{entity_id}_evidence_pack.zip"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
 
     return StreamingResponse(
         iter([zip_bytes]),

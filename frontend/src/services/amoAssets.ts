@@ -162,42 +162,14 @@ export async function downloadAmoAsset(
   kind: "logo" | "template",
   amoId?: string | null,
   onProgress?: (progress: TransferProgress) => void
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    const startedAt = performance.now();
-    xhr.open("GET", withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/${kind}`, amoId));
-    const headers = buildAuthHeader();
-    Object.entries(headers).forEach(([key, value]) => {
-      xhr.setRequestHeader(key, value);
-    });
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("progress", (event) => {
-      if (!onProgress) return;
-      const total = event.lengthComputable ? event.total : undefined;
-      onProgress(buildSpeed(event.loaded, total, startedAt));
-    });
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Request failed (${xhr.status})`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading asset."));
-    });
-
-    xhr.send();
+): Promise<DownloadedFile> {
+  const startedAt = performance.now();
+  return downloadWithXhr({
+    url: withAmoId(`${getApiBaseUrl()}/accounts/amo-assets/${kind}`, amoId),
+    headers: buildAuthHeader(),
+    fallbackFilename: kind === "logo" ? "amo-logo" : "crs-template.pdf",
+    onProgress: onProgress ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt)) : undefined,
+    retries: 2,
   });
 }
 

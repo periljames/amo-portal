@@ -36,11 +36,31 @@ if (typeof document !== "undefined" && import.meta.env.VITE_MANUALS_PWA_ENABLED 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
-      gcTime: 10 * 60_000,
+      staleTime: 60_000,
+      gcTime: 15 * 60_000,
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
+      refetchOnMount: false,
       refetchInterval: false,
+      retry(failureCount, error) {
+        const message = error instanceof Error ? error.message.toLowerCase() : "";
+        if (
+          message.includes("401") ||
+          message.includes("403") ||
+          message.includes("404") ||
+          message.includes("session expired") ||
+          message.includes("unauthorized") ||
+          message.includes("timeout") ||
+          message.includes("abort")
+        ) {
+          return false;
+        }
+        return failureCount < 1;
+      },
+      retryOnMount: false,
+    },
+    mutations: {
+      retry: 0,
     },
   },
 });

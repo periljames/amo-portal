@@ -12,6 +12,7 @@
     radial-gradient(circle at 14% 18%, rgba(255, 201, 171, 0.42), transparent 42%),
     radial-gradient(circle at 83% 86%, rgba(207, 154, 201, 0.36), transparent 44%),
     linear-gradient(145deg, #a36a57 0%, #8a5a64 48%, #754d69 100%);
+  animation: loginHueShift 22s ease-in-out infinite alternate;
   overflow-x: hidden;
   overflow-y: auto;
   scroll-padding-bottom: calc(10rem + env(safe-area-inset-bottom));
@@ -522,5 +523,37 @@
 
   .left {
     padding: 14px 10px 12px;
+  }
+}
+
+
+.authNotice {
+  margin: 8px 0 0;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.62);
+  color: #475569;
+  padding: 10px 12px;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+@keyframes loginHueShift {
+  0% { filter: hue-rotate(0deg) saturate(1); }
+  50% { filter: hue-rotate(9deg) saturate(1.04); }
+  100% { filter: hue-rotate(-7deg) saturate(1.02); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pageBg {
+    animation: none;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .authNotice {
+    background: rgba(15, 23, 42, 0.45);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: #cbd5e1;
   }
 }

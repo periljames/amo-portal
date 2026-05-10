@@ -27,24 +27,24 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
         label: "Planner",
         shortLabel: "Planner",
         icon: CalendarDays,
-        href: `/maintenance/${amoCode}/${department}/qms/audits/plan?view=calendar`,
-        active: location.pathname === `/maintenance/${amoCode}/${department}/qms/audits/plan`,
+        href: `/maintenance/${amoCode}/qms/audits/plan?view=calendar`,
+        active: location.pathname === `/maintenance/${amoCode}/qms/audits/plan`,
       },
       {
         id: "register",
         label: "Register",
         shortLabel: "Register",
         icon: TableProperties,
-        href: `/maintenance/${amoCode}/${department}/qms/audits/register?tab=findings`,
-        active: location.pathname === `/maintenance/${amoCode}/${department}/qms/audits/register`,
+        href: `/maintenance/${amoCode}/qms/audits/register?tab=findings`,
+        active: location.pathname === `/maintenance/${amoCode}/qms/audits/register`,
       },
       {
         id: "evidence-library",
         label: "Evidence",
         shortLabel: "Evidence",
         icon: Files,
-        href: `/maintenance/${amoCode}/${department}/qms/evidence`,
-        active: location.pathname.startsWith(`/maintenance/${amoCode}/${department}/qms/evidence`),
+        href: `/maintenance/${amoCode}/qms/evidence-vault`,
+        active: location.pathname.startsWith(`/maintenance/${amoCode}/qms/evidence-vault`),
       },
     ],
     [amoCode, department, location.pathname]
@@ -59,8 +59,8 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
       title={title}
       subtitle={subtitle}
       breadcrumbs={[
-        { label: "QMS", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms`) },
-        { label: "Audits", onClick: () => navigate(`/maintenance/${amoCode}/${department}/qms/audits`) },
+        { label: "QMS", onClick: () => navigate(`/maintenance/${amoCode}/qms`) },
+        { label: "Audits", onClick: () => navigate(`/maintenance/${amoCode}/qms/audits`) },
         { label: title },
       ]}
       toolbar={toolbar}

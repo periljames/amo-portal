@@ -26,7 +26,7 @@ const resolveDevProxy = (env: Record<string, string>) => {
   const target = env.VITE_API_PROXY_TARGET?.trim() || env.VITE_API_BASE_URL?.trim() || 'http://127.0.0.1:8080'
 
   return {
-    '^/(auth|accounts|admin|billing|aircraft|work-orders|crs|training|public|quality|qms|reliability|audit|audit-events|bootstrap|integrations|api|notifications|email-logs|tasks|health|healthz|time|manuals|records)(?:/|$|\\?)': {
+    '^/(auth|accounts|admin|billing|aircraft|work-orders|crs|training|public|quality|qms|platform|reliability|audit|audit-events|bootstrap|integrations|api|notifications|email-logs|tasks|health|healthz|time|manuals|records)(?:/|$|\\?)': {
       target,
       changeOrigin: true,
       secure: false,

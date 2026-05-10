@@ -15,6 +15,7 @@ import {
 } from "../services/amoAssets.ts";
 
 import type { AmoAssetRead, TransferProgress } from "../services/amoAssets.ts";
+import { saveDownloadedFile } from "../utils/downloads";
 
 type UrlParams = {
   amoCode?: string;
@@ -264,22 +265,12 @@ const AdminAmoAssetsPage: React.FC = () => {
     setError(null);
     setDownloadProgress(null);
     try {
-      const blob = await downloadAmoAsset(
+      const downloaded = await downloadAmoAsset(
         kind,
         isSuperuser ? effectiveAmoId : null,
         (progress) => setDownloadProgress({ kind, progress })
       );
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      const filename =
-        kind === "logo"
-          ? assets?.crs_logo_filename || "amo-logo"
-          : assets?.crs_template_filename || "crs-template.pdf";
-
-      link.href = url;
-      link.download = filename;
-      link.click();
-      window.URL.revokeObjectURL(url);
+      saveDownloadedFile(downloaded);
     } catch (e: any) {
       console.error("Failed to download asset", e);
       setError(e?.message || "Could not download asset.");
@@ -292,12 +283,12 @@ const AdminAmoAssetsPage: React.FC = () => {
     setError(null);
     setDownloadProgress(null);
     try {
-      const blob = await downloadAmoAsset(
+      const downloaded = await downloadAmoAsset(
         kind,
         isSuperuser ? effectiveAmoId : null,
         (progress) => setDownloadProgress({ kind, progress })
       );
-      const url = window.URL.createObjectURL(blob);
+      const url = window.URL.createObjectURL(downloaded.blob);
       const name =
         kind === "logo"
           ? assets?.crs_logo_filename || "amo-logo"

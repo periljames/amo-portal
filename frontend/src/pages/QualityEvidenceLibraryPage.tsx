@@ -9,6 +9,7 @@ import { getContext } from "../services/auth";
 import { getApiBaseUrl } from "../services/config";
 import { downloadAuditEvidencePack, downloadCarEvidencePack, qmsListAudits, qmsListCars, qmsListCarAttachmentsBulk, qmsListFindingsBulk, type CARAttachmentOut } from "../services/qms";
 import { buildAuditWorkspacePath } from "../utils/auditSlug";
+import { saveDownloadedFile } from "../utils/downloads";
 
 type EvidenceRow = {
   id: string;
@@ -167,20 +168,10 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   const cellTextClass = wrapText ? "qms-cell-text qms-cell-text--wrap" : "qms-cell-text qms-cell-text--truncate";
 
   const openViewer = (file: EvidenceRow) => {
-    navigate(`/maintenance/${amoCode}/${department}/qms/evidence/${file.id}?name=${encodeURIComponent(file.filename)}&mime=${encodeURIComponent(file.mime)}&url=${encodeURIComponent(file.reviewUrl)}&source=${encodeURIComponent(file.source)}`);
+    navigate(`/maintenance/${amoCode}/qms/evidence-vault/${file.id}?name=${encodeURIComponent(file.filename)}&mime=${encodeURIComponent(file.mime)}&url=${encodeURIComponent(file.reviewUrl)}&source=${encodeURIComponent(file.source)}`);
   };
 
 
-  const saveBlob = (blob: Blob, name: string) => {
-    const u = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = u;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(u);
-  };
 
   const copyLink = async (file: EvidenceRow) => {
     if (navigator.clipboard?.writeText) {
@@ -219,7 +210,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
             </div>
             <div className="qms-header__actions">
             <span className="qms-pill">{filteredRows.length} files</span>
-            {filterAuditId ? <button type="button" className="secondary-chip-btn" onClick={() => downloadAuditEvidencePack(filterAuditId).then((b) => saveBlob(b, `audit-${filterAuditId}-evidence.zip`))}>Export audit evidence pack</button> : null}
+            {filterAuditId ? <button type="button" className="secondary-chip-btn" onClick={() => downloadAuditEvidencePack(filterAuditId).then((file) => saveDownloadedFile(file))}>Export audit evidence pack</button> : null}
           </div>
           </div>
           <div className="table-wrapper">
@@ -271,7 +262,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
                         <a aria-label={`Download ${file.title}`} href={file.reviewUrl} target="_blank" rel="noreferrer" className="secondary-chip-btn"><Download size={14} /> Download</a>
                         <button type="button" aria-label={`Copy link for ${file.title}`} onClick={() => void copyLink(file)} className="secondary-chip-btn"><Link2 size={14} /> Copy</button>
                         {file.auditId ? <button type="button" aria-label={`View audit for ${file.title}`} onClick={() => { const audit = (audits.data ?? []).find((row) => row.id === file.auditId); if (audit) navigate(buildAuditWorkspacePath({ amoCode, department, auditRef: audit.audit_ref })); }} className="secondary-chip-btn"><FileText size={14} /> Audit</button> : null}
-                        {file.type === "CAR evidence" ? <button type="button" className="secondary-chip-btn" onClick={() => { const carId = (cars.data ?? []).find((c) => `${c.car_number} · ${c.title}` === file.source)?.id; if (carId) downloadCarEvidencePack(carId).then((b) => saveBlob(b, `car-${carId}-evidence.zip`)); }}>Export CAR pack</button> : null}
+                        {file.type === "CAR evidence" ? <button type="button" className="secondary-chip-btn" onClick={() => { const carId = (cars.data ?? []).find((c) => `${c.car_number} · ${c.title}` === file.source)?.id; if (carId) downloadCarEvidencePack(carId).then((file) => saveDownloadedFile(file)); }}>Export CAR pack</button> : null}
                       </div>
                     </td>
                   </tr>

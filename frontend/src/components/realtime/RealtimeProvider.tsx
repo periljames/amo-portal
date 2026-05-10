@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { getApiBaseUrl } from "../../services/config";
-import { getContext, getToken, onSessionEvent } from "../../services/auth";
+import { getCachedUser, getContext, getToken, onSessionEvent } from "../../services/auth";
 import { playNotificationChirp, pushDesktopNotification } from "../../services/notificationPreferences";
 import { fetchHealthz, fetchServerTime, RealtimeHttpError } from "../../services/realtime/api";
 import { RealtimeMqttClient } from "../../services/realtime/mqtt";
@@ -38,6 +38,11 @@ const eventSchema = z.object({
 });
 
 const MAX_ACTIVITY = 1500;
+
+function isLoginSurface(): boolean {
+  if (typeof window === "undefined") return false;
+  return /\/login\/?$/.test(window.location.pathname);
+}
 
 type ParsedSseEvent = { event: string; data: string; id?: string };
 function parseSseBlock(block: string): ParsedSseEvent | null {
@@ -77,6 +82,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const frozenClockRef = useRef<number | null>(null);
   const mqttRef = useRef<RealtimeMqttClient | null>(null);
   const ctx = getContext();
+  const cachedUser = getCachedUser();
+  const isPlatformUser = Boolean(cachedUser?.is_superuser && !cachedUser?.amo_id);
   const lastEventKey = `amo:last-event-id:${ctx.amoCode || "unknown"}`;
 
   const isStale = !isOnline || (status === "offline" && !lastGoodServerTime);
@@ -104,6 +111,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
 
   const sendPresenceHeartbeat = useCallback(async (state: "online" | "away" = "online") => {
+    if (isPlatformUser || isLoginSurface()) return;
     const token = getToken();
     if (!token || !isRealtimeEnabled()) return;
     try {
@@ -120,7 +128,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch {
       // presence is best-effort only
     }
-  }, []);
+  }, [isPlatformUser]);
 
   const handleEvent = useCallback((raw: unknown, transportCursor?: string) => {
     const parsed = eventSchema.safeParse(raw);
@@ -141,6 +149,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const connectSse = useCallback(() => {
     controllerRef.current?.abort();
+    if (isPlatformUser || isLoginSurface()) {
+      setStatus("offline");
+      setBrokerState("offline");
+      return;
+    }
     const token = getToken();
     if (!token) {
       setStatus("offline");
@@ -213,7 +226,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         reconnectTimer.current = window.setTimeout(() => connectRef.current(), retryDelay);
       }
     })();
-  }, [handleEvent, lastEventKey, serverNow]);
+  }, [handleEvent, isPlatformUser, lastEventKey, serverNow]);
 
   const reconnectNow = useCallback(() => {
     retryCount.current = 0;
@@ -229,6 +242,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         mqttRef.current?.disconnect();
         mqttRef.current = null;
+        if (isPlatformUser) {
+          controllerRef.current?.abort();
+          setStatus("offline");
+          setBrokerState("offline");
+          return;
+        }
         if (!isRealtimeEnabled()) {
           controllerRef.current?.abort();
           setStatus("offline");
@@ -262,12 +281,21 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setBrokerState("offline");
       }
     });
-  }, [reconnectNow, serverNow, syncServerTime]);
+  }, [isPlatformUser, reconnectNow, serverNow, syncServerTime]);
 
   useEffect(() => {
     connectRef.current = connectSse;
 
     if (getToken()) {
+      if (isPlatformUser || isLoginSurface()) {
+        controllerRef.current?.abort();
+        setStatus("offline");
+        setBrokerState("offline");
+        return () => {
+          controllerRef.current?.abort();
+          if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
+        };
+      }
       if (!isRealtimeEnabled()) {
         controllerRef.current?.abort();
         setStatus("offline");
@@ -309,7 +337,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       mqttRef.current?.disconnect();
       if (reconnectTimer.current) window.clearTimeout(reconnectTimer.current);
     };
-  }, [connectSse, serverNow, syncServerTime]);
+  }, [connectSse, isPlatformUser, serverNow, syncServerTime]);
 
   useEffect(() => {
     if (staleIntervalRef.current) window.clearInterval(staleIntervalRef.current);
@@ -361,16 +389,25 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     };
 
-    void syncServerTime();
-    void refreshHealth();
+    const hasToken = !!getToken();
+    const kickoff = () => {
+      if (hasToken) {
+        void syncServerTime();
+      }
+      void refreshHealth();
+    };
+    const initialTimer = window.setTimeout(kickoff, hasToken ? 2500 : 1000);
     const timer = window.setInterval(() => {
       void refreshHealth();
     }, 180_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
   }, [syncServerTime]);
 
   useEffect(() => {
-    if (!getToken() || !isRealtimeEnabled()) return;
+    if (isPlatformUser || isLoginSurface() || !getToken() || !isRealtimeEnabled()) return;
 
     const pushPresence = () => {
       const state = typeof document !== "undefined" && document.hidden ? "away" : "online";
@@ -385,7 +422,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [sendPresenceHeartbeat]);
+  }, [isPlatformUser, sendPresenceHeartbeat]);
 
   const refreshData = useCallback(() => {
     queryClient.invalidateQueries();

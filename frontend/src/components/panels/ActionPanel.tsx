@@ -278,7 +278,7 @@ const ActionPanel: React.FC<Props> = ({ isOpen, context, onClose }) => {
                   <ul>
                     {trainingFiles.filter((f) => f.owner_user_id === context.userId).map((f) => (
                       <li key={f.id}>
-                        <button type="button" className="btn btn-secondary" onClick={() => downloadTrainingFile(f.id)}>{f.original_filename}</button> ({f.size_bytes ?? 0} bytes)
+                        <button type="button" className="btn btn-secondary" onClick={async () => saveDownloadedFile(await downloadTrainingFile(f.id))}>{f.original_filename}</button> ({f.size_bytes ?? 0} bytes)
                       </li>
                     ))}
                   </ul>

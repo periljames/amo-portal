@@ -12,7 +12,8 @@ from . import models as training_models
 from . import schemas as training_schemas
 
 
-REMINDER_DAY_MARKS: tuple[int, ...] = (60, 30, 15, -1)
+DEFAULT_DUE_SOON_WINDOW = 45
+REMINDER_DAY_MARKS: tuple[int, ...] = (45, 30, 15, -1)
 PORTAL_LOCKOUT_DAYS_OVERDUE = 1
 
 
@@ -130,27 +131,65 @@ def is_initial_course(course: training_models.TrainingCourse) -> bool:
     return any(marker in padded for marker in initial_markers)
 
 
+def is_refresher_course(course: training_models.TrainingCourse) -> bool:
+    kind = getattr(course, "kind", None)
+    if kind == training_models.TrainingKind.REFRESHER:
+        return True
+
+    status = getattr(course, "status", None)
+    if isinstance(status, str) and status.strip().upper() in {"RECURRENT", "REFRESHER", "RENEWAL"}:
+        return True
+
+    text = _normalized_course_text(course)
+    if not text:
+        return False
+
+    padded = f" {text.replace('-', ' ').replace('_', ' ')} "
+    refresher_markers = (
+        " refresher ",
+        " recurrent ",
+        " renewal ",
+        " continuation ",
+        " ref ",
+        " recurrent training ",
+    )
+    return any(marker in padded for marker in refresher_markers)
 
 
-def _extract_status_from_remarks(remarks: Optional[str]) -> Optional[str]:
-    if not remarks:
-        return None
-    match = re.search(r"(?:^|\|)\s*(?:LifecycleStatus|Status)\s*=\s*([^|]+?)\s*(?:\||$)", remarks, flags=re.IGNORECASE)
-    if not match:
-        return None
-    return match.group(1).strip() or None
+def _course_family_key(course: training_models.TrainingCourse) -> str:
+    text = _normalized_course_text(course)
+    if not text:
+        return ""
+    cleaned = re.sub(r"\b(init|initial|induction|refresh|refresher|recurrent|continuation|renewal|ref|one[ _-]?off)\b", " ", text)
+    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned).strip()
+    return cleaned
 
-def _normalize_training_state_label(value: Optional[str]) -> Optional[str]:
-    raw = (value or "").strip().upper()
-    if not raw:
-        return None
-    aliases = {
-        "COMPLIANT": "OK",
-        "CURRENT": "OK",
-        "IN_DATE": "OK",
-        "IN-DATE": "OK",
-    }
-    return aliases.get(raw, raw)
+
+def _should_suppress_refresher_until_initial_exists(
+    course: training_models.TrainingCourse,
+    latest_record: Dict[str, training_models.TrainingRecord],
+    *,
+    course_by_code: Dict[str, training_models.TrainingCourse],
+    completed_initial_ids: set[str],
+    completed_initial_families: set[str],
+) -> bool:
+    if not is_refresher_course(course):
+        return False
+    if course.id in latest_record:
+        return False
+
+    prerequisite_ok = False
+    prerequisite_code = getattr(course, "prerequisite_course_id", None)
+    if isinstance(prerequisite_code, str) and prerequisite_code.strip():
+        prerequisite = course_by_code.get(prerequisite_code.strip().upper())
+        if prerequisite and prerequisite.id in completed_initial_ids:
+            prerequisite_ok = True
+
+    family = _course_family_key(course)
+    if family and family in completed_initial_families:
+        prerequisite_ok = True
+
+    return not prerequisite_ok
 
 
 def build_status_item_from_dates(
@@ -162,32 +201,28 @@ def build_status_item_from_dates(
     upcoming_event_id: Optional[str],
     upcoming_event_date: Optional[date],
     today: date,
-    source_record_status: Optional[str] = None,
-    source_status: Optional[str] = None,
 ) -> training_schemas.TrainingStatusItem:
     controlling_due = due_date
     if deferral_due and (controlling_due is None or deferral_due > controlling_due):
         controlling_due = deferral_due
 
-    status_label = "NOT_DONE"
+    due_soon_window = int(getattr(course, "planning_lead_days", DEFAULT_DUE_SOON_WINDOW) or DEFAULT_DUE_SOON_WINDOW)
+    if due_soon_window < 0:
+        due_soon_window = DEFAULT_DUE_SOON_WINDOW
+
+    status_label = "OK" if last_completion_date is not None else "NOT_DONE"
     days_until_due: Optional[int] = None
     if controlling_due:
         days_until_due = (controlling_due - today).days
         if days_until_due < 0:
             status_label = "OVERDUE"
-        elif days_until_due <= 60:
+        elif days_until_due <= due_soon_window:
             status_label = "DUE_SOON"
         else:
             status_label = "OK"
 
     if deferral_due and controlling_due and days_until_due is not None and days_until_due >= 0:
         status_label = "DEFERRED"
-
-    explicit_status = _normalize_training_state_label(source_record_status) or _normalize_training_state_label(source_status)
-    if explicit_status == "OK" and last_completion_date is not None and status_label not in {"DEFERRED", "SCHEDULED_ONLY"}:
-        status_label = "OK"
-    elif explicit_status in {"OVERDUE", "DUE_SOON", "NOT_DONE", "SCHEDULED_ONLY", "DEFERRED"}:
-        status_label = explicit_status
 
     if last_completion_date is None and upcoming_event_date and status_label == "NOT_DONE":
         status_label = "SCHEDULED_ONLY"
@@ -295,7 +330,6 @@ def _latest_records_for_user(db: Session, user: accounts_models.User, course_ids
                 training_models.TrainingRecord.course_id,
                 training_models.TrainingRecord.completion_date,
                 training_models.TrainingRecord.valid_until,
-                training_models.TrainingRecord.remarks,
             ),
         )
         .filter(
@@ -390,9 +424,31 @@ def evaluate_user_training_policy(
     latest_deferral = _latest_deferrals_for_user(db, user, course_ids)
     earliest_event = _earliest_events_for_user(db, user, course_ids, today)
 
+    course_by_code = {str(course.course_id).strip().upper(): course for course in courses if getattr(course, "course_id", None)}
+    completed_initial_ids = {
+        course.id
+        for course in courses
+        if course.id in latest_record and is_initial_course(course)
+    }
+    completed_initial_families = {
+        family
+        for course in courses
+        if course.id in completed_initial_ids
+        for family in [_course_family_key(course)]
+        if family
+    }
+
     items: List[training_schemas.TrainingStatusItem] = []
     for course in courses:
         record = latest_record.get(course.id)
+        if _should_suppress_refresher_until_initial_exists(
+            course,
+            latest_record,
+            course_by_code=course_by_code,
+            completed_initial_ids=completed_initial_ids,
+            completed_initial_families=completed_initial_families,
+        ):
+            continue
         deferral = latest_deferral.get(course.id)
         event_info = earliest_event.get(course.id)
         due_date = None
@@ -409,8 +465,6 @@ def evaluate_user_training_policy(
                 upcoming_event_id=upcoming_event_id,
                 upcoming_event_date=upcoming_event_date,
                 today=today,
-                source_record_status=_extract_status_from_remarks(getattr(record, "remarks", None)) if record else None,
-                source_status=None,
             )
         )
 

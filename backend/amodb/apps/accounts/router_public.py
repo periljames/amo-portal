@@ -7,6 +7,7 @@ import os
 import time
 import threading
 import urllib.request
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from fastapi import (
@@ -20,7 +21,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from amodb.database import get_db
+from amodb.database import get_db, get_read_db
 from amodb.apps.audit import services as audit_services
 from amodb.apps.audit import schemas as audit_schemas
 from amodb.security import get_current_active_user
@@ -231,10 +232,9 @@ def login(
 
     Special case for global superuser:
     - If `amo_slug` is empty / `system` / `root`, the platform owner
-      (SUPERUSER) can log in even if their AMO is the ROOT AMO.
+      (SUPERUSER) logs into platform control with no AMO context.
     """
     _enforce_auth_rate_limit(request, "login")
-    _enforce_auth_rate_limit(request, "password-reset-request")
     payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
     if payload.identifier and not payload.email and not payload.staff_code:
         identifier = payload.identifier.strip()
@@ -273,30 +273,20 @@ def login(
             detail="Incorrect email, password or AMO slug.",
         )
 
-    access_state = training_compliance.build_user_access_state(db, user)
-    if access_state.portal_locked:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=access_state.portal_lock_reason or "Portal access is blocked because mandatory training is overdue.",
-        )
+    if not user.is_superuser and not training_compliance.is_training_editor(user):
+        access_state = training_compliance.build_user_access_state(db, user)
+        if access_state.portal_locked:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=access_state.portal_lock_reason or "Portal access is blocked because mandatory training is overdue.",
+            )
 
     token, expires_in = services.issue_access_token_for_user(user)
 
-    response_amo = user.amo
+    response_amo = None if user.is_superuser else user.amo
     if user.is_superuser:
-        requested_slug = (payload.amo_slug or "").strip()
-        if requested_slug and requested_slug.lower() not in {"system", "root"}:
-            target_amo = services.resolve_amo_by_slug_or_code(db, requested_slug)
-            if target_amo:
-                target_mode = models.DataMode.DEMO if target_amo.is_demo else models.DataMode.REAL
-                services.set_user_active_context(
-                    db,
-                    user=user,
-                    active_amo_id=target_amo.id,
-                    data_mode=target_mode,
-                )
-                db.commit()
-                response_amo = target_amo
+        services.set_user_active_context(db, user=user, active_amo_id=None, data_mode=models.DataMode.REAL)
+        db.commit()
 
     return schemas.Token(
         access_token=token,
@@ -305,6 +295,34 @@ def login(
         amo=response_amo,
         department=user.department,
     )
+
+@router.post(
+    "/logout",
+    summary="Revoke the current access token and end the server-side session",
+)
+def logout(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    current_user.token_revoked_at = datetime.now(timezone.utc)
+    try:
+        audit_services.record_event(
+            db,
+            audit_schemas.AuditEventCreate(
+                action="auth.logout",
+                entity_type="user",
+                entity_id=str(current_user.id),
+                metadata={"ip": _client_ip(request), "user_agent": _user_agent(request)},
+            ),
+            actor_user_id=str(current_user.id),
+            amo_id=getattr(current_user, "amo_id", None),
+        )
+    except Exception:
+        # Logout must not fail just because audit logging is unavailable.
+        pass
+    db.commit()
+    return {"ok": True, "token_revoked_at": current_user.token_revoked_at}
 
 
 @router.post(
@@ -345,7 +363,7 @@ def dev_seed_login(
         access_token=token,
         expires_in=expires_in,
         user=user,
-        amo=user.amo,
+        amo=None,
         department=user.department,
     )
 
@@ -359,7 +377,7 @@ def login_context(
     identifier: str | None = Query(None, min_length=1),
     email: str | None = Query(None, min_length=3),
     staff_code: str | None = Query(None, min_length=2),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_read_db),
 ):
     resolved = identifier or email or staff_code or ""
     identifier_value = _validate_login_identifier(resolved)
@@ -385,9 +403,9 @@ def login_context(
     amo = user.amo
     if user.is_superuser:
         return schemas.LoginContextResponse(
-            login_slug=(amo.login_slug if amo else "system"),
-            amo_code=(amo.amo_code if amo else "ROOT"),
-            amo_name=(amo.name if amo else "Platform Root"),
+            login_slug="system",
+            amo_code=None,
+            amo_name="Platform Control",
             is_platform=True,
         )
 
@@ -668,3 +686,6 @@ def create_first_superuser(
     db.commit()
 
     return user
+
+
+

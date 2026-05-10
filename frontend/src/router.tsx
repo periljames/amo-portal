@@ -7,11 +7,6 @@
 
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
-import * as DocControlPages from "./pages/DocControlPages";
-import * as TechnicalRecordsPages from "./pages/TechnicalRecordsPages";
-import * as PlanningProductionPages from "./pages/PlanningProductionPages";
-import QualityAuditPlanSchedulePage from "./pages/qualityAudits/QualityAuditPlanSchedulePage";
-import QualityAuditRegisterPage from "./pages/qualityAudits/QualityAuditRegisterPage";
 
 import {
   fetchOnboardingStatus,
@@ -19,12 +14,96 @@ import {
   getCachedUser,
   getContext,
   isAuthenticated,
-  normalizeDepartmentCode,
   type OnboardingStatus,
 } from "./services/auth";
 import { canViewFeature, getFirstAccessibleModuleRoute, type ModuleFeature } from "./utils/roleAccess";
+import { hasQmsRolePermission, isPlatformSuperuser } from "./app/routeGuards";
+
+function lazyNamed<T extends Record<string, React.ComponentType<any>>>(
+  loader: () => Promise<T>,
+  exportName: keyof T
+) {
+  return lazy(async () => ({ default: (await loader())[exportName] as React.ComponentType<any> }));
+}
+
+const DocControlPages = {
+  LegacyDocControlRedirectPage: lazyNamed(() => import("./pages/DocControlPages"), "LegacyDocControlRedirectPage"),
+  DocControlDashboardPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDashboardPage"),
+  DocControlLibraryPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlLibraryPage"),
+  DocControlDocumentDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDocumentDetailPage"),
+  DocControlDraftsPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDraftsPage"),
+  DocControlDraftDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDraftDetailPage"),
+  DocControlChangeProposalPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlChangeProposalPage"),
+  DocControlChangeProposalDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlChangeProposalDetailPage"),
+  DocControlRevisionsPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlRevisionsPage"),
+  DocControlLEPPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlLEPPage"),
+  DocControlTRPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlTRPage"),
+  DocControlTRDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlTRDetailPage"),
+  DocControlDistributionPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDistributionPage"),
+  DocControlDistributionDetailPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlDistributionDetailPage"),
+  DocControlArchivePage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlArchivePage"),
+  DocControlReviewsPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlReviewsPage"),
+  DocControlRegistersPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlRegistersPage"),
+  DocControlSettingsPage: lazyNamed(() => import("./pages/DocControlPages"), "DocControlSettingsPage"),
+} as const;
+
+const PlanningProductionPages = {
+  PlanningDashboardPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningDashboardPage"),
+  PlanningUtilisationPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningUtilisationPage"),
+  PlanningForecastPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningForecastPage"),
+  PlanningAmpPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningAmpPage"),
+  PlanningTaskLibraryPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningTaskLibraryPage"),
+  PlanningAdSbPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningAdSbPage"),
+  PlanningWorkPackagesPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningWorkPackagesPage"),
+  PlanningWorkOrdersPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningWorkOrdersPage"),
+  PlanningDefermentsPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningDefermentsPage"),
+  PlanningNonRoutinePage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PlanningNonRoutinePage"),
+  WatchlistsPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "WatchlistsPage"),
+  PublicationReviewPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "PublicationReviewPage"),
+  ComplianceActionsPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ComplianceActionsPage"),
+  ProductionDashboardPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ProductionDashboardPage"),
+  ProductionControlBoardPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ProductionControlBoardPage"),
+  ProductionExecutionPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ProductionExecutionPage"),
+  ProductionFindingsPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ProductionFindingsPage"),
+  ProductionMaterialsPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ProductionMaterialsPage"),
+  ProductionReviewInspectionPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ProductionReviewInspectionPage"),
+  ProductionReleasePrepPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ProductionReleasePrepPage"),
+  ProductionComplianceItemsPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ProductionComplianceItemsPage"),
+} as const;
+
+const TechnicalRecordsPages = {
+  TechnicalRecordsDashboardPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "TechnicalRecordsDashboardPage"),
+  AircraftRecordsPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "AircraftRecordsPage"),
+  AircraftRecordDetailPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "AircraftRecordDetailPage"),
+  LogbooksPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "LogbooksPage"),
+  LogbookByTailPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "LogbookByTailPage"),
+  DeferralsPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "DeferralsPage"),
+  DeferralDetailPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "DeferralDetailPage"),
+  MaintenanceRecordsPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "MaintenanceRecordsPage"),
+  MaintenanceRecordDetailPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "MaintenanceRecordDetailPage"),
+  AirworthinessPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "AirworthinessPage"),
+  ADRegisterPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "ADRegisterPage"),
+  ADDetailPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "ADDetailPage"),
+  SBRegisterPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "SBRegisterPage"),
+  SBDetailPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "SBDetailPage"),
+  LLPPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "LLPPage"),
+  ComponentsPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "ComponentsPage"),
+  ReconciliationPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "ReconciliationPage"),
+  TraceabilityPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "TraceabilityPage"),
+  PacksPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "PacksPage"),
+  TechnicalRecordsSettingsPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "TechnicalRecordsSettingsPage"),
+} as const;
+
 
 const LoginPage = lazy(() => import("./pages/LoginPage"));
+const PlatformControlPage = lazy(() => import("./pages/PlatformControlPage"));
+const PlatformTenantsPage = lazy(() => import("./pages/platform/PlatformTenantsPage"));
+const PlatformUsersPage = lazy(() => import("./pages/platform/PlatformUsersPage"));
+const PlatformBillingPage = lazy(() => import("./pages/platform/PlatformBillingPage"));
+const PlatformAnalyticsPage = lazy(() => import("./pages/platform/PlatformAnalyticsPage"));
+const PlatformSecurityPage = lazy(() => import("./pages/platform/PlatformSecurityPage"));
+const PlatformIntegrationsPage = lazy(() => import("./pages/platform/PlatformIntegrationsPage"));
+const PlatformInfrastructurePage = lazy(() => import("./pages/platform/PlatformInfrastructurePage"));
 const PasswordResetPage = lazy(() => import("./pages/PasswordResetPage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const EhmDashboardPage = lazy(() => import("./pages/ehm/EhmDashboardPage"));
@@ -52,15 +131,8 @@ const AdminInvoiceDetailPage = lazy(() => import("./pages/AdminInvoiceDetailPage
 const EmailLogsPage = lazy(() => import("./pages/EmailLogsPage"));
 const EmailServerSettingsPage = lazy(() => import("./pages/EmailServerSettingsPage"));
 const TrainingPage = lazy(() => import("./pages/MyTrainingPage"));
-const QMSHomePage = lazy(() => import("./pages/QMSHomePage"));
-const QMSDocumentsPage = lazy(() => import("./pages/QMSDocumentsPage"));
-const QMSAuditsPage = lazy(() => import("./pages/QMSAuditsPage"));
-const QMSChangeControlPage = lazy(() => import("./pages/QMSChangeControlPage"));
-const MyTasksPage = lazy(() => import("./pages/MyTasksPage"));
-const TrainingCompetencePage = lazy(() => import("./pages/TrainingCompetencePage"));
+const QmsCanonicalPage = lazy(() => import("./pages/qms/QmsCanonicalPage"));
 const QMSTrainingUserPage = lazy(() => import("./pages/QMSTrainingUserPage"));
-const QMSEventsPage = lazy(() => import("./pages/QMSEventsPage"));
-const QMSKpisPage = lazy(() => import("./pages/QMSKpisPage"));
 const AeroDocAuditModePage = lazy(() => import("./pages/AeroDocAuditModePage"));
 const AeroDocComplianceHealthPage = lazy(() => import("./pages/AeroDocComplianceHealthPage"));
 const AeroDocHangarDashboardPage = lazy(() => import("./pages/AeroDocHangarDashboardPage"));
@@ -75,7 +147,6 @@ const VerifyScanPage = lazy(() => import("./pages/VerifyScanPage"));
 
 const QualityAuditScheduleDetailPage = lazy(() => import("./pages/QualityAuditScheduleDetailPage"));
 const QualityAuditRunHubPage = lazy(() => import("./pages/QualityAuditRunHubPage"));
-const QualityEvidenceLibraryPage = lazy(() => import("./pages/QualityEvidenceLibraryPage"));
 const QualityEvidenceViewerPage = lazy(() => import("./pages/QualityEvidenceViewerPage"));
 
 const ManualsDashboardPage = lazy(() => import("./pages/manuals/ManualsDashboardPage"));
@@ -111,11 +182,50 @@ type RequireTenantAdminProps = {
 };
 
 function LegacyTrainingCompetenceRedirect(): React.ReactElement {
-  const { amoCode, department } = useParams<{ amoCode?: string; department?: string }>();
+  const { amoCode } = useParams<{ amoCode?: string; department?: string }>();
   const location = useLocation();
-  const target = `/maintenance/${amoCode || "UNKNOWN"}/${department || "quality"}/qms/training${location.search}`;
+  const target = `/maintenance/${amoCode || "UNKNOWN"}/qms/training-competence${location.search}`;
   return <Navigate to={target} replace />;
 }
+
+function LegacyQmsRedirect(): React.ReactElement {
+  const { amoCode } = useParams<{ amoCode?: string; department?: string }>();
+  const location = useLocation();
+  const parts = location.pathname.split("/").filter(Boolean);
+  const qmsIndex = parts.indexOf("qms");
+  const suffix = qmsIndex >= 0 ? parts.slice(qmsIndex + 1).join("/") : "";
+  const target = `/maintenance/${amoCode || "UNKNOWN"}/qms${suffix ? `/${suffix}` : ""}${location.search}`;
+  return <Navigate to={target} replace />;
+}
+
+function QmsInboxRedirect(): React.ReactElement {
+  const { amoCode } = useParams<{ amoCode?: string }>();
+  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/qms/inbox/assigned-to-me`} replace />;
+}
+
+function QmsProgrammeRedirect(): React.ReactElement {
+  const { amoCode } = useParams<{ amoCode?: string }>();
+  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/qms/audits/program`} replace />;
+}
+
+type RequireQmsPermissionProps = {
+  permission: string;
+  children: React.ReactElement;
+};
+
+const RequireQmsPermission: React.FC<RequireQmsPermissionProps> = ({ permission, children }) => {
+  if (isPlatformSuperuser()) {
+    return <Navigate to="/platform/control" replace />;
+  }
+  if (!hasQmsRolePermission(permission)) {
+    return (
+      <div style={{ padding: "2rem" }}>
+        You do not have permission to access this QMS page.
+      </div>
+    );
+  }
+  return children;
+};
 
 
 function inferAmoCodeFromPath(pathname: string): string | null {
@@ -182,7 +292,7 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
   }
 
   if (!onboardingChecked && !isOnboardingRoute) {
-    return <PageRouteLoading label="Preparing workspace…" />;
+    return <PageRouteLoading label="Preparing workspaceâ€¦" />;
   }
 
   if (
@@ -233,7 +343,10 @@ const RequireTenantAdmin: React.FC<RequireTenantAdminProps> = ({ children }) => 
 
 function resolveDefaultDepartment(amoCode: string): string {
   const currentUser = getCachedUser();
-  if (currentUser?.is_superuser || currentUser?.is_amo_admin) {
+  if (currentUser?.is_superuser) {
+    return "platform/control";
+  }
+  if (currentUser?.is_amo_admin) {
     return "admin/overview";
   }
   const target = getFirstAccessibleModuleRoute(amoCode, currentUser, getContext().department);
@@ -244,6 +357,13 @@ const DepartmentHomeRedirect: React.FC = () => {
   const location = useLocation();
   const amoCode = inferAmoCodeFromPath(location.pathname) || "system";
   return <Navigate to={`/maintenance/${amoCode}/${resolveDefaultDepartment(amoCode)}`} replace />;
+};
+
+const QualityRootRedirect: React.FC = () => {
+  const location = useLocation();
+  if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
+  const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
+  return <Navigate to={`/maintenance/${amoCode}/qms${location.search}`} replace />;
 };
 
 const LegacyEngineeringRedirect: React.FC = () => {
@@ -258,7 +378,7 @@ const LegacyTechnicalRecordsRedirect: React.FC = () => {
   const location = useLocation();
   const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
   const parts = location.pathname.split("/").filter(Boolean);
-  const recordsIndex = parts.index("records");
+  const recordsIndex = parts.indexOf("records");
   const suffix = recordsIndex >= 0 ? parts.slice(recordsIndex + 1).join("/") : "";
   const base = `/maintenance/${amoCode}/production/records`;
   const target = suffix ? `${base}/${suffix}${location.search}` : `${base}${location.search}`;
@@ -276,7 +396,7 @@ const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.R
   return children;
 };
 
-const PageRouteLoading: React.FC<{ label?: string }> = ({ label = "Loading…" }) => (
+const PageRouteLoading: React.FC<{ label?: string }> = ({ label = "Loadingâ€¦" }) => (
   <div className="page-loading" role="status" aria-live="polite">
     <div className="page-loading__card">
       <div className="page-loading__spinner" />
@@ -321,7 +441,7 @@ class PortalRouteErrorBoundary extends React.Component<{ children: React.ReactNo
 export const AppRouter: React.FC = () => {
   return (
     <PortalRouteErrorBoundary>
-      <Suspense fallback={<PageRouteLoading label="Loading portal workspace…" />}>
+      <Suspense fallback={<PageRouteLoading label="Loading portal workspaceâ€¦" />}>
         <Routes>
 
       <Route path="/doc-control" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
@@ -363,11 +483,29 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/:department/doc-control/registers" element={<RequireAuth><DocControlPages.DocControlRegistersPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/doc-control/settings" element={<RequireAuth><DocControlPages.DocControlSettingsPage /></RequireAuth>} />
 
-      {/* Root → login */}
+      {/* Root â†’ login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
 
       {/* Platform login */}
       <Route path="/login" element={<LoginPage />} />
+
+      {/* Platform superuser control plane */}
+      <Route
+        path="/platform/control"
+        element={
+          <RequireAuth>
+            <PlatformControlPage />
+          </RequireAuth>
+        }
+      />
+
+      <Route path="/platform/tenants" element={<RequireAuth><PlatformTenantsPage /></RequireAuth>} />
+      <Route path="/platform/users" element={<RequireAuth><PlatformUsersPage /></RequireAuth>} />
+      <Route path="/platform/billing" element={<RequireAuth><PlatformBillingPage /></RequireAuth>} />
+      <Route path="/platform/analytics" element={<RequireAuth><PlatformAnalyticsPage /></RequireAuth>} />
+      <Route path="/platform/security" element={<RequireAuth><PlatformSecurityPage /></RequireAuth>} />
+      <Route path="/platform/integrations" element={<RequireAuth><PlatformIntegrationsPage /></RequireAuth>} />
+      <Route path="/platform/infrastructure" element={<RequireAuth><PlatformInfrastructurePage /></RequireAuth>} />
 
       <Route
         path="/verify/certificate/:certificateNumber"
@@ -649,6 +787,43 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/production/records/packs" element={<RequireAuth><RequireFeatureAccess feature="production.records.packs"><TechnicalRecordsPages.PacksPage /></RequireFeatureAccess></RequireAuth>} />
       <Route path="/maintenance/:amoCode/production/records/settings" element={<RequireAuth><RequireFeatureAccess feature="production.records.settings"><TechnicalRecordsPages.TechnicalRecordsSettingsPage /></RequireFeatureAccess></RequireAuth>} />
 
+
+      {/* Canonical QMS route surface. Register, workflow, reporting, feedback, and archive views are remastered in QmsCanonicalPage. */}
+      <Route
+        path="/maintenance/:amoCode/qms"
+        element={
+          <RequireAuth>
+            <RequireQmsPermission permission="qms.dashboard.view">
+              <QmsCanonicalPage />
+            </RequireQmsPermission>
+          </RequireAuth>
+        }
+      />
+
+      <Route path="/maintenance/:amoCode/qms/tasks" element={<RequireAuth><QmsInboxRedirect /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/qms/audits/programme" element={<RequireAuth><QmsProgrammeRedirect /></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/qms/documents/reader/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/qms/documents/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/qms/audits/schedules/:scheduleId" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditScheduleDetailPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/qms/audits/:auditId/*" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRunHubPage /></RequireQmsPermission></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/qms/cars/:carId/*" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QualityCarsPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/qms/training-competence/people/:userId/*" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><QMSTrainingUserPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/qms/evidence-vault/:evidenceId" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QualityEvidenceViewerPage /></RequireQmsPermission></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/qms/aerodoc/hangar" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocHangarDashboardPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/qms/aerodoc/compliance" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocComplianceHealthPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/qms/aerodoc/audit-mode" element={<RequireAuth><RequireQmsPermission permission="qms.audit.execute"><AeroDocAuditModePage /></RequireQmsPermission></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/qms/*" element={<RequireAuth><RequireQmsPermission permission="qms.dashboard.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+
+      {/* Legacy QMS route surfaces are no longer active. They redirect to the canonical route. */}
+      <Route path="/maintenance/:amoCode/quality" element={<QualityRootRedirect />} />
+      <Route path="/maintenance/:amoCode/:department/training-competence" element={<RequireAuth><LegacyTrainingCompetenceRedirect /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/qms/*" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
+
       {/* Department dashboard, e.g. /maintenance/safarilink/maintenance */}
       <Route
         path="/maintenance/:amoCode/:department"
@@ -659,297 +834,6 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-
-      {/* Work orders */}
-      <Route
-        path="/maintenance/:amoCode/:department/work-orders"
-        element={
-          <RequireAuth>
-            <WorkOrderSearchPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/work-orders/:id"
-        element={
-          <RequireAuth>
-            <WorkOrderDetailPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/tasks"
-        element={
-          <RequireAuth>
-            <MyTasksPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/tasks/:taskId"
-        element={
-          <RequireAuth>
-            <TaskSummaryPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/tasks/:taskId/print"
-        element={
-          <RequireAuth>
-            <TaskPrintPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/ehm"
-        element={
-          <RequireAuth>
-            <EhmDashboardPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/ehm/dashboard"
-        element={
-          <RequireAuth>
-            <EhmDashboardPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/ehm/trends"
-        element={
-          <RequireAuth>
-            <EhmTrendsPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/ehm/uploads"
-        element={
-          <RequireAuth>
-            <EhmUploadsPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/reliability"
-        element={
-          <RequireAuth>
-            <ReliabilityReportsPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/reliability/reports"
-        element={
-          <RequireAuth>
-            <ReliabilityReportsPage />
-          </RequireAuth>
-        }
-      />
-
-      {/* Upsell + pricing page */}
-      <Route
-        path="/maintenance/:amoCode/upsell"
-        element={
-          <RequireAuth>
-            <UpsellPage />
-          </RequireAuth>
-        }
-      />
-
-      {/* Training status view, e.g. /maintenance/safarilink/planning/training */}
-      <Route
-        path="/maintenance/:amoCode/:department/training"
-        element={
-          <RequireAuth>
-            <TrainingPage />
-          </RequireAuth>
-        }
-      />
-
-      {/* User widgets settings */}
-      <Route
-        path="/maintenance/:amoCode/:department/settings/widgets"
-        element={
-          <RequireAuth>
-            <UserWidgetsPage />
-          </RequireAuth>
-        }
-      />
-
-      {/* New CRS, e.g. /maintenance/safarilink/planning/crs/new */}
-      <Route
-        path="/maintenance/:amoCode/:department/crs/new"
-        element={
-          <RequireAuth>
-            <CRSNewPage />
-          </RequireAuth>
-        }
-      />
-
-      {/* Aircraft import, e.g. /maintenance/safarilink/maintenance/aircraft-import */}
-      <Route
-        path="/maintenance/:amoCode/:department/aircraft-import"
-        element={
-          <RequireAuth>
-            <AircraftImportPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/component-import"
-        element={
-          <RequireAuth>
-            <ComponentImportPage />
-          </RequireAuth>
-        }
-      />
-
-      {/* Aircraft documents, e.g. /maintenance/safarilink/planning/aircraft-documents */}
-      <Route
-        path="/maintenance/:amoCode/:department/aircraft-documents"
-        element={
-          <RequireAuth>
-            <AircraftDocumentsPage />
-          </RequireAuth>
-        }
-      />
-
-      {/* QMS dashboard, e.g. /maintenance/safarilink/quality/qms */}
-      <Route
-        path="/maintenance/:amoCode/:department/qms"
-        element={
-          <RequireAuth>
-            <QMSHomePage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/tasks"
-        element={
-          <RequireAuth>
-            <MyTasksPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/documents"
-        element={
-          <RequireAuth>
-            <QMSDocumentsPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/audits"
-        element={
-          <RequireAuth>
-            <QMSAuditsPage />
-          </RequireAuth>
-        }
-      />
-      <Route path="/maintenance/:amoCode/:department/qms/audits/plan" element={<RequireAuth><QualityAuditPlanSchedulePage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/audits/register" element={<RequireAuth><QualityAuditRegisterPage /></RequireAuth>} />
-      <Route
-        path="/maintenance/:amoCode/:department/qms/audits/schedules/:scheduleId"
-        element={<RequireAuth><QualityAuditScheduleDetailPage /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/qms/audits/:auditId"
-        element={<RequireAuth><QualityAuditRunHubPage /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/qms/evidence"
-        element={<RequireAuth><QualityEvidenceLibraryPage /></RequireAuth>}
-      />
-      <Route
-        path="/maintenance/:amoCode/:department/qms/evidence/:evidenceId"
-        element={<RequireAuth><QualityEvidenceViewerPage /></RequireAuth>}
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/change-control"
-        element={
-          <RequireAuth>
-            <QMSChangeControlPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/cars"
-        element={
-          <RequireAuth>
-            <QualityCarsPage />
-          </RequireAuth>
-        }
-      />
-
-
-      <Route
-        path="/maintenance/:amoCode/:department/training-competence"
-        element={
-          <RequireAuth>
-            <LegacyTrainingCompetenceRedirect />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/training"
-        element={
-          <RequireAuth>
-            <TrainingCompetencePage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/training/:userId"
-        element={
-          <RequireAuth>
-            <QMSTrainingUserPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/events"
-        element={
-          <RequireAuth>
-            <QMSEventsPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/kpis"
-        element={
-          <RequireAuth>
-            <QMSKpisPage />
-          </RequireAuth>
-        }
-      />
-
-      <Route path="/maintenance/:amoCode/:department/qms/aerodoc/hangar" element={<RequireAuth><AeroDocHangarDashboardPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/aerodoc/compliance" element={<RequireAuth><AeroDocComplianceHealthPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/:department/qms/aerodoc/audit-mode" element={<RequireAuth><AeroDocAuditModePage /></RequireAuth>} />
-
-
-
-
-
-      <Route
-        path="/maintenance/:amoCode/:department/qms/documents/:docId/revisions/:revId/view"
-        element={<RequireAuth><ManualReaderPage /></RequireAuth>}
-      />
       <Route path="/maintenance/:amoCode/manuals" element={<RequireAuth><ManualsDashboardPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/manuals/master-list" element={<RequireAuth><ManualMasterListPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/manuals/:manualId" element={<RequireAuth><ManualOverviewPage /></RequireAuth>} />
@@ -970,7 +854,7 @@ export const AppRouter: React.FC = () => {
       <Route path="/records" element={<LegacyTechnicalRecordsRedirect />} />
       <Route path="/records/*" element={<LegacyTechnicalRecordsRedirect />} />
 
-      {/* Catch-all → login */}
+      {/* Catch-all â†’ login */}
       <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
@@ -979,3 +863,4 @@ export const AppRouter: React.FC = () => {
 };
 
 export default AppRouter;
+
