@@ -40,6 +40,8 @@ from amodb.apps.fleet import models as fleet_models  # noqa: F401, E402
 from amodb.apps.work import models as work_models  # noqa: F401, E402
 from amodb.apps.crs import models as crs_models  # noqa: F401, E402
 from amodb.apps.maintenance_program import models as maintenance_program_models  # noqa: F401, E402
+from amodb.apps.foundations import models as foundations_models  # noqa: F401, E402
+from amodb.apps.rostering import models as rostering_models  # noqa: F401, E402
 
 # ADD: Training models so Alembic can create/update training tables
 from amodb.apps.training import models as training_models  # noqa: F401, E402

@@ -15,6 +15,7 @@ import { getApiBaseUrl } from "./config";
 import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+type AppRequestInit = RequestInit & { silent?: boolean; suppressAuthLogout?: boolean };
 
 function buildJsonMisrouteHint(url: string, contentType: string): string {
   if (!contentType.toLowerCase().includes("text/html")) {
@@ -32,12 +33,13 @@ async function request<T>(
   method: HttpMethod,
   path: string,
   body?: BodyInit,
-  init: RequestInit = {},
+  init: AppRequestInit = {},
   loadingMode?: "foreground" | "background"
 ): Promise<T> {
   const url = `${getApiBaseUrl()}${path}`;
+  const { silent: silentRequest, suppressAuthLogout, ...fetchInit } = init;
 
-  const mode = loadingMode ?? (method === "GET" ? "background" : "foreground");
+  const mode = loadingMode ?? (method === "GET" || silentRequest ? "background" : "foreground");
   if (mode === "background") beginBackgroundLoading();
   else beginLoading();
   try {
@@ -46,14 +48,17 @@ async function request<T>(
     const res = await fetch(url, {
       method,
       body,
-      signal: init.signal ?? controller.signal,
-      ...init,
+      ...fetchInit,
+      signal: fetchInit.signal ?? controller.signal,
     });
     window.clearTimeout(timeout);
 
     if (res.status === 401) {
-      handleAuthFailure("expired");
-      throw new Error("Session expired. Please sign in again.");
+      const shouldSuppressAuthLogout = Boolean(suppressAuthLogout) || path.startsWith("/training/");
+      if (!shouldSuppressAuthLogout) {
+        handleAuthFailure("expired");
+      }
+      throw new Error("Session expired or this training endpoint is not authorised. Please refresh your session if this continues.");
     }
 
     if (!res.ok) {
@@ -107,7 +112,7 @@ async function request<T>(
 export async function apiPost<T>(
   path: string,
   body?: unknown,
-  init: RequestInit = {}
+  init: AppRequestInit = {}
 ): Promise<T> {
   let bodyInit: BodyInit | undefined;
 
@@ -132,7 +137,7 @@ export async function apiPost<T>(
 export async function apiPut<T>(
   path: string,
   body?: unknown,
-  init: RequestInit = {}
+  init: AppRequestInit = {}
 ): Promise<T> {
   let bodyInit: BodyInit | undefined;
 
@@ -156,7 +161,7 @@ export async function apiPut<T>(
 
 export async function apiGet<T>(
   path: string,
-  init: RequestInit = {}
+  init: AppRequestInit = {}
 ): Promise<T> {
   return request<T>("GET", path, undefined, init);
 }
@@ -164,7 +169,7 @@ export async function apiGet<T>(
 export async function apiDelete<T>(
   path: string,
   body?: unknown,
-  init: RequestInit = {}
+  init: AppRequestInit = {}
 ): Promise<T> {
   let bodyInit: BodyInit | undefined;
 
@@ -189,7 +194,7 @@ export async function apiDelete<T>(
 export async function apiPostForm<T>(
   path: string,
   formData: FormData,
-  init: RequestInit = {}
+  init: AppRequestInit = {}
 ): Promise<T> {
   return request<T>("POST", path, formData, init);
 }

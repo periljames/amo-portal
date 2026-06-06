@@ -10,6 +10,7 @@ import type { TrainingEventRead } from "../../types/training";
 import { updateAdminUser, deactivateAdminUser, type AccountRole } from "../../services/adminUsers";
 import { motionTokens } from "../../utils/motion";
 import { getEvidenceAcceptString, isEvidenceFileAllowed } from "../../services/notificationPreferences";
+import { saveDownloadedFile } from "../../utils/downloads";
 
 export type ActionPanelContext =
   | { type: "car"; id: string; title: string; status?: CARStatus; ownerId?: string | null }

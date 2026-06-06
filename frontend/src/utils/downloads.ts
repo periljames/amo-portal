@@ -1,5 +1,3 @@
-import { handleAuthFailure } from "../services/auth";
-
 export interface DownloadedFile {
   blob: Blob;
   filename: string;
@@ -9,7 +7,7 @@ export interface DownloadedFile {
 export interface DownloadRequestOptions {
   url: string;
   method?: "GET" | "POST";
-  headers?: Record<string, string>;
+  headers?: HeadersInit;
   body?: Document | XMLHttpRequestBodyInit | null;
   withCredentials?: boolean;
   onProgress?: (loaded: number, total?: number) => void;
@@ -125,7 +123,7 @@ export async function downloadWithXhr(options: DownloadRequestOptions): Promise<
         xhr.responseType = "blob";
         xhr.withCredentials = withCredentials;
         xhr.timeout = timeoutMs;
-        Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+        new Headers(headers).forEach((value, key) => xhr.setRequestHeader(key, value));
 
         xhr.addEventListener("progress", (event) => {
           if (!onProgress) return;
@@ -135,8 +133,9 @@ export async function downloadWithXhr(options: DownloadRequestOptions): Promise<
         xhr.addEventListener("load", async () => {
           const contentType = xhr.getResponseHeader("Content-Type") || (xhr.response as Blob | null)?.type || null;
           if (xhr.status === 401) {
-            handleAuthFailure("expired");
-            reject(new Error("Session expired. Please sign in again."));
+            const error = new Error("Download is not authorised. Refresh the page and try again.");
+            (error as Error & { status?: number }).status = xhr.status;
+            reject(error);
             return;
           }
           if (xhr.status < 200 || xhr.status >= 300) {
@@ -181,8 +180,7 @@ export async function downloadWithFetch(
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     if (response.status === 401) {
-      handleAuthFailure("expired");
-      throw new Error("Session expired. Please sign in again.");
+      throw new Error("Download is not authorised. Refresh the page and try again.");
     }
     if (!response.ok) {
       const detail = await response.text().catch(() => "");

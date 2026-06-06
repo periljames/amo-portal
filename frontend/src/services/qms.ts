@@ -121,6 +121,21 @@ export interface QMSAuditScheduleOut {
   is_active: boolean;
   created_by_user_id?: string | null;
   created_at: string;
+  external_auditees?: QMSExternalAuditeeContact[];
+  notify_auditors?: boolean;
+  notify_auditees?: boolean;
+  reminder_interval_days?: number | null;
+}
+
+export interface QMSExternalAuditeeContact {
+  name?: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_contact?: string | null;
+  designation: string;
+  organisation?: string | null;
+  role?: string | null;
 }
 
 export interface QMSAuditParticipantOut {
@@ -272,7 +287,8 @@ export interface CAROut {
   updated_at: string;
 }
 
-type QueryVal = string | number | boolean | null | undefined;
+type QueryVal = string | number | boolean | string[] | null | undefined;
+type QmsRequestOptions = { silent?: boolean };
 
 const API_BASE = getApiBaseUrl();
 const NOTIFICATION_SUMMARY_CACHE_KEY = "amo:qms-notification-summary:data";
@@ -310,6 +326,10 @@ function toQuery(params: Record<string, QueryVal>): string {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
     if (v === null || v === undefined) return;
+    if (Array.isArray(v)) {
+      v.forEach((item) => qs.append(k, String(item)));
+      return;
+    }
     qs.set(k, String(v));
   });
   const s = qs.toString();
@@ -551,6 +571,7 @@ export interface QMSCockpitSnapshotOut {
   compliance_overdue?: number;
   compliance_unplanned_applicable?: number;
   manpower?: QMSManpowerOut | null;
+  next_due_audit?: { audit_ref?: string; title?: string; planned_start?: string | null; planned_end?: string | null } | null;
   audit_closure_trend: {
     period_start: string;
     period_end: string;
@@ -628,14 +649,16 @@ export async function qmsListAudits(params?: {
   domain?: string;
   status_?: QMSAuditStatus;
   kind?: string;
-}): Promise<QMSAuditOut[]> {
+  limit?: number;
+}, _options?: QmsRequestOptions): Promise<QMSAuditOut[]> {
   return fetchJson<QMSAuditOut[]>(`/quality/audits${toQuery(params ?? {})}`);
 }
 
 export async function qmsListAuditSchedules(params?: {
   domain?: string;
   active?: boolean;
-}): Promise<QMSAuditScheduleOut[]> {
+  limit?: number;
+}, _options?: QmsRequestOptions): Promise<QMSAuditScheduleOut[]> {
   return fetchJson<QMSAuditScheduleOut[]>(
     `/quality/audits/schedules${toQuery(params ?? {})}`
   );
@@ -829,9 +852,11 @@ export async function qmsListFindings(auditId: string): Promise<QMSFindingOut[]>
 export async function qmsListFindingsBulk(params?: {
   domain?: string;
   audit_ids?: string[];
-}): Promise<QMSFindingOut[]> {
+  limit?: number;
+}, _options?: QmsRequestOptions): Promise<QMSFindingOut[]> {
   const qs = new URLSearchParams();
   if (params?.domain) qs.set("domain", params.domain);
+  if (params?.limit) qs.set("limit", String(params.limit));
   (params?.audit_ids ?? []).forEach((auditId) => qs.append("audit_ids", auditId));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchJson<QMSFindingOut[]>(`/quality/audits/findings${suffix}`);
@@ -839,7 +864,9 @@ export async function qmsListFindingsBulk(params?: {
 
 export async function qmsGetAuditRegister(params?: {
   domain?: string;
-}): Promise<QMSAuditRegisterResponse> {
+  audit_id?: string;
+  limit?: number;
+}, _options?: QmsRequestOptions): Promise<QMSAuditRegisterResponse> {
   return fetchJson<QMSAuditRegisterResponse>(`/quality/audits/register${toQuery(params ?? {})}`);
 }
 
@@ -873,7 +900,9 @@ export async function qmsListCars(params?: {
   program?: CARProgram;
   status_?: CARStatus;
   assigned_to_user_id?: string;
-}): Promise<CAROut[]> {
+  audit_id?: string;
+  limit?: number;
+}, _options?: QmsRequestOptions): Promise<CAROut[]> {
   return fetchJson<CAROut[]>(`/quality/cars${toQuery(params ?? {})}`);
 }
 
@@ -1159,6 +1188,64 @@ export async function qmsMarkAllNotificationsRead(): Promise<{ updated: number }
 
 export async function qmsMarkNotificationRead(notificationId: string): Promise<QMSNotificationOut> {
   return sendJson<QMSNotificationOut>(`/quality/notifications/${notificationId}/read`, "POST", {});
+}
+
+export interface QMSAuditWorkflowStageOut {
+  id: string;
+  label: string;
+  complete?: boolean;
+  active?: boolean;
+  metric?: string | null;
+  helper?: string | null;
+}
+
+export interface QMSAuditWorkflowOut {
+  current_stage_label: string;
+  percent_complete: number;
+  findings_open: number;
+  cars_open: number;
+  checklist_uploaded: boolean;
+  report_uploaded: boolean;
+  stages: QMSAuditWorkflowStageOut[];
+}
+
+export interface QMSAuditWorkflowContextOut {
+  audit: QMSAuditOut;
+  workflow: QMSAuditWorkflowOut;
+}
+
+export async function qmsGetAuditWorkflow(auditId: string, _options?: QmsRequestOptions): Promise<QMSAuditWorkflowContextOut> {
+  const workspace = await qmsGetAuditWorkspace(auditId);
+  const findingsOpen = workspace.summary.findings_open ?? 0;
+  const carsOpen = workspace.summary.cars_open ?? 0;
+  const checklistUploaded = !!workspace.summary.checklist_uploaded;
+  const reportUploaded = !!workspace.summary.report_uploaded;
+  const passedCount = [workspace.readiness.planning_complete, checklistUploaded, findingsOpen === 0, carsOpen === 0, reportUploaded].filter(Boolean).length;
+  const percentComplete = Math.round((passedCount / 5) * 100);
+  return {
+    audit: workspace.audit,
+    workflow: {
+      current_stage_label: workspace.audit.status || "Audit",
+      percent_complete: percentComplete,
+      findings_open: findingsOpen,
+      cars_open: carsOpen,
+      checklist_uploaded: checklistUploaded,
+      report_uploaded: reportUploaded,
+      stages: [
+        { id: "planning", label: "Planning", complete: workspace.readiness.planning_complete, active: !workspace.readiness.planning_complete },
+        { id: "checklist", label: "Checklist", complete: checklistUploaded, active: workspace.readiness.planning_complete && !checklistUploaded },
+        { id: "findings", label: "Findings", complete: findingsOpen === 0, active: checklistUploaded && findingsOpen > 0, metric: `${findingsOpen} open` },
+        { id: "cars", label: "CARs", complete: carsOpen === 0, active: findingsOpen === 0 && carsOpen > 0, metric: `${carsOpen} open` },
+        { id: "report", label: "Report", complete: reportUploaded, active: carsOpen === 0 && !reportUploaded },
+      ],
+    },
+  };
+}
+
+export async function qmsResolveAudit(auditKey: string, _options?: QmsRequestOptions): Promise<QMSAuditOut | null> {
+  const audits = await qmsListAudits({ domain: "AMO", limit: 500 });
+  const normalized = auditKey.trim().toLowerCase();
+  return audits.find((audit) => audit.id === auditKey || audit.audit_ref.toLowerCase() === normalized || audit.audit_ref.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") === normalized) ?? null;
 }
 
 export interface AuditorStatsOut {

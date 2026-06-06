@@ -36,6 +36,8 @@ import {
   isDepartmentId,
 } from "../../utils/departmentAccess";
 import { BrowserPollCoordinator } from "../../services/pollCoordinator";
+import { preloadRoute, scheduleWorkspaceRoutePreload } from "../../app/routePreload";
+import { canViewFeature } from "../../utils/roleAccess";
 
 type Props = {
   amoCode: string;
@@ -231,7 +233,7 @@ const DepartmentLayout: React.FC<Props> = ({
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [billingAccessStatus, setBillingAccessStatus] = useState<BillingAccessStatus | null>(null);
   const [subscriptionMissing, setSubscriptionMissing] = useState(false);
-  const [billingGateResolved, setBillingGateResolved] = useState(false);
+  const [billingGateResolved, setBillingGateResolved] = useState(true);
   const [aerodocEnabled, setAerodocEnabled] = useState(false);
   const [pollingError, setPollingError] = useState<string | null>(null);
   const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(null);
@@ -311,6 +313,28 @@ const DepartmentLayout: React.FC<Props> = ({
     });
   }, [isAdminArea, isSuperuser, isTenantAdmin]);
 
+  const rosteringLandingPath = useMemo(() => {
+    const canViewDashboard = canViewFeature(currentUser, "rostering.dashboard", assignedDepartment);
+    return canViewDashboard
+      ? `/maintenance/${amoCode}/rostering/dashboard`
+      : `/maintenance/${amoCode}/rostering/my-roster`;
+  }, [amoCode, assignedDepartment, currentUser]);
+
+  useEffect(() => {
+    const departmentPaths = visibleDepartments.map((department) => {
+      if (department.id === "admin") return `/maintenance/${amoCode}/admin/overview`;
+      if (department.id === "production") return `/maintenance/${amoCode}/production/dashboard`;
+      if (department.id === "maintenance") return `/maintenance/${amoCode}/maintenance/dashboard`;
+      return `/maintenance/${amoCode}/${department.id}`;
+    });
+    return scheduleWorkspaceRoutePreload([
+      rosteringLandingPath,
+      ...departmentPaths,
+      `/maintenance/${amoCode}/qms`,
+      `/maintenance/${amoCode}/manuals`,
+    ]);
+  }, [amoCode, rosteringLandingPath, visibleDepartments]);
+
   useEffect(() => {
     if (!currentUser) return;
     if (isAdminArea) {
@@ -371,6 +395,9 @@ const DepartmentLayout: React.FC<Props> = ({
 
   const navigateWithSidebarClose = useCallback(
     (path: string, options?: { replace?: boolean; state?: unknown }) => {
+      // Start the lazy route import before React Router commits the new route.
+      // The import is deduplicated by the browser and Vite runtime.
+      void preloadRoute(path).catch(() => undefined);
       closeSidebarDrawer();
       if (!sidebarPinned) setSidebarDrawerOpen(false);
       navigate(path, options as never);
@@ -475,8 +502,7 @@ const DepartmentLayout: React.FC<Props> = ({
   };
 
   const gotoMyTraining = () => {
-    const dept = resolveDeptForTraining();
-    navigateWithSidebarClose(`/maintenance/${amoCode}/${dept}/training`);
+    navigateWithSidebarClose(`/maintenance/${amoCode}/training`);
   };
 
   const resolveLoginSlug = (): string => {
@@ -512,8 +538,14 @@ const DepartmentLayout: React.FC<Props> = ({
     return location.pathname.includes("/upsell");
   }, [location.pathname]);
 
-  const isTrainingRoute = useMemo(() => {
-    return location.pathname.includes("/training");
+  const isQmsTrainingRoute = useMemo(() => {
+    return location.pathname.includes("/qms/training-competence");
+  }, [location.pathname]);
+
+  const isMyTrainingRoute = useMemo(() => {
+    const path = location.pathname;
+    if (path.includes("/qms/training-competence")) return false;
+    return /^\/maintenance\/[^/]+\/(?:[^/]+\/)?training(?:\/|$)/.test(path);
   }, [location.pathname]);
 
 
@@ -797,6 +829,7 @@ const DepartmentLayout: React.FC<Props> = ({
         id: "qms-training",
         label: "Training & Competence",
         path: `/maintenance/${amoCode}/qms/training-competence/dashboard`,
+        matchPrefixes: [`/maintenance/${amoCode}/qms/training-competence`],
         children: [
           {
             id: "qms-training-matrix",
@@ -944,7 +977,9 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [currentUser]);
 
   useEffect(() => {
-    setBillingGateResolved(!currentUser);
+    // The backend remains authoritative for subscription enforcement. Do not
+    // blank the workspace while the client refreshes a cached access status.
+    setBillingGateResolved(true);
   }, [currentUser]);
 
   useEffect(() => {
@@ -1066,7 +1101,7 @@ const DepartmentLayout: React.FC<Props> = ({
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [currentUser, isBillingRoute, isUpsellRoute, billingGateResolved, refreshSubscription]);
+  }, [currentUser, isBillingRoute, isUpsellRoute, refreshSubscription]);
 
 
   useEffect(() => {
@@ -1811,6 +1846,21 @@ const DepartmentLayout: React.FC<Props> = ({
                 {!isAdminArea && (
                   <button
                     type="button"
+                    onClick={() => navigateWithSidebarClose(rosteringLandingPath)}
+                    className={
+                      "sidebar__item" + (location.pathname.includes("/rostering") ? " sidebar__item--active" : "")
+                    }
+                    aria-label="Duty Rostering"
+                    title="Duty Rostering"
+                  >
+                    <span className="sidebar__item-label">Duty Rostering</span>
+                  </button>
+                )}
+
+
+                {!isAdminArea && (
+                  <button
+                    type="button"
                     onClick={() =>
                       navigateWithSidebarClose(`/maintenance/${amoCode}/manuals`)
                     }
@@ -1828,9 +1878,9 @@ const DepartmentLayout: React.FC<Props> = ({
                 {!isAdminArea && activeDepartment !== "quality" && (
                   <button
                     type="button"
-                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/qms/training-competence`)}
+                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/qms/training-competence/dashboard`)}
                     className={
-                      "sidebar__item" + (isTrainingRoute ? " sidebar__item--active" : "")
+                      "sidebar__item" + (isQmsTrainingRoute ? " sidebar__item--active" : "")
                     }
                     aria-label="Training & Competence"
                     title="Training & Competence"
@@ -1844,7 +1894,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     type="button"
                     onClick={gotoMyTraining}
                     className={
-                      "sidebar__item" + (isTrainingRoute ? " sidebar__item--active" : "")
+                      "sidebar__item" + (isMyTrainingRoute ? " sidebar__item--active" : "")
                     }
                     aria-label="My Training"
                     title="My Training"
@@ -1859,7 +1909,12 @@ const DepartmentLayout: React.FC<Props> = ({
                       type="button"
                       onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/qms`)}
                       className={
-                        "sidebar__item" + ((isQmsRoute || isDocControlRoute) ? " sidebar__item--active" : "")
+                        "sidebar__item" +
+                        (location.pathname === `/maintenance/${amoCode}/qms` || location.pathname === `/maintenance/${amoCode}/qms/`
+                          ? " sidebar__item--active"
+                          : (isQmsRoute || isDocControlRoute)
+                            ? " sidebar__item--trail"
+                            : "")
                       }
                       aria-label="Quality Management System"
                       title="Quality Management System"
@@ -1869,23 +1924,23 @@ const DepartmentLayout: React.FC<Props> = ({
                     {(isQmsRoute || isDocControlRoute) && (
                       <div className="sidebar__qms-nav" aria-label="QMS modules">
                         {qmsNavItems.map((item) => {
-                          const isActive = isPathMatch(location.pathname, item.path, item.matchPrefixes);
+                          const childActive = item.children?.some((child) => isPathMatch(location.pathname, child.path, child.matchPrefixes)) ?? false;
+                          const branchActive = childActive || isPathMatch(location.pathname, item.path, item.matchPrefixes);
+                          const selfExactActive = location.pathname === item.path || location.pathname === `${item.path}/`;
+                          const itemClass = "sidebar__item" + (selfExactActive && !childActive ? " sidebar__item--active" : branchActive ? " sidebar__item--trail" : "");
                           return (
                               <div key={item.id} className="sidebar__qms-node">
                                 <button
                                   type="button"
                                   onClick={() => navigateWithSidebarClose(item.path)}
-                                  className={
-                                    "sidebar__item" +
-                                    (isActive ? " sidebar__item--active" : "")
-                                  }
+                                  className={itemClass}
                                 >
                                   <span className="sidebar__item-label">{item.label}</span>
                                 </button>
-                                {isActive && item.children?.length ? (
+                                {branchActive && item.children?.length ? (
                                   <div className="sidebar__qms-subnav" aria-label={`${item.label} subpages`}>
                                     {item.children.map((child) => {
-                                      const childActive = isPathMatch(location.pathname, child.path, child.matchPrefixes);
+                                      const childActiveNow = isPathMatch(location.pathname, child.path, child.matchPrefixes);
                                       return (
                                         <button
                                           key={child.id}
@@ -1893,7 +1948,7 @@ const DepartmentLayout: React.FC<Props> = ({
                                           onClick={() => navigateWithSidebarClose(child.path)}
                                           className={
                                             "sidebar__item sidebar__item--sub" +
-                                            (childActive ? " sidebar__item--active" : "")
+                                            (childActiveNow ? " sidebar__item--active" : "")
                                           }
                                         >
                                           <span className="sidebar__item-label">{child.label}</span>

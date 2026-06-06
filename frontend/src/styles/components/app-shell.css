@@ -113,6 +113,23 @@
   color: var(--text);
 }
 
+.sidebar__item--trail {
+  background: color-mix(in srgb, var(--brand-weak) 42%, transparent 58%);
+  border-color: color-mix(in srgb, var(--border) 72%, var(--brand-weak) 28%);
+  color: var(--text);
+  opacity: 0.88;
+}
+
+.sidebar__item--trail .sidebar__item-label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.sidebar__item--trail:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--brand-weak) 56%, transparent 44%);
+}
+
 .sidebar__item,
 .sidebar__item-label {
   color: var(--text);
@@ -374,6 +391,17 @@ body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--active .sidebar__
   background: var(--accent-primary);
   color: var(--brand-accent-contrast);
   border-color: var(--accent-primary);
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--trail,
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--trail .sidebar__item-label {
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent 90%);
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent-primary) 24%, var(--surface-border) 76%);
+}
+
+body[data-color-scheme="light"] .app-shell--v2 .sidebar__item--trail:hover {
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent 84%);
 }
 
 .app-shell__flight-chip {

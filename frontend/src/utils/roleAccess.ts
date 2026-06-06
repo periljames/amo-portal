@@ -68,7 +68,14 @@ export type ModuleFeature =
   | "maintenance.parts-tools"
   | "maintenance.closeout"
   | "maintenance.reports"
-  | "maintenance.settings";
+  | "maintenance.settings"
+  | "rostering.dashboard"
+  | "rostering.calendar"
+  | "rostering.planning-board"
+  | "rostering.my-roster"
+  | "rostering.training-impact"
+  | "rostering.reports"
+  | "rostering.settings";
 
 export type ModuleAction =
   | "planning.recompute-due"
@@ -90,7 +97,15 @@ export type ModuleAction =
   | "maintenance.request-parts"
   | "maintenance.perform-inspection"
   | "maintenance.closeout"
-  | "maintenance.manage-settings";
+  | "maintenance.manage-settings"
+  | "rostering.create-draft"
+  | "rostering.edit-draft"
+  | "rostering.validate"
+  | "rostering.submit"
+  | "rostering.approve"
+  | "rostering.publish"
+  | "rostering.override-rule"
+  | "rostering.allocate-work";
 
 type AccessRule = {
   view: RoleCapability[];
@@ -235,6 +250,13 @@ const FEATURE_RULES: Record<ModuleFeature, AccessRule> = {
   "maintenance.closeout": { view: ["admin", "supervisor", "certifying"] , edit: ["admin", "supervisor", "certifying"]},
   "maintenance.reports": { view: ["admin", "supervisor", "certifying", "technician", "quality"] },
   "maintenance.settings": { view: ["admin", "supervisor"], edit: ["admin", "supervisor"] },
+  "rostering.dashboard": { view: ["admin", "planner", "supervisor", "certifying", "technician", "quality", "viewer"] },
+  "rostering.calendar": { view: ["admin", "planner", "supervisor", "certifying", "technician", "quality", "viewer"], edit: ["admin", "planner", "supervisor"] },
+  "rostering.planning-board": { view: ["admin", "planner", "supervisor", "certifying", "quality"], edit: ["admin", "planner", "supervisor"] },
+  "rostering.my-roster": { view: ["admin", "planner", "supervisor", "certifying", "technician", "records", "quality", "safety", "stores", "viewer"] },
+  "rostering.training-impact": { view: ["admin", "planner", "supervisor", "certifying", "quality"] },
+  "rostering.reports": { view: ["admin", "planner", "supervisor", "quality", "records"] },
+  "rostering.settings": { view: ["admin", "planner", "supervisor"], edit: ["admin", "planner"] },
 };
 
 const ACTION_RULES: Record<ModuleAction, RoleCapability[]> = {
@@ -258,6 +280,14 @@ const ACTION_RULES: Record<ModuleAction, RoleCapability[]> = {
   "maintenance.perform-inspection": ["admin", "supervisor", "certifying"],
   "maintenance.closeout": ["admin", "supervisor", "certifying"],
   "maintenance.manage-settings": ["admin", "supervisor"],
+  "rostering.create-draft": ["admin", "planner", "supervisor"],
+  "rostering.edit-draft": ["admin", "planner", "supervisor"],
+  "rostering.validate": ["admin", "planner", "supervisor", "quality"],
+  "rostering.submit": ["admin", "planner", "supervisor"],
+  "rostering.approve": ["admin", "supervisor", "quality"],
+  "rostering.publish": ["admin", "supervisor", "quality"],
+  "rostering.override-rule": ["admin", "quality"],
+  "rostering.allocate-work": ["admin", "planner", "supervisor"],
 };
 
 function hasMatchingCapability(caps: RoleCapability[], expected: RoleCapability[]): boolean {

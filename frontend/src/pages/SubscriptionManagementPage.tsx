@@ -206,12 +206,13 @@ const SubscriptionManagementPage: React.FC = () => {
     setIntegrationForms((prev) => ({
       ...prev,
       [key]: {
-        enabled: false,
-        baseUrl: "",
-        secret: "",
-        environment: "sandbox",
-        invoicePrefix: "",
-        ...(prev[key] || {}),
+        ...(prev[key] || {
+          enabled: false,
+          baseUrl: "",
+          secret: "",
+          environment: "sandbox",
+          invoicePrefix: "",
+        }),
         [field]: value,
       },
     }));

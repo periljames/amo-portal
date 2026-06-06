@@ -635,7 +635,7 @@ export async function downloadTrainingFile(
   const startedAt = performance.now();
   return downloadWithXhr({
     url: `${getApiBaseUrl()}/training/files/${encodeURIComponent(fileId)}/download`,
-    headers: authHeaders() as Record<string, string>,
+    headers: authHeaders(),
     fallbackFilename: `training_file_${fileId}`,
     onProgress: onProgress
       ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt))
@@ -669,12 +669,14 @@ export async function downloadTrainingUserRecordPdf(userId: string, onProgress?:
   const startedAt = performance.now();
   return downloadWithXhr({
     url: `${getApiBaseUrl()}/training/users/${encodeURIComponent(userId)}/record-pdf`,
-    headers: authHeaders() as Record<string, string>,
+    headers: authHeaders(),
     fallbackFilename: `training-record-${userId}.pdf`,
     onProgress: onProgress
       ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt))
       : undefined,
-    retries: 3,
+    timeoutMs: 240_000,
+    retries: 10,
+    retryDelayMs: 1_000,
     retryStatuses: [404, 408, 409, 423, 425, 429, 500, 502, 503, 504],
   });
 }
@@ -683,7 +685,7 @@ export async function downloadTrainingUserEvidencePack(userId: string, onProgres
   const startedAt = performance.now();
   return downloadWithXhr({
     url: `${getApiBaseUrl()}/training/users/${encodeURIComponent(userId)}/evidence-pack`,
-    headers: authHeaders() as Record<string, string>,
+    headers: authHeaders(),
     fallbackFilename: `training-evidence-${userId}.zip`,
     onProgress: onProgress
       ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt))
@@ -1032,6 +1034,42 @@ export async function downloadTrainingCertificateArtifact(
   return downloadWithFetch(url, { headers: authHeaders() }, `training-certificate-${recordId}.pdf`, 180_000);
 }
 
+
+
+export async function downloadTrainingCertificateArtifactsBatch(
+  recordIds: string[],
+  options: TrainingCertificateArtifactOptions = {},
+): Promise<DownloadedFile> {
+  const sortedIds = [...new Set(recordIds.map((id) => String(id).trim()).filter(Boolean))];
+  if (!sortedIds.length) throw new Error("Select at least one certificate record.");
+  const url = `${getApiBaseUrl()}/training/certificates/artifacts-batch`;
+  return downloadWithFetch(
+    url,
+    {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ record_ids: sortedIds, ...options }),
+    },
+    "training-certificates.zip",
+    240_000,
+  );
+}
+
+export async function downloadTrainingUserRecordPdfsBatch(userIds: string[]): Promise<DownloadedFile> {
+  const sortedIds = [...new Set(userIds.map((id) => String(id).trim()).filter(Boolean))];
+  if (!sortedIds.length) throw new Error("Select at least one person.");
+  const url = `${getApiBaseUrl()}/training/users/record-pdfs-batch`;
+  return downloadWithFetch(
+    url,
+    {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ user_ids: sortedIds }),
+    },
+    "training-record-pdfs.zip",
+    240_000,
+  );
+}
 
 export async function listTrainingRecordsByUsers(
   userIds: string[],

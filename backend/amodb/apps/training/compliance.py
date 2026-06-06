@@ -160,7 +160,9 @@ def _course_family_key(course: training_models.TrainingCourse) -> str:
     text = _normalized_course_text(course)
     if not text:
         return ""
-    cleaned = re.sub(r"\b(init|initial|induction|refresh|refresher|recurrent|continuation|renewal|ref|one[ _-]?off)\b", " ", text)
+    cleaned = re.sub(r"\b(init|initial|induction|refresh|refresher|recurrent|continuation|renewal|ref|rec|one[ _-]?off)\b", " ", text)
+    # Remove common AMO numbering noise so INIT/REF variants in the same family match reliably.
+    cleaned = re.sub(r"\b(v\d+|rev\d+|issue\d+)\b", " ", cleaned)
     cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned).strip()
     return cleaned
 
@@ -330,6 +332,8 @@ def _latest_records_for_user(db: Session, user: accounts_models.User, course_ids
                 training_models.TrainingRecord.course_id,
                 training_models.TrainingRecord.completion_date,
                 training_models.TrainingRecord.valid_until,
+                training_models.TrainingRecord.created_at,
+                training_models.TrainingRecord.verification_status,
             ),
         )
         .filter(
@@ -337,13 +341,50 @@ def _latest_records_for_user(db: Session, user: accounts_models.User, course_ids
             training_models.TrainingRecord.user_id == user.id,
             training_models.TrainingRecord.course_id.in_(course_ids),
         )
-        .order_by(training_models.TrainingRecord.course_id.asc(), training_models.TrainingRecord.completion_date.desc())
+        .order_by(
+            training_models.TrainingRecord.course_id.asc(),
+            training_models.TrainingRecord.valid_until.desc().nullslast(),
+            training_models.TrainingRecord.completion_date.desc().nullslast(),
+            training_models.TrainingRecord.created_at.desc().nullslast(),
+        )
         .all()
     )
     latest: Dict[str, training_models.TrainingRecord] = {}
     for row in rows:
+        # The first row is the current controlling evidence for the course.
+        # Validity takes priority over old completion chronology so a newer current certificate is not hidden by an expired legacy row.
         latest.setdefault(row.course_id, row)
     return latest
+
+
+def _all_completed_initial_evidence_for_user(
+    db: Session,
+    user: accounts_models.User,
+) -> tuple[set[str], set[str]]:
+    """Return all initial-course completions for a user, not only courses currently in the requirements matrix."""
+    rows = (
+        db.query(training_models.TrainingRecord, training_models.TrainingCourse)
+        .join(training_models.TrainingCourse, training_models.TrainingRecord.course_id == training_models.TrainingCourse.id)
+        .options(noload("*"))
+        .filter(
+            training_models.TrainingRecord.amo_id == user.amo_id,
+            training_models.TrainingRecord.user_id == user.id,
+            training_models.TrainingCourse.amo_id == user.amo_id,
+        )
+        .all()
+    )
+    completed_ids: set[str] = set()
+    completed_families: set[str] = set()
+    for _record, course in rows:
+        if not is_initial_course(course):
+            continue
+        completed_ids.add(course.id)
+        if getattr(course, "course_id", None):
+            completed_ids.add(str(course.course_id).strip().upper())
+        family = _course_family_key(course)
+        if family:
+            completed_families.add(family)
+    return completed_ids, completed_families
 
 
 def _latest_deferrals_for_user(db: Session, user: accounts_models.User, course_ids: Sequence[str]) -> Dict[str, training_models.TrainingDeferralRequest]:
@@ -425,18 +466,15 @@ def evaluate_user_training_policy(
     earliest_event = _earliest_events_for_user(db, user, course_ids, today)
 
     course_by_code = {str(course.course_id).strip().upper(): course for course in courses if getattr(course, "course_id", None)}
-    completed_initial_ids = {
-        course.id
-        for course in courses
-        if course.id in latest_record and is_initial_course(course)
-    }
-    completed_initial_families = {
-        family
-        for course in courses
-        if course.id in completed_initial_ids
-        for family in [_course_family_key(course)]
-        if family
-    }
+    completed_initial_ids, completed_initial_families = _all_completed_initial_evidence_for_user(db, user)
+    for course in courses:
+        if course.id in latest_record and is_initial_course(course):
+            completed_initial_ids.add(course.id)
+            if getattr(course, "course_id", None):
+                completed_initial_ids.add(str(course.course_id).strip().upper())
+            family = _course_family_key(course)
+            if family:
+                completed_initial_families.add(family)
 
     items: List[training_schemas.TrainingStatusItem] = []
     for course in courses:

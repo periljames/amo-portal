@@ -2,6 +2,7 @@
 
 import { getApiBaseUrl } from "./config";
 import { authHeaders, getToken, handleAuthFailure } from "./auth";
+import { downloadWithXhr, type DownloadedFile } from "../utils/downloads";
 
 const AMO_LOGO_CACHE_TTL_MS = 5 * 60 * 1000;
 const AMO_LOGO_FETCH_TIMEOUT_MS = 4000;
@@ -33,7 +34,7 @@ export type TransferProgress = {
   megaBitsPerSecond: number;
 };
 
-function buildAuthHeader(): HeadersInit {
+function buildAuthHeader(): Record<string, string> {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }

@@ -93,6 +93,9 @@ type QmsModuleResponse = {
   trace_id?: string;
   elapsed_ms?: number;
   applied_filters?: Record<string, string>;
+  source_errors?: Array<{ source?: string; error?: string; trace_id?: string; required?: boolean }>;
+  calendar_meta?: { today?: string; timezone?: string; country?: string | null; start?: string; end?: string; week_starts_on?: string };
+  summary?: Record<string, number>;
 };
 
 type CreateDraft = {
@@ -671,6 +674,91 @@ function counterValue(dashboard: QmsDashboardResponse | null, key: string): numb
   return dashboard?.counters?.[key] ?? 0;
 }
 
+type CalendarItem = QmsRow & {
+  id?: string;
+  date?: string;
+  title?: string;
+  module?: string;
+  source?: string;
+  event_type?: string;
+  status?: string;
+  due_state?: string;
+  owner_label?: string;
+  detail?: string;
+  link?: string | null;
+};
+
+function parseIsoDay(value: unknown): { year: number; month: number; day: number } | null {
+  const raw = typeof value === "string" ? value.slice(0, 10) : "";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!match) return null;
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+
+function isoDay(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function addIsoDays(value: string, days: number): string {
+  const parsed = parseIsoDay(value);
+  if (!parsed) return value;
+  const date = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day + days));
+  return isoDay(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+}
+
+function monthLabel(value: string | undefined): string {
+  const parsed = parseIsoDay(value || "");
+  if (!parsed) return "Calendar";
+  return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(parsed.year, parsed.month - 1, 1)));
+}
+
+function calendarMonthBounds(anchor: string): { start: string; end: string } {
+  const parsed = parseIsoDay(anchor) || parseIsoDay(new Date().toISOString().slice(0, 10))!;
+  return { start: isoDay(parsed.year, parsed.month, 1), end: isoDay(parsed.year, parsed.month, daysInMonth(parsed.year, parsed.month)) };
+}
+
+function nextMonthAnchor(anchor: string, delta: number): string {
+  const parsed = parseIsoDay(anchor) || parseIsoDay(new Date().toISOString().slice(0, 10))!;
+  const date = new Date(Date.UTC(parsed.year, parsed.month - 1 + delta, 1));
+  return isoDay(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
+}
+
+function buildCalendarCells(monthStart: string, weekStartsOn = "MONDAY"): string[] {
+  const parsed = parseIsoDay(monthStart) || parseIsoDay(new Date().toISOString().slice(0, 10))!;
+  const first = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
+  const jsDay = first.getUTCDay();
+  const mondayStart = weekStartsOn.toUpperCase() !== "SUNDAY";
+  const lead = mondayStart ? (jsDay + 6) % 7 : jsDay;
+  const gridStart = isoDay(parsed.year, parsed.month, 1 - lead);
+  return Array.from({ length: 42 }, (_, index) => addIsoDays(gridStart, index));
+}
+
+function eventTone(item: CalendarItem): string {
+  const state = String(item.due_state || "").toLowerCase();
+  const source = String(item.source || item.module || "").toLowerCase();
+  if (source === "holidays" || state === "holiday") return "holiday";
+  if (state === "overdue") return "danger";
+  if (state === "today") return "today";
+  if (state === "complete") return "success";
+  if (source === "audits") return "audit";
+  if (source === "cars") return "car";
+  if (source === "training") return "training";
+  return "default";
+}
+
+function sourceLabel(item: CalendarItem): string {
+  const source = String(item.source || item.module || "");
+  if (source === "training") return "Training";
+  if (source === "audits") return "Audit";
+  if (source === "cars") return "CAR";
+  if (source === "holidays") return "Holiday";
+  return humanise(source || item.event_type || "Item");
+}
+
 function currentQmsParts(pathname: string): string[] {
   const parts = pathname.split("/").filter(Boolean);
   const qmsIndex = parts.indexOf("qms");
@@ -938,6 +1026,112 @@ function LoadingPanel({ label }: { label: string }): React.ReactElement {
   );
 }
 
+function SourceDiagnostics({ data }: { data: QmsModuleResponse | null }): React.ReactElement | null {
+  const errors = data?.source_errors || [];
+  if (!errors.length) return null;
+  return (
+    <div className="qms-calendar-diagnostics" role="alert">
+      <AlertTriangle size={17} />
+      <div>
+        <strong>Calendar source issue</strong>
+        <p>The view is showing available database-backed records only. Fix the source below before relying on this calendar for operations.</p>
+        <ul>
+          {errors.map((entry, index) => (
+            <li key={`${entry.source || "source"}-${index}`}><strong>{entry.source || "source"}:</strong> {entry.error || "Unknown error"}{entry.trace_id ? ` · trace ${entry.trace_id}` : ""}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function CalendarWorkspace({ amoCode, module, data, state, error, onRetry, onMonthChange }: { amoCode: string; module: ModuleMeta; view: string; data: QmsModuleResponse | null; state: LoadState; error: string | null; onRetry: () => void; onMonthChange: (anchor: string) => void; }): React.ReactElement {
+  const items = (data?.items || []) as CalendarItem[];
+  const meta = data?.calendar_meta || {};
+  const today = meta.today || new Date().toISOString().slice(0, 10);
+  const monthStart = meta.start || calendarMonthBounds(today).start;
+  const monthInfo = parseIsoDay(monthStart) || parseIsoDay(today)!;
+  const cells = buildCalendarCells(isoDay(monthInfo.year, monthInfo.month, 1), meta.week_starts_on || "MONDAY");
+  const currentMonth = `${monthInfo.year}-${String(monthInfo.month).padStart(2, "0")}`;
+  const byDate = new Map<string, CalendarItem[]>();
+  for (const item of items) {
+    const itemDate = typeof item.date === "string" ? item.date.slice(0, 10) : "";
+    if (!itemDate) continue;
+    const list = byDate.get(itemDate) || [];
+    list.push(item);
+    byDate.set(itemDate, list);
+  }
+  const agenda = [...items].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || String(a.title || "").localeCompare(String(b.title || "")));
+  const summary = data?.summary || {};
+  const weekdayLabels = (meta.week_starts_on || "MONDAY").toUpperCase() === "SUNDAY" ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  return (
+    <div className="qms-calendar-shell">
+      <SectionCard className="qms-calendar-main" title="Operational calendar" subtitle={`AMO time zone: ${meta.timezone || "not set"}${meta.country ? ` · Region: ${meta.country}` : ""}`} variant="subtle" actions={<Button variant="secondary" size="sm" onClick={onRetry} loading={state === "loading"}><RefreshCw size={14} /> Refresh</Button>}>
+        <SourceDiagnostics data={data} />
+        {error ? <InlineError message={error} onAction={onRetry} /> : null}
+        <div className="qms-calendar-toolbar">
+          <Button variant="secondary" size="sm" onClick={() => onMonthChange(nextMonthAnchor(monthStart, -1))}>Previous month</Button>
+          <div className="qms-calendar-toolbar__month"><span>Viewing</span><strong>{monthLabel(monthStart)}</strong></div>
+          <Button variant="secondary" size="sm" onClick={() => onMonthChange(calendarMonthBounds(today).start)}>Today</Button>
+          <Button variant="secondary" size="sm" onClick={() => onMonthChange(nextMonthAnchor(monthStart, 1))}>Next month</Button>
+        </div>
+        <div className="qms-calendar-tabs"><ActionTabs amoCode={amoCode} module={module} currentPath={window.location.pathname} /></div>
+        <div className="qms-calendar-summary" aria-label="Calendar summary">
+          <span><strong>{summary.total ?? items.length}</strong><small>Total</small></span>
+          <span><strong>{summary.overdue ?? 0}</strong><small>Overdue work</small></span>
+          <span><strong>{summary.audits ?? 0}</strong><small>Audits</small></span>
+          <span><strong>{summary.cars ?? 0}</strong><small>CARs</small></span>
+          <span><strong>{summary.training ?? 0}</strong><small>Training</small></span>
+          <span><strong>{summary.holidays ?? 0}</strong><small>Holidays</small></span>
+        </div>
+        {state === "loading" ? <LoadingPanel label="Loading calendar..." /> : null}
+        <div className="qms-calendar-grid" role="grid" aria-label={`${monthLabel(monthStart)} calendar`}>
+          {weekdayLabels.map((label) => <div key={label} className="qms-calendar-weekday">{label}</div>)}
+          {cells.map((day) => {
+            const parsed = parseIsoDay(day)!;
+            const inMonth = day.slice(0, 7) === currentMonth;
+            const dayItems = byDate.get(day) || [];
+            const isToday = day === today;
+            return (
+              <div key={day} className={`qms-calendar-day${inMonth ? "" : " is-muted"}${isToday ? " is-today" : ""}`} role="gridcell" aria-label={day}>
+                <div className="qms-calendar-day__head"><strong>{parsed.day}</strong>{isToday ? <span>Today</span> : null}</div>
+                <div className="qms-calendar-day__items">
+                  {dayItems.slice(0, 4).map((item) => <CalendarChip key={String(item.id || item.title)} item={item} />)}
+                  {dayItems.length > 4 ? <span className="qms-calendar-more">+{dayItems.length - 4} more</span> : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </SectionCard>
+      <aside className="qms-calendar-agenda">
+        <div className="qms-calendar-agenda__head"><span>Agenda</span><strong>{monthLabel(monthStart)}</strong><small>{agenda.length} item{agenda.length === 1 ? "" : "s"}</small></div>
+        <div className="qms-calendar-agenda__list">
+          {agenda.length ? agenda.map((item) => <AgendaItem key={String(item.id || `${item.date}-${item.title}`)} item={item} />) : <div className="qms-ops-empty-state"><CheckCircle2 size={18} /><div><strong>No operational calendar items</strong><p>This view has no records for the selected month.</p></div></div>}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function CalendarChip({ item }: { item: CalendarItem }): React.ReactElement {
+  return (
+    <Link to={item.link ? String(item.link) : "#"} className={`qms-calendar-chip qms-calendar-chip--${eventTone(item)}${item.link ? "" : " is-static"}`} onClick={(event) => { if (!item.link) event.preventDefault(); }} title={`${item.title || "Calendar item"}${item.owner_label ? ` · ${item.owner_label}` : ""}`}>
+      <span>{sourceLabel(item)}</span>
+      <strong>{item.owner_label || item.title || "Calendar item"}</strong>
+    </Link>
+  );
+}
+
+function AgendaItem({ item }: { item: CalendarItem }): React.ReactElement {
+  return (
+    <Link to={item.link ? String(item.link) : "#"} className={`qms-calendar-agenda-item qms-calendar-agenda-item--${eventTone(item)}${item.link ? "" : " is-static"}`} onClick={(event) => { if (!item.link) event.preventDefault(); }}>
+      <div><strong>{item.title || "Calendar item"}</strong><small>{item.date ? formatValue(item.date) : "No date"} · {sourceLabel(item)}{item.detail ? ` · ${item.detail}` : ""}</small></div>
+      <span className={statusClass(item.due_state || item.status || "")}>{humanise(item.due_state || item.status || "Scheduled")}</span>
+    </Link>
+  );
+}
+
 function WorkspacePanel({
   amoCode,
   module,
@@ -1061,8 +1255,10 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
   const query = searchParams.get("q") || "";
   const statusFilter = searchParams.get("status") || "";
-  const pageSize = Number(searchParams.get("limit") || 15);
+  const pageSize = Number(searchParams.get("limit") || (module.key === "calendar" ? 120 : 15));
   const offset = Number(searchParams.get("offset") || 0);
+  const calendarStart = searchParams.get("start") || "";
+  const calendarEnd = searchParams.get("end") || "";
 
   const breadcrumbs = useMemo(() => [
     { label: "Quality", to: `/maintenance/${amoCode}/qms` },
@@ -1092,8 +1288,12 @@ export default function QmsCanonicalPage(): React.ReactElement {
     params.set("offset", String(Math.max(0, nextOffset)));
     if (query.trim()) params.set("q", query.trim());
     if (statusFilter) params.set("status", statusFilter);
+    if (module.key === "calendar") {
+      if (calendarStart) params.set("start", calendarStart);
+      if (calendarEnd) params.set("end", calendarEnd);
+    }
     return `${qmsPath(amoCode, fetchSuffix(module, view))}?${params.toString()}`;
-  }, [amoCode, module, offset, pageSize, query, statusFilter, view]);
+  }, [amoCode, calendarEnd, calendarStart, module, offset, pageSize, query, statusFilter, view]);
 
   const loadModule = useCallback(async ({ force = false, nextOffset = offset }: { force?: boolean; nextOffset?: number } = {}) => {
     if (!module.route) {
@@ -1142,7 +1342,7 @@ export default function QmsCanonicalPage(): React.ReactElement {
   }, [loadModule]);
 
   useEffect(() => {
-    if (!module.route || moduleState !== "ready") return;
+    if (!module.route || moduleState !== "ready" || module.key === "calendar") return;
     const nextAction = module.actions[0];
     if (!nextAction) return;
     const timer = window.setTimeout(() => {
@@ -1161,6 +1361,16 @@ export default function QmsCanonicalPage(): React.ReactElement {
     if (value) next.set(key, value);
     else next.delete(key);
     if (key !== "offset") next.set("offset", "0");
+    setSearchParams(next, { replace: true });
+  };
+
+  const setCalendarMonth = (anchor: string) => {
+    const bounds = calendarMonthBounds(anchor);
+    const next = new URLSearchParams(searchParams);
+    next.set("start", bounds.start);
+    next.set("end", bounds.end);
+    next.set("offset", "0");
+    next.set("limit", "120");
     setSearchParams(next, { replace: true });
   };
 
@@ -1198,19 +1408,33 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
         {dashboardError ? <InlineError message={dashboardError} onAction={loadDashboard} /> : null}
 
-        <section className="qms-ops-hero">
-          <div className="qms-ops-hero__copy">
-            <span>Tenant workspace</span>
-            <strong>{dashboard?.tenant?.amo_code || amoCode}</strong>
-            <p>Quality, QMS, document control, calendar, reporting, feedback, and archive actions now resolve into one canonical operational path.</p>
-          </div>
-          <SignalCards amoCode={amoCode} dashboard={dashboard} />
-        </section>
-
-        <ModuleNavigation amoCode={amoCode} activeKey={module.key} />
+        {module.key === "calendar" ? null : (
+          <>
+            <section className="qms-ops-hero">
+              <div className="qms-ops-hero__copy">
+                <span>Tenant workspace</span>
+                <strong>{dashboard?.tenant?.amo_code || amoCode}</strong>
+                <p>Quality, QMS, document control, calendar, reporting, feedback, and archive actions now resolve into one canonical operational path.</p>
+              </div>
+              <SignalCards amoCode={amoCode} dashboard={dashboard} />
+            </section>
+            <ModuleNavigation amoCode={amoCode} activeKey={module.key} />
+          </>
+        )}
 
         {module.key === "cockpit" ? (
           <CockpitWorkspace amoCode={amoCode} dashboard={dashboard} loading={dashboardState === "loading"} />
+        ) : module.key === "calendar" ? (
+          <CalendarWorkspace
+            amoCode={amoCode}
+            module={module}
+            view={view}
+            state={moduleState}
+            data={moduleData}
+            error={moduleError}
+            onRetry={() => void loadModule({ force: true })}
+            onMonthChange={setCalendarMonth}
+          />
         ) : (
           <WorkspacePanel
             amoCode={amoCode}

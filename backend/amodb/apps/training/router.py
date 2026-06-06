@@ -12,6 +12,7 @@ import time
 import tempfile
 import urllib.request
 import uuid
+import zipfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -19,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 from fastapi import (
     APIRouter,
     BackgroundTasks,
+    Body,
     Depends,
     File,
     Form,
@@ -1357,9 +1359,34 @@ def _maybe_send_email(background_tasks: BackgroundTasks, to_email: Optional[str]
 
 
 def _preferred_phone(user: object) -> Optional[str]:
-    primary = _preferred_phone(user)
-    secondary = getattr(user, "secondary_phone", None)
-    return primary or secondary
+    """Return the best available phone number for optional WhatsApp alerts.
+
+    This helper must never call itself. A previous implementation accidentally
+    recursed indefinitely, which caused POST /training/records to fail after
+    the record was prepared but before commit. Keep this function deliberately
+    defensive because user/contact objects can vary between Accounts and
+    PersonnelProfile records.
+    """
+    if user is None:
+        return None
+
+    candidate_fields = (
+        "phone",
+        "phone_number",
+        "mobile_phone",
+        "mobile_number",
+        "whatsapp_phone",
+        "whatsapp_number",
+        "secondary_phone",
+        "secondary_phone_number",
+    )
+    for field in candidate_fields:
+        value = getattr(user, field, None)
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                return cleaned
+    return None
 
 
 def _maybe_send_whatsapp(background_tasks: BackgroundTasks, to_phone: Optional[str], message: str) -> None:
@@ -4379,6 +4406,24 @@ def _training_user_pdf_build_lock(user_id: str) -> threading.Lock:
         return lock
 
 
+def _is_training_user_pdf_warming(user_id: str) -> bool:
+    with _TRAINING_RECORD_PDF_CACHE_LOCK:
+        return user_id in _TRAINING_RECORD_PDF_WARMING
+
+
+def _training_record_pdf_not_ready_response(user_id: str, *, queued: bool) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_425_TOO_EARLY,
+        content={
+            "detail": "Training record PDF is still being prepared. Please retry shortly.",
+            "ready": False,
+            "queued": queued,
+            "user_id": user_id,
+        },
+        headers={"Retry-After": "1"},
+    )
+
+
 def _clear_training_user_pdf_cache(user_id: str) -> None:
     for path in _TRAINING_RECORD_PDF_CACHE_DIR.glob(f"{user_id}-*.pdf"):
         try:
@@ -4554,6 +4599,13 @@ def warm_training_user_record_pdf(
     if current_user.id != user_id and not _is_training_editor(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to prepare training records")
 
+    # Avoid repeatedly rebuilding the expensive export context while a worker is
+    # already preparing this user's PDF. The frontend polls this endpoint, so a
+    # cheap in-progress response keeps the UI responsive and prevents duplicate
+    # database work.
+    if _is_training_user_pdf_warming(user_id):
+        return {"queued": False, "ready": False}
+
     context = _get_training_user_record_export_context(db, amo_id=current_user.amo_id, user_id=user_id)
     cache_path = _training_user_pdf_cache_path(user_id, context["cache_key"])
     if cache_path.exists():
@@ -4581,23 +4633,10 @@ def export_training_user_record_pdf(
     if cache_path.exists():
         pdf_bytes = cache_path.read_bytes()
     else:
-        build_lock = _training_user_pdf_build_lock(user_id)
-        with build_lock:
-            cache_path = _training_user_pdf_cache_path(user_id, context["cache_key"])
-            if cache_path.exists():
-                pdf_bytes = cache_path.read_bytes()
-            else:
-                pdf_bytes = _build_training_user_record_pdf_bytes(
-                    user=user,
-                    amo=context.get("amo"),
-                    logo_path=context.get("logo_path"),
-                    status_items=context["evaluation"].items,
-                    records=context["records"],
-                    course_by_id=context["course_by_id"],
-                    upcoming_events=context["upcoming_events"],
-                    deferrals=context["deferrals"],
-                )
-                _write_training_user_pdf_cache(user_id=user_id, cache_key=context["cache_key"], pdf_bytes=pdf_bytes)
+        queued = False
+        if not _is_training_user_pdf_warming(user_id):
+            queued = _queue_training_user_pdf_warm(amo_id=current_user.amo_id, user_id=user_id)
+        return _training_record_pdf_not_ready_response(user_id, queued=queued)
     filename = f"{(user.full_name or user.id).replace(' ', '_')}_training_record.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -4935,6 +4974,14 @@ def issue_certificate(
     return _record_to_read(record)
 
 
+
+
+def _download_filename_token(value: object, fallback: str = "download") -> str:
+    raw = str(value or fallback).strip() or fallback
+    cleaned = re.sub(r'[^A-Za-z0-9._-]+', '_', raw).strip('._')
+    return (cleaned or fallback)[:120]
+
+
 @router.get(
     "/certificates/artifact/{record_id}",
     summary="Download branded certificate PDF for a training record",
@@ -4994,6 +5041,161 @@ def download_certificate_artifact(
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post(
+    "/certificates/artifacts-batch",
+    summary="Download a ZIP of branded certificate PDFs for multiple training records",
+)
+def download_certificate_artifacts_batch(
+    payload: dict = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    record_ids = payload.get("record_ids") or []
+    if not isinstance(record_ids, list):
+        raise HTTPException(status_code=400, detail="record_ids must be a list.")
+    ordered_ids = [str(value).strip() for value in record_ids if str(value or "").strip()]
+    ordered_ids = list(dict.fromkeys(ordered_ids))
+    if not ordered_ids:
+        raise HTTPException(status_code=400, detail="Select at least one training record.")
+    if len(ordered_ids) > 250:
+        raise HTTPException(status_code=400, detail="Batch certificate downloads are limited to 250 records per request.")
+
+    records = (
+        db.query(training_models.TrainingRecord)
+        .filter(training_models.TrainingRecord.amo_id == current_user.amo_id, training_models.TrainingRecord.id.in_(ordered_ids))
+        .all()
+    )
+    by_id = {str(record.id): record for record in records}
+    missing = [record_id for record_id in ordered_ids if record_id not in by_id]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"{len(missing)} selected record(s) were not found for this AMO.")
+
+    users = {
+        str(user.id): user
+        for user in db.query(accounts_models.User)
+        .filter(accounts_models.User.amo_id == current_user.amo_id, accounts_models.User.id.in_({record.user_id for record in records}))
+        .all()
+    }
+    courses = {
+        str(course.id): course
+        for course in db.query(training_models.TrainingCourse)
+        .filter(training_models.TrainingCourse.amo_id == current_user.amo_id, training_models.TrainingCourse.id.in_({record.course_id for record in records}))
+        .all()
+    }
+    amo = db.query(accounts_models.AMO).filter(accounts_models.AMO.id == current_user.amo_id).first()
+    logo_path = _get_amo_logo_path(db, current_user.amo_id)
+    event_ids = {record.event_id for record in records if getattr(record, "event_id", None)}
+    events = {
+        str(event.id): event
+        for event in db.query(training_models.TrainingEvent)
+        .filter(training_models.TrainingEvent.amo_id == current_user.amo_id, training_models.TrainingEvent.id.in_(event_ids))
+        .all()
+    } if event_ids else {}
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        used_names: set[str] = set()
+        for record_id in ordered_ids:
+            record = by_id[record_id]
+            user = users.get(str(record.user_id))
+            course = courses.get(str(record.course_id))
+            if not user or not course:
+                continue
+            issue = db.query(training_models.TrainingCertificateIssue).filter(
+                training_models.TrainingCertificateIssue.record_id == record.id,
+                training_models.TrainingCertificateIssue.amo_id == current_user.amo_id,
+            ).first()
+            if not issue:
+                issue = _issue_certificate_for_record(db, record=record, amo_id=current_user.amo_id, actor_user_id=current_user.id)
+                db.flush()
+            pdf_bytes = _build_training_certificate_pdf_bytes(
+                user=user,
+                course=course,
+                record=record,
+                issue=issue,
+                amo=amo,
+                event=events.get(str(record.event_id)) if getattr(record, "event_id", None) else None,
+                logo_path=logo_path,
+                signatory_name=payload.get("signatory_name") or None,
+                signatory_title=payload.get("signatory_title") or None,
+                approver_name=payload.get("approver_name") or None,
+                approver_title=payload.get("approver_title") or None,
+            )
+            base_name = f"{_download_filename_token(user.full_name or user.id)}_{_download_filename_token(course.course_id)}_certificate.pdf"
+            name = base_name
+            suffix = 2
+            while name in used_names:
+                name = base_name.replace(".pdf", f"_{suffix}.pdf")
+                suffix += 1
+            used_names.add(name)
+            zf.writestr(name, pdf_bytes)
+    db.commit()
+    zip_buffer.seek(0)
+    filename = f"training_certificates_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip"
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post(
+    "/users/record-pdfs-batch",
+    summary="Download a ZIP of personnel training record PDFs",
+)
+def export_training_user_record_pdfs_batch(
+    payload: dict = Body(default_factory=dict),
+    db: Session = Depends(get_read_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    user_ids = payload.get("user_ids") or []
+    if not isinstance(user_ids, list):
+        raise HTTPException(status_code=400, detail="user_ids must be a list.")
+    ordered_ids = [str(value).strip() for value in user_ids if str(value or "").strip()]
+    ordered_ids = list(dict.fromkeys(ordered_ids))
+    if not ordered_ids:
+        raise HTTPException(status_code=400, detail="Select at least one user.")
+    if len(ordered_ids) > 150:
+        raise HTTPException(status_code=400, detail="Batch personnel record downloads are limited to 150 users per request.")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        used_names: set[str] = set()
+        for user_id in ordered_ids:
+            context = _get_training_user_record_export_context(db, amo_id=current_user.amo_id, user_id=user_id)
+            user = context["user"]
+            cache_path = _training_user_pdf_cache_path(user_id, context["cache_key"])
+            if cache_path.exists():
+                pdf_bytes = cache_path.read_bytes()
+            else:
+                pdf_bytes = _build_training_user_record_pdf_bytes(
+                    user=user,
+                    amo=context.get("amo"),
+                    logo_path=context.get("logo_path"),
+                    status_items=context["evaluation"].items,
+                    records=context["records"],
+                    course_by_id=context["course_by_id"],
+                    upcoming_events=context["upcoming_events"],
+                    deferrals=context["deferrals"],
+                )
+                _write_training_user_pdf_cache(user_id=user_id, cache_key=context["cache_key"], pdf_bytes=pdf_bytes)
+            base_name = f"{_download_filename_token(user.full_name or user.id)}_training_record.pdf"
+            name = base_name
+            suffix = 2
+            while name in used_names:
+                name = base_name.replace(".pdf", f"_{suffix}.pdf")
+                suffix += 1
+            used_names.add(name)
+            zf.writestr(name, pdf_bytes)
+    zip_buffer.seek(0)
+    filename = f"training_record_pdfs_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip"
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

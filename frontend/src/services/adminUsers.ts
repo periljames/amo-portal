@@ -56,23 +56,23 @@ export interface AdminUserRead {
   full_name: string;
   role: AccountRole;
   position_title: string | null;
-  phone: string | null;
-  secondary_phone: string | null;
+  phone?: string | null;
+  secondary_phone?: string | null;
 
-  regulatory_authority: RegulatoryAuthority | null;
-  licence_number: string | null;
-  licence_state_or_country: string | null;
-  licence_expires_on: string | null;
+  regulatory_authority?: RegulatoryAuthority | null;
+  licence_number?: string | null;
+  licence_state_or_country?: string | null;
+  licence_expires_on?: string | null;
 
-  is_active: boolean;
-  is_superuser: boolean;
-  is_amo_admin: boolean;
-  must_change_password: boolean;
-  token_revoked_at: string | null;
-  last_login_at: string | null;
-  last_login_ip: string | null;
-  created_at: string;
-  updated_at: string;
+  is_active?: boolean;
+  is_superuser?: boolean;
+  is_amo_admin?: boolean;
+  must_change_password?: boolean;
+  token_revoked_at?: string | null;
+  last_login_at?: string | null;
+  last_login_ip?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AdminUserSummaryRead {
@@ -495,7 +495,7 @@ export async function listAdminUserSummaries(
     staff_code: user.staff_code,
     role: user.role,
     position_title: user.position_title,
-    is_active: user.is_active,
+    is_active: !!user.is_active,
   }));
 }
 

@@ -18,7 +18,7 @@ import ActionPanel, { type ActionPanelContext } from "../components/panels/Actio
 import { getContext } from "../services/auth";
 import { listEventHistory } from "../services/events";
 import { useRealtime } from "../components/realtime/realtimeContext";
-import { qmsGetCockpitSnapshot, type QMSCockpitSnapshotOut } from "../services/qms";
+import { qmsGetCockpitSnapshot, type CARStatus, type QMSCockpitSnapshotOut } from "../services/qms";
 import type { ActionItem, ActivityItem } from "../components/dashboard/DashboardScaffold";
 import type { QualityCockpitVisualData } from "../components/dashboard/QualityCockpitCanvas";
 import { deepEqual } from "../utils/deepEqual";

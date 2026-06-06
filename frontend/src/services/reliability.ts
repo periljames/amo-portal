@@ -1,6 +1,7 @@
 // src/services/reliability.ts
 import { getToken, handleAuthFailure, markSessionActivity } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { downloadWithXhr, type DownloadedFile } from "../utils/downloads";
 
 const API_BASE = getApiBaseUrl();
 const REPORTS_CACHE_TTL_MS = 8000;
@@ -28,7 +29,7 @@ export type TransferProgress = {
   megaBitsPerSecond: number;
 };
 
-function buildAuthHeader(): HeadersInit {
+function buildAuthHeader(): Record<string, string> {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }

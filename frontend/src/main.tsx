@@ -24,6 +24,7 @@ import "./styles/components/dashboard-cockpit.css";
 import "./styles/components/action-panel.css";
 import "./styles/components/planning-production.css";
 import "./styles/components/liquid-glass.css";
+import "./styles/rostering.css";
 
 
 if (typeof document !== "undefined" && import.meta.env.VITE_MANUALS_PWA_ENABLED === "1") {
@@ -95,8 +96,57 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   </React.StrictMode>
 );
 
-if (typeof window !== "undefined" && "serviceWorker" in navigator && import.meta.env.VITE_AERODOC_PWA_ENABLED === "1") {
+const AERODOC_CACHE_PREFIX = "aerodoc-hybrid-dms-";
+
+async function clearAeroDocCaches(): Promise<void> {
+  if (!("caches" in window)) return;
+  const keys = await window.caches.keys();
+  await Promise.all(keys.filter((key) => key.startsWith(AERODOC_CACHE_PREFIX)).map((key) => window.caches.delete(key)));
+}
+
+async function configureAeroDocServiceWorker(): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+  const enabled = import.meta.env.VITE_AERODOC_PWA_ENABLED === "1";
+
+  if (!enabled) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(
+      registrations
+        .filter((registration) => registration.active?.scriptURL.includes("/aerodoc-sw.js"))
+        .map((registration) => registration.unregister()),
+    );
+    await clearAeroDocCaches();
+    return;
+  }
+
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloadScheduled = false;
+  const registration = await navigator.serviceWorker.register("/aerodoc-sw.js", { updateViaCache: "none" });
+
+  const activateWaitingWorker = () => {
+    registration.waiting?.postMessage({ type: "SKIP_WAITING" });
+  };
+
+  registration.addEventListener("updatefound", () => {
+    const worker = registration.installing;
+    if (!worker) return;
+    worker.addEventListener("statechange", () => {
+      if (worker.state === "installed" && navigator.serviceWorker.controller) activateWaitingWorker();
+    });
+  });
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloadScheduled) return;
+    reloadScheduled = true;
+    window.location.reload();
+  });
+
+  activateWaitingWorker();
+  await registration.update().catch(() => undefined);
+}
+
+if (typeof window !== "undefined") {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/aerodoc-sw.js").catch(() => {});
+    void configureAeroDocServiceWorker().catch(() => undefined);
   });
 }

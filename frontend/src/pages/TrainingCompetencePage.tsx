@@ -256,37 +256,55 @@ function buildRefresherAnomalies(
     if (coursePhase(course) === "INITIAL") {
       const key = familyKey(course);
       if (!key) return;
-      initialsByFamily[key] = [...(initialsByFamily[key] || []), course.id];
+      initialsByFamily[key] = [...(initialsByFamily[key] || []), course.id, course.course_id].filter(Boolean) as string[];
     }
   });
 
-  const completedByUser = new Map<string, Set<string>>();
+  const latestRecords = new Map<string, TrainingRecordRead>();
   records.forEach((record) => {
+    const key = `${record.user_id}:${record.course_id}`;
+    const existing = latestRecords.get(key);
+    const recordRank = `${record.valid_until || "0000-00-00"}:${record.completion_date || "0000-00-00"}:${record.created_at || ""}`;
+    const existingRank = existing ? `${existing.valid_until || "0000-00-00"}:${existing.completion_date || "0000-00-00"}:${existing.created_at || ""}` : "";
+    if (!existing || recordRank > existingRank) latestRecords.set(key, record);
+  });
+  const activeRecords = Array.from(latestRecords.values());
+
+  const completedByUser = new Map<string, Set<string>>();
+  const completedInitialFamiliesByUser = new Map<string, Set<string>>();
+  activeRecords.forEach((record) => {
     if (!completedByUser.has(record.user_id)) completedByUser.set(record.user_id, new Set());
     const completed = completedByUser.get(record.user_id)!;
     completed.add(record.course_id);
     const resolved = resolveCourse(courseLookup, record.course_id);
     if (resolved?.id) completed.add(resolved.id);
     if (resolved?.course_id) completed.add(resolved.course_id);
+    if (resolved && coursePhase(resolved) === "INITIAL") {
+      if (!completedInitialFamiliesByUser.has(record.user_id)) completedInitialFamiliesByUser.set(record.user_id, new Set());
+      const family = familyKey(resolved);
+      if (family) completedInitialFamiliesByUser.get(record.user_id)!.add(family);
+    }
   });
 
   const userById = new Map(users.map((user) => [user.id, user]));
   const anomalies: RefresherAnomaly[] = [];
   const seen = new Set<string>();
 
-  records.forEach((record) => {
+  activeRecords.forEach((record) => {
     const course = resolveCourse(courseLookup, record.course_id);
     if (!course || coursePhase(course) !== "REFRESHER") return;
     const prerequisites = new Set<string>();
     if (course.prerequisite_course_id) prerequisites.add(course.prerequisite_course_id);
     const fk = familyKey(course);
     (initialsByFamily[fk] || []).forEach((courseId) => {
-      if (courseId !== course.id) prerequisites.add(courseId);
+      if (courseId && courseId !== course.id && courseId !== course.course_id) prerequisites.add(courseId);
     });
-    if (prerequisites.size === 0) return;
+    if (prerequisites.size === 0 && !fk) return;
     const completed = completedByUser.get(record.user_id) || new Set<string>();
-    const hasInitial = [...prerequisites].some((courseId) => completed.has(courseId));
-    if (hasInitial) return;
+    const completedFamilies = completedInitialFamiliesByUser.get(record.user_id) || new Set<string>();
+    const hasExactInitial = [...prerequisites].some((courseId) => completed.has(courseId));
+    const hasFamilyInitial = fk ? [...completedFamilies].some((family) => family === fk || family.includes(fk) || fk.includes(family)) : false;
+    if (hasExactInitial || hasFamilyInitial) return;
     const key = `${record.user_id}:${record.course_id}`;
     if (seen.has(key)) return;
     seen.add(key);

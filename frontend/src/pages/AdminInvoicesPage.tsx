@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { Button, InlineAlert, PageHeader, Panel, Table } from "../components/UI/Admin";
 import { getCachedUser } from "../services/auth";
-import { fetchInvoiceDocument, fetchInvoices } from "../services/billing";
+import { exportInvoicesCsv, fetchInvoiceDocument, fetchInvoices } from "../services/billing";
 import {
   listAdminAmos,
   setAdminContext,

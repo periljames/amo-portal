@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { getCachedUser } from "../services/auth";
+import { getCachedUser, getContext } from "../services/auth";
 import "../styles/training.css";
 import { saveDownloadedFile } from "../utils/downloads";
 import {
@@ -563,9 +563,18 @@ function tryGetUserIdFromStorage(): string | null {
 function MyTrainingPage() {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const amoCode = (params.amoCode || "AMO").trim();
-  const department = (params.department || "planning").trim();
-
   const cachedUser = useMemo(() => getCachedUser(), []);
+  const department = useMemo(() => {
+    const fromParams = (params.department || "").trim();
+    if (fromParams && fromParams !== "admin") return fromParams;
+    const contextDepartment = (getContext().department || "").trim();
+    if (contextDepartment && contextDepartment !== "admin") return contextDepartment;
+    const fromUserDepartment =
+      ((cachedUser as any)?.department?.code || (cachedUser as any)?.department_code || "").trim();
+    if (fromUserDepartment && fromUserDepartment !== "admin") return fromUserDepartment;
+    return "maintenance";
+  }, [cachedUser, params.department]);
+
   const cacheBaseKey = `${amoCode}:${cachedUser?.id || "me"}`;
 
   const [items, setItems] = useState<TrainingStatusItem[]>([]);

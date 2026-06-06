@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import hashlib
 import json
 import logging
 import os
 import re
 import time
+import urllib.request
 import uuid
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path as FsPath
 from typing import Any, Iterable
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func, or_, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db, get_write_db
 from amodb.apps.audit import services as audit_services
+from amodb.apps.accounts import models as accounts_models
 from amodb.apps.quality import models as quality_models
 from amodb.apps.quality.enums import CARStatus, QMSAuditStatus, QMSDocStatus
 from amodb.apps.training import models as training_models
@@ -52,7 +57,22 @@ def _row_id(value: Any) -> str:
     return str(getattr(value, "id", value))
 
 
-def _event(module: str, entity_type: str, entity_id: str, title: str, when: Any, event_type: str, link: str | None = None) -> dict[str, Any]:
+def _event(
+    module: str,
+    entity_type: str,
+    entity_id: str,
+    title: str,
+    when: Any,
+    event_type: str,
+    link: str | None = None,
+    *,
+    status_value: Any = None,
+    owner_label: str | None = None,
+    detail: str | None = None,
+    source: str | None = None,
+    due_state: str | None = None,
+    actionable: bool = True,
+) -> dict[str, Any]:
     return {
         "id": f"{module}:{entity_type}:{entity_id}:{event_type}",
         "module": module,
@@ -61,12 +81,275 @@ def _event(module: str, entity_type: str, entity_id: str, title: str, when: Any,
         "title": title,
         "date": _as_date(when),
         "event_type": event_type,
+        "status": _as_text(status_value),
+        "owner_label": owner_label,
+        "detail": detail,
+        "source": source or module,
+        "due_state": due_state,
+        "actionable": actionable,
         "link": link,
     }
 
 
 def _limit(qs, limit: int):
     return qs.limit(max(1, min(limit, 500)))
+
+
+def _safe_rollback(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("QMS database rollback failed after an error")
+
+
+def _valid_zoneinfo(name: str | None) -> ZoneInfo:
+    candidate = (name or "").strip() or "UTC"
+    try:
+        return ZoneInfo(candidate)
+    except ZoneInfoNotFoundError:
+        logger.warning("Invalid AMO time zone %r; falling back to UTC", candidate)
+        return ZoneInfo("UTC")
+
+
+def _tenant_calendar_context(db: Session, *, amo_id: str) -> dict[str, Any]:
+    row = (
+        db.query(accounts_models.AMO.id, accounts_models.AMO.amo_code, accounts_models.AMO.name, accounts_models.AMO.country, accounts_models.AMO.time_zone)
+        .filter(accounts_models.AMO.id == amo_id)
+        .first()
+    )
+    tz_name = getattr(row, "time_zone", None) if row else None
+    zone = _valid_zoneinfo(tz_name)
+    now_local = datetime.now(timezone.utc).astimezone(zone)
+    return {
+        "timezone": zone.key,
+        "country": getattr(row, "country", None) if row else None,
+        "today": now_local.date(),
+        "now": now_local,
+    }
+
+
+def _qms_table_exists(db: Session, table: str) -> bool:
+    try:
+        row = db.execute(
+            text("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = :table
+                )
+            """),
+            {"table": table},
+        ).scalar()
+        return bool(row)
+    except SQLAlchemyError:
+        _safe_rollback(db)
+        return False
+
+
+def _qms_count(db: Session, *, sql: str, params: dict[str, Any], label: str, trace_id: str, source_errors: list[dict[str, Any]], amo_id: str | None = None, user_id: str | None = None) -> int | None:
+    try:
+        return int(db.execute(text(sql), params).scalar() or 0)
+    except SQLAlchemyError as exc:
+        _safe_rollback(db)
+        if amo_id and user_id:
+            try:
+                set_postgres_tenant_context(db, amo_id=amo_id, user_id=user_id)
+            except Exception:
+                logger.exception("QMS tenant context recovery failed after counter error")
+        detail = str(getattr(exc, "orig", exc))
+        logger.error("QMS dashboard counter failed trace_id=%s label=%s error=%s", trace_id, label, detail)
+        source_errors.append({"source": label, "error": detail, "trace_id": trace_id})
+        return None
+
+
+def _calendar_fetch_rows(
+    db: Session,
+    *,
+    sql: str,
+    params: dict[str, Any],
+    label: str,
+    trace_id: str,
+    source_errors: list[dict[str, Any]],
+    required: bool = False,
+    amo_id: str | None = None,
+    user_id: str | None = None,
+) -> list[dict[str, Any]]:
+    try:
+        return [dict(row) for row in db.execute(text(sql), params).mappings().all()]
+    except SQLAlchemyError as exc:
+        _safe_rollback(db)
+        if amo_id and user_id:
+            try:
+                set_postgres_tenant_context(db, amo_id=amo_id, user_id=user_id)
+            except Exception:
+                logger.exception("QMS tenant context recovery failed after calendar source error")
+        detail = str(getattr(exc, "orig", exc))
+        logger.error("QMS calendar source failed trace_id=%s label=%s error=%s", trace_id, label, detail)
+        source_errors.append({"source": label, "error": detail, "trace_id": trace_id, "required": required})
+        if required:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": f"Required calendar source '{label}' failed.", "trace_id": trace_id, "error": detail},
+            )
+        return []
+
+
+def _due_state_for(when: date | None, today: date, *, event_type: str, status_value: Any = None) -> str:
+    if event_type == "public_holiday":
+        return "holiday"
+    normalized = (_as_text(status_value) or "").upper()
+    if normalized in {"CLOSED", "COMPLETED", "COMPLETE", "CANCELLED", "APPROVED", "IMPLEMENTED"}:
+        return "complete"
+    if when is None:
+        return "scheduled"
+    if when < today:
+        return "overdue"
+    if when == today:
+        return "today"
+    return "due"
+
+
+def _source_filter_for_view(view: str) -> set[str] | None:
+    if view == "audits":
+        return {"audits"}
+    if view == "cars":
+        return {"cars"}
+    if view == "training":
+        return {"training"}
+    if view in {"management-review", "reviews"}:
+        return {"reviews"}
+    if view in {"holidays", "public-holidays"}:
+        return {"holidays"}
+    return None
+
+
+def _read_calendar_settings(db: Session, *, amo_id: str) -> dict[str, Any]:
+    if not _qms_table_exists(db, "qms_calendar_settings"):
+        return {}
+    row = db.execute(
+        text("""
+            SELECT amo_id, holidays_enabled, holiday_source_url, holiday_provider,
+                   holiday_country_code, holiday_region_code, cache_ttl_hours, updated_at
+            FROM qms_calendar_settings
+            WHERE amo_id = :amo_id
+            LIMIT 1
+        """),
+        {"amo_id": amo_id},
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _parse_ics_date(raw_value: str) -> date | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    if ":" in value:
+        value = value.split(":", 1)[1]
+    value = value.strip()
+    try:
+        if "T" in value:
+            return datetime.strptime(value[:8], "%Y%m%d").date()
+        return datetime.strptime(value[:8], "%Y%m%d").date()
+    except Exception:
+        return None
+
+
+def _unescape_ics_text(value: str) -> str:
+    return (value or "").replace("\\n", " ").replace("\\,", ",").replace("\\;", ";").strip()
+
+
+def _parse_public_holiday_ics(payload: str, *, start_date: date, end_date: date) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    current: dict[str, str] | None = None
+    for raw_line in payload.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line == "BEGIN:VEVENT":
+            current = {}
+            continue
+        if line == "END:VEVENT":
+            if current:
+                dt = _parse_ics_date(current.get("DTSTART", ""))
+                title = _unescape_ics_text(current.get("SUMMARY", "Public holiday")) or "Public holiday"
+                uid = current.get("UID") or hashlib.sha1(f"{title}:{dt}".encode("utf-8")).hexdigest()
+                if dt and start_date <= dt <= end_date:
+                    events.append({"uid": uid, "date": dt, "title": title})
+            current = None
+            continue
+        if current is not None and ":" in line:
+            key, value = line.split(":", 1)
+            key = key.split(";", 1)[0].upper()
+            if key in {"DTSTART", "SUMMARY", "UID"}:
+                current[key] = value
+    return events
+
+
+def _refresh_public_holidays_if_needed(
+    db: Session,
+    *,
+    amo_id: str,
+    settings_row: dict[str, Any],
+    start_date: date,
+    end_date: date,
+    trace_id: str,
+    source_errors: list[dict[str, Any]],
+) -> None:
+    if not _qms_table_exists(db, "qms_public_holidays"):
+        return
+    if not settings_row or not bool(settings_row.get("holidays_enabled")):
+        return
+    source_url = (settings_row.get("holiday_source_url") or "").strip()
+    if not source_url:
+        source_errors.append({"source": "public_holidays", "error": "Public holiday source URL is not configured in qms_calendar_settings.", "trace_id": trace_id})
+        return
+    ttl_hours = int(settings_row.get("cache_ttl_hours") or 168)
+    stale_before = datetime.now(timezone.utc) - timedelta(hours=max(1, ttl_hours))
+    cached = db.execute(
+        text("""
+            SELECT COUNT(*)
+            FROM qms_public_holidays
+            WHERE amo_id = :amo_id
+              AND holiday_date >= :start_date
+              AND holiday_date <= :end_date
+              AND source_updated_at >= :stale_before
+        """),
+        {"amo_id": amo_id, "start_date": start_date, "end_date": end_date, "stale_before": stale_before},
+    ).scalar()
+    if cached:
+        return
+    try:
+        req = urllib.request.Request(source_url, headers={"User-Agent": "AMO-Portal-QMS-Calendar/1.0"})
+        with urllib.request.urlopen(req, timeout=4) as response:
+            payload = response.read(1_500_000).decode("utf-8", errors="replace")
+        parsed = _parse_public_holiday_ics(payload, start_date=start_date, end_date=end_date)
+        now = datetime.now(timezone.utc)
+        for item in parsed:
+            db.execute(
+                text("""
+                    INSERT INTO qms_public_holidays
+                        (id, amo_id, holiday_date, title, source_uid, source_url, source_updated_at, created_at, updated_at)
+                    VALUES
+                        (:id, :amo_id, :holiday_date, :title, :source_uid, :source_url, :source_updated_at, NOW(), NOW())
+                    ON CONFLICT (amo_id, holiday_date, source_uid)
+                    DO UPDATE SET title = EXCLUDED.title, source_url = EXCLUDED.source_url,
+                                  source_updated_at = EXCLUDED.source_updated_at, updated_at = NOW()
+                """),
+                {
+                    "id": str(uuid.uuid4()),
+                    "amo_id": amo_id,
+                    "holiday_date": item["date"],
+                    "title": item["title"],
+                    "source_uid": item["uid"],
+                    "source_url": source_url,
+                    "source_updated_at": now,
+                },
+            )
+        db.commit()
+    except Exception as exc:
+        _safe_rollback(db)
+        detail = str(exc)
+        logger.error("QMS public holiday refresh failed trace_id=%s error=%s", trace_id, detail)
+        source_errors.append({"source": "public_holidays", "error": detail, "trace_id": trace_id})
 
 
 @router.get("/dashboard")
@@ -78,62 +361,55 @@ def qms_dashboard(
     started = time.perf_counter()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     if _is_postgres(db):
-        db.execute(text("SET LOCAL statement_timeout = '12000ms'"))
-    today = date.today()
+        db.execute(text("SET LOCAL statement_timeout = '9000ms'"))
+    calendar_context = _tenant_calendar_context(db, amo_id=ctx.amo_id)
+    today = calendar_context["today"]
     due_soon = today + timedelta(days=30)
+    source_errors: list[dict[str, Any]] = []
 
-    audit_qs = db.query(quality_models.QMSAudit).filter(quality_models.QMSAudit.amo_id == ctx.amo_id)
-    car_qs = db.query(quality_models.CorrectiveActionRequest).filter(quality_models.CorrectiveActionRequest.amo_id == ctx.amo_id)
-    document_qs = db.query(quality_models.QMSDocument).filter(quality_models.QMSDocument.amo_id == ctx.amo_id)
-    finding_qs = db.query(quality_models.QMSAuditFinding).filter(quality_models.QMSAuditFinding.amo_id == ctx.amo_id)
-    training_qs = db.query(training_models.TrainingRecord).filter(training_models.TrainingRecord.amo_id == ctx.amo_id)
-
-    open_audits = audit_qs.filter(quality_models.QMSAudit.status != QMSAuditStatus.CLOSED).count()
-    audits_due_soon = audit_qs.filter(
-        quality_models.QMSAudit.planned_start.isnot(None),
-        quality_models.QMSAudit.planned_start >= today,
-        quality_models.QMSAudit.planned_start <= due_soon,
-        quality_models.QMSAudit.status != QMSAuditStatus.CLOSED,
-    ).count()
-    active_fieldwork = audit_qs.filter(quality_models.QMSAudit.status == QMSAuditStatus.IN_PROGRESS).count()
-
-    open_cars = car_qs.filter(quality_models.CorrectiveActionRequest.status.notin_([CARStatus.CLOSED, CARStatus.CANCELLED])).count()
-    overdue_cars = car_qs.filter(
-        quality_models.CorrectiveActionRequest.due_date.isnot(None),
-        quality_models.CorrectiveActionRequest.due_date < today,
-        quality_models.CorrectiveActionRequest.status.notin_([CARStatus.CLOSED, CARStatus.CANCELLED]),
-    ).count()
-    due_soon_cars = car_qs.filter(
-        quality_models.CorrectiveActionRequest.due_date.isnot(None),
-        quality_models.CorrectiveActionRequest.due_date >= today,
-        quality_models.CorrectiveActionRequest.due_date <= due_soon,
-        quality_models.CorrectiveActionRequest.status.notin_([CARStatus.CLOSED, CARStatus.CANCELLED]),
-    ).count()
-
-    draft_documents = document_qs.filter(quality_models.QMSDocument.status == QMSDocStatus.DRAFT).count()
-    active_documents = document_qs.filter(quality_models.QMSDocument.status == QMSDocStatus.ACTIVE).count()
-    open_findings = finding_qs.filter(quality_models.QMSAuditFinding.closed_at.is_(None)).count()
-    overdue_training = training_qs.filter(
-        training_models.TrainingRecord.valid_until.isnot(None),
-        training_models.TrainingRecord.valid_until < today,
-    ).count()
+    counters = {
+        "open_audits": _qms_count(db, sql="SELECT COUNT(*) FROM qms_audits WHERE amo_id = :amo_id AND status <> 'CLOSED'", params={"amo_id": ctx.amo_id}, label="open_audits", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+        "audits_due_soon": _qms_count(db, sql="""
+            SELECT COUNT(*) FROM qms_audits
+            WHERE amo_id = :amo_id AND planned_start IS NOT NULL
+              AND planned_start >= :today AND planned_start <= :due_soon
+              AND status <> 'CLOSED'
+        """, params={"amo_id": ctx.amo_id, "today": today, "due_soon": due_soon}, label="audits_due_soon", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+        "active_audit_fieldwork": _qms_count(db, sql="SELECT COUNT(*) FROM qms_audits WHERE amo_id = :amo_id AND status = 'IN_PROGRESS'", params={"amo_id": ctx.amo_id}, label="active_audit_fieldwork", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+        "open_cars": _qms_count(db, sql="SELECT COUNT(*) FROM quality_cars WHERE amo_id = :amo_id AND status NOT IN ('CLOSED', 'CANCELLED')", params={"amo_id": ctx.amo_id}, label="open_cars", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+        "overdue_cars": _qms_count(db, sql="""
+            SELECT COUNT(*) FROM quality_cars
+            WHERE amo_id = :amo_id AND due_date IS NOT NULL AND due_date < :today
+              AND status NOT IN ('CLOSED', 'CANCELLED')
+        """, params={"amo_id": ctx.amo_id, "today": today}, label="overdue_cars", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+        "cars_due_soon": _qms_count(db, sql="""
+            SELECT COUNT(*) FROM quality_cars
+            WHERE amo_id = :amo_id AND due_date IS NOT NULL
+              AND due_date >= :today AND due_date <= :due_soon
+              AND status NOT IN ('CLOSED', 'CANCELLED')
+        """, params={"amo_id": ctx.amo_id, "today": today, "due_soon": due_soon}, label="cars_due_soon", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+        "open_findings": _qms_count(db, sql="SELECT COUNT(*) FROM qms_audit_findings WHERE amo_id = :amo_id AND closed_at IS NULL", params={"amo_id": ctx.amo_id}, label="open_findings", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+        "draft_documents": _qms_count(db, sql="SELECT COUNT(*) FROM qms_documents WHERE amo_id = :amo_id AND status = 'DRAFT'", params={"amo_id": ctx.amo_id}, label="draft_documents", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+        "active_documents": _qms_count(db, sql="SELECT COUNT(*) FROM qms_documents WHERE amo_id = :amo_id AND status = 'ACTIVE'", params={"amo_id": ctx.amo_id}, label="active_documents", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+        "training_expired_records": _qms_count(db, sql="""
+            WITH latest AS (
+                SELECT DISTINCT ON (user_id, course_id) user_id, course_id, valid_until
+                FROM training_records
+                WHERE amo_id = :amo_id AND valid_until IS NOT NULL
+                ORDER BY user_id, course_id, completion_date DESC NULLS LAST, valid_until DESC NULLS LAST, created_at DESC NULLS LAST
+            )
+            SELECT COUNT(*) FROM latest WHERE valid_until < :today
+        """, params={"amo_id": ctx.amo_id, "today": today}, label="training_expired_records", trace_id=trace_id, source_errors=source_errors, amo_id=ctx.amo_id, user_id=ctx.user_id),
+    }
 
     return {
         "tenant": {"amo_code": ctx.amo_code, "amo_id": ctx.amo_id},
         "source": "tenant_scoped_backend",
-        "as_of": datetime.now(timezone.utc).isoformat(),
-        "counters": {
-            "open_audits": open_audits,
-            "audits_due_soon": audits_due_soon,
-            "active_audit_fieldwork": active_fieldwork,
-            "open_cars": open_cars,
-            "overdue_cars": overdue_cars,
-            "cars_due_soon": due_soon_cars,
-            "open_findings": open_findings,
-            "draft_documents": draft_documents,
-            "active_documents": active_documents,
-            "training_expired_records": overdue_training,
-        },
+        "as_of": calendar_context["now"].isoformat(),
+        "timezone": calendar_context["timezone"],
+        "health": "degraded" if source_errors else "ok",
+        "source_errors": source_errors,
+        "counters": {key: (0 if value is None else value) for key, value in counters.items()},
         "links": {
             "open_cars": f"/maintenance/{ctx.amo_code}/qms/cars/overdue",
             "audits_due_soon": f"/maintenance/{ctx.amo_code}/qms/audits/schedule",
@@ -193,8 +469,9 @@ def qms_inbox_view(
 def qms_calendar(
     start: date | None = Query(None),
     end: date | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(120, ge=1, le=500),
     offset: int = Query(0, ge=0, le=100_000),
+    source: str | None = Query(None),
     ctx: TenantContext = Depends(require_qms_permission("qms.calendar.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
@@ -202,79 +479,260 @@ def qms_calendar(
     started = time.perf_counter()
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     if _is_postgres(db):
-        db.execute(text("SET LOCAL statement_timeout = '12000ms'"))
-    today = date.today()
-    start_date = start or today - timedelta(days=30)
-    end_date = end or today + timedelta(days=180)
-    bounded_limit = max(1, min(limit, 200))
+        db.execute(text("SET LOCAL statement_timeout = '9000ms'"))
+    calendar_context = _tenant_calendar_context(db, amo_id=ctx.amo_id)
+    today = calendar_context["today"]
+    start_date = start or today.replace(day=1) - timedelta(days=10)
+    end_date = end or today + timedelta(days=90)
+    if end_date < start_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Calendar end date cannot be before start date.")
+    bounded_limit = max(1, min(limit, 500))
     bounded_offset = max(0, offset)
-    source_limit = min(max(bounded_limit + bounded_offset + 10, 50), 250)
-
-    events: list[dict[str, Any]] = []
-
-    audits = (
-        db.query(quality_models.QMSAudit)
-        .filter(
-            quality_models.QMSAudit.amo_id == ctx.amo_id,
-            or_(
-                quality_models.QMSAudit.planned_start.between(start_date, end_date),
-                quality_models.QMSAudit.planned_end.between(start_date, end_date),
-            ),
-        )
-        .limit(source_limit)
-        .all()
+    source_filter = {source} if source else None
+    events, source_errors = _build_calendar_events(
+        db,
+        ctx=ctx,
+        start_date=start_date,
+        end_date=end_date,
+        today=today,
+        source_filter=source_filter,
+        trace_id=trace_id,
+        required_sources=source_filter or set(),
     )
-    for audit in audits:
-        if audit.planned_start:
-            events.append(_event("audits", "audit", _row_id(audit), audit.title, audit.planned_start, "audit_start", f"/maintenance/{ctx.amo_code}/qms/audits/{audit.id}/overview"))
-        if audit.planned_end:
-            events.append(_event("audits", "audit", _row_id(audit), audit.title, audit.planned_end, "audit_end", f"/maintenance/{ctx.amo_code}/qms/audits/{audit.id}/overview"))
-
-    cars = (
-        db.query(quality_models.CorrectiveActionRequest)
-        .filter(
-            quality_models.CorrectiveActionRequest.amo_id == ctx.amo_id,
-            quality_models.CorrectiveActionRequest.due_date.between(start_date, end_date),
-        )
-        .limit(source_limit)
-        .all()
-    )
-    for car in cars:
-        events.append(_event("cars", "car", _row_id(car), car.title, car.due_date, "car_due", f"/maintenance/{ctx.amo_code}/qms/cars/{car.id}/overview"))
-
-    training = (
-        db.query(training_models.TrainingRecord, training_models.TrainingCourse)
-        .outerjoin(training_models.TrainingCourse, training_models.TrainingRecord.course_id == training_models.TrainingCourse.id)
-        .filter(
-            training_models.TrainingRecord.amo_id == ctx.amo_id,
-            training_models.TrainingRecord.valid_until.between(start_date, end_date),
-        )
-        .limit(source_limit)
-        .all()
-    )
-    for record, course in training:
-        course_label = None
-        if course is not None:
-            course_label = course.course_name or course.course_id
-        events.append(_event("training-competence", "training_record", _row_id(record), f"Training expires: {course_label or record.course_id}", record.valid_until, "training_expiry", f"/maintenance/{ctx.amo_code}/qms/training-competence/people/{record.user_id}/course-history"))
-
-    events.sort(key=lambda item: item["date"] or "")
+    events.sort(key=lambda item: (item.get("date") or "9999-12-31", item.get("source") or "", item.get("title") or ""))
     visible = events[bounded_offset:bounded_offset + bounded_limit]
-    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-    logger.info("QMS calendar read trace_id=%s amo=%s rows=%s elapsed_ms=%s", trace_id, ctx.amo_code, len(visible), elapsed_ms)
     return {
         "module": "calendar",
-        "view": "list",
-        "start": start_date.isoformat(),
-        "end": end_date.isoformat(),
+        "view": "list" if not source else source,
+        "calendar_meta": {
+            "today": today.isoformat(),
+            "timezone": calendar_context["timezone"],
+            "country": calendar_context.get("country"),
+            "start": start_date.isoformat(),
+            "end": end_date.isoformat(),
+            "week_starts_on": "MONDAY",
+        },
+        "summary": {
+            "total": len(events),
+            "overdue": sum(1 for item in events if item.get("due_state") == "overdue"),
+            "audits": sum(1 for item in events if item.get("source") == "audits"),
+            "cars": sum(1 for item in events if item.get("source") == "cars"),
+            "training": sum(1 for item in events if item.get("source") == "training"),
+            "holidays": sum(1 for item in events if item.get("source") == "holidays"),
+        },
         "items": visible,
+        "columns": ["date", "title", "owner_label", "event_type", "status", "due_state"],
         "limit": bounded_limit,
         "offset": bounded_offset,
         "next_offset": bounded_offset + bounded_limit if len(events) > bounded_offset + bounded_limit else None,
         "has_more": len(events) > bounded_offset + bounded_limit,
+        "source_errors": source_errors,
+        "warning": f"{len(source_errors)} calendar source(s) failed. See diagnostics." if source_errors else None,
         "trace_id": trace_id,
-        "elapsed_ms": elapsed_ms,
+        "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
     }
+
+
+def _build_calendar_events(
+    db: Session,
+    *,
+    ctx: TenantContext,
+    start_date: date,
+    end_date: date,
+    today: date,
+    source_filter: set[str] | None,
+    trace_id: str,
+    required_sources: set[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    events: list[dict[str, Any]] = []
+    source_errors: list[dict[str, Any]] = []
+    source_limit = 500
+
+    def want(name: str) -> bool:
+        return source_filter is None or name in source_filter
+
+    if want("audits"):
+        audit_start_rows = _calendar_fetch_rows(
+            db,
+            sql="""
+                SELECT id::text AS id, audit_ref, title, status, kind, planned_start AS event_date, lead_auditor_user_id
+                FROM qms_audits
+                WHERE amo_id = :amo_id
+                  AND planned_start IS NOT NULL
+                  AND planned_start >= :start_date
+                  AND planned_start <= :end_date
+                ORDER BY planned_start ASC, created_at DESC NULLS LAST
+                LIMIT :limit
+            """,
+            params={"amo_id": ctx.amo_id, "start_date": start_date, "end_date": end_date, "limit": source_limit},
+            label="audit_start",
+            trace_id=trace_id,
+            source_errors=source_errors,
+            required="audits" in required_sources,
+            amo_id=ctx.amo_id,
+            user_id=ctx.user_id,
+        )
+        audit_end_rows = _calendar_fetch_rows(
+            db,
+            sql="""
+                SELECT id::text AS id, audit_ref, title, status, kind, planned_end AS event_date, lead_auditor_user_id
+                FROM qms_audits
+                WHERE amo_id = :amo_id
+                  AND planned_end IS NOT NULL
+                  AND planned_end >= :start_date
+                  AND planned_end <= :end_date
+                ORDER BY planned_end ASC, created_at DESC NULLS LAST
+                LIMIT :limit
+            """,
+            params={"amo_id": ctx.amo_id, "start_date": start_date, "end_date": end_date, "limit": source_limit},
+            label="audit_end",
+            trace_id=trace_id,
+            source_errors=source_errors,
+            required="audits" in required_sources,
+            amo_id=ctx.amo_id,
+            user_id=ctx.user_id,
+        )
+        for row in audit_start_rows:
+            when = row.get("event_date")
+            title = row.get("title") or row.get("audit_ref") or "Audit"
+            events.append(_event("audits", "audit", row["id"], str(title), when, "audit_start", f"/maintenance/{ctx.amo_code}/qms/audits/{row['id']}/overview", status_value=row.get("status"), detail=row.get("audit_ref"), source="audits", due_state=_due_state_for(when, today, event_type="audit_start", status_value=row.get("status"))))
+        for row in audit_end_rows:
+            when = row.get("event_date")
+            title = row.get("title") or row.get("audit_ref") or "Audit"
+            events.append(_event("audits", "audit", row["id"], str(title), when, "audit_end", f"/maintenance/{ctx.amo_code}/qms/audits/{row['id']}/overview", status_value=row.get("status"), detail=row.get("audit_ref"), source="audits", due_state=_due_state_for(when, today, event_type="audit_end", status_value=row.get("status"))))
+
+    if want("cars"):
+        car_rows = _calendar_fetch_rows(
+            db,
+            sql="""
+                SELECT id::text AS id, car_number, title, status, priority, due_date AS event_date, assigned_to_user_id
+                FROM quality_cars
+                WHERE amo_id = :amo_id
+                  AND due_date IS NOT NULL
+                  AND due_date >= :start_date
+                  AND due_date <= :end_date
+                ORDER BY due_date ASC, created_at DESC NULLS LAST
+                LIMIT :limit
+            """,
+            params={"amo_id": ctx.amo_id, "start_date": start_date, "end_date": end_date, "limit": source_limit},
+            label="cars",
+            trace_id=trace_id,
+            source_errors=source_errors,
+            required="cars" in required_sources,
+            amo_id=ctx.amo_id,
+            user_id=ctx.user_id,
+        )
+        for row in car_rows:
+            when = row.get("event_date")
+            title = row.get("title") or row.get("car_number") or "Corrective action"
+            events.append(_event("cars", "car", row["id"], str(title), when, "car_due", f"/maintenance/{ctx.amo_code}/qms/cars/{row['id']}/overview", status_value=row.get("status"), detail=row.get("car_number"), source="cars", due_state=_due_state_for(when, today, event_type="car_due", status_value=row.get("status"))))
+
+    if want("training"):
+        training_session_rows = _calendar_fetch_rows(
+            db,
+            sql="""
+                SELECT e.id::text AS id, e.title, e.status, e.starts_on AS event_date, e.ends_on,
+                       c.course_id AS course_code, c.course_name,
+                       COUNT(p.id) AS participant_count
+                FROM training_events e
+                LEFT JOIN training_courses c ON c.id = e.course_id
+                LEFT JOIN training_event_participants p ON p.event_id = e.id
+                WHERE e.amo_id = :amo_id
+                  AND e.starts_on >= :start_date
+                  AND e.starts_on <= :end_date
+                GROUP BY e.id, e.title, e.status, e.starts_on, e.ends_on, c.course_id, c.course_name
+                ORDER BY e.starts_on ASC, e.created_at DESC NULLS LAST
+                LIMIT :limit
+            """,
+            params={"amo_id": ctx.amo_id, "start_date": start_date, "end_date": end_date, "limit": source_limit},
+            label="training_sessions",
+            trace_id=trace_id,
+            source_errors=source_errors,
+            required="training" in required_sources,
+            amo_id=ctx.amo_id,
+            user_id=ctx.user_id,
+        )
+        for row in training_session_rows:
+            when = row.get("event_date")
+            title = row.get("title") or row.get("course_name") or row.get("course_code") or "Training session"
+            participant_count = int(row.get("participant_count") or 0)
+            events.append(_event("training", "training_event", row["id"], str(title), when, "training_session", f"/maintenance/{ctx.amo_code}/qms/training-competence/schedule", status_value=row.get("status"), detail=f"{participant_count} participant(s)", source="training", due_state=_due_state_for(when, today, event_type="training_session", status_value=row.get("status"))))
+
+        training_expiry_rows = _calendar_fetch_rows(
+            db,
+            sql="""
+                WITH latest AS (
+                    SELECT DISTINCT ON (r.user_id, r.course_id)
+                        r.id::text AS id,
+                        r.user_id,
+                        r.course_id,
+                        r.valid_until AS event_date,
+                        r.completion_date,
+                        r.verification_status,
+                        r.created_at
+                    FROM training_records r
+                    WHERE r.amo_id = :amo_id
+                      AND r.valid_until IS NOT NULL
+                    ORDER BY r.user_id, r.course_id,
+                             r.completion_date DESC NULLS LAST,
+                             r.valid_until DESC NULLS LAST,
+                             r.created_at DESC NULLS LAST
+                )
+                SELECT latest.id, latest.user_id, latest.event_date, latest.verification_status,
+                       u.full_name, u.staff_code,
+                       c.course_id AS course_code, c.course_name
+                FROM latest
+                JOIN users u ON u.id = latest.user_id
+                LEFT JOIN training_courses c ON c.id = latest.course_id
+                WHERE u.amo_id = :amo_id
+                  AND latest.event_date >= :start_date
+                  AND latest.event_date <= :end_date
+                ORDER BY latest.event_date ASC, u.full_name ASC
+                LIMIT :limit
+            """,
+            params={"amo_id": ctx.amo_id, "start_date": start_date, "end_date": end_date, "limit": source_limit},
+            label="training_expiry",
+            trace_id=trace_id,
+            source_errors=source_errors,
+            required="training" in required_sources,
+            amo_id=ctx.amo_id,
+            user_id=ctx.user_id,
+        )
+        for row in training_expiry_rows:
+            when = row.get("event_date")
+            person = row.get("full_name") or row.get("staff_code") or row.get("user_id") or "Personnel"
+            course = row.get("course_name") or row.get("course_code") or "Training"
+            title = f"{person}: {course} expires"
+            events.append(_event("training", "training_record", row["id"], title, when, "training_expiry", f"/maintenance/{ctx.amo_code}/qms/training-competence/people/{row['user_id']}/course-history", status_value=row.get("verification_status"), owner_label=str(person), detail=str(course), source="training", due_state=_due_state_for(when, today, event_type="training_expiry", status_value=None)))
+
+    if want("holidays"):
+        settings_row = _read_calendar_settings(db, amo_id=ctx.amo_id)
+        _refresh_public_holidays_if_needed(db, amo_id=ctx.amo_id, settings_row=settings_row, start_date=start_date, end_date=end_date, trace_id=trace_id, source_errors=source_errors)
+        if _qms_table_exists(db, "qms_public_holidays"):
+            holiday_rows = _calendar_fetch_rows(
+                db,
+                sql="""
+                    SELECT id::text AS id, holiday_date AS event_date, title, source_uid, source_url
+                    FROM qms_public_holidays
+                    WHERE amo_id = :amo_id
+                      AND holiday_date >= :start_date
+                      AND holiday_date <= :end_date
+                    ORDER BY holiday_date ASC, title ASC
+                    LIMIT :limit
+                """,
+                params={"amo_id": ctx.amo_id, "start_date": start_date, "end_date": end_date, "limit": source_limit},
+                label="public_holidays",
+                trace_id=trace_id,
+                source_errors=source_errors,
+                required="holidays" in required_sources,
+                amo_id=ctx.amo_id,
+                user_id=ctx.user_id,
+            )
+            for row in holiday_rows:
+                when = row.get("event_date")
+                events.append(_event("holidays", "public_holiday", row["id"], str(row.get("title") or "Public holiday"), when, "public_holiday", None, status_value="HOLIDAY", detail="Public holiday", source="holidays", due_state="holiday", actionable=False))
+
+    return events, source_errors
 
 
 @router.get("/calendar/{view}")
@@ -282,25 +740,60 @@ def qms_calendar_view(
     view: str,
     start: date | None = Query(None),
     end: date | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(120, ge=1, le=500),
     offset: int = Query(0, ge=0, le=100_000),
     ctx: TenantContext = Depends(require_qms_permission("qms.calendar.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
-    if view in {"audits", "cars", "training", "management-review", "regulatory-deadlines"}:
-        data = qms_calendar(start=start, end=end, limit=200, offset=0, ctx=ctx, db=db)
-        filtered = [item for item in data.get("items", []) if item.get("module") == view or item.get("event_type", "").startswith(view.rstrip("s"))]
-        bounded_limit = max(1, min(limit, 200))
-        bounded_offset = max(0, offset)
-        data["items"] = filtered[bounded_offset:bounded_offset + bounded_limit]
-        data["limit"] = bounded_limit
-        data["offset"] = bounded_offset
-        data["has_more"] = len(filtered) > bounded_offset + bounded_limit
-        data["next_offset"] = bounded_offset + bounded_limit if data["has_more"] else None
-    else:
-        data = qms_calendar(start=start, end=end, limit=limit, offset=offset, ctx=ctx, db=db)
+    source_filter = _source_filter_for_view(view)
+    source = next(iter(source_filter)) if source_filter and len(source_filter) == 1 else None
+    data = qms_calendar(start=start, end=end, limit=limit, offset=offset, source=source, ctx=ctx, db=db)
     data["view"] = view
     return data
+
+
+@router.get("/calendar/settings")
+def get_calendar_settings(
+    ctx: TenantContext = Depends(require_qms_permission("qms.settings.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    calendar_context = _tenant_calendar_context(db, amo_id=ctx.amo_id)
+    return {
+        "tenant": {"amo_code": ctx.amo_code, "amo_id": ctx.amo_id},
+        "timezone": calendar_context["timezone"],
+        "country": calendar_context.get("country"),
+        "settings": _read_calendar_settings(db, amo_id=ctx.amo_id),
+    }
+
+
+@router.patch("/calendar/settings")
+def update_calendar_settings(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    ctx: TenantContext = Depends(require_qms_permission("qms.settings.manage")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    if not _qms_table_exists(db, "qms_calendar_settings"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="qms_calendar_settings table is missing. Run migrations first.")
+    allowed = {"holidays_enabled", "holiday_source_url", "holiday_provider", "holiday_country_code", "holiday_region_code", "cache_ttl_hours"}
+    values = {key: payload[key] for key in allowed if key in payload}
+    if not values:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No supported calendar settings supplied.")
+    params = {"amo_id": ctx.amo_id, **values}
+    set_sql = ", ".join(f"{key} = :{key}" for key in values)
+    row = db.execute(
+        text(f"""
+            INSERT INTO qms_calendar_settings (amo_id, {', '.join(values.keys())}, created_at, updated_at)
+            VALUES (:amo_id, {', '.join(':' + key for key in values)}, NOW(), NOW())
+            ON CONFLICT (amo_id)
+            DO UPDATE SET {set_sql}, updated_at = NOW()
+            RETURNING *
+        """),
+        params,
+    ).mappings().first()
+    db.commit()
+    return {"settings": dict(row) if row else _read_calendar_settings(db, amo_id=ctx.amo_id)}
 
 
 @router.get("/audits")

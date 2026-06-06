@@ -19,11 +19,76 @@ import {
 import { canViewFeature, getFirstAccessibleModuleRoute, type ModuleFeature } from "./utils/roleAccess";
 import { hasQmsRolePermission, isPlatformSuperuser } from "./app/routeGuards";
 
+const CHUNK_RECOVERY_PREFIX = "amoportal:route-chunk-recovery:";
+const CHUNK_RECOVERY_WINDOW_MS = 60_000;
+
+function isLazyChunkLoadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /failed to fetch dynamically imported module|importing a module script failed|loading chunk|chunkloaderror|dynamically imported module/i.test(message);
+}
+
+async function clearStaleRouteAssetCaches(): Promise<void> {
+  if (typeof window === "undefined") return;
+  if ("caches" in window) {
+    const keys = await window.caches.keys();
+    await Promise.all(keys.filter((key) => key.startsWith("aerodoc-hybrid-dms-")).map((key) => window.caches.delete(key)));
+  }
+  if ("serviceWorker" in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.update().catch(() => undefined)));
+  }
+}
+
+async function loadLazyModule<T>(loader: () => Promise<T>): Promise<T> {
+  try {
+    const module = await loader();
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.removeItem(`${CHUNK_RECOVERY_PREFIX}${window.location.pathname}`);
+      } catch {
+        // Storage can be unavailable in hardened browser modes.
+      }
+    }
+    return module;
+  } catch (error) {
+    if (typeof window === "undefined" || !isLazyChunkLoadError(error)) throw error;
+
+    const key = `${CHUNK_RECOVERY_PREFIX}${window.location.pathname}`;
+    let lastAttempt = 0;
+    try {
+      lastAttempt = Number(sessionStorage.getItem(key) || 0);
+    } catch {
+      // Continue with a one-time recovery attempt even without session storage.
+    }
+    if (!lastAttempt || Date.now() - lastAttempt > CHUNK_RECOVERY_WINDOW_MS) {
+      try {
+        sessionStorage.setItem(key, String(Date.now()));
+      } catch {
+        // Best effort only.
+      }
+      await clearStaleRouteAssetCaches().catch(() => undefined);
+      window.location.reload();
+      return new Promise<T>(() => undefined);
+    }
+
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      // Best effort only.
+    }
+    throw error;
+  }
+}
+
+function lazyDefault<T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) {
+  return lazy(() => loadLazyModule(loader));
+}
+
 function lazyNamed<T extends Record<string, React.ComponentType<any>>>(
   loader: () => Promise<T>,
   exportName: keyof T
 ) {
-  return lazy(async () => ({ default: (await loader())[exportName] as React.ComponentType<any> }));
+  return lazy(async () => ({ default: (await loadLazyModule(loader))[exportName] as React.ComponentType<any> }));
 }
 
 const DocControlPages = {
@@ -71,6 +136,17 @@ const PlanningProductionPages = {
   ProductionComplianceItemsPage: lazyNamed(() => import("./pages/PlanningProductionPages"), "ProductionComplianceItemsPage"),
 } as const;
 
+
+const RosteringPages = {
+  RosteringDashboardPage: lazyNamed(() => import("./pages/rostering/RosteringPages"), "RosteringDashboardPage"),
+  RosterCalendarPage: lazyNamed(() => import("./pages/rostering/RosteringPages"), "RosterCalendarPage"),
+  ManpowerPlanningBoardPage: lazyNamed(() => import("./pages/rostering/RosteringPages"), "ManpowerPlanningBoardPage"),
+  MyRosterPage: lazyNamed(() => import("./pages/rostering/RosteringPages"), "MyRosterPage"),
+  TrainingImpactPage: lazyNamed(() => import("./pages/rostering/RosteringPages"), "TrainingImpactPage"),
+  RosterReportsPage: lazyNamed(() => import("./pages/rostering/RosteringPages"), "RosterReportsPage"),
+  RosterSettingsPage: lazyNamed(() => import("./pages/rostering/RosteringPages"), "RosterSettingsPage"),
+} as const;
+
 const TechnicalRecordsPages = {
   TechnicalRecordsDashboardPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "TechnicalRecordsDashboardPage"),
   AircraftRecordsPage: lazyNamed(() => import("./pages/TechnicalRecordsPages"), "AircraftRecordsPage"),
@@ -95,83 +171,84 @@ const TechnicalRecordsPages = {
 } as const;
 
 
-const LoginPage = lazy(() => import("./pages/LoginPage"));
-const PlatformControlPage = lazy(() => import("./pages/PlatformControlPage"));
-const PlatformTenantsPage = lazy(() => import("./pages/platform/PlatformTenantsPage"));
-const PlatformUsersPage = lazy(() => import("./pages/platform/PlatformUsersPage"));
-const PlatformBillingPage = lazy(() => import("./pages/platform/PlatformBillingPage"));
-const PlatformAnalyticsPage = lazy(() => import("./pages/platform/PlatformAnalyticsPage"));
-const PlatformSecurityPage = lazy(() => import("./pages/platform/PlatformSecurityPage"));
-const PlatformIntegrationsPage = lazy(() => import("./pages/platform/PlatformIntegrationsPage"));
-const PlatformInfrastructurePage = lazy(() => import("./pages/platform/PlatformInfrastructurePage"));
-const PasswordResetPage = lazy(() => import("./pages/PasswordResetPage"));
-const DashboardPage = lazy(() => import("./pages/DashboardPage"));
-const EhmDashboardPage = lazy(() => import("./pages/ehm/EhmDashboardPage"));
-const EhmTrendsPage = lazy(() => import("./pages/ehm/EhmTrendsPage"));
-const EhmUploadsPage = lazy(() => import("./pages/ehm/EhmUploadsPage"));
-const ReliabilityReportsPage = lazy(() => import("./pages/ReliabilityReportsPage"));
-const CRSNewPage = lazy(() => import("./pages/CRSNewPage"));
-const AircraftImportPage = lazy(() => import("./pages/AircraftImportPage"));
-const ComponentImportPage = lazy(() => import("./pages/ComponentImportPage"));
-const AircraftDocumentsPage = lazy(() => import("./pages/AircraftDocumentsPage"));
-const WorkOrderSearchPage = lazy(() => import("./pages/work/WorkOrderSearchPage"));
-const WorkOrderDetailPage = lazy(() => import("./pages/work/WorkOrderDetailPage"));
-const TaskSummaryPage = lazy(() => import("./pages/work/TaskSummaryPage"));
-const TaskPrintPage = lazy(() => import("./pages/work/TaskPrintPage"));
-const AdminUserNewPage = lazy(() => import("./pages/AdminUserNewPage"));
-const AdminUserDetailPage = lazy(() => import("./pages/AdminUserDetailPage"));
-const AdminDashboardPage = lazy(() => import("./pages/AdminDashboardPage"));
-const AdminOverviewPage = lazy(() => import("./pages/AdminOverviewPage"));
-const AdminAmoManagementPage = lazy(() => import("./pages/AdminAmoManagementPage"));
-const AdminAmoProfilePage = lazy(() => import("./pages/AdminAmoProfilePage"));
-const AdminAmoAssetsPage = lazy(() => import("./pages/AdminAmoAssetsPage"));
-const AdminUsageSettingsPage = lazy(() => import("./pages/AdminUsageSettingsPage"));
-const AdminInvoicesPage = lazy(() => import("./pages/AdminInvoicesPage"));
-const AdminInvoiceDetailPage = lazy(() => import("./pages/AdminInvoiceDetailPage"));
-const EmailLogsPage = lazy(() => import("./pages/EmailLogsPage"));
-const EmailServerSettingsPage = lazy(() => import("./pages/EmailServerSettingsPage"));
-const TrainingPage = lazy(() => import("./pages/MyTrainingPage"));
-const QmsCanonicalPage = lazy(() => import("./pages/qms/QmsCanonicalPage"));
-const QMSTrainingUserPage = lazy(() => import("./pages/QMSTrainingUserPage"));
-const AeroDocAuditModePage = lazy(() => import("./pages/AeroDocAuditModePage"));
-const AeroDocComplianceHealthPage = lazy(() => import("./pages/AeroDocComplianceHealthPage"));
-const AeroDocHangarDashboardPage = lazy(() => import("./pages/AeroDocHangarDashboardPage"));
-const QualityCarsPage = lazy(() => import("./pages/QualityCarsPage"));
-const PublicCarInvitePage = lazy(() => import("./pages/PublicCarInvitePage"));
-const SubscriptionManagementPage = lazy(() => import("./pages/SubscriptionManagementPage"));
-const UpsellPage = lazy(() => import("./pages/UpsellPage"));
-const UserWidgetsPage = lazy(() => import("./pages/UserWidgetsPage"));
-const OnboardingPasswordPage = lazy(() => import("./pages/OnboardingPasswordPage"));
-const PublicCertificateVerificationPage = lazy(() => import("./pages/PublicCertificateVerificationPage"));
-const VerifyScanPage = lazy(() => import("./pages/VerifyScanPage"));
+const LoginPage = lazyDefault(() => import("./pages/LoginPage"));
+const PlatformControlPage = lazyDefault(() => import("./pages/PlatformControlPage"));
+const PlatformTenantsPage = lazyDefault(() => import("./pages/platform/PlatformTenantsPage"));
+const PlatformUsersPage = lazyDefault(() => import("./pages/platform/PlatformUsersPage"));
+const PlatformBillingPage = lazyDefault(() => import("./pages/platform/PlatformBillingPage"));
+const PlatformAnalyticsPage = lazyDefault(() => import("./pages/platform/PlatformAnalyticsPage"));
+const PlatformSecurityPage = lazyDefault(() => import("./pages/platform/PlatformSecurityPage"));
+const PlatformIntegrationsPage = lazyDefault(() => import("./pages/platform/PlatformIntegrationsPage"));
+const PlatformInfrastructurePage = lazyDefault(() => import("./pages/platform/PlatformInfrastructurePage"));
+const PasswordResetPage = lazyDefault(() => import("./pages/PasswordResetPage"));
+const DashboardPage = lazyDefault(() => import("./pages/DashboardPage"));
+const EhmDashboardPage = lazyDefault(() => import("./pages/ehm/EhmDashboardPage"));
+const EhmTrendsPage = lazyDefault(() => import("./pages/ehm/EhmTrendsPage"));
+const EhmUploadsPage = lazyDefault(() => import("./pages/ehm/EhmUploadsPage"));
+const ReliabilityReportsPage = lazyDefault(() => import("./pages/ReliabilityReportsPage"));
+const CRSNewPage = lazyDefault(() => import("./pages/CRSNewPage"));
+const AircraftImportPage = lazyDefault(() => import("./pages/AircraftImportPage"));
+const ComponentImportPage = lazyDefault(() => import("./pages/ComponentImportPage"));
+const AircraftDocumentsPage = lazyDefault(() => import("./pages/AircraftDocumentsPage"));
+const WorkOrderSearchPage = lazyDefault(() => import("./pages/work/WorkOrderSearchPage"));
+const WorkOrderDetailPage = lazyDefault(() => import("./pages/work/WorkOrderDetailPage"));
+const TaskSummaryPage = lazyDefault(() => import("./pages/work/TaskSummaryPage"));
+const TaskPrintPage = lazyDefault(() => import("./pages/work/TaskPrintPage"));
+const AdminUserNewPage = lazyDefault(() => import("./pages/AdminUserNewPage"));
+const AdminUserDetailPage = lazyDefault(() => import("./pages/AdminUserDetailPage"));
+const AdminDashboardPage = lazyDefault(() => import("./pages/AdminDashboardPage"));
+const AdminOverviewPage = lazyDefault(() => import("./pages/AdminOverviewPage"));
+const AdminAmoManagementPage = lazyDefault(() => import("./pages/AdminAmoManagementPage"));
+const AdminAmoProfilePage = lazyDefault(() => import("./pages/AdminAmoProfilePage"));
+const AdminAmoAssetsPage = lazyDefault(() => import("./pages/AdminAmoAssetsPage"));
+const AdminUsageSettingsPage = lazyDefault(() => import("./pages/AdminUsageSettingsPage"));
+const AdminInvoicesPage = lazyDefault(() => import("./pages/AdminInvoicesPage"));
+const AdminInvoiceDetailPage = lazyDefault(() => import("./pages/AdminInvoiceDetailPage"));
+const EmailLogsPage = lazyDefault(() => import("./pages/EmailLogsPage"));
+const EmailServerSettingsPage = lazyDefault(() => import("./pages/EmailServerSettingsPage"));
+const TrainingPage = lazyDefault(() => import("./pages/MyTrainingPage"));
+const TrainingCompetencePage = lazyDefault(() => import("./pages/TrainingCompetencePage"));
+const QmsCanonicalPage = lazyDefault(() => import("./pages/qms/QmsCanonicalPage"));
+const QMSTrainingUserPage = lazyDefault(() => import("./pages/QMSTrainingUserPage"));
+const AeroDocAuditModePage = lazyDefault(() => import("./pages/AeroDocAuditModePage"));
+const AeroDocComplianceHealthPage = lazyDefault(() => import("./pages/AeroDocComplianceHealthPage"));
+const AeroDocHangarDashboardPage = lazyDefault(() => import("./pages/AeroDocHangarDashboardPage"));
+const QualityCarsPage = lazyDefault(() => import("./pages/QualityCarsPage"));
+const PublicCarInvitePage = lazyDefault(() => import("./pages/PublicCarInvitePage"));
+const SubscriptionManagementPage = lazyDefault(() => import("./pages/SubscriptionManagementPage"));
+const UpsellPage = lazyDefault(() => import("./pages/UpsellPage"));
+const UserWidgetsPage = lazyDefault(() => import("./pages/UserWidgetsPage"));
+const OnboardingPasswordPage = lazyDefault(() => import("./pages/OnboardingPasswordPage"));
+const PublicCertificateVerificationPage = lazyDefault(() => import("./pages/PublicCertificateVerificationPage"));
+const VerifyScanPage = lazyDefault(() => import("./pages/VerifyScanPage"));
 
-const QualityAuditScheduleDetailPage = lazy(() => import("./pages/QualityAuditScheduleDetailPage"));
-const QualityAuditRunHubPage = lazy(() => import("./pages/QualityAuditRunHubPage"));
-const QualityEvidenceViewerPage = lazy(() => import("./pages/QualityEvidenceViewerPage"));
+const QualityAuditScheduleDetailPage = lazyDefault(() => import("./pages/QualityAuditScheduleDetailPage"));
+const QualityAuditRunHubPage = lazyDefault(() => import("./pages/QualityAuditRunHubPage"));
+const QualityEvidenceViewerPage = lazyDefault(() => import("./pages/QualityEvidenceViewerPage"));
 
-const ManualsDashboardPage = lazy(() => import("./pages/manuals/ManualsDashboardPage"));
-const ManualOverviewPage = lazy(() => import("./pages/manuals/ManualOverviewPage"));
-const ManualReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
-const ManualDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
-const ManualWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
-const ManualExportsPage = lazy(() => import("./pages/manuals/ManualExportsPage"));
-const ManualMasterListPage = lazy(() => import("./pages/manuals/ManualMasterListPage"));
-const ProductionWorkspacePage = lazy(() => import("./pages/ProductionWorkspacePage"));
-const UserProfilePage = lazy(() => import("./pages/UserProfilePage"));
-const MaintenanceDashboardPage = lazy(() => import("./pages/maintenance/MaintenanceDashboardPage"));
-const MaintenanceWorkOrdersPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrdersPage"));
-const MaintenanceWorkOrderDetailPage = lazy(() => import("./pages/maintenance/MaintenanceWorkOrderDetailPage"));
-const MaintenanceWorkPackagesPage = lazy(() => import("./pages/maintenance/MaintenanceWorkPackagesPage"));
-const MaintenanceDefectsPage = lazy(() => import("./pages/maintenance/MaintenanceDefectsPage"));
-const MaintenanceDefectDetailPage = lazy(() => import("./pages/maintenance/MaintenanceDefectDetailPage"));
-const MaintenanceNonRoutinesPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutinesPage"));
-const MaintenanceNonRoutineDetailPage = lazy(() => import("./pages/maintenance/MaintenanceNonRoutineDetailPage"));
-const MaintenanceInspectionsPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionsPage"));
-const MaintenanceInspectionDetailPage = lazy(() => import("./pages/maintenance/MaintenanceInspectionDetailPage"));
-const MaintenancePartsToolsPage = lazy(() => import("./pages/maintenance/MaintenancePartsToolsPage"));
-const MaintenanceCloseoutPage = lazy(() => import("./pages/maintenance/MaintenanceCloseoutPage"));
-const MaintenanceReportsPage = lazy(() => import("./pages/maintenance/MaintenanceReportsPage"));
-const MaintenanceSettingsPage = lazy(() => import("./pages/maintenance/MaintenanceSettingsPage"));
+const ManualsDashboardPage = lazyDefault(() => import("./pages/manuals/ManualsDashboardPage"));
+const ManualOverviewPage = lazyDefault(() => import("./pages/manuals/ManualOverviewPage"));
+const ManualReaderPage = lazyDefault(() => import("./pages/manuals/ManualReaderPage"));
+const ManualDiffPage = lazyDefault(() => import("./pages/manuals/ManualDiffPage"));
+const ManualWorkflowPage = lazyDefault(() => import("./pages/manuals/ManualWorkflowPage"));
+const ManualExportsPage = lazyDefault(() => import("./pages/manuals/ManualExportsPage"));
+const ManualMasterListPage = lazyDefault(() => import("./pages/manuals/ManualMasterListPage"));
+const ProductionWorkspacePage = lazyDefault(() => import("./pages/ProductionWorkspacePage"));
+const UserProfilePage = lazyDefault(() => import("./pages/UserProfilePage"));
+const MaintenanceDashboardPage = lazyDefault(() => import("./pages/maintenance/MaintenanceDashboardPage"));
+const MaintenanceWorkOrdersPage = lazyDefault(() => import("./pages/maintenance/MaintenanceWorkOrdersPage"));
+const MaintenanceWorkOrderDetailPage = lazyDefault(() => import("./pages/maintenance/MaintenanceWorkOrderDetailPage"));
+const MaintenanceWorkPackagesPage = lazyDefault(() => import("./pages/maintenance/MaintenanceWorkPackagesPage"));
+const MaintenanceDefectsPage = lazyDefault(() => import("./pages/maintenance/MaintenanceDefectsPage"));
+const MaintenanceDefectDetailPage = lazyDefault(() => import("./pages/maintenance/MaintenanceDefectDetailPage"));
+const MaintenanceNonRoutinesPage = lazyDefault(() => import("./pages/maintenance/MaintenanceNonRoutinesPage"));
+const MaintenanceNonRoutineDetailPage = lazyDefault(() => import("./pages/maintenance/MaintenanceNonRoutineDetailPage"));
+const MaintenanceInspectionsPage = lazyDefault(() => import("./pages/maintenance/MaintenanceInspectionsPage"));
+const MaintenanceInspectionDetailPage = lazyDefault(() => import("./pages/maintenance/MaintenanceInspectionDetailPage"));
+const MaintenancePartsToolsPage = lazyDefault(() => import("./pages/maintenance/MaintenancePartsToolsPage"));
+const MaintenanceCloseoutPage = lazyDefault(() => import("./pages/maintenance/MaintenanceCloseoutPage"));
+const MaintenanceReportsPage = lazyDefault(() => import("./pages/maintenance/MaintenanceReportsPage"));
+const MaintenanceSettingsPage = lazyDefault(() => import("./pages/maintenance/MaintenanceSettingsPage"));
 
 type RequireAuthProps = {
   children: React.ReactElement;
@@ -292,7 +369,7 @@ const RequireAuth: React.FC<RequireAuthProps> = ({ children }) => {
   }
 
   if (!onboardingChecked && !isOnboardingRoute) {
-    return <PageRouteLoading label="Preparing workspaceâ€¦" />;
+    return <PageRouteLoading label="Preparing workspace…" />;
   }
 
   if (
@@ -396,7 +473,7 @@ const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.R
   return children;
 };
 
-const PageRouteLoading: React.FC<{ label?: string }> = ({ label = "Loadingâ€¦" }) => (
+const PageRouteLoading: React.FC<{ label?: string }> = ({ label = "Loading…" }) => (
   <div className="page-loading" role="status" aria-live="polite">
     <div className="page-loading__card">
       <div className="page-loading__spinner" />
@@ -405,14 +482,25 @@ const PageRouteLoading: React.FC<{ label?: string }> = ({ label = "Loadingâ€�
   </div>
 );
 
-class PortalRouteErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message: string }> {
-  constructor(props: { children: React.ReactNode }) {
+type PortalRouteErrorBoundaryInnerProps = {
+  children: React.ReactNode;
+  resetKey: string;
+};
+
+class PortalRouteErrorBoundaryInner extends React.Component<PortalRouteErrorBoundaryInnerProps, { hasError: boolean; message: string }> {
+  constructor(props: PortalRouteErrorBoundaryInnerProps) {
     super(props);
     this.state = { hasError: false, message: "" };
   }
 
   static getDerivedStateFromError(error: Error) {
     return { hasError: true, message: error?.message || "Unexpected portal rendering error." };
+  }
+
+  componentDidUpdate(previousProps: PortalRouteErrorBoundaryInnerProps) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false, message: "" });
+    }
   }
 
   componentDidCatch(error: Error) {
@@ -425,6 +513,7 @@ class PortalRouteErrorBoundary extends React.Component<{ children: React.ReactNo
         <div className="page-loading" role="alert">
           <div className="page-loading__card">
             <div className="page-loading__label">Portal page could not be rendered. {this.state.message}</div>
+            <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>Reload page</button>
           </div>
         </div>
       );
@@ -432,6 +521,15 @@ class PortalRouteErrorBoundary extends React.Component<{ children: React.ReactNo
     return this.props.children;
   }
 }
+
+const PortalRouteErrorBoundary: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const location = useLocation();
+  return (
+    <PortalRouteErrorBoundaryInner resetKey={`${location.pathname}${location.search}`}>
+      {children}
+    </PortalRouteErrorBoundaryInner>
+  );
+};
 
 /**
  * AppRouter
@@ -441,7 +539,7 @@ class PortalRouteErrorBoundary extends React.Component<{ children: React.ReactNo
 export const AppRouter: React.FC = () => {
   return (
     <PortalRouteErrorBoundary>
-      <Suspense fallback={<PageRouteLoading label="Loading portal workspaceâ€¦" />}>
+      <Suspense fallback={<PageRouteLoading label="Loading portal workspace…" />}>
         <Routes>
 
       <Route path="/doc-control" element={<RequireAuth><DocControlPages.LegacyDocControlRedirectPage /></RequireAuth>} />
@@ -685,6 +783,16 @@ export const AppRouter: React.FC = () => {
         }
       />
 
+
+      <Route path="/maintenance/:amoCode/rostering" element={<RequireAuth><RequireFeatureAccess feature="rostering.dashboard"><RosteringPages.RosteringDashboardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/rostering/dashboard" element={<RequireAuth><RequireFeatureAccess feature="rostering.dashboard"><RosteringPages.RosteringDashboardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/rostering/calendar" element={<RequireAuth><RequireFeatureAccess feature="rostering.calendar"><RosteringPages.RosterCalendarPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/rostering/planning-board" element={<RequireAuth><RequireFeatureAccess feature="rostering.planning-board"><RosteringPages.ManpowerPlanningBoardPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/rostering/my-roster" element={<RequireAuth><RequireFeatureAccess feature="rostering.my-roster"><RosteringPages.MyRosterPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/rostering/training-impact" element={<RequireAuth><RequireFeatureAccess feature="rostering.training-impact"><RosteringPages.TrainingImpactPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/rostering/reports" element={<RequireAuth><RequireFeatureAccess feature="rostering.reports"><RosteringPages.RosterReportsPage /></RequireFeatureAccess></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/rostering/settings" element={<RequireAuth><RequireFeatureAccess feature="rostering.settings"><RosteringPages.RosterSettingsPage /></RequireFeatureAccess></RequireAuth>} />
+
       <Route path="/maintenance/:amoCode/planning" element={<RequireAuth><RequireFeatureAccess feature="planning.dashboard"><PlanningProductionPages.PlanningDashboardPage /></RequireFeatureAccess></RequireAuth>} />
       <Route path="/maintenance/:amoCode/planning/dashboard" element={<RequireAuth><RequireFeatureAccess feature="planning.dashboard"><PlanningProductionPages.PlanningDashboardPage /></RequireFeatureAccess></RequireAuth>} />
       <Route path="/maintenance/:amoCode/planning/utilisation-monitoring" element={<RequireAuth><RequireFeatureAccess feature="planning.utilisation-monitoring"><PlanningProductionPages.PlanningUtilisationPage /></RequireFeatureAccess></RequireAuth>} />
@@ -811,6 +919,11 @@ export const AppRouter: React.FC = () => {
 
       <Route path="/maintenance/:amoCode/qms/cars/:carId/*" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QualityCarsPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/qms/training-competence/people/:userId/*" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><QMSTrainingUserPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/qms/training-competence/*" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training" element={<RequireAuth><TrainingPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/*" element={<RequireAuth><TrainingPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/training" element={<RequireAuth><TrainingPage /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/:department/training/*" element={<RequireAuth><TrainingPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/qms/evidence-vault/:evidenceId" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QualityEvidenceViewerPage /></RequireQmsPermission></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/qms/aerodoc/hangar" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocHangarDashboardPage /></RequireQmsPermission></RequireAuth>} />

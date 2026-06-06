@@ -19,6 +19,15 @@ const ONBOARDING_STATUS_KEY = "amo_onboarding_status";
 const LAST_LOGIN_IDENTIFIER_KEY = "amo_last_login_identifier";
 const LOGIN_CONTEXT_CACHE_KEY = "amo_login_context_cache";
 
+let cachedUserRaw: string | null | undefined;
+let cachedUserValue: PortalUser | null = null;
+
+function resetCachedUserMemory(raw: string | null = null, value: PortalUser | null = null): void {
+  cachedUserRaw = raw;
+  cachedUserValue = value;
+}
+
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
 const LOGIN_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -242,7 +251,9 @@ export function clearContext(): void {
 }
 
 export function cacheCurrentUser(user: PortalUser): void {
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  const raw = JSON.stringify(user);
+  localStorage.setItem(USER_KEY, raw);
+  resetCachedUserMemory(raw, user);
 }
 
 export function saveLastLoginIdentifier(identifier: string): void {
@@ -257,16 +268,39 @@ export function getLastLoginIdentifier(): string {
 
 export function getCachedUser(): PortalUser | null {
   const raw = localStorage.getItem(USER_KEY);
-  if (!raw) return null;
+  if (raw === cachedUserRaw) return cachedUserValue;
+  if (!raw) {
+    resetCachedUserMemory(null, null);
+    return null;
+  }
   try {
-    return JSON.parse(raw) as PortalUser;
+    const user = JSON.parse(raw) as PortalUser;
+    resetCachedUserMemory(raw, user);
+    return user;
   } catch {
+    resetCachedUserMemory(raw, null);
     return null;
   }
 }
 
 export function clearCachedUser(): void {
   localStorage.removeItem(USER_KEY);
+  resetCachedUserMemory(null, null);
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== USER_KEY) return;
+    if (!event.newValue) {
+      resetCachedUserMemory(null, null);
+      return;
+    }
+    try {
+      resetCachedUserMemory(event.newValue, JSON.parse(event.newValue) as PortalUser);
+    } catch {
+      resetCachedUserMemory(event.newValue, null);
+    }
+  });
 }
 
 export function cacheOnboardingStatus(status: OnboardingStatus | null): void {

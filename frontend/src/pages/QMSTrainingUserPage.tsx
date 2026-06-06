@@ -57,7 +57,7 @@ const DEFERRAL_REASON_OPTIONS: Array<{ value: DeferralReasonCategory; label: str
 function portalUserToAdminUser(user: PortalUser): AdminUserRead {
   return {
     id: user.id,
-    amo_id: user.amo_id,
+    amo_id: user.amo_id || "",
     department_id: user.department_id,
     staff_code: user.staff_code,
     email: user.email,

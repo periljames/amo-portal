@@ -54,6 +54,8 @@ from .apps.technical_records.router import router as technical_records_router
 from .apps.qms.router import router as canonical_qms_router
 from .apps.platform.router import router as platform_router
 from .apps.platform import metrics as platform_metrics
+from .apps.foundations.router import router as foundations_router
+from .apps.rostering.router import router as rostering_router
 
 
 logger = logging.getLogger(__name__)
@@ -449,6 +451,8 @@ def server_time():
 
 app.include_router(accounts_public_router)
 app.include_router(platform_router)
+app.include_router(foundations_router)
+app.include_router(rostering_router)
 app.include_router(accounts_admin_router)
 app.include_router(accounts_modules_router)
 app.include_router(accounts_amo_assets_router)

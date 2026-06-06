@@ -187,19 +187,6 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     staleTime: 60_000,
   });
 
-  const carsQuery = useQuery({
-    queryKey: ["qms-cars", "schedule-detail", amoCode],
-    queryFn: async () => {
-      if (scheduleAudits.length === 0) return [];
-      const batches = await Promise.all(
-        scheduleAudits.map((audit) => qmsListCars({ audit_id: audit.id, limit: 200 }, { silent: true }))
-      );
-      return batches.flat();
-    },
-    enabled: scheduleAudits.length > 0,
-    staleTime: 60_000,
-  });
-
   const dashboardQuery = useQuery({
     queryKey: ["qms-dashboard", "schedule-detail", amoCode],
     queryFn: () => qmsGetDashboard({ domain: "AMO" }),
@@ -218,6 +205,20 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     if (byTitle.length > 0) return byTitle;
     return all.filter((audit) => audit.kind === schedule.kind);
   }, [auditsQuery.data, schedule]);
+
+  const carsQuery = useQuery({
+    queryKey: ["qms-cars", "schedule-detail", amoCode],
+    queryFn: async () => {
+      if (scheduleAudits.length === 0) return [];
+      const batches = await Promise.all(
+        scheduleAudits.map((audit) => qmsListCars({ audit_id: audit.id, limit: 200 }, { silent: true }))
+      );
+      return batches.flat();
+    },
+    enabled: scheduleAudits.length > 0,
+    staleTime: 60_000,
+  });
+
 
   const findingsQueries = useQuery({
     queryKey: ["qms-findings", "schedule-detail", amoCode, scheduleId, scheduleAudits.map((item) => item.id).join(",")],
