@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 import hashlib
 import json
 import logging
@@ -102,13 +102,13 @@ def _safe_rollback(db: Session) -> None:
         logger.exception("QMS database rollback failed after an error")
 
 
-def _valid_zoneinfo(name: str | None) -> ZoneInfo:
+def _valid_zoneinfo(name: str | None) -> tzinfo:
     candidate = (name or "").strip() or "UTC"
     try:
         return ZoneInfo(candidate)
     except ZoneInfoNotFoundError:
         logger.warning("Invalid AMO time zone %r; falling back to UTC", candidate)
-        return ZoneInfo("UTC")
+        return timezone.utc
 
 
 def _tenant_calendar_context(db: Session, *, amo_id: str) -> dict[str, Any]:
@@ -121,7 +121,7 @@ def _tenant_calendar_context(db: Session, *, amo_id: str) -> dict[str, Any]:
     zone = _valid_zoneinfo(tz_name)
     now_local = datetime.now(timezone.utc).astimezone(zone)
     return {
-        "timezone": zone.key,
+        "timezone": getattr(zone, "key", "UTC"),
         "country": getattr(row, "country", None) if row else None,
         "today": now_local.date(),
         "now": now_local,

@@ -28,7 +28,7 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
         shortLabel: "Planner",
         icon: CalendarDays,
         href: `/maintenance/${amoCode}/qms/audits/plan?view=calendar`,
-        active: location.pathname === `/maintenance/${amoCode}/qms/audits/plan`,
+        active: location.pathname === `/maintenance/${amoCode}/qms/audits/plan` || location.pathname === `/maintenance/${amoCode}/qms/audits/schedule`,
       },
       {
         id: "register",

@@ -6029,3 +6029,118 @@ body[data-color-scheme="dark"] [class*="subtitle"] {
     grid-template-columns: 1fr;
   }
 }
+
+/* QMS audit planner: functional class filters for 1st/2nd/3rd-party schedules. */
+.planner-class-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.planner-class-card {
+  display: grid;
+  gap: 0.24rem;
+  min-width: 0;
+  padding: 0.8rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
+  border-radius: 0.95rem;
+  background: var(--surface-elevated, #fff);
+  color: var(--text-primary, #0f172a);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.planner-class-card:hover,
+.planner-class-card.is-active {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 48%, var(--border, #dbe3ef));
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.09);
+  transform: translateY(-1px);
+}
+
+.planner-class-card.is-active {
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 8%, var(--surface-elevated, #fff));
+}
+
+.planner-class-card span {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.planner-class-card strong {
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.planner-class-card small {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.planner-scheduler-links {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.planner-scheduler-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2rem;
+  padding: 0.38rem 0.62rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
+  border-radius: 999px;
+  background: var(--surface-elevated, #fff);
+  color: var(--accent-primary, #2563eb);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+@media (max-width: 1180px) {
+  .planner-class-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .planner-class-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* QMS audit run hub war-room cards. */
+.audit-war-room-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.audit-war-room-card {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
+  border-radius: 0.95rem;
+  background: var(--surface-elevated, #fff);
+}
+
+.audit-war-room-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+@media (max-width: 960px) {
+  .audit-war-room-grid {
+    grid-template-columns: 1fr;
+  }
+}

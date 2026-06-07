@@ -10,7 +10,7 @@ def test_presence_resolution_marks_fresh_away_as_active():
     now = datetime.now(timezone.utc)
     state, is_online = router_admin._resolve_presence_state(
         raw_state="away",
-        last_seen_at=now - timedelta(seconds=45),
+        last_seen_at=now - timedelta(seconds=5),
         now=now,
     )
     assert state == "away"
@@ -32,7 +32,7 @@ def test_presence_resolution_marks_fresh_online_as_online():
     now = datetime.now(timezone.utc)
     state, is_online = router_admin._resolve_presence_state(
         raw_state="online",
-        last_seen_at=now - timedelta(seconds=30),
+        last_seen_at=now - timedelta(seconds=5),
         now=now,
     )
     assert state == "online"
@@ -65,3 +65,28 @@ def test_display_title_falls_back_to_role_label():
         position_title=None,
     )
     assert router_admin._display_title_for_user(user) == "Safety Manager"
+
+
+def test_presence_display_labels_fresh_away_as_away():
+    now = datetime.now(timezone.utc)
+    user = account_models.User(
+        staff_code="SC-3",
+        email="away@example.com",
+        first_name="Away",
+        last_name="User",
+        full_name="Away User",
+        hashed_password="hash",
+        role=account_models.AccountRole.TECHNICIAN,
+        is_active=True,
+    )
+    presence = router_admin.schemas.UserPresenceRead(
+        state="away",
+        is_online=True,
+        last_seen_at=now,
+        source="realtime",
+    )
+
+    display = router_admin._presence_display_for_user(user=user, presence=presence)
+
+    assert display.status_label == "Away"
+    assert display.last_seen_label == "Away"

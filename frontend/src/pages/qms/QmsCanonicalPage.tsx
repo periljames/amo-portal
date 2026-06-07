@@ -23,6 +23,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Save,
   SlidersHorizontal,
   Users,
   Wrench,
@@ -104,6 +105,39 @@ type CreateDraft = {
   due_date: string;
   owner_user_id: string;
   description: string;
+};
+
+type JsonSettings = Record<string, unknown>;
+
+type QmsSettingsResponse = {
+  settings?: QmsRow;
+  record?: QmsRow;
+  items?: QmsRow[];
+};
+
+type CalendarSettings = {
+  holidays_enabled: boolean;
+  holiday_source_url: string;
+  holiday_provider: string;
+  holiday_country_code: string;
+  holiday_region_code: string;
+  cache_ttl_hours: number;
+};
+
+type CalendarSettingsResponse = {
+  tenant?: { amo_code?: string; amo_id?: string };
+  timezone?: string;
+  country?: string | null;
+  settings?: Partial<CalendarSettings>;
+};
+
+type SettingsState = {
+  numbering_rules: string;
+  workflow_rules: string;
+  approval_matrix: string;
+  notification_rules: string;
+  retention_rules: string;
+  risk_matrix: string;
 };
 
 const MODULE_GROUPS: Record<ModuleCategory, { title: string; subtitle: string }> = {
@@ -645,6 +679,24 @@ const MODULE_BY_KEY = Object.fromEntries(QMS_MODULES.map((module) => [module.key
 const CATEGORIES: ModuleCategory[] = ["command", "assurance", "control", "archive"];
 const PAGE_SIZE_OPTIONS = [10, 15, 25, 50];
 
+const DEFAULT_SETTINGS_STATE: SettingsState = {
+  numbering_rules: JSON.stringify({ audit: "AUD-{YYYY}-{SEQ4}", car: "CAR-{YYYY}-{SEQ4}", finding: "FND-{YYYY}-{SEQ4}" }, null, 2),
+  workflow_rules: JSON.stringify({ require_root_cause_for_car: true, require_effectiveness_review: true, require_document_distribution_ack: true }, null, 2),
+  approval_matrix: JSON.stringify({ documents: ["owner", "quality_manager"], audits: ["lead_auditor", "quality_manager"], changes: ["process_owner", "quality_manager"] }, null, 2),
+  notification_rules: JSON.stringify({ due_soon_days: [30, 14, 7, 1], overdue_escalation_days: [1, 7, 14], channels: ["in_app", "email"] }, null, 2),
+  retention_rules: JSON.stringify({ audit_years: 5, car_years: 5, training_years: 3, management_review_years: 5 }, null, 2),
+  risk_matrix: JSON.stringify({ likelihood: [1, 2, 3, 4, 5], consequence: [1, 2, 3, 4, 5], high_threshold: 15 }, null, 2),
+};
+
+const DEFAULT_CALENDAR_SETTINGS: CalendarSettings = {
+  holidays_enabled: true,
+  holiday_source_url: "",
+  holiday_provider: "Configured feed",
+  holiday_country_code: "",
+  holiday_region_code: "",
+  cache_ttl_hours: 24,
+};
+
 function routeToUrl(amoCode: string, route: string): string {
   return `/maintenance/${amoCode}/qms${route ? `/${route}` : ""}`;
 }
@@ -1045,6 +1097,201 @@ function SourceDiagnostics({ data }: { data: QmsModuleResponse | null }): React.
   );
 }
 
+function parseJsonSetting(value: string, label: string): JsonSettings {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      throw new Error(`${label} must be a JSON object.`);
+    }
+    return parsed as JsonSettings;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("must be")) throw error;
+    throw new Error(`${label} is not valid JSON.`);
+  }
+}
+
+function prettyJson(value: unknown, fallback: string): string {
+  if (value == null || value === "") return fallback;
+  if (typeof value === "string") {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2);
+    } catch {
+      return value;
+    }
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function normaliseCalendarSettings(settings?: Partial<CalendarSettings>): CalendarSettings {
+  return {
+    ...DEFAULT_CALENDAR_SETTINGS,
+    ...(settings || {}),
+    holidays_enabled: settings?.holidays_enabled ?? DEFAULT_CALENDAR_SETTINGS.holidays_enabled,
+    cache_ttl_hours: Number(settings?.cache_ttl_hours ?? DEFAULT_CALENDAR_SETTINGS.cache_ttl_hours),
+  };
+}
+
+function CalendarSettingsPanel({ amoCode, onSaved }: { amoCode: string; onSaved: () => void }): React.ReactElement {
+  const [state, setState] = useState<CalendarSettings>(DEFAULT_CALENDAR_SETTINGS);
+  const [tenantMeta, setTenantMeta] = useState<{ timezone?: string; country?: string | null }>({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiRequest<CalendarSettingsResponse>(qmsPath(amoCode, "calendar/settings"), { timeoutMs: 12000, cacheTtlMs: 0 });
+      setState(normaliseCalendarSettings(response.settings));
+      setTenantMeta({ timezone: response.timezone, country: response.country });
+    } catch (err) {
+      setError(friendlyError(err, "Unable to load calendar settings."));
+    } finally {
+      setLoading(false);
+    }
+  }, [amoCode]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const payload = { ...state, cache_ttl_hours: Math.max(1, Math.min(720, Number(state.cache_ttl_hours) || 24)) };
+      const response = await apiRequest<CalendarSettingsResponse>(qmsPath(amoCode, "calendar/settings"), {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+        timeoutMs: 12000,
+        cacheTtlMs: 0,
+      });
+      setState(normaliseCalendarSettings(response.settings || payload));
+      setSaved(true);
+      onSaved();
+    } catch (err) {
+      setError(friendlyError(err, "Unable to save calendar settings."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SectionCard title="Calendar configuration" subtitle="Tenant-scoped setup for holidays, region, and cache controls." variant="subtle" actions={<Button variant="secondary" size="sm" onClick={load} loading={loading}><RefreshCw size={14} /> Reload</Button>}>
+      <div className="qms-settings-meta-grid">
+        <span><strong>{tenantMeta.timezone || "UTC"}</strong><small>AMO timezone</small></span>
+        <span><strong>{tenantMeta.country || state.holiday_country_code || "Not set"}</strong><small>Country / region</small></span>
+      </div>
+      {error ? <InlineError message={error} /> : null}
+      {saved ? <div className="qms-settings-success"><CheckCircle2 size={16} /> Calendar configuration saved.</div> : null}
+      <div className="qms-ops-create-grid qms-settings-form-grid">
+        <label><span>Enable holidays</span><select value={state.holidays_enabled ? "yes" : "no"} onChange={(event) => setState((prev) => ({ ...prev, holidays_enabled: event.target.value === "yes" }))}><option value="yes">Yes</option><option value="no">No</option></select></label>
+        <label><span>Provider</span><input value={state.holiday_provider} onChange={(event) => setState((prev) => ({ ...prev, holiday_provider: event.target.value }))} placeholder="Configured feed" /></label>
+        <label><span>Country code</span><input value={state.holiday_country_code} onChange={(event) => setState((prev) => ({ ...prev, holiday_country_code: event.target.value.toUpperCase() }))} placeholder="KE, US, GB…" maxLength={8} /></label>
+        <label><span>Region code</span><input value={state.holiday_region_code} onChange={(event) => setState((prev) => ({ ...prev, holiday_region_code: event.target.value.toUpperCase() }))} placeholder="Optional" maxLength={24} /></label>
+        <label><span>Cache TTL hours</span><input type="number" min={1} max={720} value={state.cache_ttl_hours} onChange={(event) => setState((prev) => ({ ...prev, cache_ttl_hours: Number(event.target.value) }))} /></label>
+        <label className="qms-ops-create-grid__wide"><span>Holiday source URL</span><input value={state.holiday_source_url} onChange={(event) => setState((prev) => ({ ...prev, holiday_source_url: event.target.value }))} placeholder="https://…" /></label>
+      </div>
+      <div className="qms-ops-create-actions qms-settings-actions"><Button loading={saving} onClick={save}><Save size={15} /> Save calendar settings</Button></div>
+    </SectionCard>
+  );
+}
+
+function QmsSettingsWorkspace({ amoCode, module, data, state, error, onRetry }: { amoCode: string; module: ModuleMeta; data: QmsModuleResponse | null; state: LoadState; error: string | null; onRetry: () => void }): React.ReactElement {
+  const [form, setForm] = useState<SettingsState>(DEFAULT_SETTINGS_STATE);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    const current = (data?.items || [])[0];
+    if (!current) return;
+    setForm({
+      numbering_rules: prettyJson(current.numbering_rules, DEFAULT_SETTINGS_STATE.numbering_rules),
+      workflow_rules: prettyJson(current.workflow_rules, DEFAULT_SETTINGS_STATE.workflow_rules),
+      approval_matrix: prettyJson(current.approval_matrix, DEFAULT_SETTINGS_STATE.approval_matrix),
+      notification_rules: prettyJson(current.notification_rules, DEFAULT_SETTINGS_STATE.notification_rules),
+      retention_rules: prettyJson(current.retention_rules, DEFAULT_SETTINGS_STATE.retention_rules),
+      risk_matrix: prettyJson(current.risk_matrix, DEFAULT_SETTINGS_STATE.risk_matrix),
+    });
+  }, [data]);
+
+  const save = async () => {
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      const payload = {
+        numbering_rules: parseJsonSetting(form.numbering_rules, "Numbering rules"),
+        workflow_rules: parseJsonSetting(form.workflow_rules, "Workflow rules"),
+        approval_matrix: parseJsonSetting(form.approval_matrix, "Approval matrix"),
+        notification_rules: parseJsonSetting(form.notification_rules, "Notification rules"),
+        retention_rules: parseJsonSetting(form.retention_rules, "Retention rules"),
+        risk_matrix: parseJsonSetting(form.risk_matrix, "Risk matrix"),
+      };
+      const response = await apiRequest<QmsSettingsResponse>(qmsPath(amoCode, "settings"), {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+        timeoutMs: 15000,
+        cacheTtlMs: 0,
+      });
+      const settings = response.settings || response.record || payload;
+      setForm({
+        numbering_rules: prettyJson(settings.numbering_rules, form.numbering_rules),
+        workflow_rules: prettyJson(settings.workflow_rules, form.workflow_rules),
+        approval_matrix: prettyJson(settings.approval_matrix, form.approval_matrix),
+        notification_rules: prettyJson(settings.notification_rules, form.notification_rules),
+        retention_rules: prettyJson(settings.retention_rules, form.retention_rules),
+        risk_matrix: prettyJson(settings.risk_matrix, form.risk_matrix),
+      });
+      setSaved(true);
+      onRetry();
+    } catch (err) {
+      setSaveError(friendlyError(err, "Unable to save QMS settings."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fields: Array<{ key: keyof SettingsState; label: string; help: string }> = [
+    { key: "numbering_rules", label: "Numbering", help: "Audit, CAR, finding, change, and evidence reference patterns." },
+    { key: "workflow_rules", label: "Workflow rules", help: "Mandatory stages, evidence gates, and effectiveness review rules." },
+    { key: "approval_matrix", label: "Approval matrix", help: "Roles required for documents, changes, audits, and closures." },
+    { key: "notification_rules", label: "Notification rules", help: "Due-soon reminders, escalations, and delivery channels." },
+    { key: "retention_rules", label: "Retention rules", help: "Archive retention by record family for audit-proof evidence." },
+    { key: "risk_matrix", label: "Risk matrix", help: "Likelihood, consequence, and threshold configuration." },
+  ];
+
+  return (
+    <div className="qms-settings-shell">
+      <SectionCard className="qms-ops-span-2" title="QMS control room" subtitle="Functional settings backed by /api/maintenance/{amo}/qms/settings." variant="subtle" actions={<Button onClick={save} loading={saving}><Save size={15} /> Save settings</Button>}>
+        <ActionTabs amoCode={amoCode} module={module} currentPath={window.location.pathname} />
+        {state === "loading" ? <LoadingPanel label="Loading settings..." /> : null}
+        {error ? <InlineError message={error} onAction={onRetry} /> : null}
+        {saveError ? <InlineError message={saveError} /> : null}
+        {saved ? <div className="qms-settings-success"><CheckCircle2 size={16} /> QMS settings saved and activity logged.</div> : null}
+        <div className="qms-settings-json-grid">
+          {fields.map((field) => (
+            <label key={field.key} className="qms-settings-json-field">
+              <span><strong>{field.label}</strong><small>{field.help}</small></span>
+              <textarea rows={8} value={form[field.key]} onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))} spellCheck={false} />
+            </label>
+          ))}
+        </div>
+      </SectionCard>
+      <CalendarSettingsPanel amoCode={amoCode} onSaved={onRetry} />
+      <SectionCard title="Route and module coverage" subtitle="No ghost menu items: each link resolves to the canonical QMS route surface." variant="subtle">
+        <div className="qms-settings-route-list">
+          {QMS_MODULES.filter((item) => item.route).map((item) => (
+            <Link key={item.key} to={routeToUrl(amoCode, `${item.route}/${item.defaultView}`)}><span>{item.shortTitle}</span><small>{item.route}/{item.defaultView}</small></Link>
+          ))}
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
 function CalendarWorkspace({ amoCode, module, data, state, error, onRetry, onMonthChange }: { amoCode: string; module: ModuleMeta; view: string; data: QmsModuleResponse | null; state: LoadState; error: string | null; onRetry: () => void; onMonthChange: (anchor: string) => void; }): React.ReactElement {
   const items = (data?.items || []) as CalendarItem[];
   const meta = data?.calendar_meta || {};
@@ -1408,7 +1655,10 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
         {dashboardError ? <InlineError message={dashboardError} onAction={loadDashboard} /> : null}
 
-        {module.key === "calendar" ? null : (
+        <>
+          {module.key === "calendar" ? (
+            <ModuleNavigation amoCode={amoCode} activeKey={module.key} />
+          ) : (
           <>
             <section className="qms-ops-hero">
               <div className="qms-ops-hero__copy">
@@ -1420,7 +1670,8 @@ export default function QmsCanonicalPage(): React.ReactElement {
             </section>
             <ModuleNavigation amoCode={amoCode} activeKey={module.key} />
           </>
-        )}
+          )}
+        </>
 
         {module.key === "cockpit" ? (
           <CockpitWorkspace amoCode={amoCode} dashboard={dashboard} loading={dashboardState === "loading"} />
@@ -1434,6 +1685,15 @@ export default function QmsCanonicalPage(): React.ReactElement {
             error={moduleError}
             onRetry={() => void loadModule({ force: true })}
             onMonthChange={setCalendarMonth}
+          />
+        ) : module.key === "settings" ? (
+          <QmsSettingsWorkspace
+            amoCode={amoCode}
+            module={module}
+            state={moduleState}
+            data={moduleData}
+            error={moduleError}
+            onRetry={() => void loadModule({ force: true })}
           />
         ) : (
           <WorkspacePanel
