@@ -87,12 +87,13 @@ const formatDateTime = (value?: string | null) => {
   }).format(date);
 };
 
-const formatRelative = (value?: string | null) => {
+const formatRelative = (value?: string | null, now = Date.now()) => {
   if (!value) return "Never seen";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Never seen";
-  const deltaMs = Date.now() - date.getTime();
-  if (deltaMs < 60_000) return "Just now";
+  const deltaMs = Math.max(0, now - date.getTime());
+  if (deltaMs < 5_000) return "Active now";
+  if (deltaMs < 60_000) return `${Math.floor(deltaMs / 1000)}s ago`;
   const mins = Math.floor(deltaMs / 60_000);
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.floor(mins / 60);
@@ -176,6 +177,12 @@ const AdminDashboardPage: React.FC = () => {
     requires_valid_licence: false,
   });
   const [feedback, setFeedback] = useState<string>("");
+  const [relativeNow, setRelativeNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRelativeNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     setPermissionForm((current) => ({ ...current, amo_id: effectiveAmoId || current.amo_id || "" }));
@@ -185,6 +192,10 @@ const AdminDashboardPage: React.FC = () => {
     queryKey: ["admin-user-directory", effectiveAmoId, search],
     queryFn: () => getAdminUserDirectory({ amo_id: effectiveAmoId, search, limit: 250 }),
     enabled: canAccessAdmin && !!effectiveAmoId,
+    staleTime: 0,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const departmentsQuery = useQuery({
@@ -269,10 +280,13 @@ const AdminDashboardPage: React.FC = () => {
 
   const refreshAll = async () => {
     await Promise.all([
+      directoryQuery.refetch(),
+      departmentsQuery.refetch(),
+      groupsQuery.refetch(),
+      permissionsQuery.refetch(),
       queryClient.invalidateQueries({ queryKey: ["admin-user-directory"] }),
-      queryClient.invalidateQueries({ queryKey: ["admin-user-groups"] }),
-      queryClient.invalidateQueries({ queryKey: ["admin-user-authorisation-types"] }),
     ]);
+    setRelativeNow(Date.now());
   };
 
   const bulkMutation = useMutation({
@@ -541,8 +555,8 @@ const AdminDashboardPage: React.FC = () => {
           </div>
           <div className="aum-header-actions">
             <span className={`aum-live ${realtimeStatus === "live" ? "is-live" : ""}`}>{realtimeStatus}</span>
-            <button type="button" className="aum-button aum-button--secondary" onClick={() => refreshAll()}>
-              Refresh
+            <button type="button" className="aum-button aum-button--secondary" onClick={() => void refreshAll()} disabled={directoryQuery.isFetching}>
+              {directoryQuery.isFetching ? "Refreshing…" : "Refresh"}
             </button>
             <button type="button" className="aum-button aum-button--primary" onClick={() => navigate(`/maintenance/${amoCode}/admin/users/new`)}>
               Add user
@@ -760,10 +774,10 @@ const AdminDashboardPage: React.FC = () => {
                       filteredItems.map((user) => {
                         const checked = selectedUserIds.includes(user.id);
                         const primaryLastSeen = user.presence_display.status_label === "Online"
-                          ? "Active now"
+                          ? formatRelative(user.presence_display.last_seen_at, relativeNow)
                           : user.presence_display.status_label === "On leave"
                             ? "Leave scheduled"
-                            : formatRelative(user.presence_display.last_seen_at || user.last_login_at);
+                            : formatRelative(user.presence_display.last_seen_at || user.last_login_at, relativeNow);
                         const displayRole = user.position_title?.trim() || formatRole(user.role);
                         const secondaryRole = user.position_title?.trim()
                           ? formatRole(user.role)

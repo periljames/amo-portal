@@ -11,6 +11,7 @@
 import { getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
+import { resolveDownloadFilename, type DownloadedFile } from "../utils/downloads";
 
 export type QMSDocumentStatus = "DRAFT" | "ACTIVE" | "OBSOLETE";
 export type QMSAuditStatus = "PLANNED" | "IN_PROGRESS" | "CAP_OPEN" | "CLOSED";
@@ -188,11 +189,7 @@ export interface QMSAuditNoticeStateOut {
 
 export interface QMSAuditWorkspaceOut {
   audit: QMSAuditOut;
-  summary: QMSAuditWorkspaceSummaryOut;
-  readiness: QMSAuditWorkspaceReadinessOut;
-  actions: QMSAuditWorkspaceActionOut[];
-  participants: QMSAuditParticipantOut[];
-  notice_state: QMSAuditNoticeStateOut;
+  workflow: QMSAuditWorkflowOut;
 }
 
 export interface QMSAuditWorkflowCheckItemOut {
@@ -203,10 +200,8 @@ export interface QMSAuditWorkflowCheckItemOut {
 }
 
 export interface QMSAuditWorkflowCheckOut {
-  audit_id: string;
-  audit_status: string;
-  checks: QMSAuditWorkflowCheckItemOut[];
-  passed: boolean;
+  audit: QMSAuditOut;
+  workflow: QMSAuditWorkflowOut;
 }
 
 export interface QMSAuditNoticeDispatchOut {
@@ -336,7 +331,7 @@ function toQuery(params: Record<string, QueryVal>): string {
   return s ? `?${s}` : "";
 }
 
-function downloadEvidencePack(path: string): Promise<Blob> {
+function downloadEvidencePack(path: string): Promise<DownloadedFile> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("GET", `${API_BASE}${path}`);
@@ -357,7 +352,10 @@ function downloadEvidencePack(path: string): Promise<Blob> {
         reject(new Error(message));
         return;
       }
-      resolve(xhr.response as Blob);
+      const blob = xhr.response as Blob;
+      const contentType = xhr.getResponseHeader("content-type");
+      const filename = resolveDownloadFilename(xhr.getResponseHeader("content-disposition"), "qms-evidence-pack", contentType);
+      resolve({ blob, filename, contentType });
     });
 
     xhr.addEventListener("error", () => {
@@ -730,8 +728,11 @@ export async function qmsListAuditPersonnelOptions(params?: {
 export async function qmsUpdateAudit(
   auditId: string,
   payload: {
+    status?: QMSAuditStatus | null;
     planned_start?: string | null;
     planned_end?: string | null;
+    actual_start?: string | null;
+    actual_end?: string | null;
   }
 ): Promise<QMSAuditOut> {
   return sendJson<QMSAuditOut>(`/quality/audits/${auditId}`, "PATCH", payload);
@@ -763,7 +764,7 @@ export async function qmsRunAuditReminders(upcomingDays: number): Promise<{
 }
 
 export async function qmsGetAuditWorkspace(auditId: string): Promise<QMSAuditWorkspaceOut> {
-  return fetchJson<QMSAuditWorkspaceOut>(`/quality/audits/${encodeURIComponent(auditId)}/workspace`);
+  return fetchJson<QMSAuditWorkspaceOut>(`/quality/audits/${encodeURIComponent(auditId)}/workflow-check`);
 }
 
 export async function qmsGetAuditWorkflowCheck(auditId: string): Promise<QMSAuditWorkflowCheckOut> {
@@ -845,10 +846,13 @@ export async function qmsDownloadAuditReport(auditId: string): Promise<Blob> {
   return downloadBinary(`/quality/audits/${auditId}/report`);
 }
 
+export async function qmsCloseAudit(auditId: string): Promise<QMSAuditOut> {
+  return qmsUpdateAudit(auditId, { status: "CLOSED" as QMSAuditStatus });
+}
+
 export async function qmsListFindings(auditId: string): Promise<QMSFindingOut[]> {
   return fetchJson<QMSFindingOut[]>(`/quality/audits/${auditId}/findings`);
 }
-
 export async function qmsListFindingsBulk(params?: {
   domain?: string;
   audit_ids?: string[];
@@ -1215,31 +1219,8 @@ export interface QMSAuditWorkflowContextOut {
 }
 
 export async function qmsGetAuditWorkflow(auditId: string, _options?: QmsRequestOptions): Promise<QMSAuditWorkflowContextOut> {
-  const workspace = await qmsGetAuditWorkspace(auditId);
-  const findingsOpen = workspace.summary.findings_open ?? 0;
-  const carsOpen = workspace.summary.cars_open ?? 0;
-  const checklistUploaded = !!workspace.summary.checklist_uploaded;
-  const reportUploaded = !!workspace.summary.report_uploaded;
-  const passedCount = [workspace.readiness.planning_complete, checklistUploaded, findingsOpen === 0, carsOpen === 0, reportUploaded].filter(Boolean).length;
-  const percentComplete = Math.round((passedCount / 5) * 100);
-  return {
-    audit: workspace.audit,
-    workflow: {
-      current_stage_label: workspace.audit.status || "Audit",
-      percent_complete: percentComplete,
-      findings_open: findingsOpen,
-      cars_open: carsOpen,
-      checklist_uploaded: checklistUploaded,
-      report_uploaded: reportUploaded,
-      stages: [
-        { id: "planning", label: "Planning", complete: workspace.readiness.planning_complete, active: !workspace.readiness.planning_complete },
-        { id: "checklist", label: "Checklist", complete: checklistUploaded, active: workspace.readiness.planning_complete && !checklistUploaded },
-        { id: "findings", label: "Findings", complete: findingsOpen === 0, active: checklistUploaded && findingsOpen > 0, metric: `${findingsOpen} open` },
-        { id: "cars", label: "CARs", complete: carsOpen === 0, active: findingsOpen === 0 && carsOpen > 0, metric: `${carsOpen} open` },
-        { id: "report", label: "Report", complete: reportUploaded, active: carsOpen === 0 && !reportUploaded },
-      ],
-    },
-  };
+  const workspace = await fetchJson<{ audit: QMSAuditOut; workflow: QMSAuditWorkflowOut }>(`/quality/audits/${encodeURIComponent(auditId)}/workflow-check`);
+  return { audit: workspace.audit, workflow: workspace.workflow };
 }
 
 export async function qmsResolveAudit(auditKey: string, _options?: QmsRequestOptions): Promise<QMSAuditOut | null> {
@@ -1262,10 +1243,10 @@ export async function qmsGetAuditorStats(userId: string): Promise<AuditorStatsOu
   return fetchJson<AuditorStatsOut>(`/quality/auditors/${userId}/stats`);
 }
 
-export async function downloadAuditEvidencePack(auditId: string): Promise<Blob> {
+export async function downloadAuditEvidencePack(auditId: string): Promise<DownloadedFile> {
   return downloadEvidencePack(`/quality/audits/${encodeURIComponent(auditId)}/evidence-pack`);
 }
 
-export async function downloadCarEvidencePack(carId: string): Promise<Blob> {
+export async function downloadCarEvidencePack(carId: string): Promise<DownloadedFile> {
   return downloadEvidencePack(`/quality/cars/${encodeURIComponent(carId)}/evidence-pack`);
 }

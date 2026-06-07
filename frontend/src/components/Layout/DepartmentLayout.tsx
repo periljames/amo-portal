@@ -69,7 +69,7 @@ const ADMIN_NAV_ITEMS: Array<{ id: AdminNavId; label: string }> = [
 
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
-const IDLE_WARNING_MS = 3 * 60 * 1000;
+const IDLE_WARNING_MS = 10 * 1000;
 const LAYOUT_CACHE_TTL_MS = 5 * 60 * 1000;
 const LAYOUT_CACHE_FAST_TTL_MS = 10 * 60 * 1000;
 const LAYOUT_CACHE_PREFIX = "amo_portal_layout_cache";
@@ -1426,6 +1426,7 @@ const DepartmentLayout: React.FC<Props> = ({
       "pointerdown",
       "pointermove",
       "focus",
+      "resize",
     ];
     const handleActivity = () => {
       if (logoutReason) return;
@@ -1439,6 +1440,8 @@ const DepartmentLayout: React.FC<Props> = ({
     activityEvents.forEach((evt) =>
       window.addEventListener(evt, handleActivity, { passive: true })
     );
+    document.addEventListener("scroll", handleActivity, { passive: true, capture: true });
+    document.addEventListener("selectionchange", handleActivity);
 
     const handleVisibility = () => {
       if (!document.hidden) {
@@ -1451,6 +1454,8 @@ const DepartmentLayout: React.FC<Props> = ({
       activityEvents.forEach((evt) =>
         window.removeEventListener(evt, handleActivity)
       );
+      document.removeEventListener("scroll", handleActivity, true);
+      document.removeEventListener("selectionchange", handleActivity);
       document.removeEventListener("visibilitychange", handleVisibility);
       clearIdleTimers();
     };
@@ -1626,6 +1631,7 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [trialMenuOpen]);
 
   const handleStaySignedIn = () => {
+    markSessionActivity("continue-session");
     resetIdleTimers();
   };
 
@@ -2191,8 +2197,8 @@ const DepartmentLayout: React.FC<Props> = ({
                   <>
                     <h2>Inactivity warning</h2>
                     <p>
-                      You will be logged out in{" "}
-                      <strong>{formattedCountdown}</strong> due to inactivity.
+                      You appear to be away from keyboard. You will be logged out in{" "}
+                      <strong>{formattedCountdown}</strong>.
                     </p>
                     <p>Please click below to stay signed in.</p>
                     <div className="session-timeout-actions">

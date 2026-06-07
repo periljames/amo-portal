@@ -22,6 +22,27 @@ const LOGIN_CONTEXT_CACHE_KEY = "amo_login_context_cache";
 let cachedUserRaw: string | null | undefined;
 let cachedUserValue: PortalUser | null = null;
 
+function decodeJwtExpiryMs(token: string | null): number | null {
+  if (!token) return null;
+  const [, payload] = token.split(".");
+  if (!payload) return null;
+  try {
+    const normalised = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalised.padEnd(Math.ceil(normalised.length / 4) * 4, "=");
+    const decoded = JSON.parse(window.atob(padded)) as { exp?: unknown };
+    return typeof decoded.exp === "number" ? decoded.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldClearSessionForAuthFailure(reason: string): boolean {
+  if (reason !== "expired") return true;
+  const expiryMs = decodeJwtExpiryMs(getToken());
+  if (!expiryMs) return true;
+  return expiryMs <= Date.now() + 30_000;
+}
+
 function resetCachedUserMemory(raw: string | null = null, value: PortalUser | null = null): void {
   cachedUserRaw = raw;
   cachedUserValue = value;
@@ -751,6 +772,10 @@ export function endSession(reason: "manual" | "idle" = "manual"): void {
 }
 
 export function handleAuthFailure(reason = "expired"): void {
+  if (!shouldClearSessionForAuthFailure(reason)) {
+    emitSessionEvent({ type: "activity", reason: "auth-failure-with-fresh-token" });
+    return;
+  }
   void sendPresenceBeacon("away", reason);
   logout();
   emitSessionEvent({ type: "expired", reason });

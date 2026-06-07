@@ -38,6 +38,8 @@ const eventSchema = z.object({
 });
 
 const MAX_ACTIVITY = 1500;
+const PRESENCE_HEARTBEAT_MS = 5_000;
+const PRESENCE_AWAY_AFTER_MS = 60_000;
 
 function isLoginSurface(): boolean {
   if (typeof window === "undefined") return false;
@@ -75,6 +77,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const connectRef = useRef<() => void>(() => undefined);
   const retryCount = useRef(0);
   const staleIntervalRef = useRef<number | null>(null);
+  const lastPresenceActivityRef = useRef<number>(Date.now());
+  const lastPresencePushRef = useRef<number>(0);
+  const currentPresenceStateRef = useRef<"online" | "away">("online");
   const [staleSeconds, setStaleSeconds] = useState(0);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator === "undefined" ? true : navigator.onLine);
   const [clockSource, setClockSource] = useState<"server" | "local">("local");
@@ -110,7 +115,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
 
-  const sendPresenceHeartbeat = useCallback(async (state: "online" | "away" = "online") => {
+  const sendPresenceHeartbeat = useCallback(async (state: "online" | "away" = "online", reason?: string, keepalive = false) => {
     if (isPlatformUser || isLoginSurface()) return;
     const token = getToken();
     if (!token || !isRealtimeEnabled()) return;
@@ -123,7 +128,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ state }),
+        keepalive,
+        body: JSON.stringify({ state, reason }),
       });
     } catch {
       // presence is best-effort only
@@ -237,7 +243,16 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     return onSessionEvent((detail) => {
       if (!isRealtimeEnabled()) return;
+      if (detail.type === "activity") {
+        lastPresenceActivityRef.current = Date.now();
+        if (currentPresenceStateRef.current === "away") {
+          currentPresenceStateRef.current = "online";
+          void sendPresenceHeartbeat("online", detail.reason || "activity");
+        }
+      }
+
       if (detail.type === "authenticated") {
+        lastPresenceActivityRef.current = Date.now();
         retryCount.current = 0;
 
         mqttRef.current?.disconnect();
@@ -281,7 +296,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setBrokerState("offline");
       }
     });
-  }, [isPlatformUser, reconnectNow, serverNow, syncServerTime]);
+  }, [isPlatformUser, reconnectNow, sendPresenceHeartbeat, serverNow, syncServerTime]);
 
   useEffect(() => {
     connectRef.current = connectSse;
@@ -409,18 +424,51 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (isPlatformUser || isLoginSurface() || !getToken() || !isRealtimeEnabled()) return;
 
-    const pushPresence = () => {
-      const state = typeof document !== "undefined" && document.hidden ? "away" : "online";
-      void sendPresenceHeartbeat(state);
+    const resolvePresenceState = () => {
+      if (typeof document !== "undefined" && document.hidden) return "away" as const;
+      return Date.now() - lastPresenceActivityRef.current > PRESENCE_AWAY_AFTER_MS ? "away" as const : "online" as const;
     };
 
-    pushPresence();
-    const timer = window.setInterval(pushPresence, 45_000);
-    const handleVisibility = () => pushPresence();
+    const pushPresence = (reason = "heartbeat", force = false, keepalive = false) => {
+      const state = resolvePresenceState();
+      const now = Date.now();
+      if (!force && state === currentPresenceStateRef.current && now - lastPresencePushRef.current < PRESENCE_HEARTBEAT_MS) return;
+      currentPresenceStateRef.current = state;
+      lastPresencePushRef.current = now;
+      void sendPresenceHeartbeat(state, reason, keepalive);
+    };
+
+    const markActivity = () => {
+      lastPresenceActivityRef.current = Date.now();
+      if (currentPresenceStateRef.current === "away") pushPresence("activity", true);
+    };
+
+    const activityEvents: Array<keyof WindowEventMap> = ["mousemove", "mousedown", "mouseup", "keydown", "click", "scroll", "wheel", "touchstart", "touchmove", "pointerdown", "pointermove", "focus", "resize"];
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, markActivity, { passive: true }));
+    document.addEventListener("scroll", markActivity, { passive: true, capture: true });
+    document.addEventListener("selectionchange", markActivity);
+
+    pushPresence("mount", true);
+    const timer = window.setInterval(() => pushPresence("heartbeat"), PRESENCE_HEARTBEAT_MS);
+    const handleVisibility = () => {
+      if (!document.hidden) markActivity();
+      pushPresence(document.hidden ? "hidden" : "visible", true);
+    };
+    const handlePageHide = () => {
+      currentPresenceStateRef.current = "away";
+      void sendPresenceHeartbeat("away", "pagehide", true);
+    };
     document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handlePageHide);
     return () => {
       window.clearInterval(timer);
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, markActivity));
+      document.removeEventListener("scroll", markActivity, true);
+      document.removeEventListener("selectionchange", markActivity);
       document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handlePageHide);
     };
   }, [isPlatformUser, sendPresenceHeartbeat]);
 

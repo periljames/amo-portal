@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BellRing,
@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  GraduationCap,
   LayoutList,
   MailCheck,
   Pencil,
@@ -74,10 +75,10 @@ type ScheduleFormState = {
 };
 
 const frequencies: QMSAuditScheduleFrequency[] = ["ONE_TIME", "MONTHLY", "QUARTERLY", "BI_ANNUAL", "ANNUAL"];
-const auditKinds: Array<{ value: AuditKind; label: string; helper: string }> = [
-  { value: "INTERNAL", label: "Internal", helper: "Use internal personnel records for auditee and audit team selection." },
-  { value: "EXTERNAL", label: "External", helper: "Capture named external auditees, their roles, and contact details." },
-  { value: "THIRD_PARTY", label: "Third party", helper: "Use named external auditees for regulatory, customer, or certification audits." },
+const auditKinds: Array<{ value: AuditKind; label: string; shortLabel: string; helper: string }> = [
+  { value: "INTERNAL", label: "1st party / internal", shortLabel: "1st party", helper: "AMO self-audits against procedures, approvals, process controls, records, and competence evidence." },
+  { value: "EXTERNAL", label: "2nd party / external", shortLabel: "2nd party", helper: "Supplier, subcontractor, customer, or contracted-party audits with named external auditees." },
+  { value: "THIRD_PARTY", label: "3rd party", shortLabel: "3rd party", helper: "Regulator, authority, certification-body, customer authority, or independent third-party audits." },
 ];
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const drawerTabs: Array<{ id: DrawerTab; label: string; helper: string }> = [
@@ -198,6 +199,20 @@ function countdownLabel(nextDueDate?: string | null): { text: string; className:
   if (diffDays === 0) return { text: "Due today", className: "audit-countdown-chip is-due-soon" };
   if (diffDays <= 14) return { text: `Starts in ${diffDays} day(s)`, className: "audit-countdown-chip is-due-soon" };
   return { text: `Starts in ${diffDays} day(s)`, className: "audit-countdown-chip" };
+}
+
+function daysUntil(value?: string | null): number | null {
+  if (!value) return null;
+  const target = new Date(value);
+  if (Number.isNaN(target.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+}
+
+function auditKindMeta(kind: string) {
+  return auditKinds.find((item) => item.value === kind) ?? auditKinds[0];
 }
 
 function monthGrid(seedDate: Date) {
@@ -406,6 +421,8 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   const rawView = searchParams.get("view") || "calendar";
   const view = (["calendar", "list", "table"].includes(rawView) ? rawView : "calendar") as PlannerView;
+  const rawKindFilter = searchParams.get("kind") || "ALL";
+  const kindFilter = (["ALL", ...auditKinds.map((item) => item.value)].includes(rawKindFilter) ? rawKindFilter : "ALL") as AuditKind | "ALL";
 
   const schedulesQuery = useQuery({
     queryKey: ["qms-audit-schedules", amoCode, department],
@@ -498,10 +515,12 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     return merged.sort((a, b) => (a.next_due_date || "").localeCompare(b.next_due_date || ""));
   }, [previewSchedule, schedules]);
 
+  const filteredSchedules = useMemo(() => (kindFilter === "ALL" ? boardSchedules : boardSchedules.filter((row) => row.kind === kindFilter)), [boardSchedules, kindFilter]);
+
   const seedDate = useMemo(() => {
-    const firstDue = boardSchedules.find((row) => row.next_due_date)?.next_due_date;
+    const firstDue = filteredSchedules.find((row) => row.next_due_date)?.next_due_date || boardSchedules.find((row) => row.next_due_date)?.next_due_date;
     return firstDue ? new Date(firstDue) : new Date();
-  }, [boardSchedules]);
+  }, [boardSchedules, filteredSchedules]);
 
   useEffect(() => {
     setVisibleMonth((prev) => prev ?? new Date(seedDate.getFullYear(), seedDate.getMonth(), 1));
@@ -512,15 +531,27 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   const scheduleSummary = useMemo(
     () => [
-      { label: "Visible schedules", value: String(boardSchedules.length) },
-      { label: "Next due", value: boardSchedules[0]?.next_due_date ? formatDate(boardSchedules[0].next_due_date) : "Not scheduled" },
+      { label: "Visible schedules", value: String(filteredSchedules.length) },
+      { label: "All active schedules", value: String(boardSchedules.length) },
+      { label: "Next due", value: filteredSchedules[0]?.next_due_date ? formatDate(filteredSchedules[0].next_due_date) : "Not scheduled" },
       {
         label: editingScheduleId ? "Editing" : isMeaningfulDraft(form) ? "Staged draft" : "Draft state",
         value: editingScheduleId ? "Existing schedule" : isMeaningfulDraft(form) ? "Autosaved" : "Clean",
       },
     ],
-    [boardSchedules, editingScheduleId, form]
+    [boardSchedules.length, editingScheduleId, filteredSchedules, form]
   );
+
+  const auditClassMetrics = useMemo(() => auditKinds.map((kind) => {
+    const rows = boardSchedules.filter((schedule) => schedule.kind === kind.value);
+    return {
+      ...kind,
+      count: rows.length,
+      overdue: rows.filter((schedule) => { const days = daysUntil(schedule.next_due_date); return days != null && days < 0; }).length,
+      dueSoon: rows.filter((schedule) => { const days = daysUntil(schedule.next_due_date); return days != null && days >= 0 && days <= 30; }).length,
+      nextDue: rows[0]?.next_due_date || null,
+    };
+  }), [boardSchedules]);
 
   const leadAuditorUser = form.lead_auditor_user_id ? peopleById.get(form.lead_auditor_user_id) ?? null : null;
   const observerAuditorUser = form.observer_auditor_user_id ? peopleById.get(form.observer_auditor_user_id) ?? null : null;
@@ -730,6 +761,17 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
     if (typeof window !== "undefined") window.localStorage.setItem(guideStorageKey, "1");
   };
 
+
+  const updatePlannerParams = (updates: Partial<Record<"view" | "kind", string>>) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (!value || value === "ALL") next.delete(key);
+      else next.set(key, value);
+    });
+    if (!next.get("view")) next.set("view", view);
+    setSearchParams(next, { replace: true });
+  };
+
   const handleDelete = (schedule: QMSAuditScheduleOut) => {
     const confirmDelete = window.confirm(`Delete schedule \"${schedule.title}\" due ${formatDate(schedule.next_due_date)}?`);
     if (!confirmDelete) return;
@@ -765,7 +807,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   const renderCalendar = () => {
     const byDate = new Map<string, ScheduleViewModel[]>();
-    boardSchedules.forEach((schedule) => {
+    filteredSchedules.forEach((schedule) => {
       const key = schedule.next_due_date;
       if (!key) return;
       const group = byDate.get(key) ?? [];
@@ -813,7 +855,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                           onClick={() => (schedule.is_preview ? setDrawerOpen(true) : beginEdit(schedule))}
                         >
                           <strong>{schedule.title}</strong>
-                          <span>{schedule.preview_label || formatKindLabel(schedule.kind)}</span>
+                          <span>{schedule.preview_label || auditKindMeta(schedule.kind).shortLabel}</span>
                           <span>{leadUser ? userLabel(leadUser) : "Lead auditor pending"}</span>
                           <span className={countdown.className}>{countdown.text}</span>
                         </button>
@@ -831,7 +873,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
 
   const renderList = () => (
     <div className="portal-list-grid">
-      {boardSchedules.map((schedule) => {
+      {filteredSchedules.map((schedule) => {
         const countdown = countdownLabel(schedule.next_due_date);
         const auditee = schedule.kind === "INTERNAL"
           ? (schedule.auditee_user_id ? peopleById.get(schedule.auditee_user_id) : null)
@@ -877,7 +919,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
           </tr>
         </thead>
         <tbody>
-          {boardSchedules.map((schedule) => {
+          {filteredSchedules.map((schedule) => {
             const countdown = countdownLabel(schedule.next_due_date);
             const leadUser = schedule.lead_auditor_user_id ? peopleById.get(schedule.lead_auditor_user_id) : null;
             const auditeeUser = schedule.auditee_user_id ? peopleById.get(schedule.auditee_user_id) : null;
@@ -886,7 +928,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
                 <td>
                   <div className="table-primary-cell">
                     <strong>{schedule.title}</strong>
-                    <span>{schedule.preview_label || formatKindLabel(schedule.kind)}</span>
+                    <span>{schedule.preview_label || auditKindMeta(schedule.kind).shortLabel}</span>
                   </div>
                 </td>
                 <td>{formatFrequencyLabel(schedule.frequency)}</td>
@@ -956,13 +998,34 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
               {plannerViewOptions().map((option) => {
                 const Icon = option.icon;
                 return (
-                  <button key={option.value} type="button" className={`portal-view-switcher__item${view === option.value ? " is-active" : ""}`} onClick={() => setSearchParams({ view: option.value })}>
+                  <button key={option.value} type="button" className={`portal-view-switcher__item${view === option.value ? " is-active" : ""}`} onClick={() => updatePlannerParams({ view: option.value })}>
                     <Icon size={16} />
                     {option.label}
                   </button>
                 );
               })}
             </div>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Audit class scheduling" subtitle="Filter and manage 1st-party internal, 2nd-party external, and 3rd-party audits without losing the staged draft.">
+          <div className="planner-class-grid">
+            <button type="button" className={`planner-class-card${kindFilter === "ALL" ? " is-active" : ""}`} onClick={() => updatePlannerParams({ kind: "ALL" })}>
+              <span>All classes</span>
+              <strong>{boardSchedules.length}</strong>
+              <small>Combined schedule board</small>
+            </button>
+            {auditClassMetrics.map((item) => (
+              <button key={item.value} type="button" className={`planner-class-card${kindFilter === item.value ? " is-active" : ""}`} onClick={() => updatePlannerParams({ kind: item.value })}>
+                <span>{item.label}</span>
+                <strong>{item.count}</strong>
+                <small>{item.overdue} overdue · {item.dueSoon} due in 30 days · next {item.nextDue ? formatDate(item.nextDue) : "not set"}</small>
+              </button>
+            ))}
+          </div>
+          <div className="planner-scheduler-links">
+            <Link to={`/maintenance/${amoCode}/qms/calendar/list`}><CalendarRange size={15} /> Unified QMS calendar</Link>
+            <Link to={`/maintenance/${amoCode}/qms/training-competence?tab=schedule`}><GraduationCap size={15} /> Training scheduler</Link>
           </div>
         </SectionCard>
 
@@ -980,7 +1043,8 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
         <SectionCard title={view === "calendar" ? "Upcoming schedule board" : view === "list" ? "Schedule list" : "Schedule register"} subtitle={view === "calendar" ? "The board reflects staged edits before save so the planner stays predictable." : undefined} eyebrow={view === "calendar" ? "Calendar view" : "Planner"}>
           {schedulesQuery.isLoading ? <p className="qms-loading-copy">Loading schedules…</p> : null}
           {!schedulesQuery.isLoading && !boardSchedules.length ? <EmptyState title="No active schedules yet" description="Create a schedule to populate the planner views." /> : null}
-          {!schedulesQuery.isLoading && boardSchedules.length ? (view === "calendar" ? renderCalendar() : view === "list" ? renderList() : renderTable()) : null}
+          {!schedulesQuery.isLoading && boardSchedules.length && !filteredSchedules.length ? <EmptyState title="No schedules in this audit class" description="Clear the class filter or create a schedule for this audit class." /> : null}
+          {!schedulesQuery.isLoading && filteredSchedules.length ? (view === "calendar" ? renderCalendar() : view === "list" ? renderList() : renderTable()) : null}
         </SectionCard>
       </div>
 

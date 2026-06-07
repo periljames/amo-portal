@@ -67,7 +67,7 @@ AIRCRAFT_DOC_UPLOAD_DIR = Path(
 AIRCRAFT_DOC_AMO_SUBDIR = "aircraft"
 
 ALLOWED_PLATFORM_LOGO_EXTS = {".png", ".jpg", ".jpeg", ".svg"}
-PRESENCE_HEARTBEAT_GRACE_SECONDS = 150
+PRESENCE_HEARTBEAT_GRACE_SECONDS = 20
 RECENTLY_ACTIVE_WINDOW_MINUTES = 10
 
 _USER_GROUP_SCHEMA_VERIFIED = False
@@ -178,9 +178,10 @@ def _presence_display_for_user(
         )
 
     if presence.is_online:
+        state_label = "Away" if presence.state == "away" else "Online"
         return schemas.UserPresenceDisplayRead(
-            status_label="Online",
-            last_seen_label="Active now",
+            status_label=state_label,
+            last_seen_label="Away" if state_label == "Away" else "Active now",
             last_seen_at=presence.last_seen_at,
             last_seen_at_display=None,
         )

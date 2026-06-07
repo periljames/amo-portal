@@ -1,24 +1,30 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { CalendarClock, ClipboardList, FileText, FolderKanban, ShieldAlert, TimerReset } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { CalendarClock, ClipboardList, FileText, FolderKanban, MailCheck, PackageCheck, ShieldAlert, TimerReset, Users } from "lucide-react";
 import AuditPageShell from "../components/QMS/AuditPageShell";
 import { getCachedUser, getContext } from "../services/auth";
 import { getApiBaseUrl } from "../services/config";
 import {
+  downloadAuditEvidencePack,
+  qmsCloseAudit,
   qmsGetAuditRegister,
   qmsGetAuditWorkflow,
+  qmsIssueAuditNotice,
   qmsResolveAudit,
   qmsListCars,
   qmsListCarAttachmentsBulk,
   qmsUploadAuditChecklist,
+  qmsUploadAuditReport,
 } from "../services/qms";
+import { saveDownloadedFile } from "../utils/downloads";
 import { buildAuditWorkspacePath, isUuidLike, toAuditReferenceSlug } from "../utils/auditSlug";
 
-const TABS = ["checklist", "findings", "cars", "evidence", "report", "closeout"] as const;
+const TABS = ["war-room", "checklist", "findings", "cars", "evidence", "report", "closeout"] as const;
 type WorkspaceTab = typeof TABS[number];
 
 const tabLabels: Record<WorkspaceTab, string> = {
+  "war-room": "War room",
   checklist: "Checklist",
   findings: "Findings",
   cars: "CARs",
@@ -27,7 +33,7 @@ const tabLabels: Record<WorkspaceTab, string> = {
   closeout: "Closeout",
 };
 
-const safeTab = (value: string | null): WorkspaceTab => (TABS.includes((value ?? "") as WorkspaceTab) ? (value as WorkspaceTab) : "checklist");
+const safeTab = (value: string | null): WorkspaceTab => (TABS.includes((value ?? "") as WorkspaceTab) ? (value as WorkspaceTab) : "war-room");
 const dateFmt = (value: string | null | undefined) => (value ? new Date(value).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—");
 
 function formatRelative(days: number): string {
@@ -80,6 +86,7 @@ const QualityAuditRunHubPage: React.FC = () => {
   const [tick, setTick] = useState(Date.now());
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [guideDismissed, setGuideDismissed] = useState(false);
 
   useEffect(() => {
@@ -136,7 +143,7 @@ const QualityAuditRunHubPage: React.FC = () => {
     queryKey: ["qms-cars", "workspace", audit?.id],
     queryFn: () => qmsListCars({ audit_id: audit!.id, limit: 200 }, { silent: true }),
     staleTime: 60_000,
-    enabled: !!audit?.id && ["cars", "evidence", "closeout"].includes(activeTab),
+    enabled: !!audit?.id && ["war-room", "cars", "evidence", "closeout"].includes(activeTab),
   });
   const attachments = useQuery({
     queryKey: ["qms-car-attachments", "workspace", audit?.id],
@@ -162,6 +169,38 @@ const QualityAuditRunHubPage: React.FC = () => {
   const checklistUrl = audit ? `${getApiBaseUrl()}/quality/audits/${audit.id}/checklist` : "";
   const reportUrl = audit ? `${getApiBaseUrl()}/quality/audits/${audit.id}/report` : "";
   const workflow = auditContextQuery.data?.workflow;
+  const allCars = cars.data ?? [];
+  const openCars = allCars.filter((car) => car.status !== "CLOSED");
+  const openFindings = findings.filter((row) => !row.finding.closed_at);
+  const assignedAuditors = [
+    { label: "Lead", value: audit?.lead_auditor_user_id },
+    { label: "Observer", value: audit?.observer_auditor_user_id },
+    { label: "Assistant", value: audit?.assistant_auditor_user_id },
+  ].filter((item) => item.value);
+
+  const refetchAuditData = async () => {
+    await auditContextQuery.refetch();
+    await registerQuery.refetch();
+    await cars.refetch();
+  };
+
+  const issueNotice = useMutation({
+    mutationFn: () => audit ? qmsIssueAuditNotice(audit.id, { stage: "manual" }) : Promise.reject(new Error("Audit not resolved.")),
+    onSuccess: () => { void refetchAuditData(); setActionError(null); },
+    onError: (error: Error) => setActionError(error.message || "Failed to issue audit notice."),
+  });
+
+  const closeAudit = useMutation({
+    mutationFn: () => audit ? qmsCloseAudit(audit.id) : Promise.reject(new Error("Audit not resolved.")),
+    onSuccess: () => { void refetchAuditData(); setActionError(null); },
+    onError: (error: Error) => setActionError(error.message || "Failed to close audit."),
+  });
+
+  const exportPack = useMutation({
+    mutationFn: () => audit ? downloadAuditEvidencePack(audit.id) : Promise.reject(new Error("Audit not resolved.")),
+    onSuccess: (file) => { saveDownloadedFile(file); setActionError(null); },
+    onError: (error: Error) => setActionError(error.message || "Failed to export audit evidence pack."),
+  });
 
   const setTab = (tab: WorkspaceTab) => {
     const next = new URLSearchParams(searchParams);
@@ -253,6 +292,46 @@ const QualityAuditRunHubPage: React.FC = () => {
               <span className="qms-pill">Lead: {audit.lead_auditor_user_id || "Unassigned"}</span>
               <span className="qms-pill">Window: {dateFmt(audit.planned_start)} → {dateFmt(audit.planned_end)}</span>
             </div>
+            {actionError ? <p className="text-danger">{actionError}</p> : null}
+
+            {activeTab === "war-room" && (
+              <div className="audit-war-room-grid">
+                <section className="audit-war-room-card">
+                  <h3><Users size={16} /> Audit team and notices</h3>
+                  <p className="text-muted">Notices are sent through the existing backend dispatch, which creates portal notifications and email log entries for assigned auditors and auditees.</p>
+                  <dl className="planner-review-list">
+                    <div><dt>Lead auditor</dt><dd>{audit.lead_auditor_user_id || "Unassigned"}</dd></div>
+                    <div><dt>Observer</dt><dd>{audit.observer_auditor_user_id || "Not assigned"}</dd></div>
+                    <div><dt>Assistant</dt><dd>{audit.assistant_auditor_user_id || "Not assigned"}</dd></div>
+                    <div><dt>Auditee</dt><dd>{audit.auditee || audit.auditee_email || audit.auditee_user_id || "Not set"}</dd></div>
+                    <div><dt>Notice state</dt><dd>Upcoming: {audit.upcoming_notice_sent_at ? dateFmt(audit.upcoming_notice_sent_at) : "not sent"} · Day-of: {audit.day_of_notice_sent_at ? dateFmt(audit.day_of_notice_sent_at) : "not sent"}</dd></div>
+                  </dl>
+                  <div className="qms-header__actions">
+                    <button type="button" className="secondary-chip-btn" onClick={() => issueNotice.mutate()} disabled={issueNotice.isPending || !assignedAuditors.length}>
+                      <MailCheck size={14} /> {issueNotice.isPending ? "Sending…" : "Send notice now"}
+                    </button>
+                    <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/schedule`)}>Open planner</button>
+                  </div>
+                  {!assignedAuditors.length ? <p className="text-danger">Assign at least a lead auditor before sending notices.</p> : null}
+                </section>
+                <section className="audit-war-room-card">
+                  <h3><PackageCheck size={16} /> Closure readiness</h3>
+                  <div className="audit-progress-card__stats">
+                    <span className="qms-pill">Open findings: {openFindings.length}</span>
+                    <span className="qms-pill">Open CARs: {openCars.length}</span>
+                    <span className="qms-pill">Checklist: {audit.checklist_file_ref ? "Ready" : "Missing"}</span>
+                    <span className="qms-pill">Report: {audit.report_file_ref ? "Ready" : "Missing"}</span>
+                  </div>
+                  <p className="text-muted">Use findings and CAR tabs for fieldwork and corrective action. Closeout is blocked by the backend until report/checklist and CAR verification rules pass.</p>
+                  <div className="qms-header__actions">
+                    <button type="button" className="secondary-chip-btn" onClick={() => exportPack.mutate()} disabled={exportPack.isPending}>
+                      <FolderKanban size={14} /> {exportPack.isPending ? "Packaging…" : "Export evidence pack"}
+                    </button>
+                    <button type="button" className="secondary-chip-btn" onClick={() => setTab("closeout")}>Go to closeout</button>
+                  </div>
+                </section>
+              </div>
+            )}
 
             {activeTab === "checklist" && (
               <div>
@@ -300,7 +379,15 @@ const QualityAuditRunHubPage: React.FC = () => {
             {activeTab === "cars" && (
               <div>
                 <h3><ShieldAlert size={16} /> CARs</h3>
-                <p>{findings.flatMap((row) => row.linked_cars).length} CARs are linked to the findings in this audit.</p>
+                <p>{allCars.length || findings.flatMap((row) => row.linked_cars).length} CARs are linked to this audit. Open CARs: {openCars.length}.</p>
+                <div className="audit-chip-list">
+                  {(allCars.length ? allCars : findings.flatMap((row) => row.linked_cars)).map((car) => (
+                    <button key={car.id} type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/qms/cars/${car.id}/overview`)}>
+                      {car.car_number} · {car.status}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-muted">Issue new CARs from finding records. Auditee responses and quality review stay on the CAR workspace and feed this audit closeout state.</p>
               </div>
             )}
             {activeTab === "evidence" && (
@@ -314,14 +401,46 @@ const QualityAuditRunHubPage: React.FC = () => {
               <div>
                 <h3><FileText size={16} /> Report</h3>
                 <p className="text-muted">{audit.report_file_ref ? "Report available" : "No report uploaded."}</p>
-                {audit.report_file_ref ? <a className="secondary-chip-btn" href={reportUrl} target="_blank" rel="noreferrer">Open report</a> : null}
+                <div className="qms-header__actions" style={{ marginBottom: 8 }}>
+                  {audit.report_file_ref ? <a className="secondary-chip-btn" href={reportUrl} target="_blank" rel="noreferrer">Open report</a> : null}
+                  <label className="secondary-chip-btn">
+                    Upload report
+                    <input
+                      type="file"
+                      style={{ display: "none" }}
+                      accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      disabled={!canEditChecklist || uploading}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file || !audit.id) return;
+                        setUploading(true);
+                        setUploadError(null);
+                        qmsUploadAuditReport(audit.id, file)
+                          .then(() => void refetchAuditData())
+                          .catch((err: any) => setUploadError(err?.message || "Failed to upload report."))
+                          .finally(() => setUploading(false));
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                {uploadError ? <p className="text-danger">{uploadError}</p> : null}
               </div>
             )}
             {activeTab === "closeout" && (
               <div>
                 <h3><CalendarClock size={16} /> Closeout Log</h3>
-                <p>Open findings: {findings.filter((row) => !row.finding.closed_at).length}</p>
-                <p className="text-muted">Closure should follow only after findings and CAR verification are complete and the report is on file.</p>
+                <p>Open findings: {openFindings.length}</p>
+                <p>Open CARs: {openCars.length}</p>
+                <p className="text-muted">Closure follows the backend rules: checklist/report required, all NC findings must have CARs, CAR root cause/CAPA must be accepted, and required evidence must be verified.</p>
+                <div className="qms-header__actions">
+                  <button type="button" className="secondary-chip-btn" onClick={() => exportPack.mutate()} disabled={exportPack.isPending}>
+                    <PackageCheck size={14} /> {exportPack.isPending ? "Packaging…" : "Package evidence"}
+                  </button>
+                  <button type="button" className="secondary-chip-btn" onClick={() => closeAudit.mutate()} disabled={closeAudit.isPending || audit.status === "CLOSED"}>
+                    {closeAudit.isPending ? "Closing…" : audit.status === "CLOSED" ? "Audit closed" : "Close audit"}
+                  </button>
+                </div>
               </div>
             )}
           </div>
