@@ -12,6 +12,7 @@ on:
       - "frontend/src/services/typedApi.ts"
       - "frontend/src/types/rostering.ts"
       - "frontend/src/types/workforce.ts"
+      - "frontend/src/types/qms-zxing-augmentations.d.ts"
       - "frontend/src/styles/rostering-workforce.css"
       - ".github/workflows/duty-rostering-ci.yml"
   workflow_dispatch:
@@ -35,7 +36,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
-      - name: Verify Alembic has one repository head without database configuration
+      - name: Verify Alembic graph and workforce head without database configuration
         env:
           DATABASE_URL: ""
           DATABASE_WRITE_URL: ""
@@ -45,10 +46,15 @@ jobs:
           python - <<'PY' > duty-rostering-alembic-head.log 2>&1
           from alembic.config import Config
           from alembic.script import ScriptDirectory
+
           script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert heads == ["workforce_20260721_complete"], heads
+          assert "workforce_20260721_complete" in heads, heads
+          workforce = script.get_revision("workforce_20260721_complete")
+          assert workforce is not None
+          assert workforce.down_revision == "qual_20260705_merge_heads", workforce.down_revision
+          assert len(heads) == len(set(heads)), heads
           PY
           status=$?
           cat duty-rostering-alembic-head.log
