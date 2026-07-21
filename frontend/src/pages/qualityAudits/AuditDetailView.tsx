@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, Info, ClipboardList } from "lucide-react";
+import { Search, Info, ClipboardList, Pencil, Save, X } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -18,9 +18,12 @@ import {
   qmsListCars,
   qmsListFindingsBulk,
   qmsListAuditSchedules,
+  qmsListAuditPersonnelOptions,
+  qmsUpdateAuditSchedule,
   type CAROut,
   type QMSAuditOut,
   type QMSFindingOut,
+  type QMSPersonOption,
 } from "../../services/qms";
 import { computeReadiness } from "./readiness";
 import { getDueMessage } from "./dueStatus";
@@ -46,6 +49,15 @@ type TrendDatum = {
   value: number;
 };
 
+type ParticipantFormState = {
+  lead_auditor_user_id: string;
+  observer_auditor_user_id: string;
+  assistant_auditor_user_id: string;
+  auditee_user_id: string;
+  auditee: string;
+  auditee_email: string;
+};
+
 const asStatus = (finding: QMSFindingOut): "Open" | "Closed" | "Overdue" => {
   if (finding.closed_at) return "Closed";
   if (finding.target_close_date && new Date(finding.target_close_date).getTime() < Date.now()) return "Overdue";
@@ -58,11 +70,44 @@ const riskTone = (openLevel1: number, openLevel2: number) => {
   return { label: "Low", className: "qms-pill qms-pill--success" };
 };
 
+
+const findingLevelLabel = (value?: string | null): string => {
+  const normalized = String(value || "").toUpperCase();
+  if (normalized === "LEVEL_1") return "Level 1 · Critical";
+  if (normalized === "LEVEL_2") return "Level 2 · Major";
+  if (normalized === "LEVEL_3") return "Level 3 · Minor";
+  if (normalized === "LEVEL_4") return "Observations";
+  return value || "Unclassified";
+};
+
 const statusClassName = (status: "Open" | "Closed" | "Overdue") => {
   if (status === "Closed") return "qms-status-pill qms-status-pill--closed";
   if (status === "Overdue") return "qms-status-pill qms-status-pill--overdue";
   return "qms-status-pill qms-status-pill--open";
 };
+
+
+const personName = (peopleById: Map<string, QMSPersonOption>, userId?: string | null): string => {
+  if (!userId) return "Unassigned";
+  const person = peopleById.get(userId);
+  return person ? (person.position_title ? `${person.full_name} · ${person.position_title}` : person.full_name) : userId;
+};
+
+const participantFormFromSchedule = (schedule: {
+  lead_auditor_user_id?: string | null;
+  observer_auditor_user_id?: string | null;
+  assistant_auditor_user_id?: string | null;
+  auditee_user_id?: string | null;
+  auditee?: string | null;
+  auditee_email?: string | null;
+} | null): ParticipantFormState => ({
+  lead_auditor_user_id: schedule?.lead_auditor_user_id || "",
+  observer_auditor_user_id: schedule?.observer_auditor_user_id || "",
+  assistant_auditor_user_id: schedule?.assistant_auditor_user_id || "",
+  auditee_user_id: schedule?.auditee_user_id || "",
+  auditee: schedule?.auditee || "",
+  auditee_email: schedule?.auditee_email || "",
+});
 
 const TrendCard = React.memo(function TrendCard({ data, hasData }: { data: TrendDatum[]; hasData: boolean }) {
   return (
@@ -153,7 +198,7 @@ const FindingsTable = React.memo(function FindingsTable({
               >
                 <td>{row.finding.finding_ref ?? row.finding.id.slice(0, 8)}</td>
                 <td><code>{row.finding.requirement_ref ?? "N/A"}</code></td>
-                <td><span className="qms-pill">{row.finding.level}</span></td>
+                <td><span className="qms-pill">{findingLevelLabel(row.finding.level)}</span></td>
                 <td><span className={statusClassName(status)}>{status}</span></td>
                 <td>{row.finding.closed_at ? new Date(row.finding.closed_at).toLocaleDateString() : "—"}</td>
               </tr>
@@ -167,7 +212,11 @@ const FindingsTable = React.memo(function FindingsTable({
 
 const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [editingParticipants, setEditingParticipants] = useState(false);
+  const [participantForm, setParticipantForm] = useState<ParticipantFormState>(participantFormFromSchedule(null));
+  const [participantMessage, setParticipantMessage] = useState<string | null>(null);
   const rawWorkspaceTab = searchParams.get("tab");
   const activeTab: WorkspaceTab = rawWorkspaceTab === "checklists" || rawWorkspaceTab === "documents" ? rawWorkspaceTab : "findings";
   const severityFilter = searchParams.get("severity") || "ALL";
@@ -180,6 +229,18 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     queryFn: () => qmsListAuditSchedules({ domain: "AMO", active: true }, { silent: true }),
     staleTime: 60_000,
   });
+
+  const personnelQuery = useQuery({
+    queryKey: ["qms-audit-personnel-options", amoCode],
+    queryFn: () => qmsListAuditPersonnelOptions({ limit: 150 }),
+    staleTime: 5 * 60_000,
+  });
+
+  const peopleById = useMemo(() => {
+    const next = new Map<string, QMSPersonOption>();
+    (personnelQuery.data ?? []).forEach((person) => next.set(person.id, person));
+    return next;
+  }, [personnelQuery.data]);
 
   const auditsQuery = useQuery({
     queryKey: ["qms-audits", "schedule-detail", amoCode],
@@ -197,6 +258,31 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     () => (schedulesQuery.data ?? []).find((row) => row.id === scheduleId) ?? null,
     [scheduleId, schedulesQuery.data]
   );
+
+  useEffect(() => {
+    setParticipantForm(participantFormFromSchedule(schedule));
+    setEditingParticipants(false);
+    setParticipantMessage(null);
+  }, [schedule?.id]);
+
+  const participantUpdate = useMutation({
+    mutationFn: async () => qmsUpdateAuditSchedule(scheduleId, {
+      lead_auditor_user_id: participantForm.lead_auditor_user_id || null,
+      observer_auditor_user_id: participantForm.observer_auditor_user_id || null,
+      assistant_auditor_user_id: participantForm.assistant_auditor_user_id || null,
+      auditee_user_id: schedule?.kind === "INTERNAL" ? participantForm.auditee_user_id || null : null,
+      auditee: participantForm.auditee || null,
+      auditee_email: participantForm.auditee_email || null,
+    }),
+    onSuccess: async () => {
+      setParticipantMessage("Audit team and auditee details updated.");
+      setEditingParticipants(false);
+      await queryClient.invalidateQueries({ queryKey: ["qms-audit-schedules", amoCode] });
+    },
+    onError: (error: Error) => {
+      setParticipantMessage(error.message || "Unable to update participants.");
+    },
+  });
 
   const scheduleAudits = useMemo(() => {
     const all = auditsQuery.data ?? [];
@@ -218,7 +304,6 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     enabled: scheduleAudits.length > 0,
     staleTime: 60_000,
   });
-
 
   const findingsQueries = useQuery({
     queryKey: ["qms-findings", "schedule-detail", amoCode, scheduleId, scheduleAudits.map((item) => item.id).join(",")],
@@ -342,16 +427,32 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
     setSearchParams(next);
   };
 
-  const baseQmsPath = `/maintenance/${amoCode}/qms`;
+  const baseQmsPath = `/maintenance/${amoCode}/quality`;
   const goToRegister = () => navigate(`${baseQmsPath}/audits/register`);
   const goToEvidence = () => navigate(`${baseQmsPath}/evidence`);
+  const personnelOptions = personnelQuery.data ?? [];
+  const setParticipantField = (field: keyof ParticipantFormState, value: string) => setParticipantForm((prev) => ({ ...prev, [field]: value }));
+  const cancelParticipantEdit = () => {
+    setParticipantForm(participantFormFromSchedule(schedule));
+    setEditingParticipants(false);
+    setParticipantMessage(null);
+  };
+  const participantSelect = (field: keyof ParticipantFormState, label: string, value: string) => (
+    <label className="qms-audit-detail__team-edit-field">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => setParticipantField(field, event.target.value)}>
+        <option value="">Unassigned</option>
+        {personnelOptions.map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.position_title ? ` · ${person.position_title}` : ""}</option>)}
+      </select>
+    </label>
+  );
 
   if (!schedule && !schedulesQuery.isLoading) {
     return (
       <div className="qms-card">
         <h3>Schedule not found</h3>
         <p>The schedule is missing, inactive, or outside your AMO scope.</p>
-        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/plan?view=list`)}>
+        <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/plan?view=list`)}>
           Back to list
         </button>
       </div>
@@ -402,22 +503,47 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
             <button type="button" className="btn qms-audit-detail__prep-cta">Start Preparation Steps</button>
           </article>
 
-          <article className="qms-card qms-audit-detail__kpi-card">
-            <h4>AMO Dossier</h4>
-            <div className="qms-audit-detail__dossier-list">
-              <div><strong>Registered Name:</strong> {brand.name || amoCode}</div>
+          <article className="qms-card qms-audit-detail__kpi-card qms-audit-detail__team-card">
+            <div className="qms-audit-detail__team-head">
               <div>
-                <strong>Lead auditor:</strong>{" "}
-                {schedule?.lead_auditor_user_id || "Unassigned"}
+                <h4>Audit team and auditee</h4>
+                <small>{brand.name || amoCode} · {schedule?.frequency?.replaceAll("_", " ") || "No cadence"}</small>
               </div>
-              <div><strong>Auditee:</strong> {schedule?.auditee || "Unassigned"}</div>
-              <div><strong>Observer auditor:</strong> {schedule?.observer_auditor_user_id || "Unassigned"}</div>
-              <div><strong>Assistant auditor:</strong> {schedule?.assistant_auditor_user_id || "Unassigned"}</div>
-              <div>
-                <strong>Risk Summary:</strong> <span className={risk.className}>{risk.label}</span>
-              </div>
-              <div><strong>Schedule Frequency:</strong> {schedule?.frequency?.replaceAll("_", " ") || "—"}</div>
+              {editingParticipants ? (
+                <div className="qms-audit-detail__team-actions">
+                  <button type="button" className="secondary-chip-btn" onClick={cancelParticipantEdit}><X size={13} /> Cancel</button>
+                  <button type="button" className="btn btn--sm" onClick={() => participantUpdate.mutate()} disabled={participantUpdate.isPending}><Save size={13} /> Save</button>
+                </div>
+              ) : (
+                <button type="button" className="secondary-chip-btn" onClick={() => setEditingParticipants(true)}><Pencil size={13} /> Edit team</button>
+              )}
             </div>
+            {participantMessage ? <p className="qms-audit-detail__team-message">{participantMessage}</p> : null}
+            {editingParticipants ? (
+              <div className="qms-audit-detail__team-editor">
+                {participantSelect("lead_auditor_user_id", "Lead auditor", participantForm.lead_auditor_user_id)}
+                {participantSelect("observer_auditor_user_id", "Observer auditor", participantForm.observer_auditor_user_id)}
+                {participantSelect("assistant_auditor_user_id", "Assistant auditor", participantForm.assistant_auditor_user_id)}
+                {schedule?.kind === "INTERNAL" ? participantSelect("auditee_user_id", "Internal auditee", participantForm.auditee_user_id) : null}
+                <label className="qms-audit-detail__team-edit-field">
+                  <span>Auditee label</span>
+                  <input value={participantForm.auditee} onChange={(event) => setParticipantField("auditee", event.target.value)} placeholder="Department, contact name or external organisation" />
+                </label>
+                <label className="qms-audit-detail__team-edit-field">
+                  <span>Auditee email</span>
+                  <input type="email" value={participantForm.auditee_email} onChange={(event) => setParticipantField("auditee_email", event.target.value)} placeholder="name@example.com" />
+                </label>
+              </div>
+            ) : (
+              <div className="qms-audit-detail__team-list">
+                <div><span>Lead auditor</span><strong>{personName(peopleById, schedule?.lead_auditor_user_id)}</strong></div>
+                <div><span>Observer</span><strong>{personName(peopleById, schedule?.observer_auditor_user_id)}</strong></div>
+                <div><span>Assistant</span><strong>{personName(peopleById, schedule?.assistant_auditor_user_id)}</strong></div>
+                <div><span>Auditee</span><strong>{schedule?.kind === "INTERNAL" ? personName(peopleById, schedule?.auditee_user_id) : schedule?.auditee || "Unassigned"}</strong></div>
+                <div><span>Auditee email</span><strong>{schedule?.auditee_email || "Not set"}</strong></div>
+                <div><span>Risk summary</span><strong><span className={risk.className}>{risk.label}</span></strong></div>
+              </div>
+            )}
           </article>
 
           <TrendCard data={trendData} hasData={findingRows.length > 0} />
@@ -445,9 +571,10 @@ const AuditDetailView: React.FC<Props> = ({ amoCode, department, scheduleId }) =
               <label className="qms-pill">Severity
                 <select value={severityFilter} onChange={(e) => setFilter("severity", e.target.value)}>
                   <option value="ALL">All</option>
-                  <option value="LEVEL_1">Level 1</option>
-                  <option value="LEVEL_2">Level 2</option>
-                  <option value="LEVEL_3">Level 3</option>
+                  <option value="LEVEL_1">Level 1 · Critical</option>
+                  <option value="LEVEL_2">Level 2 · Major</option>
+                  <option value="LEVEL_3">Level 3 · Minor</option>
+                  <option value="LEVEL_4">Observations</option>
                 </select>
               </label>
               <label className="qms-pill">Status

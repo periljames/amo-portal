@@ -25,13 +25,14 @@ type Props = {
   title: string;
   subtitle: string;
   breadcrumbs: Breadcrumb[];
-  nav: React.ReactNode;
+  nav?: React.ReactNode;
   toolbar?: React.ReactNode;
   children: React.ReactNode;
+  suppressHeader?: boolean;
 };
 
-const AuditPageShell: React.FC<Props> = ({ amoCode, department, title, subtitle, breadcrumbs, nav, toolbar, children }) => {
-  const customHeader = (
+const AuditPageShell: React.FC<Props> = ({ amoCode, department, title, subtitle, breadcrumbs, nav, toolbar, children, suppressHeader = false }) => {
+  const customHeader = suppressHeader ? <></> : (
     <div className="audit-shell-header">
       <div className="audit-shell-header__top-row">
         <div className="audit-shell-header__title-block">
@@ -69,7 +70,7 @@ const AuditPageShell: React.FC<Props> = ({ amoCode, department, title, subtitle,
           </button>
         </div>
       </div>
-      <div className="audit-shell-header__nav">{nav}</div>
+      {nav ? <div className="audit-shell-header__nav">{nav}</div> : null}
     </div>
   );
 

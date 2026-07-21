@@ -251,7 +251,7 @@ const QMSHomePage: React.FC = () => {
           date: audit.planned_start as string,
           type: "Audit" as const,
           meta: audit.audit_ref,
-          route: `/maintenance/${amoSlug}/${department}/qms/audits/${audit.id}`,
+          route: `/maintenance/${amoSlug}/quality/audits/${audit.id}`,
         })),
       ...trainingEvents.map((event) => ({
         id: event.id,
@@ -259,7 +259,7 @@ const QMSHomePage: React.FC = () => {
         date: event.starts_on,
         type: "Training" as const,
         meta: trainingCourses.find((course) => course.id === event.course_id)?.course_id,
-        route: `/maintenance/${amoSlug}/${department}/qms/events`,
+        route: `/maintenance/${amoSlug}/quality/events`,
       })),
     ]
       .filter((event) => isWithinDays(event.date, 45))
@@ -360,7 +360,7 @@ const QMSHomePage: React.FC = () => {
                 type="button"
                 className="secondary-chip-btn"
                 onClick={() =>
-                  navigate(`/maintenance/${amoSlug}/${department}/qms/cars`)
+                  navigate(`/maintenance/${amoSlug}/quality/cars`)
                 }
               >
                 Open CAR register
@@ -393,7 +393,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className={`qms-attention ${metrics.overdueCars.length > 0 ? "qms-attention--alert qms-attention--pulse" : ""}`}
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/cars`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/cars`)}
                 >
                   <span className="qms-attention__icon">⚠️</span>
                   <span className="qms-attention__label">Overdue CARs</span>
@@ -403,7 +403,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className={`qms-attention ${metrics.overdueTraining.length > 0 ? "qms-attention--alert qms-attention--pulse" : ""}`}
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/training`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/training`)}
                 >
                   <span className="qms-attention__icon">⚠️</span>
                   <span className="qms-attention__label">Training overdue</span>
@@ -413,7 +413,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className={`qms-attention ${metrics.auditCounts.CAP_OPEN > 0 ? "qms-attention--alert qms-attention--pulse" : ""}`}
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/audits`)}
                 >
                   <span className="qms-attention__icon">⚠️</span>
                   <span className="qms-attention__label">CAPs open</span>
@@ -423,7 +423,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className={`qms-attention ${metrics.outstandingAcks > 0 ? "qms-attention--alert qms-attention--pulse" : ""}`}
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/documents`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/documents`)}
                 >
                   <span className="qms-attention__icon">⚠️</span>
                   <span className="qms-attention__label">Outstanding acks</span>
@@ -448,7 +448,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="qms-action"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits/plan`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/audits/plan`)}
                 >
                   <span className="qms-action__icon">📋</span>
                   <span className="qms-action__title">Plan & schedule audits</span>
@@ -457,7 +457,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="qms-action"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/cars`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/cars`)}
                 >
                   <span className="qms-action__icon">🛠️</span>
                   <span className="qms-action__title">Manage CARs</span>
@@ -466,7 +466,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="qms-action"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/training`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/training`)}
                 >
                   <span className="qms-action__icon">🎓</span>
                   <span className="qms-action__title">Training matrix</span>
@@ -475,7 +475,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="qms-action"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/documents`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/documents`)}
                 >
                   <span className="qms-action__icon">📘</span>
                   <span className="qms-action__title">Document control</span>
@@ -596,7 +596,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="qms-kpi"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/audits`)}
                 >
                   <span className="qms-kpi__label">Audit closure rate</span>
                   <span className="qms-kpi__value">{metrics.auditClosureRate}%</span>
@@ -605,7 +605,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="qms-kpi"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/documents`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/documents`)}
                 >
                   <span className="qms-kpi__label">Active documents</span>
                   <span className="qms-kpi__value">{metrics.docCounts.ACTIVE}</span>
@@ -614,7 +614,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="qms-kpi"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/cars`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/cars`)}
                 >
                   <span className="qms-kpi__label">Open CARs</span>
                   <span className="qms-kpi__value">{metrics.openCars.length}</span>
@@ -623,7 +623,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="qms-kpi"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/training`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/training`)}
                 >
                   <span className="qms-kpi__label">Training attention</span>
                   <span className="qms-kpi__value">
@@ -645,7 +645,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="secondary-chip-btn"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits/plan`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/audits/plan`)}
                 >
                   View audit programme
                 </button>
@@ -656,7 +656,7 @@ const QMSHomePage: React.FC = () => {
                     type="button"
                     key={audit.id}
                     className="qms-list__item"
-                    onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/audits/${audit.id}`)}
+                    onClick={() => navigate(`/maintenance/${amoSlug}/quality/audits/${audit.id}`)}
                   >
                     <div>
                       <strong>{audit.title}</strong>
@@ -684,7 +684,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="secondary-chip-btn"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/events`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/events`)}
                 >
                   View calendar
                 </button>
@@ -727,7 +727,7 @@ const QMSHomePage: React.FC = () => {
                   type="button"
                   className="secondary-chip-btn"
                   onClick={() =>
-                    navigate(`/maintenance/${amoSlug}/${department}/qms/change-control`)
+                    navigate(`/maintenance/${amoSlug}/quality/change-control`)
                   }
                 >
                   Open change control
@@ -740,7 +740,7 @@ const QMSHomePage: React.FC = () => {
                     key={cr.id}
                     className="qms-list__item"
                     onClick={() =>
-                      navigate(`/maintenance/${amoSlug}/${department}/qms/change-control`)
+                      navigate(`/maintenance/${amoSlug}/quality/change-control`)
                     }
                   >
                     <div>
@@ -769,7 +769,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="secondary-chip-btn"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/cars`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/cars`)}
                 >
                   Open CAR register
                 </button>
@@ -780,7 +780,7 @@ const QMSHomePage: React.FC = () => {
                     type="button"
                     key={car.id}
                     className="qms-list__item"
-                    onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/cars`)}
+                    onClick={() => navigate(`/maintenance/${amoSlug}/quality/cars`)}
                   >
                     <div>
                       <strong>{car.title}</strong>
@@ -808,7 +808,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="secondary-chip-btn"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/documents`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/documents`)}
                 >
                   View document control
                 </button>
@@ -845,7 +845,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="secondary-chip-btn"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/training`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/training`)}
                 >
                   Open training matrix
                 </button>
@@ -872,7 +872,7 @@ const QMSHomePage: React.FC = () => {
                         className="qms-table__row"
                         onClick={() =>
                           navigate(
-                            `/maintenance/${amoSlug}/${department}/qms/training/${entry.user.id}`
+                            `/maintenance/${amoSlug}/quality/training/${entry.user.id}`
                           )
                         }
                       >
@@ -887,7 +887,7 @@ const QMSHomePage: React.FC = () => {
                             onClick={(event) => {
                               event.stopPropagation();
                               navigate(
-                                `/maintenance/${amoSlug}/${department}/qms/training?course=${encodeURIComponent(
+                                `/maintenance/${amoSlug}/quality/training?course=${encodeURIComponent(
                                   entry.item.course_id
                                 )}`
                               );
@@ -933,7 +933,7 @@ const QMSHomePage: React.FC = () => {
                 <button
                   type="button"
                   className="secondary-chip-btn"
-                  onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/events`)}
+                  onClick={() => navigate(`/maintenance/${amoSlug}/quality/events`)}
                 >
                   View events
                 </button>
@@ -944,7 +944,7 @@ const QMSHomePage: React.FC = () => {
                     type="button"
                     key={event.id}
                     className="qms-list__item"
-                    onClick={() => navigate(`/maintenance/${amoSlug}/${department}/qms/events`)}
+                    onClick={() => navigate(`/maintenance/${amoSlug}/quality/events`)}
                   >
                     <div>
                       <strong>{event.title}</strong>

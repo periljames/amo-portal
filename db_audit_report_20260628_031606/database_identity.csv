@@ -1,0 +1,2 @@
+database_name,current_user,server_addr,server_port,postgres_version,captured_at
+"amodb","amodb_app","100.95.25.50/32","5432","PostgreSQL 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit","2026-06-28 06:16:07.940196+00"

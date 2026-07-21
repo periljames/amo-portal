@@ -10,11 +10,11 @@
 // - Uses authHeaders() from auth.ts so requests carry the JWT.
 
 import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
-import { authHeaders, handleAuthFailure } from "./auth";
+import { authHeaders, handleAuthFailure, markSessionActivity, extendSessionIfNeeded } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
 
-type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type AppRequestInit = RequestInit & { silent?: boolean; suppressAuthLogout?: boolean };
 
 function buildJsonMisrouteHint(url: string, contentType: string): string {
@@ -43,6 +43,8 @@ async function request<T>(
   if (mode === "background") beginBackgroundLoading();
   else beginLoading();
   try {
+    markSessionActivity(`api:${method.toLowerCase()}:start:${path}`);
+    void extendSessionIfNeeded(`api:${method.toLowerCase()}:${path}`)?.catch(() => undefined);
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort("timeout"), method === "GET" ? 20000 : 45000);
     const res = await fetch(url, {
@@ -64,11 +66,19 @@ async function request<T>(
     if (!res.ok) {
       const contentType = res.headers.get("Content-Type") || "";
       const text = await res.text();
-      let message = text || `HTTP ${res.status}`;
+      let parsedBody: any = null;
+      let message: string = text || `HTTP ${res.status}`;
       if (contentType.toLowerCase().includes("application/json")) {
         try {
-          const parsed = JSON.parse(text) as { detail?: string; message?: string };
-          message = parsed.detail || parsed.message || message;
+          parsedBody = JSON.parse(text);
+          const detail = parsedBody?.detail;
+          if (typeof detail === "string") {
+            message = detail;
+          } else if (detail && typeof detail === "object") {
+            message = String(detail.message || detail.code || parsedBody?.message || `HTTP ${res.status}`);
+          } else {
+            message = String(parsedBody?.message || message);
+          }
         } catch {
           // keep raw text fallback
         }
@@ -79,8 +89,14 @@ async function request<T>(
         contentType,
         text.slice(0, 300)
       );
-      throw new Error(message || `HTTP ${res.status}`);
+      const error = new Error(message || `HTTP ${res.status}`) as Error & { status?: number; detail?: unknown; responseBody?: unknown };
+      error.status = res.status;
+      error.detail = parsedBody?.detail;
+      error.responseBody = parsedBody;
+      throw error;
     }
+
+    markSessionActivity(`api:${method.toLowerCase()}:ok:${path}`);
 
     if (res.status === 204 || res.status === 205) {
       return null as T;
@@ -164,6 +180,31 @@ export async function apiGet<T>(
   init: AppRequestInit = {}
 ): Promise<T> {
   return request<T>("GET", path, undefined, init);
+}
+
+export async function apiPatch<T>(
+  path: string,
+  body?: unknown,
+  init: AppRequestInit = {}
+): Promise<T> {
+  let bodyInit: BodyInit | undefined;
+
+  if (body === undefined || body === null) {
+    bodyInit = undefined;
+  } else if (typeof body === "string" || body instanceof FormData) {
+    bodyInit = body;
+  } else {
+    bodyInit = JSON.stringify(body);
+  }
+
+  const headers = new Headers(init.headers);
+  if (bodyInit !== undefined && !(bodyInit instanceof FormData)) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+  }
+
+  return request<T>("PATCH", path, bodyInit, { ...init, headers });
 }
 
 export async function apiDelete<T>(

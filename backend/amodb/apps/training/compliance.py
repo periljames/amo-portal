@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, load_only, noload
 
 from ..accounts import models as accounts_models
 from . import models as training_models
+from . import record_lifecycle as training_record_lifecycle
 from . import schemas as training_schemas
 
 
@@ -256,11 +257,15 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
                 training_models.TrainingRequirement.job_role,
                 training_models.TrainingRequirement.user_id,
                 training_models.TrainingRequirement.is_active,
+                training_models.TrainingRequirement.is_mandatory,
+                training_models.TrainingRequirement.effective_from,
+                training_models.TrainingRequirement.effective_to,
             ),
         )
         .filter(
             training_models.TrainingRequirement.amo_id == user.amo_id,
             training_models.TrainingRequirement.is_active.is_(True),
+            training_models.TrainingRequirement.is_mandatory.is_(True),
         )
         .all()
     )
@@ -269,8 +274,14 @@ def get_required_course_ids_for_user(db: Session, user: accounts_models.User) ->
     job_role = get_user_job_role(user)
     required_course_ids: List[str] = []
 
+    today = date.today()
+
     if reqs:
         for req in reqs:
+            if req.effective_from and req.effective_from > today:
+                continue
+            if req.effective_to and req.effective_to < today:
+                continue
             if req.scope == training_models.TrainingRequirementScope.ALL:
                 required_course_ids.append(req.course_id)
             elif req.scope == training_models.TrainingRequirementScope.USER and req.user_id == user.id:
@@ -340,6 +351,7 @@ def _latest_records_for_user(db: Session, user: accounts_models.User, course_ids
             training_models.TrainingRecord.amo_id == user.amo_id,
             training_models.TrainingRecord.user_id == user.id,
             training_models.TrainingRecord.course_id.in_(course_ids),
+            training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
         )
         .order_by(
             training_models.TrainingRecord.course_id.asc(),
@@ -369,6 +381,7 @@ def _all_completed_initial_evidence_for_user(
         .filter(
             training_models.TrainingRecord.amo_id == user.amo_id,
             training_models.TrainingRecord.user_id == user.id,
+            training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
             training_models.TrainingCourse.amo_id == user.amo_id,
         )
         .all()

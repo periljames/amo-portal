@@ -7,7 +7,38 @@ import { BrandLogo } from "../Brand/BrandLogo";
 import { BrandProvider } from "../Brand/BrandProvider";
 import AppShellV2 from "../AppShell/AppShellV2";
 import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
-import { Bell, Menu, X } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  Bell,
+  BookOpen,
+  Building2,
+  CalendarClock,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  Factory,
+  FileText,
+  FolderCog,
+  GraduationCap,
+  Hammer,
+  LayoutDashboard,
+  Mail,
+  Menu,
+  MoreHorizontal,
+  Package,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Send,
+  Settings,
+  ShieldCheck,
+  UserCheck,
+  Users,
+  Wrench,
+  type LucideIcon,
+  X,
+} from "lucide-react";
 import { useToast } from "../feedback/ToastProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { useTimeOfDayTheme } from "../../hooks/useTimeOfDayTheme";
@@ -23,7 +54,7 @@ import {
 } from "../../services/notificationPreferences";
 import { fetchSubscriptionStatus, fetchEntitlements } from "../../services/billing";
 import type { BillingAccessStatus, Subscription } from "../../types/billing";
-import { endSession, getCachedUser, getContext, markSessionActivity, onSessionEvent } from "../../services/auth";
+import { endSession, extendSession, getCachedUser, getContext, getTokenSecondsRemaining, markSessionActivity, onSessionEvent } from "../../services/auth";
 import { fetchOverviewSummary, type OverviewSummary } from "../../services/adminOverview";
 import { qmsGetNotificationSummary, qmsListNotifications, qmsMarkAllNotificationsRead, qmsMarkNotificationRead, type QMSNotificationOut, type QMSNotificationSummaryOut } from "../../services/qms";
 import {
@@ -66,6 +97,63 @@ const ADMIN_NAV_ITEMS: Array<{ id: AdminNavId; label: string }> = [
   { id: "admin-email-logs", label: "Email Logs" },
   { id: "admin-email-settings", label: "Email Server" },
 ];
+
+type SidebarIconKey = string | null | undefined;
+
+const NAV_ICON_MAP: Record<string, LucideIcon> = {
+  "admin-overview": LayoutDashboard,
+  "admin-amos": Building2,
+  "admin-users": Users,
+  "admin-assets": FolderCog,
+  "admin-billing": CreditCard,
+  "admin-settings": Settings,
+  "admin-email-logs": Mail,
+  "admin-email-settings": Send,
+  planning: CalendarDays,
+  production: Factory,
+  maintenance: Wrench,
+  "document-control": FileText,
+  quality: ShieldCheck,
+  reliability: Activity,
+  safety: AlertTriangle,
+  stores: Package,
+  workshops: Hammer,
+  admin: Settings,
+  rostering: CalendarClock,
+  manuals: BookOpen,
+  training: GraduationCap,
+  "my-training": UserCheck,
+  qms: ShieldCheck,
+  more: MoreHorizontal,
+};
+
+function iconForSidebarItem(id: SidebarIconKey, label?: string, sub = false): LucideIcon {
+  if (sub) return ChevronRight;
+  const normalized = `${id || ""} ${label || ""}`.toLowerCase();
+  if (id && NAV_ICON_MAP[id]) return NAV_ICON_MAP[id];
+  if (normalized.includes("calendar") || normalized.includes("planner") || normalized.includes("rostering")) return CalendarDays;
+  if (normalized.includes("audit") || normalized.includes("quality") || normalized.includes("car")) return ShieldCheck;
+  if (normalized.includes("training")) return GraduationCap;
+  if (normalized.includes("document") || normalized.includes("manual")) return FileText;
+  if (normalized.includes("user") || normalized.includes("person")) return Users;
+  if (normalized.includes("billing")) return CreditCard;
+  if (normalized.includes("settings") || normalized.includes("system")) return Settings;
+  if (normalized.includes("stores") || normalized.includes("parts")) return Package;
+  if (normalized.includes("reliability") || normalized.includes("ehm")) return Activity;
+  return LayoutDashboard;
+}
+
+function SidebarItemBody({ id, label, sub = false }: { id?: SidebarIconKey; label: string; sub?: boolean }) {
+  const Icon = iconForSidebarItem(id, label, sub);
+  return (
+    <>
+      <span className={`sidebar__item-icon${sub ? " sidebar__item-icon--sub" : ""}`} aria-hidden="true">
+        <Icon size={sub ? 13 : 17} strokeWidth={2} />
+      </span>
+      <span className="sidebar__item-label">{label}</span>
+    </>
+  );
+}
 
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -280,7 +368,7 @@ const DepartmentLayout: React.FC<Props> = ({
     window.localStorage.setItem(sidebarStorageKey, sidebarPinned ? "1" : "0");
     if (sidebarPinned) setSidebarDrawerOpen(false);
   }, [sidebarPinned, sidebarPinnedPreferenceStorageKey, sidebarStorageKey, uiShellV2]);
-  const { isGoLive } = usePortalRuntimeMode();
+  const { isDemoMode } = usePortalRuntimeMode();
   const isSuperuser = !!currentUser?.is_superuser;
   const isTenantAdmin = isSuperuser || !!currentUser?.is_amo_admin;
   const isAdminArea = isAdminNavId(activeDepartment);
@@ -302,6 +390,16 @@ const DepartmentLayout: React.FC<Props> = ({
       allowedDepartments.includes(dept.id)
     );
   }, [canAccessAdmin, isAdminArea, allowedDepartments]);
+
+  const primaryDepartments = useMemo(() => {
+    const mainOrder = new Set<DepartmentId>(["planning", "production", "maintenance", "quality", "stores", "admin"]);
+    return visibleDepartments.filter((dept) => mainOrder.has(dept.id) || dept.id === activeDepartment);
+  }, [activeDepartment, visibleDepartments]);
+
+  const overflowDepartments = useMemo(() => {
+    const primaryIds = new Set(primaryDepartments.map((dept) => dept.id));
+    return visibleDepartments.filter((dept) => !primaryIds.has(dept.id));
+  }, [primaryDepartments, visibleDepartments]);
 
   const visibleAdminNav = useMemo(() => {
     if (!isAdminArea) return [];
@@ -330,7 +428,7 @@ const DepartmentLayout: React.FC<Props> = ({
     return scheduleWorkspaceRoutePreload([
       rosteringLandingPath,
       ...departmentPaths,
-      `/maintenance/${amoCode}/qms`,
+      `/maintenance/${amoCode}/quality`,
       `/maintenance/${amoCode}/manuals`,
     ]);
   }, [amoCode, rosteringLandingPath, visibleDepartments]);
@@ -539,12 +637,12 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [location.pathname]);
 
   const isQmsTrainingRoute = useMemo(() => {
-    return location.pathname.includes("/qms/training-competence");
+    return location.pathname.includes("/training/competence") || location.pathname.includes("/training-competence");
   }, [location.pathname]);
 
   const isMyTrainingRoute = useMemo(() => {
     const path = location.pathname;
-    if (path.includes("/qms/training-competence")) return false;
+    if (path.includes("/training/competence") || path.includes("/training-competence")) return false;
     return /^\/maintenance\/[^/]+\/(?:[^/]+\/)?training(?:\/|$)/.test(path);
   }, [location.pathname]);
 
@@ -554,8 +652,16 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [location.pathname]);
 
   const isQmsRoute = useMemo(() => {
-    return location.pathname.includes("/qms");
+    return location.pathname.includes("/quality") || location.pathname.includes("/qms");
   }, [location.pathname]);
+
+  const isQualityCarsRoute = useMemo(() => {
+    return /\/maintenance\/[^/]+\/quality\/cars(?:\/|$)/.test(location.pathname);
+  }, [location.pathname]);
+
+  const qualityCarsContentClassName = isQualityCarsRoute
+    ? "app-shell__content app-shell__content--quality-cars"
+    : undefined;
 
   const isDocControlRoute = useMemo(() => {
     return location.pathname.startsWith("/doc-control") || location.pathname.includes("/doc-control") || location.pathname.includes("/document-control");
@@ -647,254 +753,254 @@ const DepartmentLayout: React.FC<Props> = ({
       {
         id: "qms-command",
         label: "Command Centre",
-        path: `/maintenance/${amoCode}/qms`,
-        matchPrefixes: [`/maintenance/${amoCode}/qms/cockpit`],
+        path: `/maintenance/${amoCode}/quality`,
+        matchPrefixes: [`/maintenance/${amoCode}/quality/cockpit`],
       },
       {
         id: "qms-inbox",
-        label: "My QMS Work",
-        path: `/maintenance/${amoCode}/qms/inbox/assigned-to-me`,
+        label: "My Quality Work",
+        path: `/maintenance/${amoCode}/quality/inbox/assigned-to-me`,
         children: [
           {
             id: "qms-inbox-approvals",
             label: "Approvals",
-            path: `/maintenance/${amoCode}/qms/inbox/approvals`,
+            path: `/maintenance/${amoCode}/quality/inbox/approvals`,
           },
           {
             id: "qms-inbox-overdue",
             label: "Overdue Work",
-            path: `/maintenance/${amoCode}/qms/inbox/overdue`,
+            path: `/maintenance/${amoCode}/quality/inbox/overdue`,
           },
           {
             id: "qms-inbox-completed",
             label: "Completed Work",
-            path: `/maintenance/${amoCode}/qms/inbox/completed`,
+            path: `/maintenance/${amoCode}/quality/inbox/completed`,
           },
         ],
       },
       {
         id: "qms-calendar",
         label: "Calendar",
-        path: `/maintenance/${amoCode}/qms/calendar/list`,
+        path: `/maintenance/${amoCode}/quality/calendar/list`,
         children: [
           {
             id: "qms-calendar-audits",
             label: "Audit Dates",
-            path: `/maintenance/${amoCode}/qms/calendar/audits`,
+            path: `/maintenance/${amoCode}/quality/calendar/audits`,
           },
           {
             id: "qms-calendar-cars",
             label: "CAR Deadlines",
-            path: `/maintenance/${amoCode}/qms/calendar/cars`,
+            path: `/maintenance/${amoCode}/quality/calendar/cars`,
           },
           {
             id: "qms-calendar-training",
             label: "Training Expiry",
-            path: `/maintenance/${amoCode}/qms/calendar/training`,
+            path: `/maintenance/${amoCode}/quality/calendar/training`,
           },
           {
             id: "qms-calendar-reviews",
             label: "Review Dates",
-            path: `/maintenance/${amoCode}/qms/calendar/management-review`,
+            path: `/maintenance/${amoCode}/quality/calendar/management-review`,
           },
         ],
       },
       {
         id: "qms-system",
         label: "System & Processes",
-        path: `/maintenance/${amoCode}/qms/system/processes`,
+        path: `/maintenance/${amoCode}/quality/system/processes`,
         children: [
           {
             id: "qms-system-process-map",
             label: "Process Map",
-            path: `/maintenance/${amoCode}/qms/system/processes`,
+            path: `/maintenance/${amoCode}/quality/system/processes`,
           },
           {
             id: "qms-system-objectives",
             label: "Objectives",
-            path: `/maintenance/${amoCode}/qms/system/quality-objectives`,
+            path: `/maintenance/${amoCode}/quality/system/quality-objectives`,
           },
         ],
       },
       {
         id: "qms-documents",
         label: "Controlled Documents",
-        path: `/maintenance/${amoCode}/qms/documents/library`,
+        path: `/maintenance/${amoCode}/quality/documents/library`,
         children: [
           {
             id: "qms-documents-change-requests",
             label: "Change Requests",
-            path: `/maintenance/${amoCode}/qms/documents/change-requests`,
+            path: `/maintenance/${amoCode}/quality/documents/change-requests`,
           },
           {
             id: "qms-documents-approvals",
             label: "Approval Queue",
-            path: `/maintenance/${amoCode}/qms/documents/approvals`,
+            path: `/maintenance/${amoCode}/quality/documents/approvals`,
           },
           {
             id: "qms-documents-distribution",
             label: "Distribution",
-            path: `/maintenance/${amoCode}/qms/documents/distribution`,
+            path: `/maintenance/${amoCode}/quality/documents/distribution`,
           },
           {
             id: "qms-documents-obsolete",
             label: "Archive / Obsolete",
-            path: `/maintenance/${amoCode}/qms/documents/obsolete`,
+            path: `/maintenance/${amoCode}/quality/documents/obsolete`,
           },
         ],
       },
       {
         id: "qms-audits",
         label: "Audits",
-        path: `/maintenance/${amoCode}/qms/audits/dashboard`,
+        path: `/maintenance/${amoCode}/quality/audits/dashboard`,
         children: [
           {
             id: "qms-audits-programme",
             label: "Programme",
-            path: `/maintenance/${amoCode}/qms/audits/program`,
+            path: `/maintenance/${amoCode}/quality/audits/program`,
           },
           {
             id: "qms-audits-schedule",
             label: "Schedule",
-            path: `/maintenance/${amoCode}/qms/audits/schedule`,
-            matchPrefixes: [`/maintenance/${amoCode}/qms/audits/schedules/`],
+            path: `/maintenance/${amoCode}/quality/audits/schedule`,
+            matchPrefixes: [`/maintenance/${amoCode}/quality/audits/schedules/`],
           },
           {
             id: "qms-audits-checklists",
             label: "Checklists",
-            path: `/maintenance/${amoCode}/qms/audits/checklists`,
+            path: `/maintenance/${amoCode}/quality/audits/checklists`,
           },
           {
             id: "qms-audits-reports",
             label: "Reports",
-            path: `/maintenance/${amoCode}/qms/audits/reports`,
+            path: `/maintenance/${amoCode}/quality/audits/reports`,
           },
         ],
       },
       {
         id: "qms-findings",
         label: "Findings",
-        path: `/maintenance/${amoCode}/qms/findings/register`,
+        path: `/maintenance/${amoCode}/quality/findings/register`,
       },
       {
         id: "qms-cars",
         label: "CAR / CAPA",
-        path: `/maintenance/${amoCode}/qms/cars/register`,
+        path: `/maintenance/${amoCode}/quality/cars/register`,
         children: [
           {
             id: "qms-cars-overdue",
             label: "Overdue",
-            path: `/maintenance/${amoCode}/qms/cars/overdue`,
+            path: `/maintenance/${amoCode}/quality/cars/overdue`,
           },
           {
             id: "qms-cars-due-soon",
             label: "Due Soon",
-            path: `/maintenance/${amoCode}/qms/cars/due-soon`,
+            path: `/maintenance/${amoCode}/quality/cars/due-soon`,
           },
           {
             id: "qms-cars-review",
             label: "Quality Review",
-            path: `/maintenance/${amoCode}/qms/cars/awaiting-quality-review`,
+            path: `/maintenance/${amoCode}/quality/cars/awaiting-quality-review`,
           },
           {
             id: "qms-cars-closed",
             label: "Closed",
-            path: `/maintenance/${amoCode}/qms/cars/closed`,
+            path: `/maintenance/${amoCode}/quality/cars/closed`,
           },
         ],
       },
       {
         id: "qms-risk",
         label: "Risk & Opportunities",
-        path: `/maintenance/${amoCode}/qms/risk/register`,
+        path: `/maintenance/${amoCode}/quality/risk/register`,
         children: [
           {
             id: "qms-risk-matrix",
             label: "Risk Matrix",
-            path: `/maintenance/${amoCode}/qms/risk/risk-matrix`,
+            path: `/maintenance/${amoCode}/quality/risk/risk-matrix`,
           },
           {
             id: "qms-risk-treatment",
             label: "Treatment Plans",
-            path: `/maintenance/${amoCode}/qms/risk/treatment-plans`,
+            path: `/maintenance/${amoCode}/quality/risk/treatment-plans`,
           },
         ],
       },
       {
         id: "qms-change",
         label: "Change Control",
-        path: `/maintenance/${amoCode}/qms/change-control/register`,
+        path: `/maintenance/${amoCode}/quality/change-control/register`,
       },
       {
         id: "qms-training",
         label: "Training & Competence",
-        path: `/maintenance/${amoCode}/qms/training-competence/dashboard`,
-        matchPrefixes: [`/maintenance/${amoCode}/qms/training-competence`],
+        path: `/maintenance/${amoCode}/training/competence/dashboard`,
+        matchPrefixes: [`/maintenance/${amoCode}/training/competence`],
         children: [
           {
             id: "qms-training-matrix",
             label: "Matrix",
-            path: `/maintenance/${amoCode}/qms/training-competence/matrix`,
+            path: `/maintenance/${amoCode}/training/competence/matrix`,
           },
           {
             id: "qms-training-due",
             label: "Due / Overdue",
-            path: `/maintenance/${amoCode}/qms/training-competence/overdue`,
+            path: `/maintenance/${amoCode}/training/competence/overdue`,
           },
         ],
       },
       {
         id: "qms-suppliers",
         label: "Suppliers",
-        path: `/maintenance/${amoCode}/qms/suppliers/approved-list`,
+        path: `/maintenance/${amoCode}/quality/suppliers/approved-list`,
       },
       {
         id: "qms-equipment",
         label: "Equipment & Calibration",
-        path: `/maintenance/${amoCode}/qms/equipment-calibration/register`,
+        path: `/maintenance/${amoCode}/quality/equipment-calibration/register`,
       },
       {
         id: "qms-external",
         label: "External Interface",
-        path: `/maintenance/${amoCode}/qms/external-interface/regulator-findings`,
+        path: `/maintenance/${amoCode}/quality/external-interface/regulator-findings`,
       },
       {
         id: "qms-review",
         label: "Management Review",
-        path: `/maintenance/${amoCode}/qms/management-review/dashboard`,
+        path: `/maintenance/${amoCode}/quality/management-review/dashboard`,
       },
       {
         id: "qms-reports",
         label: "Reports & Analytics",
-        path: `/maintenance/${amoCode}/qms/reports/executive-dashboard`,
+        path: `/maintenance/${amoCode}/quality/reports/executive-dashboard`,
       },
       {
         id: "qms-evidence",
         label: "Evidence Vault",
-        path: `/maintenance/${amoCode}/qms/evidence-vault/search`,
-        matchPrefixes: [`/maintenance/${amoCode}/qms/evidence-vault/`],
+        path: `/maintenance/${amoCode}/quality/evidence-vault/search`,
+        matchPrefixes: [`/maintenance/${amoCode}/quality/evidence-vault/`],
       },
       {
         id: "qms-settings",
         label: "Settings",
-        path: `/maintenance/${amoCode}/qms/settings/general`,
+        path: `/maintenance/${amoCode}/quality/settings/general`,
       },
       ...(aerodocEnabled
         ? [
             {
               id: "qms-aerodoc-hangar",
               label: "AeroDoc Hangar",
-              path: `/maintenance/${amoCode}/qms/aerodoc/hangar`,
+              path: `/maintenance/${amoCode}/quality/aerodoc/hangar`,
             },
             {
               id: "qms-aerodoc-compliance",
               label: "AeroDoc Compliance",
-              path: `/maintenance/${amoCode}/qms/aerodoc/compliance`,
+              path: `/maintenance/${amoCode}/quality/aerodoc/compliance`,
             },
             {
               id: "qms-aerodoc-audit",
               label: "AeroDoc Audit Mode",
-              path: `/maintenance/${amoCode}/qms/aerodoc/audit-mode`,
+              path: `/maintenance/${amoCode}/quality/aerodoc/audit-mode`,
             },
           ]
         : []),
@@ -946,7 +1052,11 @@ const DepartmentLayout: React.FC<Props> = ({
   const idleWarningTimeoutRef = useRef<number | null>(null);
   const idleLogoutTimeoutRef = useRef<number | null>(null);
   const idleCountdownIntervalRef = useRef<number | null>(null);
-  const lastActivityRef = useRef<number>(0);
+  const lastActivityRef = useRef<number>(Date.now());
+  const lastActivityUiUpdateRef = useRef<number>(0);
+  const lastActivityBroadcastRef = useRef<number>(0);
+  const idleWarningOpenRef = useRef(false);
+  const lastSessionExtendAttemptRef = useRef<number>(0);
   const pollingInFlightRef = useRef(false);
   const trialMenuRef = useRef<HTMLDivElement | null>(null);
   const lastPollingToastRef = useRef<string | null>(null);
@@ -983,9 +1093,17 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [currentUser]);
 
   useEffect(() => {
+    idleWarningOpenRef.current = idleWarningOpen;
+  }, [idleWarningOpen]);
+
+  useEffect(() => {
     return onSessionEvent((detail) => {
       if (detail.type === "activity") {
-        resetIdleTimers();
+        lastActivityRef.current = Date.now();
+        if (idleWarningOpenRef.current) {
+          resetIdleTimers();
+        }
+        return;
       }
       if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
         clearLayoutCache(`${LAYOUT_CACHE_PREFIX}:`);
@@ -1159,7 +1277,7 @@ const DepartmentLayout: React.FC<Props> = ({
       if (opts?.notify && nextUnread > previousUnreadRef.current) {
         const delta = nextUnread - previousUnreadRef.current;
         playNotificationChirp();
-        void pushDesktopNotification("New QMS notifications", `${delta} new item(s) received.`);
+        void pushDesktopNotification("New Quality notifications", `${delta} new item(s) received.`);
       }
       previousUnreadRef.current = nextUnread;
       setUnreadNotifications(nextUnread);
@@ -1279,6 +1397,73 @@ const DepartmentLayout: React.FC<Props> = ({
     }
   }, [notifications, pushToast, refreshNotifications]);
 
+
+
+  const getNotificationActionUrl = useCallback((note: QMSNotificationOut): string => {
+    const stored = (note.action_url || "").trim();
+    if (stored) return stored;
+    const match = note.message.match(/https?:\/\/[^\s)]+|\/car-invite\?[^\s)]+/i);
+    return match?.[0]?.trim() ?? "";
+  }, []);
+
+  const normaliseNotificationActionUrl = useCallback((rawUrl: string): string => {
+    const actionUrl = rawUrl.trim();
+    if (!actionUrl) return "";
+    if (!/^https?:\/\//i.test(actionUrl)) return actionUrl;
+    try {
+      const target = new URL(actionUrl);
+      if (["localhost", "127.0.0.1", "0.0.0.0"].includes(target.hostname) && window.location.hostname) {
+        target.protocol = window.location.protocol;
+        target.host = window.location.host;
+      }
+      return target.toString();
+    } catch {
+      return actionUrl;
+    }
+  }, []);
+
+  const openNotificationAction = useCallback(
+    async (note: QMSNotificationOut) => {
+      const actionUrl = normaliseNotificationActionUrl(getNotificationActionUrl(note));
+      if (!actionUrl) return;
+      try {
+        if (!note.read_at) {
+          await qmsMarkNotificationRead(note.id);
+        }
+      } catch {
+        // Navigation is more important than blocking the user on a transient read-state failure.
+      }
+      setNotificationsOpen(false);
+      void refreshNotifications({ preserveVisibleItems: true });
+
+      if (/^https?:\/\//i.test(actionUrl)) {
+        try {
+          const target = new URL(actionUrl);
+          if (target.origin === window.location.origin) {
+            navigate(`${target.pathname}${target.search}${target.hash}`);
+          } else {
+            window.location.assign(actionUrl);
+          }
+        } catch {
+          window.location.assign(actionUrl);
+        }
+        return;
+      }
+
+      navigate(actionUrl.startsWith("/") ? actionUrl : `/${actionUrl}`);
+    },
+    [getNotificationActionUrl, navigate, normaliseNotificationActionUrl, refreshNotifications]
+  );
+
+  const markNotificationReadOnly = useCallback(
+    async (note: QMSNotificationOut) => {
+      if (note.read_at) return;
+      await qmsMarkNotificationRead(note.id);
+      await refreshNotifications({ preserveVisibleItems: true });
+    },
+    [refreshNotifications]
+  );
+
   useEffect(() => {
     if (!notificationPollCoordinator) return;
     return notificationPollCoordinator.start((message) => {
@@ -1391,6 +1576,14 @@ const DepartmentLayout: React.FC<Props> = ({
     }, warningDelay);
 
     idleLogoutTimeoutRef.current = window.setTimeout(() => {
+      const elapsed = Date.now() - lastActivityRef.current;
+      // Do not log out from a stale timer while the user has been active.
+      // This protects long training/Quality workflows where a route transition or API
+      // save may reset activity after the original timeout was scheduled.
+      if (elapsed < IDLE_TIMEOUT_MS || (typeof document !== "undefined" && !document.hidden && elapsed < IDLE_TIMEOUT_MS + IDLE_WARNING_MS)) {
+        scheduleIdleTimers();
+        return;
+      }
       endSession("idle");
       setIdleWarningOpen(false);
       setLogoutReason("idle");
@@ -1413,7 +1606,7 @@ const DepartmentLayout: React.FC<Props> = ({
     if (!currentUser) return;
     scheduleIdleTimers();
 
-    const activityEvents: Array<keyof WindowEventMap> = [
+    const activityEvents: string[] = [
       "mousemove",
       "mousedown",
       "mouseup",
@@ -1427,38 +1620,74 @@ const DepartmentLayout: React.FC<Props> = ({
       "pointermove",
       "focus",
       "resize",
+      "selectionchange",
     ];
-    const handleActivity = () => {
+
+    const maybeExtendActiveSession = (reason: string) => {
+      const remaining = getTokenSecondsRemaining();
+      if (remaining == null || remaining > 5 * 60) return;
+      const now = Date.now();
+      if (now - lastSessionExtendAttemptRef.current < 60_000) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      lastSessionExtendAttemptRef.current = now;
+      void extendSession(reason).catch(() => undefined);
+    };
+
+    const handleActivity = (event?: Event) => {
       if (logoutReason) return;
       const now = Date.now();
-      if (now - lastActivityRef.current < 1000) return;
       lastActivityRef.current = now;
-      markSessionActivity("interaction");
-      resetIdleTimers();
+      const reason = event?.type || "interaction";
+      if (now - lastActivityBroadcastRef.current > 10_000) {
+        lastActivityBroadcastRef.current = now;
+        markSessionActivity(reason);
+      }
+      if (idleWarningOpenRef.current || now - lastActivityUiUpdateRef.current > 5_000) {
+        lastActivityUiUpdateRef.current = now;
+        setIdleWarningOpen(false);
+        setIdleCountdown(IDLE_WARNING_MS / 1000);
+        scheduleIdleTimers();
+      }
+      maybeExtendActiveSession(reason);
     };
 
     activityEvents.forEach((evt) =>
-      window.addEventListener(evt, handleActivity, { passive: true })
+      window.addEventListener(evt, handleActivity, { passive: true, capture: true })
     );
     document.addEventListener("scroll", handleActivity, { passive: true, capture: true });
-    document.addEventListener("selectionchange", handleActivity);
 
     const handleVisibility = () => {
       if (!document.hidden) {
-        resetIdleTimers();
+        handleActivity(new Event("visibility"));
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       activityEvents.forEach((evt) =>
-        window.removeEventListener(evt, handleActivity)
+        window.removeEventListener(evt, handleActivity, { capture: true } as EventListenerOptions)
       );
-      document.removeEventListener("scroll", handleActivity, true);
-      document.removeEventListener("selectionchange", handleActivity);
+      document.removeEventListener("scroll", handleActivity, { capture: true } as EventListenerOptions);
       document.removeEventListener("visibilitychange", handleVisibility);
       clearIdleTimers();
     };
+  }, [currentUser, logoutReason]);
+
+  useEffect(() => {
+    if (!currentUser || logoutReason) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const activeRecently = now - lastActivityRef.current < 90_000;
+      if (!activeRecently || document.hidden) return;
+      const remaining = getTokenSecondsRemaining();
+      if (remaining != null && remaining <= 5 * 60) {
+        if (now - lastSessionExtendAttemptRef.current >= 60_000) {
+          lastSessionExtendAttemptRef.current = now;
+          void extendSession("active-portal-use").catch(() => undefined);
+        }
+      }
+    }, 30_000);
+    return () => window.clearInterval(timer);
   }, [currentUser, logoutReason]);
 
   useEffect(() => {
@@ -1631,7 +1860,8 @@ const DepartmentLayout: React.FC<Props> = ({
   }, [trialMenuOpen]);
 
   const handleStaySignedIn = () => {
-    markSessionActivity("continue-session");
+    lastActivityRef.current = Date.now();
+    void extendSession("stay-signed-in").catch(() => undefined);
     resetIdleTimers();
   };
 
@@ -1682,10 +1912,10 @@ const DepartmentLayout: React.FC<Props> = ({
                     type="button"
                     className="sidebar__pin-btn"
                     onClick={() => setSidebarPinned((prev) => !prev)}
-                    aria-label={sidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
-                    title={sidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+                    aria-label={sidebarPinned ? "Collapse navigation" : "Expand navigation"}
+                    title={sidebarPinned ? "Collapse navigation" : "Expand navigation"}
                   >
-                    {sidebarPinned ? "Unpin" : "Pin"}
+                    {sidebarPinned ? <PanelLeftClose size={17} aria-hidden="true" /> : <PanelLeftOpen size={17} aria-hidden="true" />}
                   </button>
                 )}
               </div>
@@ -1710,7 +1940,7 @@ const DepartmentLayout: React.FC<Props> = ({
                         "sidebar__item" + (isActive ? " sidebar__item--active" : "")
                       }
                     >
-                      <span className="sidebar__item-label">{nav.label}</span>
+                      <SidebarItemBody id={nav.id} label={nav.label} />
                       {nav.id !== "admin-overview" && showBadge && (
                         <span
                           className={`sidebar__badge sidebar__badge--${badgeSeverity} ${
@@ -1724,7 +1954,7 @@ const DepartmentLayout: React.FC<Props> = ({
                   );
                 })}
 
-                {visibleDepartments.map((dept) => {
+                {primaryDepartments.map((dept) => {
                   const isActive = dept.id === activeDepartment;
                   return (
                     <button
@@ -1735,11 +1965,34 @@ const DepartmentLayout: React.FC<Props> = ({
                         "sidebar__item" + (isActive ? " sidebar__item--active" : "")
                       }
                     >
-                      <span className="sidebar__item-label">{dept.label}</span>
+                      <SidebarItemBody id={dept.id} label={dept.label} />
                     </button>
                   );
                 })}
 
+                {overflowDepartments.length > 0 && (
+                  <details className="sidebar__more" open={overflowDepartments.some((dept) => dept.id === activeDepartment)}>
+                    <summary className="sidebar__item sidebar__item--more">
+                      <SidebarItemBody id="more" label="More" />
+                    </summary>
+                    <div className="sidebar__more-list">
+                      {overflowDepartments.map((dept) => {
+                        const isActive = dept.id === activeDepartment;
+                        return (
+                          <button
+                            key={dept.id}
+                            type="button"
+                            onClick={() => handleNav(dept.id)}
+                            className={"sidebar__item sidebar__item--sub" + (isActive ? " sidebar__item--active" : "")}
+                            title={dept.label}
+                          >
+                            <SidebarItemBody id={dept.id} label={dept.label} sub />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
 
                 {((!isAdminArea && visibleDepartments.length > 0) ||
                   (isAdminArea && visibleDepartments.length > 0)) && (
@@ -1767,7 +2020,7 @@ const DepartmentLayout: React.FC<Props> = ({
                       const active = location.pathname === item.path;
                       return (
                         <button key={item.id} type="button" onClick={() => navigateWithSidebarClose(item.path)} className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "") }>
-                          <span className="sidebar__item-label">{item.label}</span>
+                          <SidebarItemBody id={item.id} label={item.label} />
                         </button>
                       );
                     })}
@@ -1792,7 +2045,7 @@ const DepartmentLayout: React.FC<Props> = ({
                       const active = location.pathname === item.path;
                       return (
                         <button key={item.id} type="button" onClick={() => navigateWithSidebarClose(item.path)} className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "") }>
-                          <span className="sidebar__item-label">{item.label}</span>
+                          <SidebarItemBody id={item.id} label={item.label} />
                         </button>
                       );
                     })}
@@ -1816,7 +2069,7 @@ const DepartmentLayout: React.FC<Props> = ({
                       const active = location.pathname === item.path;
                       return (
                         <button key={item.id} type="button" onClick={() => navigateWithSidebarClose(item.path)} className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "") }>
-                          <span className="sidebar__item-label">{item.label}</span>
+                          <SidebarItemBody id={item.id} label={item.label} />
                         </button>
                       );
                     })}
@@ -1842,7 +2095,7 @@ const DepartmentLayout: React.FC<Props> = ({
                       const active = location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
                       return (
                         <button key={item.id} type="button" onClick={() => navigateWithSidebarClose(item.path)} className={"sidebar__item sidebar__item--sub" + (active ? " sidebar__item--active" : "") }>
-                          <span className="sidebar__item-label">{item.label}</span>
+                          <SidebarItemBody id={item.id} label={item.label} />
                         </button>
                       );
                     })}
@@ -1859,7 +2112,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     aria-label="Duty Rostering"
                     title="Duty Rostering"
                   >
-                    <span className="sidebar__item-label">Duty Rostering</span>
+                    <SidebarItemBody id="rostering" label="Duty Rostering" />
                   </button>
                 )}
 
@@ -1876,7 +2129,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     aria-label="Manuals"
                     title="Manuals"
                   >
-                    <span className="sidebar__item-label">Manuals</span>
+                    <SidebarItemBody id="manuals" label="Manuals" />
                   </button>
                 )}
 
@@ -1884,14 +2137,14 @@ const DepartmentLayout: React.FC<Props> = ({
                 {!isAdminArea && activeDepartment !== "quality" && (
                   <button
                     type="button"
-                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/qms/training-competence/dashboard`)}
+                    onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/training/competence/dashboard`)}
                     className={
                       "sidebar__item" + (isQmsTrainingRoute ? " sidebar__item--active" : "")
                     }
                     aria-label="Training & Competence"
                     title="Training & Competence"
                   >
-                    <span className="sidebar__item-label">Training & Competence</span>
+                    <SidebarItemBody id="training" label="Training & Competence" />
                   </button>
                 )}
 
@@ -1905,7 +2158,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     aria-label="My Training"
                     title="My Training"
                   >
-                    <span className="sidebar__item-label">My Training</span>
+                    <SidebarItemBody id="my-training" label="My Training" />
                   </button>
                 )}
 
@@ -1913,22 +2166,22 @@ const DepartmentLayout: React.FC<Props> = ({
                   <>
                     <button
                       type="button"
-                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/qms`)}
+                      onClick={() => navigateWithSidebarClose(`/maintenance/${amoCode}/quality`)}
                       className={
                         "sidebar__item" +
-                        (location.pathname === `/maintenance/${amoCode}/qms` || location.pathname === `/maintenance/${amoCode}/qms/`
+                        (location.pathname === `/maintenance/${amoCode}/quality` || location.pathname === `/maintenance/${amoCode}/quality/`
                           ? " sidebar__item--active"
                           : (isQmsRoute || isDocControlRoute)
                             ? " sidebar__item--trail"
                             : "")
                       }
-                      aria-label="Quality Management System"
-                      title="Quality Management System"
+                      aria-label="Quality Management"
+                      title="Quality Management"
                     >
-                      <span className="sidebar__item-label">QMS Command Centre</span>
+                      <SidebarItemBody id="qms" label="Quality Command Centre" />
                     </button>
                     {(isQmsRoute || isDocControlRoute) && (
-                      <div className="sidebar__qms-nav" aria-label="QMS modules">
+                      <div className="sidebar__qms-nav" aria-label="Quality modules">
                         {qmsNavItems.map((item) => {
                           const childActive = item.children?.some((child) => isPathMatch(location.pathname, child.path, child.matchPrefixes)) ?? false;
                           const branchActive = childActive || isPathMatch(location.pathname, item.path, item.matchPrefixes);
@@ -1941,7 +2194,7 @@ const DepartmentLayout: React.FC<Props> = ({
                                   onClick={() => navigateWithSidebarClose(item.path)}
                                   className={itemClass}
                                 >
-                                  <span className="sidebar__item-label">{item.label}</span>
+                                  <SidebarItemBody id={item.id} label={item.label} />
                                 </button>
                                 {branchActive && item.children?.length ? (
                                   <div className="sidebar__qms-subnav" aria-label={`${item.label} subpages`}>
@@ -1957,7 +2210,7 @@ const DepartmentLayout: React.FC<Props> = ({
                                             (childActiveNow ? " sidebar__item--active" : "")
                                           }
                                         >
-                                          <span className="sidebar__item-label">{child.label}</span>
+                                          <SidebarItemBody id={child.id} label={child.label} sub />
                                         </button>
                                       );
                                     })}
@@ -1980,7 +2233,7 @@ const DepartmentLayout: React.FC<Props> = ({
                       aria-label="Document Control workspace"
                       title="Document Control workspace"
                     >
-                      <span className="sidebar__item-label">Document Control</span>
+                      <SidebarItemBody id="document-control" label="Document Control" />
                     </button>
                     <div className="sidebar__qms-nav" aria-label="Document Control pages">
                       {docControlNavItems.map((item) => {
@@ -1992,7 +2245,7 @@ const DepartmentLayout: React.FC<Props> = ({
                             onClick={() => navigateWithSidebarClose(item.path)}
                             className={"sidebar__item sidebar__item--sub" + (isActive ? " sidebar__item--active" : "")}
                           >
-                            <span className="sidebar__item-label">{item.label}</span>
+                            <SidebarItemBody id={item.id} label={item.label} />
                           </button>
                         );
                       })}
@@ -2012,7 +2265,7 @@ const DepartmentLayout: React.FC<Props> = ({
                       aria-label="Reliability Reports"
                       title="Reliability Reports"
                     >
-                      <span className="sidebar__item-label">Reliability Reports</span>
+                      <SidebarItemBody id="reliability" label="Reliability Reports" />
                     </button>
                     <button
                       type="button"
@@ -2024,7 +2277,7 @@ const DepartmentLayout: React.FC<Props> = ({
                       aria-label="Engine Health Monitoring dashboard"
                       title="Engine Health Monitoring dashboard"
                     >
-                      <span className="sidebar__item-label">EHM Dashboard</span>
+                      <SidebarItemBody id="reliability" label="EHM Dashboard" />
                     </button>
                     <button
                       type="button"
@@ -2035,7 +2288,7 @@ const DepartmentLayout: React.FC<Props> = ({
                       aria-label="Engine Health Monitoring trends"
                       title="Engine Health Monitoring trends"
                     >
-                      <span className="sidebar__item-label">EHM Trends</span>
+                      <SidebarItemBody id="reliability" label="EHM Trends" />
                     </button>
                     <button
                       type="button"
@@ -2046,7 +2299,7 @@ const DepartmentLayout: React.FC<Props> = ({
                       aria-label="Engine Health Monitoring uploads"
                       title="Engine Health Monitoring uploads"
                     >
-                      <span className="sidebar__item-label">EHM Uploads</span>
+                      <SidebarItemBody id="reliability" label="EHM Uploads" />
                     </button>
                   </>
                 )}
@@ -2089,9 +2342,9 @@ const DepartmentLayout: React.FC<Props> = ({
                   </div>
                   <div className="app-shell__topbar-actions">
                     {uiShellV2 && <LiveStatusIndicator />}
-                    {uiShellV2 && (
-                      <span className={`app-shell__flight-chip ${isGoLive ? "app-shell__flight-chip--live" : "app-shell__flight-chip--demo"}`}>
-                        {isGoLive ? "LIVE" : "DEMO"}
+                    {uiShellV2 && isDemoMode && (
+                      <span className="app-shell__flight-chip app-shell__flight-chip--demo">
+                        DEMO
                       </span>
                     )}
                     <div ref={notificationsRef} className="notification-menu">
@@ -2135,23 +2388,46 @@ const DepartmentLayout: React.FC<Props> = ({
                           ) : null}
                           {!notificationsError && notifications.length ? (
                             <div className="notification-panel__list">
-                              {notifications.slice(0, 12).map((note) => (
-                                <article key={note.id} className={`notification-item${note.read_at ? "" : " notification-item--unread"}`}>
-                                  <div className="notification-item__title">{note.message}</div>
-                                  <div className="notification-item__meta">
-                                    <span>{new Date(note.created_at).toLocaleString()}</span>
-                                    {!note.read_at ? (
-                                      <button
-                                        type="button"
-                                        className="notification-item__action"
-                                        onClick={() => qmsMarkNotificationRead(note.id).then(() => refreshNotifications({ preserveVisibleItems: true }))}
-                                      >
-                                        Mark read
-                                      </button>
-                                    ) : <span>Read</span>}
-                                  </div>
-                                </article>
-                              ))}
+                              {notifications.slice(0, 12).map((note) => {
+                                const actionUrl = normaliseNotificationActionUrl(getNotificationActionUrl(note));
+                                return (
+                                  <article
+                                    key={note.id}
+                                    className={`notification-item${note.read_at ? "" : " notification-item--unread"}${actionUrl ? " notification-item--actionable" : ""}`}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="notification-item__body"
+                                      onClick={() => actionUrl ? void openNotificationAction(note) : undefined}
+                                      disabled={!actionUrl}
+                                      aria-label={actionUrl ? `Open notification action: ${note.message}` : undefined}
+                                    >
+                                      <span className="notification-item__title">{note.message}</span>
+                                      <span className="notification-item__timestamp">{new Date(note.created_at).toLocaleString()}</span>
+                                    </button>
+                                    <div className="notification-item__meta">
+                                      {actionUrl ? (
+                                        <button
+                                          type="button"
+                                          className="notification-item__action notification-item__action--primary"
+                                          onClick={() => void openNotificationAction(note)}
+                                        >
+                                          {note.action_label || "Open"}
+                                        </button>
+                                      ) : null}
+                                      {!note.read_at ? (
+                                        <button
+                                          type="button"
+                                          className="notification-item__action"
+                                          onClick={() => void markNotificationReadOnly(note)}
+                                        >
+                                          Mark read
+                                        </button>
+                                      ) : <span>Read</span>}
+                                    </div>
+                                  </article>
+                                );
+                              })}
                             </div>
                           ) : null}
                         </div>
@@ -2197,8 +2473,8 @@ const DepartmentLayout: React.FC<Props> = ({
                   <>
                     <h2>Inactivity warning</h2>
                     <p>
-                      You appear to be away from keyboard. You will be logged out in{" "}
-                      <strong>{formattedCountdown}</strong>.
+                      You will be logged out in{" "}
+                      <strong>{formattedCountdown}</strong> due to inactivity.
                     </p>
                     <p>Please click below to stay signed in.</p>
                     <div className="session-timeout-actions">
@@ -2331,7 +2607,7 @@ const DepartmentLayout: React.FC<Props> = ({
                     </div>
                   )}
 
-                  <div className="app-shell__main-inner">{protectedContent}</div>
+                  <div className={`app-shell__main-inner${isQualityCarsRoute ? " app-shell__main-inner--quality-cars" : ""}`}>{protectedContent}</div>
 
                   <footer className="app-shell__footer">
                     <span>© {currentYear} {brand.name}.</span>
@@ -2360,6 +2636,7 @@ const DepartmentLayout: React.FC<Props> = ({
                 className={shellClassName}
                 sidebar={sidebar}
                 header={header}
+                contentClassName={qualityCarsContentClassName}
                 focusMode={false}
               >
                 {isExpired && (

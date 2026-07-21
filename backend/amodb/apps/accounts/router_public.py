@@ -326,6 +326,41 @@ def logout(
 
 
 @router.post(
+    "/extend-session",
+    response_model=schemas.Token,
+    summary="Issue a fresh access token for an active non-AFK session",
+)
+def extend_session(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    token, expires_in = services.issue_access_token_for_user(current_user)
+    try:
+        audit_services.record_event(
+            db,
+            audit_schemas.AuditEventCreate(
+                action="auth.extend_session",
+                entity_type="user",
+                entity_id=str(current_user.id),
+                metadata={"ip": _client_ip(request), "user_agent": _user_agent(request)},
+            ),
+            actor_user_id=str(current_user.id),
+            amo_id=getattr(current_user, "amo_id", None),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return schemas.Token(
+        access_token=token,
+        expires_in=expires_in,
+        user=current_user,
+        amo=None if current_user.is_superuser else current_user.amo,
+        department=current_user.department,
+    )
+
+
+@router.post(
     "/dev-seed-login",
     response_model=schemas.Token,
     include_in_schema=False,

@@ -5,7 +5,7 @@ import py_compile
 from pathlib import Path
 from typing import Iterable
 
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 ROOT = BACKEND_ROOT.parent
 FRONTEND_ROOT = ROOT / "frontend"
 
@@ -116,13 +116,29 @@ def main() -> int:
     ok = True
 
     for check_name, (path, needles) in REQUIRED_CHECKS.items():
+        if not path.exists():
+            is_frontend_check = str(path).startswith(str(FRONTEND_ROOT))
+            if not is_frontend_check:
+                ok = False
+            results[check_name] = {
+                "passed": bool(is_frontend_check),
+                "skipped": bool(is_frontend_check),
+                "path": str(path),
+                "missing": list(needles) if not is_frontend_check else [],
+                "reason": "Frontend file not present in backend-only package." if is_frontend_check else "Required backend file is missing.",
+            }
+            continue
         text = path.read_text(encoding="utf-8")
         missing = ensure_contains(text, needles)
         passed = not missing
         ok = ok and passed
+        try:
+            display_path = str(path.relative_to(ROOT.parent))
+        except ValueError:
+            display_path = str(path)
         results[check_name] = {
             "passed": passed,
-            "path": str(path.relative_to(ROOT.parent)),
+            "path": display_path,
             "missing": missing,
         }
 
@@ -130,10 +146,18 @@ def main() -> int:
     for target in COMPILE_TARGETS:
         try:
             py_compile.compile(str(target), doraise=True)
-            compile_results.append({"path": str(target.relative_to(ROOT.parent)), "passed": True})
+            try:
+                display_target = str(target.relative_to(ROOT.parent))
+            except ValueError:
+                display_target = str(target)
+            compile_results.append({"path": display_target, "passed": True})
         except Exception as exc:  # pragma: no cover
             ok = False
-            compile_results.append({"path": str(target.relative_to(ROOT.parent)), "passed": False, "error": str(exc)})
+            try:
+                display_target = str(target.relative_to(ROOT.parent))
+            except ValueError:
+                display_target = str(target)
+            compile_results.append({"path": display_target, "passed": False, "error": str(exc)})
 
     summary = {
         "passed": ok,

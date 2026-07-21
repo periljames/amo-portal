@@ -1,5 +1,44 @@
 /* ---------- QMS standalone shell ---------- */
 
+/* QMS typography bridge: enterprise-safe, local-first font stack. */
+:root {
+  --qms-font-sans: "Aptos", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  --qms-font-display: "Aptos Display", "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  --qms-font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.qms-shell,
+.qms-nav,
+.qms-content,
+.qms-card,
+.qms-panel,
+.qms-table,
+.cockpit-kpi-card,
+.paper-form {
+  font-family: var(--qms-font-sans);
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  font-kerning: normal;
+  letter-spacing: -0.006em;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.qms-shell :where(h1, h2, h3, h4, .qms-title, .qms-card-title, .cockpit-kpi-value) {
+  font-family: var(--qms-font-display);
+  letter-spacing: -0.032em;
+}
+
+.qms-shell :where(button, input, select, textarea) {
+  font: inherit;
+}
+
+.qms-shell :where(code, .qms-mono, .qms-record-id) {
+  font-family: var(--qms-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+
 /* ---------- QMS token bridge ---------- */
 :root {
   --qms-accent: var(--accent-primary);
@@ -2195,5 +2234,181 @@ button.qms-list__item:hover {
 @media (max-width: 900px) {
   .qms-grid--form-2 {
     grid-template-columns: 1fr;
+  }
+}
+
+/* QMS audit detail participant editing */
+.qms-audit-detail__team-card {
+  gap: 0.9rem;
+}
+
+.qms-audit-detail__team-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.qms-audit-detail__team-head h4 {
+  margin: 0;
+}
+
+.qms-audit-detail__team-head small {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--text-secondary, #64748b);
+}
+
+.qms-audit-detail__team-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.qms-audit-detail__team-message {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--accent-primary, #2563eb) 28%, var(--border, #d8e1ef));
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 7%, var(--surface-elevated, #fff));
+  color: var(--text-secondary, #52647a);
+  font-size: 0.82rem;
+}
+
+.qms-audit-detail__team-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.qms-audit-detail__team-list div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.68rem 0.72rem;
+  border: 1px solid var(--border, #d8e1ef);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 92%, var(--accent-primary, #2563eb) 8%);
+}
+
+.qms-audit-detail__team-list span {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.qms-audit-detail__team-list strong {
+  overflow: hidden;
+  color: var(--text-primary, #0f172a);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-audit-detail__team-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.qms-audit-detail__team-edit-field {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--text-secondary, #64748b);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qms-audit-detail__team-edit-field input,
+.qms-audit-detail__team-edit-field select {
+  min-height: 2.25rem;
+  border: 1px solid var(--border, #d8e1ef);
+  border-radius: 0.7rem;
+  background: var(--surface-elevated, #fff);
+  color: var(--text-primary, #0f172a);
+  padding: 0.45rem 0.58rem;
+  font: inherit;
+  text-transform: none;
+}
+
+@media (max-width: 900px) {
+  .qms-audit-detail__team-list,
+  .qms-audit-detail__team-editor {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* QMS typography tightening ------------------------------------------------------------- */
+.qms-title {
+  font-size: clamp(1.45rem, 2vw, 1.95rem);
+  font-weight: 750;
+}
+
+.qms-eyebrow,
+.qms-nav__meta,
+.qms-section-header p {
+  letter-spacing: 0.02em;
+}
+
+.qms-nav__link,
+.qms-nav__label,
+.qms-header__actions .btn__content {
+  font-weight: 650;
+}
+
+.qms-subtitle,
+.qms-nav__meta,
+.qms-section-header p {
+  font-weight: 400;
+  line-height: 1.42;
+}
+
+@supports (font-variation-settings: normal) {
+  .qms-shell,
+  .qms-nav,
+  .qms-content,
+  .qms-card,
+  .qms-panel,
+  .qms-table,
+  .cockpit-kpi-card,
+  .paper-form {
+    font-family: "Segoe UI Variable Text", "Aptos", "Inter", system-ui, sans-serif;
+  }
+
+  .qms-shell :where(h1, h2, h3, h4, .qms-title, .qms-card-title, .cockpit-kpi-value) {
+    font-family: "Segoe UI Variable Display", "Aptos Display", "Inter", system-ui, sans-serif;
+  }
+}
+
+
+/* QMS scroll stability patch: reduce repaint pressure on large audit/calendar boards. */
+.qms-page-grid,
+.qms-ops-workspace,
+.qms-calendar-shell,
+.audit-shell-body {
+  scroll-behavior: auto;
+  contain: layout paint;
+}
+
+.qms-calendar-day,
+.qms-ops-card,
+.portal-list-card,
+.planner-calendar-cell {
+  content-visibility: auto;
+  contain-intrinsic-size: 96px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qms-ops-card,
+  .qms-calendar-day,
+  .planner-calendar-event,
+  .portal-list-card {
+    transition: none !important;
+    transform: none !important;
   }
 }

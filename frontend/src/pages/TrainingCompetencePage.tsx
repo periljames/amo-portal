@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CalendarClock, CheckSquare, ClipboardSignature, Download, ExternalLink, FileSpreadsheet, GraduationCap, RefreshCw, ScanLine, Search, ShieldCheck, Upload, Users } from "lucide-react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QMSLayout from "../components/QMS/QMSLayout";
 import Drawer from "../components/shared/Drawer";
 import { useToast } from "../components/feedback/ToastProvider";
@@ -16,6 +16,7 @@ import {
   deleteTrainingRequirement,
   downloadTrainingCertificateArtifact,
   getBulkTrainingStatusForUsers,
+  getTrainingReportSettings,
   importTrainingCoursesWorkbook,
   importTrainingRecordsWorkbook,
   issueTrainingCertificate,
@@ -26,9 +27,12 @@ import {
   listTrainingEvents,
   listTrainingRecordsByUsers,
   listTrainingRequirements,
+  type TrainingReportSettings,
+  type TrainingReportSettingsUpdate,
   type TransferProgress,
   updateTrainingCourse,
   updateTrainingEventParticipant,
+  updateTrainingReportSettings,
   updateTrainingRequirement,
   prefetchTrainingUserDetailBundle,
 } from "../services/training";
@@ -50,6 +54,49 @@ import type {
 import "../styles/training-competence.css";
 
 type TabKey = "overview" | "people" | "matrix" | "schedule" | "certificates";
+
+function trainingRouteTab(pathname: string, searchParams: URLSearchParams): TabKey {
+  const explicitTab = searchParams.get("tab");
+  if (explicitTab === "overview" || explicitTab === "people" || explicitTab === "matrix" || explicitTab === "schedule" || explicitTab === "certificates") {
+    return explicitTab;
+  }
+  const section = searchParams.get("section");
+  if (section === "personnel") return "people";
+  if (section === "courses" || section === "requirements" || section === "matrix" || section === "reports") return "matrix";
+  if (section === "schedule" || section === "events") return "schedule";
+  if (section === "certificates") return "certificates";
+
+  const parts = pathname.split("/").filter(Boolean);
+  const legacyIndex = parts.indexOf("training-competence");
+  const trainingIndex = parts.indexOf("training");
+  const view = legacyIndex >= 0
+    ? parts[legacyIndex + 1] || "dashboard"
+    : trainingIndex >= 0 && parts[trainingIndex + 1] === "competence"
+      ? parts[trainingIndex + 2] || "dashboard"
+      : "dashboard";
+  if (view === "dashboard" || view === "overview") return "overview";
+  if (view === "people" || view === "overdue" || view === "expiring" || view === "evaluations") return "people";
+  if (view === "courses" || view === "requirements" || view === "matrix" || view === "reports") return "matrix";
+  if (view === "schedule" || view === "events") return "schedule";
+  if (view === "certificates") return "certificates";
+  return "overview";
+}
+
+function trainingRouteStatusFilter(pathname: string, searchParams: URLSearchParams): string {
+  const explicit = searchParams.get("status");
+  if (explicit) return explicit;
+  const parts = pathname.split("/").filter(Boolean);
+  const legacyIndex = parts.indexOf("training-competence");
+  const trainingIndex = parts.indexOf("training");
+  const view = legacyIndex >= 0
+    ? parts[legacyIndex + 1] || ""
+    : trainingIndex >= 0 && parts[trainingIndex + 1] === "competence"
+      ? parts[trainingIndex + 2] || ""
+      : "";
+  if (view === "overdue") return "OVERDUE";
+  if (view === "expiring") return "DUE_SOON";
+  return "ALL";
+}
 
 type PersonRow = {
   user: AdminUserSummaryRead;
@@ -75,6 +122,19 @@ type RefresherAnomaly = {
   courseName: string;
   prerequisiteNames: string[];
   completionDate: string | null;
+};
+
+type SchedulerCohort = {
+  key: string;
+  coursePk: string;
+  courseCode: string;
+  courseName: string;
+  dueMonth: string;
+  dueLabel: string;
+  urgencyRank: number;
+  statuses: Record<string, number>;
+  userIds: string[];
+  members: Array<{ userId: string; userName: string; staffCode?: string | null; role?: string | null; dueDate: string | null; status: string; daysUntilDue?: number | null }>;
 };
 
 type CourseFamilyIndex = Record<string, string[]>;
@@ -245,6 +305,84 @@ function nextDueLabel(items: TrainingStatusItem[]): { label: string; date: strin
   return { label: `${item.course_name} · ${compactDate(due)}`, date: due || null };
 }
 
+function schedulerDueMonth(dueDate: string | null, fallbackDate: string): { key: string; label: string } {
+  const source = dueDate || fallbackDate;
+  const parsed = new Date(`${source}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return { key: "open", label: "Open due date" };
+  const key = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}`;
+  const label = parsed.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  return { key, label };
+}
+
+function schedulerStatusRank(status: string): number {
+  if (status === "OVERDUE") return 0;
+  if (status === "DUE_SOON") return 1;
+  if (status === "NOT_DONE") return 2;
+  return 9;
+}
+
+function buildSchedulerCohorts(
+  rows: PersonRow[],
+  courses: TrainingCourseRead[],
+  baseDate: string,
+  options: { includeOverdue: boolean; includeDueSoon: boolean; includeNotDone: boolean },
+): SchedulerCohort[] {
+  const lookup = buildCourseLookup(courses);
+  const groups = new Map<string, SchedulerCohort>();
+
+  rows.forEach((row) => {
+    row.items.forEach((item) => {
+      const status = String(item.status || "").toUpperCase();
+      if (status === "OVERDUE" && !options.includeOverdue) return;
+      if (status === "DUE_SOON" && !options.includeDueSoon) return;
+      if (status === "NOT_DONE" && !options.includeNotDone) return;
+      if (!["OVERDUE", "DUE_SOON", "NOT_DONE"].includes(status)) return;
+
+      const course = resolveCourse(lookup, item.course_pk || item.course_id) || resolveCourse(lookup, item.course_id);
+      const coursePk = course?.id || item.course_pk || item.course_id;
+      const courseCode = course?.course_id || item.course_id || "COURSE";
+      const courseName = course?.course_name || item.course_name || courseCode;
+      const dueDate = item.extended_due_date || item.valid_until || null;
+      const dueMonth = schedulerDueMonth(dueDate, baseDate);
+      const key = `${coursePk}:${dueMonth.key}`;
+      const existing = groups.get(key) || {
+        key,
+        coursePk,
+        courseCode,
+        courseName,
+        dueMonth: dueMonth.key,
+        dueLabel: dueMonth.label,
+        urgencyRank: schedulerStatusRank(status),
+        statuses: {},
+        userIds: [],
+        members: [],
+      };
+      if (!existing.userIds.includes(row.user.id)) {
+        existing.userIds.push(row.user.id);
+        existing.members.push({
+          userId: row.user.id,
+          userName: row.user.full_name || row.user.email || row.user.id,
+          staffCode: row.user.staff_code,
+          role: row.user.position_title || row.user.role,
+          dueDate,
+          status,
+          daysUntilDue: item.days_until_due,
+        });
+      }
+      existing.statuses[status] = (existing.statuses[status] || 0) + 1;
+      existing.urgencyRank = Math.min(existing.urgencyRank, schedulerStatusRank(status));
+      groups.set(key, existing);
+    });
+  });
+
+  return Array.from(groups.values()).sort((a, b) => {
+    if (a.urgencyRank !== b.urgencyRank) return a.urgencyRank - b.urgencyRank;
+    if (a.dueMonth !== b.dueMonth) return a.dueMonth.localeCompare(b.dueMonth);
+    if (b.userIds.length !== a.userIds.length) return b.userIds.length - a.userIds.length;
+    return `${a.courseCode} ${a.courseName}`.localeCompare(`${b.courseCode} ${b.courseName}`);
+  });
+}
+
 function buildRefresherAnomalies(
   users: AdminUserSummaryRead[],
   courses: TrainingCourseRead[],
@@ -326,9 +464,10 @@ function buildRefresherAnomalies(
 const TrainingCompetencePage: React.FC = () => {
   const { amoCode, department } = useParams<{ amoCode?: string; department?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const legacySection = searchParams.get("section");
-  const tabParam = (searchParams.get("tab") || (legacySection === "personnel" ? "people" : legacySection) || "people") as TabKey;
+  const tabParam = trainingRouteTab(location.pathname, searchParams);
+  const routeStatusFilter = trainingRouteStatusFilter(location.pathname, searchParams);
   const filterCourseParam = searchParams.get("course") || "ALL";
   const dueWindowParam = searchParams.get("window") || "ALL";
 
@@ -344,7 +483,7 @@ const TrainingCompetencePage: React.FC = () => {
   const [certificates, setCertificates] = useState<TrainingRecordRead[]>([]);
   const [statusByUser, setStatusByUser] = useState<Record<string, TrainingStatusItem[]>>({});
   const [personQuery, setPersonQuery] = useState("");
-  const [personStatusFilter, setPersonStatusFilter] = useState<string>("ALL");
+  const [personStatusFilter, setPersonStatusFilter] = useState<string>(routeStatusFilter);
   const [personCourseFilter, setPersonCourseFilter] = useState<string>(filterCourseParam);
   const [personAnomalyOnly, setPersonAnomalyOnly] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string>("");
@@ -391,6 +530,7 @@ const TrainingCompetencePage: React.FC = () => {
   const [autoGroupOpen, setAutoGroupOpen] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [autoGrouping, setAutoGrouping] = useState(false);
+  const [lastSchedulerResult, setLastSchedulerResult] = useState<{ totalSessions: number; totalEnrolled: number; skipped: number } | null>(null);
   const [scheduleForm, setScheduleForm] = useState<TrainingEventBatchScheduleCreate>({
     course_pk: "",
     user_ids: [],
@@ -408,12 +548,18 @@ const TrainingCompetencePage: React.FC = () => {
     participant_status: "SCHEDULED",
     auto_issue_certificates: true,
     allow_self_attendance: true,
+    allow_online_overlap: true,
   });
   const [autoGroupForm, setAutoGroupForm] = useState<TrainingAutoGroupScheduleCreate>({
     user_ids: [],
     include_due_soon: true,
     include_overdue: true,
+    include_not_done: true,
     base_start_on: new Date().toISOString().slice(0, 10),
+    max_participants_per_session: 20,
+    schedule_search_days: 120,
+    avoid_weekends: true,
+    allow_online_overlap: true,
     provider: "",
     provider_kind: "INTERNAL",
     delivery_mode: "CLASSROOM",
@@ -431,6 +577,21 @@ const TrainingCompetencePage: React.FC = () => {
   const [deferralForm, setDeferralForm] = useState({ requested_new_due_date: "", reason_category: "OPERATIONAL_REQUIREMENTS", reason_text: "" });
   const [certSetupOpen, setCertSetupOpen] = useState(false);
   const [certificateSetup, setCertificateSetup] = useState<TrainingCertificateArtifactOptions>({});
+  const [reportSetupOpen, setReportSetupOpen] = useState(false);
+  const [reportSaving, setReportSaving] = useState(false);
+  const [reportSettings, setReportSettings] = useState<TrainingReportSettings | null>(null);
+  const [reportForm, setReportForm] = useState<TrainingReportSettingsUpdate>({
+    title: "Personnel Training Record",
+    subtitle: "",
+    form_no: "QAM/49A",
+    issue_date: "1 Sept 25",
+    revision: "00",
+    show_compliance_summary: true,
+    show_training_history: true,
+    show_scheduled_events: true,
+    show_deferrals: true,
+    footer_note: "",
+  });
   const loadSeq = useRef(0);
   const anomalyToastKey = useRef<string>("");
   const hydratedSnapshotRef = useRef(false);
@@ -455,6 +616,30 @@ const TrainingCompetencePage: React.FC = () => {
     }
   }, [amoCode, certificateSetup]);
 
+
+  useEffect(() => {
+    let mounted = true;
+    getTrainingReportSettings()
+      .then((settings) => {
+        if (!mounted) return;
+        setReportSettings(settings);
+        setReportForm({
+          title: settings.title,
+          subtitle: settings.subtitle || "",
+          form_no: settings.form_no,
+          issue_date: settings.issue_date,
+          revision: settings.revision,
+          show_compliance_summary: settings.show_compliance_summary,
+          show_training_history: settings.show_training_history,
+          show_scheduled_events: settings.show_scheduled_events,
+          show_deferrals: settings.show_deferrals,
+          footer_note: settings.footer_note || "",
+        });
+      })
+      .catch(() => undefined);
+    return () => { mounted = false; };
+  }, [amoCode]);
+
   useEffect(() => {
     try {
       const raw = window.sessionStorage.getItem(trainingDashboardSnapshotKey(amoCode));
@@ -477,8 +662,12 @@ const TrainingCompetencePage: React.FC = () => {
   }, [amoCode]);
 
   useEffect(() => {
-    setTab(tabParam);
+    setTab((current) => (current === tabParam ? current : tabParam));
   }, [tabParam]);
+
+  useEffect(() => {
+    setPersonStatusFilter((current) => (current === routeStatusFilter ? current : routeStatusFilter));
+  }, [routeStatusFilter]);
 
   useEffect(() => {
     if (!selectedEventId) {
@@ -650,6 +839,30 @@ const TrainingCompetencePage: React.FC = () => {
   }, [dueWindowParam, peopleRows, personAnomalyOnly, personCourseFilter, personQuery, personStatusFilter]);
 
   const selectedUserIdSet = useMemo(() => new Set(selectedUserIds), [selectedUserIds]);
+  const schedulerCohorts = useMemo(
+    () => buildSchedulerCohorts(peopleRows, courses, autoGroupForm.base_start_on || new Date().toISOString().slice(0, 10), {
+      includeOverdue: autoGroupForm.include_overdue !== false,
+      includeDueSoon: autoGroupForm.include_due_soon !== false,
+      includeNotDone: autoGroupForm.include_not_done !== false,
+    }),
+    [autoGroupForm.base_start_on, autoGroupForm.include_due_soon, autoGroupForm.include_not_done, autoGroupForm.include_overdue, courses, peopleRows],
+  );
+  const schedulerQueueUserIds = useMemo(
+    () => Array.from(new Set(schedulerCohorts.flatMap((group) => group.userIds))),
+    [schedulerCohorts],
+  );
+  const selectedSchedulerCohorts = useMemo(() => {
+    if (selectedUserIds.length === 0) return schedulerCohorts;
+    return schedulerCohorts
+      .map((group) => ({
+        ...group,
+        userIds: group.userIds.filter((userId) => selectedUserIdSet.has(userId)),
+        members: group.members.filter((member) => selectedUserIdSet.has(member.userId)),
+      }))
+      .filter((group) => group.userIds.length > 0);
+  }, [schedulerCohorts, selectedUserIdSet, selectedUserIds.length]);
+  const schedulerQueueCount = schedulerCohorts.reduce((sum, group) => sum + group.userIds.length, 0);
+  const selectedSchedulerQueueCount = selectedSchedulerCohorts.reduce((sum, group) => sum + group.userIds.length, 0);
 
   useEffect(() => {
     const visibleIds = new Set(filteredPeople.map((row) => row.user.id));
@@ -768,33 +981,45 @@ const TrainingCompetencePage: React.FC = () => {
     setScheduleOpen(true);
   };
 
-  const openAutoGroupDrawer = () => {
-    if (selectedUserIds.length === 0) {
-      pushToast({ title: "No personnel selected", message: "Select one or more personnel rows before running the grouped scheduler.", variant: "error" });
+  const selectSmartSchedulerQueue = () => {
+    if (schedulerQueueUserIds.length === 0) {
+      pushToast({ title: "No scheduler queue", message: "No overdue, due-soon, or missing mandatory training items are available on the loaded personnel page.", variant: "warning" });
       return;
     }
+    setSelectedUserIds(schedulerQueueUserIds);
+    pushToast({ title: "Scheduler queue selected", message: `${schedulerQueueUserIds.length} personnel with training actions were selected.`, variant: "info" });
+  };
+
+  const openAutoGroupDrawer = (useSmartQueue = false) => {
+    const smartIds = useSmartQueue ? schedulerQueueUserIds : selectedUserIds;
+    if (smartIds.length === 0) {
+      pushToast({ title: "No personnel selected", message: "Select personnel or build the smart scheduler queue first.", variant: "error" });
+      return;
+    }
+    if (useSmartQueue) setSelectedUserIds(smartIds);
     setAutoGroupForm((prev) => ({
       ...prev,
-      user_ids: selectedUserIds,
+      user_ids: smartIds,
       base_start_on: prev.base_start_on || new Date().toISOString().slice(0, 10),
     }));
     setAutoGroupOpen(true);
   };
 
-  const submitAutoGroupSchedule = async () => {
-    if (selectedUserIds.length === 0) {
-      pushToast({ title: "No personnel selected", message: "Select personnel first.", variant: "error" });
+  const submitAutoGroupSchedule = async (overrideUserIds?: string[]) => {
+    const schedulerUserIds = Array.isArray(overrideUserIds) && overrideUserIds.length > 0 ? overrideUserIds : (selectedUserIds.length > 0 ? selectedUserIds : schedulerQueueUserIds);
+    if (schedulerUserIds.length === 0) {
+      pushToast({ title: "No personnel selected", message: "Select personnel first or use the smart scheduler queue.", variant: "error" });
       return;
     }
-    if (!autoGroupForm.include_due_soon && !autoGroupForm.include_overdue) {
-      pushToast({ title: "Select a due bucket", message: "Choose overdue, due soon, or both before running the grouped scheduler.", variant: "error" });
+    if (!autoGroupForm.include_due_soon && !autoGroupForm.include_overdue && !autoGroupForm.include_not_done) {
+      pushToast({ title: "Select a due bucket", message: "Choose overdue, due soon, missing initial, or a combination before running the grouped scheduler.", variant: "error" });
       return;
     }
     setAutoGrouping(true);
     try {
       const result = await autoGroupTrainingEvents({
         ...autoGroupForm,
-        user_ids: selectedUserIds,
+        user_ids: schedulerUserIds,
         base_start_on: autoGroupForm.base_start_on || null,
         provider: autoGroupForm.provider || null,
         instructor_name: autoGroupForm.instructor_name || null,
@@ -803,13 +1028,14 @@ const TrainingCompetencePage: React.FC = () => {
         notes: autoGroupForm.notes || null,
       });
       setAutoGroupOpen(false);
+      setLastSchedulerResult({ totalSessions: result.total_sessions || result.sessions.length, totalEnrolled: result.total_enrolled || 0, skipped: result.skipped.length });
       setSelectedUserIds([]);
       if (result.sessions[0]?.event?.id) setSelectedEventId(result.sessions[0].event.id);
       await load();
       openTab("schedule");
       pushToast({
         title: "Grouped schedule created",
-        message: `${result.total_enrolled} enrolments were placed into ${result.total_sessions} course session(s).${result.skipped.length ? ` ${result.skipped.length} item(s) were skipped.` : ""}`,
+        message: `${result.total_enrolled || 0} enrolments were placed into ${result.total_sessions || result.sessions.length} course session(s).${result.skipped.length ? ` ${result.skipped.length} item(s) were skipped.` : ""}`,
         variant: result.skipped.length ? "warning" : "info",
       });
     } catch (error: any) {
@@ -903,6 +1129,32 @@ const TrainingCompetencePage: React.FC = () => {
       pushToast({ title: "Deferral submitted", message: `${deferralTarget.userName} has been marked deferred pending decision.`, variant: "info" });
     } catch (error: any) {
       pushToast({ title: "Deferral failed", message: error?.message || "Could not submit the deferral request.", variant: "error" });
+    }
+  };
+
+  const saveReportSettings = async () => {
+    setReportSaving(true);
+    try {
+      const saved = await updateTrainingReportSettings(reportForm);
+      setReportSettings(saved);
+      setReportForm({
+        title: saved.title,
+        subtitle: saved.subtitle || "",
+        form_no: saved.form_no,
+        issue_date: saved.issue_date,
+        revision: saved.revision,
+        show_compliance_summary: saved.show_compliance_summary,
+        show_training_history: saved.show_training_history,
+        show_scheduled_events: saved.show_scheduled_events,
+        show_deferrals: saved.show_deferrals,
+        footer_note: saved.footer_note || "",
+      });
+      setReportSetupOpen(false);
+      pushToast({ title: "Report setup saved", message: "Training record PDFs will use the updated tenant settings.", variant: "success" });
+    } catch (error: any) {
+      pushToast({ title: "Report setup failed", message: error?.message || "Could not save the report settings.", variant: "error" });
+    } finally {
+      setReportSaving(false);
     }
   };
 
@@ -1140,7 +1392,7 @@ const TrainingCompetencePage: React.FC = () => {
     if (options?.filter) qs.set("filter", options.filter);
     if (options?.tab) qs.set("tab", options.tab);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    navigate(`/maintenance/${amoCode || "UNKNOWN"}/qms/training-competence/people/${userId}/course-history${suffix}`);
+    navigate(`/maintenance/${amoCode || "UNKNOWN"}/training/competence/people/${userId}/course-history${suffix}`);
   };
 
   const currentEventParticipants = useMemo(() => participants, [participants]);
@@ -1579,6 +1831,87 @@ const TrainingCompetencePage: React.FC = () => {
                 <button type="button" className="secondary-chip-btn" onClick={() => openPeopleFilter("DUE_SOON")}><CalendarClock size={14} /> Pull due-soon roster</button>
               </div>
             </div>
+
+            <div className="tc-smart-scheduler">
+              <div className="tc-smart-scheduler__header">
+                <div>
+                  <p className="tc-eyebrow">Smart scheduler</p>
+                  <h4 className="tc-panel__title">Build sessions from due-month cohorts</h4>
+                  <p className="tc-muted">The backend checks leave/away windows and existing non-online training bookings before it creates sessions. Online training can overlap where allowed.</p>
+                </div>
+                <div className="tc-inline-actions">
+                  <span className="tc-chip"><Users size={14} /> {schedulerQueueUserIds.length} personnel</span>
+                  <span className="tc-chip"><CalendarClock size={14} /> {schedulerCohorts.length} cohort(s)</span>
+                  <span className="tc-chip">{selectedUserIds.length > 0 ? `${selectedSchedulerQueueCount} selected due item(s)` : `${schedulerQueueCount} due item(s)`}</span>
+                </div>
+              </div>
+
+              <div className="tc-scheduler-controls">
+                <label className="tc-field">
+                  <span className="tc-field__label">Start from</span>
+                  <input className="tc-input" type="date" value={autoGroupForm.base_start_on || ""} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, base_start_on: e.target.value }))} />
+                </label>
+                <label className="tc-field">
+                  <span className="tc-field__label">Max class size</span>
+                  <input className="tc-input" type="number" min={1} max={100} value={autoGroupForm.max_participants_per_session || 20} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, max_participants_per_session: Number(e.target.value) || 20 }))} />
+                </label>
+                <label className="tc-field">
+                  <span className="tc-field__label">Search window</span>
+                  <input className="tc-input" type="number" min={1} max={366} value={autoGroupForm.schedule_search_days || 120} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, schedule_search_days: Number(e.target.value) || 120 }))} />
+                </label>
+                <label className="tc-field">
+                  <span className="tc-field__label">Delivery</span>
+                  <select className="tc-select" value={autoGroupForm.delivery_mode || "CLASSROOM"} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, delivery_mode: e.target.value }))}>
+                    <option value="CLASSROOM">Classroom</option>
+                    <option value="ONLINE">Online</option>
+                    <option value="MIXED">Mixed</option>
+                    <option value="OJT">OJT</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="tc-scheduler-toggles">
+                <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.include_overdue !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, include_overdue: e.target.checked }))} /><span>Overdue</span></label>
+                <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.include_due_soon !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, include_due_soon: e.target.checked }))} /><span>Due soon</span></label>
+                <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.include_not_done !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, include_not_done: e.target.checked }))} /><span>Missing initial</span></label>
+                <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.avoid_weekends !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, avoid_weekends: e.target.checked }))} /><span>Avoid weekends</span></label>
+                <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.allow_online_overlap !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, allow_online_overlap: e.target.checked }))} /><span>Allow online overlap</span></label>
+              </div>
+
+              <div className="tc-inline-actions tc-smart-scheduler__actions">
+                <button type="button" className="secondary-chip-btn" onClick={selectSmartSchedulerQueue}><CheckSquare size={14} /> Select smart queue</button>
+                <button type="button" className="secondary-chip-btn" onClick={() => openAutoGroupDrawer(true)} disabled={schedulerQueueUserIds.length === 0}><CalendarClock size={14} /> Review smart scheduler</button>
+                <button type="button" className="secondary-chip-btn" onClick={() => submitAutoGroupSchedule(schedulerQueueUserIds)} disabled={autoGrouping || schedulerQueueUserIds.length === 0}>{autoGrouping ? "Scheduling…" : "Create smart sessions"}</button>
+              </div>
+
+              {lastSchedulerResult ? (
+                <div className="tc-scheduler-result">
+                  Created {lastSchedulerResult.totalSessions} session(s), enrolled {lastSchedulerResult.totalEnrolled} participant(s), skipped {lastSchedulerResult.skipped} item(s).
+                </div>
+              ) : null}
+
+              <div className="tc-cohort-grid">
+                {(selectedUserIds.length > 0 ? selectedSchedulerCohorts : schedulerCohorts).slice(0, 8).map((group) => (
+                  <article key={group.key} className="tc-cohort-card">
+                    <div className="tc-cohort-card__top">
+                      <strong>{group.courseCode}</strong>
+                      <span>{group.dueLabel}</span>
+                    </div>
+                    <p>{group.courseName}</p>
+                    <div className="tc-cohort-card__meta">
+                      <span>{group.userIds.length} learner(s)</span>
+                      {Object.entries(group.statuses).map(([status, count]) => <span key={status}>{status.replaceAll("_", " ")}: {count}</span>)}
+                    </div>
+                    <div className="tc-cohort-card__members">
+                      {group.members.slice(0, 4).map((member) => <span key={member.userId}>{member.userName}</span>)}
+                      {group.members.length > 4 ? <span>+{group.members.length - 4} more</span> : null}
+                    </div>
+                  </article>
+                ))}
+                {schedulerCohorts.length === 0 ? <p className="tc-empty">No due-month cohorts are available from the loaded training data.</p> : null}
+              </div>
+            </div>
+
             <div className="tc-filterbar">
               <label className="tc-field tc-field--grow">
                 <span className="tc-field__label">Session</span>
@@ -1699,6 +2032,7 @@ const TrainingCompetencePage: React.FC = () => {
                 <p className="tc-muted">Issue immutable certificate numbers, download branded certificate PDFs, and verify authenticity from one register.</p>
               </div>
               <div className="tc-inline-actions">
+                <button type="button" className="secondary-chip-btn" onClick={() => setReportSetupOpen(true)}><FileSpreadsheet size={14} /> Record report setup</button>
                 <button type="button" className="secondary-chip-btn" onClick={() => setCertSetupOpen(true)}><ClipboardSignature size={14} /> Signature setup</button>
               </div>
             </div>
@@ -1760,12 +2094,24 @@ const TrainingCompetencePage: React.FC = () => {
             <span className="tc-chip"><CalendarClock size={14} /> Groups by due course, urgency, and availability</span>
           </div>
           <div className="tc-form-grid-2">
-            <label className="tc-toggle"><input type="checkbox" checked={Boolean(autoGroupForm.include_overdue)} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, include_overdue: e.target.checked }))} /><span>Include overdue</span></label>
-            <label className="tc-toggle"><input type="checkbox" checked={Boolean(autoGroupForm.include_due_soon)} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, include_due_soon: e.target.checked }))} /><span>Include due soon</span></label>
+            <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.include_overdue !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, include_overdue: e.target.checked }))} /><span>Include overdue</span></label>
+            <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.include_due_soon !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, include_due_soon: e.target.checked }))} /><span>Include due soon</span></label>
+          </div>
+          <div className="tc-form-grid-2">
+            <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.include_not_done !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, include_not_done: e.target.checked }))} /><span>Include missing initial training</span></label>
+            <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.avoid_weekends !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, avoid_weekends: e.target.checked }))} /><span>Avoid weekends</span></label>
+          </div>
+          <div className="tc-form-grid-2">
+            <label className="tc-toggle"><input type="checkbox" checked={autoGroupForm.allow_online_overlap !== false} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, allow_online_overlap: e.target.checked }))} /><span>Allow overlap only for online sessions</span></label>
+            <label className="tc-field"><span className="tc-field__label">Max class size</span><input className="tc-input" type="number" min={1} max={100} value={autoGroupForm.max_participants_per_session || 20} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, max_participants_per_session: Number(e.target.value) || 20 }))} /></label>
           </div>
           <div className="tc-form-grid-2">
             <label className="tc-field"><span className="tc-field__label">Scheduling floor date</span><input className="tc-input" type="date" value={autoGroupForm.base_start_on || ""} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, base_start_on: e.target.value }))} /></label>
+            <label className="tc-field"><span className="tc-field__label">Search window days</span><input className="tc-input" type="number" min={1} max={366} value={autoGroupForm.schedule_search_days || 120} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, schedule_search_days: Number(e.target.value) || 120 }))} /></label>
+          </div>
+          <div className="tc-form-grid-2">
             <label className="tc-field"><span className="tc-field__label">Provider type</span><select className="tc-select" value={autoGroupForm.provider_kind || "INTERNAL"} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, provider_kind: e.target.value }))}><option value="INTERNAL">Internal</option><option value="EXTERNAL">External</option></select></label>
+            <label className="tc-field"><span className="tc-field__label">Participant status</span><select className="tc-select" value={autoGroupForm.participant_status || "SCHEDULED"} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, participant_status: e.target.value }))}><option value="SCHEDULED">Scheduled</option><option value="INVITED">Invited</option><option value="CONFIRMED">Confirmed</option></select></label>
           </div>
           <div className="tc-form-grid-2">
             <label className="tc-field"><span className="tc-field__label">Delivery mode</span><select className="tc-select" value={autoGroupForm.delivery_mode || "CLASSROOM"} onChange={(e) => setAutoGroupForm((prev) => ({ ...prev, delivery_mode: e.target.value }))}><option value="CLASSROOM">Classroom</option><option value="ONLINE">Online</option><option value="MIXED">Mixed</option><option value="OJT">OJT</option></select></label>
@@ -1786,7 +2132,7 @@ const TrainingCompetencePage: React.FC = () => {
           </div>
           <div className="tc-inline-actions" style={{ justifyContent: "flex-end" }}>
             <button type="button" className="secondary-chip-btn" onClick={() => setAutoGroupOpen(false)}>Cancel</button>
-            <button type="button" className="secondary-chip-btn" onClick={submitAutoGroupSchedule} disabled={autoGrouping}>{autoGrouping ? "Scheduling…" : "Create grouped sessions"}</button>
+            <button type="button" className="secondary-chip-btn" onClick={() => submitAutoGroupSchedule()} disabled={autoGrouping}>{autoGrouping ? "Scheduling…" : "Create grouped sessions"}</button>
           </div>
         </div>
       </Drawer>
@@ -1828,6 +2174,7 @@ const TrainingCompetencePage: React.FC = () => {
           <div className="tc-form-grid-2">
             <label className="tc-toggle"><input type="checkbox" checked={Boolean(scheduleForm.allow_self_attendance)} onChange={(e) => setScheduleForm((prev) => ({ ...prev, allow_self_attendance: e.target.checked }))} /><span>Allow portal self-attendance</span></label>
             <label className="tc-toggle"><input type="checkbox" checked={Boolean(scheduleForm.auto_issue_certificates)} onChange={(e) => setScheduleForm((prev) => ({ ...prev, auto_issue_certificates: e.target.checked }))} /><span>Auto-issue certificates on attendance close</span></label>
+            <label className="tc-toggle"><input type="checkbox" checked={scheduleForm.allow_online_overlap !== false} onChange={(e) => setScheduleForm((prev) => ({ ...prev, allow_online_overlap: e.target.checked }))} /><span>Permit overlap only where this session is online</span></label>
           </div>
           <div className="tc-inline-actions" style={{ justifyContent: "flex-end" }}>
             <button type="button" className="secondary-chip-btn" onClick={() => setScheduleOpen(false)}>Cancel</button>
@@ -1847,6 +2194,33 @@ const TrainingCompetencePage: React.FC = () => {
           <div className="tc-inline-actions" style={{ justifyContent: "flex-end" }}>
             <button type="button" className="secondary-chip-btn" onClick={() => setDeferralOpen(false)}>Cancel</button>
             <button type="button" className="secondary-chip-btn" onClick={submitDeferralRequest}>Submit deferral</button>
+          </div>
+        </div>
+      </Drawer>
+
+      <Drawer title="Training record report setup" isOpen={reportSetupOpen} onClose={() => setReportSetupOpen(false)}>
+        <div style={{ padding: 16, display: "grid", gap: 12 }}>
+          <p className="tc-muted">These tenant settings control the individual training record PDF before preview or download. The QR remains a signed read-only verification link.</p>
+          {reportSettings ? <span className="tc-chip">Last saved revision {reportSettings.revision}</span> : null}
+          <div className="tc-form-grid-2">
+            <label className="tc-field"><span className="tc-field__label">Report title</span><input className="tc-input" value={reportForm.title || ""} onChange={(e) => setReportForm((prev) => ({ ...prev, title: e.target.value }))} /></label>
+            <label className="tc-field"><span className="tc-field__label">Form number</span><input className="tc-input" value={reportForm.form_no || ""} onChange={(e) => setReportForm((prev) => ({ ...prev, form_no: e.target.value }))} /></label>
+          </div>
+          <div className="tc-form-grid-2">
+            <label className="tc-field"><span className="tc-field__label">Issue date</span><input className="tc-input" value={reportForm.issue_date || ""} onChange={(e) => setReportForm((prev) => ({ ...prev, issue_date: e.target.value }))} /></label>
+            <label className="tc-field"><span className="tc-field__label">Revision</span><input className="tc-input" value={reportForm.revision || ""} onChange={(e) => setReportForm((prev) => ({ ...prev, revision: e.target.value }))} /></label>
+          </div>
+          <label className="tc-field"><span className="tc-field__label">Subtitle</span><input className="tc-input" value={reportForm.subtitle || ""} onChange={(e) => setReportForm((prev) => ({ ...prev, subtitle: e.target.value }))} /></label>
+          <label className="tc-field"><span className="tc-field__label">Footer note</span><textarea className="tc-textarea" rows={3} value={reportForm.footer_note || ""} onChange={(e) => setReportForm((prev) => ({ ...prev, footer_note: e.target.value }))} /></label>
+          <div className="tc-form-grid-2">
+            <label className="tc-toggle"><input type="checkbox" checked={reportForm.show_compliance_summary !== false} onChange={(e) => setReportForm((prev) => ({ ...prev, show_compliance_summary: e.target.checked }))} /><span>Show compliance summary</span></label>
+            <label className="tc-toggle"><input type="checkbox" checked={reportForm.show_training_history !== false} onChange={(e) => setReportForm((prev) => ({ ...prev, show_training_history: e.target.checked }))} /><span>Show training history</span></label>
+            <label className="tc-toggle"><input type="checkbox" checked={reportForm.show_scheduled_events !== false} onChange={(e) => setReportForm((prev) => ({ ...prev, show_scheduled_events: e.target.checked }))} /><span>Show scheduled events</span></label>
+            <label className="tc-toggle"><input type="checkbox" checked={reportForm.show_deferrals !== false} onChange={(e) => setReportForm((prev) => ({ ...prev, show_deferrals: e.target.checked }))} /><span>Show deferrals</span></label>
+          </div>
+          <div className="tc-inline-actions" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="secondary-chip-btn" onClick={() => setReportSetupOpen(false)}>Cancel</button>
+            <button type="button" className="secondary-chip-btn" onClick={saveReportSettings} disabled={reportSaving}>{reportSaving ? "Saving…" : "Save report setup"}</button>
           </div>
         </div>
       </Drawer>

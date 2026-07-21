@@ -55,7 +55,7 @@ const QMSEventsPage: React.FC = () => {
                 <td>{a.audit_ref} · {a.title}</td>
                 <td>{a.planned_start}</td>
                 <td>{a.planned_end || "—"}</td>
-                <td><button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/${a.id}`)}>Open</button></td>
+                <td><button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/${a.id}`)}>Open</button></td>
                 <td>
                   <button type="button" className="secondary-chip-btn" onClick={() => {
                     if (!a.planned_start) return;

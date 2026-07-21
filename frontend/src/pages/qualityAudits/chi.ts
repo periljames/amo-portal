@@ -6,6 +6,7 @@ const PENALTIES: Record<string, number> = {
   LEVEL_1: 5,
   LEVEL_2: 2,
   LEVEL_3: 0.5,
+  LEVEL_4: 0,
 };
 
 const scoreForFindings = (findings: QMSFindingOut[]): number => {

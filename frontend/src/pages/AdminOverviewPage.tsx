@@ -242,7 +242,7 @@ const AdminOverviewPage: React.FC = () => {
           <Panel
             title="Flight deck · Go Live"
             subtitle="Garmin-style runtime confirmation"
-            actions={<Badge tone={isGoLive ? "success" : "warning"}>{isGoLive ? "LIVE" : "DEMO"}</Badge>}
+            actions={!isGoLive ? <Badge tone="warning">DEMO</Badge> : undefined}
           >
             <div className="go-live-radar">
               <div className={`go-live-radar__scope ${isGoLive ? "is-live" : "is-demo"}`} aria-hidden="true">

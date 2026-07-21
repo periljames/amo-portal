@@ -252,6 +252,23 @@ class TrainingCourse(Base):
     regulatory_reference = Column(String(255), nullable=True)
     default_provider = Column(String(255), nullable=True)
     default_duration_days = Column(Integer, nullable=True, default=1)
+    nominal_hours = Column(
+        Integer,
+        nullable=True,
+        doc="Nominal training hours used by planning and certificate defaults.",
+    )
+    planning_lead_days = Column(
+        Integer,
+        nullable=True,
+        default=45,
+        server_default=text("45"),
+        doc="Days before expiry when the course should enter due-soon planning.",
+    )
+    candidate_requirement_text = Column(
+        Text,
+        nullable=True,
+        doc="Free-text candidate / role applicability guidance from the MTM or course catalogue.",
+    )
 
     is_mandatory = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     mandatory_for_all = Column(Boolean, nullable=False, default=False)
@@ -551,6 +568,9 @@ class TrainingRecord(Base):
         Index("idx_training_records_amo_user", "amo_id", "user_id"),
         Index("idx_training_records_amo_course", "amo_id", "course_id"),
         Index("idx_training_records_amo_verification", "amo_id", "verification_status"),
+        Index("idx_training_records_amo_status", "amo_id", "record_status"),
+        Index("idx_training_records_superseded_by", "superseded_by_record_id"),
+        Index("idx_training_records_purge_after", "purge_after"),
         CheckConstraint(
             "valid_until IS NULL OR valid_until >= completion_date",
             name="ck_training_record_validity_after_completion",
@@ -608,6 +628,40 @@ class TrainingRecord(Base):
     certificate_reference = Column(String(255), nullable=True)
     remarks = Column(Text, nullable=True)
 
+    legacy_record_id = Column(
+        String(64),
+        nullable=True,
+        index=True,
+        doc="Optional identifier from legacy/imported training history.",
+    )
+    source_status = Column(
+        String(64),
+        nullable=True,
+        index=True,
+        doc="Original status from import or manual capture; retained for audit.",
+    )
+    record_status = Column(
+        String(64),
+        nullable=True,
+        default="ACTIVE",
+        index=True,
+        doc="Lifecycle status for display control: ACTIVE rows are visible; RENEWED/SUPERSEDED rows are hidden from normal record views.",
+    )
+    superseded_by_record_id = Column(
+        String(36),
+        ForeignKey("training_records.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        doc="Replacement record that renewed this historical row.",
+    )
+    superseded_at = Column(DateTime(timezone=True), nullable=True)
+    purge_after = Column(
+        Date,
+        nullable=True,
+        index=True,
+        doc="Optional retention review date for historical records; evidence is not removed automatically.",
+    )
+
     verification_status = Column(
         SAEnum(
             TrainingRecordVerificationStatus,
@@ -642,6 +696,7 @@ class TrainingRecord(Base):
     )
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     course = relationship("TrainingCourse", back_populates="records", lazy="selectin")
     event = relationship("TrainingEvent", back_populates="records", lazy="selectin")
@@ -979,6 +1034,34 @@ class TrainingAuditLog(Base):
         return f"<TrainingAuditLog {self.id} action={self.action} entity={self.entity_type}:{self.entity_id}>"
 
 
+
+
+class TrainingReportSettings(Base):
+    """Tenant-configurable personnel training record PDF settings."""
+
+    __tablename__ = "training_report_settings"
+    __table_args__ = (
+        UniqueConstraint("amo_id", name="uq_training_report_settings_amo"),
+        Index("idx_training_report_settings_amo", "amo_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(255), nullable=False, default="Personnel Training Record")
+    subtitle = Column(Text, nullable=True)
+    form_no = Column(String(64), nullable=False, default="QAM/49A")
+    issue_date = Column(String(64), nullable=False, default="1 Sept 25")
+    revision = Column(String(32), nullable=False, default="00")
+    show_compliance_summary = Column(Boolean, nullable=False, default=True)
+    show_training_history = Column(Boolean, nullable=False, default=True)
+    show_scheduled_events = Column(Boolean, nullable=False, default=True)
+    show_deferrals = Column(Boolean, nullable=False, default=True)
+    footer_note = Column(Text, nullable=True)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
 # ---------------------------------------------------------------------------
 # CERTIFICATE ISSUANCE / STATUS HISTORY
 # ---------------------------------------------------------------------------
@@ -1007,6 +1090,40 @@ class TrainingCertificateIssue(Base):
     barcode_value = Column(String(255), nullable=True)
     status = Column(String(32), nullable=False, default="VALID", index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class TrainingAuditorAccessGrant(Base):
+    """Time-boxed guest auditor access to verify personnel training records.
+
+    Store only hashes of the one-time token/access code. The raw access code is
+    returned once from the creation endpoint and is never persisted.
+    """
+
+    __tablename__ = "training_auditor_access_grants"
+    __table_args__ = (
+        Index("idx_training_auditor_access_amo_user", "amo_id", "target_user_id", "expires_at"),
+        Index("idx_training_auditor_access_token", "token_hash"),
+        Index("idx_training_auditor_access_code", "access_code_hash"),
+        Index("idx_training_auditor_access_expires", "expires_at"),
+        CheckConstraint("max_uses IS NULL OR max_uses > 0", name="ck_training_auditor_access_max_uses_positive"),
+        CheckConstraint("use_count >= 0", name="ck_training_auditor_access_use_count_nonneg"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    purpose = Column(String(64), nullable=False, default="USER_TRAINING_PROFILE", index=True)
+    target_user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    target_record_id = Column(String(36), ForeignKey("training_records.id", ondelete="CASCADE"), nullable=True, index=True)
+    token_hash = Column(String(64), nullable=True, unique=True, index=True)
+    access_code_hash = Column(String(64), nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    max_uses = Column(Integer, nullable=True, default=None)
+    use_count = Column(Integer, nullable=False, default=0)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    metadata_json = Column(JSON, nullable=True)
 
 
 class TrainingCertificateStatusHistory(Base):

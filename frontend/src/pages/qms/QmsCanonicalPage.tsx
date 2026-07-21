@@ -23,7 +23,6 @@ import {
   Search,
   Settings,
   ShieldCheck,
-  Save,
   SlidersHorizontal,
   Users,
   Wrench,
@@ -36,7 +35,9 @@ import Button from "../../components/UI/Button";
 import { isPlatformSuperuser } from "../../app/routeGuards";
 import { apiRequest, qmsPath } from "../../services/apiClient";
 import { getQmsDashboard } from "../../services/qmsDashboard";
+import { createTrainingEventBatch, listTrainingCourses } from "../../services/training";
 import type { QmsDashboardResponse } from "../../types/qms";
+import type { TrainingCourseRead } from "../../types/training";
 import "../../styles/qms-canonical.css";
 
 type ModuleCategory = "command" | "assurance" | "control" | "archive";
@@ -77,6 +78,8 @@ type ModuleMeta = {
   rowRoute?: (amoCode: string, row: QmsRow) => string | null;
 };
 
+type QmsSourceError = { label: string; message: string; type?: string };
+
 type QmsModuleResponse = {
   module?: string;
   view?: string;
@@ -89,14 +92,14 @@ type QmsModuleResponse = {
   offset?: number;
   next_offset?: number | null;
   has_more?: boolean;
+  start?: string;
+  end?: string;
   table_missing?: boolean;
   warning?: string | null;
+  source_errors?: QmsSourceError[];
   trace_id?: string;
   elapsed_ms?: number;
   applied_filters?: Record<string, string>;
-  source_errors?: Array<{ source?: string; error?: string; trace_id?: string; required?: boolean }>;
-  calendar_meta?: { today?: string; timezone?: string; country?: string | null; start?: string; end?: string; week_starts_on?: string };
-  summary?: Record<string, number>;
 };
 
 type CreateDraft = {
@@ -105,39 +108,6 @@ type CreateDraft = {
   due_date: string;
   owner_user_id: string;
   description: string;
-};
-
-type JsonSettings = Record<string, unknown>;
-
-type QmsSettingsResponse = {
-  settings?: QmsRow;
-  record?: QmsRow;
-  items?: QmsRow[];
-};
-
-type CalendarSettings = {
-  holidays_enabled: boolean;
-  holiday_source_url: string;
-  holiday_provider: string;
-  holiday_country_code: string;
-  holiday_region_code: string;
-  cache_ttl_hours: number;
-};
-
-type CalendarSettingsResponse = {
-  tenant?: { amo_code?: string; amo_id?: string };
-  timezone?: string;
-  country?: string | null;
-  settings?: Partial<CalendarSettings>;
-};
-
-type SettingsState = {
-  numbering_rules: string;
-  workflow_rules: string;
-  approval_matrix: string;
-  notification_rules: string;
-  retention_rules: string;
-  risk_matrix: string;
 };
 
 const MODULE_GROUPS: Record<ModuleCategory, { title: string; subtitle: string }> = {
@@ -154,7 +124,7 @@ function idFromRow(row: QmsRow): string | null {
 
 function detailRoute(route: string, amoCode: string, row: QmsRow): string | null {
   const id = idFromRow(row);
-  return id ? `/maintenance/${amoCode}/qms/${route}/${id}/overview` : null;
+  return id ? `/maintenance/${amoCode}/quality/${route}/${id}/overview` : null;
 }
 
 const QMS_MODULES: ModuleMeta[] = [
@@ -173,7 +143,7 @@ const QMS_MODULES: ModuleMeta[] = [
     primary: { label: "Command", path: "" },
     actions: [
       { label: "My work", path: "inbox/assigned-to-me" },
-      { label: "Calendar", path: "calendar/list" },
+      { label: "Calendar", path: "calendar/month" },
       { label: "Overdue CARs", path: "cars/overdue", tone: "attention" },
       { label: "Reports", path: "reports/executive-dashboard" },
     ],
@@ -225,11 +195,14 @@ const QMS_MODULES: ModuleMeta[] = [
     category: "command",
     mode: "live",
     icon: CalendarDays,
-    defaultView: "list",
+    defaultView: "month",
     sourceLabel: "Calendar events",
     columns: ["date", "title", "event_type", "module", "entity_type"],
-    primary: { label: "List", path: "calendar/list" },
+    primary: { label: "Month", path: "calendar/month" },
     actions: [
+      { label: "Week", path: "calendar/week" },
+      { label: "Year", path: "calendar/year" },
+      { label: "Agenda", path: "calendar/list" },
       { label: "Audits", path: "calendar/audits" },
       { label: "CARs", path: "calendar/cars" },
       { label: "Training", path: "calendar/training" },
@@ -679,26 +652,13 @@ const MODULE_BY_KEY = Object.fromEntries(QMS_MODULES.map((module) => [module.key
 const CATEGORIES: ModuleCategory[] = ["command", "assurance", "control", "archive"];
 const PAGE_SIZE_OPTIONS = [10, 15, 25, 50];
 
-const DEFAULT_SETTINGS_STATE: SettingsState = {
-  numbering_rules: JSON.stringify({ audit: "AUD-{YYYY}-{SEQ4}", car: "CAR-{YYYY}-{SEQ4}", finding: "FND-{YYYY}-{SEQ4}" }, null, 2),
-  workflow_rules: JSON.stringify({ require_root_cause_for_car: true, require_effectiveness_review: true, require_document_distribution_ack: true }, null, 2),
-  approval_matrix: JSON.stringify({ documents: ["owner", "quality_manager"], audits: ["lead_auditor", "quality_manager"], changes: ["process_owner", "quality_manager"] }, null, 2),
-  notification_rules: JSON.stringify({ due_soon_days: [30, 14, 7, 1], overdue_escalation_days: [1, 7, 14], channels: ["in_app", "email"] }, null, 2),
-  retention_rules: JSON.stringify({ audit_years: 5, car_years: 5, training_years: 3, management_review_years: 5 }, null, 2),
-  risk_matrix: JSON.stringify({ likelihood: [1, 2, 3, 4, 5], consequence: [1, 2, 3, 4, 5], high_threshold: 15 }, null, 2),
-};
-
-const DEFAULT_CALENDAR_SETTINGS: CalendarSettings = {
-  holidays_enabled: true,
-  holiday_source_url: "",
-  holiday_provider: "Configured feed",
-  holiday_country_code: "",
-  holiday_region_code: "",
-  cache_ttl_hours: 24,
-};
-
 function routeToUrl(amoCode: string, route: string): string {
-  return `/maintenance/${amoCode}/qms${route ? `/${route}` : ""}`;
+  const cleanRoute = route.replace(/^\/+/, "");
+  if (cleanRoute === "training-competence" || cleanRoute.startsWith("training-competence/")) {
+    const suffix = cleanRoute.slice("training-competence".length).replace(/^\/+/, "");
+    return `/maintenance/${amoCode}/training/competence${suffix ? `/${suffix}` : ""}`;
+  }
+  return `/maintenance/${amoCode}/quality${cleanRoute ? `/${cleanRoute}` : ""}`;
 }
 
 function humanise(value: unknown): string {
@@ -726,95 +686,10 @@ function counterValue(dashboard: QmsDashboardResponse | null, key: string): numb
   return dashboard?.counters?.[key] ?? 0;
 }
 
-type CalendarItem = QmsRow & {
-  id?: string;
-  date?: string;
-  title?: string;
-  module?: string;
-  source?: string;
-  event_type?: string;
-  status?: string;
-  due_state?: string;
-  owner_label?: string;
-  detail?: string;
-  link?: string | null;
-};
-
-function parseIsoDay(value: unknown): { year: number; month: number; day: number } | null {
-  const raw = typeof value === "string" ? value.slice(0, 10) : "";
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
-  if (!match) return null;
-  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
-}
-
-function isoDay(year: number, month: number, day: number): string {
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function addIsoDays(value: string, days: number): string {
-  const parsed = parseIsoDay(value);
-  if (!parsed) return value;
-  const date = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day + days));
-  return isoDay(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
-}
-
-function monthLabel(value: string | undefined): string {
-  const parsed = parseIsoDay(value || "");
-  if (!parsed) return "Calendar";
-  return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(parsed.year, parsed.month - 1, 1)));
-}
-
-function calendarMonthBounds(anchor: string): { start: string; end: string } {
-  const parsed = parseIsoDay(anchor) || parseIsoDay(new Date().toISOString().slice(0, 10))!;
-  return { start: isoDay(parsed.year, parsed.month, 1), end: isoDay(parsed.year, parsed.month, daysInMonth(parsed.year, parsed.month)) };
-}
-
-function nextMonthAnchor(anchor: string, delta: number): string {
-  const parsed = parseIsoDay(anchor) || parseIsoDay(new Date().toISOString().slice(0, 10))!;
-  const date = new Date(Date.UTC(parsed.year, parsed.month - 1 + delta, 1));
-  return isoDay(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
-}
-
-function buildCalendarCells(monthStart: string, weekStartsOn = "MONDAY"): string[] {
-  const parsed = parseIsoDay(monthStart) || parseIsoDay(new Date().toISOString().slice(0, 10))!;
-  const first = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
-  const jsDay = first.getUTCDay();
-  const mondayStart = weekStartsOn.toUpperCase() !== "SUNDAY";
-  const lead = mondayStart ? (jsDay + 6) % 7 : jsDay;
-  const gridStart = isoDay(parsed.year, parsed.month, 1 - lead);
-  return Array.from({ length: 42 }, (_, index) => addIsoDays(gridStart, index));
-}
-
-function eventTone(item: CalendarItem): string {
-  const state = String(item.due_state || "").toLowerCase();
-  const source = String(item.source || item.module || "").toLowerCase();
-  if (source === "holidays" || state === "holiday") return "holiday";
-  if (state === "overdue") return "danger";
-  if (state === "today") return "today";
-  if (state === "complete") return "success";
-  if (source === "audits") return "audit";
-  if (source === "cars") return "car";
-  if (source === "training") return "training";
-  return "default";
-}
-
-function sourceLabel(item: CalendarItem): string {
-  const source = String(item.source || item.module || "");
-  if (source === "training") return "Training";
-  if (source === "audits") return "Audit";
-  if (source === "cars") return "CAR";
-  if (source === "holidays") return "Holiday";
-  return humanise(source || item.event_type || "Item");
-}
-
 function currentQmsParts(pathname: string): string[] {
   const parts = pathname.split("/").filter(Boolean);
-  const qmsIndex = parts.indexOf("qms");
-  return qmsIndex >= 0 ? parts.slice(qmsIndex + 1) : [];
+  const moduleIndex = parts.findIndex((part) => part === "quality" || part === "qms");
+  return moduleIndex >= 0 ? parts.slice(moduleIndex + 1) : [];
 }
 
 function moduleFromPath(pathname: string): ModuleMeta {
@@ -860,7 +735,7 @@ function ModuleBadge({ mode }: { mode: ModuleMode }): React.ReactElement {
 
 function SignalCards({ amoCode, dashboard }: { amoCode: string; dashboard: QmsDashboardResponse | null }): React.ReactElement {
   const signals = [
-    { label: "Open audits", value: counterValue(dashboard, "open_audits"), icon: ClipboardCheck, to: "audits/dashboard" },
+    { label: "Active audit plans", value: counterValue(dashboard, "open_audits"), icon: ClipboardCheck, to: "audits/schedule" },
     { label: "Overdue CARs", value: counterValue(dashboard, "overdue_cars"), icon: AlertTriangle, to: "cars/overdue", tone: "danger" },
     { label: "CARs due soon", value: counterValue(dashboard, "cars_due_soon"), icon: CalendarDays, to: "cars/due-soon", tone: "warning" },
     { label: "Open findings", value: counterValue(dashboard, "open_findings"), icon: ClipboardList, to: "findings/register" },
@@ -1078,18 +953,17 @@ function LoadingPanel({ label }: { label: string }): React.ReactElement {
   );
 }
 
-function SourceDiagnostics({ data }: { data: QmsModuleResponse | null }): React.ReactElement | null {
-  const errors = data?.source_errors || [];
-  if (!errors.length) return null;
+function SourceErrorsNotice({ errors }: { errors?: QmsSourceError[] }): React.ReactElement | null {
+  if (!errors || errors.length === 0) return null;
   return (
-    <div className="qms-calendar-diagnostics" role="alert">
-      <AlertTriangle size={17} />
+    <div className="qms-ops-warning qms-ops-warning--danger">
+      <AlertTriangle size={16} />
       <div>
-        <strong>Calendar source issue</strong>
-        <p>The view is showing available database-backed records only. Fix the source below before relying on this calendar for operations.</p>
+        <strong>Source errors detected</strong>
+        <p>{errors.length} backend source read failed. Open the terminal log and trace details before treating this view as complete.</p>
         <ul>
-          {errors.map((entry, index) => (
-            <li key={`${entry.source || "source"}-${index}`}><strong>{entry.source || "source"}:</strong> {entry.error || "Unknown error"}{entry.trace_id ? ` · trace ${entry.trace_id}` : ""}</li>
+          {errors.slice(0, 4).map((error, index) => (
+            <li key={`${error.label}-${index}`}><strong>{error.label}</strong>: {error.message}</li>
           ))}
         </ul>
       </div>
@@ -1097,285 +971,553 @@ function SourceDiagnostics({ data }: { data: QmsModuleResponse | null }): React.
   );
 }
 
-function parseJsonSetting(value: string, label: string): JsonSettings {
-  try {
-    const parsed = JSON.parse(value || "{}");
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-      throw new Error(`${label} must be a JSON object.`);
-    }
-    return parsed as JsonSettings;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("must be")) throw error;
-    throw new Error(`${label} is not valid JSON.`);
+
+function isoDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseIsoDateKey(value: unknown): Date | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  const candidate = new Date(year, month - 1, day);
+  if (candidate.getFullYear() !== year || candidate.getMonth() !== month - 1 || candidate.getDate() !== day) return null;
+  return candidate;
+}
+
+function addCalendarMonths(value: Date, delta: number): Date {
+  const next = new Date(value);
+  next.setMonth(value.getMonth() + delta);
+  return next;
+}
+
+function addCalendarYears(value: Date, delta: number): Date {
+  const next = new Date(value);
+  next.setFullYear(value.getFullYear() + delta);
+  return next;
+}
+
+function startOfCalendarWeek(value: Date): Date {
+  const next = new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  next.setDate(next.getDate() - next.getDay());
+  return next;
+}
+
+function calendarRequestRange(view: string, anchor: Date): { start: string; end: string } {
+  if (view === "year") {
+    return {
+      start: isoDateKey(new Date(anchor.getFullYear(), 0, 1)),
+      end: isoDateKey(new Date(anchor.getFullYear(), 11, 31)),
+    };
   }
-}
-
-function prettyJson(value: unknown, fallback: string): string {
-  if (value == null || value === "") return fallback;
-  if (typeof value === "string") {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2);
-    } catch {
-      return value;
-    }
+  if (view === "week") {
+    const start = startOfCalendarWeek(anchor);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return { start: isoDateKey(start), end: isoDateKey(end) };
   }
-  return JSON.stringify(value, null, 2);
+  if (view === "list" || view === "agenda") {
+    const start = new Date(anchor);
+    start.setDate(anchor.getDate() - 30);
+    const end = new Date(anchor);
+    end.setDate(anchor.getDate() + 180);
+    return { start: isoDateKey(start), end: isoDateKey(end) };
+  }
+  const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  const gridStart = startOfCalendarWeek(monthStart);
+  const monthEnd = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+  const gridEnd = new Date(monthEnd);
+  gridEnd.setDate(monthEnd.getDate() + (6 - monthEnd.getDay()));
+  return { start: isoDateKey(gridStart), end: isoDateKey(gridEnd) };
 }
 
-function normaliseCalendarSettings(settings?: Partial<CalendarSettings>): CalendarSettings {
-  return {
-    ...DEFAULT_CALENDAR_SETTINGS,
-    ...(settings || {}),
-    holidays_enabled: settings?.holidays_enabled ?? DEFAULT_CALENDAR_SETTINGS.holidays_enabled,
-    cache_ttl_hours: Number(settings?.cache_ttl_hours ?? DEFAULT_CALENDAR_SETTINGS.cache_ttl_hours),
-  };
+function calendarTitle(row: QmsRow): string {
+  const title = String(row.title || row.course_name || "").trim();
+  const reference = String(row.audit_ref || row.car_number || row.ref || row.reference || "").trim();
+  if (reference && title && !title.includes(reference)) return `${reference} — ${title}`;
+  return title || reference || "QMS item";
 }
 
-function CalendarSettingsPanel({ amoCode, onSaved }: { amoCode: string; onSaved: () => void }): React.ReactElement {
-  const [state, setState] = useState<CalendarSettings>(DEFAULT_CALENDAR_SETTINGS);
-  const [tenantMeta, setTenantMeta] = useState<{ timezone?: string; country?: string | null }>({});
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await apiRequest<CalendarSettingsResponse>(qmsPath(amoCode, "calendar/settings"), { timeoutMs: 12000, cacheTtlMs: 0 });
-      setState(normaliseCalendarSettings(response.settings));
-      setTenantMeta({ timezone: response.timezone, country: response.country });
-    } catch (err) {
-      setError(friendlyError(err, "Unable to load calendar settings."));
-    } finally {
-      setLoading(false);
-    }
-  }, [amoCode]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const payload = { ...state, cache_ttl_hours: Math.max(1, Math.min(720, Number(state.cache_ttl_hours) || 24)) };
-      const response = await apiRequest<CalendarSettingsResponse>(qmsPath(amoCode, "calendar/settings"), {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-        timeoutMs: 12000,
-        cacheTtlMs: 0,
-      });
-      setState(normaliseCalendarSettings(response.settings || payload));
-      setSaved(true);
-      onSaved();
-    } catch (err) {
-      setError(friendlyError(err, "Unable to save calendar settings."));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <SectionCard title="Calendar configuration" subtitle="Tenant-scoped setup for holidays, region, and cache controls." variant="subtle" actions={<Button variant="secondary" size="sm" onClick={load} loading={loading}><RefreshCw size={14} /> Reload</Button>}>
-      <div className="qms-settings-meta-grid">
-        <span><strong>{tenantMeta.timezone || "UTC"}</strong><small>AMO timezone</small></span>
-        <span><strong>{tenantMeta.country || state.holiday_country_code || "Not set"}</strong><small>Country / region</small></span>
-      </div>
-      {error ? <InlineError message={error} /> : null}
-      {saved ? <div className="qms-settings-success"><CheckCircle2 size={16} /> Calendar configuration saved.</div> : null}
-      <div className="qms-ops-create-grid qms-settings-form-grid">
-        <label><span>Enable holidays</span><select value={state.holidays_enabled ? "yes" : "no"} onChange={(event) => setState((prev) => ({ ...prev, holidays_enabled: event.target.value === "yes" }))}><option value="yes">Yes</option><option value="no">No</option></select></label>
-        <label><span>Provider</span><input value={state.holiday_provider} onChange={(event) => setState((prev) => ({ ...prev, holiday_provider: event.target.value }))} placeholder="Configured feed" /></label>
-        <label><span>Country code</span><input value={state.holiday_country_code} onChange={(event) => setState((prev) => ({ ...prev, holiday_country_code: event.target.value.toUpperCase() }))} placeholder="KE, US, GB…" maxLength={8} /></label>
-        <label><span>Region code</span><input value={state.holiday_region_code} onChange={(event) => setState((prev) => ({ ...prev, holiday_region_code: event.target.value.toUpperCase() }))} placeholder="Optional" maxLength={24} /></label>
-        <label><span>Cache TTL hours</span><input type="number" min={1} max={720} value={state.cache_ttl_hours} onChange={(event) => setState((prev) => ({ ...prev, cache_ttl_hours: Number(event.target.value) }))} /></label>
-        <label className="qms-ops-create-grid__wide"><span>Holiday source URL</span><input value={state.holiday_source_url} onChange={(event) => setState((prev) => ({ ...prev, holiday_source_url: event.target.value }))} placeholder="https://…" /></label>
-      </div>
-      <div className="qms-ops-create-actions qms-settings-actions"><Button loading={saving} onClick={save}><Save size={15} /> Save calendar settings</Button></div>
-    </SectionCard>
-  );
+function calendarTone(row: QmsRow): string {
+  const module = String(row.module || "").toLowerCase();
+  const dueState = String(row.due_state || "").toLowerCase();
+  const eventType = String(row.event_type || "").toLowerCase();
+  if (dueState === "holiday") return "holiday";
+  if (dueState === "overdue" || eventType.includes("overdue") || eventType.includes("critical")) return "danger";
+  if (module.includes("training")) return "training";
+  if (module === "cars" || eventType.includes("car")) return dueState === "due" ? "danger" : "warning";
+  if (module === "audits") return "audit";
+  if (module.includes("review") || eventType.includes("review")) return "review";
+  return "default";
 }
 
-function QmsSettingsWorkspace({ amoCode, module, data, state, error, onRetry }: { amoCode: string; module: ModuleMeta; data: QmsModuleResponse | null; state: LoadState; error: string | null; onRetry: () => void }): React.ReactElement {
-  const [form, setForm] = useState<SettingsState>(DEFAULT_SETTINGS_STATE);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+type CalendarFilterKey = "all" | "audits" | "cars" | "training" | "reviews" | "other";
+
+const CALENDAR_FILTERS: Array<{ key: CalendarFilterKey; label: string; title: string }> = [
+  { key: "all", label: "All", title: "Show all calendar entries" },
+  { key: "audits", label: "Audits", title: "Show audit dates and audit fieldwork" },
+  { key: "cars", label: "CARs", title: "Show corrective action deadlines and reviews" },
+  { key: "training", label: "Training", title: "Show training sessions and expiries" },
+  { key: "reviews", label: "Reviews", title: "Show management review and regulatory commitments" },
+  { key: "other", label: "Other", title: "Show uncategorised QMS calendar entries" },
+];
+
+function calendarCategory(row: QmsRow): CalendarFilterKey {
+  const module = String(row.module || "").toLowerCase();
+  const eventType = String(row.event_type || "").toLowerCase();
+  if (module === "audits" || eventType.includes("audit")) return "audits";
+  if (module === "cars" || eventType.includes("car") || eventType.includes("corrective")) return "cars";
+  if (module.includes("training") || eventType.includes("training")) return "training";
+  if (module.includes("review") || eventType.includes("review") || eventType.includes("regulatory")) return "reviews";
+  return "other";
+}
+
+function splitCalendarLabel(label: string): { lead: string; detail: string } {
+  const trimmed = label.trim();
+  const separator = trimmed.includes(" — ") ? " — " : trimmed.includes(" - ") ? " - " : "";
+  if (!separator) return { lead: trimmed, detail: "" };
+  const [lead, ...rest] = trimmed.split(separator);
+  return { lead: lead.trim(), detail: rest.join(separator).trim() };
+}
+
+function rowText(row: QmsRow, key: string, fallback = ""): string {
+  const value = row[key];
+  return value == null ? fallback : String(value);
+}
+
+function rowNumber(row: QmsRow, key: string): number {
+  const value = Number(row[key]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function calendarCourseCode(row: QmsRow): string {
+  return rowText(row, "course_code", rowText(row, "course_id", rowText(row, "course_name", "Training"))).trim() || "Training";
+}
+
+function calendarPersonnelLabel(row: QmsRow): string {
+  return rowText(row, "personnel_name", rowText(row, "user_name", rowText(row, "user_id", "Personnel"))).trim() || "Personnel";
+}
+
+function isTrainingExpiry(row: QmsRow): boolean {
+  return rowText(row, "module").includes("training") && rowText(row, "event_type") === "training_expiry";
+}
+
+function isTrainingSession(row: QmsRow): boolean {
+  return rowText(row, "module").includes("training") && rowText(row, "event_type") === "training_session";
+}
+
+type CalendarSummary = { key: string; label: string; tone: string; count: number; rows: QmsRow[] };
+
+function calendarSummariesForDay(dayRows: QmsRow[]): CalendarSummary[] {
+  const summaries: CalendarSummary[] = [];
+  const trainingDue = dayRows.filter(isTrainingExpiry);
+  const sessions = dayRows.filter(isTrainingSession);
+  const otherRows = dayRows.filter((row) => !isTrainingExpiry(row) && !isTrainingSession(row));
+
+  sessions.forEach((row) => {
+    const count = rowNumber(row, "participant_count");
+    const code = calendarCourseCode(row);
+    summaries.push({
+      key: rowText(row, "id", `${rowText(row, "date")}:${code}:session`),
+      label: count > 0 ? `${code} (${count})` : calendarTitle(row),
+      tone: calendarTone(row),
+      count: Math.max(count, 1),
+      rows: [row],
+    });
+  });
+
+  const dueGroups = new Map<string, QmsRow[]>();
+  trainingDue.forEach((row) => {
+    const key = calendarCourseCode(row);
+    const bucket = dueGroups.get(key) || [];
+    bucket.push(row);
+    dueGroups.set(key, bucket);
+  });
+  dueGroups.forEach((rows, code) => {
+    summaries.push({
+      key: `${rowText(rows[0], "date")}:${code}:due`,
+      label: rows.length > 1 ? `${code} due (${rows.length})` : `${calendarPersonnelLabel(rows[0])} — ${code}`,
+      tone: "training",
+      count: rows.length,
+      rows,
+    });
+  });
+
+  otherRows.forEach((row) => {
+    summaries.push({
+      key: rowText(row, "id", `${rowText(row, "date")}:${calendarTitle(row)}`),
+      label: calendarTitle(row),
+      tone: calendarTone(row),
+      count: 1,
+      rows: [row],
+    });
+  });
+
+  return summaries.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function CalendarPlanner({ amoCode, view, rows, data, state, error, anchorDateKey, onAnchorDateChange, onRetry }: {
+  amoCode: string;
+  view: string;
+  rows: QmsRow[];
+  data: QmsModuleResponse | null;
+  state: LoadState;
+  error: string | null;
+  anchorDateKey: string;
+  onAnchorDateChange: (value: string) => void;
+  onRetry: () => void;
+}): React.ReactElement {
+  const today = useMemo(() => new Date(), []);
+  const todayKey = isoDateKey(today);
+  const anchorDate = useMemo(() => parseIsoDateKey(anchorDateKey) || new Date(today.getFullYear(), today.getMonth(), today.getDate()), [anchorDateKey, today]);
+  const activeView = view === "list" ? "agenda" : (["month", "week", "year", "agenda"].includes(view) ? view : "month");
+  const [focusDate, setFocusDate] = useState<Date>(() => new Date(anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate()));
+  const [selectedDateKey, setSelectedDateKey] = useState<string>(anchorDateKey || todayKey);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [courses, setCourses] = useState<TrainingCourseRead[]>([]);
+  const [coursesLoaded, setCoursesLoaded] = useState(false);
+  const [scheduleCoursePk, setScheduleCoursePk] = useState("");
+  const [scheduleDate, setScheduleDate] = useState(todayKey);
+  const [scheduleTitle, setScheduleTitle] = useState("");
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [calendarFilter, setCalendarFilter] = useState<CalendarFilterKey>("all");
 
   useEffect(() => {
-    const current = (data?.items || [])[0];
-    if (!current) return;
-    setForm({
-      numbering_rules: prettyJson(current.numbering_rules, DEFAULT_SETTINGS_STATE.numbering_rules),
-      workflow_rules: prettyJson(current.workflow_rules, DEFAULT_SETTINGS_STATE.workflow_rules),
-      approval_matrix: prettyJson(current.approval_matrix, DEFAULT_SETTINGS_STATE.approval_matrix),
-      notification_rules: prettyJson(current.notification_rules, DEFAULT_SETTINGS_STATE.notification_rules),
-      retention_rules: prettyJson(current.retention_rules, DEFAULT_SETTINGS_STATE.retention_rules),
-      risk_matrix: prettyJson(current.risk_matrix, DEFAULT_SETTINGS_STATE.risk_matrix),
-    });
-  }, [data]);
+    const next = parseIsoDateKey(anchorDateKey);
+    if (!next) return;
+    setFocusDate(new Date(next.getFullYear(), next.getMonth(), next.getDate()));
+    setSelectedDateKey(anchorDateKey);
+  }, [anchorDateKey]);
 
-  const save = async () => {
-    setSaving(true);
-    setSaveError(null);
-    setSaved(false);
-    try {
-      const payload = {
-        numbering_rules: parseJsonSetting(form.numbering_rules, "Numbering rules"),
-        workflow_rules: parseJsonSetting(form.workflow_rules, "Workflow rules"),
-        approval_matrix: parseJsonSetting(form.approval_matrix, "Approval matrix"),
-        notification_rules: parseJsonSetting(form.notification_rules, "Notification rules"),
-        retention_rules: parseJsonSetting(form.retention_rules, "Retention rules"),
-        risk_matrix: parseJsonSetting(form.risk_matrix, "Risk matrix"),
-      };
-      const response = await apiRequest<QmsSettingsResponse>(qmsPath(amoCode, "settings"), {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-        timeoutMs: 15000,
-        cacheTtlMs: 0,
+  const allDatedRows = useMemo(() => rows.filter((row) => parseIsoDateKey(row.date)), [rows]);
+  const calendarFilters = useMemo(() => CALENDAR_FILTERS.map((filter) => ({
+    ...filter,
+    count: filter.key === "all" ? allDatedRows.length : allDatedRows.filter((row) => calendarCategory(row) === filter.key).length,
+  })), [allDatedRows]);
+  const datedRows = useMemo(
+    () => calendarFilter === "all" ? allDatedRows : allDatedRows.filter((row) => calendarCategory(row) === calendarFilter),
+    [allDatedRows, calendarFilter]
+  );
+  const rowsByDate = useMemo(() => {
+    const grouped = new Map<string, QmsRow[]>();
+    datedRows.forEach((row) => {
+      const key = String(row.date);
+      const bucket = grouped.get(key) || [];
+      bucket.push(row);
+      grouped.set(key, bucket);
+    });
+    return grouped;
+  }, [datedRows]);
+
+  const selectedRows = rowsByDate.get(selectedDateKey) || [];
+  const selectedTrainingDue = selectedRows.filter((row) => isTrainingExpiry(row) && rowText(row, "user_id"));
+  const selectedStandaloneRows = selectedRows.filter((row) => !(isTrainingExpiry(row) && rowText(row, "user_id")));
+  const selectedLabel = parseIsoDateKey(selectedDateKey)?.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }) || selectedDateKey;
+
+  useEffect(() => {
+    if (selectedRows.length > 0 && !drawerOpen) setDrawerOpen(true);
+  }, [selectedDateKey]);
+
+  useEffect(() => {
+    if (!drawerOpen || selectedTrainingDue.length === 0 || coursesLoaded) return;
+    let cancelled = false;
+    listTrainingCourses({ include_inactive: false, limit: 300 })
+      .then((result) => {
+        if (cancelled) return;
+        setCourses(result || []);
+        setCoursesLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setCoursesLoaded(true);
       });
-      const settings = response.settings || response.record || payload;
-      setForm({
-        numbering_rules: prettyJson(settings.numbering_rules, form.numbering_rules),
-        workflow_rules: prettyJson(settings.workflow_rules, form.workflow_rules),
-        approval_matrix: prettyJson(settings.approval_matrix, form.approval_matrix),
-        notification_rules: prettyJson(settings.notification_rules, form.notification_rules),
-        retention_rules: prettyJson(settings.retention_rules, form.retention_rules),
-        risk_matrix: prettyJson(settings.risk_matrix, form.risk_matrix),
-      });
-      setSaved(true);
-      onRetry();
-    } catch (err) {
-      setSaveError(friendlyError(err, "Unable to save QMS settings."));
-    } finally {
-      setSaving(false);
+    return () => { cancelled = true; };
+  }, [coursesLoaded, drawerOpen, selectedTrainingDue.length]);
+
+  useEffect(() => {
+    const ids = Array.from(new Set(selectedTrainingDue.map((row) => rowText(row, "user_id")).filter(Boolean)));
+    setSelectedUserIds(ids);
+    setScheduleDate(selectedDateKey);
+    const first = selectedTrainingDue[0];
+    if (first) {
+      const code = calendarCourseCode(first);
+      setScheduleTitle(`${code} recurrent (${ids.length || selectedTrainingDue.length})`);
+      const matched = courses.find((course) =>
+        course.course_id === rowText(first, "course_code") ||
+        course.course_pk === rowText(first, "course_id") ||
+        course.id === rowText(first, "course_id") ||
+        course.course_name === rowText(first, "course_name")
+      );
+      setScheduleCoursePk(matched?.course_pk || matched?.id || "");
+    } else {
+      setScheduleTitle("");
+      setScheduleCoursePk("");
+    }
+  }, [courses, selectedDateKey, selectedTrainingDue.length]);
+
+  const monthStart = new Date(focusDate.getFullYear(), focusDate.getMonth(), 1);
+  const firstGridDate = new Date(monthStart);
+  firstGridDate.setDate(monthStart.getDate() - monthStart.getDay());
+  const daysInFocusedMonth = new Date(focusDate.getFullYear(), focusDate.getMonth() + 1, 0).getDate();
+  const monthCellCount = Math.ceil((monthStart.getDay() + daysInFocusedMonth) / 7) * 7;
+  const monthDays = Array.from({ length: monthCellCount }, (_, index) => {
+    const day = new Date(firstGridDate);
+    day.setDate(firstGridDate.getDate() + index);
+    return day;
+  });
+  const weekStart = new Date(focusDate);
+  weekStart.setDate(focusDate.getDate() - focusDate.getDay());
+  const weekDays = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(weekStart);
+    day.setDate(weekStart.getDate() + index);
+    return day;
+  });
+  const yearMonths = Array.from({ length: 12 }, (_, month) => new Date(focusDate.getFullYear(), month, 1));
+  const agendaRows = [...datedRows].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || calendarTitle(a).localeCompare(calendarTitle(b)));
+
+  const applyFocusDate = (nextDate: Date, openDrawer = false) => {
+    const key = isoDateKey(nextDate);
+    setFocusDate(new Date(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate()));
+    setSelectedDateKey(key);
+    onAnchorDateChange(key);
+    if (openDrawer) setDrawerOpen(true);
+  };
+
+  const shiftFocus = (unit: "month" | "year" | "today", direction: -1 | 0 | 1 = 0) => {
+    if (unit === "today") {
+      applyFocusDate(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
+      return;
+    }
+    const next = unit === "year" ? addCalendarYears(focusDate, direction) : addCalendarMonths(focusDate, direction);
+    applyFocusDate(next);
+  };
+
+  const openDate = (key: string) => {
+    const parsed = parseIsoDateKey(key);
+    if (parsed) applyFocusDate(parsed, true);
+    else {
+      setSelectedDateKey(key);
+      setDrawerOpen(true);
     }
   };
 
-  const fields: Array<{ key: keyof SettingsState; label: string; help: string }> = [
-    { key: "numbering_rules", label: "Numbering", help: "Audit, CAR, finding, change, and evidence reference patterns." },
-    { key: "workflow_rules", label: "Workflow rules", help: "Mandatory stages, evidence gates, and effectiveness review rules." },
-    { key: "approval_matrix", label: "Approval matrix", help: "Roles required for documents, changes, audits, and closures." },
-    { key: "notification_rules", label: "Notification rules", help: "Due-soon reminders, escalations, and delivery channels." },
-    { key: "retention_rules", label: "Retention rules", help: "Archive retention by record family for audit-proof evidence." },
-    { key: "risk_matrix", label: "Risk matrix", help: "Likelihood, consequence, and threshold configuration." },
-  ];
+  const toggleUser = (userId: string) => {
+    setSelectedUserIds((current) => current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId]);
+  };
 
-  return (
-    <div className="qms-settings-shell">
-      <SectionCard className="qms-ops-span-2" title="QMS control room" subtitle="Functional settings backed by /api/maintenance/{amo}/qms/settings." variant="subtle" actions={<Button onClick={save} loading={saving}><Save size={15} /> Save settings</Button>}>
-        <ActionTabs amoCode={amoCode} module={module} currentPath={window.location.pathname} />
-        {state === "loading" ? <LoadingPanel label="Loading settings..." /> : null}
-        {error ? <InlineError message={error} onAction={onRetry} /> : null}
-        {saveError ? <InlineError message={saveError} /> : null}
-        {saved ? <div className="qms-settings-success"><CheckCircle2 size={16} /> QMS settings saved and activity logged.</div> : null}
-        <div className="qms-settings-json-grid">
-          {fields.map((field) => (
-            <label key={field.key} className="qms-settings-json-field">
-              <span><strong>{field.label}</strong><small>{field.help}</small></span>
-              <textarea rows={8} value={form[field.key]} onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))} spellCheck={false} />
-            </label>
-          ))}
-        </div>
-      </SectionCard>
-      <CalendarSettingsPanel amoCode={amoCode} onSaved={onRetry} />
-      <SectionCard title="Route and module coverage" subtitle="No ghost menu items: each link resolves to the canonical QMS route surface." variant="subtle">
-        <div className="qms-settings-route-list">
-          {QMS_MODULES.filter((item) => item.route).map((item) => (
-            <Link key={item.key} to={routeToUrl(amoCode, `${item.route}/${item.defaultView}`)}><span>{item.shortTitle}</span><small>{item.route}/{item.defaultView}</small></Link>
-          ))}
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
+  const submitSchedule = async () => {
+    if (!scheduleCoursePk) {
+      setScheduleMessage("Choose the course/class before scheduling personnel.");
+      return;
+    }
+    if (selectedUserIds.length === 0) {
+      setScheduleMessage("Select at least one personnel record to enrol.");
+      return;
+    }
+    setScheduleBusy(true);
+    setScheduleMessage(null);
+    try {
+      await createTrainingEventBatch({
+        course_pk: scheduleCoursePk,
+        user_ids: selectedUserIds,
+        starts_on: scheduleDate,
+        ends_on: scheduleDate,
+        title: scheduleTitle || null,
+        participant_status: "SCHEDULED",
+        auto_issue_certificates: true,
+        allow_self_attendance: true,
+      });
+      setScheduleMessage(`Scheduled ${selectedUserIds.length} personnel for ${scheduleDate}.`);
+      setSelectedUserIds([]);
+      onRetry();
+    } catch (err) {
+      setScheduleMessage(friendlyError(err, "Could not schedule the selected personnel."));
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
 
-function CalendarWorkspace({ amoCode, module, data, state, error, onRetry, onMonthChange }: { amoCode: string; module: ModuleMeta; view: string; data: QmsModuleResponse | null; state: LoadState; error: string | null; onRetry: () => void; onMonthChange: (anchor: string) => void; }): React.ReactElement {
-  const items = (data?.items || []) as CalendarItem[];
-  const meta = data?.calendar_meta || {};
-  const today = meta.today || new Date().toISOString().slice(0, 10);
-  const monthStart = meta.start || calendarMonthBounds(today).start;
-  const monthInfo = parseIsoDay(monthStart) || parseIsoDay(today)!;
-  const cells = buildCalendarCells(isoDay(monthInfo.year, monthInfo.month, 1), meta.week_starts_on || "MONDAY");
-  const currentMonth = `${monthInfo.year}-${String(monthInfo.month).padStart(2, "0")}`;
-  const byDate = new Map<string, CalendarItem[]>();
-  for (const item of items) {
-    const itemDate = typeof item.date === "string" ? item.date.slice(0, 10) : "";
-    if (!itemDate) continue;
-    const list = byDate.get(itemDate) || [];
-    list.push(item);
-    byDate.set(itemDate, list);
-  }
-  const agenda = [...items].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || String(a.title || "").localeCompare(String(b.title || "")));
-  const summary = data?.summary || {};
-  const weekdayLabels = (meta.week_starts_on || "MONDAY").toUpperCase() === "SUNDAY" ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  return (
-    <div className="qms-calendar-shell">
-      <SectionCard className="qms-calendar-main" title="Operational calendar" subtitle={`AMO time zone: ${meta.timezone || "not set"}${meta.country ? ` · Region: ${meta.country}` : ""}`} variant="subtle" actions={<Button variant="secondary" size="sm" onClick={onRetry} loading={state === "loading"}><RefreshCw size={14} /> Refresh</Button>}>
-        <SourceDiagnostics data={data} />
-        {error ? <InlineError message={error} onAction={onRetry} /> : null}
-        <div className="qms-calendar-toolbar">
-          <Button variant="secondary" size="sm" onClick={() => onMonthChange(nextMonthAnchor(monthStart, -1))}>Previous month</Button>
-          <div className="qms-calendar-toolbar__month"><span>Viewing</span><strong>{monthLabel(monthStart)}</strong></div>
-          <Button variant="secondary" size="sm" onClick={() => onMonthChange(calendarMonthBounds(today).start)}>Today</Button>
-          <Button variant="secondary" size="sm" onClick={() => onMonthChange(nextMonthAnchor(monthStart, 1))}>Next month</Button>
-        </div>
-        <div className="qms-calendar-tabs"><ActionTabs amoCode={amoCode} module={module} currentPath={window.location.pathname} /></div>
-        <div className="qms-calendar-summary" aria-label="Calendar summary">
-          <span><strong>{summary.total ?? items.length}</strong><small>Total</small></span>
-          <span><strong>{summary.overdue ?? 0}</strong><small>Overdue work</small></span>
-          <span><strong>{summary.audits ?? 0}</strong><small>Audits</small></span>
-          <span><strong>{summary.cars ?? 0}</strong><small>CARs</small></span>
-          <span><strong>{summary.training ?? 0}</strong><small>Training</small></span>
-          <span><strong>{summary.holidays ?? 0}</strong><small>Holidays</small></span>
-        </div>
-        {state === "loading" ? <LoadingPanel label="Loading calendar..." /> : null}
-        <div className="qms-calendar-grid" role="grid" aria-label={`${monthLabel(monthStart)} calendar`}>
-          {weekdayLabels.map((label) => <div key={label} className="qms-calendar-weekday">{label}</div>)}
-          {cells.map((day) => {
-            const parsed = parseIsoDay(day)!;
-            const inMonth = day.slice(0, 7) === currentMonth;
-            const dayItems = byDate.get(day) || [];
-            const isToday = day === today;
+  const renderDayCell = (day: Date, compact = false) => {
+    const key = isoDateKey(day);
+    const dayRows = rowsByDate.get(key) || [];
+    const summaries = calendarSummariesForDay(dayRows);
+    const muted = activeView === "month" && day.getMonth() !== monthStart.getMonth();
+    const selected = key === selectedDateKey;
+    return (
+      <button
+        type="button"
+        key={key}
+        className={`qms-calendar-day${muted ? " is-muted" : ""}${key === todayKey ? " is-today" : ""}${selected ? " is-selected" : ""}${compact ? " is-compact" : ""}`}
+        onClick={() => openDate(key)}
+      >
+        <span className="qms-calendar-day__head"><strong>{day.getDate()}</strong><span>{key === todayKey ? "Today" : summaries.length ? String(dayRows.length) : ""}</span></span>
+        <span className="qms-calendar-day__items">
+          {summaries.slice(0, compact ? 2 : 3).map((summary) => {
+            const label = splitCalendarLabel(summary.label);
             return (
-              <div key={day} className={`qms-calendar-day${inMonth ? "" : " is-muted"}${isToday ? " is-today" : ""}`} role="gridcell" aria-label={day}>
-                <div className="qms-calendar-day__head"><strong>{parsed.day}</strong>{isToday ? <span>Today</span> : null}</div>
-                <div className="qms-calendar-day__items">
-                  {dayItems.slice(0, 4).map((item) => <CalendarChip key={String(item.id || item.title)} item={item} />)}
-                  {dayItems.length > 4 ? <span className="qms-calendar-more">+{dayItems.length - 4} more</span> : null}
-                </div>
-              </div>
+              <span key={summary.key} className={`qms-calendar-item qms-calendar-item--${summary.tone}`} title={summary.label}>
+                <strong>{label.lead}</strong>
+                {label.detail ? <small>{label.detail}</small> : null}
+              </span>
             );
           })}
+          {summaries.length > (compact ? 2 : 3) ? <span className="qms-calendar-more">+{summaries.length - (compact ? 2 : 3)} groups</span> : null}
+        </span>
+      </button>
+    );
+  };
+
+  const selectedPanel = drawerOpen ? (
+    <aside className="qms-calendar-drawer" aria-label="Selected calendar date details">
+      <div className="qms-calendar-drawer__head">
+        <div><strong>{selectedLabel}</strong><span>{selectedRows.length} event{selectedRows.length === 1 ? "" : "s"}</span></div>
+        <button type="button" onClick={() => setDrawerOpen(false)}>Close</button>
+      </div>
+      {!selectedRows.length ? <p className="qms-calendar-empty-note">No QMS calendar entries for this date.</p> : null}
+      {selectedTrainingDue.length ? (
+        <div className="qms-calendar-scheduler">
+          <div className="qms-calendar-scheduler__title"><strong>Batch schedule training</strong><span>Select personnel, choose a course, then enrol them into one session.</span></div>
+          <div className="qms-calendar-checklist">
+            {selectedTrainingDue.map((row) => {
+              const userId = rowText(row, "user_id");
+              return (
+                <label key={rowText(row, "id", userId)}>
+                  <input type="checkbox" checked={selectedUserIds.includes(userId)} onChange={() => toggleUser(userId)} />
+                  <span><strong>{calendarPersonnelLabel(row)}</strong><small>{calendarCourseCode(row)} · due {rowText(row, "date")}</small></span>
+                </label>
+              );
+            })}
+          </div>
+          <label className="qms-calendar-field">Course/class
+            <select value={scheduleCoursePk} onChange={(event) => setScheduleCoursePk(event.target.value)}>
+              <option value="">Select course</option>
+              {courses.map((course) => <option key={course.id} value={course.course_pk || course.id}>{course.course_id} — {course.course_name}</option>)}
+            </select>
+          </label>
+          <label className="qms-calendar-field">Session date<input type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} /></label>
+          <label className="qms-calendar-field">Calendar label<input value={scheduleTitle} onChange={(event) => setScheduleTitle(event.target.value)} placeholder="SMS-REF (6)" /></label>
+          {scheduleMessage ? <p className="qms-calendar-scheduler__message">{scheduleMessage}</p> : null}
+          <div className="qms-calendar-scheduler__actions">
+            <Button size="sm" onClick={submitSchedule} loading={scheduleBusy}>Schedule selected</Button>
+            <Link className="qms-ops-action-tab" to={routeToUrl(amoCode, "training-competence/schedule")}>Open training scheduler</Link>
+          </div>
         </div>
-      </SectionCard>
-      <aside className="qms-calendar-agenda">
-        <div className="qms-calendar-agenda__head"><span>Agenda</span><strong>{monthLabel(monthStart)}</strong><small>{agenda.length} item{agenda.length === 1 ? "" : "s"}</small></div>
-        <div className="qms-calendar-agenda__list">
-          {agenda.length ? agenda.map((item) => <AgendaItem key={String(item.id || `${item.date}-${item.title}`)} item={item} />) : <div className="qms-ops-empty-state"><CheckCircle2 size={18} /><div><strong>No operational calendar items</strong><p>This view has no records for the selected month.</p></div></div>}
+      ) : null}
+      {selectedStandaloneRows.length ? (
+        <div className="qms-calendar-drawer__list">
+          {selectedStandaloneRows.map((row) => {
+            const href = typeof row.link === "string" && row.link ? row.link : routeToUrl(amoCode, "calendar/agenda");
+            return <Link key={rowText(row, "id", `${rowText(row, "date")}:${calendarTitle(row)}`)} to={href}>{calendarTitle(row)}<small>{humanise(rowText(row, "module"))} · {humanise(rowText(row, "event_type"))}</small></Link>;
+          })}
         </div>
-      </aside>
+      ) : null}
+    </aside>
+  ) : null;
+
+  const toolbarTitle = activeView === "year"
+    ? String(focusDate.getFullYear())
+    : activeView === "week"
+      ? `Week of ${weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
+      : activeView === "agenda"
+        ? "Agenda"
+        : focusDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const rangeLabel = data?.start && data?.end ? `${data.start} to ${data.end}` : "Select a date to load the period";
+
+  return (
+    <div className={`qms-calendar-shell${drawerOpen ? " has-drawer" : ""}`}>
+      <div className="qms-calendar-command">
+        <div className="qms-calendar-command__period">
+          <strong>{toolbarTitle}</strong>
+          <span className="qms-calendar-command__range">{rangeLabel} · {datedRows.length} of {allDatedRows.length} shown</span>
+        </div>
+        <div className="qms-calendar-command__controls">
+          <div className="qms-calendar-date-nav" aria-label="Calendar date navigation">
+            <button className="qms-calendar-nav-button" type="button" title="Previous month" onClick={() => shiftFocus("month", -1)}>‹</button>
+            <button className="qms-calendar-icon-button qms-calendar-icon-button--today" type="button" onClick={() => shiftFocus("today")} title="Jump to today">Today</button>
+            <button className="qms-calendar-nav-button" type="button" title="Next month" onClick={() => shiftFocus("month", 1)}>›</button>
+            <input className="qms-calendar-date-input" type="date" aria-label="Select calendar date" value={selectedDateKey} onChange={(event) => { const parsed = parseIsoDateKey(event.target.value); if (parsed) applyFocusDate(parsed); }} />
+          </div>
+          <div className="qms-calendar-view-switch" aria-label="Calendar view">
+            <Link className={`qms-calendar-view-switch__item${activeView === "month" ? " is-active" : ""}`} to={`${routeToUrl(amoCode, "calendar/month")}?date=${selectedDateKey}`}>Month</Link>
+            <Link className={`qms-calendar-view-switch__item${activeView === "week" ? " is-active" : ""}`} to={`${routeToUrl(amoCode, "calendar/week")}?date=${selectedDateKey}`}>Week</Link>
+            <Link className={`qms-calendar-view-switch__item${activeView === "year" ? " is-active" : ""}`} to={`${routeToUrl(amoCode, "calendar/year")}?date=${selectedDateKey}`}>Year</Link>
+            <Link className={`qms-calendar-view-switch__item${activeView === "agenda" ? " is-active" : ""}`} to={`${routeToUrl(amoCode, "calendar/list")}?date=${selectedDateKey}`}>Agenda</Link>
+          </div>
+        </div>
+      </div>
+      <div className="qms-calendar-insight-rail" aria-label="Calendar event filters">
+        {calendarFilters.map((filter) => (
+          <button
+            key={filter.key}
+            type="button"
+            className={`qms-calendar-filter-chip qms-calendar-filter-chip--${filter.key}${calendarFilter === filter.key ? " is-active" : ""}`}
+            title={filter.title}
+            aria-pressed={calendarFilter === filter.key}
+            onClick={() => setCalendarFilter(filter.key)}
+          >
+            <span>{filter.label}</span>
+            <strong>{filter.count}</strong>
+          </button>
+        ))}
+      </div>
+      {data?.warning ? <div className="qms-ops-warning"><AlertTriangle size={16} /> {data.warning}</div> : null}
+      <SourceErrorsNotice errors={data?.source_errors} />
+      {error ? <InlineError message={error} onAction={onRetry} /> : null}
+      {state === "loading" ? <LoadingPanel label="Loading calendar..." /> : null}
+      <div className="qms-calendar-layout">
+        <div className="qms-calendar-main">
+          {activeView === "month" ? (
+            <div className="qms-calendar-board qms-calendar-board--compact" aria-label="QMS month calendar">
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label) => <div key={label} className="qms-calendar-board__dow">{label}</div>)}
+              {monthDays.map((day) => renderDayCell(day))}
+            </div>
+          ) : null}
+          {activeView === "week" ? (
+            <div className="qms-calendar-week" aria-label="QMS week calendar">
+              {weekDays.map((day) => renderDayCell(day, true))}
+            </div>
+          ) : null}
+          {activeView === "year" ? (
+            <div className="qms-calendar-year" aria-label="QMS year calendar">
+              {yearMonths.map((month) => {
+                const prefix = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
+                const monthRows = agendaRows.filter((row) => rowText(row, "date").startsWith(prefix));
+                return (
+                  <button key={prefix} type="button" className="qms-calendar-year__month" onClick={() => applyFocusDate(month, true)}>
+                    <strong>{month.toLocaleDateString(undefined, { month: "short" })}</strong>
+                    <span>{monthRows.length} item{monthRows.length === 1 ? "" : "s"}</span>
+                    {calendarSummariesForDay(monthRows).slice(0, 3).map((summary) => {
+                      const label = splitCalendarLabel(summary.label);
+                      return <small key={summary.key}><strong>{label.lead}</strong>{label.detail ? ` · ${label.detail}` : ""}</small>;
+                    })}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {activeView === "agenda" ? (
+            <div className="qms-calendar-agenda" aria-label="Calendar agenda">
+              <div className="qms-calendar-agenda__head"><strong>Agenda</strong><span>{agendaRows.length} visible item{agendaRows.length === 1 ? "" : "s"}</span></div>
+              {agendaRows.length ? agendaRows.slice(0, 120).map((row) => {
+                const key = rowText(row, "date");
+                return (
+                  <button key={rowText(row, "id", `${key}:${calendarTitle(row)}`)} type="button" className={`qms-calendar-agenda__row${key === selectedDateKey ? " is-selected" : ""}`} onClick={() => openDate(key)}>
+                    <span className={`qms-calendar-dot qms-calendar-dot--${calendarTone(row)}`} />
+                    <span className="qms-calendar-agenda__date">{formatValue(row.date)}</span>
+                    <span className="qms-calendar-agenda__content"><strong>{calendarTitle(row)}</strong><small>{humanise(rowText(row, "module"))} · {humanise(rowText(row, "event_type"))}</small></span>
+                    <span className={`qms-calendar-event-badge qms-calendar-event-badge--${calendarTone(row)}`}>{humanise(calendarCategory(row))}</span>
+                  </button>
+                );
+              }) : <EmptyRows module={MODULE_BY_KEY.calendar} />}
+            </div>
+          ) : null}
+        </div>
+        {selectedPanel}
+      </div>
     </div>
-  );
-}
-
-function CalendarChip({ item }: { item: CalendarItem }): React.ReactElement {
-  return (
-    <Link to={item.link ? String(item.link) : "#"} className={`qms-calendar-chip qms-calendar-chip--${eventTone(item)}${item.link ? "" : " is-static"}`} onClick={(event) => { if (!item.link) event.preventDefault(); }} title={`${item.title || "Calendar item"}${item.owner_label ? ` · ${item.owner_label}` : ""}`}>
-      <span>{sourceLabel(item)}</span>
-      <strong>{item.owner_label || item.title || "Calendar item"}</strong>
-    </Link>
-  );
-}
-
-function AgendaItem({ item }: { item: CalendarItem }): React.ReactElement {
-  return (
-    <Link to={item.link ? String(item.link) : "#"} className={`qms-calendar-agenda-item qms-calendar-agenda-item--${eventTone(item)}${item.link ? "" : " is-static"}`} onClick={(event) => { if (!item.link) event.preventDefault(); }}>
-      <div><strong>{item.title || "Calendar item"}</strong><small>{item.date ? formatValue(item.date) : "No date"} · {sourceLabel(item)}{item.detail ? ` · ${item.detail}` : ""}</small></div>
-      <span className={statusClass(item.due_state || item.status || "")}>{humanise(item.due_state || item.status || "Scheduled")}</span>
-    </Link>
   );
 }
 
@@ -1394,6 +1536,8 @@ function WorkspacePanel({
   onPageSizeChange,
   onRetry,
   onPage,
+  calendarDateKey,
+  onCalendarDateChange,
 }: {
   amoCode: string;
   module: ModuleMeta;
@@ -1409,12 +1553,35 @@ function WorkspacePanel({
   onPageSizeChange: (value: number) => void;
   onRetry: () => void;
   onPage: (direction: "next" | "prev") => void;
+  calendarDateKey: string;
+  onCalendarDateChange: (value: string) => void;
 }): React.ReactElement {
   const rows = data?.items || [];
   const source = data?.table || module.sourceLabel;
   const offset = data?.offset || 0;
   const limit = data?.limit || pageSize;
   const currentPage = Math.floor(offset / limit) + 1;
+
+  if (module.key === "calendar") {
+    return (
+      <div className="qms-ops-workspace-grid qms-ops-workspace-grid--calendar">
+        <SectionCard className="qms-ops-span-2 qms-calendar-card" variant="subtle">
+          <CalendarPlanner
+            amoCode={amoCode}
+            view={view}
+            rows={rows}
+            data={data}
+            state={state}
+            error={error}
+            anchorDateKey={calendarDateKey}
+            onAnchorDateChange={onCalendarDateChange}
+            onRetry={onRetry}
+          />
+        </SectionCard>
+      </div>
+    );
+  }
+
   return (
     <div className="qms-ops-workspace-grid">
       <SectionCard className="qms-ops-span-2" title={module.title} subtitle={module.subtitle} variant="subtle" actions={<Button variant="secondary" size="sm" onClick={onRetry} loading={state === "loading"}><RefreshCw size={14} /> Refresh</Button>}>
@@ -1433,10 +1600,17 @@ function WorkspacePanel({
           <span className="qms-ops-pill">Page {currentPage}</span>
         </div>
         {data?.warning ? <div className="qms-ops-warning"><AlertTriangle size={16} /> {data.warning}</div> : null}
+        <SourceErrorsNotice errors={data?.source_errors} />
         {data?.table_missing ? <div className="qms-ops-warning"><AlertTriangle size={16} /> The configured QMS table is missing. Run the canonical QMS migration for this environment.</div> : null}
         {error ? <InlineError message={error} onAction={onRetry} /> : null}
-        {state === "loading" ? <LoadingPanel label={`Loading ${module.sourceLabel.toLowerCase()}...`} /> : null}
-        {state !== "loading" && !error ? <RecordTable amoCode={amoCode} module={module} rows={rows} response={data} /> : null}
+        {module.key === "calendar" ? (
+          <CalendarPlanner amoCode={amoCode} view={view} rows={rows} data={data} state={state} error={error} anchorDateKey={calendarDateKey} onAnchorDateChange={onCalendarDateChange} onRetry={onRetry} />
+        ) : (
+          <>
+            {state === "loading" ? <LoadingPanel label={`Loading ${module.sourceLabel.toLowerCase()}...`} /> : null}
+            {state !== "loading" && !error ? <RecordTable amoCode={amoCode} module={module} rows={rows} response={data} /> : null}
+          </>
+        )}
         <div className="qms-ops-pagination">
           <Button variant="secondary" size="sm" disabled={offset <= 0 || state === "loading"} onClick={() => onPage("prev")}>Previous</Button>
           <span>{data?.elapsed_ms != null ? `${data.elapsed_ms} ms backend` : "Backend timing pending"}</span>
@@ -1468,10 +1642,10 @@ function CockpitWorkspace({ amoCode, dashboard, loading }: { amoCode: string; da
         {loading ? <LoadingPanel label="Loading command centre..." /> : null}
         <LifecycleRunway amoCode={amoCode} steps={MODULE_BY_KEY.cockpit.lifecycle} />
       </SectionCard>
-      <SectionCard title="Priority queue" subtitle="Backend counters loaded from the tenant QMS dashboard." variant="subtle">
+      <SectionCard title="Priority queue" subtitle="Tenant dashboard indicators. Audit indicators use the audit schedule source to keep the cockpit responsive." variant="subtle">
         <div className="qms-ops-priority-list">
           <Link to={routeToUrl(amoCode, "cars/overdue")}><AlertTriangle size={16} /> Overdue CARs <strong>{counterValue(dashboard, "overdue_cars")}</strong></Link>
-          <Link to={routeToUrl(amoCode, "audits/schedule")}><CalendarDays size={16} /> Audits due soon <strong>{counterValue(dashboard, "audits_due_soon")}</strong></Link>
+          <Link to={routeToUrl(amoCode, "audits/schedule")}><CalendarDays size={16} /> Audit plan due soon <strong>{counterValue(dashboard, "audits_due_soon")}</strong></Link>
           <Link to={routeToUrl(amoCode, "documents/library")}><FileText size={16} /> Draft documents <strong>{counterValue(dashboard, "draft_documents")}</strong></Link>
           <Link to={routeToUrl(amoCode, "training-competence/overdue")}><Users size={16} /> Expired training <strong>{counterValue(dashboard, "training_expired_records")}</strong></Link>
         </div>
@@ -1502,13 +1676,16 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
   const query = searchParams.get("q") || "";
   const statusFilter = searchParams.get("status") || "";
-  const pageSize = Number(searchParams.get("limit") || (module.key === "calendar" ? 120 : 15));
+  const pageSize = Number(searchParams.get("limit") || 15);
   const offset = Number(searchParams.get("offset") || 0);
-  const calendarStart = searchParams.get("start") || "";
-  const calendarEnd = searchParams.get("end") || "";
+  const calendarDateKey = useMemo(() => {
+    const supplied = searchParams.get("date");
+    if (parseIsoDateKey(supplied)) return supplied as string;
+    return isoDateKey(new Date());
+  }, [searchParams]);
 
   const breadcrumbs = useMemo(() => [
-    { label: "Quality", to: `/maintenance/${amoCode}/qms` },
+    { label: "Quality", to: `/maintenance/${amoCode}/quality` },
     { label: module.shortTitle },
   ], [amoCode, module.shortTitle]);
 
@@ -1531,16 +1708,21 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
   const buildModulePath = useCallback((nextOffset = offset) => {
     const params = new URLSearchParams();
-    params.set("limit", String(pageSize));
-    params.set("offset", String(Math.max(0, nextOffset)));
+    const calendarBoard = module.key === "calendar" && ["month", "week", "year", "list", "agenda"].includes(view);
+    params.set("limit", String(calendarBoard ? (view === "year" ? 200 : Math.max(120, pageSize)) : pageSize));
+    params.set("offset", String(calendarBoard ? 0 : Math.max(0, nextOffset)));
+    if (calendarBoard) {
+      const anchor = parseIsoDateKey(calendarDateKey) || new Date();
+      const range = calendarRequestRange(view, anchor);
+      params.set("start", range.start);
+      params.set("end", range.end);
+    }
     if (query.trim()) params.set("q", query.trim());
     if (statusFilter) params.set("status", statusFilter);
-    if (module.key === "calendar") {
-      if (calendarStart) params.set("start", calendarStart);
-      if (calendarEnd) params.set("end", calendarEnd);
-    }
-    return `${qmsPath(amoCode, fetchSuffix(module, view))}?${params.toString()}`;
-  }, [amoCode, calendarEnd, calendarStart, module, offset, pageSize, query, statusFilter, view]);
+    const suffix = calendarBoard ? "/integrations/calendar" : fetchSuffix(module, view);
+    if (calendarBoard) params.set("view", view);
+    return `${qmsPath(amoCode, suffix)}?${params.toString()}`;
+  }, [amoCode, calendarDateKey, module, offset, pageSize, query, statusFilter, view]);
 
   const loadModule = useCallback(async ({ force = false, nextOffset = offset }: { force?: boolean; nextOffset?: number } = {}) => {
     if (!module.route) {
@@ -1589,35 +1771,32 @@ export default function QmsCanonicalPage(): React.ReactElement {
   }, [loadModule]);
 
   useEffect(() => {
-    if (!module.route || moduleState !== "ready" || module.key === "calendar") return;
-    const nextAction = module.actions[0];
-    if (!nextAction) return;
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ limit: "10", offset: "0" });
-      const prefetchPath = `${qmsPath(amoCode, nextAction.path)}?${params.toString()}`;
-      if (cacheRef.current.has(prefetchPath)) return;
-      void apiRequest<QmsModuleResponse>(prefetchPath, { timeoutMs: 8000 })
-        .then((result) => cacheRef.current.set(prefetchPath, result))
-        .catch((err) => console.info("[QMS] background prefetch skipped", { path: prefetchPath, error: err }));
-    }, 650);
+    // Preload route code only. This keeps navigation snappy without firing hidden
+    // QMS data reads or creating background source errors.
+    const run = () => {
+      void import("../TrainingCompetencePage");
+      void import("../qualityAudits/QualityAuditPlanSchedulePage");
+      void import("../QualityAuditRunHubPage");
+      void import("../../services/training");
+      void import("../../services/qms");
+    };
+    const idle = (window as any).requestIdleCallback as undefined | ((cb: () => void, options?: { timeout?: number }) => number);
+    if (idle) {
+      const id = idle(run, { timeout: 900 });
+      return () => {
+        const cancel = (window as any).cancelIdleCallback as undefined | ((id: number) => void);
+        if (cancel) cancel(id);
+      };
+    }
+    const timer = window.setTimeout(run, 250);
     return () => window.clearTimeout(timer);
-  }, [amoCode, module, moduleState]);
+  }, []);
 
   const setParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
     if (key !== "offset") next.set("offset", "0");
-    setSearchParams(next, { replace: true });
-  };
-
-  const setCalendarMonth = (anchor: string) => {
-    const bounds = calendarMonthBounds(anchor);
-    const next = new URLSearchParams(searchParams);
-    next.set("start", bounds.start);
-    next.set("end", bounds.end);
-    next.set("offset", "0");
-    next.set("limit", "120");
     setSearchParams(next, { replace: true });
   };
 
@@ -1638,13 +1817,14 @@ export default function QmsCanonicalPage(): React.ReactElement {
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-      <div className="qms-ops-page">
+      <div className={`qms-ops-page${module.key === "calendar" ? " qms-ops-page--calendar" : ""}`}>
         <PageHeader
           eyebrow="Unified Quality Management System"
           title={module.title}
-          subtitle={module.subtitle}
+          subtitle={module.key === "calendar" ? undefined : module.subtitle}
           breadcrumbs={breadcrumbs}
           meta={<ModuleBadge mode={module.mode} />}
+          compact={module.key === "calendar"}
           actions={
             <div className="qms-ops-header-actions">
               <Button variant="secondary" onClick={() => navigate(routeToUrl(amoCode, "inbox/assigned-to-me"))}>My work</Button>
@@ -1654,11 +1834,9 @@ export default function QmsCanonicalPage(): React.ReactElement {
         />
 
         {dashboardError ? <InlineError message={dashboardError} onAction={loadDashboard} /> : null}
+        <SourceErrorsNotice errors={dashboard?.source_errors} />
 
-        <>
-          {module.key === "calendar" ? (
-            <ModuleNavigation amoCode={amoCode} activeKey={module.key} />
-          ) : (
+        {module.key !== "calendar" ? (
           <>
             <section className="qms-ops-hero">
               <div className="qms-ops-hero__copy">
@@ -1668,33 +1846,13 @@ export default function QmsCanonicalPage(): React.ReactElement {
               </div>
               <SignalCards amoCode={amoCode} dashboard={dashboard} />
             </section>
+
             <ModuleNavigation amoCode={amoCode} activeKey={module.key} />
           </>
-          )}
-        </>
+        ) : null}
 
         {module.key === "cockpit" ? (
           <CockpitWorkspace amoCode={amoCode} dashboard={dashboard} loading={dashboardState === "loading"} />
-        ) : module.key === "calendar" ? (
-          <CalendarWorkspace
-            amoCode={amoCode}
-            module={module}
-            view={view}
-            state={moduleState}
-            data={moduleData}
-            error={moduleError}
-            onRetry={() => void loadModule({ force: true })}
-            onMonthChange={setCalendarMonth}
-          />
-        ) : module.key === "settings" ? (
-          <QmsSettingsWorkspace
-            amoCode={amoCode}
-            module={module}
-            state={moduleState}
-            data={moduleData}
-            error={moduleError}
-            onRetry={() => void loadModule({ force: true })}
-          />
         ) : (
           <WorkspacePanel
             amoCode={amoCode}
@@ -1711,6 +1869,8 @@ export default function QmsCanonicalPage(): React.ReactElement {
             onPageSizeChange={(value) => setParam("limit", String(value))}
             onRetry={() => void loadModule({ force: true })}
             onPage={page}
+            calendarDateKey={calendarDateKey}
+            onCalendarDateChange={(value) => setParam("date", value)}
           />
         )}
       </div>

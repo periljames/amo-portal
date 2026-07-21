@@ -1,6 +1,6 @@
 // src/services/apiClient.ts
-import { authHeaders, handleAuthFailure } from "./auth";
-import { getApiBaseUrl } from "./config";
+import { authHeaders, handleAuthFailure, markSessionActivity, extendSessionIfNeeded } from "./auth";
+import { getApiBaseUrl, normaliseBaseUrl } from "./config";
 
 export type ApiClientOptions = RequestInit & {
   timeoutMs?: number;
@@ -24,7 +24,13 @@ type CacheEntry = {
   value: unknown;
 };
 
+type ParsedResponse<T> = {
+  response: Response;
+  body: T;
+};
+
 const DEFAULT_GET_CACHE_TTL_MS = 15_000;
+const DEFAULT_DIRECT_DEV_BACKEND = "http://127.0.0.1:8080";
 const responseCache = new Map<string, CacheEntry>();
 const inFlightGets = new Map<string, Promise<unknown>>();
 
@@ -59,8 +65,69 @@ export function clearApiResponseCache(): void {
   inFlightGets.clear();
 }
 
-export async function apiRequest<T>(path: string, options: ApiClientOptions = {}): Promise<T> {
-  const { timeoutMs = 30000, cacheTtlMs, headers, body, signal, ...rest } = options;
+export function clearQmsApiResponseCache(): void {
+  clearApiResponseCache();
+}
+
+function isLocalDevSurface(): boolean {
+  if (typeof window === "undefined") return false;
+  const { hostname, port } = window.location;
+  return ["localhost", "127.0.0.1"].includes(hostname) && ["5173", "4173"].includes(port);
+}
+
+function resolveDirectDevBackend(): string {
+  const configured = import.meta.env.VITE_DIRECT_API_BASE_URL || import.meta.env.VITE_API_DIRECT_BASE_URL;
+  return normaliseBaseUrl(configured || DEFAULT_DIRECT_DEV_BACKEND);
+}
+
+function buildRequestUrls(path: string): string[] {
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  const configuredBase = getApiBaseUrl();
+  const primary = `${configuredBase}${cleanPath}`;
+  const direct = `${resolveDirectDevBackend()}${cleanPath}`;
+
+  // On localhost Vite, prefer the backend directly. This bypasses stale Vite proxy
+  // sockets after backend restarts, which was causing blank QMS pages despite a
+  // healthy FastAPI server. If CORS or the direct backend fails, the same-origin
+  // proxy remains as fallback.
+  if (isLocalDevSurface()) {
+    return direct === primary ? [primary] : [direct, primary];
+  }
+
+  return [primary];
+}
+
+async function readResponseBody<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return (await response.json().catch(() => null)) as T;
+  }
+  return (await response.text().catch(() => "")) as T;
+}
+
+function errorMessageFromBody(response: Response, responseBody: unknown): string {
+  if (responseBody && typeof responseBody === "object") {
+    const body = responseBody as { detail?: unknown; message?: unknown; error?: unknown };
+    const detail = body.detail ?? body.message ?? body.error;
+    if (typeof detail === "string") return detail;
+    if (detail != null) {
+      try {
+        return JSON.stringify(detail);
+      } catch {
+        return String(detail);
+      }
+    }
+  }
+  if (typeof responseBody === "string" && responseBody.trim()) return responseBody.trim();
+  return response.statusText || "Request failed";
+}
+
+async function fetchOnce<T>(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  callerSignal?: AbortSignal | null,
+): Promise<ParsedResponse<T>> {
   const controller = new AbortController();
   let timedOut = false;
   const timeout = window.setTimeout(() => {
@@ -69,24 +136,57 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
   }, timeoutMs);
 
   const abortFromCaller = () => {
-    const reason = signal && "reason" in signal ? signal.reason : undefined;
+    const reason = callerSignal && "reason" in callerSignal ? callerSignal.reason : undefined;
     controller.abort(reason || new DOMException("Request was cancelled", "AbortError"));
   };
-  if (signal) {
-    if (signal.aborted) abortFromCaller();
-    else signal.addEventListener("abort", abortFromCaller, { once: true });
+
+  if (callerSignal) {
+    if (callerSignal.aborted) abortFromCaller();
+    else callerSignal.addEventListener("abort", abortFromCaller, { once: true });
   }
 
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const body = await readResponseBody<T>(response);
+    return { response, body };
+  } catch (error) {
+    if (isAbortError(error)) {
+      const reason = controller.signal.reason;
+      const message = reason instanceof Error ? reason.message : String(reason || "Request timed out or was cancelled");
+      throw new Error(timedOut ? "Request timed out. Confirm the backend is reachable, then retry." : message);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    if (callerSignal) callerSignal.removeEventListener("abort", abortFromCaller);
+  }
+}
+
+function isRetryableNetworkError(error: unknown): boolean {
+  if (error instanceof ApiClientError) return false;
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    return message.includes("failed to fetch") || message.includes("networkerror") || message.includes("request timed out");
+  }
+  return false;
+}
+
+export async function apiRequest<T>(path: string, options: ApiClientOptions = {}): Promise<T> {
+  const { timeoutMs = 30000, cacheTtlMs, headers, body, signal, ...rest } = options;
   const finalHeaders = new Headers(authHeaders(headers));
   if (body && !(body instanceof FormData) && !finalHeaders.has("Content-Type")) {
     finalHeaders.set("Content-Type", "application/json");
   }
 
   const method = getMethod(rest);
-  const url = `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  markSessionActivity(`api:${method.toLowerCase()}:start:${path}`);
+  void extendSessionIfNeeded(`api:${method.toLowerCase()}:${path}`)?.catch(() => undefined);
+
+  const urls = buildRequestUrls(path);
+  const primaryUrl = urls[0];
   const canUseCache = method === "GET" && !body && cacheTtlMs !== 0;
   const effectiveCacheTtlMs = cacheTtlMs ?? DEFAULT_GET_CACHE_TTL_MS;
-  const cacheKey = canUseCache ? buildCacheKey(url, method, finalHeaders) : "";
+  const cacheKey = canUseCache ? buildCacheKey(primaryUrl, method, finalHeaders) : "";
 
   if (canUseCache) {
     const now = Date.now();
@@ -98,56 +198,56 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
   }
 
   const requestPromise = (async () => {
-    try {
-      const response = await fetch(url, {
-        ...rest,
-        method,
-        body,
-        headers: finalHeaders,
-        signal: controller.signal,
-      });
-      const contentType = response.headers.get("content-type") || "";
-      const responseBody = contentType.includes("application/json")
-        ? await response.json().catch(() => null)
-        : await response.text().catch(() => "");
+    let lastError: unknown;
+    for (let index = 0; index < urls.length; index += 1) {
+      const url = urls[index];
+      try {
+        const { response, body: responseBody } = await fetchOnce<T>(
+          url,
+          {
+            ...rest,
+            method,
+            body,
+            headers: finalHeaders,
+          },
+          timeoutMs,
+          signal,
+        );
 
-      if (!response.ok) {
-        const detail =
-          responseBody && typeof responseBody === "object" && "detail" in responseBody
-            ? String((responseBody as { detail?: unknown }).detail)
-            : response.statusText || "Request failed";
-        if (response.status === 401) handleAuthFailure("expired");
-        throw new ApiClientError(response.status, detail, responseBody);
-      }
+        if (!response.ok) {
+          const detail = errorMessageFromBody(response, responseBody);
+          if (response.status === 401) handleAuthFailure("expired");
+          throw new ApiClientError(response.status, detail, responseBody);
+        }
 
-      if (canUseCache && effectiveCacheTtlMs > 0) {
-        responseCache.set(cacheKey, { expiresAt: Date.now() + effectiveCacheTtlMs, value: responseBody });
+        markSessionActivity(`api:${method.toLowerCase()}:ok:${path}`);
+        if (canUseCache && effectiveCacheTtlMs > 0) {
+          responseCache.set(cacheKey, { expiresAt: Date.now() + effectiveCacheTtlMs, value: responseBody });
+        }
+        return responseBody as T;
+      } catch (error) {
+        lastError = error;
+        const canTryNext = index < urls.length - 1 && isRetryableNetworkError(error) && !(signal?.aborted);
+        if (!canTryNext) throw error;
+        console.warn("[apiClient] proxied request failed; retrying direct backend", { path, error });
       }
-      return responseBody as T;
-    } catch (error) {
-      if (isAbortError(error)) {
-        const reason = controller.signal.reason;
-        const message = reason instanceof Error ? reason.message : String(reason || "Request timed out or was cancelled");
-        throw new Error(timedOut ? "Request timed out. Confirm the backend is reachable, then retry." : message);
-      }
-      throw error;
-    } finally {
-      if (canUseCache) inFlightGets.delete(cacheKey);
     }
-  })();
+    throw lastError instanceof Error ? lastError : new Error("Request failed.");
+  })()
+    .finally(() => {
+      if (canUseCache) inFlightGets.delete(cacheKey);
+    });
 
   if (canUseCache) inFlightGets.set(cacheKey, requestPromise as Promise<unknown>);
+  return requestPromise;
+}
 
-  try {
-    return await requestPromise;
-  } finally {
-    window.clearTimeout(timeout);
-    if (signal) signal.removeEventListener("abort", abortFromCaller);
-  }
+export function qualityPath(amoCode: string, suffix = ""): string {
+  const safeAmoCode = encodeURIComponent(amoCode);
+  const cleanSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`;
+  return `/api/maintenance/${safeAmoCode}/quality${suffix ? cleanSuffix : ""}`;
 }
 
 export function qmsPath(amoCode: string, suffix = ""): string {
-  const safeAmoCode = encodeURIComponent(amoCode);
-  const cleanSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`;
-  return `/api/maintenance/${safeAmoCode}/qms${suffix ? cleanSuffix : ""}`;
+  return qualityPath(amoCode, suffix);
 }

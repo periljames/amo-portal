@@ -1,0 +1,1262 @@
+Rev: p0a7_train_record_dedupe (head)
+Parent: p0a6_train_record
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\p0a7_training_record_deduplicate_current.py
+
+    Deduplicate current training records and enforce one active record per user/course.
+    
+    Revision ID: p0a7_train_record_dedupe
+    Revises: p0a6_train_record
+    Create Date: 2026-06-08 00:00:00.000000
+    
+    This migration is idempotent and PostgreSQL-focused. It retains historical records by
+    marking older active records as RENEWED. It does not delete training evidence.
+
+Rev: saas_p5_20260501 (head) (mergepoint)
+Merges: f4a5b6c7d8e9, qms_p4_20260501, amo_20260501_gsu_scope
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\saas_p5_20260501_platform_email_controls.py
+
+    platform email settings and merge SaaS/QMS heads
+    
+    Revision ID: saas_p5_20260501
+    Revises: f4a5b6c7d8e9, qms_p4_20260501, amo_20260501_gsu_scope
+    Create Date: 2026-05-01
+
+Rev: f4a5b6c7d8e9
+Parent: c4b7e1d9f0a2
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\f4a5b6c7d8e9_ensure_training_import_columns_present.py
+
+    ensure training import columns present for environments that missed the catalog migration
+    
+    Revision ID: f4a5b6c7d8e9
+    Revises: c4b7e1d9f0a2
+    Create Date: 2026-04-08
+
+Rev: c4b7e1d9f0a2
+Parent: a3c9e7f1b2d4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\c4b7e1d9f0a2_add_training_course_status_check.py
+
+    Add CHECK constraint for training course status domain.
+    
+    Revision ID: c4b7e1d9f0a2
+    Revises: a3c9e7f1b2d4
+    Create Date: 2026-04-07
+
+Rev: a3c9e7f1b2d4
+Parent: f2a6c1d9b8e7
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\a3c9e7f1b2d4_align_course_status_default_with_workbook.py
+
+    Align training course status default with workbook domain.
+    
+    Revision ID: a3c9e7f1b2d4
+    Revises: f2a6c1d9b8e7
+    Create Date: 2026-04-07
+
+Rev: f2a6c1d9b8e7
+Parent: e1f2a3b4c5d6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\f2a6c1d9b8e7_add_courses_import_columns.py
+
+    Add training course catalog import columns and defaults.
+    
+    Revision ID: f2a6c1d9b8e7
+    Revises: e1f2a3b4c5d6
+    Create Date: 2026-04-07
+
+Rev: e1f2a3b4c5d6
+Parent: d9e2f3a4b5c6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\e1f2a3b4c5d6_add_personnel_profiles_and_password_audit.py
+
+    Add personnel profiles table and password audit/secondary phone columns.
+    
+    Revision ID: e1f2a3b4c5d6
+    Revises: d9e2f3a4b5c6
+    Create Date: 2026-04-07
+
+Rev: amo_20260501_gsu_scope (mergepoint)
+Merges: 2c4d7e9f0a1b, 9c6a7d2e8f10, a1b2c3d4e5f6, a5c1d2e3f4b6, b2c3d4e5f6g7, c1d2e3f4a5b7, d9e2f3a4b5c6, e4b7d1a2c3f4, g1b2c3d4e5f6, l1b2c3d4e5f7, m4a5n6u7a8l9, qms_p2_20260426, s9t8u7v6w5x4, v0a1b2c3d4e5
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\amo_20260501_global_superuser_scope.py
+
+    make superusers global platform identities
+    
+    Revision ID: amo_20260501_gsu_scope
+    Revises: 2c4d7e9f0a1b, 9c6a7d2e8f10, a1b2c3d4e5f6, a5c1d2e3f4b6, b2c3d4e5f6g7, c1d2e3f4a5b7, d9e2f3a4b5c6, e4b7d1a2c3f4, g1b2c3d4e5f6, l1b2c3d4e5f7, m4a5n6u7a8l9, qms_p2_20260426, s9t8u7v6w5x4, v0a1b2c3d4e5
+    Create Date: 2026-05-01
+
+Rev: qms_p4_20260501
+Parent: qms_p3_20260501
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\qms_p4_20260501_phase4_route_tree_workflow_hardening.py
+
+    phase 4 QMS route tree and workflow hardening
+    
+    Revision ID: qms_p4_20260501
+    Revises: qms_p3_20260501
+    Create Date: 2026-05-01
+    
+    Adds columns used by the canonical QMS activity log and file/evidence security
+    surfaces. This migration is additive and safe to run on databases where the
+    tables already exist or where Phase 2 created the generic canonical tables.
+
+Rev: qms_p3_20260501
+Parent: qms_p2_20260426
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\qms_p3_20260501_global_superuser_tenant_safety.py
+
+    global superuser tenant safety and QMS phase 3 hardening
+    
+    Revision ID: qms_p3_20260501
+    Revises: qms_p2_20260426
+    Create Date: 2026-05-01
+    
+    This migration separates platform superusers from AMO tenants and adds a
+    minimal safety layer required by the canonical QMS route model.
+
+Rev: train_20260627_final (head)
+Parent: training_20260627_auditor_access
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\training_20260627_final_pass.py
+
+    training final report settings and QR verification
+    
+    Revision ID: train_20260627_final
+    Revises: training_20260627_auditor_access
+    Create Date: 2026-06-27
+
+Rev: training_20260627_auditor_access
+Parent: aa11bb22cc33
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\training_20260627_auditor_access_grants.py
+
+    add training auditor access grants
+    
+    Revision ID: training_20260627_auditor_access
+    Revises: aa11bb22cc33
+    Create Date: 2026-06-27 00:00:00.000000
+
+Rev: v0a1b2c3d4e5
+Parent: u9v8w7x6y5z4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\v0a1b2c3d4e5_ensure_user_group_runtime_columns.py
+
+    ensure user group runtime columns exist
+    
+    Revision ID: v0a1b2c3d4e5
+    Revises: u9v8w7x6y5z4
+    Create Date: 2026-04-09 00:00:00.000000
+
+Rev: u9v8w7x6y5z4 (mergepoint)
+Merges: 2c4d7e9f0a1b, 9c6a7d2e8f10, a1b2c3d4e5f6, a5c1d2e3f4b6, b1c2d3e4f5a6, b2c3d4e5f6g7, c1d2e3f4a5b7, c3d4e5f6a7b8, d0c1b2a3e4f5, d7e6f5a4b3c2, d9e2f3a4b5c6, e4b7d1a2c3f4, g1b2c3d4e5f6, l1b2c3d4e5f7, p0a4_training_gate_fields, s9t8u7v6w5x4, w2x3y4z5a6b7
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\u9v8w7x6y5z4_add_user_groups.py
+
+    add user groups
+    
+    Revision ID: u9v8w7x6y5z4
+    Revises: 2c4d7e9f0a1b, 9c6a7d2e8f10, a1b2c3d4e5f6, a5c1d2e3f4b6, b1c2d3e4f5a6, b2c3d4e5f6g7, c1d2e3f4a5b7, c3d4e5f6a7b8, d0c1b2a3e4f5, d7e6f5a4b3c2, d9e2f3a4b5c6, e4b7d1a2c3f4, g1b2c3d4e5f6, l1b2c3d4e5f7, p0a4_training_gate_fields, s9t8u7v6w5x4, w2x3y4z5a6b7
+    Create Date: 2026-04-08 00:00:00.000000
+
+Rev: phase2_14a_20260615 (head)
+Parent: phase2_14_20260615
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_14a_20260615_compatibility_marker.py
+
+    Compatibility marker for workstations that already stamped phase2_14a_20260615.
+    
+    Revision ID: phase2_14a_20260615
+    Revises: phase2_14_20260615
+    Create Date: 2026-06-15
+    
+    This no-op migration repairs Alembic environments where the database
+    alembic_version table already contains phase2_14a_20260615, but the file was
+    removed during cleanup. Do not delete this file while any deployed database may
+    still reference this revision.
+
+Rev: phase2_14_20260615
+Parent: phase2_13_20260614
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_14_20260615_qms_fast_indexes.py
+
+    Add fast QMS calendar/dashboard integration indexes.
+    
+    Revision ID: phase2_14_20260615
+    Revises: phase2_13_20260614
+    Create Date: 2026-06-15
+
+Rev: phase2_13_20260614
+Parent: phase2_12_20260607
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_13_20260614_qms_audit_recycle_bin.py
+
+    Add recycle bin support for QMS audit records and schedules.
+    
+    Revision ID: phase2_13_20260614
+    Revises: phase2_12_20260607
+    Create Date: 2026-06-14
+
+Rev: phase2_12_20260607
+Parent: phase2_11_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_12_20260607_qms_schedule_tenant_control.py
+
+    QMS audit schedule tenant control and frontend-edit support.
+    
+    Revision ID: phase2_12_20260607
+    Revises: phase2_11_20260605
+    Create Date: 2026-06-07
+
+Rev: phase2_11_20260605 (mergepoint)
+Merges: phase2_3_20260605, phase2_10_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_11_20260605_merge_qms_patch_heads.py
+
+    Merge QMS patch migration heads.
+    
+    Revision ID: phase2_11_20260605
+    Revises: phase2_3_20260605, phase2_10_20260605
+    Create Date: 2026-06-05
+
+Rev: phase2_3_20260605
+Parent: phase2_2_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_3_20260605_qms_dashboard_hotfix_indexes.py
+
+    phase2.3 qms dashboard hotfix indexes
+    
+    Revision ID: phase2_3_20260605
+    Revises: phase2_2_20260605
+    Create Date: 2026-06-05
+
+Rev: phase2_2_20260605
+Parent: phase1_20260604
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_2_20260605_qms_training_indexes.py
+
+    phase2.2 qms and training performance indexes
+    
+    Revision ID: phase2_2_20260605
+    Revises: phase1_20260604
+    Create Date: 2026-06-05
+
+Rev: phase1_20260604
+Parent: phase0_20260604
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase1_20260604_core_rostering.py
+
+    phase1 core duty rostering
+    
+    Revision ID: phase1_20260604
+    Revises: phase0_20260604
+    Create Date: 2026-06-04
+
+Rev: phase0_20260604
+Parent: <base>
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase0_20260604_shared_foundations.py
+
+    phase0 shared foundations base stations
+    
+    Revision ID: phase0_20260604
+    Revises: None
+    Create Date: 2026-06-04
+
+Rev: qms_p2_20260426 (branchpoint)
+Parent: qms_p1_rls_20260426
+Branches into: amo_20260501_gsu_scope, qms_p3_20260501
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\qms_p2_20260426_complete_canonical_qms.py
+
+    complete canonical qms tenant-scoped tables and RLS
+    
+    Revision ID: qms_p2_20260426
+    Revises: qms_p1_rls_20260426
+    Create Date: 2026-04-26
+    
+    This migration completes the canonical QMS storage layer used by
+    /api/maintenance/{amo_code}/qms. It is intentionally additive and production-safe:
+    existing tables are not dropped; missing tenant/common columns are added; RLS is enabled
+    where an amo_id column is present.
+
+Rev: qms_p1_rls_20260426
+Parent: p0a6_train_record
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\qms_p1_rls_20260426_phase1_qms_tenant_guardrails.py
+
+    phase1 qms tenant guardrails
+    
+    Revision ID: qms_p1_rls_20260426
+    Revises: p0a6_train_record
+    Create Date: 2026-04-26
+    
+    This migration is intentionally defensive. The existing schema already contains
+    several QMS/quality tenant-scoping migrations. This migration only fills the
+    known ORM/schema gap for qms_corrective_actions and enables PostgreSQL RLS
+    policies on QMS tables that already expose amo_id.
+
+Rev: m4a5n6u7a8l9
+Parent: m3a4n5u6l7s8
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\m4a5n6u7a8l9_add_manual_source_and_reader_progress.py
+
+    add manual source storage fields and reader progress
+    
+    Revision ID: m4a5n6u7a8l9
+    Revises: m3a4n5u6l7s8
+    Create Date: 2026-04-09 10:30:00.000000
+
+Rev: m3a4n5u6l7s8
+Parent: d7e6f5a4b3c2
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\m3a4n5u6l7s8_add_manual_audit_log_and_ocr_fields.py
+
+    add manual audit log and ocr fields
+    
+    Revision ID: m3a4n5u6l7s8
+    Revises: d7e6f5a4b3c2
+    Create Date: 2026-04-08 08:30:00.000000
+
+Rev: phase2_8_20260605 (head)
+Parent: phase2_7_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_8_20260605_qms_calendar_stability.py
+
+    QMS calendar stability, tenant timezone, and configurable public holidays.
+    
+    Revision ID: phase2_8_20260605
+    Revises: phase2_7_20260605
+    Create Date: 2026-06-05
+
+Rev: phase2_7_20260605
+Parent: phase2_6_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_7_20260605_qms_calendar_authority.py
+
+    QMS calendar authoritative date and visibility indexes.
+    
+    Revision ID: phase2_7_20260605
+    Revises: phase2_6_20260605
+    Create Date: 2026-06-05
+
+Rev: phase2_6_20260605
+Parent: phase2_5_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_6_20260605_qms_calendar_visibility.py
+
+    QMS calendar visibility and source diagnostics indexes.
+    
+    Revision ID: phase2_6_20260605
+    Revises: phase2_5_20260605
+    Create Date: 2026-06-05
+
+Rev: phase2_10_20260605
+Parent: phase2_9_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_10_20260605_qms_audit_read_stability.py
+
+    QMS audit dashboard and calendar read stability indexes.
+    
+    Revision ID: phase2_10_20260605
+    Revises: phase2_9_20260605
+    Create Date: 2026-06-05
+
+Rev: phase2_9_20260605
+Parent: phase2_5_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_9_20260605_qms_timezone_runtime.py
+
+    QMS timezone runtime bridge migration.
+    
+    Revision ID: phase2_9_20260605
+    Revises: phase2_5_20260605
+    Create Date: 2026-06-05
+
+Rev: phase2_5_20260605 (branchpoint)
+Parent: phase2_4_20260605
+Branches into: phase2_6_20260605, phase2_9_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_5_20260605_qms_calendar_restore.py
+
+    Restore QMS calendar performance and preserve canonical QMS styling support.
+    
+    Revision ID: phase2_5_20260605
+    Revises: phase2_4_20260605
+    Create Date: 2026-06-05
+
+Rev: phase2_4_20260605
+Parent: s9t8u7v6w5x4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\phase2_4_20260605_qms_calendar_training_integrity.py
+
+    QMS calendar performance and training currency integrity indexes.
+    
+    Revision ID: phase2_4_20260605
+    Revises: s9t8u7v6w5x4
+    Create Date: 2026-06-05
+
+Rev: p0a6_train_record (branchpoint)
+Parent: p0a5_train_plan
+Branches into: qms_p1_rls_20260426, p0a7_train_record_dedupe
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\p0a6_training_record_integrity.py
+
+    P0 training record integrity fields
+    
+    Revision ID: p0a6_train_record
+    Revises: p0a5_train_plan
+    Create Date: 2026-04-09 00:10:00.000000
+    
+    This migration is intentionally idempotent. Some production/staging databases
+    already contain part or all of these columns from earlier manual/schema-sync
+    runs while the Alembic revision was not stamped. Plain ``op.add_column`` then
+    fails with DuplicateColumn and blocks all later QMS migrations.
+
+Rev: p0a5_train_plan
+Parent: p0a4_training_gate_fields
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\p0a5_training_course_planning_fields.py
+
+    P0 training course planning fields
+    
+    Revision ID: p0a5_train_plan
+    Revises: p0a4_training_gate_fields
+    Create Date: 2026-04-09 00:00:00.000000
+
+Rev: qms_20260607_read_stability (head)
+Parent: <base>
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\qms_20260607_read_stability_indexes.py
+
+    QMS dashboard/calendar read stability indexes.
+    
+    Revision ID: qms_20260607_read_stability
+    Revises: None
+    Create Date: 2026-06-07
+
+Rev: qual_20260627_wf_close (head)
+Parent: plat_20260627_support
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\quality_20260627_workflow_closure.py
+
+    close quality audit workflow gaps
+    
+    Revision ID: qual_20260627_wf_close
+    Revises: plat_20260627_support
+    Create Date: 2026-06-27
+
+Rev: plat_20260627_support
+Parent: plat_p7_20260501
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\platform_20260627_support_sessions.py
+
+    tenant support sessions for platform read-only and approved admin access
+    
+    Revision ID: plat_20260627_support
+    Revises: plat_p7_20260501
+    Create Date: 2026-06-27
+
+Rev: plat_p7_20260501
+Parent: <base>
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\plat_p7_20260501_platform_control_plane.py
+
+    platform control plane tables and SaaS superadmin expansion
+    
+    Revision ID: plat_p7_20260501
+    Revises: 
+    Create Date: 2026-05-01
+
+Rev: d9e2f3a4b5c6 (branchpoint)
+Parent: c8d1e2f3a4b5
+Branches into: u9v8w7x6y5z4, e1f2a3b4c5d6, amo_20260501_gsu_scope
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\d9e2f3a4b5c6_drop_post_cutover_legacy_tables.py
+
+    hard drop post-cutover legacy tables after retention approval
+    
+    Revision ID: d9e2f3a4b5c6
+    Revises: c8d1e2f3a4b5
+    Create Date: 2026-04-07 00:05:00.000000
+
+Rev: c8d1e2f3a4b5 (mergepoint)
+Merges: aa11bb22cc33, b2c3d4e5f6g7, c1d2e3f4a5b7, d7e6f5a4b3c2, p0a4_training_gate_fields
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\c8d1e2f3a4b5_rename_post_cutover_legacy_tables.py
+
+    rename post-cutover legacy tables to *_legacy
+    
+    Revision ID: c8d1e2f3a4b5
+    Revises: aa11bb22cc33, b2c3d4e5f6g7, c1d2e3f4a5b7, d7e6f5a4b3c2, p0a4_training_gate_fields
+    Create Date: 2026-04-07 00:00:00.000000
+
+Rev: aa11bb22cc33 (branchpoint)
+Parent: b7d9f3a1c2e4
+Branches into: c8d1e2f3a4b5, training_20260627_auditor_access
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\aa11bb22cc33_add_training_certificate_issuance_tables.py
+
+    add training certificate issuance tables
+    
+    Revision ID: aa11bb22cc33
+    Revises: b7d9f3a1c2e4
+    Create Date: 2026-03-05 00:00:00.000000
+
+Rev: d7e6f5a4b3c2 (branchpoint)
+Parent: c9d8e7f6a5b4
+Branches into: u9v8w7x6y5z4, c8d1e2f3a4b5, m3a4n5u6l7s8
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\d7e6f5a4b3c2_add_manual_document_versions_sections.py
+
+    add manual document_versions and document_sections tables
+    
+    Revision ID: d7e6f5a4b3c2
+    Revises: c9d8e7f6a5b4
+    Create Date: 2026-03-01
+
+Rev: c9d8e7f6a5b4
+Parent: b1a2e3r4o5d6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\c9d8e7f6a5b4_block_delete_published_manual_revisions.py
+
+    block deletion of published manual revisions
+    
+    Revision ID: c9d8e7f6a5b4
+    Revises: b1a2e3r4o5d6
+    Create Date: 2026-03-01
+
+Rev: b1a2e3r4o5d6
+Parent: aerodoc_hybrid_dms
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\b1a2e3r4o5d6_add_ltree_for_physical_copy_paths.py
+
+    enable ltree and index physical copy location paths
+    
+    Revision ID: b1a2e3r4o5d6
+    Revises: aerodoc_hybrid_dms
+    Create Date: 2026-03-01
+
+Rev: aerodoc_hybrid_dms (mergepoint)
+Merges: d0c1b2a3e4f5, t9r8e7c6h5n4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\aerodoc_hybrid_dms_additions.py
+
+    add aerodoc hybrid dms columns and physical copy tables
+    
+    Revision ID: aerodoc_hybrid_dms
+    Revises: d0c1b2a3e4f5, t9r8e7c6h5n4
+    Create Date: 2026-03-01
+
+Rev: b2c3d4e5f6g7 (branchpoint)
+Parent: a1b2c3d4e9f0
+Branches into: u9v8w7x6y5z4, c8d1e2f3a4b5, amo_20260501_gsu_scope
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\b2c3d4e5f6g7_add_production_execution_release_tables.py
+
+    add production execution release tables
+    
+    Revision ID: b2c3d4e5f6g7
+    Revises: a1b2c3d4e9f0
+    Create Date: 2026-03-03 10:35:00.000000
+
+Rev: a1b2c3d4e9f0
+Parent: t9r8e7c6h5n4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\a1b2c3d4e9f0_add_planning_production_watchlists.py
+
+    add planning production watchlists
+    
+    Revision ID: a1b2c3d4e9f0
+    Revises: t9r8e7c6h5n4
+    Create Date: 2026-03-03 10:10:00.000000
+
+Rev: d0c1b2a3e4f5 (branchpoint)
+Parent: 463febfffd67
+Branches into: u9v8w7x6y5z4, aerodoc_hybrid_dms
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\d0c1b2a3e4f5_add_doc_control_module.py
+
+    add doc control module tables
+    
+    Revision ID: d0c1b2a3e4f5
+    Revises: 463febfffd67
+    Create Date: 2026-02-20
+
+Rev: 463febfffd67 (mergepoint)
+Merges: m2n3u4a5l6s7, a1b2c3d4e5f6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\463febfffd67_merge_manuals_and_manpower_heads.py
+
+    merge manuals and manpower heads
+    
+    Revision ID: 463febfffd67
+    Revises: m2n3u4a5l6s7, a1b2c3d4e5f6
+    Create Date: 2026-02-19 18:28:42.001251
+
+Rev: m2n3u4a5l6s7
+Parent: y3z4a5b6c7d8
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\m2n3u4a5l6s7_add_manuals_reader_controlled_revisions.py
+
+    add manuals reader controlled revisions scaffold
+    
+    Revision ID: m2n3u4a5l6s7
+    Revises: y3z4a5b6c7d8
+    Create Date: 2026-02-19
+
+Rev: a1b2c3d4e5f6 (branchpoint)
+Parent: r9t8m7q6p5n4
+Branches into: u9v8w7x6y5z4, amo_20260501_gsu_scope, 463febfffd67
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\a1b2c3d4e5f6_add_user_availability_table.py
+
+    add user availability table for qms manpower
+    
+    Revision ID: a1b2c3d4e5f6
+    Revises: r9t8m7q6p5n4
+    Create Date: 2026-02-17
+
+Rev: r9t8m7q6p5n4 (mergepoint)
+Merges: c3d4e5f6a7b8, d6e7f8a9b0c1
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\r9t8m7q6p5n4_add_realtime_tables.py
+
+    add realtime tables
+    
+    Revision ID: r9t8m7q6p5n4
+    Revises: c3d4e5f6a7b8, d6e7f8a9b0c1
+    Create Date: 2026-02-16 00:00:00.000000
+
+Rev: d6e7f8a9b0c1
+Parent: b7c8d9e0f1a3
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\d6e7f8a9b0c1_sync_quality_cars_workflow_columns.py
+
+    sync quality_cars workflow columns with ORM model
+    
+    Revision ID: d6e7f8a9b0c1
+    Revises: b7c8d9e0f1a3
+    Create Date: 2026-02-15 00:00:00.000000
+
+Rev: b7c8d9e0f1a3
+Parent: a4d6f8b0c2e1
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\b7c8d9e0f1a3_add_qms_notifications_table.py
+
+    add qms notifications table
+    
+    Revision ID: b7c8d9e0f1a3
+    Revises: a4d6f8b0c2e1
+    Create Date: 2026-02-12 00:00:00.000000
+
+Rev: a4d6f8b0c2e1
+Parent: s9t8u7v6w5x4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\a4d6f8b0c2e1_create_missing_billing_and_quality_tables.py
+
+    create missing billing invoice and quality CAR tables
+    
+    Revision ID: a4d6f8b0c2e1
+    Revises: s9t8u7v6w5x4
+    Create Date: 2026-02-11 00:00:00.000000
+
+Rev: c1d2e3f4a5b7 (branchpoint)
+Parent: a7b8c9d0e1f2
+Branches into: u9v8w7x6y5z4, c8d1e2f3a4b5, amo_20260501_gsu_scope
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\c1d2e3f4a5b7_scope_qms_audit_refs_per_amo.py
+
+    scope qms audit refs per amo
+    
+    Revision ID: c1d2e3f4a5b7
+    Revises: a7b8c9d0e1f2
+    Create Date: 2026-03-19 00:00:00.000000
+
+Rev: a7b8c9d0e1f2
+Parent: z9y8x7w6v5u4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\a7b8c9d0e1f2_add_qms_audit_reference_counters.py
+
+    add qms audit reference counters
+    
+    Revision ID: a7b8c9d0e1f2
+    Revises: z9y8x7w6v5u4
+    Create Date: 2026-03-19 00:00:00.000000
+
+Rev: s9t8u7v6w5x4 (branchpoint)
+Parent: z1y2x3w4v5u6
+Branches into: u9v8w7x6y5z4, amo_20260501_gsu_scope, a4d6f8b0c2e1, phase2_4_20260605
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\s9t8u7v6w5x4_ensure_car_attachment_sha256_column.py
+
+    ensure car attachment sha256 column
+    
+    Revision ID: s9t8u7v6w5x4
+    Revises: z1y2x3w4v5u6
+    Create Date: 2026-02-10 07:30:00.000000
+
+Rev: z1y2x3w4v5u6
+Parent: y3z4a5b6c7d8
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\z1y2x3w4v5u6_add_audit_events_replay_index.py
+
+    add composite audit_events replay index
+    
+    Revision ID: z1y2x3w4v5u6
+    Revises: y3z4a5b6c7d8
+    Create Date: 2026-02-10 00:00:01.000000
+
+Rev: y3z4a5b6c7d8 (branchpoint) (mergepoint)
+Merges: b1c2d3e4f5a6, d2c3e4f5a6b7, e41af43f2beb, w2x3y4z5a6b7, z9y8x7w6v5u4
+Branches into: z1y2x3w4v5u6, m2n3u4a5l6s7
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\y3z4a5b6c7d8_ensure_runtime_schema_columns_for_auth.py
+
+    ensure runtime schema columns for auth/realtime compatibility
+    
+    Revision ID: y3z4a5b6c7d8
+    Revises: b1c2d3e4f5a6, d2c3e4f5a6b7, e41af43f2beb, w2x3y4z5a6b7, z9y8x7w6v5u4
+    Create Date: 2026-02-10 00:00:00.000000
+
+Rev: c3d4e5f6a7b8 (branchpoint)
+Parent: d2c3e4f5a6b7
+Branches into: u9v8w7x6y5z4, r9t8m7q6p5n4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\c3d4e5f6a7b8_enforce_audit_car_workflow_fields.py
+
+    enforce audit car workflow fields
+    
+    Revision ID: c3d4e5f6a7b8
+    Revises: d2c3e4f5a6b7
+    Create Date: 2026-02-13
+
+Rev: b1c2d3e4f5a6 (branchpoint)
+Parent: f8a1b2c3d4e6
+Branches into: u9v8w7x6y5z4, y3z4a5b6c7d8
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\b1c2d3e4f5a6_add_car_attachment_sha256.py
+
+    add car attachment sha256
+    
+    Revision ID: b1c2d3e4f5a6
+    Revises: f8a1b2c3d4e6
+    Create Date: 2026-02-10
+
+Rev: z9y8x7w6v5u4 (branchpoint)
+Parent: q1w2e3r4t5y6
+Branches into: a7b8c9d0e1f2, y3z4a5b6c7d8
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\z9y8x7w6v5u4_add_user_token_revoked_at.py
+
+    add user token revoked at
+    
+    Revision ID: z9y8x7w6v5u4
+    Revises: q1w2e3r4t5y6
+    Create Date: 2026-02-10 12:00:00.000000
+
+Rev: q1w2e3r4t5y6
+Parent: n1b2c3d4e5f9
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\q1w2e3r4t5y6_add_platform_performance_settings.py
+
+    add platform performance settings
+    
+    Revision ID: q1w2e3r4t5y6
+    Revises: n1b2c3d4e5f9
+    Create Date: 2026-02-06 12:00:00.000000
+
+Rev: w2x3y4z5a6b7 (branchpoint)
+Parent: v1w2x3y4z5a6
+Branches into: u9v8w7x6y5z4, y3z4a5b6c7d8
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\w2x3y4z5a6b7_ensure_qms_audit_assistant_column.py
+
+    Ensure assistant auditor user id exists on qms_audits.
+    
+    Revision ID: w2x3y4z5a6b7
+    Revises: v1w2x3y4z5a6
+    Create Date: 2026-03-12 09:00:00.000000
+
+Rev: v1w2x3y4z5a6
+Parent: u1v2w3x4y5z6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\v1w2x3y4z5a6_ensure_qms_audit_observer_column.py
+
+    Ensure observer auditor user id exists on qms_audits.
+    
+    Revision ID: v1w2x3y4z5a6
+    Revises: u1v2w3x4y5z6
+    Create Date: 2025-02-01 12:00:00.000000
+
+Rev: u1v2w3x4y5z6
+Parent: t1u2v3w4x5y6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\u1v2w3x4y5z6_add_auditee_email_to_qms_audits.py
+
+    add auditee_email to qms_audits
+    
+    Revision ID: u1v2w3x4y5z6
+    Revises: t1u2v3w4x5y6
+    Create Date: 2025-02-14 00:00:00.000000
+
+Rev: t1u2v3w4x5y6
+Parent: s1t2u3v4w5x6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\t1u2v3w4x5y6_add_audit_schedules_and_auditor_flag.py
+
+    add audit schedules and auditor flag
+    
+    Revision ID: t1u2v3w4x5y6
+    Revises: s1t2u3v4w5x6
+    Create Date: 2026-03-10 10:00:00.000000
+
+Rev: s1t2u3v4w5x6
+Parent: r1s2t3u4v5w6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\s1t2u3v4w5x6_add_email_logs.py
+
+    add email logs
+    
+    Revision ID: s1t2u3v4w5x6
+    Revises: r1s2t3u4v5w6
+    Create Date: 2026-03-05 12:00:00.000000
+
+Rev: r1s2t3u4v5w6
+Parent: q1w2e3r4t5u7
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\r1s2t3u4v5w6_add_tasks.py
+
+    add tasks table
+    
+    Revision ID: r1s2t3u4v5w6
+    Revises: q1w2e3r4t5u7
+    Create Date: 2026-03-05 00:20:00.000000
+
+Rev: q1w2e3r4t5u7
+Parent: p1q2r3s4t5u6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\q1w2e3r4t5u7_add_workflow_fields.py
+
+    add workflow verification and approval fields
+    
+    Revision ID: q1w2e3r4t5u7
+    Revises: p1q2r3s4t5u6
+    Create Date: 2026-03-05 00:10:00.000000
+
+Rev: p1q2r3s4t5u6
+Parent: n1b2c3d4e5f9
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\p1q2r3s4t5u6_update_audit_events_schema.py
+
+    update audit_events schema for qms audit logging
+    
+    Revision ID: p1q2r3s4t5u6
+    Revises: n1b2c3d4e5f9
+    Create Date: 2026-03-05 00:00:00.000000
+
+Rev: p0a4_training_gate_fields (branchpoint)
+Parent: p0a3_compliance_event_ledger
+Branches into: u9v8w7x6y5z4, c8d1e2f3a4b5, p0a5_train_plan
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\p0a4_training_gate_fields.py
+
+    P0 training gate fields
+    
+    Revision ID: p0a4_training_gate_fields
+    Revises: p0a3_compliance_event_ledger
+    Create Date: 2026-03-09 00:00:00.000000
+
+Rev: p0a3_compliance_event_ledger
+Parent: p0a2_quality_amo_id_norm
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\p0a3_compliance_event_ledger.py
+
+    P0 compliance event ledger
+    
+    Revision ID: p0a3_compliance_event_ledger
+    Revises: p0a2_quality_amo_id_norm
+    Create Date: 2026-03-09 00:00:00.000000
+
+Rev: p0a2_quality_amo_id_norm
+Parent: p0a1_authz_core_tables
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\p0a2_quality_amo_id_normalization.py
+
+    P0 quality amo_id normalization
+    
+    Revision ID: p0a2_quality_amo_id_norm
+    Revises: p0a1_authz_core_tables
+    Create Date: 2026-03-09 00:00:00.000000
+
+Rev: p0a1_authz_core_tables
+Parent: e41af43f2beb
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\p0a1_authz_core_tables.py
+
+    P0 authorization core tables
+    
+    Revision ID: p0a1_authz_core_tables
+    Revises: e41af43f2beb
+    Create Date: 2026-03-09 00:00:00.000000
+
+Rev: t9r8e7c6h5n4 (branchpoint)
+Parent: k1b2c3d4e5f6
+Branches into: aerodoc_hybrid_dms, a1b2c3d4e9f0
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\t9r8e7c6h5n4_add_technical_records_module.py
+
+    add technical records module
+    
+    Revision ID: t9r8e7c6h5n4
+    Revises: k1b2c3d4e5f6
+    Create Date: 2026-02-20 00:00:00.000000
+
+Rev: n1b2c3d4e5f9 (branchpoint)
+Parent: m1b2c3d4e5f8
+Branches into: p1q2r3s4t5u6, q1w2e3r4t5y6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\n1b2c3d4e5f9_add_car_attachments.py
+
+    add car attachments
+    
+    Revision ID: n1b2c3d4e5f9
+    Revises: m1b2c3d4e5f8
+    Create Date: 2025-02-14 00:00:00.000000
+
+Rev: d2c3e4f5a6b7 (branchpoint)
+Parent: c9f1b2a3d4e5
+Branches into: c3d4e5f6a7b8, y3z4a5b6c7d8
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\d2c3e4f5a6b7_add_car_responses.py
+
+    add car responses
+    
+    Revision ID: d2c3e4f5a6b7
+    Revises: c9f1b2a3d4e5
+    Create Date: 2025-02-14 00:00:00.000000
+
+Rev: c9f1b2a3d4e5
+Parent: m1b2c3d4e5f8
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\c9f1b2a3d4e5_add_car_attachments.py
+
+    add car attachments
+    
+    Revision ID: c9f1b2a3d4e5
+    Revises: m1b2c3d4e5f8
+    Create Date: 2025-02-14 00:00:00.000000
+
+Rev: m1b2c3d4e5f8 (branchpoint)
+Parent: l1b2c3d4e5f7
+Branches into: n1b2c3d4e5f9, c9f1b2a3d4e5
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\m1b2c3d4e5f8_add_billing_audit_logs.py
+
+    add billing audit logs table
+    
+    Revision ID: m1b2c3d4e5f8
+    Revises: l1b2c3d4e5f7
+    Create Date: 2026-02-03 12:20:00.000000
+
+Rev: l1b2c3d4e5f7 (branchpoint)
+Parent: k1b2c3d4e5f6
+Branches into: m1b2c3d4e5f8, amo_20260501_gsu_scope, u9v8w7x6y5z4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\l1b2c3d4e5f7_add_catalog_sku_usage_limits.py
+
+    add catalog sku usage limits
+    
+    Revision ID: l1b2c3d4e5f7
+    Revises: k1b2c3d4e5f6
+    Create Date: 2026-02-03 07:10:00.000000
+
+Rev: k1b2c3d4e5f6 (branchpoint)
+Parent: j1k2l3m4n5o6
+Branches into: l1b2c3d4e5f7, t9r8e7c6h5n4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\k1b2c3d4e5f6_add_idempotency_keys.py
+
+    add idempotency keys table
+    
+    Revision ID: k1b2c3d4e5f6
+    Revises: j1k2l3m4n5o6
+    Create Date: 2026-02-03 06:30:00.000000
+
+Rev: j1k2l3m4n5o6 (mergepoint)
+Merges: 2c4d7e9f0a1b, 4c2d5e6f8a9b, a5c1d2e3f4b6, c6a9f2d1e7ab, h1e2m3l4o5g6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\j1k2l3m4n5o6_merge_heads.py
+
+    merge heads after EHM and platform settings updates
+    
+    Revision ID: j1k2l3m4n5o6
+    Revises: 2c4d7e9f0a1b, 4c2d5e6f8a9b, a5c1d2e3f4b6, c6a9f2d1e7ab, h1e2m3l4o5g6
+    Create Date: 2026-02-05 00:00:00.000000
+
+Rev: e41af43f2beb (branchpoint) (mergepoint)
+Merges: 2c4d7e9f0a1b, 4c2d5e6f8a9b, a5c1d2e3f4b6, c6a9f2d1e7ab, f8a1b2c3d4e6
+Branches into: y3z4a5b6c7d8, p0a1_authz_core_tables
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\e41af43f2beb_merge_heads.py
+
+    merge heads
+    
+    Revision ID: e41af43f2beb
+    Revises: 2c4d7e9f0a1b, 4c2d5e6f8a9b, a5c1d2e3f4b6, c6a9f2d1e7ab, f8a1b2c3d4e6
+    Create Date: 2026-01-29 08:04:48.748683
+
+Rev: 4c2d5e6f8a9b (branchpoint)
+Parent: e3f1a2b3c4d5
+Branches into: j1k2l3m4n5o6, e41af43f2beb
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\4c2d5e6f8a9b_add_missing_trial_fields_to_tenant_licenses.py
+
+    add missing trial fields to tenant_licenses
+    
+    Revision ID: 4c2d5e6f8a9b
+    Revises: e3f1a2b3c4d5
+    Create Date: 2025-02-11 00:00:00.000000
+
+Rev: e3f1a2b3c4d5
+Parent: d2f8c9a1b4e7
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\e3f1a2b3c4d5_seed_platform_superuser.py
+
+    seed platform superuser
+    
+    Revision ID: e3f1a2b3c4d5
+    Revises: d2f8c9a1b4e7
+    Create Date: 2025-01-05 00:00:00.000000
+
+Rev: d2f8c9a1b4e7
+Parent: 1b2c3d4e6f70
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\d2f8c9a1b4e7_add_must_change_password_flag.py
+
+    Add must_change_password flag to users.
+    
+    Revision ID: d2f8c9a1b4e7
+    Revises: 1b2c3d4e6f70
+    Create Date: 2025-02-21 00:00:00.000000
+
+Rev: 1b2c3d4e6f70
+Parent: 0f1e4ad3c5b1
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\1b2c3d4e6f70_add_billing_tables.py
+
+    add billing and licensing tables
+    
+    Revision ID: 1b2c3d4e6f70
+    Revises: 0f1e4ad3c5b1
+    Create Date: 2025-12-30 12:00:00.000000
+
+Rev: 2c4d7e9f0a1b (branchpoint)
+Parent: 0f1e4ad3c5b1
+Branches into: u9v8w7x6y5z4, amo_20260501_gsu_scope, j1k2l3m4n5o6, e41af43f2beb
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\2c4d7e9f0a1b_add_finance_inventory_module.py
+
+    Add finance and inventory module tables.
+    
+    Revision ID: 2c4d7e9f0a1b
+    Revises: 0f1e4ad3c5b1
+    Create Date: 2025-02-14 12:00:00.000000
+
+Rev: h1e2m3l4o5g6
+Parent: g1b2c3d4e5f6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\h1e2m3l4o5g6_add_ehm_logs.py
+
+    add EHM raw logs and parsed records
+    
+    Revision ID: h1e2m3l4o5g6
+    Revises: g1b2c3d4e5f6
+    Create Date: 2026-02-05 00:00:00.000000
+
+Rev: c6a9f2d1e7ab (branchpoint)
+Parent: a1b2c3d4e5f7
+Branches into: j1k2l3m4n5o6, e41af43f2beb
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\c6a9f2d1e7ab_add_aircraft_import_preview_tables.py
+
+    add aircraft import preview tables
+    
+    Revision ID: c6a9f2d1e7ab
+    Revises: a1b2c3d4e5f7
+    Create Date: 2025-03-27 00:00:00.000000
+
+Rev: a1b2c3d4e5f7
+Parent: 0f1e4ad3c5b1
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\a1b2c3d4e5f7_add_engine_trend_statuses.py
+
+    add engine trend statuses and snapshot context fields
+    
+    Revision ID: a1b2c3d4e5f7
+    Revises: 0f1e4ad3c5b1
+    Create Date: 2025-03-26 10:00:00.000000
+
+Rev: 0f1e4ad3c5b1 (branchpoint)
+Parent: 8e1ae4ea5206
+Branches into: 1b2c3d4e6f70, 2c4d7e9f0a1b, a1b2c3d4e5f7
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\0f1e4ad3c5b1_add_aircraft_documents_table.py
+
+    Add aircraft_documents table for regulatory compliance tracking.
+    
+    Revision ID: 0f1e4ad3c5b1
+    Revises: 8e1ae4ea5206
+    Create Date: 2025-03-19
+
+Rev: 8e1ae4ea5206 (mergepoint)
+Merges: 8b7c1f0a9c2d, 3a1d2f1b6c4f
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\8e1ae4ea5206_merge_import_heads.py
+
+    merge import heads
+    
+    Revision ID: 8e1ae4ea5206
+    Revises: 8b7c1f0a9c2d, 3a1d2f1b6c4f
+    Create Date: 2025-01-15 13:00:00.000000
+
+Rev: 8b7c1f0a9c2d
+Parent: f4c7f0c1d2ab
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\8b7c1f0a9c2d_add_lockout_count_to_users.py
+
+    add lockout count to users
+    
+    Revision ID: 8b7c1f0a9c2d
+    Revises: f4c7f0c1d2ab
+    Create Date: 2025-02-14 09:30:00.000000
+
+Rev: g1b2c3d4e5f6 (branchpoint)
+Parent: i1a2b3c4d5e6
+Branches into: u9v8w7x6y5z4, amo_20260501_gsu_scope, h1e2m3l4o5g6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\g1b2c3d4e5f6_add_platform_branding_fields.py
+
+    Add platform branding fields.
+    
+    Revision ID: g1b2c3d4e5f6
+    Revises: f8a1b2c3d4e6
+    Create Date: 2026-01-29 00:00:00.000000
+
+Rev: i1a2b3c4d5e6
+Parent: f8a1b2c3d4e6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\i1a2b3c4d5e6_create_platform_settings.py
+
+    create platform settings table
+    
+    Revision ID: i1a2b3c4d5e6
+    Revises: f8a1b2c3d4e6
+    Create Date: 2026-02-05 00:00:00.000000
+
+Rev: f8a1b2c3d4e6 (branchpoint) (mergepoint)
+Merges: f7c8d9e0f1a2, e4b7d1a2c3f4
+Branches into: b1c2d3e4f5a6, i1a2b3c4d5e6, e41af43f2beb
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\f8a1b2c3d4e6_harden_part_movement_audit_fields.py
+
+    harden part movement audit fields
+    
+    Revision ID: f8a1b2c3d4e6
+    Revises: f7c8d9e0f1a2, e4b7d1a2c3f4
+    Create Date: 2025-01-12 14:30:00.000000
+    
+    NOTE FOR FUTURE EDITS:
+    - This migration assumes the reliability tables already exist:
+      - part_movement_ledger
+      - removal_events
+      Those tables are created in revision: 9c6a7d2e8f10_add_reliability_core_models.py
+    - Because this project has multiple Alembic branches/heads, Alembic may try to run this
+      migration before the reliability branch unless we explicitly merge the heads.
+    - If you add more migrations that touch these tables, always confirm the dependency graph
+      (alembic heads/history) so "CREATE TABLE" revisions run before "ALTER TABLE" revisions.
+    
+    PATCH NOTE (2026-01):
+    - This migration creates a CHECK constraint that references part_movement_ledger.reason_code.
+      The original reliability table did not include reason_code, so the constraint would fail
+      with: psycopg2.errors.UndefinedColumn: column "reason_code" does not exist
+    - Fix: add the reason_code column BEFORE creating the constraint, and drop it on downgrade.
+
+Rev: f7c8d9e0f1a2
+Parent: f6b7c8d9e0f1
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\f7c8d9e0f1a2_add_demo_context.py
+
+    add demo context
+    
+    Revision ID: f7c8d9e0f1a2
+    Revises: f6b7c8d9e0f1
+    Create Date: 2025-01-12 12:30:00.000000
+
+Rev: f6b7c8d9e0f1
+Parent: f5a8b9c1d2e3
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\f6b7c8d9e0f1_add_integration_inbound_events.py
+
+    add integration inbound events
+    
+    Revision ID: f6b7c8d9e0f1
+    Revises: f5a8b9c1d2e3
+    Create Date: 2025-01-12 12:00:00.000000
+
+Rev: f5a8b9c1d2e3
+Parent: f4c7f0c1d2ab
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\f5a8b9c1d2e3_add_integrations_tables.py
+
+    add integrations tables
+    
+    Revision ID: f5a8b9c1d2e3
+    Revises: f4c7f0c1d2ab
+    Create Date: 2025-01-12 10:20:00.000000
+
+Rev: e4b7d1a2c3f4 (branchpoint)
+Parent: d1a2f3b4c5e6
+Branches into: u9v8w7x6y5z4, amo_20260501_gsu_scope, f8a1b2c3d4e6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\e4b7d1a2c3f4_add_multi_tenant_workflow_scaffold.py
+
+    add multi-tenant workflow scaffold
+    
+    Revision ID: e4b7d1a2c3f4
+    Revises: d1a2f3b4c5e6
+    Create Date: 2025-02-06 00:00:00.000000
+
+Rev: d1a2f3b4c5e6
+Parent: c4d2a7b9f1e0
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\d1a2f3b4c5e6_add_reliability_notifications_reports.py
+
+    add reliability notifications and reports
+    
+    Revision ID: d1a2f3b4c5e6
+    Revises: c4d2a7b9f1e0
+    Create Date: 2025-02-14 00:20:00.000000
+
+Rev: c4d2a7b9f1e0
+Parent: b7d9f3a1c2e4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\c4d2a7b9f1e0_scope_component_instances_to_amo.py
+
+    scope component instances to amo
+    
+    Revision ID: c4d2a7b9f1e0
+    Revises: b7d9f3a1c2e4
+    Create Date: 2025-02-14 00:10:00.000000
+
+Rev: a5c1d2e3f4b6 (branchpoint)
+Parent: f4c7f0c1d2ab
+Branches into: u9v8w7x6y5z4, amo_20260501_gsu_scope, j1k2l3m4n5o6, e41af43f2beb
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\a5c1d2e3f4b6_add_bootstrap_indexes.py
+
+    Add bootstrap workflow indexes.
+    
+    Revision ID: a5c1d2e3f4b6
+    Revises: f4c7f0c1d2ab
+    Create Date: 2025-02-21 00:00:00.000000
+
+Rev: b7d9f3a1c2e4 (branchpoint)
+Parent: 9c6a7d2e8f10
+Branches into: c4d2a7b9f1e0, aa11bb22cc33
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\b7d9f3a1c2e4_add_reliability_audit_fields.py
+
+    add reliability audit fields
+    
+    Revision ID: b7d9f3a1c2e4
+    Revises: 9c6a7d2e8f10
+    Create Date: 2025-02-14 00:00:00.000000
+
+Rev: 9c6a7d2e8f10 (branchpoint)
+Parent: f4c7f0c1d2ab
+Branches into: u9v8w7x6y5z4, amo_20260501_gsu_scope, b7d9f3a1c2e4
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\9c6a7d2e8f10_add_reliability_core_models.py
+
+    add reliability core models
+    
+    Revision ID: 9c6a7d2e8f10
+    Revises: f4c7f0c1d2ab
+    Create Date: 2025-01-12 00:00:00.000000
+
+Rev: f4c7f0c1d2ab (branchpoint)
+Parent: c2f4c8b2f1d0
+Branches into: f5a8b9c1d2e3, a5c1d2e3f4b6, 8b7c1f0a9c2d, 9c6a7d2e8f10
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\f4c7f0c1d2ab_add_verification_status_to_fleet.py
+
+    add verification status to fleet records
+    
+    Revision ID: f4c7f0c1d2ab
+    Revises: c2f4c8b2f1d0
+    Create Date: 2025-01-08 12:00:00.000000
+
+Rev: c2f4c8b2f1d0
+Parent: e1b2c3d4e5f6
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\c2f4c8b2f1d0_add_decision_to_import_reconciliation_logs.py
+
+    add decision to import reconciliation logs
+    
+    Revision ID: c2f4c8b2f1d0
+    Revises: 70a4e360dd80
+    Create Date: 2025-12-30 10:12:00.000000
+
+Rev: e1b2c3d4e5f6
+Parent: 70a4e360dd80
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\e1b2c3d4e5f6_add_import_reconciliation_tables.py
+
+    add import reconciliation tables
+    
+    Revision ID: e1b2c3d4e5f6
+    Revises: 70a4e360dd80
+    Create Date: 2025-01-15 12:00:00.000000
+
+Rev: 3a1d2f1b6c4f
+Parent: ab12cd34ef56
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\3a1d2f1b6c4f_add_template_type_to_import_templates.py
+
+    Add template_type to aircraft import templates.
+    
+    Revision ID: 3a1d2f1b6c4f
+    Revises: ab12cd34ef56
+    Create Date: 2025-01-12 00:00:00.000000
+
+Rev: ab12cd34ef56
+Parent: 70a4e360dd80
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\ab12cd34ef56_add_aircraft_import_templates_table.py
+
+    add aircraft import templates table
+    
+    Revision ID: ab12cd34ef56
+    Revises: 70a4e360dd80
+    Create Date: 2025-01-15 12:30:00.000000
+
+Rev: 70a4e360dd80 (branchpoint)
+Parent: 54c8ea152b4c
+Branches into: e1b2c3d4e5f6, ab12cd34ef56
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\70a4e360dd80_add_qms_tables.py
+
+    add qms tables
+    
+    Revision ID: 70a4e360dd80
+    Revises: 54c8ea152b4c
+    Create Date: 2025-12-19 16:39:00.001391
+
+Rev: 54c8ea152b4c
+Parent: b9a8860cf4f2
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\54c8ea152b4c_harden_models_constraints_indexes_table_.py
+
+    Harden models: constraints, indexes, table naming
+    
+    Revision ID: 54c8ea152b4c
+    Revises: b9a8860cf4f2
+    Create Date: 2025-12-19 11:51:10.459426
+
+Rev: b9a8860cf4f2
+Parent: <base>
+Path: D:\XLK-Assets-AMO-Portal-and-DB\amo-portal\backend\amodb\alembic\versions\b9a8860cf4f2_initial_schema.py
+
+    initial schema
+    
+    Revision ID: b9a8860cf4f2
+    Revises: 
+    Create Date: 2025-11-25 14:24:25.433085
+

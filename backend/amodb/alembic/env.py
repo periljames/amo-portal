@@ -9,7 +9,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from alembic.script import ScriptDirectory
-from sqlalchemy import pool  # kept for compatibility with typical alembic templates
+from sqlalchemy import pool, text  # kept for compatibility with typical alembic templates
 
 # ---------------------------------------------------------------------------
 # PYTHONPATH SETUP
@@ -142,6 +142,39 @@ def _assert_no_duplicate_revisions() -> None:
             f"{details}"
         )
 
+
+def _ensure_alembic_version_column_width(connection) -> None:
+    """Make Alembic version storage tolerant of descriptive revision IDs.
+
+    Older local databases may have alembic_version.version_num as VARCHAR(32).
+    That blocks migrations whose revision IDs are longer than 32 chars before the
+    migration itself can run. This guard is intentionally idempotent and only
+    widens metadata storage; it does not alter application tables.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    try:
+        exists = connection.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'alembic_version'
+                  AND column_name = 'version_num'
+                  AND character_maximum_length IS NOT NULL
+                  AND character_maximum_length < 128
+                """
+            )
+        ).scalar()
+        if exists:
+            connection.execute(
+                text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)")
+            )
+    except Exception:
+        # Alembic may be creating the version table for a fresh DB. Do not fail
+        # preflight; normal migration execution will report real schema issues.
+        return
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
@@ -151,6 +184,15 @@ def run_migrations_online() -> None:
     connectable = write_engine
 
     with connectable.connect() as connection:
+        # SQLAlchemy 2.x autobegins a transaction even for the preflight SELECT in
+        # _ensure_alembic_version_column_width(). If that implicit transaction remains
+        # open, Alembic may run/stamp revisions but the version-table updates can be
+        # rolled back when the connection is returned to the pool. Commit the preflight
+        # transaction before handing the connection to Alembic.
+        _ensure_alembic_version_column_width(connection)
+        if connection.in_transaction():
+            connection.commit()
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

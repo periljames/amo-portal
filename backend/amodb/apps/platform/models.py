@@ -391,3 +391,35 @@ class PlatformNotification(Base):
     route = Column(String(255), nullable=True)
     read_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class PlatformTenantSupportSession(Base):
+    """Time-boxed platform support access into a tenant.
+
+    READ_ONLY sessions can be started by a platform superuser with a reason.
+    ADMIN sessions stay PENDING until an AMO-side administrator approves them.
+    """
+
+    __tablename__ = "platform_tenant_support_sessions"
+    __table_args__ = (
+        Index("ix_platform_support_session_tenant_status", "tenant_id", "status", "expires_at"),
+        Index("ix_platform_support_session_platform_user", "platform_user_id", "status", "expires_at"),
+        Index("ix_platform_support_session_approved_by", "approved_by_user_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    platform_user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    access_level = Column(String(32), nullable=False, default="READ_ONLY", index=True)
+    status = Column(String(32), nullable=False, default="PENDING", index=True)
+    reason = Column(Text, nullable=False)
+    requested_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    approved_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    denied_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    denied_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    ended_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    metadata_json = Column(JSONB, nullable=True)

@@ -31,7 +31,7 @@ from .apps.fleet.router import router as fleet_router
 from .apps.work.router import router as work_router
 from .apps.crs.router import router as crs_router
 from .apps.training.router import router as training_router, public_router as training_public_router
-from .apps.quality import router as quality_router  
+from .apps.quality import router as quality_router, public_router as quality_public_router  
 from .apps.reliability.router import router as reliability_router
 from .apps.inventory.router import router as inventory_router
 from .apps.finance.router import router as finance_router
@@ -51,7 +51,7 @@ from .apps.manuals.router_branding import router as manuals_branding_router
 from .apps.aerodoc_router import router as aerodoc_router
 from .apps.doc_control.router import router as doc_control_router
 from .apps.technical_records.router import router as technical_records_router
-from .apps.qms.router import router as canonical_qms_router
+from .apps.quality.canonical_router import router as canonical_quality_router, legacy_router as legacy_qms_router
 from .apps.platform.router import router as platform_router
 from .apps.platform import metrics as platform_metrics
 from .apps.foundations.router import router as foundations_router
@@ -462,6 +462,7 @@ app.include_router(work_router)
 app.include_router(crs_router)
 app.include_router(training_router)
 app.include_router(training_public_router)
+app.include_router(quality_public_router)
 app.include_router(quality_router) 
 app.include_router(reliability_router)
 app.include_router(inventory_router)
@@ -479,6 +480,7 @@ app.include_router(manuals_router)
 app.include_router(manuals_branding_router)
 app.include_router(doc_control_router)
 app.include_router(technical_records_router)
-app.include_router(canonical_qms_router)
+app.include_router(canonical_quality_router)
+app.include_router(legacy_qms_router)
 app.include_router(aerodoc_router)
 

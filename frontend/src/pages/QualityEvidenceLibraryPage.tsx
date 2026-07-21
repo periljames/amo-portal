@@ -168,7 +168,7 @@ const QualityEvidenceLibraryPage: React.FC = () => {
   const cellTextClass = wrapText ? "qms-cell-text qms-cell-text--wrap" : "qms-cell-text qms-cell-text--truncate";
 
   const openViewer = (file: EvidenceRow) => {
-    navigate(`/maintenance/${amoCode}/qms/evidence-vault/${file.id}?name=${encodeURIComponent(file.filename)}&mime=${encodeURIComponent(file.mime)}&url=${encodeURIComponent(file.reviewUrl)}&source=${encodeURIComponent(file.source)}`);
+    navigate(`/maintenance/${amoCode}/quality/evidence-vault/${file.id}?name=${encodeURIComponent(file.filename)}&mime=${encodeURIComponent(file.mime)}&url=${encodeURIComponent(file.reviewUrl)}&source=${encodeURIComponent(file.source)}`);
   };
 
 

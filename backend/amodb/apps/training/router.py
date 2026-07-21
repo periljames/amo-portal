@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import html
 import io
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import tempfile
 import urllib.request
+from urllib.parse import quote
 import uuid
 import zipfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import (
     APIRouter,
@@ -25,11 +29,13 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
+    Request,
     Response,
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from reportlab.graphics import renderPDF
 from reportlab.graphics.barcode import code128, qr
 from reportlab.graphics.shapes import Drawing
@@ -40,13 +46,13 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from sqlalchemy import inspect, select, text
+from sqlalchemy import inspect, or_, select, text
 from sqlalchemy.orm import Session, load_only, noload, selectinload
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from ...database import SessionLocal, get_db, get_read_db
 from ...entitlements import require_module
-from ...security import get_current_active_user
+from ...security import SECRET_KEY, get_current_active_user
 from ..accounts import models as accounts_models
 from ..audit import services as audit_services
 from ..accounts import services as account_services
@@ -56,6 +62,7 @@ from ..quality import models as quality_models
 from . import models as training_models
 from . import schemas as training_schemas
 from . import compliance as training_compliance
+from . import record_lifecycle as training_record_lifecycle
 from ..workflow import apply_transition, TransitionError
 from .courses_import import import_courses_rows, parse_courses_sheet
 from .records_import import import_training_records_rows, parse_training_records_sheet
@@ -104,6 +111,133 @@ _TRAINING_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Optional: max file size guard (bytes). 0/None disables.
 _MAX_UPLOAD_BYTES = int(os.getenv("TRAINING_MAX_UPLOAD_BYTES", "0") or "0")
+
+
+_ACCESS_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _normalise_access_code(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", value or "").upper()
+
+
+def _new_access_code() -> str:
+    raw = "".join(secrets.choice(_ACCESS_CODE_ALPHABET) for _ in range(10))
+    return f"{raw[:4]}-{raw[4:]}"
+
+
+def _public_base_url(db: Optional[Session] = None) -> str:
+    """Return the externally reachable platform base URL, if configured."""
+    candidates: list[str | None] = []
+    if db is not None:
+        try:
+            settings = db.query(accounts_models.PlatformSettings).first()
+            candidates.append(getattr(settings, "api_base_url", None) if settings else None)
+        except Exception:
+            pass
+    candidates.extend([
+        os.getenv("APP_PUBLIC_BASE_URL"),
+        os.getenv("PLATFORM_API_BASE_URL"),
+        os.getenv("PUBLIC_BASE_URL"),
+        _TRAINING_RECORD_PUBLIC_BASE_URL,
+    ])
+    for value in candidates:
+        cleaned = str(value or "").strip().rstrip("/")
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _join_public_url(path: str, db: Optional[Session] = None) -> str:
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    base = _public_base_url(db)
+    return f"{base}{normalized_path}" if base else normalized_path
+
+
+def _certificate_verification_url(certificate_number: str, db: Optional[Session] = None, *, html_page: bool = True) -> str:
+    token = quote(str(certificate_number or "").strip(), safe="")
+    suffix = "?format=html" if html_page else ""
+    return _join_public_url(f"/public/certificates/verify/{token}{suffix}", db)
+
+
+def _training_report_signature(*, amo_id: str, user_id: str) -> str:
+    payload = f"training-report-profile:v1:{amo_id}:{user_id}".encode("utf-8")
+    return hmac.new(SECRET_KEY.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def _training_report_token(*, amo_id: str, user_id: str) -> str:
+    return f"trp1.{quote(str(amo_id), safe='')}.{quote(str(user_id), safe='')}.{_training_report_signature(amo_id=str(amo_id), user_id=str(user_id))}"
+
+
+def _verify_training_report_token(token: Optional[str], *, amo_id: str, user_id: str) -> bool:
+    raw = str(token or "").strip()
+    prefix = f"trp1.{quote(str(amo_id), safe='')}.{quote(str(user_id), safe='')}."
+    if not raw.startswith(prefix):
+        return False
+    supplied = raw[len(prefix):]
+    expected = _training_report_signature(amo_id=str(amo_id), user_id=str(user_id))
+    return hmac.compare_digest(supplied, expected)
+
+
+def _training_profile_verification_url(*, user_id: str, amo: Optional[accounts_models.AMO], db: Optional[Session] = None, report_token: Optional[str] = None) -> str:
+    public_identifier = (
+        getattr(amo, "login_slug", None)
+        or getattr(amo, "amo_code", None)
+        or getattr(amo, "id", None)
+        or ""
+    )
+    params = ["format=html"]
+    if public_identifier:
+        params.append(f"amo={quote(str(public_identifier), safe='')}")
+    if report_token:
+        params.append(f"report_token={quote(str(report_token), safe='')}")
+    query = "?" + "&".join(params)
+    return _join_public_url(f"/public/training/users/{quote(str(user_id), safe='')}/verify{query}", db)
+
+
+def _wants_html(request: Optional[Request], response_format: Optional[str]) -> bool:
+    response_format_value = getattr(response_format, "default", response_format)
+    if (response_format_value or "").strip().lower() == "html":
+        return True
+    if request is not None and "text/html" in (request.headers.get("accept") or "").lower():
+        return True
+    return False
+
+
+def _verification_html_page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
+    safe_title = html.escape(title)
+    return HTMLResponse(
+        status_code=status_code,
+        content=f"""
+<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>{safe_title}</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 0; background: #f8fafc; color: #111827; }}
+    main {{ max-width: 760px; margin: 32px auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 24px; box-shadow: 0 10px 30px rgba(15, 23, 42, .08); }}
+    h1 {{ margin-top: 0; font-size: 24px; }}
+    table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
+    th, td {{ padding: 9px 10px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 14px; }}
+    th {{ width: 34%; color: #475467; font-weight: 700; }}
+    .badge {{ display: inline-block; padding: 4px 10px; border-radius: 999px; background: #ecfdf3; color: #027a48; font-weight: 700; }}
+    .warning {{ background: #fff7ed; color: #9a3412; }}
+    .error {{ background: #fef2f2; color: #991b1b; }}
+    label {{ display: block; margin: 14px 0 6px; font-weight: 700; }}
+    input {{ width: 100%; box-sizing: border-box; border: 1px solid #d0d5dd; border-radius: 8px; padding: 10px; font-size: 16px; }}
+    button {{ margin-top: 14px; border: 0; border-radius: 8px; background: #17212b; color: #fff; padding: 10px 16px; font-size: 15px; cursor: pointer; }}
+    .muted {{ color: #667085; font-size: 13px; }}
+  </style>
+</head>
+<body><main><h1>{safe_title}</h1>{body}</main></body>
+</html>
+""",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -217,21 +351,24 @@ def _seed_refresher_records_from_initial(
 ) -> list[training_models.TrainingRecord]:
     seeded: list[training_models.TrainingRecord] = []
     for refresher in _find_related_refresher_courses(db, amo_id=amo_id, initial_course=initial_course):
-        existing = (
-            db.query(training_models.TrainingRecord)
-            .filter(
-                training_models.TrainingRecord.amo_id == amo_id,
-                training_models.TrainingRecord.user_id == trainee_id,
-                training_models.TrainingRecord.course_id == refresher.id,
-                training_models.TrainingRecord.completion_date == completion_date,
+        try:
+            seeded_record_id, _renewed_for_seed = training_record_lifecycle.prepare_training_record_insert(
+                db,
+                amo_id=amo_id,
+                user_id=trainee_id,
+                course_id=refresher.id,
+                completion_date=completion_date,
+                confirm_renewal=True,
+                actor_user_id=created_by_user_id,
             )
-            .first()
-        )
-        if existing:
-            continue
+        except ValueError as exc:
+            if str(exc) == "DUPLICATE_TRAINING_RECORD":
+                continue
+            raise
         valid_until = _add_months(completion_date, refresher.frequency_months) if refresher.frequency_months else None
         note_parts = [part for part in [remarks, f"AUTO-SEEDED FROM INITIAL {initial_course.course_id}"] if part]
         seeded_record = training_models.TrainingRecord(
+            id=seeded_record_id,
             amo_id=amo_id,
             user_id=trainee_id,
             course_id=refresher.id,
@@ -244,6 +381,8 @@ def _seed_refresher_records_from_initial(
             remarks=" | ".join(note_parts) if note_parts else None,
             is_manual_entry=is_manual_entry,
             created_by_user_id=created_by_user_id,
+            record_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
+            source_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
         )
         db.add(seeded_record)
         seeded.append(seeded_record)
@@ -286,7 +425,7 @@ def _issue_certificate_for_record(
         return existing_issue
 
     cert_no = record.certificate_reference or _next_certificate_number(db, amo_id)
-    qr_value = f"/verify/certificate/{cert_no}"
+    qr_value = _certificate_verification_url(cert_no, db, html_page=True)
     artifact_hash = hashlib.sha256(f"{record.id}:{cert_no}:{record.completion_date}".encode("utf-8")).hexdigest()
     issue = training_models.TrainingCertificateIssue(
         amo_id=amo_id,
@@ -404,6 +543,360 @@ def _default_start_date_for_status_item(
     if item.days_until_due <= lead_days:
         return base_start_on + timedelta(days=7)
     return base_start_on
+
+
+_SCHEDULING_PARTICIPANT_STATUSES = (
+    training_models.TrainingParticipantStatus.SCHEDULED,
+    training_models.TrainingParticipantStatus.INVITED,
+    training_models.TrainingParticipantStatus.CONFIRMED,
+)
+
+_SCHEDULING_EVENT_STATUSES = (
+    training_models.TrainingEventStatus.PLANNED,
+    training_models.TrainingEventStatus.IN_PROGRESS,
+)
+
+
+def _schedule_end(starts_on: date, ends_on: Optional[date]) -> date:
+    return ends_on or starts_on
+
+
+def _date_ranges_overlap(start_a: date, end_a: date, start_b: date, end_b: date) -> bool:
+    return start_a <= end_b and start_b <= end_a
+
+
+def _is_weekend_range(starts_on: date, ends_on: date) -> bool:
+    cursor = starts_on
+    while cursor <= ends_on:
+        if cursor.weekday() >= 5:
+            return True
+        cursor += timedelta(days=1)
+    return False
+
+
+def _next_business_start(starts_on: date, duration_days: int) -> date:
+    next_start = starts_on
+    while _is_weekend_range(next_start, next_start + timedelta(days=duration_days - 1)):
+        next_start += timedelta(days=1)
+    return next_start
+
+
+def _session_descriptor_is_online(
+    *,
+    delivery_mode: Optional[str],
+    venue_mode: Optional[str],
+    meeting_link: Optional[str],
+    location: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> bool:
+    blob = " ".join(
+        str(part or "")
+        for part in (delivery_mode, venue_mode, meeting_link, location, notes)
+    ).strip().lower()
+    return bool(
+        "online" in blob
+        or "remote" in blob
+        or "virtual" in blob
+        or "teams" in blob
+        or "zoom" in blob
+        or "meet.google" in blob
+        or "http://" in blob
+        or "https://" in blob
+    )
+
+
+def _event_is_online(event: training_models.TrainingEvent) -> bool:
+    meta, plain_notes = _extract_training_event_metadata(getattr(event, "notes", None))
+    return _session_descriptor_is_online(
+        delivery_mode=meta.get("delivery_mode"),
+        venue_mode=meta.get("venue_mode"),
+        meeting_link=meta.get("meeting_link"),
+        location=getattr(event, "location", None),
+        notes=plain_notes,
+    )
+
+
+def _availability_block_for_range(
+    rows: List[quality_models.UserAvailability],
+    starts_on: date,
+    ends_on: date,
+) -> tuple[str, Optional[date]]:
+    """Return AVAILABLE/AWAY/ON_LEAVE and the first realistic return date.
+
+    The scheduler checks the whole session date range, not only the first day,
+    because multi-day training must not be placed across leave or away windows.
+    """
+    blocking_status: Optional[str] = None
+    next_available: Optional[date] = None
+
+    for row in rows:
+        status_value = str(getattr(getattr(row, "status", None), "value", getattr(row, "status", "")) or "").upper()
+        if status_value not in {"AWAY", "ON_LEAVE"}:
+            continue
+        effective_from = getattr(row, "effective_from", None)
+        effective_to = getattr(row, "effective_to", None)
+        from_date = effective_from.date() if isinstance(effective_from, datetime) else (effective_from or date.min)
+        to_date = effective_to.date() if isinstance(effective_to, datetime) else effective_to
+        if from_date <= ends_on and (to_date is None or to_date >= starts_on):
+            if blocking_status != "ON_LEAVE":
+                blocking_status = status_value
+            if to_date is None:
+                next_available = None
+                return blocking_status or status_value, None
+            candidate_next = to_date + timedelta(days=1)
+            if next_available is None or candidate_next > next_available:
+                next_available = candidate_next
+
+    return blocking_status or "AVAILABLE", next_available
+
+
+def _active_training_conflicts_for_users(
+    db: Session,
+    *,
+    amo_id: str,
+    user_ids: List[str],
+    starts_on: date,
+    ends_on: date,
+    new_session_is_online: bool,
+    allow_online_overlap: bool,
+    exclude_event_id: Optional[str] = None,
+) -> Dict[str, List[dict]]:
+    if not user_ids:
+        return {}
+    if allow_online_overlap and new_session_is_online:
+        return {}
+
+    q = (
+        db.query(training_models.TrainingEventParticipant, training_models.TrainingEvent)
+        .join(training_models.TrainingEvent, training_models.TrainingEvent.id == training_models.TrainingEventParticipant.event_id)
+        .filter(
+            training_models.TrainingEventParticipant.amo_id == amo_id,
+            training_models.TrainingEventParticipant.user_id.in_(user_ids),
+            training_models.TrainingEventParticipant.status.in_(_SCHEDULING_PARTICIPANT_STATUSES),
+            training_models.TrainingEvent.status.in_(_SCHEDULING_EVENT_STATUSES),
+            training_models.TrainingEvent.starts_on <= ends_on,
+            or_(training_models.TrainingEvent.ends_on.is_(None), training_models.TrainingEvent.ends_on >= starts_on),
+        )
+    )
+    if exclude_event_id:
+        q = q.filter(training_models.TrainingEvent.id != exclude_event_id)
+
+    conflicts: Dict[str, List[dict]] = {}
+    for participant, event in q.all():
+        existing_end = event.ends_on or event.starts_on
+        if allow_online_overlap and _event_is_online(event):
+            continue
+        conflicts.setdefault(str(participant.user_id), []).append(
+            {
+                "event_id": event.id,
+                "title": event.title,
+                "starts_on": event.starts_on,
+                "ends_on": existing_end,
+                "status": str(getattr(participant.status, "value", participant.status)),
+            }
+        )
+    return conflicts
+
+
+def _planned_assignment_conflicts(
+    planned_by_user: Dict[str, List[Tuple[date, date]]],
+    user_ids: List[str],
+    starts_on: date,
+    ends_on: date,
+    *,
+    new_session_is_online: bool,
+    allow_online_overlap: bool,
+) -> Dict[str, date]:
+    if allow_online_overlap and new_session_is_online:
+        return {}
+    conflicts: Dict[str, date] = {}
+    for user_id in user_ids:
+        for planned_start, planned_end in planned_by_user.get(user_id, []):
+            if _date_ranges_overlap(starts_on, ends_on, planned_start, planned_end):
+                conflicts[user_id] = max(conflicts.get(user_id, date.min), planned_end + timedelta(days=1))
+    return conflicts
+
+
+def _manual_schedule_conflict_detail(
+    *,
+    user: accounts_models.User,
+    reason: str,
+    starts_on: date,
+    ends_on: date,
+    next_available_on: Optional[date] = None,
+    event_title: Optional[str] = None,
+) -> dict:
+    return {
+        "user_id": str(user.id),
+        "user_name": getattr(user, "full_name", None) or getattr(user, "email", None) or str(user.id),
+        "reason": reason,
+        "starts_on": str(starts_on),
+        "ends_on": str(ends_on),
+        "next_available_on": str(next_available_on) if next_available_on else None,
+        "event_title": event_title,
+    }
+
+
+def _validate_manual_batch_schedule(
+    db: Session,
+    *,
+    amo_id: str,
+    user_ids: List[str],
+    trainee_by_id: Dict[str, accounts_models.User],
+    starts_on: date,
+    ends_on: Optional[date],
+    delivery_mode: Optional[str],
+    venue_mode: Optional[str],
+    meeting_link: Optional[str],
+    location: Optional[str],
+    notes: Optional[str],
+    allow_online_overlap: bool,
+) -> None:
+    session_end = _schedule_end(starts_on, ends_on)
+    new_is_online = _session_descriptor_is_online(
+        delivery_mode=delivery_mode,
+        venue_mode=venue_mode,
+        meeting_link=meeting_link,
+        location=location,
+        notes=notes,
+    )
+    availability_rows = _latest_availability_rows_for_users(db, amo_id=amo_id, user_ids=user_ids)
+    conflict_details: List[dict] = []
+
+    for user_id in user_ids:
+        status_value, next_available_on = _availability_block_for_range(availability_rows.get(user_id, []), starts_on, session_end)
+        if status_value in {"AWAY", "ON_LEAVE"}:
+            conflict_details.append(
+                _manual_schedule_conflict_detail(
+                    user=trainee_by_id[user_id],
+                    reason=f"{status_value.replace('_', ' ').title()} during this session window",
+                    starts_on=starts_on,
+                    ends_on=session_end,
+                    next_available_on=next_available_on,
+                )
+            )
+
+    event_conflicts = _active_training_conflicts_for_users(
+        db,
+        amo_id=amo_id,
+        user_ids=user_ids,
+        starts_on=starts_on,
+        ends_on=session_end,
+        new_session_is_online=new_is_online,
+        allow_online_overlap=allow_online_overlap,
+    )
+    for user_id, rows in event_conflicts.items():
+        for row in rows:
+            conflict_details.append(
+                _manual_schedule_conflict_detail(
+                    user=trainee_by_id[user_id],
+                    reason="Already scheduled for another non-online training session",
+                    starts_on=starts_on,
+                    ends_on=session_end,
+                    next_available_on=row.get("ends_on") + timedelta(days=1) if isinstance(row.get("ends_on"), date) else None,
+                    event_title=row.get("title"),
+                )
+            )
+
+    if conflict_details:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "TRAINING_SCHEDULE_CONFLICT",
+                "message": "One or more selected personnel are on leave, away, or already booked for another non-online training session.",
+                "conflicts": conflict_details,
+            },
+        )
+
+
+def _find_schedulable_group_window(
+    db: Session,
+    *,
+    amo_id: str,
+    user_ids: List[str],
+    availability_rows: Dict[str, List[quality_models.UserAvailability]],
+    planned_by_user: Dict[str, List[Tuple[date, date]]],
+    seed_start: date,
+    duration_days: int,
+    new_session_is_online: bool,
+    allow_online_overlap: bool,
+    avoid_weekends: bool,
+    search_days: int,
+) -> tuple[Optional[date], Optional[date], List[str], List[training_schemas.TrainingAutoGroupSkippedRead]]:
+    remaining = list(dict.fromkeys(user_ids))
+    skipped: List[training_schemas.TrainingAutoGroupSkippedRead] = []
+    start_on = seed_start
+    searched_until = seed_start + timedelta(days=max(search_days, 1))
+
+    while remaining and start_on <= searched_until:
+        if avoid_weekends:
+            adjusted = _next_business_start(start_on, duration_days)
+            if adjusted != start_on:
+                start_on = adjusted
+                continue
+
+        end_on = start_on + timedelta(days=duration_days - 1)
+        moved_to: Optional[date] = None
+        for user_id in list(remaining):
+            bucket, next_available_on = _availability_block_for_range(availability_rows.get(user_id, []), start_on, end_on)
+            if bucket in {"AWAY", "ON_LEAVE"}:
+                if next_available_on is None:
+                    remaining.remove(user_id)
+                    skipped.append(
+                        training_schemas.TrainingAutoGroupSkippedRead(
+                            user_id=user_id,
+                            reason=f"{bucket.replace('_', ' ').title()} overlaps the session and no return date is captured.",
+                            availability_status=bucket,
+                        )
+                    )
+                else:
+                    moved_to = max(moved_to or next_available_on, next_available_on)
+
+        if moved_to:
+            start_on = moved_to
+            continue
+
+        planned_conflicts = _planned_assignment_conflicts(
+            planned_by_user,
+            remaining,
+            start_on,
+            end_on,
+            new_session_is_online=new_session_is_online,
+            allow_online_overlap=allow_online_overlap,
+        )
+        if planned_conflicts:
+            start_on = max(planned_conflicts.values())
+            continue
+
+        event_conflicts = _active_training_conflicts_for_users(
+            db,
+            amo_id=amo_id,
+            user_ids=remaining,
+            starts_on=start_on,
+            ends_on=end_on,
+            new_session_is_online=new_session_is_online,
+            allow_online_overlap=allow_online_overlap,
+        )
+        if event_conflicts:
+            latest_next = start_on + timedelta(days=1)
+            for rows in event_conflicts.values():
+                for row in rows:
+                    conflict_end = row.get("ends_on")
+                    if isinstance(conflict_end, date):
+                        latest_next = max(latest_next, conflict_end + timedelta(days=1))
+            start_on = latest_next
+            continue
+
+        return start_on, end_on, remaining, skipped
+
+    for user_id in remaining:
+        skipped.append(
+            training_schemas.TrainingAutoGroupSkippedRead(
+                user_id=user_id,
+                reason=f"No conflict-free training window was found within {max(search_days, 1)} day(s).",
+            )
+        )
+    return None, None, [], skipped
 
 
 def _create_scheduled_event_with_participants(
@@ -542,35 +1035,60 @@ def _ensure_completion_artifacts_for_participant(
     )
     if record is None:
         completion_date = event.ends_on or event.starts_on or date.today()
-        valid_until = _add_months(completion_date, course.frequency_months) if course.frequency_months else None
-        meta, plain_notes = _extract_training_event_metadata(event.notes)
-        note_bits = ["Auto-generated from portal attendance"]
-        if plain_notes:
-            note_bits.append(plain_notes)
-        if meta.get("provider_kind"):
-            note_bits.append(f"Provider type={meta['provider_kind']}")
-        if meta.get("delivery_mode"):
-            note_bits.append(f"Delivery={meta['delivery_mode']}")
-        record = training_models.TrainingRecord(
+        duplicate = training_record_lifecycle.find_exact_duplicate(
+            db,
             amo_id=participant.amo_id,
             user_id=participant.user_id,
             course_id=course.id,
-            event_id=event.id,
             completion_date=completion_date,
-            valid_until=valid_until,
-            hours_completed=getattr(course, "nominal_hours", None),
-            exam_score=None,
-            certificate_reference=None,
-            remarks=" | ".join(note_bits),
-            is_manual_entry=False,
-            created_by_user_id=actor_user_id,
-            verification_status=training_models.TrainingRecordVerificationStatus.VERIFIED,
-            verified_at=datetime.now(timezone.utc),
-            verified_by_user_id=actor_user_id,
-            verification_comment="Attendance marked through scheduled session workflow.",
         )
-        db.add(record)
-        db.flush()
+        if duplicate is not None:
+            record = duplicate
+            if not getattr(record, "event_id", None):
+                record.event_id = event.id
+                db.add(record)
+        else:
+            record_id, _renewed_records = training_record_lifecycle.prepare_training_record_insert(
+                db,
+                amo_id=participant.amo_id,
+                user_id=participant.user_id,
+                course_id=course.id,
+                completion_date=completion_date,
+                confirm_renewal=True,
+                actor_user_id=actor_user_id,
+            )
+            valid_until = _add_months(completion_date, course.frequency_months) if course.frequency_months else None
+            meta, plain_notes = _extract_training_event_metadata(event.notes)
+            note_bits = ["Auto-generated from portal attendance"]
+            if plain_notes:
+                note_bits.append(plain_notes)
+            if meta.get("provider_kind"):
+                note_bits.append(f"Provider type={meta['provider_kind']}")
+            if meta.get("delivery_mode"):
+                note_bits.append(f"Delivery={meta['delivery_mode']}")
+            record = training_models.TrainingRecord(
+                id=record_id,
+                amo_id=participant.amo_id,
+                user_id=participant.user_id,
+                course_id=course.id,
+                event_id=event.id,
+                completion_date=completion_date,
+                valid_until=valid_until,
+                hours_completed=getattr(course, "nominal_hours", None),
+                exam_score=None,
+                certificate_reference=None,
+                remarks=" | ".join(note_bits),
+                is_manual_entry=False,
+                created_by_user_id=actor_user_id,
+                record_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
+                source_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
+                verification_status=training_models.TrainingRecordVerificationStatus.VERIFIED,
+                verified_at=datetime.now(timezone.utc),
+                verified_by_user_id=actor_user_id,
+                verification_comment="Attendance marked through scheduled session workflow.",
+            )
+            db.add(record)
+            db.flush()
 
     if auto_issue_certificate:
         _issue_certificate_for_record(db, record=record, amo_id=participant.amo_id, actor_user_id=actor_user_id)
@@ -583,12 +1101,13 @@ def _ensure_completion_artifacts_for_participant(
 
 def _ensure_training_catalog_schema_compat(db: Session) -> None:
     """
-    One-time, best-effort schema compatibility guard.
+    One-time, best-effort runtime schema guard for the Training module.
 
-    Important: avoid issuing ALTER TABLE statements on every request because
-    the training page fires many concurrent reads in development, which can
-    deadlock against runtime DDL. We inspect first and only mutate once when
-    genuinely required.
+    Several deployed AMO databases may be behind the Python model after a file
+    replacement. The training and competence page opens many endpoints at once;
+    one missing lifecycle/planning column then becomes a burst of HTTP 500s.
+    This guard uses the write engine, inspects the live tables once, and adds
+    only missing compatibility columns before any ORM read touches them.
     """
     global _TRAINING_SCHEMA_COMPAT_CHECKED
 
@@ -599,30 +1118,77 @@ def _ensure_training_catalog_schema_compat(db: Session) -> None:
         if _TRAINING_SCHEMA_COMPAT_CHECKED:
             return
 
-        bind = db.get_bind()
-        if bind is None:
-            return
-
+        # Use the write session for compatibility DDL even when the endpoint is
+        # using get_read_db. In single-DB deployments this is the same pool; in a
+        # future read-replica deployment, the replica must never receive DDL.
+        ddl_db = SessionLocal()
         try:
-            existing = {col["name"] for col in inspect(bind).get_columns("training_courses")}
-        except Exception:
-            return
+            bind = ddl_db.get_bind()
+            inspector = inspect(bind)
+            table_names = set(inspector.get_table_names())
 
-        statements: list[str] = []
-        if "category_raw" not in existing:
-            statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS category_raw VARCHAR(255)")
-        if "status" not in existing:
-            statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS status VARCHAR(64) DEFAULT 'One_Off'")
-        if "scope" not in existing:
-            statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS scope VARCHAR(255)")
+            def table_columns(table_name: str) -> set[str]:
+                if table_name not in table_names:
+                    return set()
+                return {col["name"] for col in inspector.get_columns(table_name)}
 
-        if statements:
-            with bind.begin() as conn:
-                for statement in statements:
-                    conn.execute(text(statement))
+            statements: list[str] = []
 
-        _TRAINING_SCHEMA_COMPAT_CHECKED = True
+            course_cols = table_columns("training_courses")
+            if course_cols:
+                if "category_raw" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS category_raw VARCHAR(255)")
+                if "status" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS status VARCHAR(64) DEFAULT 'One_Off'")
+                if "scope" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS scope VARCHAR(255)")
+                if "nominal_hours" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS nominal_hours INTEGER")
+                if "planning_lead_days" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS planning_lead_days INTEGER DEFAULT 45")
+                if "candidate_requirement_text" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS candidate_requirement_text TEXT")
+                if "mandatory_for_all" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS mandatory_for_all BOOLEAN DEFAULT FALSE")
+                if "prerequisite_course_id" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS prerequisite_course_id VARCHAR(64)")
+                if "created_at" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()")
+                if "updated_at" not in course_cols:
+                    statements.append("ALTER TABLE training_courses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()")
 
+            requirement_cols = table_columns("training_requirements")
+            if requirement_cols:
+                if "created_at" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()")
+                if "updated_at" not in requirement_cols:
+                    statements.append("ALTER TABLE training_requirements ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()")
+
+            record_cols = table_columns("training_records")
+            if record_cols:
+                if "legacy_record_id" not in record_cols:
+                    statements.append("ALTER TABLE training_records ADD COLUMN IF NOT EXISTS legacy_record_id VARCHAR(64)")
+                if "source_status" not in record_cols:
+                    statements.append("ALTER TABLE training_records ADD COLUMN IF NOT EXISTS source_status VARCHAR(64)")
+                if "record_status" not in record_cols:
+                    statements.append("ALTER TABLE training_records ADD COLUMN IF NOT EXISTS record_status VARCHAR(64) DEFAULT 'ACTIVE'")
+                if "superseded_by_record_id" not in record_cols:
+                    statements.append("ALTER TABLE training_records ADD COLUMN IF NOT EXISTS superseded_by_record_id VARCHAR(36)")
+                if "superseded_at" not in record_cols:
+                    statements.append("ALTER TABLE training_records ADD COLUMN IF NOT EXISTS superseded_at TIMESTAMP WITH TIME ZONE")
+                if "purge_after" not in record_cols:
+                    statements.append("ALTER TABLE training_records ADD COLUMN IF NOT EXISTS purge_after DATE")
+                if "updated_at" not in record_cols:
+                    statements.append("ALTER TABLE training_records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()")
+
+            if statements:
+                with bind.begin() as conn:
+                    for statement in statements:
+                        conn.execute(text(statement))
+
+            _TRAINING_SCHEMA_COMPAT_CHECKED = True
+        finally:
+            ddl_db.close()
 
 def _run_deadlock_retry(db: Session, fn, *, attempts: int = 2):
     last_exc = None
@@ -687,17 +1253,16 @@ def _normalize_record_state(value: Optional[str]) -> Optional[str]:
 
 
 def _record_source_status(record: training_models.TrainingRecord) -> Optional[str]:
-    return _normalize_record_state(_extract_record_remark_token(getattr(record, "remarks", None), "Status"))
+    db_status = _normalize_record_state(getattr(record, "source_status", None))
+    return db_status or _normalize_record_state(_extract_record_remark_token(getattr(record, "remarks", None), "Status"))
 
 
 def _record_lifecycle_status(record: training_models.TrainingRecord) -> Optional[str]:
-    lifecycle = _normalize_record_state(_extract_record_remark_token(getattr(record, "remarks", None), "LifecycleStatus"))
-    return lifecycle or _record_source_status(record)
+    return training_record_lifecycle.get_record_lifecycle_status(record)
 
 
 def _is_record_active_for_display(record: training_models.TrainingRecord) -> bool:
-    state = _record_lifecycle_status(record)
-    return state not in {"RENEWED"}
+    return training_record_lifecycle.is_active_record(record)
 
 
 def _status_label_for_pdf(status: Optional[str]) -> str:
@@ -776,9 +1341,9 @@ class _TrainingRecordNumberedCanvas(canvas.Canvas):
         meta_x = right - 64 * mm
         self.setFont("Helvetica-Bold", 8)
         self.setFillColor(colors.HexColor("#111827"))
-        self.drawRightString(right, top, f"Form No: {_TRAINING_RECORD_FORM_NO}")
-        self.drawRightString(right, top - 4.2 * mm, f"Issue date: {_TRAINING_RECORD_ISSUE_DATE}")
-        self.drawRightString(right, top - 8.4 * mm, f"Revision: {_TRAINING_RECORD_REVISION}")
+        self.drawRightString(right, top, f"Form No: {meta.get('form_no') or _TRAINING_RECORD_FORM_NO}")
+        self.drawRightString(right, top - 4.2 * mm, f"Issue date: {meta.get('issue_date') or _TRAINING_RECORD_ISSUE_DATE}")
+        self.drawRightString(right, top - 8.4 * mm, f"Revision: {meta.get('revision') or _TRAINING_RECORD_REVISION}")
         self.drawRightString(right, top - 12.6 * mm, f"Page {self._pageNumber} of {total_pages}")
 
         self.setStrokeColor(_TRAINING_RECORD_BRAND_PRIMARY)
@@ -789,7 +1354,7 @@ class _TrainingRecordNumberedCanvas(canvas.Canvas):
         self.setFillColor(colors.HexColor("#667085"))
         printed_at = meta.get("printed_at") or datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
         self.drawString(left, 8 * mm, f"Printed on {printed_at}")
-        self.drawRightString(right, 8 * mm, f"Training_Tracker_DB_v1.2    {self._pageNumber} of {total_pages}")
+        self.drawRightString(right, 8 * mm, str(meta.get("footer_note") or f"Training_Tracker_DB_v1.2    {self._pageNumber} of {total_pages}"))
         self.restoreState()
 
 
@@ -820,6 +1385,8 @@ def _build_training_user_record_pdf_bytes(
     course_by_id: Dict[str, training_models.TrainingCourse],
     upcoming_events: List[training_models.TrainingEvent],
     deferrals: List[training_models.TrainingDeferralRequest],
+    verification_url: Optional[str] = None,
+    report_settings: Optional[dict[str, Any]] = None,
 ) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -895,16 +1462,19 @@ def _build_training_user_record_pdf_bytes(
         None,
     )
 
-    public_identifier = getattr(amo, "login_slug", None) or getattr(amo, "amo_code", None) or getattr(amo, "id", None) or getattr(user, "amo_id", None) or "amo"
-    profile_path = f"/maintenance/{public_identifier}/quality/qms/training/{user.id}"
-    qr_value = f"{_TRAINING_RECORD_PUBLIC_BASE_URL}{profile_path}" if _TRAINING_RECORD_PUBLIC_BASE_URL else f"Training profile {user.id}"
+    qr_value = verification_url or _training_profile_verification_url(user_id=str(user.id), amo=amo)
+
+    report_settings = report_settings or {}
+    show_compliance_summary = report_settings.get("show_compliance_summary", True) is not False
+    show_training_history = report_settings.get("show_training_history", True) is not False
+    show_scheduled_events = report_settings.get("show_scheduled_events", True) is not False
+    show_deferrals = report_settings.get("show_deferrals", True) is not False
+    report_title = str(report_settings.get("title") or "Personnel Training Record")
+    report_subtitle = str(report_settings.get("subtitle") or "Controlled training record generated from the Training module profile. Only current and due items are shown in the main log; superseded renewed history is excluded from this export.")
 
     story: list = [
-        Paragraph("Personnel Training Record", title_style),
-        Paragraph(
-            "Controlled training record generated from the QMS training profile. Only current and due items are shown in the main log; superseded renewed history is excluded from this export.",
-            subtitle_style,
-        ),
+        Paragraph(html.escape(report_title), title_style),
+        Paragraph(html.escape(report_subtitle), subtitle_style),
     ]
 
     details_table = Table(
@@ -1007,7 +1577,8 @@ def _build_training_user_record_pdf_bytes(
             ]
         )
     )
-    story.extend([Paragraph("Compliance summary", section_style), summary_table, Spacer(1, 6)])
+    if show_compliance_summary:
+        story.extend([Paragraph("Compliance summary", section_style), summary_table, Spacer(1, 6)])
 
     history_header = [
         Paragraph("<b>Course code</b>", compact_style),
@@ -1070,7 +1641,8 @@ def _build_training_user_record_pdf_bytes(
             ]
         )
     )
-    story.extend([Paragraph("Training record log", section_style), history_table, Spacer(1, 6)])
+    if show_training_history:
+        story.extend([Paragraph("Training record log", section_style), history_table, Spacer(1, 6)])
 
     schedule_header = [Paragraph("<b>Course</b>", compact_style), Paragraph("<b>Event</b>", compact_style), Paragraph("<b>Starts</b>", compact_style), Paragraph("<b>Ends</b>", compact_style), Paragraph("<b>Status</b>", compact_style), Paragraph("<b>Location</b>", compact_style)]
     schedule_rows = [schedule_header]
@@ -1099,7 +1671,8 @@ def _build_training_user_record_pdf_bytes(
         ('TOPPADDING', (0, 0), (-1, -1), 5),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
     ]))
-    story.extend([Paragraph("Scheduled training and events", section_style), schedule_table, Spacer(1, 6)])
+    if show_scheduled_events:
+        story.extend([Paragraph("Scheduled training and events", section_style), schedule_table, Spacer(1, 6)])
 
     deferral_header = [Paragraph("<b>Course</b>", compact_style), Paragraph("<b>Original due</b>", compact_style), Paragraph("<b>Requested due</b>", compact_style), Paragraph("<b>Status</b>", compact_style), Paragraph("<b>Requested at</b>", compact_style), Paragraph("<b>Decision</b>", compact_style)]
     deferral_rows = [deferral_header]
@@ -1128,12 +1701,17 @@ def _build_training_user_record_pdf_bytes(
         ('TOPPADDING', (0, 0), (-1, -1), 5),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
     ]))
-    story.extend([Paragraph("Deferral and extension history", section_style), deferral_table])
+    if show_deferrals:
+        story.extend([Paragraph("Deferral and extension history", section_style), deferral_table])
 
     canvas_meta = {
         'logo_path': logo_path,
         'amo_name': getattr(amo, 'name', None) or getattr(amo, 'amo_code', None) or getattr(user, 'amo_id', None),
         'printed_at': printed_at,
+        'form_no': report_settings.get('form_no'),
+        'issue_date': report_settings.get('issue_date'),
+        'revision': report_settings.get('revision'),
+        'footer_note': report_settings.get('footer_note'),
     }
     doc.build(story, canvasmaker=_training_canvas_maker(canvas_meta))
     buffer.seek(0)
@@ -1481,6 +2059,36 @@ def _participant_to_read(p: training_models.TrainingEventParticipant) -> trainin
 
 
 
+def _training_record_conflict_response(
+    *,
+    code: str,
+    message: str,
+    record: Optional[training_models.TrainingRecord] = None,
+    records: Optional[List[training_models.TrainingRecord]] = None,
+) -> HTTPException:
+    def serialize(row: training_models.TrainingRecord) -> dict:
+        course = getattr(row, "course", None)
+        return {
+            "id": row.id,
+            "user_id": row.user_id,
+            "course_id": row.course_id,
+            "course_code": getattr(course, "course_id", None) if course is not None else None,
+            "course_name": getattr(course, "course_name", None) if course is not None else None,
+            "completion_date": row.completion_date.isoformat() if row.completion_date else None,
+            "valid_until": row.valid_until.isoformat() if row.valid_until else None,
+            "certificate_reference": row.certificate_reference,
+            "record_status": _record_lifecycle_status(row),
+            "created_at": row.created_at.isoformat() if getattr(row, "created_at", None) else None,
+        }
+
+    payload = {"code": code, "message": message}
+    if record is not None:
+        payload["record"] = serialize(record)
+    if records:
+        payload["records"] = [serialize(row) for row in records]
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=payload)
+
+
 def _record_to_read(r: training_models.TrainingRecord) -> training_schemas.TrainingRecordRead:
     course = getattr(r, "course", None)
     course_pk = getattr(r, "course_id", None)
@@ -1505,7 +2113,7 @@ def _record_to_read(r: training_models.TrainingRecord) -> training_schemas.Train
         course_id=course_pk,
         course_code=course_code,
         course_name=course_name,
-        legacy_record_id=_extract_record_remark_token(getattr(r, "remarks", None), "RecordID"),
+        legacy_record_id=getattr(r, "legacy_record_id", None) or _extract_record_remark_token(getattr(r, "remarks", None), "RecordID"),
         source_status=_record_source_status(r),
         record_status=_record_lifecycle_status(r),
         superseded_by_record_id=getattr(r, "superseded_by_record_id", None),
@@ -1661,6 +2269,7 @@ def create_course(
     db: Session = Depends(get_db),
     current_user: accounts_models.User = Depends(_require_training_editor),
 ):
+    _ensure_training_catalog_schema_compat(db)
     course_id_norm = payload.course_id.strip().upper()
 
     existing = (
@@ -1688,6 +2297,9 @@ def create_course(
         regulatory_reference=payload.regulatory_reference,
         default_provider=payload.default_provider,
         default_duration_days=payload.default_duration_days,
+        nominal_hours=payload.nominal_hours,
+        planning_lead_days=payload.planning_lead_days,
+        candidate_requirement_text=payload.candidate_requirement_text,
         is_mandatory=payload.is_mandatory,
         mandatory_for_all=payload.mandatory_for_all,
         prerequisite_course_id=payload.prerequisite_course_id,
@@ -1784,6 +2396,7 @@ def update_course(
     db: Session = Depends(get_db),
     current_user: accounts_models.User = Depends(_require_training_editor),
 ):
+    _ensure_training_catalog_schema_compat(db)
     course = (
         db.query(training_models.TrainingCourse)
         .filter(
@@ -1835,6 +2448,7 @@ def list_requirements(
     current_user: accounts_models.User = Depends(_require_training_editor),
 ):
     limit, offset = _normalize_pagination(limit, offset)
+    _ensure_training_catalog_schema_compat(db)
 
     q = db.query(training_models.TrainingRequirement).filter(training_models.TrainingRequirement.amo_id == current_user.amo_id)
     if not include_inactive:
@@ -2014,6 +2628,111 @@ def delete_requirement(
 # ---------------------------------------------------------------------------
 # EVENTS
 # ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/calendar",
+    summary="List Training module calendar items for the current AMO",
+)
+def training_calendar(
+    start: Optional[date] = Query(None),
+    end: Optional[date] = Query(None),
+    source: str = Query("all"),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_read_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    today = date.today()
+    start_date = start or today - timedelta(days=30)
+    end_date = end or today + timedelta(days=180)
+    requested_source = (source or "all").strip().lower()
+    amo = db.query(accounts_models.AMO).filter(accounts_models.AMO.id == current_user.amo_id).first()
+    amo_code = getattr(amo, "amo_code", None) or str(current_user.amo_id)
+    items: list[dict[str, Any]] = []
+
+    if requested_source in {"all", "sessions", "events"}:
+        events = (
+            db.query(training_models.TrainingEvent)
+            .filter(
+                training_models.TrainingEvent.amo_id == current_user.amo_id,
+                training_models.TrainingEvent.starts_on.isnot(None),
+                training_models.TrainingEvent.starts_on >= start_date,
+                training_models.TrainingEvent.starts_on <= end_date,
+                training_models.TrainingEvent.status != training_models.TrainingEventStatus.CANCELLED,
+            )
+            .order_by(training_models.TrainingEvent.starts_on.asc(), training_models.TrainingEvent.title.asc())
+            .limit(min(max(limit + offset, 50), 700))
+            .all()
+        )
+        course_ids = {event.course_id for event in events if event.course_id}
+        courses = {
+            course.id: course
+            for course in db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.amo_id == current_user.amo_id, training_models.TrainingCourse.id.in_(course_ids)).all()
+        } if course_ids else {}
+        for event in events:
+            course = courses.get(event.course_id)
+            course_code = getattr(course, "course_id", None) or getattr(course, "course_name", None) or event.title
+            items.append({
+                "id": f"training:event:{event.id}",
+                "module": "training",
+                "entity_type": "training_event",
+                "entity_id": str(event.id),
+                "title": event.title or str(course_code or "Training session"),
+                "date": event.starts_on.isoformat() if event.starts_on else None,
+                "end_date": event.ends_on.isoformat() if event.ends_on else None,
+                "event_type": "training_session",
+                "calendar_group": "training_session",
+                "status": getattr(event.status, "value", str(event.status)),
+                "course_code": course_code,
+                "link": f"/maintenance/{amo_code}/training/schedule?event_id={event.id}",
+            })
+
+    if requested_source in {"all", "expiries", "expiry", "due"}:
+        rows = (
+            db.query(training_models.TrainingRecord, training_models.TrainingCourse, accounts_models.User)
+            .join(training_models.TrainingCourse, training_models.TrainingCourse.id == training_models.TrainingRecord.course_id)
+            .join(accounts_models.User, accounts_models.User.id == training_models.TrainingRecord.user_id)
+            .filter(
+                training_models.TrainingRecord.amo_id == current_user.amo_id,
+                training_models.TrainingRecord.valid_until.isnot(None),
+                training_models.TrainingRecord.valid_until >= start_date,
+                training_models.TrainingRecord.valid_until <= end_date,
+                training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
+            )
+            .order_by(training_models.TrainingRecord.valid_until.asc(), accounts_models.User.full_name.asc())
+            .limit(min(max(limit + offset, 50), 700))
+            .all()
+        )
+        for record, course, user in rows:
+            items.append({
+                "id": f"training:record:{record.id}:expiry",
+                "module": "training",
+                "entity_type": "training_record",
+                "entity_id": str(record.id),
+                "title": f"{user.full_name or user.email or user.id} · {course.course_id or course.course_name} expires",
+                "date": record.valid_until.isoformat() if record.valid_until else None,
+                "event_type": "training_expiry",
+                "calendar_group": "training_expiry",
+                "user_id": str(user.id),
+                "user_name": user.full_name or user.email,
+                "course_code": course.course_id or course.course_name,
+                "link": f"/maintenance/{amo_code}/training/people/{user.id}/course-history",
+            })
+
+    items.sort(key=lambda item: (item.get("date") or "", item.get("title") or ""))
+    visible = items[offset:offset + limit]
+    return {
+        "module": "training",
+        "view": requested_source,
+        "start": start_date.isoformat(),
+        "end": end_date.isoformat(),
+        "items": visible,
+        "limit": limit,
+        "offset": offset,
+        "next_offset": offset + limit if len(items) > offset + limit else None,
+        "has_more": len(items) > offset + limit,
+    }
 
 
 @router.get(
@@ -2216,6 +2935,21 @@ def batch_schedule_event(
     if missing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Some selected users were not found in your AMO: {', '.join(missing)}")
 
+    _validate_manual_batch_schedule(
+        db,
+        amo_id=current_user.amo_id,
+        user_ids=requested_user_ids,
+        trainee_by_id=trainee_by_id,
+        starts_on=payload.starts_on,
+        ends_on=payload.ends_on,
+        delivery_mode=payload.delivery_mode,
+        venue_mode=payload.venue_mode,
+        meeting_link=payload.meeting_link,
+        location=payload.location,
+        notes=payload.notes,
+        allow_online_overlap=bool(getattr(payload, "allow_online_overlap", True)),
+    )
+
     event_meta = {
         "provider_kind": (payload.provider_kind or "INTERNAL").upper(),
         "delivery_mode": (payload.delivery_mode or "CLASSROOM").upper(),
@@ -2323,7 +3057,7 @@ def batch_schedule_event(
     "/events/auto-group-schedule",
     response_model=training_schemas.TrainingAutoGroupScheduleRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Auto-group selected personnel by due course, availability, and urgency (Quality / AMO admin only)",
+    summary="Auto-group selected personnel by due course, due month, availability, and existing training conflicts (Quality / AMO admin only)",
 )
 def auto_group_schedule_events(
     payload: training_schemas.TrainingAutoGroupScheduleCreate,
@@ -2331,7 +3065,7 @@ def auto_group_schedule_events(
     db: Session = Depends(get_db),
     current_user: accounts_models.User = Depends(_require_training_editor),
 ):
-    if not payload.include_due_soon and not payload.include_overdue:
+    if not payload.include_due_soon and not payload.include_overdue and not getattr(payload, "include_not_done", False):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one status bucket to schedule.")
 
     requested_user_ids = [user_id for user_id in dict.fromkeys(payload.user_ids) if user_id]
@@ -2356,13 +3090,24 @@ def auto_group_schedule_events(
         )
         .all()
     )
-    course_by_code = {course.course_id: course for course in active_courses}
+    course_by_code = {str(course.course_id): course for course in active_courses}
+    course_by_id = {str(course.id): course for course in active_courses}
     availability_rows = _latest_availability_rows_for_users(db, amo_id=current_user.amo_id, user_ids=requested_user_ids)
     base_start_on = payload.base_start_on or date.today()
+    max_participants = max(1, min(int(getattr(payload, "max_participants_per_session", 20) or 20), 100))
+    search_days = max(1, min(int(getattr(payload, "schedule_search_days", 120) or 120), 366))
+    avoid_weekends = bool(getattr(payload, "avoid_weekends", True))
+    allow_online_overlap = bool(getattr(payload, "allow_online_overlap", True))
+    new_session_is_online = _session_descriptor_is_online(
+        delivery_mode=payload.delivery_mode,
+        venue_mode=payload.venue_mode,
+        meeting_link=payload.meeting_link,
+        location=payload.location,
+        notes=payload.notes,
+    )
 
-    grouped_assignments: Dict[Tuple[str, date, Optional[date], str], List[str]] = {}
+    candidate_rows: List[dict] = []
     skipped: List[training_schemas.TrainingAutoGroupSkippedRead] = []
-    user_next_free_date: Dict[str, date] = {user_id: base_start_on for user_id in requested_user_ids}
 
     for user_id in requested_user_ids:
         user = trainee_by_id[user_id]
@@ -2371,13 +3116,19 @@ def auto_group_schedule_events(
             continue
 
         evaluation = training_compliance.evaluate_user_training_policy(db, user, required_only=True)
-        due_items = [
-            item for item in evaluation.items
-            if (payload.include_overdue and item.status == "OVERDUE") or (payload.include_due_soon and item.status == "DUE_SOON")
-        ]
+        due_items = []
+        for item in evaluation.items:
+            status_value = str(getattr(item.status, "value", item.status) or "").upper()
+            if payload.include_overdue and status_value == "OVERDUE":
+                due_items.append(item)
+            elif payload.include_due_soon and status_value == "DUE_SOON":
+                due_items.append(item)
+            elif getattr(payload, "include_not_done", False) and status_value == "NOT_DONE":
+                due_items.append(item)
+
         due_items.sort(
             key=lambda item: (
-                0 if item.status == "OVERDUE" else 1,
+                0 if str(getattr(item.status, "value", item.status)).upper() == "OVERDUE" else 1,
                 item.days_until_due if item.days_until_due is not None else 999999,
                 item.extended_due_date or item.valid_until or date.max,
                 item.course_name.lower(),
@@ -2385,11 +3136,11 @@ def auto_group_schedule_events(
         )
 
         if not due_items:
-            skipped.append(training_schemas.TrainingAutoGroupSkippedRead(user_id=user_id, reason="No overdue or due-soon mandatory courses require scheduling."))
+            skipped.append(training_schemas.TrainingAutoGroupSkippedRead(user_id=user_id, reason="No selected mandatory training bucket requires scheduling."))
             continue
 
         for item in due_items:
-            course = course_by_code.get(item.course_id)
+            course = course_by_code.get(str(item.course_id)) or course_by_id.get(str(getattr(item, "course_pk", "") or ""))
             if course is None:
                 skipped.append(
                     training_schemas.TrainingAutoGroupSkippedRead(
@@ -2401,81 +3152,109 @@ def auto_group_schedule_events(
                 )
                 continue
 
-            start_on = max(
-                user_next_free_date.get(user_id, base_start_on),
-                _default_start_date_for_status_item(item=item, course=course, base_start_on=base_start_on),
+            due_date = item.extended_due_date or item.valid_until
+            if isinstance(due_date, datetime):
+                due_date = due_date.date()
+            due_month = due_date.strftime("%Y-%m") if isinstance(due_date, date) else base_start_on.strftime("%Y-%m")
+            candidate_rows.append(
+                {
+                    "user_id": user_id,
+                    "course": course,
+                    "item": item,
+                    "due_date": due_date if isinstance(due_date, date) else None,
+                    "due_month": due_month,
+                    "default_start_on": _default_start_date_for_status_item(item=item, course=course, base_start_on=base_start_on),
+                    "priority": 0 if str(getattr(item.status, "value", item.status)).upper() == "OVERDUE" else 1,
+                }
             )
-            duration_days = max(int(getattr(course, "default_duration_days", 1) or 1), 1)
-            target_dt = datetime.combine(start_on, datetime.min.time(), tzinfo=timezone.utc)
-            availability_bucket, next_available_on = _current_or_next_availability_window(
-                availability_rows.get(user_id, []),
-                target_dt,
-            )
-            if availability_bucket in {"AWAY", "ON_LEAVE"}:
-                if next_available_on is None:
-                    skipped.append(
-                        training_schemas.TrainingAutoGroupSkippedRead(
-                            user_id=user_id,
-                            course_pk=course.id,
-                            course_code=course.course_id,
-                            course_name=course.course_name,
-                            reason="User is unavailable with no return date captured.",
-                            availability_status=availability_bucket,
-                        )
-                    )
-                    continue
-                start_on = max(start_on, next_available_on)
 
-            end_on = start_on + timedelta(days=duration_days - 1)
-            bucket = availability_bucket if availability_bucket in {"AWAY", "ON_LEAVE"} else "ON_DUTY"
-            grouped_assignments.setdefault((course.id, start_on, end_on, bucket), []).append(user_id)
-            user_next_free_date[user_id] = end_on + timedelta(days=1)
+    grouped: Dict[Tuple[str, str], List[dict]] = {}
+    for row in candidate_rows:
+        course = row["course"]
+        grouped.setdefault((str(course.id), str(row["due_month"])), []).append(row)
 
+    planned_by_user: Dict[str, List[Tuple[date, date]]] = {}
     sessions: List[training_schemas.TrainingAutoGroupedSessionRead] = []
     total_enrolled = 0
-    for (course_pk, starts_on, ends_on, bucket), user_ids in sorted(grouped_assignments.items(), key=lambda item: (item[0][1], item[0][0], item[0][3])):
-        course = next((row for row in active_courses if row.id == course_pk), None)
-        if course is None:
-            continue
-        bucket_title = "" if bucket == "ON_DUTY" else f" ({bucket.replace('_', ' ').title()} cohort)"
-        notes = payload.notes or None
-        if bucket != "ON_DUTY":
-            notes = (notes + "\n\n" if notes else "") + f"Auto-group scheduler bucket: {bucket.replace('_', ' ').title()}."
-        event, participants = _create_scheduled_event_with_participants(
-            db,
-            current_user=current_user,
-            background_tasks=background_tasks,
-            course=course,
-            user_ids=user_ids,
-            trainee_by_id=trainee_by_id,
-            starts_on=starts_on,
-            ends_on=ends_on,
-            payload_notes=notes,
-            provider=payload.provider,
-            provider_kind=payload.provider_kind,
-            delivery_mode=payload.delivery_mode,
-            venue_mode=payload.venue_mode,
-            instructor_name=payload.instructor_name,
-            location=payload.location,
-            meeting_link=payload.meeting_link,
-            participant_status=payload.participant_status,
-            allow_self_attendance=payload.allow_self_attendance,
-            auto_issue_certificates=payload.auto_issue_certificates,
-            title_override=f"{course.course_name}{bucket_title}",
-        )
-        sessions.append(
-            training_schemas.TrainingAutoGroupedSessionRead(
-                course_pk=course.id,
-                course_code=course.course_id,
-                course_name=course.course_name,
-                availability_bucket=bucket,
-                start_on=starts_on,
-                end_on=ends_on,
-                event=_event_to_read(event),
-                participants=[_participant_to_read(participant) for participant in participants],
+
+    def _group_sort_key(group_item: Tuple[Tuple[str, str], List[dict]]) -> tuple:
+        _key, entries = group_item
+        earliest_due = min((entry["due_date"] or date.max for entry in entries), default=date.max)
+        priority = min((entry["priority"] for entry in entries), default=9)
+        course = entries[0]["course"]
+        return (priority, earliest_due, course.course_id, _key[1])
+
+    for (_course_pk, due_month), entries in sorted(grouped.items(), key=_group_sort_key):
+        entries.sort(key=lambda entry: (entry["priority"], entry["due_date"] or date.max, entry["user_id"]))
+        for chunk_index in range(0, len(entries), max_participants):
+            chunk = entries[chunk_index:chunk_index + max_participants]
+            if not chunk:
+                continue
+            course = chunk[0]["course"]
+            duration_days = max(int(getattr(course, "default_duration_days", 1) or 1), 1)
+            seed_start = max(base_start_on, min((entry["default_start_on"] for entry in chunk), default=base_start_on))
+            chunk_user_ids = [entry["user_id"] for entry in chunk]
+            starts_on, ends_on, scheduled_user_ids, window_skips = _find_schedulable_group_window(
+                db,
+                amo_id=current_user.amo_id,
+                user_ids=chunk_user_ids,
+                availability_rows=availability_rows,
+                planned_by_user=planned_by_user,
+                seed_start=seed_start,
+                duration_days=duration_days,
+                new_session_is_online=new_session_is_online,
+                allow_online_overlap=allow_online_overlap,
+                avoid_weekends=avoid_weekends,
+                search_days=search_days,
             )
-        )
-        total_enrolled += len(participants)
+            skipped.extend(window_skips)
+            if not starts_on or not ends_on or not scheduled_user_ids:
+                continue
+
+            due_month_title = due_month if due_month else "open due date"
+            scheduler_note = (
+                f"Smart scheduler cohort: grouped by course and due month {due_month_title}. "
+                f"The window was checked against leave/away records and existing non-online training bookings."
+            )
+            notes = payload.notes or None
+            notes = f"{scheduler_note}\n\n{notes}" if notes else scheduler_note
+            event, participants = _create_scheduled_event_with_participants(
+                db,
+                current_user=current_user,
+                background_tasks=background_tasks,
+                course=course,
+                user_ids=scheduled_user_ids,
+                trainee_by_id=trainee_by_id,
+                starts_on=starts_on,
+                ends_on=ends_on,
+                payload_notes=notes,
+                provider=payload.provider,
+                provider_kind=payload.provider_kind,
+                delivery_mode=payload.delivery_mode,
+                venue_mode=payload.venue_mode,
+                instructor_name=payload.instructor_name,
+                location=payload.location,
+                meeting_link=payload.meeting_link,
+                participant_status=payload.participant_status,
+                allow_self_attendance=payload.allow_self_attendance,
+                auto_issue_certificates=payload.auto_issue_certificates,
+                title_override=f"{course.course_name} · {due_month_title} cohort",
+            )
+            for user_id in scheduled_user_ids:
+                planned_by_user.setdefault(user_id, []).append((starts_on, ends_on))
+            sessions.append(
+                training_schemas.TrainingAutoGroupedSessionRead(
+                    course_pk=course.id,
+                    course_code=course.course_id,
+                    course_name=course.course_name,
+                    availability_bucket="SMART_GROUP",
+                    start_on=starts_on,
+                    end_on=ends_on,
+                    event=_event_to_read(event),
+                    participants=[_participant_to_read(participant) for participant in participants],
+                )
+            )
+            total_enrolled += len(participants)
 
     _audit(
         db,
@@ -2486,10 +3265,16 @@ def auto_group_schedule_events(
         entity_id=None,
         details={
             "selected_user_count": len(requested_user_ids),
+            "candidate_count": len(candidate_rows),
             "session_count": len(sessions),
             "total_enrolled": total_enrolled,
             "include_due_soon": payload.include_due_soon,
             "include_overdue": payload.include_overdue,
+            "include_not_done": getattr(payload, "include_not_done", False),
+            "max_participants_per_session": max_participants,
+            "search_days": search_days,
+            "avoid_weekends": avoid_weekends,
+            "allow_online_overlap": allow_online_overlap,
         },
     )
     db.commit()
@@ -2878,6 +3663,7 @@ def get_training_user_detail_bundle(
     db: Session = Depends(get_read_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
+    _ensure_training_catalog_schema_compat(db)
     can_edit = _is_training_editor(current_user)
     target_user_id = user_id if can_edit else current_user.id
     user = (
@@ -2900,7 +3686,7 @@ def get_training_user_detail_bundle(
     )
     hire_date = profile_row.hire_date if profile_row is not None else None
 
-    status_items = training_compliance.evaluate_user_training_policy(db, user, required_only=False).items
+    status_items = training_compliance.evaluate_user_training_policy(db, user, required_only=True).items
 
     record_query = (
         db.query(training_models.TrainingRecord)
@@ -2925,10 +3711,21 @@ def get_training_user_detail_bundle(
                 training_models.TrainingRecord.verified_at,
                 training_models.TrainingRecord.verified_by_user_id,
                 training_models.TrainingRecord.verification_comment,
+                training_models.TrainingRecord.legacy_record_id,
+                training_models.TrainingRecord.source_status,
+                training_models.TrainingRecord.record_status,
+                training_models.TrainingRecord.superseded_by_record_id,
+                training_models.TrainingRecord.superseded_at,
+                training_models.TrainingRecord.purge_after,
+                training_models.TrainingRecord.updated_at,
             ),
             *_record_course_load_options(),
         )
-        .filter(training_models.TrainingRecord.amo_id == current_user.amo_id, training_models.TrainingRecord.user_id == user.id)
+        .filter(
+            training_models.TrainingRecord.amo_id == current_user.amo_id,
+            training_models.TrainingRecord.user_id == user.id,
+            training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
+        )
     )
     records_total = record_query.count()
     records = record_query.order_by(training_models.TrainingRecord.completion_date.desc()).limit(records_limit).all()
@@ -2980,6 +3777,7 @@ def list_training_records_by_users(
     db: Session = Depends(get_read_db),
     current_user: accounts_models.User = Depends(_require_training_editor),
 ):
+    _ensure_training_catalog_schema_compat(db)
     user_ids = [str(user_id).strip() for user_id in payload.user_ids if str(user_id).strip()]
     if not user_ids:
         return []
@@ -3009,12 +3807,20 @@ def list_training_records_by_users(
                 training_models.TrainingRecord.verified_at,
                 training_models.TrainingRecord.verified_by_user_id,
                 training_models.TrainingRecord.verification_comment,
+                training_models.TrainingRecord.legacy_record_id,
+                training_models.TrainingRecord.source_status,
+                training_models.TrainingRecord.record_status,
+                training_models.TrainingRecord.superseded_by_record_id,
+                training_models.TrainingRecord.superseded_at,
+                training_models.TrainingRecord.purge_after,
+                training_models.TrainingRecord.updated_at,
             ),
             *_record_course_load_options(),
         )
         .filter(
             training_models.TrainingRecord.amo_id == current_user.amo_id,
             training_models.TrainingRecord.user_id.in_(user_ids),
+            training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
         )
         .order_by(training_models.TrainingRecord.user_id.asc(), training_models.TrainingRecord.completion_date.desc())
         .offset(offset)
@@ -3043,6 +3849,7 @@ def list_training_records(
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
     limit, offset = _normalize_pagination(limit, offset)
+    _ensure_training_catalog_schema_compat(db)
 
     is_editor = _is_training_editor(current_user)
 
@@ -3074,10 +3881,20 @@ def list_training_records(
                     training_models.TrainingRecord.verified_at,
                     training_models.TrainingRecord.verified_by_user_id,
                     training_models.TrainingRecord.verification_comment,
+                    training_models.TrainingRecord.legacy_record_id,
+                    training_models.TrainingRecord.source_status,
+                    training_models.TrainingRecord.record_status,
+                    training_models.TrainingRecord.superseded_by_record_id,
+                    training_models.TrainingRecord.superseded_at,
+                    training_models.TrainingRecord.purge_after,
+                    training_models.TrainingRecord.updated_at,
                 ),
                 *_record_course_load_options(),
             )
-            .filter(training_models.TrainingRecord.amo_id == current_user.amo_id)
+            .filter(
+                training_models.TrainingRecord.amo_id == current_user.amo_id,
+                training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
+            )
         )
         if user_id:
             q = q.filter(training_models.TrainingRecord.user_id == user_id)
@@ -3109,6 +3926,7 @@ def list_my_training_records(
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
     limit, offset = _normalize_pagination(limit, offset)
+    _ensure_training_catalog_schema_compat(db)
     def _fetch_records():
         return (
             db.query(training_models.TrainingRecord)
@@ -3133,10 +3951,21 @@ def list_my_training_records(
                     training_models.TrainingRecord.verified_at,
                     training_models.TrainingRecord.verified_by_user_id,
                     training_models.TrainingRecord.verification_comment,
+                    training_models.TrainingRecord.legacy_record_id,
+                    training_models.TrainingRecord.source_status,
+                    training_models.TrainingRecord.record_status,
+                    training_models.TrainingRecord.superseded_by_record_id,
+                    training_models.TrainingRecord.superseded_at,
+                    training_models.TrainingRecord.purge_after,
+                    training_models.TrainingRecord.updated_at,
                 ),
             *_record_course_load_options(),
             )
-            .filter(training_models.TrainingRecord.amo_id == current_user.amo_id, training_models.TrainingRecord.user_id == current_user.id)
+            .filter(
+                training_models.TrainingRecord.amo_id == current_user.amo_id,
+                training_models.TrainingRecord.user_id == current_user.id,
+                training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
+            )
             .order_by(training_models.TrainingRecord.completion_date.desc())
             .offset(offset)
             .limit(limit)
@@ -3159,6 +3988,7 @@ def create_training_record(
     db: Session = Depends(get_db),
     current_user: accounts_models.User = Depends(_require_training_editor),
 ):
+    _ensure_training_catalog_schema_compat(db)
     today = date.today()
     if payload.completion_date > today:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Completion date cannot be in the future.")
@@ -3179,8 +4009,10 @@ def create_training_record(
     if not trainee:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target user not found in your AMO.")
 
-    valid_until = _add_months(payload.completion_date, course.frequency_months) if course.frequency_months else None
-    hours_completed = getattr(course, "nominal_hours", None)
+    valid_until = payload.valid_until if payload.valid_until is not None else (_add_months(payload.completion_date, course.frequency_months) if course.frequency_months else None)
+    if valid_until is not None and valid_until < payload.completion_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid-until date cannot be before the completion date.")
+    hours_completed = payload.hours_completed if payload.hours_completed is not None else getattr(course, "nominal_hours", None)
 
     linked_file = None
     if payload.attachment_file_id:
@@ -3204,7 +4036,47 @@ def create_training_record(
     if payload.certificate_reference and linked_file and linked_file.kind != training_models.TrainingFileKind.CERTIFICATE:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The linked attachment must be uploaded as a certificate file.")
 
+    try:
+        record_id, renewed_records = training_record_lifecycle.prepare_training_record_insert(
+            db,
+            amo_id=current_user.amo_id,
+            user_id=trainee.id,
+            course_id=course.id,
+            completion_date=payload.completion_date,
+            confirm_renewal=payload.confirm_renewal,
+            actor_user_id=current_user.id,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "DUPLICATE_TRAINING_RECORD":
+            duplicate = training_record_lifecycle.find_exact_duplicate(
+                db,
+                amo_id=current_user.amo_id,
+                user_id=trainee.id,
+                course_id=course.id,
+                completion_date=payload.completion_date,
+            )
+            raise _training_record_conflict_response(
+                code="DUPLICATE_TRAINING_RECORD",
+                message="A training record for this user, course and completion date already exists. Review the existing record instead of saving a duplicate.",
+                record=duplicate,
+            )
+        if code == "TRAINING_RECORD_RENEWAL_CONFIRMATION_REQUIRED":
+            active_records = training_record_lifecycle.list_active_records_for_user_course(
+                db,
+                amo_id=current_user.amo_id,
+                user_id=trainee.id,
+                course_id=course.id,
+            )
+            raise _training_record_conflict_response(
+                code="TRAINING_RECORD_RENEWAL_CONFIRMATION_REQUIRED",
+                message="This user already has an active record for the selected course. Confirm that the new completion renews the previous record before saving.",
+                records=active_records,
+            )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Training record could not be prepared.")
+
     record = training_models.TrainingRecord(
+        id=record_id,
         amo_id=current_user.amo_id,
         user_id=trainee.id,
         course_id=course.id,
@@ -3217,7 +4089,8 @@ def create_training_record(
         remarks=payload.remarks,
         is_manual_entry=payload.is_manual_entry,
         created_by_user_id=current_user.id,
-        # verification_status defaults to PENDING in model (IOSA-friendly)
+        record_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
+        source_status=training_record_lifecycle.RECORD_STATUS_ACTIVE,
     )
 
     db.add(record)
@@ -3251,9 +4124,10 @@ def create_training_record(
             created_by_user_id=current_user.id,
         )
 
-    # Notify user (in-app + optional email)
     notif_title = "Training record updated"
     notif_body = f"A training record for '{course.course_name}' has been added/updated on your profile."
+    if renewed_records:
+        notif_body += f" The previous active entr{'y was' if len(renewed_records) == 1 else 'ies were'} marked as renewed and hidden from the current record view."
     if seeded_refresher_records:
         notif_body += f" {len(seeded_refresher_records)} linked refresher entr{'y' if len(seeded_refresher_records) == 1 else 'ies'} were auto-seeded from the initial completion."
     _create_notification(
@@ -3276,8 +4150,14 @@ def create_training_record(
         actor_user_id=current_user.id,
         action="RECORD_CREATE",
         entity_type="TrainingRecord",
-        entity_id=None,
-        details={"user_id": trainee.id, "course_id": course.id, "completion_date": str(payload.completion_date), "auto_seeded_refresher_count": len(seeded_refresher_records)},
+        entity_id=record.id,
+        details={
+            "user_id": trainee.id,
+            "course_id": course.id,
+            "completion_date": str(payload.completion_date),
+            "renewed_record_ids": [row.id for row in renewed_records],
+            "auto_seeded_refresher_count": len(seeded_refresher_records),
+        },
     )
 
     db.commit()
@@ -3315,11 +4195,31 @@ def update_training_record(
     if payload.completion_date is not None:
         if payload.completion_date > date.today():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Completion date cannot be in the future.")
+        duplicate = (
+            db.query(training_models.TrainingRecord)
+            .options(*_record_course_load_options())
+            .filter(
+                training_models.TrainingRecord.amo_id == current_user.amo_id,
+                training_models.TrainingRecord.user_id == record.user_id,
+                training_models.TrainingRecord.course_id == record.course_id,
+                training_models.TrainingRecord.completion_date == payload.completion_date,
+                training_models.TrainingRecord.id != record.id,
+            )
+            .first()
+        )
+        if duplicate is not None:
+            raise _training_record_conflict_response(
+                code="DUPLICATE_TRAINING_RECORD",
+                message="Another training record for this user, course and completion date already exists.",
+                record=duplicate,
+            )
         record.completion_date = payload.completion_date
         if payload.valid_until is None:
             record.valid_until = _add_months(payload.completion_date, course.frequency_months) if course.frequency_months else None
 
     if payload.valid_until is not None:
+        if payload.valid_until < record.completion_date:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid-until date cannot be before the completion date.")
         record.valid_until = payload.valid_until
     if payload.hours_completed is not None:
         record.hours_completed = payload.hours_completed
@@ -4153,7 +5053,8 @@ def get_my_training_status(
     db: Session = Depends(get_read_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
-    return training_compliance.evaluate_user_training_policy(db, current_user, required_only=False).items
+    _ensure_training_catalog_schema_compat(db)
+    return training_compliance.evaluate_user_training_policy(db, current_user, required_only=True).items
 
 
 @router.get(
@@ -4165,6 +5066,7 @@ def get_my_required_training_status(
     db: Session = Depends(get_read_db),
     current_user: accounts_models.User = Depends(get_current_active_user),
 ):
+    _ensure_training_catalog_schema_compat(db)
     return training_compliance.evaluate_user_training_policy(db, current_user, required_only=True).items
 
 
@@ -4179,6 +5081,7 @@ def get_user_training_status(
     db: Session = Depends(get_read_db),
     current_user: accounts_models.User = Depends(_require_training_editor),
 ):
+    _ensure_training_catalog_schema_compat(db)
     user = (
         db.query(accounts_models.User)
         .filter(accounts_models.User.id == user_id, accounts_models.User.amo_id == current_user.amo_id)
@@ -4200,6 +5103,7 @@ def get_bulk_training_status_for_users(
     db: Session = Depends(get_db),
     current_user: accounts_models.User = Depends(_require_training_editor),
 ):
+    _ensure_training_catalog_schema_compat(db)
     user_ids = sorted({(user_id or "").strip() for user_id in payload.user_ids if (user_id or "").strip()})
     if not user_ids:
         return training_schemas.TrainingStatusBulkResponse(users={})
@@ -4311,6 +5215,77 @@ def run_training_notification_sweep(
 # ---------------------------------------------------------------------------
 
 
+def _ensure_training_report_settings_table(db: Session) -> None:
+    """Create the tenant report settings table if Alembic was stamped before DDL ran."""
+
+    bind = db.get_bind()
+    inspector = inspect(bind)
+    if inspector.has_table("training_report_settings"):
+        return
+    db.execute(text("""
+        CREATE TABLE IF NOT EXISTS training_report_settings (
+            id VARCHAR(36) PRIMARY KEY,
+            amo_id VARCHAR(36) NOT NULL REFERENCES amos(id) ON DELETE CASCADE,
+            title VARCHAR(255) NOT NULL DEFAULT 'Personnel Training Record',
+            subtitle TEXT,
+            form_no VARCHAR(64) NOT NULL DEFAULT 'QAM/49A',
+            issue_date VARCHAR(64) NOT NULL DEFAULT '1 Sept 25',
+            revision VARCHAR(32) NOT NULL DEFAULT '00',
+            show_compliance_summary BOOLEAN NOT NULL DEFAULT TRUE,
+            show_training_history BOOLEAN NOT NULL DEFAULT TRUE,
+            show_scheduled_events BOOLEAN NOT NULL DEFAULT TRUE,
+            show_deferrals BOOLEAN NOT NULL DEFAULT TRUE,
+            footer_note TEXT,
+            updated_by_user_id VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_training_report_settings_amo UNIQUE (amo_id)
+        )
+    """))
+    db.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_training_report_settings_amo
+        ON training_report_settings (amo_id)
+    """))
+    db.execute(text("""
+        CREATE INDEX IF NOT EXISTS ix_training_report_settings_updated_by_user_id
+        ON training_report_settings (updated_by_user_id)
+    """))
+
+
+def _training_report_settings_payload(row: Optional[training_models.TrainingReportSettings]) -> dict[str, Any]:
+    return {
+        "title": getattr(row, "title", None) or "Personnel Training Record",
+        "subtitle": getattr(row, "subtitle", None),
+        "form_no": getattr(row, "form_no", None) or _TRAINING_RECORD_FORM_NO,
+        "issue_date": getattr(row, "issue_date", None) or _TRAINING_RECORD_ISSUE_DATE,
+        "revision": getattr(row, "revision", None) or _TRAINING_RECORD_REVISION,
+        "show_compliance_summary": bool(getattr(row, "show_compliance_summary", True)),
+        "show_training_history": bool(getattr(row, "show_training_history", True)),
+        "show_scheduled_events": bool(getattr(row, "show_scheduled_events", True)),
+        "show_deferrals": bool(getattr(row, "show_deferrals", True)),
+        "footer_note": getattr(row, "footer_note", None),
+    }
+
+
+def _get_or_create_training_report_settings(db: Session, *, amo_id: str, actor_user_id: Optional[str] = None) -> training_models.TrainingReportSettings:
+    _ensure_training_report_settings_table(db)
+    row = db.query(training_models.TrainingReportSettings).filter(training_models.TrainingReportSettings.amo_id == amo_id).first()
+    if row:
+        return row
+    row = training_models.TrainingReportSettings(
+        amo_id=amo_id,
+        title="Personnel Training Record",
+        subtitle="Controlled training record generated from the Training module profile.",
+        form_no=_TRAINING_RECORD_FORM_NO,
+        issue_date=_TRAINING_RECORD_ISSUE_DATE,
+        revision=_TRAINING_RECORD_REVISION,
+        updated_by_user_id=actor_user_id,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
 def _serialize_for_pdf_signature(value):
     if isinstance(value, (date, datetime)):
         return value.isoformat()
@@ -4319,7 +5294,7 @@ def _serialize_for_pdf_signature(value):
     return value
 
 
-def _build_training_user_pdf_cache_key(*, user, status_items, records, courses, upcoming_events, deferrals) -> str:
+def _build_training_user_pdf_cache_key(*, user, status_items, records, courses, upcoming_events, deferrals, verification_url: Optional[str] = None, report_settings: Optional[dict[str, Any]] = None) -> str:
     payload = {
         "today": date.today().isoformat(),
         "user": {
@@ -4389,6 +5364,8 @@ def _build_training_user_pdf_cache_key(*, user, status_items, records, courses, 
             }
             for row in deferrals
         ],
+        "verification_url": verification_url,
+        "report_settings": report_settings or {},
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=_serialize_for_pdf_signature).encode("utf-8")).hexdigest()
 
@@ -4475,18 +5452,29 @@ def _get_training_user_record_export_context(db: Session, *, amo_id: str, user_i
                 training_models.TrainingRecord.remarks,
                 training_models.TrainingRecord.verification_status,
                 training_models.TrainingRecord.created_at,
+                training_models.TrainingRecord.legacy_record_id,
+                training_models.TrainingRecord.source_status,
+                training_models.TrainingRecord.record_status,
+                training_models.TrainingRecord.superseded_by_record_id,
+                training_models.TrainingRecord.superseded_at,
+                training_models.TrainingRecord.purge_after,
+                training_models.TrainingRecord.updated_at,
             ),
             *_record_course_load_options(),
         )
-        .filter(training_models.TrainingRecord.amo_id == amo_id, training_models.TrainingRecord.user_id == user.id)
+        .filter(
+            training_models.TrainingRecord.amo_id == amo_id,
+            training_models.TrainingRecord.user_id == user.id,
+            training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
+        )
         .order_by(training_models.TrainingRecord.completion_date.desc(), training_models.TrainingRecord.created_at.desc())
         .all()
     )
     display_records = [record for record in records if _is_record_active_for_display(record)]
 
-    evaluation = training_compliance.evaluate_user_training_policy(db, user, required_only=False)
+    evaluation = training_compliance.evaluate_user_training_policy(db, user, required_only=True)
     course_ids = {record.course_id for record in records}
-    course_ids.update({course.id for course in training_compliance.get_courses_for_user(db, user, required_only=False)})
+    course_ids.update({course.id for course in training_compliance.get_courses_for_user(db, user, required_only=True)})
     courses = []
     if course_ids:
         courses = (
@@ -4516,6 +5504,13 @@ def _get_training_user_record_export_context(db: Session, *, amo_id: str, user_i
         .all()
     )
 
+    try:
+        report_settings_row = db.query(training_models.TrainingReportSettings).filter(training_models.TrainingReportSettings.amo_id == amo_id).first()
+    except Exception:
+        report_settings_row = None
+    report_settings = _training_report_settings_payload(report_settings_row)
+    report_token = _training_report_token(amo_id=str(amo_id), user_id=str(user.id))
+    verification_url = _training_profile_verification_url(user_id=str(user.id), amo=amo, db=db, report_token=report_token)
     cache_key = _build_training_user_pdf_cache_key(
         user=user,
         status_items=evaluation.items,
@@ -4523,6 +5518,8 @@ def _get_training_user_record_export_context(db: Session, *, amo_id: str, user_i
         courses=courses,
         upcoming_events=upcoming_events,
         deferrals=deferrals,
+        verification_url=verification_url,
+        report_settings=report_settings,
     )
 
     return {
@@ -4535,6 +5532,8 @@ def _get_training_user_record_export_context(db: Session, *, amo_id: str, user_i
         "upcoming_events": upcoming_events,
         "deferrals": deferrals,
         "cache_key": cache_key,
+        "verification_url": verification_url,
+        "report_settings": report_settings,
     }
 
 
@@ -4567,6 +5566,8 @@ def _build_and_cache_training_user_record_pdf(*, amo_id: str, user_id: str) -> O
                 course_by_id=context["course_by_id"],
                 upcoming_events=context["upcoming_events"],
                 deferrals=context["deferrals"],
+                verification_url=context.get("verification_url"),
+                report_settings=context.get("report_settings"),
             )
             return _write_training_user_pdf_cache(user_id=user_id, cache_key=context["cache_key"], pdf_bytes=pdf_bytes)
     except Exception:
@@ -4587,6 +5588,55 @@ def _queue_training_user_pdf_warm(*, amo_id: str, user_id: str) -> bool:
     return True
 
 
+@router.get(
+    "/report-settings",
+    response_model=training_schemas.TrainingReportSettingsRead,
+    summary="Get tenant training report PDF settings",
+)
+def get_training_report_settings(
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    row = _get_or_create_training_report_settings(db, amo_id=current_user.amo_id, actor_user_id=current_user.id)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.patch(
+    "/report-settings",
+    response_model=training_schemas.TrainingReportSettingsRead,
+    summary="Update tenant training report PDF settings",
+)
+def update_training_report_settings(
+    payload: training_schemas.TrainingReportSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    row = _get_or_create_training_report_settings(db, amo_id=current_user.amo_id, actor_user_id=current_user.id)
+    updates = payload.model_dump(exclude_unset=True)
+    text_fields = {"title": 255, "form_no": 64, "issue_date": 64, "revision": 32}
+    for field, max_len in text_fields.items():
+        if field in updates:
+            value = str(updates[field] or "").strip()
+            if not value:
+                raise HTTPException(status_code=400, detail=f"{field} cannot be blank.")
+            setattr(row, field, value[:max_len])
+    for field in ("subtitle", "footer_note"):
+        if field in updates:
+            setattr(row, field, (str(updates[field]).strip() if updates[field] is not None else None))
+    for field in ("show_compliance_summary", "show_training_history", "show_scheduled_events", "show_deferrals"):
+        if field in updates:
+            setattr(row, field, bool(updates[field]))
+    row.updated_by_user_id = current_user.id
+    row.updated_at = datetime.now(timezone.utc)
+    db.add(row)
+    _clear_training_user_pdf_cache("*")
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 @router.post(
     "/users/{user_id}/record-pdf/warm",
     summary="Warm and cache a personnel training record PDF for a specific user",
@@ -4604,15 +5654,15 @@ def warm_training_user_record_pdf(
     # cheap in-progress response keeps the UI responsive and prevents duplicate
     # database work.
     if _is_training_user_pdf_warming(user_id):
-        return {"queued": False, "ready": False}
+        return {"queued": False, "ready": False, "preview_url": f"/training/users/{user_id}/record-pdf/preview", "download_url": f"/training/users/{user_id}/record-pdf"}
 
     context = _get_training_user_record_export_context(db, amo_id=current_user.amo_id, user_id=user_id)
     cache_path = _training_user_pdf_cache_path(user_id, context["cache_key"])
     if cache_path.exists():
-        return {"queued": False, "ready": True}
+        return {"queued": False, "ready": True, "preview_url": f"/training/users/{user_id}/record-pdf/preview", "download_url": f"/training/users/{user_id}/record-pdf", "verify_url": context.get("verification_url")}
 
     queued = _queue_training_user_pdf_warm(amo_id=current_user.amo_id, user_id=user_id)
-    return {"queued": queued, "ready": False}
+    return {"queued": queued, "ready": False, "preview_url": f"/training/users/{user_id}/record-pdf/preview", "download_url": f"/training/users/{user_id}/record-pdf", "verify_url": context.get("verification_url")}
 
 
 @router.get(
@@ -4642,6 +5692,42 @@ def export_training_user_record_pdf(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(
+    "/users/{user_id}/record-pdf/preview",
+    summary="Preview personnel training record PDF inline for a specific user",
+)
+def preview_training_user_record_pdf(
+    user_id: str,
+    db: Session = Depends(get_read_db),
+    current_user: accounts_models.User = Depends(get_current_active_user),
+):
+    if current_user.id != user_id and not _is_training_editor(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges to preview training records")
+    context = _get_training_user_record_export_context(db, amo_id=current_user.amo_id, user_id=user_id)
+    user = context["user"]
+    cache_path = _training_user_pdf_cache_path(user_id, context["cache_key"])
+    if not cache_path.exists():
+        pdf_bytes = _build_training_user_record_pdf_bytes(
+            user=user,
+            amo=context.get("amo"),
+            logo_path=context.get("logo_path"),
+            status_items=context["evaluation"].items,
+            records=context["records"],
+            course_by_id=context["course_by_id"],
+            upcoming_events=context["upcoming_events"],
+            deferrals=context["deferrals"],
+            verification_url=context.get("verification_url"),
+            report_settings=context.get("report_settings"),
+        )
+        cache_path = _write_training_user_pdf_cache(user_id=user_id, cache_key=context["cache_key"], pdf_bytes=pdf_bytes)
+    filename = f"{(user.full_name or user.id).replace(' ', '_')}_training_record.pdf"
+    return StreamingResponse(
+        io.BytesIO(cache_path.read_bytes()),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"', "X-Training-Verify-Url": str(context.get("verification_url") or "")},
     )
 
 
@@ -4707,7 +5793,11 @@ def get_training_dashboard_summary(
 
     records = (
         db.query(training_models.TrainingRecord)
-        .filter(training_models.TrainingRecord.amo_id == current_user.amo_id, training_models.TrainingRecord.course_id.in_(course_ids))
+        .filter(
+            training_models.TrainingRecord.amo_id == current_user.amo_id,
+            training_models.TrainingRecord.course_id.in_(course_ids),
+            training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
+        )
         .order_by(
             training_models.TrainingRecord.user_id.asc(),
             training_models.TrainingRecord.course_id.asc(),
@@ -4913,7 +6003,7 @@ def _build_training_certificate_pdf_bytes(
     w, h = info_table.wrap(page_width - 110 * mm, 40 * mm)
     info_table.drawOn(pdf, 34 * mm, page_height - 195 * mm)
 
-    verify_value = f"{_TRAINING_RECORD_PUBLIC_BASE_URL}/verify/certificate/{issue.certificate_number}" if _TRAINING_RECORD_PUBLIC_BASE_URL else f"/verify/certificate/{issue.certificate_number}"
+    verify_value = issue.qr_value or _certificate_verification_url(issue.certificate_number, html_page=True)
     qr_drawing = _build_training_profile_qr_drawing(verify_value, size_mm=24)
     renderPDF.draw(qr_drawing, pdf, page_width - 62 * mm, page_height - 178 * mm)
     barcode = code128.Code128(issue.certificate_number, barHeight=12 * mm, barWidth=0.32)
@@ -5015,6 +6105,10 @@ def download_certificate_artifact(
         issue = _issue_certificate_for_record(db, record=record, amo_id=current_user.amo_id, actor_user_id=current_user.id)
         db.commit()
         db.refresh(record)
+    elif not issue.qr_value or "/verify/certificate/" in str(issue.qr_value):
+        issue.qr_value = _certificate_verification_url(issue.certificate_number, db, html_page=True)
+        db.add(issue)
+        db.commit()
 
     user = db.query(accounts_models.User).filter(accounts_models.User.id == record.user_id, accounts_models.User.amo_id == current_user.amo_id).first()
     course = db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.id == record.course_id, training_models.TrainingCourse.amo_id == current_user.amo_id).first()
@@ -5112,6 +6206,10 @@ def download_certificate_artifacts_batch(
             if not issue:
                 issue = _issue_certificate_for_record(db, record=record, amo_id=current_user.amo_id, actor_user_id=current_user.id)
                 db.flush()
+            elif not issue.qr_value or "/verify/certificate/" in str(issue.qr_value):
+                issue.qr_value = _certificate_verification_url(issue.certificate_number, db, html_page=True)
+                db.add(issue)
+                db.flush()
             pdf_bytes = _build_training_certificate_pdf_bytes(
                 user=user,
                 course=course,
@@ -5181,6 +6279,8 @@ def export_training_user_record_pdfs_batch(
                     course_by_id=context["course_by_id"],
                     upcoming_events=context["upcoming_events"],
                     deferrals=context["deferrals"],
+                    verification_url=context.get("verification_url"),
+                    report_settings=context.get("report_settings"),
                 )
                 _write_training_user_pdf_cache(user_id=user_id, cache_key=context["cache_key"], pdf_bytes=pdf_bytes)
             base_name = f"{_download_filename_token(user.full_name or user.id)}_training_record.pdf"
@@ -5200,14 +6300,344 @@ def export_training_user_record_pdfs_batch(
     )
 
 
-@public_router.get(
-    "/certificates/verify/{certificate_number}",
-    summary="Public certificate authenticity verification",
+
+def _resolve_public_amo(db: Session, amo_identifier: Optional[str], *, user_id: Optional[str] = None) -> Optional[accounts_models.AMO]:
+    cleaned = str(amo_identifier or "").strip()
+    query = db.query(accounts_models.AMO).filter(accounts_models.AMO.is_active.is_(True))
+    if cleaned:
+        return query.filter(
+            or_(
+                accounts_models.AMO.id == cleaned,
+                accounts_models.AMO.amo_code == cleaned,
+                accounts_models.AMO.login_slug == cleaned,
+            )
+        ).first()
+    if user_id:
+        user = db.query(accounts_models.User).filter(accounts_models.User.id == user_id).first()
+        if user and getattr(user, "amo_id", None):
+            return query.filter(accounts_models.AMO.id == user.amo_id).first()
+    return None
+
+
+def _public_training_profile_payload(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    record_id: Optional[str] = None,
+) -> dict[str, Any]:
+    user = db.query(accounts_models.User).filter(accounts_models.User.id == user_id, accounts_models.User.amo_id == amo_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training profile not found.")
+    amo = db.query(accounts_models.AMO).filter(accounts_models.AMO.id == amo_id).first()
+    q = db.query(training_models.TrainingRecord).filter(
+        training_models.TrainingRecord.amo_id == amo_id,
+        training_models.TrainingRecord.user_id == user.id,
+        training_record_lifecycle.active_records_filter(training_models.TrainingRecord),
+    )
+    if record_id:
+        q = q.filter(training_models.TrainingRecord.id == record_id)
+    records = q.order_by(training_models.TrainingRecord.completion_date.desc(), training_models.TrainingRecord.created_at.desc()).all()
+    course_ids = {record.course_id for record in records}
+    courses = {
+        str(course.id): course
+        for course in db.query(training_models.TrainingCourse).filter(training_models.TrainingCourse.amo_id == amo_id, training_models.TrainingCourse.id.in_(course_ids)).all()
+    } if course_ids else {}
+    today = date.today()
+    profile_records: list[dict[str, Any]] = []
+    for record in records:
+        course = courses.get(str(record.course_id))
+        row_status = "EXPIRED" if record.valid_until and record.valid_until < today else "CURRENT"
+        verification_status = getattr(record, "verification_status", None)
+        profile_records.append({
+            "record_id": str(record.id),
+            "course_id": getattr(course, "course_id", None) or str(record.course_id),
+            "course_name": getattr(course, "course_name", None) or "Unknown course",
+            "completion_date": str(record.completion_date) if record.completion_date else None,
+            "valid_until": str(record.valid_until) if record.valid_until else None,
+            "status": row_status,
+            "verification_status": getattr(verification_status, "value", verification_status),
+            "certificate_reference": record.certificate_reference,
+            "source_status": record.source_status,
+        })
+    return {
+        "status": "VERIFIED",
+        "tenant": {
+            "amo_id": str(getattr(amo, "id", amo_id) or amo_id),
+            "amo_code": getattr(amo, "amo_code", None),
+            "name": getattr(amo, "name", None),
+        },
+        "user": {
+            "user_id": str(user.id),
+            "full_name": user.full_name,
+            "staff_code": getattr(user, "staff_code", None),
+            "position_title": getattr(user, "position_title", None),
+            "department": getattr(user, "department", None),
+            "is_active": bool(getattr(user, "is_active", False)),
+        },
+        "records": profile_records,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _training_profile_html(payload: dict[str, Any]) -> HTMLResponse:
+    user = payload.get("user") or {}
+    tenant = payload.get("tenant") or {}
+    rows = []
+    for record in payload.get("records") or []:
+        badge_class = "warning" if record.get("status") == "EXPIRED" else ""
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(record.get('course_id') or ''))}</td>"
+            f"<td>{html.escape(str(record.get('course_name') or ''))}</td>"
+            f"<td>{html.escape(str(record.get('completion_date') or ''))}</td>"
+            f"<td>{html.escape(str(record.get('valid_until') or ''))}</td>"
+            f"<td><span class='badge {badge_class}'>{html.escape(str(record.get('status') or ''))}</span></td>"
+            f"<td>{html.escape(str(record.get('certificate_reference') or ''))}</td>"
+            "</tr>"
+        )
+    body = f"""
+<p class=\"muted\">Verified training profile from AMO Portal.</p>
+<table>
+<tr><th>Organisation</th><td>{html.escape(str(tenant.get('name') or tenant.get('amo_code') or ''))}</td></tr>
+<tr><th>Name</th><td>{html.escape(str(user.get('full_name') or ''))}</td></tr>
+<tr><th>Staff code</th><td>{html.escape(str(user.get('staff_code') or ''))}</td></tr>
+<tr><th>Position</th><td>{html.escape(str(user.get('position_title') or ''))}</td></tr>
+<tr><th>Generated</th><td>{html.escape(str(payload.get('generated_at') or ''))}</td></tr>
+</table>
+<h2>Current training records</h2>
+<table>
+<thead><tr><th>Course ID</th><th>Course</th><th>Completed</th><th>Valid until</th><th>Status</th><th>Certificate</th></tr></thead>
+<tbody>{''.join(rows) or '<tr><td colspan="6">No current training records found.</td></tr>'}</tbody>
+</table>
+"""
+    return _verification_html_page("Training record verified", body)
+
+
+def _validate_training_auditor_access(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    access_code: str,
+    token: Optional[str] = None,
+) -> training_models.TrainingAuditorAccessGrant:
+    code_hash = _sha256_hex(_normalise_access_code(access_code))
+    if not code_hash or code_hash == _sha256_hex(""):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access code is required.")
+    now = datetime.now(timezone.utc)
+    query = db.query(training_models.TrainingAuditorAccessGrant).filter(
+        training_models.TrainingAuditorAccessGrant.amo_id == amo_id,
+        training_models.TrainingAuditorAccessGrant.target_user_id == user_id,
+        training_models.TrainingAuditorAccessGrant.purpose == "USER_TRAINING_PROFILE",
+        training_models.TrainingAuditorAccessGrant.revoked_at.is_(None),
+        training_models.TrainingAuditorAccessGrant.expires_at >= now,
+    )
+    if token:
+        query = query.filter(training_models.TrainingAuditorAccessGrant.token_hash == _sha256_hex(str(token).strip()))
+    for grant in query.order_by(training_models.TrainingAuditorAccessGrant.expires_at.desc()).limit(50).all():
+        if not hmac.compare_digest(str(grant.access_code_hash or ""), code_hash):
+            continue
+        if grant.max_uses is not None and grant.use_count >= grant.max_uses:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access code use limit has been reached.")
+        grant.use_count = int(grant.use_count or 0) + 1
+        grant.last_used_at = now
+        db.add(grant)
+        db.commit()
+        return grant
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired access code.")
+
+
+def _training_access_form(*, request: Request, amo: Optional[str], token: Optional[str], message: Optional[str] = None, status_code: int = 200) -> HTMLResponse:
+    action = html.escape(str(request.url.replace_query_params(format="html", amo=amo or "", token=token or "")))
+    msg = f"<p class='error'>{html.escape(message)}</p>" if message else ""
+    body = f"""
+<p class=\"muted\">Enter the auditor access code issued by the AMO for this audit window. The same code can be reused until the window expires unless the issuer set a use limit.</p>
+{msg}
+<form method=\"get\" action=\"{action}\">
+  <input type=\"hidden\" name=\"format\" value=\"html\" />
+  <input type=\"hidden\" name=\"amo\" value=\"{html.escape(str(amo or ''))}\" />
+  <input type=\"hidden\" name=\"token\" value=\"{html.escape(str(token or ''))}\" />
+  <label for=\"code\">Auditor access code</label>
+  <input id=\"code\" name=\"code\" autocomplete=\"one-time-code\" />
+  <button type=\"submit\">Verify training record</button>
+</form>
+"""
+    return _verification_html_page("Training record verification", body, status_code=status_code)
+
+
+@router.post(
+    "/auditor-access",
+    response_model=training_schemas.TrainingAuditorAccessRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a time-limited guest auditor training-record verification code",
 )
-def verify_certificate_public(certificate_number: str, db: Session = Depends(get_db)):
+def create_training_auditor_access(
+    payload: training_schemas.TrainingAuditorAccessCreate,
+    db: Session = Depends(get_db),
+    current_user: accounts_models.User = Depends(_require_training_editor),
+):
+    target_user = db.query(accounts_models.User).filter(
+        accounts_models.User.id == payload.target_user_id,
+        accounts_models.User.amo_id == current_user.amo_id,
+    ).first()
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found in your AMO.")
+    target_record = None
+    if payload.target_record_id:
+        target_record = db.query(training_models.TrainingRecord).filter(
+            training_models.TrainingRecord.id == payload.target_record_id,
+            training_models.TrainingRecord.amo_id == current_user.amo_id,
+            training_models.TrainingRecord.user_id == target_user.id,
+        ).first()
+        if not target_record:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target training record not found for this user.")
+
+    raw_code = _new_access_code()
+    raw_token = secrets.token_urlsafe(32)
+    amo = db.query(accounts_models.AMO).filter(accounts_models.AMO.id == current_user.amo_id).first()
+    amo_identifier = getattr(amo, "login_slug", None) or getattr(amo, "amo_code", None) or str(current_user.amo_id)
+    verify_path = f"/public/training/users/{quote(str(target_user.id), safe='')}/verify?format=html&amo={quote(str(amo_identifier), safe='')}&token={quote(raw_token, safe='')}"
+    verify_url = _join_public_url(verify_path, db)
+    grant = training_models.TrainingAuditorAccessGrant(
+        amo_id=current_user.amo_id,
+        purpose="USER_TRAINING_PROFILE",
+        target_user_id=str(target_user.id),
+        target_record_id=str(target_record.id) if target_record else None,
+        token_hash=_sha256_hex(raw_token),
+        access_code_hash=_sha256_hex(_normalise_access_code(raw_code)),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=payload.expires_in_hours),
+        max_uses=payload.max_uses,
+        use_count=0,
+        created_by_user_id=current_user.id,
+        metadata_json={
+            "auditor_name": payload.auditor_name,
+            "audit_reference": payload.audit_reference,
+            "notes": payload.notes,
+        },
+    )
+    db.add(grant)
+    db.flush()
+    _audit(
+        db,
+        amo_id=current_user.amo_id,
+        actor_user_id=current_user.id,
+        action="AUDITOR_ACCESS_CREATE",
+        entity_type="TrainingAuditorAccessGrant",
+        entity_id=grant.id,
+        details={
+            "target_user_id": str(target_user.id),
+            "target_record_id": str(target_record.id) if target_record else None,
+            "expires_at": grant.expires_at.isoformat(),
+            "max_uses": grant.max_uses,
+        },
+    )
+    db.commit()
+    db.refresh(grant)
+    return training_schemas.TrainingAuditorAccessRead(
+        id=str(grant.id),
+        amo_id=str(grant.amo_id),
+        purpose=str(grant.purpose),
+        target_user_id=str(grant.target_user_id) if grant.target_user_id else None,
+        target_record_id=str(grant.target_record_id) if grant.target_record_id else None,
+        expires_at=grant.expires_at,
+        max_uses=grant.max_uses,
+        use_count=grant.use_count,
+        verify_url=verify_url,
+        access_code=raw_code,
+        created_at=grant.created_at,
+    )
+
+
+@public_router.get(
+    "/training/users/{user_id}/verify",
+    summary="Guest auditor personnel training profile verification",
+)
+def verify_training_profile_public(
+    user_id: str,
+    request: Request,
+    amo: Optional[str] = Query(None),
+    code: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+    report_token: Optional[str] = Query(None),
+    response_format: Optional[str] = Query(None, alias="format"),
+    db: Session = Depends(get_db),
+):
+    amo_row = _resolve_public_amo(db, amo, user_id=user_id)
+    if not amo_row:
+        if _wants_html(request, response_format):
+            return _verification_html_page("Training record verification", "<p class='error'>Organisation not found.</p>", status_code=404)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organisation not found.")
+    if report_token and _verify_training_report_token(report_token, amo_id=str(amo_row.id), user_id=user_id):
+        payload = _public_training_profile_payload(db, amo_id=str(amo_row.id), user_id=user_id)
+        if _wants_html(request, response_format):
+            return _training_profile_html(payload)
+        return JSONResponse(status_code=200, content=payload, media_type="application/json")
+    if not code:
+        if _wants_html(request, response_format):
+            return _training_access_form(request=request, amo=amo, token=token)
+        return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content={"status": "ACCESS_REQUIRED", "message": "Auditor access code is required."})
+    try:
+        grant = _validate_training_auditor_access(db, amo_id=str(amo_row.id), user_id=user_id, access_code=code, token=token)
+        payload = _public_training_profile_payload(db, amo_id=str(amo_row.id), user_id=user_id, record_id=grant.target_record_id)
+    except HTTPException as exc:
+        if _wants_html(request, response_format):
+            return _training_access_form(request=request, amo=amo, token=token, message=str(exc.detail), status_code=exc.status_code)
+        raise
+    if _wants_html(request, response_format):
+        return _training_profile_html(payload)
+    return JSONResponse(status_code=200, content=payload, media_type="application/json")
+
+
+@public_router.post(
+    "/training/users/{user_id}/verify",
+    summary="Guest auditor personnel training profile verification via JSON body",
+)
+def verify_training_profile_public_post(
+    user_id: str,
+    request: Request,
+    payload: dict = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+):
+    amo_identifier = payload.get("amo") or payload.get("amo_code") or payload.get("tenant")
+    code = payload.get("code") or payload.get("access_code")
+    token = payload.get("token")
+    report_token = payload.get("report_token")
+    response_format = payload.get("format")
+    amo_row = _resolve_public_amo(db, amo_identifier, user_id=user_id)
+    if not amo_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organisation not found.")
+    if report_token and _verify_training_report_token(str(report_token), amo_id=str(amo_row.id), user_id=user_id):
+        profile = _public_training_profile_payload(db, amo_id=str(amo_row.id), user_id=user_id)
+    else:
+        grant = _validate_training_auditor_access(db, amo_id=str(amo_row.id), user_id=user_id, access_code=str(code or ""), token=token)
+        profile = _public_training_profile_payload(db, amo_id=str(amo_row.id), user_id=user_id, record_id=grant.target_record_id)
+    if _wants_html(request, response_format):
+        return _training_profile_html(profile)
+    return JSONResponse(status_code=200, content=profile, media_type="application/json")
+
+
+def verify_certificate_public(
+    certificate_number: str,
+    db: Session,
+    request: Optional[Any] = None,
+    response_format: Optional[str] = None,
+):
     token = (certificate_number or "").strip()
+
+    def _respond(payload: dict, *, status_code: int = 200):
+        if _wants_html(request, response_format):
+            rows = "".join(
+                f"<tr><th>{html.escape(str(k).replace('_', ' ').title())}</th><td>{html.escape(str(v or ''))}</td></tr>"
+                for k, v in payload.items()
+            )
+            badge_class = "error" if payload.get("status") in {"NOT_FOUND", "MALFORMED", "UNAVAILABLE"} else ("warning" if payload.get("status") == "EXPIRED" else "")
+            body = f"<p><span class='badge {badge_class}'>{html.escape(str(payload.get('status') or ''))}</span></p><table>{rows}</table>"
+            return _verification_html_page("Certificate verification", body, status_code=status_code)
+        return JSONResponse(status_code=status_code, content=payload, media_type="application/json")
+
     if len(token) < 6:
-        return JSONResponse(status_code=400, content={"status": "MALFORMED", "certificate_number": token, "message": "Malformed certificate number."}, media_type="application/json")
+        return _respond({"status": "MALFORMED", "certificate_number": token, "message": "Malformed certificate number."}, status_code=400)
 
     try:
         issue = db.execute(
@@ -5217,9 +6647,9 @@ def verify_certificate_public(certificate_number: str, db: Session = Depends(get
             ).where(training_models.TrainingCertificateIssue.certificate_number == token)
         ).first()
     except SQLAlchemyError:
-        return JSONResponse(status_code=503, content={"status": "UNAVAILABLE", "certificate_number": token, "message": "Verification service unavailable."}, media_type="application/json")
+        return _respond({"status": "UNAVAILABLE", "certificate_number": token, "message": "Verification service unavailable."}, status_code=503)
     if not issue:
-        return JSONResponse(status_code=200, content={"status": "NOT_FOUND", "certificate_number": token}, media_type="application/json")
+        return _respond({"status": "NOT_FOUND", "certificate_number": token})
 
     record = db.execute(
         select(
@@ -5230,7 +6660,7 @@ def verify_certificate_public(certificate_number: str, db: Session = Depends(get
         ).where(training_models.TrainingRecord.id == issue.record_id)
     ).first()
     if not record:
-        return JSONResponse(status_code=200, content={"status": "NOT_FOUND", "certificate_number": token}, media_type="application/json")
+        return _respond({"status": "NOT_FOUND", "certificate_number": token})
 
     user_name = db.execute(select(accounts_models.User.full_name).where(accounts_models.User.id == record.user_id)).scalar_one_or_none()
     course_name = db.execute(select(training_models.TrainingCourse.course_name).where(training_models.TrainingCourse.id == record.course_id)).scalar_one_or_none()
@@ -5240,16 +6670,29 @@ def verify_certificate_public(certificate_number: str, db: Session = Depends(get
     if status_value == "VALID" and record.valid_until and record.valid_until < now:
         status_value = "EXPIRED"
 
-    return JSONResponse(
-        status_code=200,
-        content={
-            "status": status_value,
-            "certificate_number": token,
-            "trainee_name": user_name or "Unknown",
-            "course_title": course_name or "Unknown",
-            "issue_date": str(record.completion_date),
-            "valid_until": str(record.valid_until) if record.valid_until else None,
-            "issuer": "AMO Portal",
-        },
-        media_type="application/json",
-    )
+    return _respond({
+        "status": status_value,
+        "certificate_number": token,
+        "trainee_name": user_name or "Unknown",
+        "course_title": course_name or "Unknown",
+        "issue_date": str(record.completion_date),
+        "valid_until": str(record.valid_until) if record.valid_until else None,
+        "issuer": "AMO Portal",
+    })
+
+@public_router.get(
+    "/training/certificates/verify/{certificate_number}",
+    summary="Public certificate authenticity verification alias",
+)
+@public_router.get(
+    "/certificates/verify/{certificate_number}",
+    summary="Public certificate authenticity verification",
+)
+def verify_certificate_public_endpoint(
+    certificate_number: str,
+    request: Request,
+    response_format: Optional[str] = Query(None, alias="format"),
+    db: Session = Depends(get_db),
+):
+    return verify_certificate_public(certificate_number, db, request, response_format)
+

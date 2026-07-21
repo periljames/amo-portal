@@ -19,6 +19,7 @@ export const BrandHeader: React.FC<BrandHeaderProps> = ({
   const [logoFailed, setLogoFailed] = useState(false);
   const [resolvedScheme, setResolvedScheme] = useState<"dark" | "light">("dark");
   const resolvedSubtitle = subtitle.toUpperCase();
+  const fallbackLabel = (brand.name || "AMO Portal").trim().toUpperCase();
 
   useEffect(() => {
     const readScheme = () => {
@@ -59,7 +60,7 @@ export const BrandHeader: React.FC<BrandHeaderProps> = ({
             />
           </div>
         ) : (
-          <span className="brand-header__topbar-fallback">{(brand.name || "safarilink").toLowerCase()}</span>
+          <span className="brand-header__topbar-fallback">{fallbackLabel}</span>
         )}
       </div>
     );

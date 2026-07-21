@@ -5,7 +5,6 @@ import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { useToast } from "../components/feedback/ToastProvider";
 import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
 import { getCachedUser, getContext } from "../services/auth";
-import { decodeAmoCertFromUrl } from "../utils/amo";
 import { deriveCarMetrics, isCarOverdue, isCarClosedStatus } from "../utils/carMetrics";
 import { saveDownloadedFile } from "../utils/downloads";
 import {
@@ -19,8 +18,10 @@ import {
   qmsListCarAssignees,
   qmsCreateCar,
   qmsGetCarInvite,
-  qmsListCars,
+  qmsListCarRegister,
   qmsListCarAttachments,
+  qmsListCarResponses,
+  qmsDownloadCarAttachmentBlob,
   qmsReviewCarResponse,
   qmsUpdateCar,
   type CARAttachmentOut,
@@ -80,6 +81,214 @@ const getCarWorkflowStep = (car: CAROut): string => {
   return "Under reviewer assessment";
 };
 
+type ReviewAttachmentPreview = {
+  attachment: CARAttachmentOut;
+  objectUrl: string;
+  contentType: string;
+  carNumber: string;
+};
+
+type CarStatusFilter = "ALL" | "ACTIVE" | CARStatus;
+type CarPageSize = 20 | 50;
+
+const CAR_STATUS_FILTERS: Array<{ value: CarStatusFilter; label: string }> = [
+  { value: "ALL", label: "All statuses" },
+  { value: "ACTIVE", label: "Open / active" },
+  { value: "DRAFT", label: "Draft" },
+  { value: "OPEN", label: "Open" },
+  { value: "IN_PROGRESS", label: "In progress" },
+  { value: "PENDING_VERIFICATION", label: "Pending review" },
+  { value: "CLOSED", label: "Closed" },
+  { value: "ESCALATED", label: "Escalated" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
+
+const formatFileSize = (bytes?: number | null): string => {
+  if (!bytes || bytes < 1) return "Size not recorded";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+
+const dateOnly = (value?: string | null): string => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10) || "—";
+  return date.toLocaleDateString(undefined, { year: "2-digit", month: "short", day: "2-digit" });
+};
+
+const daysBetween = (start?: string | null, end?: string | null): string => {
+  if (!start) return "—";
+  const startDate = new Date(`${String(start).slice(0, 10)}T00:00:00Z`);
+  const endDate = end ? new Date(`${String(end).slice(0, 10)}T00:00:00Z`) : new Date();
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return "—";
+  return String(Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 86400000)));
+};
+
+const daysRemaining = (due?: string | null): string => {
+  if (!due) return "—";
+  const today = new Date();
+  const todayUtc = new Date(`${today.toISOString().slice(0, 10)}T00:00:00Z`);
+  const dueDate = new Date(`${String(due).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(dueDate.getTime())) return "—";
+  return String(Math.round((dueDate.getTime() - todayUtc.getTime()) / 86400000));
+};
+
+const firstText = (...values: Array<string | null | undefined>): string => {
+  for (const value of values) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (text) return text;
+  }
+  return "—";
+};
+
+const cleanCarDescription = (car: CAROut): string => {
+  if (car.finding_description?.trim()) return car.finding_description.trim();
+  const stripped = (car.title || "").replace(/^CAR\s+for\s+/i, "").trim();
+  if (car.summary && car.summary.trim() && car.summary.trim() !== stripped) return car.summary.trim();
+  return stripped || car.title || "Corrective action";
+};
+
+const deriveFindingRef = (car: CAROut): string => {
+  const source = `${car.title || ""} ${car.summary || ""}`;
+  const match = source.match(/\b[A-Z]{2,4}\/[A-Z]{2,4}\/\d{2}\/\d{3}(?:-F-\d{3})?\b/i);
+  if (match) return match[0].toUpperCase();
+  return car.car_number;
+};
+
+const deriveAuditRef = (car: CAROut): string => {
+  if (car.audit_ref?.trim()) return car.audit_ref.trim();
+  const findingRef = car.finding_ref?.trim() || deriveFindingRef(car);
+  return findingRef.replace(/-F-\d+$/i, "");
+};
+
+const deriveAuditTitle = (car: CAROut): string => {
+  const title = car.audit_title;
+  if (title?.trim()) return title.trim();
+  const ref = deriveAuditRef(car);
+  const maybe = (car.summary || car.title || "").replace(ref, "").replace(/^CAR\s+for\s+/i, "").trim();
+  if (maybe && !maybe.match(/^[A-Z]{2,4}\//)) return maybe;
+  return car.program === "RELIABILITY" ? "Reliability action" : "Quality audit";
+};
+
+const shortCarNumber = (car: CAROut): string => {
+  const match = car.car_number.match(/(\d+)$/);
+  if (!match) return car.car_number;
+  return String(Number(match[1]));
+};
+
+const carStatusLabel = (status: CARStatus): string =>
+  String(status)
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const buildAuditorRemarks = (car: CAROut): string => {
+  if (car.auditor_remarks?.trim()) return car.auditor_remarks.trim();
+  const parts: string[] = [];
+  if (car.root_cause_status) parts.push(`RC ${carStatusLabel(car.root_cause_status as CARStatus)}`);
+  if (car.capa_status) parts.push(`CAP ${carStatusLabel(car.capa_status as CARStatus)}`);
+  if (car.evidence_verified_at) parts.push("EV Verified");
+  return parts.length ? parts.join(" · ") : "—";
+};
+
+const responsibleParty = (car: CAROut, assignee?: CARAssignee): string => {
+  if (car.responsible_personnel && car.responsible_department) return `${car.responsible_department}\n${car.responsible_personnel}`;
+  if (car.responsible_personnel) return car.responsible_personnel;
+  if (assignee?.full_name && assignee?.department_name) return `${assignee.department_name}\n${assignee.full_name}`;
+  if (assignee?.full_name) return assignee.full_name;
+  if (car.submitted_by_name) return car.submitted_by_name;
+  return car.assigned_to_user_id ? "Assigned user" : "Unassigned";
+};
+
+const evidenceKind = (attachment: CARAttachmentOut): "image" | "video" | "pdf" | "document" | "file" => {
+  const type = (attachment.content_type || "").toLowerCase();
+  const name = attachment.filename.toLowerCase();
+  if (type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|heic)$/i.test(name)) return "image";
+  if (type.startsWith("video/") || /\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(name)) return "video";
+  if (type.includes("pdf") || name.endsWith(".pdf")) return "pdf";
+  if (/\.(docx?|xlsx?|pptx?|csv|txt)$/i.test(name)) return "document";
+  return "file";
+};
+
+const evidenceIcon = (attachment: CARAttachmentOut): string => {
+  const kind = evidenceKind(attachment);
+  if (kind === "image") return "▧";
+  if (kind === "video") return "▶";
+  if (kind === "pdf") return "PDF";
+  if (kind === "document") return "DOC";
+  return "FILE";
+};
+
+type CarRowActionIcon = "open" | "review" | "link" | "download" | "trash";
+
+type CompactRowActionProps = {
+  icon: CarRowActionIcon;
+  label: string;
+  title?: string;
+  disabled?: boolean;
+  danger?: boolean;
+  onClick: () => void;
+};
+
+const CarRowActionIconGlyph: React.FC<{ name: CarRowActionIcon }> = ({ name }) => {
+  if (name === "open") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 5h11v11h-2V8.4l-9.3 9.3-1.4-1.4L15.6 7H8V5Z" />
+      </svg>
+    );
+  }
+  if (name === "review") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9.2 16.8 4.9 12.5l1.4-1.4 2.9 2.9 8.5-8.5 1.4 1.4-9.9 9.9Z" />
+      </svg>
+    );
+  }
+  if (name === "link") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M10.6 13.4a1 1 0 0 1 0-1.4l2.8-2.8a3 3 0 0 1 4.2 4.2l-2.1 2.1a3 3 0 0 1-4.2 0l1.4-1.4a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0-1.4-1.4L12 13.4a1 1 0 0 1-1.4 0Zm2.8-2.8a1 1 0 0 1 0 1.4l-2.8 2.8a3 3 0 0 1-4.2-4.2l2.1-2.1a3 3 0 0 1 4.2 0l-1.4 1.4a1 1 0 0 0-1.4 0L7.8 12a1 1 0 0 0 1.4 1.4l2.8-2.8a1 1 0 0 1 1.4 0Z" />
+      </svg>
+    );
+  }
+  if (name === "download") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M11 4h2v8.2l3.3-3.3 1.4 1.4L12 16l-5.7-5.7 1.4-1.4 3.3 3.3V4Zm-5 14h12v2H6v-2Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-.7 11H7.7L7 9Zm3 2 .3 7h1.5l-.2-7H10Zm3.4 0-.2 7h1.5l.3-7h-1.6Z" />
+    </svg>
+  );
+};
+
+const CompactRowAction: React.FC<CompactRowActionProps> = ({
+  icon,
+  label,
+  title,
+  disabled,
+  danger,
+  onClick,
+}) => (
+  <button
+    type="button"
+    className={`qms-car-row-action ${danger ? "is-danger" : ""}`}
+    title={title || label}
+    aria-label={title || label}
+    onClick={onClick}
+    disabled={disabled}
+  >
+    <CarRowActionIconGlyph name={icon} />
+    <span>{label}</span>
+  </button>
+);
+
 const QualityCarsPage: React.FC = () => {
   const params = useParams<{ amoCode?: string; department?: string }>();
   const [searchParams] = useSearchParams();
@@ -88,12 +297,14 @@ const QualityCarsPage: React.FC = () => {
   const currentUser = getCachedUser();
   const amoSlug = params.amoCode ?? ctx.amoCode ?? "UNKNOWN";
   const department = params.department ?? ctx.department ?? "quality";
-  const amoDisplay = amoSlug !== "UNKNOWN" ? decodeAmoCertFromUrl(amoSlug) : "AMO";
-
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [cars, setCars] = useState<CAROut[]>([]);
   const [programFilter, setProgramFilter] = useState<CARProgram>("QUALITY");
+  const [registerSearch, setRegisterSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<CarStatusFilter>("ALL");
+  const [pageSize, setPageSize] = useState<CarPageSize>(20);
+  const [currentPage, setCurrentPage] = useState(1);
   const inviteToken = searchParams.get("invite");
   const [showCreateForm, setShowCreateForm] = useState<boolean>(!!inviteToken);
 
@@ -130,6 +341,9 @@ const QualityCarsPage: React.FC = () => {
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewAttachments, setReviewAttachments] = useState<CARAttachmentOut[]>([]);
   const [reviewAttachmentsLoading, setReviewAttachmentsLoading] = useState(false);
+  const [attachmentPreview, setAttachmentPreview] = useState<ReviewAttachmentPreview | null>(null);
+  const [attachmentPreviewLoadingId, setAttachmentPreviewLoadingId] = useState<string | null>(null);
+  const [attachmentPreviewError, setAttachmentPreviewError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [reviewForm, setReviewForm] = useState<CarReviewForm>({
     root_cause_status: "",
@@ -139,6 +353,14 @@ const QualityCarsPage: React.FC = () => {
     message: "",
   });
   const { pushToast } = useToast();
+
+  useEffect(() => {
+    return () => {
+      if (attachmentPreview?.objectUrl) {
+        window.URL.revokeObjectURL(attachmentPreview.objectUrl);
+      }
+    };
+  }, [attachmentPreview?.objectUrl]);
 
   const assigneeLookup = useMemo(() => {
     const map = new Map<string, CARAssignee>();
@@ -152,6 +374,7 @@ const QualityCarsPage: React.FC = () => {
     const statusParam = searchParams.get("status");
     const dueWindow = searchParams.get("dueWindow");
     const carId = searchParams.get("carId");
+    const search = registerSearch.trim().toLowerCase();
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
     return cars.filter((car) => {
@@ -159,9 +382,9 @@ const QualityCarsPage: React.FC = () => {
       if (statusParam === "overdue") {
         return isCarOverdue(car, today);
       }
-      if (statusParam === "open") {
-        if (isCarClosedStatus(car.status)) return false;
-      }
+      if (statusParam === "open" && isCarClosedStatus(car.status)) return false;
+      if (statusFilter === "ACTIVE" && isCarClosedStatus(car.status)) return false;
+      if (statusFilter !== "ALL" && statusFilter !== "ACTIVE" && car.status !== statusFilter) return false;
       if (dueWindow && car.due_date) {
         const due = new Date(`${car.due_date}T00:00:00Z`).getTime();
         const todayMs = new Date(`${today}T00:00:00Z`).getTime();
@@ -171,13 +394,55 @@ const QualityCarsPage: React.FC = () => {
         if (dueWindow === "week" && !(diff >= 0 && diff <= 7)) return false;
         if (dueWindow === "month" && !(diff >= 0 && diff <= 30)) return false;
       }
+      if (search) {
+        const owner = car.assigned_to_user_id ? assigneeLookup.get(car.assigned_to_user_id)?.full_name || "" : "";
+        const haystack = [
+          car.car_number,
+          car.title,
+          car.summary,
+          car.status,
+          car.priority,
+          owner,
+          deriveAuditRef(car),
+          deriveAuditTitle(car),
+          firstText(car.root_cause_text, car.root_cause),
+          firstText(car.capa_text, car.corrective_action),
+          firstText(car.preventive_action),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(search)) return false;
+      }
       return true;
     });
-  }, [cars, searchParams]);
+  }, [assigneeLookup, cars, registerSearch, searchParams, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredCars.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStartIndex = filteredCars.length === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1;
+  const pageEndIndex = Math.min(filteredCars.length, safeCurrentPage * pageSize);
+  const pagedCars = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize;
+    return filteredCars.slice(start, start + pageSize);
+  }, [filteredCars, pageSize, safeCurrentPage]);
+
+  const auditBandMap = useMemo(() => {
+    const map = new Map<string, number>();
+    let band = 0;
+    filteredCars.forEach((car) => {
+      const key = deriveAuditRef(car);
+      if (!map.has(key)) {
+        map.set(key, band % 4);
+        band += 1;
+      }
+    });
+    return map;
+  }, [filteredCars]);
 
   const reviewQueue = useMemo(() => {
     return cars
-      .filter((car) => !!car.submitted_at || car.status === "IN_PROGRESS" || car.status === "PENDING_VERIFICATION")
+      .filter((car) => car.status === "PENDING_VERIFICATION" || car.root_cause_status === "SUBMITTED" || car.capa_status === "SUBMITTED")
       .sort((a, b) => (new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
   }, [cars]);
 
@@ -233,11 +498,11 @@ const QualityCarsPage: React.FC = () => {
     setState("loading");
     setError(null);
     try {
-      const next = await qmsListCars({ program: programFilter });
-      setCars(next);
+      const next = await qmsListCarRegister({ program: programFilter, limit: 1000 });
+      setCars(next.items);
       setState("ready");
     } catch (e: any) {
-      setError(e?.message || "Failed to load CAR register.");
+      setError(e?.message || "Failed to load corrective action register.");
       setState("error");
     }
   };
@@ -264,6 +529,10 @@ const QualityCarsPage: React.FC = () => {
     loadAssignees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [pageSize, programFilter, registerSearch, statusFilter, searchParams]);
 
   const handleSubmit = (ev: React.FormEvent) => {
     ev.preventDefault();
@@ -299,7 +568,7 @@ const QualityCarsPage: React.FC = () => {
       setPreviewOpen(false);
       await load();
     } catch (e: any) {
-      setError(e?.message || "Failed to create CAR");
+      setError(e?.message || "Failed to create corrective action.");
     } finally {
       setPreviewBusy(false);
     }
@@ -317,7 +586,7 @@ const QualityCarsPage: React.FC = () => {
           variant: "info",
         });
       } else {
-        window.prompt("Copy CAR invite link:", invite.invite_url);
+        window.prompt("Copy invite link:", invite.invite_url);
       }
     } catch (e: any) {
       pushToast({
@@ -352,7 +621,7 @@ const QualityCarsPage: React.FC = () => {
       const downloaded = await downloadCarEvidencePack(car.id);
       saveDownloadedFile(downloaded);
     } catch (e: any) {
-      setError(e?.message || "Failed to export CAR evidence pack.");
+      setError(e?.message || "Failed to export evidence pack.");
     } finally {
       setExportingId(null);
     }
@@ -360,15 +629,18 @@ const QualityCarsPage: React.FC = () => {
 
   const openReview = async (car: CAROut) => {
     setReviewCar(car);
+    const rootCauseDefault = car.root_cause_status === "SUBMITTED" || car.root_cause_status === "PENDING" ? "ACCEPTED" : ((car.root_cause_status as CarReviewForm["root_cause_status"]) || "");
+    const capaDefault = car.capa_status === "SUBMITTED" || car.capa_status === "PENDING" ? "ACCEPTED" : ((car.capa_status as CarReviewForm["capa_status"]) || "");
     setReviewForm({
-      root_cause_status: (car.root_cause_status as CarReviewForm["root_cause_status"]) || "",
+      root_cause_status: rootCauseDefault as CarReviewForm["root_cause_status"],
       root_cause_review_note: car.root_cause_review_note || "",
-      capa_status: (car.capa_status as CarReviewForm["capa_status"]) || "",
+      capa_status: capaDefault as CarReviewForm["capa_status"],
       capa_review_note: car.capa_review_note || "",
       message: "",
     });
     setReviewAttachmentsLoading(true);
     try {
+      await qmsListCarResponses(car.id, true);
       const files = await qmsListCarAttachments(car.id);
       setReviewAttachments(files);
     } catch (e: any) {
@@ -383,28 +655,96 @@ const QualityCarsPage: React.FC = () => {
     }
   };
 
+  const openReviewAttachmentPreview = async (attachment: CARAttachmentOut) => {
+    if (!reviewCar) return;
+    setAttachmentPreviewError(null);
+    setAttachmentPreviewLoadingId(attachment.id);
+    try {
+      const blob = await qmsDownloadCarAttachmentBlob(reviewCar.id, attachment.id);
+      const objectUrl = window.URL.createObjectURL(blob);
+      setAttachmentPreview({
+        attachment,
+        objectUrl,
+        contentType: blob.type || attachment.content_type || "application/octet-stream",
+        carNumber: reviewCar.car_number,
+      });
+    } catch (e: any) {
+      const message = e?.message || "Could not open this evidence file.";
+      setAttachmentPreviewError(message);
+      pushToast({
+        title: "Evidence preview failed",
+        message,
+        variant: "error",
+      });
+    } finally {
+      setAttachmentPreviewLoadingId(null);
+    }
+  };
+
+  const downloadReviewAttachment = async (attachment: CARAttachmentOut) => {
+    if (!reviewCar) return;
+    setAttachmentPreviewError(null);
+    setAttachmentPreviewLoadingId(attachment.id);
+    try {
+      const blob = await qmsDownloadCarAttachmentBlob(reviewCar.id, attachment.id);
+      saveDownloadedFile(blob, attachment.filename);
+    } catch (e: any) {
+      const message = e?.message || "Could not download this evidence file.";
+      setAttachmentPreviewError(message);
+      pushToast({
+        title: "Evidence download failed",
+        message,
+        variant: "error",
+      });
+    } finally {
+      setAttachmentPreviewLoadingId(null);
+    }
+  };
+
+  const closeReviewAttachmentPreview = () => {
+    setAttachmentPreview(null);
+  };
+
+  const closeReviewWorkspace = () => {
+    setReviewCar(null);
+    setReviewAttachments([]);
+    setAttachmentPreview(null);
+    setAttachmentPreviewError(null);
+  };
+
   const submitReview = async () => {
     if (!reviewCar) return;
+    const rootDecision = reviewForm.root_cause_status || "ACCEPTED";
+    const capaDecision = reviewForm.capa_status || "ACCEPTED";
+    if (rootDecision === "REJECTED" && !reviewForm.root_cause_review_note.trim()) {
+      setError("Root cause return requires a review note.");
+      return;
+    }
+    if ((capaDecision === "REJECTED" || capaDecision === "NEEDS_EVIDENCE") && !reviewForm.capa_review_note.trim()) {
+      setError("Corrective action return or evidence request requires a review note.");
+      return;
+    }
     setReviewBusy(true);
     setError(null);
     try {
       await qmsReviewCarResponse(reviewCar.id, {
-        root_cause_status: reviewForm.root_cause_status || undefined,
+        root_cause_status: rootDecision,
         root_cause_review_note: reviewForm.root_cause_review_note.trim() || null,
-        capa_status: reviewForm.capa_status || undefined,
+        capa_status: capaDecision,
         capa_review_note: reviewForm.capa_review_note.trim() || null,
         message: reviewForm.message.trim() || null,
       });
       pushToast({
-        title: "CAR review submitted",
+        title: "Review submitted",
         message: `Review outcome saved for ${reviewCar.car_number}.`,
         variant: "info",
       });
       setReviewCar(null);
       setReviewAttachments([]);
+      setAttachmentPreview(null);
       await load();
     } catch (e: any) {
-      setError(e?.message || "Failed to submit CAR review.");
+      setError(e?.message || "Failed to submit review.");
     } finally {
       setReviewBusy(false);
     }
@@ -427,7 +767,7 @@ const QualityCarsPage: React.FC = () => {
       setEditForm(null);
       await load();
     } catch (e: any) {
-      setError(e?.message || "Failed to update CAR");
+      setError(e?.message || "Failed to update corrective action.");
     } finally {
       setEditBusy(false);
     }
@@ -442,7 +782,7 @@ const QualityCarsPage: React.FC = () => {
       setDeleteCar(null);
       await load();
     } catch (e: any) {
-      setError(e?.message || "Failed to delete CAR");
+      setError(e?.message || "Failed to delete corrective action.");
     } finally {
       setDeleteBusy(false);
     }
@@ -459,32 +799,30 @@ const QualityCarsPage: React.FC = () => {
     const next = new URLSearchParams(searchParams);
     next.set("carId", entityId);
     navigate({
-      pathname: `/maintenance/${amoSlug}/qms/cars`,
+      pathname: `/maintenance/${amoSlug}/quality/cars`,
       search: `?${next.toString()}`,
     });
   };
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
-      <header className="page-header">
-        <h1 className="page-header__title">
-          Corrective Action Requests · {amoDisplay}
-        </h1>
-        <p className="page-header__subtitle">
-          Register for Quality & Reliability programmes with escalation tracking.
-        </p>
+      <header className="page-header qms-car-page-heading">
+        <div>
+          <p className="page-header__eyebrow">Quality</p>
+          <h1 className="page-header__title">Corrective action register</h1>
+        </div>
+        <button
+          type="button"
+          className="secondary-chip-btn"
+          onClick={() => navigate(`/maintenance/${amoSlug}/quality`)}
+        >
+          Back to QMS
+        </button>
       </header>
 
-      <section className="page-section qms-car-toolbar">
-        <div className="page-section__actions">
-          <button
-            type="button"
-            className="secondary-chip-btn"
-            onClick={() => navigate(`/maintenance/${amoSlug}/qms`)}
-          >
-            Back to QMS overview
-          </button>
-          <label className="form-control qms-car-toolbar__filter">
+      <section className="qms-car-workbench">
+        <div className="qms-car-filterbar">
+          <label className="qms-car-filterbar__field">
             <span>Programme</span>
             <select
               value={programFilter}
@@ -497,23 +835,30 @@ const QualityCarsPage: React.FC = () => {
               ))}
             </select>
           </label>
-        </div>
-        <div className="qms-car-overview">
-          <div className="qms-car-overview__item">
-            <span>Total</span>
-            <strong>{overviewStats.total}</strong>
-          </div>
-          <div className="qms-car-overview__item">
-            <span>Open</span>
-            <strong>{overviewStats.open}</strong>
-          </div>
-          <div className="qms-car-overview__item">
-            <span>Overdue</span>
-            <strong>{overviewStats.overdue}</strong>
-          </div>
-          <div className="qms-car-overview__item">
-            <span>In review</span>
-            <strong>{overviewStats.inReview}</strong>
+          <label className="qms-car-filterbar__field qms-car-filterbar__field--search">
+            <span>Search</span>
+            <input
+              type="search"
+              value={registerSearch}
+              onChange={(e) => setRegisterSearch(e.target.value)}
+              placeholder="Action reference, issue, owner, status…"
+            />
+          </label>
+          <label className="qms-car-filterbar__field">
+            <span>Status</span>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as CarStatusFilter)}>
+              {CAR_STATUS_FILTERS.map((filter) => (
+                <option key={filter.value} value={filter.value}>
+                  {filter.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="qms-car-filterbar__metrics" aria-label="Corrective action summary">
+            <span><strong>{overviewStats.total}</strong>Total</span>
+            <span><strong>{overviewStats.open}</strong>Open</span>
+            <span><strong>{overviewStats.overdue}</strong>Overdue</span>
+            <span><strong>{overviewStats.inReview}</strong>Review</span>
           </div>
         </div>
       </section>
@@ -521,7 +866,7 @@ const QualityCarsPage: React.FC = () => {
       {inviteToken && (
         <div className="card card--info" style={{ marginBottom: 12 }}>
           <p style={{ margin: 0 }}>
-            Invitation token detected. Please log a CAR or update the assigned CAR linked to your email invite.
+            Invitation token detected. Log or update the corrective action linked to the invite.
             The Quality team will be notified automatically.
           </p>
         </div>
@@ -545,167 +890,198 @@ const QualityCarsPage: React.FC = () => {
         </div>
       )}
 
-      <section className="page-section">
-        <div className="card">
-          <div className="qms-car-register-tabs" role="tablist" aria-label="CAR register sections">
-            <button
-              type="button"
-              role="tab"
-              id="car-register-tab"
-              className={`qms-car-register-tab ${!historyOpen ? "is-active" : ""}`}
-              aria-selected={!historyOpen}
-              aria-controls="car-register-panel"
-              onClick={() => setHistoryOpen(false)}
-            >
-              Register
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="car-history-tab"
-              className={`qms-car-register-tab ${historyOpen ? "is-active" : ""}`}
-              aria-selected={historyOpen}
-              aria-controls="car-history-panel"
-              onClick={() => setHistoryOpen(true)}
-            >
-              CAR history
-            </button>
-          </div>
-          <div className="card-header">
-            <h2>Register</h2>
-            <p className="text-muted">Auto-numbered entries with status, priority, and ownership.</p>
-            {canManageCars && (
+      <section className="page-section qms-car-register-shell">
+        <div className="qms-car-register-card">
+          <div className="qms-car-register-bar">
+            <div className="qms-car-register-tabs" role="tablist" aria-label="Corrective action register sections">
               <button
                 type="button"
-                className="primary-chip-btn"
-                onClick={() => setShowCreateForm((open) => !open)}
-                aria-expanded={showCreateForm}
+                role="tab"
+                id="car-register-tab"
+                className={`qms-car-register-tab ${!historyOpen ? "is-active" : ""}`}
+                aria-selected={!historyOpen}
+                aria-controls="car-register-panel"
+                onClick={() => setHistoryOpen(false)}
               >
-                {showCreateForm ? "Hide create form" : "Log new CAR"}
+                Register
               </button>
-            )}
+              <button
+                type="button"
+                role="tab"
+                id="car-history-tab"
+                className={`qms-car-register-tab ${historyOpen ? "is-active" : ""}`}
+                aria-selected={historyOpen}
+                aria-controls="car-history-panel"
+                onClick={() => setHistoryOpen(true)}
+              >
+                Activity
+              </button>
+            </div>
+            <div className="qms-car-register-bar__actions">
+              {canManageCars && (
+                <button
+                  type="button"
+                  className="primary-chip-btn"
+                  onClick={() => setShowCreateForm((open) => !open)}
+                  aria-expanded={showCreateForm}
+                >
+                  {showCreateForm ? "Close form" : "Log action"}
+                </button>
+              )}
+            </div>
           </div>
 
           {state === "loading" && !historyOpen && <p id="car-register-panel">Loading register…</p>}
 
           {state === "ready" && !historyOpen && (
-            <div className="table-responsive" id="car-register-panel" role="tabpanel" aria-labelledby="car-register-tab">
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>CAR #</th>
-                    <th>Title</th>
-                    <th>Owner</th>
-                    <th>Priority</th>
-                    <th>Status</th>
-                    <th>Due</th>
-                    <th>Next reminder</th>
-                    <th>Updated</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCars.map((car) => (
-                    <tr key={car.id}>
-                      <td>{car.car_number}</td>
-                      <td>{car.title}</td>
-                      <td>
-                        {car.assigned_to_user_id
-                          ? assigneeLookup.get(car.assigned_to_user_id)?.full_name ||
-                            "Assigned user"
-                          : "Unassigned"}
-                      </td>
-                      <td>
-                        <span className="badge badge--neutral">
-                          {PRIORITY_LABELS[car.priority]}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`badge ${STATUS_COLORS[car.status] || "badge--neutral"}`}>
-                          {car.status}
-                        </span>
-                      </td>
-                      <td>{car.due_date || "—"}</td>
-                      <td>{car.next_reminder_at ? new Date(car.next_reminder_at).toLocaleString() : "—"}</td>
-                      <td>{new Date(car.updated_at).toLocaleDateString()}</td>
-                      <td>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          {car.assigned_to_user_id && (
-                            <button
-                              type="button"
-                              className="secondary-chip-btn"
-                              onClick={() =>
-                                navigate(`/maintenance/${amoSlug}/admin/users/${car.assigned_to_user_id}`)
-                              }
-                            >
-                              Owner
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => openEdit(car)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => void openReview(car)}
-                          >
-                            Review
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() =>
-                              setPanelContext({
-                                type: "car",
-                                id: car.id,
-                                title: car.title,
-                                status: car.status,
-                                ownerId: car.assigned_to_user_id,
-                              })
-                            }
-                          >
-                            Quick actions
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => handleExport(car)}
-                            disabled={exportingId === car.id}
-                          >
-                            {exportingId === car.id ? "Exporting…" : "Export pack"}
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => handleCopyInvite(car)}
-                            disabled={inviteBusyId === car.id}
-                          >
-                            {inviteBusyId === car.id ? "Copying…" : "Copy invite"}
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-chip-btn"
-                            onClick={() => setDeleteCar(car)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredCars.length === 0 && (
+            <div id="car-register-panel" role="tabpanel" aria-labelledby="car-register-tab">
+              <div className="qms-car-table-toolbar">
+                <span>Showing {pageStartIndex}-{pageEndIndex} of {filteredCars.length}</span>
+                <label>
+                  Rows
+                  <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) as CarPageSize)}>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                  </select>
+                </label>
+              </div>
+              <div className="table-responsive qms-car-table-wrap">
+                <table className="table table-compact qms-car-table qms-car-index-table">
+                  <thead>
                     <tr>
-                      <td colSpan={9} className="text-muted">
-                        No CARs logged for this programme yet.
-                      </td>
+                      <th>Audit №</th>
+                      <th>Audit title</th>
+                      <th>CAR №</th>
+                      <th>Description</th>
+                      <th>Date issued</th>
+                      <th>CAR category / limit</th>
+                      <th>Due date</th>
+                      <th>Date closed</th>
+                      <th>Days out</th>
+                      <th>Days remaining<br />(-Past)</th>
+                      <th>Auditor remarks</th>
+                      <th>Root cause</th>
+                      <th>CAP<br />(Immediate / short term)</th>
+                      <th>PAP<br />(Long term)</th>
+                      <th>Auditor</th>
+                      <th>Responsible dept. / personnel</th>
+                      <th className="qms-car-index-actions-head" aria-label="Row actions">Actions</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {pagedCars.map((car) => {
+                      const auditKey = deriveAuditRef(car);
+                      const band = auditBandMap.get(auditKey) ?? 0;
+                      const assignee = car.assigned_to_user_id ? assigneeLookup.get(car.assigned_to_user_id) : undefined;
+                      const canReview = car.status === "PENDING_VERIFICATION" || car.root_cause_status === "SUBMITTED" || car.capa_status === "SUBMITTED";
+                      const auditorRemarks = buildAuditorRemarks(car);
+                      return (
+                        <tr key={car.id} className={`qms-car-index-row qms-car-index-row--band-${band}`}>
+                          <td className="qms-car-index-cell qms-car-index-cell--audit-ref">{auditKey}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--audit-title">{deriveAuditTitle(car)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--number">{car.car_sequence_no || shortCarNumber(car)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--description">{cleanCarDescription(car)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--date">{dateOnly(car.date_issued || car.created_at)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--category">
+                            <span className="badge badge--neutral">{car.car_category_limit || PRIORITY_LABELS[car.priority]}</span>
+                          </td>
+                          <td className="qms-car-index-cell qms-car-index-cell--due">{dateOnly(car.due_date)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--date">{dateOnly(car.closed_at)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--number">{car.days_out ?? daysBetween(car.date_issued || car.created_at, car.date_closed || car.closed_at)}</td>
+                          <td className={`qms-car-index-cell qms-car-index-cell--number ${Number(daysRemaining(car.due_date)) < 0 && !car.closed_at ? "is-past" : ""}`}>
+                            {car.days_remaining_past ?? daysRemaining(car.due_date)}
+                          </td>
+                          <td className="qms-car-index-cell qms-car-index-cell--remarks">
+                            <span className="qms-car-remarks-note" title={auditorRemarks}>{auditorRemarks}</span>
+                          </td>
+                          <td className="qms-car-index-cell qms-car-index-cell--longtext">{firstText(car.register_root_cause, car.root_cause_text, car.root_cause)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--longtext">{firstText(car.register_cap, car.capa_text, car.corrective_action, car.containment_action)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--longtext">{firstText(car.register_pap, car.preventive_action)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--auditor">{firstText(car.auditor_name, car.requested_by_name, car.requested_by_user_id)}</td>
+                          <td className="qms-car-index-cell qms-car-index-cell--responsible">
+                            <span>{responsibleParty(car, assignee)}</span>
+                          </td>
+                          <td className="qms-car-index-cell qms-car-index-cell--actions">
+                            <div className="qms-car-hover-actions" aria-label={`Actions for ${car.car_number}`}>
+                              <CompactRowAction
+                                icon="open"
+                                label="Manage"
+                                title="Open corrective action controls"
+                                onClick={() =>
+                                  setPanelContext({
+                                    type: "car",
+                                    id: car.id,
+                                    title: car.title,
+                                    status: car.status,
+                                    ownerId: car.assigned_to_user_id,
+                                  })
+                                }
+                              />
+                              {canReview && (
+                                <CompactRowAction
+                                  icon="review"
+                                  label="Review"
+                                  title="Review submitted response"
+                                  onClick={() => void openReview(car)}
+                                />
+                              )}
+                              <CompactRowAction
+                                icon="link"
+                                label={inviteBusyId === car.id ? "Copying" : "Invite"}
+                                title="Copy invite link"
+                                onClick={() => handleCopyInvite(car)}
+                                disabled={inviteBusyId === car.id}
+                              />
+                              <CompactRowAction
+                                icon="download"
+                                label={exportingId === car.id ? "Exporting" : "Export"}
+                                title="Export evidence pack"
+                                onClick={() => handleExport(car)}
+                                disabled={exportingId === car.id}
+                              />
+                              {canManageCars && (
+                                <CompactRowAction
+                                  icon="trash"
+                                  label="Delete"
+                                  title="Delete corrective action"
+                                  danger
+                                  onClick={() => setDeleteCar(car)}
+                                />
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filteredCars.length === 0 && (
+                      <tr>
+                        <td colSpan={17} className="text-muted">
+                          No corrective actions logged for this programme yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="qms-car-pagination" aria-label="Corrective action register pagination">
+                <button
+                  type="button"
+                  className="secondary-chip-btn"
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                  disabled={safeCurrentPage <= 1}
+                >
+                  Previous
+                </button>
+                <span>Page {safeCurrentPage} of {totalPages}</span>
+                <button
+                  type="button"
+                  className="secondary-chip-btn"
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                  disabled={safeCurrentPage >= totalPages}
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
 
@@ -717,7 +1093,7 @@ const QualityCarsPage: React.FC = () => {
               aria-labelledby="car-history-tab"
             >
               <p className="text-muted" style={{ margin: 0 }}>
-                Review completed activity and jump straight to the selected CAR to continue or collaborate.
+                Activity timeline for changes, responses, and reviewer decisions.
               </p>
               <AuditHistoryPanel
                 title="Activity timeline"
@@ -735,9 +1111,9 @@ const QualityCarsPage: React.FC = () => {
       <section className="page-section">
         <div className="card qms-car-form-card">
           <div className="card-header">
-            <h2>Log a new CAR</h2>
+            <h2>Log corrective action</h2>
             <p className="text-muted">
-              Assign programme, priority, and a concise summary. Numbers are auto-generated per programme and year.
+              Assign an owner, priority, due date, and concise action summary.
             </p>
           </div>
 
@@ -917,125 +1293,182 @@ const QualityCarsPage: React.FC = () => {
       </section>
       )}
 
-      <section className="page-section">
-        <div className="card">
-          <div className="card-header">
-            <h2>Auditee submissions & review queue</h2>
-            <p className="text-muted">Track internal/external CAR submissions, reviewer decisions, and workflow stage.</p>
-          </div>
-          <div className="table-responsive">
-            <table className="table table-compact">
-              <thead>
-                <tr>
-                  <th>CAR #</th>
-                  <th>Auditee submission</th>
-                  <th>Root cause review</th>
-                  <th>CAPA review</th>
-                  <th>Evidence</th>
-                  <th>Workflow stage</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reviewQueue.map((car) => (
-                  <tr key={`review-${car.id}`}>
-                    <td>{car.car_number}</td>
-                    <td>
-                      <div>{car.submitted_by_name || "—"}</div>
-                      <div className="text-muted">{car.submitted_at ? new Date(car.submitted_at).toLocaleString() : "Not submitted"}</div>
-                    </td>
-                    <td>{car.root_cause_status || "Pending"}</td>
-                    <td>{car.capa_status || "Pending"}</td>
-                    <td>{car.evidence_received_at ? "Received" : "Missing"}</td>
-                    <td>{getCarWorkflowStep(car)}</td>
-                    <td>
-                      <button type="button" className="secondary-chip-btn" onClick={() => void openReview(car)}>
-                        Open review
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {reviewQueue.length === 0 && (
+      {reviewQueue.length > 0 && (
+        <section className="page-section qms-car-review-queue">
+          <div className="qms-car-register-card">
+            <div className="qms-car-register-bar">
+              <div>
+                <h2>Review queue</h2>
+                <p className="text-muted">Submitted responses awaiting auditor decision.</p>
+              </div>
+              <span className="badge badge--warning">{reviewQueue.length} pending</span>
+            </div>
+            <div className="table-responsive qms-car-table-wrap">
+              <table className="table table-compact qms-car-table">
+                <thead>
                   <tr>
-                    <td colSpan={7}>No auditee submissions in review queue yet.</td>
+                    <th>Action ref</th>
+                    <th>Submission</th>
+                    <th>Root cause</th>
+                    <th>Corrective action</th>
+                    <th>Evidence</th>
+                    <th>Stage</th>
+                    <th>Action</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {reviewQueue.map((car) => (
+                    <tr key={`review-${car.id}`}>
+                      <td>{car.car_number}</td>
+                      <td>
+                        <div>{car.submitted_by_name || "Auditee"}</div>
+                        <div className="text-muted">{car.submitted_at ? new Date(car.submitted_at).toLocaleString() : "Not submitted"}</div>
+                      </td>
+                      <td>{car.root_cause_status || "Pending"}</td>
+                      <td>{car.capa_status || "Pending"}</td>
+                      <td>{car.evidence_received_at ? "Received" : "Missing"}</td>
+                      <td>{getCarWorkflowStep(car)}</td>
+                      <td>
+                        <button type="button" className="secondary-chip-btn" onClick={() => void openReview(car)}>
+                          Review
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {reviewCar && (
-        <div className="upsell-modal__backdrop" role="dialog" aria-modal="true">
-          <div className="upsell-modal" style={{ maxWidth: 920 }}>
-            <div className="upsell-modal__header">
+        <div className="upsell-modal__backdrop qms-car-review-backdrop" role="dialog" aria-modal="true">
+          <div className="upsell-modal qms-car-review-modal">
+            <div className="upsell-modal__header qms-car-review-header">
               <div>
                 <p className="upsell-modal__eyebrow">Reviewer workspace</p>
-                <h3 className="upsell-modal__title">CAR {reviewCar.car_number} · {reviewCar.title}</h3>
-                <p className="text-muted" style={{ marginTop: 4 }}>Current step: {getCarWorkflowStep(reviewCar)}</p>
+                <h3 className="upsell-modal__title">{reviewCar.car_number} · {reviewCar.title}</h3>
+                <p className="text-muted" style={{ marginTop: 4 }}>
+                  {getCarWorkflowStep(reviewCar)} · Submitted {reviewCar.submitted_at ? new Date(reviewCar.submitted_at).toLocaleString() : "not yet"}
+                </p>
               </div>
-              <button type="button" className="upsell-modal__close" onClick={() => setReviewCar(null)} disabled={reviewBusy}>×</button>
+              <button type="button" className="upsell-modal__close" onClick={closeReviewWorkspace} disabled={reviewBusy}>×</button>
             </div>
-            <div className="upsell-modal__body" style={{ display: "grid", gap: 12 }}>
-              <div className="qms-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-                <div className="qms-card">
-                  <h4 style={{ marginTop: 0 }}>Auditee payload</h4>
-                  <p><strong>Name:</strong> {reviewCar.submitted_by_name || "—"}</p>
-                  <p><strong>Email:</strong> {reviewCar.submitted_by_email || "—"}</p>
-                  <p><strong>Containment:</strong> {reviewCar.containment_action || "—"}</p>
-                  <p><strong>Root cause:</strong> {reviewCar.root_cause_text || reviewCar.root_cause || "—"}</p>
-                  <p><strong>CAPA:</strong> {reviewCar.capa_text || reviewCar.corrective_action || "—"}</p>
-                  <p><strong>Evidence ref:</strong> {reviewCar.evidence_ref || "—"}</p>
+
+            <div className="upsell-modal__body qms-car-review-body">
+              <section className="qms-car-review-section qms-car-review-section--finding">
+                <div>
+                  <span className="qms-car-review-kicker">Finding to close</span>
+                  <h4>{reviewCar.summary || reviewCar.title}</h4>
+                  <p className="text-muted">
+                    Finding ref: {reviewCar.title?.replace(/^CAR for\s+/i, "") || reviewCar.finding_id || "—"}
+                  </p>
                 </div>
-                <div className="qms-card">
-                  <h4 style={{ marginTop: 0 }}>Evidence attachments</h4>
-                  {reviewAttachmentsLoading ? <p>Loading evidence…</p> : null}
-                  {!reviewAttachmentsLoading && reviewAttachments.map((file) => (
-                    <div key={file.id} style={{ marginBottom: 8 }}>
-                      <a href={file.download_url} target="_blank" rel="noreferrer">{file.filename}</a>
+                <div className="qms-car-review-status-grid">
+                  <span><strong>Status</strong>{reviewCar.status}</span>
+                  <span><strong>Priority</strong>{PRIORITY_LABELS[reviewCar.priority]}</span>
+                  <span><strong>Due</strong>{reviewCar.due_date || "—"}</span>
+                </div>
+              </section>
+
+              <div className="qms-car-review-grid">
+                <section className="qms-car-review-section">
+                  <span className="qms-car-review-kicker">Submitted by auditee</span>
+                  <dl className="qms-car-review-dl">
+                    <div><dt>Name</dt><dd>{reviewCar.submitted_by_name || "—"}</dd></div>
+                    <div><dt>Email</dt><dd>{reviewCar.submitted_by_email || "—"}</dd></div>
+                    <div><dt>Containment</dt><dd>{reviewCar.containment_action || "—"}</dd></div>
+                    <div><dt>Root cause</dt><dd>{reviewCar.root_cause_text || reviewCar.root_cause || "—"}</dd></div>
+                    <div><dt>Corrective action</dt><dd>{reviewCar.capa_text || reviewCar.corrective_action || "—"}</dd></div>
+                    <div><dt>Evidence reference</dt><dd>{reviewCar.evidence_ref || "—"}</dd></div>
+                  </dl>
+                </section>
+
+                <section className="qms-car-review-section qms-car-review-section--evidence">
+                  <div className="qms-car-review-section-head">
+                    <div>
+                      <span className="qms-car-review-kicker">Evidence submitted</span>
+                      <h4>{reviewAttachments.length} attachment{reviewAttachments.length === 1 ? "" : "s"}</h4>
                     </div>
-                  ))}
-                  {!reviewAttachmentsLoading && reviewAttachments.length === 0 ? <p className="text-muted">No attachments.</p> : null}
-                </div>
+                    {reviewAttachmentsLoading && <span className="badge badge--info">Loading…</span>}
+                  </div>
+                  {attachmentPreviewError && <p className="qms-car-review-error">{attachmentPreviewError}</p>}
+                  {!reviewAttachmentsLoading && reviewAttachments.length === 0 ? (
+                    <p className="text-muted">No evidence files have been attached.</p>
+                  ) : null}
+                  <div className="qms-car-review-evidence-list">
+                    {reviewAttachments.map((file) => (
+                      <article key={file.id} className="qms-car-review-evidence-item">
+                        <button
+                          type="button"
+                          className="qms-car-review-evidence-main"
+                          onClick={() => void openReviewAttachmentPreview(file)}
+                          disabled={attachmentPreviewLoadingId === file.id}
+                        >
+                          <span className="qms-car-review-file-icon">{evidenceIcon(file)}</span>
+                          <span>
+                            <strong>{file.description || file.filename}</strong>
+                            {file.description && <small>{file.filename}</small>}
+                            <small>{file.content_type || "file"} · {formatFileSize(file.size_bytes)}</small>
+                          </span>
+                        </button>
+                        <div className="qms-car-review-evidence-actions">
+                          <button type="button" className="secondary-chip-btn" onClick={() => void openReviewAttachmentPreview(file)} disabled={attachmentPreviewLoadingId === file.id}>
+                            {attachmentPreviewLoadingId === file.id ? "Opening…" : "Preview"}
+                          </button>
+                          <button type="button" className="secondary-chip-btn" onClick={() => void downloadReviewAttachment(file)} disabled={attachmentPreviewLoadingId === file.id}>
+                            Download
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
               </div>
 
-              <div className="qms-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <section className="qms-car-review-section qms-car-review-section--decision">
+                <div className="qms-car-review-section-head">
+                  <div>
+                    <span className="qms-car-review-kicker">Reviewer decision</span>
+                    <h4>Accept, return, or request evidence</h4>
+                  </div>
+                </div>
+                <div className="qms-grid qms-car-review-decision-grid">
+                  <label className="qms-field">
+                    Root cause decision
+                    <select value={reviewForm.root_cause_status} onChange={(e) => setReviewForm((prev) => ({ ...prev, root_cause_status: e.target.value as CarReviewForm["root_cause_status"] }))}>
+                      <option value="ACCEPTED">Accept root cause</option>
+                      <option value="REJECTED">Return root cause</option>
+                    </select>
+                  </label>
+                  <label className="qms-field">
+                    Corrective action decision
+                    <select value={reviewForm.capa_status} onChange={(e) => setReviewForm((prev) => ({ ...prev, capa_status: e.target.value as CarReviewForm["capa_status"] }))}>
+                      <option value="ACCEPTED">Accept action</option>
+                      <option value="NEEDS_EVIDENCE">Needs evidence</option>
+                      <option value="REJECTED">Return action</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="qms-grid qms-car-review-decision-grid">
+                  <label className="qms-field">
+                    Root cause note
+                    <textarea rows={3} value={reviewForm.root_cause_review_note} onChange={(e) => setReviewForm((prev) => ({ ...prev, root_cause_review_note: e.target.value }))} placeholder="Required when returning root cause." />
+                  </label>
+                  <label className="qms-field">
+                    Action note
+                    <textarea rows={3} value={reviewForm.capa_review_note} onChange={(e) => setReviewForm((prev) => ({ ...prev, capa_review_note: e.target.value }))} placeholder="Required when returning or requesting more evidence." />
+                  </label>
+                </div>
                 <label className="qms-field">
-                  Root cause decision
-                  <select value={reviewForm.root_cause_status} onChange={(e) => setReviewForm((prev) => ({ ...prev, root_cause_status: e.target.value as CarReviewForm["root_cause_status"] }))}>
-                    <option value="">No change</option>
-                    <option value="ACCEPTED">Accept</option>
-                    <option value="REJECTED">Reject</option>
-                  </select>
+                  Reviewer message / action note
+                  <textarea rows={3} value={reviewForm.message} onChange={(e) => setReviewForm((prev) => ({ ...prev, message: e.target.value }))} placeholder="Visible in the action log." />
                 </label>
-                <label className="qms-field">
-                  CAPA decision
-                  <select value={reviewForm.capa_status} onChange={(e) => setReviewForm((prev) => ({ ...prev, capa_status: e.target.value as CarReviewForm["capa_status"] }))}>
-                    <option value="">No change</option>
-                    <option value="ACCEPTED">Accept</option>
-                    <option value="NEEDS_EVIDENCE">Needs evidence</option>
-                    <option value="REJECTED">Reject</option>
-                  </select>
-                </label>
-              </div>
-              <div className="qms-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-                <label className="qms-field">
-                  Root cause note (required for rejection)
-                  <textarea rows={3} value={reviewForm.root_cause_review_note} onChange={(e) => setReviewForm((prev) => ({ ...prev, root_cause_review_note: e.target.value }))} />
-                </label>
-                <label className="qms-field">
-                  CAPA note (required for reject/needs evidence)
-                  <textarea rows={3} value={reviewForm.capa_review_note} onChange={(e) => setReviewForm((prev) => ({ ...prev, capa_review_note: e.target.value }))} />
-                </label>
-              </div>
-              <label className="qms-field">
-                Reviewer message / action note
-                <textarea rows={3} value={reviewForm.message} onChange={(e) => setReviewForm((prev) => ({ ...prev, message: e.target.value }))} placeholder="Visible in CAR action log for full audit traceability." />
-              </label>
+              </section>
             </div>
-            <div className="upsell-modal__actions">
-              <button type="button" className="secondary-chip-btn" onClick={() => setReviewCar(null)} disabled={reviewBusy}>Cancel</button>
+            <div className="upsell-modal__actions qms-car-review-actions">
+              <button type="button" className="secondary-chip-btn" onClick={closeReviewWorkspace} disabled={reviewBusy}>Cancel</button>
               <button type="button" className="primary-chip-btn" onClick={() => void submitReview()} disabled={reviewBusy}>
                 {reviewBusy ? "Submitting…" : "Submit review"}
               </button>
@@ -1044,15 +1477,50 @@ const QualityCarsPage: React.FC = () => {
         </div>
       )}
 
+      {attachmentPreview && (() => {
+        const kind = evidenceKind({ ...attachmentPreview.attachment, content_type: attachmentPreview.contentType });
+        const canEmbed = kind === "image" || kind === "video" || kind === "pdf";
+        return (
+          <div className="qms-car-evidence-preview-backdrop" role="dialog" aria-modal="true" aria-label="Evidence preview">
+            <div className="qms-car-evidence-preview">
+              <header className="qms-car-evidence-preview__header">
+                <div>
+                  <p className="qms-car-review-kicker">Evidence preview · {attachmentPreview.carNumber}</p>
+                  <h3>{attachmentPreview.attachment.description || attachmentPreview.attachment.filename}</h3>
+                  {attachmentPreview.attachment.description && <p className="text-muted">{attachmentPreview.attachment.filename}</p>}
+                </div>
+                <div className="qms-car-review-evidence-actions">
+                  <button type="button" className="secondary-chip-btn" onClick={() => void downloadReviewAttachment(attachmentPreview.attachment)}>Download</button>
+                  <button type="button" className="upsell-modal__close" onClick={closeReviewAttachmentPreview}>×</button>
+                </div>
+              </header>
+              <div className="qms-car-evidence-preview__surface">
+                {kind === "image" && <img src={attachmentPreview.objectUrl} alt={attachmentPreview.attachment.filename} />}
+                {kind === "video" && <video src={attachmentPreview.objectUrl} controls playsInline />}
+                {kind === "pdf" && <iframe src={attachmentPreview.objectUrl} title={attachmentPreview.attachment.filename} />}
+                {!canEmbed && (
+                  <div className="qms-car-evidence-preview__fallback">
+                    <span className="qms-car-review-file-icon">{evidenceIcon(attachmentPreview.attachment)}</span>
+                    <h4>Preview not supported by this browser</h4>
+                    <p>{attachmentPreview.attachment.filename}</p>
+                    <button type="button" className="primary-chip-btn" onClick={() => void downloadReviewAttachment(attachmentPreview.attachment)}>Download file</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {previewOpen && (
         <div className="upsell-modal__backdrop" role="dialog" aria-modal="true">
           <div className="upsell-modal">
             <div className="upsell-modal__header">
               <div>
                 <p className="upsell-modal__eyebrow">Preview</p>
-                <h3 className="upsell-modal__title">Confirm CAR details</h3>
+                <h3 className="upsell-modal__title">Confirm corrective action details</h3>
                 <p className="upsell-modal__subtitle">
-                  Please confirm the information below before creating this CAR.
+                  Please confirm the information below before creating this action.
                 </p>
               </div>
               <button
@@ -1127,7 +1595,7 @@ const QualityCarsPage: React.FC = () => {
             <div className="upsell-modal__header">
               <div>
                 <p className="upsell-modal__eyebrow">Edit</p>
-                <h3 className="upsell-modal__title">Update CAR</h3>
+                <h3 className="upsell-modal__title">Update corrective action</h3>
                 <p className="upsell-modal__subtitle">
                   Adjust details for {editingCar.car_number}.
                 </p>
@@ -1304,7 +1772,7 @@ const QualityCarsPage: React.FC = () => {
             <div className="upsell-modal__header">
               <div>
                 <p className="upsell-modal__eyebrow">Delete</p>
-                <h3 className="upsell-modal__title">Remove CAR?</h3>
+                <h3 className="upsell-modal__title">Remove corrective action?</h3>
                 <p className="upsell-modal__subtitle">
                   {deleteCar.car_number} will be permanently removed.
                 </p>
@@ -1342,7 +1810,7 @@ const QualityCarsPage: React.FC = () => {
       {!canManageCars && (
         <div className="card card--info" style={{ marginTop: 12 }}>
           <p style={{ margin: 0 }}>
-            CAR updates are limited to assigned auditors, Quality Managers, AMO Admins, and superusers.
+            Updates are limited to assigned auditors, Quality Managers, AMO Admins, and superusers.
           </p>
         </div>
       )}

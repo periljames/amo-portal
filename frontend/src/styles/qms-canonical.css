@@ -1,9 +1,67 @@
+/* QMS operations typography bridge ------------------------------------------------------- */
+:root {
+  --qms-ops-font-sans: "Aptos", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  --qms-ops-font-display: "Aptos Display", "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  --qms-ops-font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+:where(.qms-ops-page, .qms-ops-hero, .qms-ops-card, .qms-calendar-shell, .qms-calendar-grid, .qms-calendar-inspector) {
+  font-family: var(--qms-ops-font-sans);
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  font-kerning: normal;
+  letter-spacing: -0.006em;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:where(.qms-ops-page, .qms-ops-hero, .qms-ops-card, .qms-calendar-shell) :where(h1, h2, h3, h4, strong, .page-header__title) {
+  font-family: var(--qms-ops-font-display);
+  letter-spacing: -0.028em;
+}
+
+:where(.qms-ops-page, .qms-ops-hero, .qms-ops-card, .qms-calendar-shell) :where(button, input, select, textarea) {
+  font: inherit;
+}
+
 /* Unified QMS operations surface. Namespaced to avoid leaking into legacy pages. */
 
 .qms-ops-page {
   display: grid;
   gap: 0.9rem;
   padding-bottom: 1.5rem;
+}
+
+.qms-ops-page--calendar {
+  gap: 0.45rem;
+}
+
+.qms-ops-page--calendar .page-header {
+  margin-bottom: 0.2rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.95rem;
+}
+
+.qms-ops-page--calendar .page-header__body {
+  gap: 0.25rem;
+}
+
+.qms-ops-page--calendar .page-header__title-row {
+  gap: 0.5rem;
+}
+
+.qms-ops-page--calendar .page-header__title {
+  font-size: clamp(1.12rem, 1.5vw, 1.45rem);
+}
+
+.qms-ops-page--calendar .page-header__subtitle {
+  margin-top: 0.16rem;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.qms-ops-page--calendar .page-header__meta {
+  padding: 0.28rem 0.55rem;
 }
 
 .qms-ops-header-actions {
@@ -757,469 +815,1904 @@
   }
 }
 
-/* QMS operational calendar: scoped, database-backed, no global layout overrides. */
-.qms-calendar-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-  gap: 0.9rem;
-  align-items: start;
+.qms-ops-warning--danger {
+  border-color: color-mix(in srgb, var(--accent-danger, #dc2626) 36%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-danger, #dc2626) 8%, var(--surface, #fff));
 }
 
-.qms-calendar-main {
+.qms-ops-warning--danger strong {
+  color: var(--accent-danger, #dc2626);
+}
+
+.qms-ops-warning--danger p,
+.qms-ops-warning--danger ul {
+  margin: 0.2rem 0 0;
+}
+
+.qms-ops-warning--danger ul {
+  padding-left: 1rem;
+  color: var(--text-secondary, #475569);
+  font-size: 0.78rem;
+}
+
+/* QMS calendar board: scoped add-on for canonical calendar views. */
+.qms-calendar-shell {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.qms-calendar-toolbar,
+.qms-calendar-agenda__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.qms-calendar-toolbar > div:first-child,
+.qms-calendar-agenda__head {
   min-width: 0;
 }
 
-.qms-calendar-toolbar {
-  display: grid;
-  grid-template-columns: auto minmax(160px, 1fr) auto auto;
-  gap: 0.65rem;
-  align-items: center;
-  margin-bottom: 0.7rem;
-  padding: 0.65rem;
-  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
-  border-radius: 1rem;
-  background: color-mix(in srgb, var(--surface-elevated, #fff) 88%, var(--accent-primary, #2563eb) 12%);
-}
-
-.qms-calendar-toolbar__month {
-  display: grid;
-  place-items: center;
-  gap: 0.1rem;
+.qms-calendar-toolbar strong,
+.qms-calendar-agenda__head strong {
+  display: block;
   color: var(--text-primary, #0f172a);
+  font-size: 0.98rem;
 }
 
-.qms-calendar-toolbar__month span {
+.qms-calendar-toolbar span,
+.qms-calendar-agenda__head span {
+  display: block;
   color: var(--text-secondary, #64748b);
+  font-size: 0.78rem;
+}
+
+.qms-calendar-toolbar__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.qms-calendar-board {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
+  border-radius: 1rem;
+  overflow: hidden;
+  background: var(--surface-elevated, #fff);
+}
+
+.qms-calendar-board__dow {
+  padding: 0.5rem 0.55rem;
+  border-right: 1px solid var(--border, rgba(15, 23, 42, 0.08));
+  border-bottom: 1px solid var(--border, rgba(15, 23, 42, 0.08));
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 92%, var(--accent-primary, #2563eb) 8%);
+  color: var(--text-secondary, #475569);
   font-size: 0.68rem;
   font-weight: 900;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
-.qms-calendar-toolbar__month strong {
-  font-size: 1rem;
-}
-
-.qms-calendar-tabs {
-  margin: 0.15rem 0 0.65rem;
-}
-
-.qms-calendar-summary {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 0.45rem;
-  margin-bottom: 0.75rem;
-}
-
-.qms-calendar-summary span {
-  display: grid;
-  gap: 0.05rem;
-  min-width: 0;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
-  border-radius: 0.85rem;
-  background: var(--surface-elevated, #fff);
-}
-
-.qms-calendar-summary strong {
-  color: var(--text-primary, #0f172a);
-  font-size: 1.05rem;
-}
-
-.qms-calendar-summary small {
-  color: var(--text-secondary, #64748b);
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.qms-calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  overflow: hidden;
-  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
-  border-radius: 1rem;
-  background: var(--surface-elevated, #fff);
-}
-
-.qms-calendar-weekday {
-  padding: 0.5rem;
-  border-right: 1px solid var(--border, rgba(15, 23, 42, 0.08));
-  border-bottom: 1px solid var(--border, rgba(15, 23, 42, 0.1));
-  background: color-mix(in srgb, var(--surface-elevated, #fff) 92%, var(--accent-primary, #2563eb) 8%);
-  color: var(--text-secondary, #475569);
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-align: center;
-  text-transform: uppercase;
+.qms-calendar-board__dow:nth-child(7n) {
+  border-right: 0;
 }
 
 .qms-calendar-day {
-  min-height: 7.4rem;
-  padding: 0.48rem;
+  min-height: 8.3rem;
+  padding: 0.5rem;
   border-right: 1px solid var(--border, rgba(15, 23, 42, 0.08));
   border-bottom: 1px solid var(--border, rgba(15, 23, 42, 0.08));
-  background: color-mix(in srgb, var(--surface-elevated, #fff) 97%, var(--accent-primary, #2563eb) 3%);
+  background: var(--surface-elevated, #fff);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.qms-calendar-day:nth-child(7n + 7) {
+  border-right: 0;
 }
 
 .qms-calendar-day.is-muted {
-  background: color-mix(in srgb, var(--surface-elevated, #fff) 70%, #f8fafc 30%);
-  color: var(--text-secondary, #94a3b8);
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 82%, var(--border, #dbe3ef) 18%);
 }
 
 .qms-calendar-day.is-today {
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-primary, #2563eb) 62%, transparent);
-  background: color-mix(in srgb, var(--accent-primary, #2563eb) 8%, var(--surface-elevated, #fff));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 4%, var(--surface-elevated, #fff));
 }
 
 .qms-calendar-day__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.35rem;
-  margin-bottom: 0.35rem;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
 }
 
 .qms-calendar-day__head strong {
   color: var(--text-primary, #0f172a);
-  font-size: 0.82rem;
+  font-size: 0.8rem;
+}
+
+.qms-calendar-day__number {
+  display: inline-grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+}
+
+.qms-calendar-day.is-today .qms-calendar-day__number {
+  background: var(--accent-primary, #2563eb);
+  color: #fff;
 }
 
 .qms-calendar-day__head span {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-primary, #2563eb) 14%, transparent);
   color: var(--accent-primary, #2563eb);
-  font-size: 0.62rem;
+  font-size: 0.64rem;
   font-weight: 900;
-  padding: 0.12rem 0.38rem;
   text-transform: uppercase;
 }
 
-.qms-calendar-day__items {
+.qms-calendar-day__items,
+.qms-calendar-agenda {
   display: grid;
-  gap: 0.25rem;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
-.qms-calendar-chip {
-  display: grid;
-  gap: 0.02rem;
+.qms-calendar-item {
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
   min-width: 0;
-  padding: 0.28rem 0.38rem;
-  border-left: 3px solid var(--accent-primary, #2563eb);
+  padding: 0.32rem 0.42rem;
   border-radius: 0.55rem;
   background: color-mix(in srgb, var(--accent-primary, #2563eb) 9%, var(--surface, #fff));
   color: var(--text-primary, #0f172a);
   font-size: 0.68rem;
-  line-height: 1.18;
+  font-weight: 800;
+  line-height: 1.2;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-calendar-item--audit,
+.qms-calendar-dot--audit { background: color-mix(in srgb, var(--accent-primary, #2563eb) 14%, var(--surface, #fff)); }
+.qms-calendar-item--warning,
+.qms-calendar-dot--warning { background: color-mix(in srgb, var(--accent-warning, #d97706) 14%, var(--surface, #fff)); }
+.qms-calendar-item--danger,
+.qms-calendar-dot--danger { background: color-mix(in srgb, var(--accent-danger, #dc2626) 14%, var(--surface, #fff)); }
+.qms-calendar-item--training,
+.qms-calendar-dot--training { background: color-mix(in srgb, #7c3aed 13%, var(--surface, #fff)); }
+.qms-calendar-item--holiday,
+.qms-calendar-dot--holiday { background: color-mix(in srgb, var(--accent-success, #16a34a) 13%, var(--surface, #fff)); }
+
+.qms-calendar-more {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.67rem;
+  font-weight: 800;
+}
+
+.qms-calendar-agenda {
+  padding: 0.7rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
+  border-radius: 1rem;
+  background: var(--surface-elevated, #fff);
+}
+
+.qms-calendar-agenda__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.25rem 0.55rem;
+  align-items: center;
+  padding: 0.55rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.08));
+  border-radius: 0.75rem;
+  color: var(--text-primary, #0f172a);
   text-decoration: none;
 }
 
-.qms-calendar-chip span {
-  color: var(--text-secondary, #475569);
-  font-size: 0.58rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.qms-calendar-agenda__row:hover {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 30%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 5%, var(--surface-elevated, #fff));
 }
 
-.qms-calendar-chip strong {
+.qms-calendar-agenda__row strong,
+.qms-calendar-agenda__row small {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.qms-calendar-chip--danger,
-.qms-calendar-agenda-item--danger { border-left-color: var(--accent-danger, #dc2626); background: color-mix(in srgb, var(--accent-danger, #dc2626) 9%, var(--surface, #fff)); }
-.qms-calendar-chip--today,
-.qms-calendar-agenda-item--today { border-left-color: var(--accent-warning, #d97706); background: color-mix(in srgb, var(--accent-warning, #d97706) 10%, var(--surface, #fff)); }
-.qms-calendar-chip--success,
-.qms-calendar-agenda-item--success { border-left-color: var(--accent-success, #16a34a); background: color-mix(in srgb, var(--accent-success, #16a34a) 9%, var(--surface, #fff)); }
-.qms-calendar-chip--holiday,
-.qms-calendar-agenda-item--holiday { border-left-color: #8b5cf6; background: color-mix(in srgb, #8b5cf6 10%, var(--surface, #fff)); }
-.qms-calendar-chip--audit,
-.qms-calendar-agenda-item--audit { border-left-color: #2563eb; }
-.qms-calendar-chip--car,
-.qms-calendar-agenda-item--car { border-left-color: #f97316; }
-.qms-calendar-chip--training,
-.qms-calendar-agenda-item--training { border-left-color: #16a34a; }
-
-.qms-calendar-chip.is-static,
-.qms-calendar-agenda-item.is-static {
-  cursor: default;
-}
-
-.qms-calendar-more {
+.qms-calendar-agenda__row small {
+  grid-column: 2;
   color: var(--text-secondary, #64748b);
-  font-size: 0.66rem;
-  font-weight: 800;
+  font-size: 0.72rem;
 }
 
-.qms-calendar-agenda {
-  position: sticky;
-  top: 0.75rem;
-  overflow: hidden;
-  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
+.qms-calendar-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 999px;
+}
+
+@media (max-width: 960px) {
+  .qms-calendar-board {
+    grid-template-columns: 1fr;
+  }
+  .qms-calendar-board__dow {
+    display: none;
+  }
+  .qms-calendar-day,
+  .qms-calendar-day:nth-child(7n + 7) {
+    min-height: auto;
+    border-right: 0;
+  }
+}
+
+/* Calendar view refinement: month board remains the primary surface while agenda supports it. */
+.qms-calendar-agenda--secondary {
+  margin-top: 0.85rem;
+  opacity: 0.94;
+}
+
+.qms-calendar-toolbar__actions .qms-ops-action-tab.is-active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary, #2563eb) 26%, transparent);
+}
+
+/* QMS calendar density and action drawer refinement. */
+.qms-calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.qms-calendar-shell.has-drawer .qms-calendar-layout {
+  grid-template-columns: minmax(0, 3fr) minmax(18rem, 1fr);
+}
+
+.qms-calendar-main { min-width: 0; }
+
+.qms-calendar-board--compact .qms-calendar-day {
+  min-height: 6.7rem;
+}
+
+.qms-calendar-day {
+  width: 100%;
+  border-top: 0;
+  border-left: 0;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.qms-calendar-day:hover {
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 4%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-day.is-selected {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-primary, #2563eb) 70%, transparent);
+}
+
+.qms-calendar-day.is-compact {
+  min-height: 7.5rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.08));
+  border-radius: 0.9rem;
+}
+
+.qms-calendar-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.qms-calendar-year {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.qms-calendar-year__month {
+  display: grid;
+  gap: 0.3rem;
+  min-height: 8.8rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
   border-radius: 1rem;
   background: var(--surface-elevated, #fff);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.07);
-}
-
-.qms-calendar-agenda__head {
-  display: grid;
-  gap: 0.05rem;
-  padding: 0.75rem;
-  border-bottom: 1px solid var(--border, rgba(15, 23, 42, 0.1));
-  background: color-mix(in srgb, var(--surface-elevated, #fff) 88%, var(--accent-primary, #2563eb) 12%);
-}
-
-.qms-calendar-agenda__head span {
-  color: var(--text-secondary, #64748b);
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.qms-calendar-agenda__head strong {
   color: var(--text-primary, #0f172a);
+  cursor: pointer;
+  text-align: left;
 }
 
-.qms-calendar-agenda__head small {
+.qms-calendar-year__month:hover {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 35%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 4%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-year__month strong { font-size: 0.95rem; }
+.qms-calendar-year__month span,
+.qms-calendar-year__month small {
+  overflow: hidden;
   color: var(--text-secondary, #64748b);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.qms-calendar-agenda__list {
+.qms-calendar-drawer {
+  position: sticky;
+  top: 0.85rem;
   display: grid;
-  gap: 0.45rem;
+  gap: 0.7rem;
+  max-height: calc(100vh - 8rem);
   overflow: auto;
-  max-height: min(62vh, 680px);
-  padding: 0.65rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
+  border-radius: 1.1rem;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 96%, var(--accent-primary, #2563eb) 4%);
+  box-shadow: 0 1rem 2.5rem rgba(15, 23, 42, 0.08);
 }
 
-.qms-calendar-agenda-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.55rem;
+.qms-calendar-drawer__head,
+.qms-calendar-scheduler__actions {
+  display: flex;
   align-items: center;
-  min-width: 0;
-  padding: 0.62rem;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.qms-calendar-drawer__head strong,
+.qms-calendar-scheduler__title strong { display: block; color: var(--text-primary, #0f172a); }
+.qms-calendar-drawer__head span,
+.qms-calendar-scheduler__title span { display: block; color: var(--text-secondary, #64748b); font-size: 0.75rem; }
+.qms-calendar-drawer__head button {
   border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
-  border-left: 4px solid var(--accent-primary, #2563eb);
+  border-radius: 999px;
+  background: var(--surface-elevated, #fff);
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.32rem 0.65rem;
+}
+
+.qms-calendar-drawer__group,
+.qms-calendar-drawer__list a {
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.55rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.08));
   border-radius: 0.8rem;
   background: var(--surface-elevated, #fff);
   color: var(--text-primary, #0f172a);
   text-decoration: none;
 }
 
-.qms-calendar-agenda-item strong,
-.qms-calendar-agenda-item small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.qms-calendar-agenda-item strong {
-  font-size: 0.84rem;
-  white-space: nowrap;
-}
-
-.qms-calendar-agenda-item small {
+.qms-calendar-drawer__group span,
+.qms-calendar-drawer__list small,
+.qms-calendar-empty-note {
   color: var(--text-secondary, #64748b);
   font-size: 0.72rem;
-  white-space: nowrap;
 }
 
-.qms-calendar-diagnostics {
-  display: flex;
+.qms-calendar-scheduler {
+  display: grid;
   gap: 0.65rem;
-  align-items: flex-start;
-  margin-bottom: 0.7rem;
   padding: 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--accent-danger, #dc2626) 30%, var(--border, #dbe3ef));
-  border-radius: 0.9rem;
-  background: color-mix(in srgb, var(--accent-danger, #dc2626) 8%, var(--surface, #fff));
-  color: var(--text-primary, #0f172a);
+  border: 1px solid color-mix(in srgb, var(--accent-primary, #2563eb) 20%, var(--border, #dbe3ef));
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 5%, var(--surface-elevated, #fff));
 }
 
-.qms-calendar-diagnostics p {
-  margin: 0.1rem 0 0.35rem;
-  color: var(--text-secondary, #64748b);
+.qms-calendar-checklist {
+  display: grid;
+  gap: 0.4rem;
+  max-height: 12rem;
+  overflow: auto;
 }
 
-.qms-calendar-diagnostics ul {
-  margin: 0;
-  padding-left: 1rem;
+.qms-calendar-checklist label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem;
+  border-radius: 0.65rem;
+  background: var(--surface-elevated, #fff);
+}
+
+.qms-calendar-checklist strong,
+.qms-calendar-checklist small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qms-calendar-checklist small { color: var(--text-secondary, #64748b); font-size: 0.7rem; }
+
+.qms-calendar-field {
+  display: grid;
+  gap: 0.25rem;
   color: var(--text-secondary, #475569);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.qms-calendar-field input,
+.qms-calendar-field select {
+  width: 100%;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
+  border-radius: 0.72rem;
+  background: var(--surface-elevated, #fff);
+  color: var(--text-primary, #0f172a);
+  padding: 0.52rem 0.6rem;
+}
+
+.qms-calendar-scheduler__message {
+  margin: 0;
+  color: var(--text-secondary, #475569);
+  font-size: 0.74rem;
+}
+
+.qms-calendar-agenda__row {
+  width: 100%;
+  cursor: pointer;
+  background: var(--surface-elevated, #fff);
+  text-align: left;
 }
 
 @media (max-width: 1180px) {
-  .qms-calendar-shell {
+  .qms-calendar-shell.has-drawer .qms-calendar-layout { grid-template-columns: 1fr; }
+  .qms-calendar-drawer { position: relative; max-height: none; }
+  .qms-calendar-week,
+  .qms-calendar-year { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .qms-calendar-week,
+  .qms-calendar-year { grid-template-columns: 1fr; }
+  .qms-calendar-toolbar__actions { width: 100%; }
+}
+
+/* QMS calendar density pass: compact cells, clearer out-of-month shading, no layout churn. */
+.qms-calendar-board--compact .qms-calendar-day {
+  min-height: 4.85rem;
+  padding: 0.34rem 0.38rem;
+}
+
+.qms-calendar-board__dow {
+  padding: 0.36rem 0.45rem;
+  font-size: 0.63rem;
+}
+
+.qms-calendar-day__head {
+  margin-bottom: 0.22rem;
+}
+
+.qms-calendar-day__head strong {
+  font-size: 0.74rem;
+}
+
+.qms-calendar-day__head span {
+  font-size: 0.58rem;
+}
+
+.qms-calendar-day__items {
+  gap: 0.2rem;
+}
+
+.qms-calendar-item {
+  padding: 0.22rem 0.32rem;
+  border-radius: 0.45rem;
+  font-size: 0.62rem;
+  line-height: 1.12;
+}
+
+.qms-calendar-more {
+  font-size: 0.6rem;
+}
+
+.qms-calendar-day.is-muted {
+  background:
+    linear-gradient(135deg, rgba(148, 163, 184, 0.08) 0 25%, transparent 25% 50%, rgba(148, 163, 184, 0.08) 50% 75%, transparent 75%),
+    color-mix(in srgb, var(--surface-elevated, #fff) 64%, var(--border, #dbe3ef) 36%);
+  background-size: 0.7rem 0.7rem, auto;
+  color: color-mix(in srgb, var(--text-secondary, #64748b) 70%, transparent);
+}
+
+.qms-calendar-day.is-muted .qms-calendar-day__head strong,
+.qms-calendar-day.is-muted .qms-calendar-day__head span,
+.qms-calendar-day.is-muted .qms-calendar-item,
+.qms-calendar-day.is-muted .qms-calendar-more {
+  opacity: 0.55;
+}
+
+.qms-calendar-day.is-muted:hover {
+  background:
+    linear-gradient(135deg, rgba(148, 163, 184, 0.1) 0 25%, transparent 25% 50%, rgba(148, 163, 184, 0.1) 50% 75%, transparent 75%),
+    color-mix(in srgb, var(--surface-elevated, #fff) 58%, var(--border, #dbe3ef) 42%);
+  background-size: 0.7rem 0.7rem, auto;
+}
+
+/* Calendar cleanup: remove the old generic register chrome and give the calendar its own dense work surface. */
+.qms-ops-workspace-grid--calendar {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.qms-calendar-card {
+  min-width: 0;
+  padding: 0.62rem;
+}
+
+.qms-calendar-toolbar--lean {
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-bottom: 0.25rem;
+}
+
+.qms-calendar-toolbar__title {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 11rem;
+}
+
+.qms-calendar-toolbar__actions--lean {
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.qms-calendar-date-nav,
+.qms-calendar-view-switch,
+.qms-calendar-action-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2.1rem;
+  padding: 0.18rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 92%, var(--surface, #f8fafc) 8%);
+}
+
+.qms-calendar-nav-button,
+.qms-calendar-month-trigger,
+.qms-calendar-icon-button,
+.qms-calendar-view-switch__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.72rem;
+  border: 1px solid transparent;
+  border-radius: 0.68rem;
+  background: transparent;
+  color: var(--text-primary, #0f172a);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 850;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.qms-calendar-nav-button {
+  width: 1.86rem;
+}
+
+.qms-calendar-month-picker {
+  position: relative;
+}
+
+.qms-calendar-month-trigger {
+  gap: 0.35rem;
+  min-width: 9.6rem;
+  padding: 0 0.58rem;
+  border-left-color: var(--border, rgba(15, 23, 42, 0.1));
+  border-right-color: var(--border, rgba(15, 23, 42, 0.1));
+}
+
+.qms-calendar-month-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-calendar-month-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.42rem);
+  left: 50%;
+  display: grid;
+  width: min(19rem, 82vw);
+  gap: 0.58rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
+  border-radius: 0.9rem;
+  background: var(--surface-elevated, #fff);
+  box-shadow: 0 1.2rem 2.6rem rgba(15, 23, 42, 0.16);
+  transform: translateX(-50%);
+}
+
+.qms-calendar-month-popover label {
+  display: grid;
+  gap: 0.24rem;
+  color: var(--text-secondary, #475569);
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.qms-calendar-month-popover select {
+  min-height: 2.08rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
+  border-radius: 0.72rem;
+  background: var(--surface-elevated, #fff);
+  color: var(--text-primary, #0f172a);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0 0.55rem;
+}
+
+.qms-calendar-month-popover__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.38rem;
+}
+
+.qms-calendar-month-popover__actions button {
+  min-height: 1.9rem;
+  padding: 0 0.66rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
+  border-radius: 0.7rem;
+  background: var(--surface-elevated, #fff);
+  color: var(--text-primary, #0f172a);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.qms-calendar-month-popover__actions button:last-child {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 34%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 9%, var(--surface-elevated, #fff));
+  color: var(--accent-primary, #1d4ed8);
+}
+
+.qms-calendar-nav-button:hover,
+.qms-calendar-month-trigger:hover,
+.qms-calendar-icon-button:hover,
+.qms-calendar-view-switch__item:hover,
+.qms-calendar-view-switch__item.is-active {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 30%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 8%, var(--surface-elevated, #fff));
+  color: var(--accent-primary, #1d4ed8);
+}
+
+.qms-calendar-icon-button {
+  gap: 0.28rem;
+  min-height: 1.72rem;
+  padding: 0 0.62rem;
+  border-color: transparent;
+  background: transparent;
+}
+
+.qms-calendar-icon-button:disabled {
+  opacity: 0.58;
+  cursor: progress;
+}
+
+.qms-calendar-view-switch__item {
+  padding: 0 0.58rem;
+}
+
+.qms-calendar-layout {
+  gap: 0.58rem;
+}
+
+.qms-calendar-shell.has-drawer .qms-calendar-layout {
+  grid-template-columns: minmax(0, 3.4fr) minmax(17rem, 0.85fr);
+}
+
+.qms-calendar-board {
+  border-radius: 0.82rem;
+}
+
+.qms-calendar-board--compact .qms-calendar-day {
+  min-height: clamp(4rem, 8.6vh, 5.4rem);
+  padding: 0.28rem 0.34rem;
+}
+
+.qms-calendar-week .qms-calendar-day.is-compact {
+  min-height: clamp(8rem, 32vh, 14rem);
+}
+
+.qms-calendar-year {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.qms-calendar-year__month {
+  min-height: 6.4rem;
+  padding: 0.62rem;
+  border-radius: 0.82rem;
+}
+
+.qms-calendar-drawer {
+  top: 0.5rem;
+  max-height: calc(100vh - 6rem);
+  padding: 0.65rem;
+  border-radius: 0.9rem;
+}
+
+@media (max-width: 1180px) {
+  .qms-calendar-shell.has-drawer .qms-calendar-layout {
     grid-template-columns: 1fr;
   }
-  .qms-calendar-agenda {
-    position: static;
-  }
-  .qms-calendar-summary {
+
+  .qms-calendar-year {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 820px) {
-  .qms-calendar-toolbar,
-  .qms-calendar-summary {
-    grid-template-columns: 1fr;
+  .qms-calendar-toolbar--lean,
+  .qms-calendar-toolbar__actions--lean {
+    align-items: stretch;
+    width: 100%;
   }
-  .qms-calendar-grid {
+
+  .qms-calendar-toolbar__actions--lean,
+  .qms-calendar-date-nav,
+  .qms-calendar-view-switch,
+  .qms-calendar-action-cluster {
+    display: flex;
+    width: 100%;
+  }
+
+  .qms-calendar-month-picker,
+  .qms-calendar-month-trigger {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  .qms-calendar-month-trigger {
+    min-width: 0;
+  }
+
+  .qms-calendar-view-switch__item,
+  .qms-calendar-icon-button {
+    flex: 1 1 auto;
+  }
+
+  .qms-calendar-year {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .qms-calendar-date-nav,
+  .qms-calendar-view-switch {
     overflow-x: auto;
   }
-  .qms-calendar-weekday,
-  .qms-calendar-day {
-    min-width: 8.25rem;
+
+  .qms-calendar-board--compact .qms-calendar-day {
+    min-height: auto;
+  }
+
+  .qms-calendar-year {
+    grid-template-columns: 1fr;
   }
 }
 
-/* Functional QMS settings. */
-.qms-settings-shell {
+/* Calendar V2: integrated command centre, filtered intelligence rail, and non-blocking inspector. */
+.qms-ops-page--calendar {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(285px, 0.8fr);
-  gap: 0.85rem;
-  align-items: start;
-}
-
-.qms-settings-json-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.7rem;
 }
 
-.qms-settings-json-field {
-  display: grid;
-  gap: 0.42rem;
-  min-width: 0;
+.qms-ops-page--calendar .page-header,
+.qms-ops-page--calendar [class*="page-header"] {
+  margin-bottom: 0;
 }
 
-.qms-settings-json-field > span {
-  display: grid;
-  gap: 0.1rem;
+.qms-calendar-card {
+  padding: 0.55rem;
+  overflow: visible;
 }
 
-.qms-settings-json-field strong {
-  color: var(--text-primary, #0f172a);
-  font-size: 0.84rem;
-}
-
-.qms-settings-json-field small {
-  color: var(--text-secondary, #64748b);
-  font-size: 0.72rem;
-  line-height: 1.32;
-}
-
-.qms-settings-json-field textarea {
-  width: 100%;
-  min-height: 12rem;
-  resize: vertical;
-  border: 1px solid var(--border, rgba(15, 23, 42, 0.14));
-  border-radius: 0.85rem;
-  background: #0f172a;
-  color: #e2e8f0;
-  padding: 0.75rem;
-  font: 0.78rem/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-}
-
-.qms-settings-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.qms-calendar-shell {
+  position: relative;
   gap: 0.55rem;
-  margin-bottom: 0.65rem;
 }
 
-.qms-settings-meta-grid span {
-  display: grid;
-  gap: 0.08rem;
-  padding: 0.62rem;
-  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
-  border-radius: 0.8rem;
-  background: var(--surface-elevated, #fff);
-}
-
-.qms-settings-meta-grid strong {
-  overflow: hidden;
-  color: var(--text-primary, #0f172a);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qms-settings-meta-grid small {
-  color: var(--text-secondary, #64748b);
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.qms-settings-success {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin: 0.45rem 0;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid color-mix(in srgb, var(--accent-success, #16a34a) 34%, var(--border, #dbe3ef));
-  border-radius: 0.8rem;
-  background: color-mix(in srgb, var(--accent-success, #16a34a) 9%, var(--surface, #fff));
-  color: var(--accent-success, #15803d);
-  font-size: 0.82rem;
-  font-weight: 800;
-}
-
-.qms-settings-form-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.qms-settings-actions {
-  margin-top: 0.65rem;
-}
-
-.qms-settings-route-list {
-  display: grid;
-  gap: 0.45rem;
-  max-height: 28rem;
-  overflow: auto;
-}
-
-.qms-settings-route-list a {
+.qms-calendar-command {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.55rem;
-  padding: 0.55rem 0.62rem;
-  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
-  border-radius: 0.75rem;
-  background: var(--surface-elevated, #fff);
-  color: var(--text-primary, #0f172a);
-  text-decoration: none;
+  gap: 0.65rem;
+  padding: 0.1rem 0.05rem 0.2rem;
 }
 
-.qms-settings-route-list small {
-  overflow: hidden;
+.qms-calendar-command__period {
+  display: inline-grid;
+  gap: 0.18rem;
+  min-width: min(100%, 17rem);
+}
+
+.qms-calendar-command__range {
   color: var(--text-secondary, #64748b);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.qms-calendar-command__controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.qms-calendar-insight-rail {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin-bottom: 0.2rem;
+}
+
+.qms-calendar-filter-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 2.15rem;
+  padding: 0.38rem 0.55rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
+  border-radius: 0.8rem;
+  background: var(--surface-elevated, #fff);
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.qms-calendar-filter-chip span,
+.qms-calendar-filter-chip strong {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.qms-calendar-filter-chip span {
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.qms-calendar-filter-chip strong {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.55rem;
+  height: 1.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface, #f8fafc) 80%, var(--border, #dbe3ef) 20%);
+  color: var(--text-primary, #0f172a);
+  font-size: 0.72rem;
+}
+
+.qms-calendar-filter-chip:hover,
+.qms-calendar-filter-chip.is-active {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 34%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 5%, var(--surface-elevated, #fff));
+  box-shadow: 0 0.45rem 1.2rem rgba(37, 99, 235, 0.08);
+}
+
+.qms-calendar-filter-chip.is-active strong {
+  background: var(--accent-primary, #2563eb);
+  color: #fff;
+}
+
+.qms-calendar-filter-chip--attention.is-active,
+.qms-calendar-filter-chip--attention:hover {
+  border-color: color-mix(in srgb, var(--accent-danger, #dc2626) 34%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-danger, #dc2626) 5%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-filter-chip--attention.is-active strong {
+  background: var(--accent-danger, #dc2626);
+}
+
+.qms-calendar-layout,
+.qms-calendar-shell.has-drawer .qms-calendar-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.qms-calendar-main {
+  min-width: 0;
+}
+
+.qms-calendar-date-nav,
+.qms-calendar-view-switch,
+.qms-calendar-action-cluster {
+  min-height: 1.98rem;
+  border-radius: 0.78rem;
+}
+
+.qms-calendar-nav-button,
+.qms-calendar-month-trigger,
+.qms-calendar-icon-button,
+.qms-calendar-view-switch__item {
+  min-height: 1.58rem;
+  border-radius: 0.6rem;
+  font-size: 0.73rem;
+}
+
+.qms-calendar-month-trigger {
+  min-width: 10.2rem;
+}
+
+.qms-calendar-board {
+  border-radius: 0.78rem;
+  box-shadow: 0 0.8rem 1.9rem rgba(15, 23, 42, 0.05);
+}
+
+.qms-calendar-board--compact .qms-calendar-day {
+  min-height: clamp(4.55rem, 8.3vh, 5.65rem);
+  padding: 0.32rem 0.38rem;
+}
+
+.qms-calendar-day {
+  position: relative;
+}
+
+.qms-calendar-day__date {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  min-width: 0;
+}
+
+.qms-calendar-day__date small {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.67rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.qms-calendar-day__count,
+.qms-calendar-day__head span.qms-calendar-day__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.12rem;
+  height: 1.12rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 10%, var(--surface-elevated, #fff));
+  color: var(--accent-primary, #1d4ed8);
+  font-size: 0.6rem;
+  font-weight: 900;
+}
+
+.qms-calendar-day.is-today {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-primary, #2563eb) 5%, var(--surface-elevated, #fff)), var(--surface-elevated, #fff));
+}
+
+.qms-calendar-day.is-selected::after {
+  content: "";
+  position: absolute;
+  inset: 0.18rem;
+  border: 2px solid color-mix(in srgb, var(--accent-primary, #2563eb) 72%, transparent);
+  border-radius: 0.48rem;
+  pointer-events: none;
+}
+
+.qms-calendar-day.is-selected {
+  box-shadow: none;
+}
+
+.qms-calendar-item {
+  position: relative;
+  padding-left: 0.52rem;
+  border: 1px solid color-mix(in srgb, var(--accent-primary, #2563eb) 12%, transparent);
+}
+
+.qms-calendar-item::before {
+  content: "";
+  position: absolute;
+  left: 0.24rem;
+  top: 50%;
+  width: 0.18rem;
+  height: 58%;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.38;
+  transform: translateY(-50%);
+}
+
+.qms-calendar-week {
+  gap: 0.5rem;
+}
+
+.qms-calendar-week .qms-calendar-day.is-compact {
+  min-height: clamp(9rem, 34vh, 16rem);
+  padding: 0.55rem;
+}
+
+.qms-calendar-year {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.qms-calendar-year__month {
+  min-height: 7.35rem;
+  background: linear-gradient(180deg, var(--surface-elevated, #fff), color-mix(in srgb, var(--surface, #f8fafc) 75%, var(--surface-elevated, #fff) 25%));
+}
+
+.qms-calendar-agenda {
+  gap: 0.38rem;
+  padding: 0.55rem;
+  max-height: min(66vh, 48rem);
+  overflow: auto;
+}
+
+.qms-calendar-agenda__row {
+  grid-template-columns: auto 4.8rem minmax(0, 1fr) auto;
+  gap: 0.42rem;
+  padding: 0.46rem 0.55rem;
+  border-radius: 0.68rem;
+}
+
+.qms-calendar-agenda__row.is-selected {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 48%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 5%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-agenda__date {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.72rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.qms-calendar-agenda__content {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.qms-calendar-agenda__content strong,
+.qms-calendar-agenda__content small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-calendar-agenda__content small {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.7rem;
+}
+
+.qms-calendar-event-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.28rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 9%, var(--surface-elevated, #fff));
+  color: var(--text-secondary, #475569);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.qms-calendar-event-badge--warning { background: color-mix(in srgb, var(--accent-warning, #d97706) 13%, var(--surface-elevated, #fff)); color: #92400e; }
+.qms-calendar-event-badge--danger { background: color-mix(in srgb, var(--accent-danger, #dc2626) 11%, var(--surface-elevated, #fff)); color: #991b1b; }
+.qms-calendar-event-badge--training { background: color-mix(in srgb, #7c3aed 11%, var(--surface-elevated, #fff)); color: #5b21b6; }
+.qms-calendar-event-badge--holiday { background: color-mix(in srgb, var(--accent-success, #16a34a) 11%, var(--surface-elevated, #fff)); color: #166534; }
+
+.qms-calendar-drawer {
+  position: fixed;
+  z-index: 60;
+  top: clamp(7.2rem, 14vh, 9.8rem);
+  right: clamp(1rem, 3vw, 2rem);
+  width: min(25rem, calc(100vw - 2rem));
+  max-height: calc(100vh - clamp(8.4rem, 17vh, 11rem));
+  padding: 0.72rem;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 97%, var(--accent-primary, #2563eb) 3%);
+  box-shadow: 0 1.4rem 3.5rem rgba(15, 23, 42, 0.18);
+}
+
+.qms-calendar-drawer__head {
+  position: sticky;
+  top: -0.72rem;
+  z-index: 1;
+  margin: -0.72rem -0.72rem 0;
+  padding: 0.72rem;
+  border-bottom: 1px solid var(--border, rgba(15, 23, 42, 0.08));
+  border-radius: 1rem 1rem 0 0;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 97%, var(--accent-primary, #2563eb) 3%);
+}
+
+.qms-calendar-inspector-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.38rem;
+}
+
+.qms-calendar-inspector-stats span {
+  display: grid;
+  gap: 0.08rem;
+  padding: 0.45rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.08));
+  border-radius: 0.75rem;
+  background: var(--surface-elevated, #fff);
+}
+
+.qms-calendar-inspector-stats strong {
+  color: var(--text-primary, #0f172a);
+  font-size: 0.9rem;
+}
+
+.qms-calendar-inspector-stats small {
+  overflow: hidden;
+  color: var(--text-secondary, #64748b);
+  font-size: 0.63rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.qms-calendar-detail-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border: 1px solid color-mix(in srgb, #7c3aed 18%, var(--border, #dbe3ef));
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, #7c3aed 4%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-detail-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.qms-calendar-detail-card__head strong {
+  color: var(--text-primary, #0f172a);
+}
+
+.qms-calendar-detail-card__head span {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.qms-calendar-summary-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+  min-width: 0;
+}
+
+.qms-calendar-summary-chip {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0.28rem 0.48rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #7c3aed 10%, var(--surface-elevated, #fff));
+  color: var(--text-primary, #0f172a);
+  font-size: 0.68rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-calendar-scheduler {
+  padding: 0;
+  border-radius: 0.82rem;
+  background: transparent;
+}
+
+.qms-calendar-scheduler summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.52rem 0.6rem;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
+  border-radius: 0.78rem;
+  background: var(--surface-elevated, #fff);
+  cursor: pointer;
+  list-style: none;
+}
+
+.qms-calendar-scheduler summary::-webkit-details-marker {
+  display: none;
+}
+
+.qms-calendar-scheduler summary strong,
+.qms-calendar-scheduler summary span {
+  display: block;
+  min-width: 0;
+}
+
+.qms-calendar-scheduler summary strong {
+  color: var(--text-primary, #0f172a);
+  font-size: 0.78rem;
+}
+
+.qms-calendar-scheduler summary span {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.68rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-calendar-scheduler[open] {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.qms-calendar-scheduler[open] summary {
+  margin-bottom: 0.05rem;
+}
+
+.qms-calendar-event-card {
+  position: relative;
+  padding: 0.6rem 0.65rem;
+}
+
+.qms-calendar-event-card strong,
+.qms-calendar-event-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-calendar-event-card .qms-calendar-event-badge {
+  justify-self: start;
+  margin-bottom: 0.1rem;
+}
+
 @media (max-width: 1180px) {
-  .qms-settings-shell {
-    grid-template-columns: 1fr;
+  .qms-calendar-command {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .qms-calendar-command__period,
+  .qms-calendar-command__controls,
+  .qms-calendar-date-nav,
+  .qms-calendar-view-switch,
+  .qms-calendar-action-cluster {
+    width: 100%;
+  }
+
+  .qms-calendar-command__controls {
+    justify-content: stretch;
+  }
+
+  .qms-calendar-view-switch__item,
+  .qms-calendar-icon-button {
+    flex: 1 1 auto;
+  }
+
+  .qms-calendar-year {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 820px) {
-  .qms-settings-json-grid,
-  .qms-settings-meta-grid,
-  .qms-settings-form-grid {
+  .qms-calendar-insight-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qms-calendar-agenda__row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .qms-calendar-agenda__date {
+    display: none;
+  }
+
+  .qms-calendar-drawer {
+    top: auto;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    max-height: min(78vh, 42rem);
+  }
+}
+
+@media (max-width: 560px) {
+  .qms-calendar-insight-rail,
+  .qms-calendar-year {
     grid-template-columns: 1fr;
+  }
+
+  .qms-calendar-command__controls {
+    display: grid;
+  }
+
+  .qms-calendar-month-trigger {
+    min-width: 0;
+  }
+}
+
+/* Calendar V3: integrated responsive detail panel
+   The selected date panel is now part of the calendar grid instead of an overlay.
+   On wide screens the grid uses a 3:1 split: calendar content gets three tracks,
+   the selected-date inspector gets one track. */
+.qms-calendar-shell {
+  position: relative;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.qms-calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 0.72rem;
+  width: 100%;
+}
+
+.qms-calendar-shell.has-drawer .qms-calendar-layout {
+  grid-template-columns: minmax(0, 3fr) minmax(20rem, 1fr);
+}
+
+.qms-calendar-main {
+  min-width: 0;
+}
+
+.qms-calendar-shell.has-drawer .qms-calendar-main .qms-calendar-board--compact .qms-calendar-day {
+  min-height: clamp(4.25rem, 7.8vh, 5.2rem);
+}
+
+.qms-calendar-shell.has-drawer .qms-calendar-main .qms-calendar-year {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.qms-calendar-shell.has-drawer .qms-calendar-main .qms-calendar-agenda {
+  max-height: min(68vh, 48rem);
+}
+
+.qms-calendar-drawer {
+  position: sticky;
+  z-index: 1;
+  top: 0.6rem;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  display: grid;
+  align-self: start;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  max-height: calc(100vh - 6.5rem);
+  overflow: auto;
+  gap: 0.65rem;
+  padding: 0.68rem;
+  border: 1px solid color-mix(in srgb, var(--accent-primary, #2563eb) 16%, var(--border, rgba(15, 23, 42, 0.1)));
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 96%, var(--accent-primary, #2563eb) 4%);
+  box-shadow: 0 0.85rem 2rem rgba(15, 23, 42, 0.08);
+}
+
+.qms-calendar-drawer__head {
+  position: sticky;
+  top: -0.68rem;
+  z-index: 2;
+  margin: -0.68rem -0.68rem 0;
+  padding: 0.68rem;
+  border-bottom: 1px solid var(--border, rgba(15, 23, 42, 0.08));
+  border-radius: 1rem 1rem 0 0;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 97%, var(--accent-primary, #2563eb) 3%);
+}
+
+.qms-calendar-inspector-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qms-calendar-detail-card {
+  min-width: 0;
+}
+
+.qms-calendar-scheduler__actions {
+  align-items: stretch;
+}
+
+.qms-calendar-scheduler__actions .btn,
+.qms-calendar-scheduler__actions .qms-ops-action-tab {
+  flex: 1 1 10rem;
+  justify-content: center;
+}
+
+@media (min-width: 1500px) {
+  .qms-calendar-shell.has-drawer .qms-calendar-layout {
+    grid-template-columns: minmax(0, 3.15fr) minmax(21rem, 0.85fr);
+  }
+}
+
+@media (max-width: 1280px) {
+  .qms-calendar-shell.has-drawer .qms-calendar-layout {
+    grid-template-columns: minmax(0, 2.25fr) minmax(19rem, 1fr);
+  }
+
+  .qms-calendar-shell.has-drawer .qms-calendar-main .qms-calendar-year {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1080px) {
+  .qms-calendar-shell.has-drawer .qms-calendar-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .qms-calendar-drawer {
+    position: relative;
+    top: auto;
+    max-height: none;
+    order: -1;
+  }
+
+  .qms-calendar-inspector-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .qms-calendar-inspector-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+
+/* QMS operations typography refinements ------------------------------------------------- */
+.qms-ops-page :where(.qms-ops-mode, .qms-calendar-chip, .qms-calendar-filter, .qms-calendar-event, .qms-calendar-toolbar button) {
+  font-weight: 650;
+  letter-spacing: -0.004em;
+}
+
+.qms-ops-page :where(.qms-ops-muted, .page-header__subtitle, .qms-calendar-range) {
+  font-weight: 400;
+  line-height: 1.38;
+}
+
+@supports (font-variation-settings: normal) {
+  :where(.qms-ops-page, .qms-ops-hero, .qms-ops-card, .qms-calendar-shell, .qms-calendar-grid, .qms-calendar-inspector) {
+    font-family: "Segoe UI Variable Text", "Aptos", "Inter", system-ui, sans-serif;
+  }
+
+  :where(.qms-ops-page, .qms-ops-hero, .qms-ops-card, .qms-calendar-shell) :where(h1, h2, h3, h4, strong, .page-header__title) {
+    font-family: "Segoe UI Variable Display", "Aptos Display", "Inter", system-ui, sans-serif;
+  }
+}
+
+
+/* QMS scroll stability patch: reduce repaint pressure on large audit/calendar boards. */
+.qms-page-grid,
+.qms-ops-workspace,
+.qms-calendar-shell,
+.audit-shell-body {
+  scroll-behavior: auto;
+  contain: layout paint;
+}
+
+.qms-calendar-day,
+.qms-ops-card,
+.portal-list-card,
+.planner-calendar-cell {
+  content-visibility: auto;
+  contain-intrinsic-size: 96px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qms-ops-card,
+  .qms-calendar-day,
+  .planner-calendar-event,
+  .portal-list-card {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
+/* Calendar V4: dashboard-first density, semantic filter rail, and standard toolbar. */
+.qms-ops-page--calendar {
+  gap: 0.55rem;
+}
+
+.qms-ops-page--calendar .page-header {
+  padding: 0.64rem 0.95rem;
+}
+
+.qms-ops-page--calendar .page-header__title {
+  font-size: clamp(1.18rem, 1.25vw, 1.55rem);
+}
+
+.qms-ops-page--calendar .page-header__subtitle {
+  display: none;
+}
+
+.qms-ops-page--calendar .section-card__header {
+  margin-bottom: 0.45rem;
+  padding: 0 0.05rem;
+}
+
+.qms-ops-page--calendar .section-card__title {
+  font-size: 0.95rem;
+  letter-spacing: -0.03em;
+}
+
+.qms-calendar-card {
+  padding: 0.56rem 0.62rem 0.62rem;
+  overflow: visible;
+}
+
+.qms-calendar-card .section-card__body {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.qms-calendar-shell {
+  gap: 0.46rem;
+}
+
+.qms-calendar-command {
+  display: grid;
+  grid-template-columns: minmax(15rem, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.02rem 0.02rem 0;
+}
+
+.qms-calendar-command__period strong {
+  display: block;
+  color: var(--text-primary, #0f172a);
+  font-size: clamp(0.95rem, 0.95vw, 1.12rem);
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.qms-calendar-command__range {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.qms-calendar-command__controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.qms-calendar-date-nav,
+.qms-calendar-view-switch {
+  min-height: 2.05rem;
+  padding: 0.2rem;
+  border-radius: 0.82rem;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 96%, var(--surface, #f8fafc) 4%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35);
+}
+
+.qms-calendar-date-nav {
+  gap: 0.18rem;
+}
+
+.qms-calendar-nav-button,
+.qms-calendar-icon-button,
+.qms-calendar-view-switch__item {
+  min-height: 1.62rem;
+  border-radius: 0.62rem;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.qms-calendar-nav-button {
+  width: 1.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-primary, #0f172a);
+}
+
+.qms-calendar-icon-button--today {
+  min-width: 3.55rem;
+  padding: 0 0.58rem;
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 22%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 7%, var(--surface-elevated, #fff));
+  color: var(--accent-primary, #1d4ed8);
+}
+
+.qms-calendar-date-input {
+  min-height: 1.62rem;
+  width: 8.65rem;
+  border: 1px solid transparent;
+  border-left-color: var(--border, rgba(15, 23, 42, 0.11));
+  border-radius: 0.62rem;
+  background: transparent;
+  color: var(--text-primary, #0f172a);
+  font-size: 0.72rem;
+  font-weight: 850;
+  padding: 0 0.42rem;
+}
+
+.qms-calendar-nav-button:hover,
+.qms-calendar-date-input:hover,
+.qms-calendar-icon-button--today:hover,
+.qms-calendar-view-switch__item:hover,
+.qms-calendar-view-switch__item.is-active {
+  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 34%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, var(--accent-primary, #2563eb) 8%, var(--surface-elevated, #fff));
+  color: var(--accent-primary, #1d4ed8);
+}
+
+.qms-calendar-view-switch__item {
+  min-width: 3.15rem;
+  padding: 0 0.54rem;
+}
+
+.qms-calendar-insight-rail {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.38rem;
+  margin: 0;
+}
+
+.qms-calendar-filter-chip {
+  min-height: 2rem;
+  padding: 0.32rem 0.48rem;
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, var(--surface-elevated, #fff) 96%, var(--surface, #f8fafc) 4%);
+}
+
+.qms-calendar-filter-chip span {
+  font-size: 0.68rem;
+  letter-spacing: 0.018em;
+  text-transform: uppercase;
+}
+
+.qms-calendar-filter-chip strong {
+  min-width: 1.42rem;
+  height: 1.18rem;
+  font-size: 0.66rem;
+}
+
+.qms-calendar-filter-chip--audits.is-active,
+.qms-calendar-filter-chip--audits:hover {
+  border-color: color-mix(in srgb, #059669 38%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, #059669 7%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-filter-chip--cars.is-active,
+.qms-calendar-filter-chip--cars:hover {
+  border-color: color-mix(in srgb, #dc2626 38%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, #dc2626 6%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-filter-chip--training.is-active,
+.qms-calendar-filter-chip--training:hover {
+  border-color: color-mix(in srgb, #7c3aed 38%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, #7c3aed 6%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-filter-chip--reviews.is-active,
+.qms-calendar-filter-chip--reviews:hover {
+  border-color: color-mix(in srgb, #0ea5e9 38%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, #0ea5e9 6%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-filter-chip--other.is-active,
+.qms-calendar-filter-chip--other:hover {
+  border-color: color-mix(in srgb, #64748b 34%, var(--border, #dbe3ef));
+  background: color-mix(in srgb, #64748b 6%, var(--surface-elevated, #fff));
+}
+
+.qms-calendar-filter-chip--audits.is-active strong { background: #059669; color: #fff; }
+.qms-calendar-filter-chip--cars.is-active strong { background: #dc2626; color: #fff; }
+.qms-calendar-filter-chip--training.is-active strong { background: #7c3aed; color: #fff; }
+.qms-calendar-filter-chip--reviews.is-active strong { background: #0ea5e9; color: #fff; }
+.qms-calendar-filter-chip--other.is-active strong { background: #64748b; color: #fff; }
+
+.qms-calendar-layout,
+.qms-calendar-shell.has-drawer .qms-calendar-layout {
+  gap: 0.52rem;
+}
+
+.qms-calendar-shell.has-drawer .qms-calendar-layout {
+  grid-template-columns: minmax(0, 3.7fr) minmax(18.5rem, 0.82fr);
+}
+
+.qms-calendar-board {
+  border-radius: 0.76rem;
+  overflow: hidden;
+}
+
+.qms-calendar-board__dow {
+  min-height: 1.38rem;
+  padding: 0.28rem 0.42rem;
+  font-size: 0.61rem;
+  letter-spacing: 0.055em;
+}
+
+.qms-calendar-board--compact .qms-calendar-day {
+  min-height: clamp(5.05rem, 9.3vh, 7.25rem);
+  padding: 0.34rem 0.4rem;
+}
+
+@media (min-width: 1800px) {
+  .qms-calendar-board--compact .qms-calendar-day {
+    min-height: clamp(6.2rem, 9.8vh, 8.9rem);
+  }
+}
+
+.qms-calendar-day__head {
+  margin-bottom: 0.24rem;
+}
+
+.qms-calendar-day__head strong {
+  font-size: 0.76rem;
+  font-weight: 950;
+}
+
+.qms-calendar-day__head span,
+.qms-calendar-day__head span.qms-calendar-day__count {
+  font-size: 0.58rem;
+  font-weight: 900;
+}
+
+.qms-calendar-day__items {
+  gap: 0.22rem;
+}
+
+.qms-calendar-item {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 0.02rem;
+  padding: 0.24rem 0.34rem 0.24rem 0.58rem;
+  border-radius: 0.46rem;
+  font-size: 0.64rem;
+  line-height: 1.08;
+  white-space: normal;
+}
+
+.qms-calendar-item strong,
+.qms-calendar-item small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qms-calendar-item strong {
+  color: var(--text-primary, #0f172a);
+  font-size: 0.65rem;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+}
+
+.qms-calendar-item small {
+  color: color-mix(in srgb, currentColor 78%, var(--text-secondary, #64748b));
+  font-size: 0.57rem;
+  font-weight: 780;
+}
+
+.qms-calendar-item--audit,
+.qms-calendar-dot--audit {
+  background: color-mix(in srgb, #059669 16%, var(--surface-elevated, #fff));
+  color: #047857;
+}
+
+.qms-calendar-item--warning,
+.qms-calendar-dot--warning {
+  background: color-mix(in srgb, #d97706 16%, var(--surface-elevated, #fff));
+  color: #92400e;
+}
+
+.qms-calendar-item--danger,
+.qms-calendar-dot--danger {
+  background: color-mix(in srgb, #dc2626 15%, var(--surface-elevated, #fff));
+  color: #991b1b;
+}
+
+.qms-calendar-item--training,
+.qms-calendar-dot--training {
+  background: color-mix(in srgb, #7c3aed 14%, var(--surface-elevated, #fff));
+  color: #5b21b6;
+}
+
+.qms-calendar-item--review,
+.qms-calendar-dot--review {
+  background: color-mix(in srgb, #0ea5e9 14%, var(--surface-elevated, #fff));
+  color: #0369a1;
+}
+
+.qms-calendar-item--holiday,
+.qms-calendar-dot--holiday {
+  background: color-mix(in srgb, #16a34a 13%, var(--surface-elevated, #fff));
+  color: #166534;
+}
+
+.qms-calendar-more {
+  font-size: 0.6rem;
+  font-weight: 900;
+}
+
+.qms-calendar-drawer {
+  padding: 0.62rem;
+  border-radius: 0.86rem;
+}
+
+.qms-calendar-agenda {
+  max-height: min(70vh, 56rem);
+}
+
+.qms-calendar-agenda__row {
+  grid-template-columns: auto 5.2rem minmax(0, 1fr) auto;
+}
+
+.qms-calendar-event-badge--audit { background: color-mix(in srgb, #059669 13%, var(--surface-elevated, #fff)); color: #047857; }
+.qms-calendar-event-badge--review { background: color-mix(in srgb, #0ea5e9 13%, var(--surface-elevated, #fff)); color: #0369a1; }
+
+.qms-calendar-year__month small strong {
+  color: var(--text-primary, #0f172a);
+  font-size: inherit;
+}
+
+@media (max-width: 1380px) {
+  .qms-calendar-command {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .qms-calendar-command__controls {
+    justify-content: space-between;
+  }
+
+  .qms-calendar-shell.has-drawer .qms-calendar-layout {
+    grid-template-columns: minmax(0, 2.5fr) minmax(18rem, 1fr);
+  }
+}
+
+@media (max-width: 1080px) {
+  .qms-calendar-insight-rail {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .qms-calendar-command__controls {
+    display: grid;
+    justify-content: stretch;
+  }
+
+  .qms-calendar-date-nav,
+  .qms-calendar-view-switch {
+    width: 100%;
+  }
+
+  .qms-calendar-date-input {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  .qms-calendar-insight-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

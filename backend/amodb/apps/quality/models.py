@@ -409,6 +409,32 @@ class QMSAuditReferenceCounter(Base):
     )
 
 
+
+
+class QMSAuditScope(Base):
+    __tablename__ = "qms_audit_scopes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    code = Column(String(16), nullable=False)
+    name = Column(String(120), nullable=False)
+    description = Column(Text, nullable=True)
+    party_level = Column(String(32), nullable=False, default="FIRST_PARTY", index=True)
+    default_kind = Column(SAEnum(QMSAuditKind, name="qms_audit_scope_default_kind", native_enum=False), nullable=False, default=QMSAuditKind.INTERNAL, index=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    is_system_default = Column(Boolean, nullable=False, default=False)
+    sort_order = Column(Integer, nullable=False, default=100)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("amo_id", "code", name="uq_qms_audit_scope_code_per_amo"),
+        Index("ix_qms_audit_scope_amo_active", "amo_id", "is_active"),
+        CheckConstraint("code = upper(code)", name="ck_qms_audit_scope_code_upper"),
+    )
+
+
 class QMSAudit(Base):
     __tablename__ = "qms_audits"
 
@@ -434,6 +460,8 @@ class QMSAudit(Base):
     )
 
     audit_ref = Column(String(64), nullable=False, index=True)
+    audit_scope_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    audit_scope_code = Column(String(16), nullable=True, index=True)
     reference_family = Column(String(16), nullable=False, default="QAR")
     unit_code = Column(String(16), nullable=False, default="MO")
     ref_year = Column(Integer, nullable=False, default=lambda: datetime.now(timezone.utc).year % 100)
@@ -468,6 +496,10 @@ class QMSAudit(Base):
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    delete_reason = Column(Text, nullable=True)
+
     findings = relationship(
         "QMSAuditFinding",
         back_populates="audit",
@@ -490,6 +522,7 @@ class QMSAudit(Base):
         Index("ix_qms_audits_domain_status", "domain", "status"),
         Index("ix_qms_audits_domain_kind", "domain", "kind"),
         Index("ix_qms_audits_amo_domain_created", "amo_id", "domain", "created_at"),
+        Index("ix_qms_audits_amo_deleted", "amo_id", "deleted_at"),
         CheckConstraint(
             "planned_start IS NULL OR planned_end IS NULL OR planned_end >= planned_start",
             name="ck_qms_audit_planned_dates_order",
@@ -573,7 +606,14 @@ class QMSAuditFinding(Base):
         uselist=False,
         cascade="all, delete-orphan",
         passive_deletes=True,
-        lazy="selectin",
+        lazy="noload",
+    )
+    attachments = relationship(
+        "QMSFindingAttachment",
+        back_populates="finding",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="noload",
     )
 
     __table_args__ = (
@@ -592,6 +632,37 @@ class QMSAuditFinding(Base):
 
     def __repr__(self) -> str:
         return f"<QMSAuditFinding id={self.id} audit_id={self.audit_id} level={self.level} severity={self.severity}>"
+
+
+
+
+class QMSFindingAttachment(Base):
+    __tablename__ = "qms_finding_attachments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    finding_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("qms_audit_findings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    filename = Column(String(255), nullable=False)
+    description = Column(String(500), nullable=True)
+    file_ref = Column(String(512), nullable=False)
+    content_type = Column(String(128), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    sha256 = Column(String(64), nullable=True, index=True)
+    uploaded_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    uploaded_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    finding = relationship("QMSAuditFinding", back_populates="attachments", lazy="noload")
+
+    __table_args__ = (
+        Index("ix_qms_finding_attachments_finding_uploaded", "finding_id", "uploaded_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<QMSFindingAttachment id={self.id} finding={self.finding_id} filename={self.filename}>"
 
 
 class QMSAuditSchedule(Base):
@@ -617,6 +688,8 @@ class QMSAuditSchedule(Base):
         index=True,
     )
     title = Column(String(255), nullable=False)
+    audit_scope_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    audit_scope_code = Column(String(16), nullable=True, index=True)
     scope = Column(Text, nullable=True)
     criteria = Column(Text, nullable=True)
     auditee = Column(String(255), nullable=True)
@@ -636,8 +709,13 @@ class QMSAuditSchedule(Base):
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    delete_reason = Column(Text, nullable=True)
+
     __table_args__ = (
         Index("ix_qms_audit_schedules_domain_active", "domain", "is_active"),
+        Index("ix_qms_audit_schedules_amo_deleted", "amo_id", "deleted_at"),
     )
 
     def __repr__(self) -> str:
@@ -716,6 +794,10 @@ class QMSNotification(Base):
         index=True,
     )
     created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    action_url = Column(String(1024), nullable=True)
+    action_label = Column(String(80), nullable=True)
+    entity_type = Column(String(64), nullable=True, index=True)
+    entity_id = Column(String(64), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     read_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
@@ -913,6 +995,7 @@ class CARAttachment(Base):
         index=True,
     )
     filename = Column(String(255), nullable=False)
+    description = Column(String(500), nullable=True)
     file_ref = Column(String(512), nullable=False)
     content_type = Column(String(128), nullable=True)
     size_bytes = Column(Integer, nullable=True)
@@ -923,6 +1006,208 @@ class CARAttachment(Base):
 
     def __repr__(self) -> str:
         return f"<CARAttachment id={self.id} car={self.car_id} filename={self.filename}>"
+
+
+class QualityTenantWorkflowSettings(Base):
+    """Tenant-governed Quality workflow defaults.
+
+    Auto-escalation is intentionally platform-locked by business logic: tenant
+    admins may tune reminders, but only a platform superuser may disable the
+    escalation switch for a tenant.
+    """
+
+    __tablename__ = "quality_tenant_workflow_settings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    report_due_days = Column(Integer, nullable=False, default=7)
+    report_reminder_days_json = Column(Text, nullable=False, default="[7,3,1]")
+    car_reminder_percentages_json = Column(Text, nullable=False, default="[75,50,25]")
+    final_reminder_days_before_due = Column(Integer, nullable=False, default=2)
+    auto_escalation_enabled = Column(Boolean, nullable=False, default=True, index=True)
+    auto_escalation_locked = Column(Boolean, nullable=False, default=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    updated_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        CheckConstraint("report_due_days BETWEEN 1 AND 60", name="ck_quality_settings_report_due_days"),
+        CheckConstraint("final_reminder_days_before_due BETWEEN 0 AND 30", name="ck_quality_settings_final_reminder"),
+        Index("ix_quality_settings_amo_escalation", "amo_id", "auto_escalation_enabled"),
+    )
+
+    @property
+    def report_reminder_days(self) -> list[int]:
+        try:
+            value = json.loads(self.report_reminder_days_json or "[]")
+            return [int(item) for item in value if int(item) >= 0]
+        except Exception:
+            return [7, 3, 1]
+
+    @property
+    def car_reminder_percentages(self) -> list[int]:
+        try:
+            value = json.loads(self.car_reminder_percentages_json or "[]")
+            return [int(item) for item in value if 0 < int(item) < 100]
+        except Exception:
+            return [75, 50, 25]
+
+
+class QualityAuditDocumentRequest(Base):
+    __tablename__ = "quality_audit_document_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    audit_id = Column(UUID(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    due_date = Column(Date, nullable=True, index=True)
+    status = Column(String(32), nullable=False, default="REQUESTED", index=True)
+    requested_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    uploaded_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    uploaded_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    file_ref = Column(String(512), nullable=True)
+    review_note = Column(Text, nullable=True)
+    reviewed_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        Index("ix_quality_doc_requests_audit_status", "audit_id", "status"),
+        CheckConstraint("status IN ('REQUESTED','UPLOADED','ACCEPTED','REJECTED','WAIVED')", name="ck_quality_doc_request_status"),
+    )
+
+
+class QualityAuditChecklistItem(Base):
+    __tablename__ = "quality_audit_checklist_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    audit_id = Column(UUID(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False, index=True)
+    section = Column(String(128), nullable=True, index=True)
+    checklist_ref = Column(String(128), nullable=True, index=True)
+    requirement_ref = Column(String(255), nullable=True)
+    prompt = Column(Text, nullable=False)
+    response_status = Column(String(32), nullable=False, default="PENDING", index=True)
+    objective_evidence = Column(Text, nullable=True)
+    finding_id = Column(UUID(as_uuid=True), ForeignKey("qms_audit_findings.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_to_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    completed_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        Index("ix_quality_checklist_audit_order", "audit_id", "section", "sort_order"),
+        CheckConstraint("response_status IN ('PENDING','COMPLIANT','NON_CONFORMING','OBSERVATION','NOT_APPLICABLE')", name="ck_quality_checklist_response_status"),
+    )
+
+
+class QualityAuditPostBrief(Base):
+    __tablename__ = "quality_audit_post_briefs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    audit_id = Column(UUID(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    briefing_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    summary = Column(Text, nullable=False)
+    attendees_json = Column(Text, nullable=False, default="[]")
+    report_due_date = Column(Date, nullable=False, index=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class QualityAuditReportTracker(Base):
+    __tablename__ = "quality_audit_report_trackers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    audit_id = Column(UUID(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    report_due_date = Column(Date, nullable=False, index=True)
+    report_submitted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    feedback_due_date = Column(Date, nullable=True, index=True)
+    feedback_submitted_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(32), nullable=False, default="DUE", index=True)
+    next_reminder_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('DUE','SUBMITTED','FEEDBACK_DUE','ACCEPTED','OVERDUE')", name="ck_quality_report_tracker_status"),
+        Index("ix_quality_report_tracker_status_due", "amo_id", "status", "report_due_date"),
+    )
+
+
+class QualityCARExtensionRequest(Base):
+    __tablename__ = "quality_car_extension_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="CASCADE"), nullable=False, index=True)
+    requested_due_date = Column(Date, nullable=False, index=True)
+    reason = Column(Text, nullable=False)
+    status = Column(String(32), nullable=False, default="PENDING", index=True)
+    requested_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    reviewed_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    review_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        Index("ix_quality_car_ext_car_status", "car_id", "status"),
+        CheckConstraint("status IN ('PENDING','APPROVED','REJECTED')", name="ck_quality_car_extension_status"),
+    )
+
+
+class QualityReminderMilestone(Base):
+    __tablename__ = "quality_reminder_milestones"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_type = Column(String(64), nullable=False, index=True)
+    entity_id = Column(String(64), nullable=False, index=True)
+    milestone_key = Column(String(64), nullable=False, index=True)
+    recipient_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    scheduled_for = Column(DateTime(timezone=True), nullable=False, index=True)
+    due_date = Column(Date, nullable=True, index=True)
+    sent_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    escalated_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    severity = Column(String(32), nullable=False, default="ACTION_REQUIRED")
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_quality_reminder_entity_key", "amo_id", "entity_type", "entity_id", "milestone_key"),
+        Index("ix_quality_reminder_due_unsent", "amo_id", "scheduled_for", "sent_at"),
+    )
+
+
+class QualityArchivePackage(Base):
+    __tablename__ = "quality_archive_packages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    audit_id = Column(UUID(as_uuid=True), ForeignKey("qms_audits.id", ondelete="CASCADE"), nullable=False, index=True)
+    package_ref = Column(String(128), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="READY", index=True)
+    file_ref = Column(String(512), nullable=True)
+    metrics_snapshot_json = Column(Text, nullable=False, default="{}")
+    generated_by_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+    generated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("amo_id", "audit_id", "package_ref", name="uq_quality_archive_package_ref"),
+        Index("ix_quality_archive_audit_generated", "audit_id", "generated_at"),
+        CheckConstraint("status IN ('READY','LOCKED','SUPERSEDED')", name="ck_quality_archive_status"),
+    )
 
 
 class UserAvailabilityStatus(str, enum.Enum):

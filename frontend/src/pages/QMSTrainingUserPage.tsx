@@ -10,7 +10,7 @@ import {
   deleteTrainingRecord,
   downloadTrainingFile,
   downloadTrainingUserEvidencePack,
-  downloadTrainingUserRecordPdf,
+  previewTrainingUserRecordPdf,
   getTrainingUserDetailBundle,
   listTrainingCourses,
   updateTrainingDeferralRequest,
@@ -36,6 +36,14 @@ type SortKey = "course" | "completion_date" | "valid_until" | "hours" | "score" 
 type SortDirection = "asc" | "desc";
 type PanelKey = "compliance" | "schedule" | "deferrals" | "newRecord";
 type ViewMode = "completed" | "missing";
+type RecordConflictKind = "duplicate" | "renewal";
+
+type RecordConflictState = {
+  kind: RecordConflictKind;
+  title: string;
+  message: string;
+  records: TrainingRecordRead[];
+};
 
 type DeferralReasonCategory =
   | "ILLNESS"
@@ -150,6 +158,46 @@ function cleanRoleTitle(user: AdminUserRead | null): string {
   return preferred.replace(/^TECHNICIAN\s*[-·]\s*/i, "").replace(/\s+/g, " ").trim();
 }
 
+
+function profileAvatarUrl(user: AdminUserRead | null): string | null {
+  if (!user || typeof window === "undefined") return null;
+  const candidates = [
+    (user as any).avatar_url,
+    (user as any).profile_photo_url,
+    (user as any).photo_url,
+    (user as any).portrait_url,
+  ].filter(Boolean) as string[];
+  if (candidates[0]) return candidates[0];
+  const keys = [
+    user.id ? `amo_portal_profile_avatar:${user.id}` : "",
+    user.staff_code ? `amo_portal_profile_avatar:${user.staff_code}` : "",
+    user.email ? `amo_portal_profile_avatar:${user.email}` : "",
+    user.id ? `profile_avatar:${user.id}` : "",
+  ].filter(Boolean);
+  for (const key of keys) {
+    const stored = window.localStorage.getItem(key);
+    if (stored) return stored;
+  }
+  return null;
+}
+
+function profileAvatarVariant(user: AdminUserRead | null): "male" | "female" | "neutral" {
+  const raw = String((user as any)?.gender || (user as any)?.sex || "").trim().toLowerCase();
+  if (["f", "female", "woman", "lady"].includes(raw)) return "female";
+  if (["m", "male", "man", "gentleman"].includes(raw)) return "male";
+  return "neutral";
+}
+
+function initialsForUser(user: AdminUserRead | null): string {
+  const name = user?.full_name || `${user?.first_name || ""} ${user?.last_name || ""}`.trim() || user?.email || "User";
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("") || "U";
+}
+
 function dueDateForItem(item: TrainingStatusItem | null | undefined): string | null {
   if (!item) return null;
   return item.extended_due_date || item.valid_until || null;
@@ -201,6 +249,63 @@ function effectiveTrainingStatusForRecord(record: TrainingRecordRead | null | un
     return "OK";
   }
   return record.completion_date ? "OK" : "NOT_DONE";
+}
+
+function normaliseRecordLifecycleStatus(record: TrainingRecordRead | null | undefined): string {
+  return String(record?.record_status || record?.source_status || "ACTIVE").trim().toUpperCase().replace(/\s+/g, "_");
+}
+
+function isHistoricalTrainingRecord(record: TrainingRecordRead | null | undefined): boolean {
+  const status = normaliseRecordLifecycleStatus(record);
+  return status === "RENEWED" || status === "SUPERSEDED" || status === "INACTIVE";
+}
+
+function recordDateTime(value: string | null | undefined, fallback = 0): number {
+  if (!value) return fallback;
+  const parsed = new Date(value.includes("T") ? value : `${value}T12:00:00`).getTime();
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function compareRecordRecency(a: TrainingRecordRead, b: TrainingRecordRead): number {
+  const completedDiff = recordDateTime(a.completion_date) - recordDateTime(b.completion_date);
+  if (completedDiff !== 0) return completedDiff;
+  const createdDiff = recordDateTime(a.created_at) - recordDateTime(b.created_at);
+  if (createdDiff !== 0) return createdDiff;
+  return String(a.id || "").localeCompare(String(b.id || ""));
+}
+
+function dedupeTrainingRecords(input: TrainingRecordRead[]): TrainingRecordRead[] {
+  const latestByCourse = new Map<string, TrainingRecordRead>();
+  input.forEach((record) => {
+    if (isHistoricalTrainingRecord(record)) return;
+    const key = String(record.course_id || record.course_pk || "").trim();
+    if (!key) return;
+    const previous = latestByCourse.get(key);
+    if (!previous || compareRecordRecency(record, previous) > 0) {
+      latestByCourse.set(key, record);
+    }
+  });
+  return [...latestByCourse.values()].sort((a, b) => compareRecordRecency(b, a));
+}
+
+function trainingApiConflictFromError(error: any): { code: string; message: string; records: TrainingRecordRead[] } | null {
+  const detail = error?.detail || error?.responseBody?.detail;
+  if (detail && typeof detail === "object" && typeof detail.code === "string") {
+    const records = Array.isArray(detail.records) ? detail.records : detail.record ? [detail.record] : [];
+    return {
+      code: detail.code,
+      message: String(detail.message || error?.message || "Training record conflict."),
+      records: records as TrainingRecordRead[],
+    };
+  }
+  const message = String(error?.message || "");
+  if (message.includes("TRAINING_RECORD_RENEWAL_CONFIRMATION_REQUIRED")) {
+    return { code: "TRAINING_RECORD_RENEWAL_CONFIRMATION_REQUIRED", message, records: [] };
+  }
+  if (message.includes("DUPLICATE_TRAINING_RECORD")) {
+    return { code: "DUPLICATE_TRAINING_RECORD", message, records: [] };
+  }
+  return null;
 }
 
 function statusLabel(status: string): string {
@@ -282,19 +387,6 @@ function dueCountdownLabel(item: TrainingStatusItem | null | undefined): string 
   if (timeLeft === "-") return formatDate(due);
   return `Due in (${timeLeft})`;
 }
-
-function displayRecordLifecycleStatus(record: TrainingRecordRead | null | undefined): string | null {
-  const raw = (record?.record_status || record?.source_status || "").trim().toUpperCase().replace(/\s+/g, "_");
-  if (!raw) return null;
-  if (raw === "SUPERSEDED") return "RENEWED";
-  return raw;
-}
-
-function isHistoricalTrainingRecord(record: TrainingRecordRead | null | undefined): boolean {
-  const status = displayRecordLifecycleStatus(record);
-  return status === "RENEWED";
-}
-
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -398,6 +490,7 @@ const QMSTrainingUserPage: React.FC = () => {
   const [recordAttachment, setRecordAttachment] = useState<File | null>(null);
   const [recordAttachmentKind, setRecordAttachmentKind] = useState("EVIDENCE");
   const [savingRecord, setSavingRecord] = useState(false);
+  const [recordConflict, setRecordConflict] = useState<RecordConflictState | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [inlineAttachmentTargetRecordId, setInlineAttachmentTargetRecordId] = useState<string | null>(null);
   const [uploadingInlineAttachment, setUploadingInlineAttachment] = useState(false);
@@ -445,7 +538,7 @@ const QMSTrainingUserPage: React.FC = () => {
     setHireDate(bundle.hire_date || null);
     setCourses(courseResult.status === "fulfilled" ? courseResult.value : []);
     setItems(bundle.status_items || []);
-    setRecords(bundle.records || []);
+    setRecords(dedupeTrainingRecords(bundle.records || []));
     setDeferrals(bundle.deferrals || []);
     setEvents(bundle.upcoming_events || []);
     setFiles(bundle.files || []);
@@ -522,38 +615,33 @@ const QMSTrainingUserPage: React.FC = () => {
     }
   };
 
+  const openTrainingRecordPreview = async (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      saveDownloadedFile(blob, `${(user?.full_name || "training-record").replace(/\s+/g, "_")}.pdf`);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_500);
+      return;
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+  };
+
   const handleExportRecord = async () => {
     if (!userId) return;
     setExportingRecord(true);
-    const stopSim = startProgressSimulation(setRecordTransfer, "Staging PDF", 8, 68);
+    const stopSim = startProgressSimulation(setRecordTransfer, "Preparing PDF", 8, 76);
     try {
-      setRecordTransfer((prev) => ({ active: true, progress: Math.max(prev.progress, 18), label: "Staging PDF" }));
+      setRecordTransfer((prev) => ({ active: true, progress: Math.max(prev.progress, 18), label: "Preparing PDF" }));
       const ready = await waitForTrainingUserRecordPdfReady(userId, { attempts: 10, intervalMs: 350 });
       setPdfReady(ready);
-      setRecordTransfer((prev) => ({ active: true, progress: Math.max(prev.progress, ready ? 58 : 42), label: ready ? "Preparing PDF" : "Building PDF" }));
-      let file = null as Awaited<ReturnType<typeof downloadTrainingUserEvidencePack>> | null;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          file = await downloadTrainingUserRecordPdf(userId, (progress: TransferProgress) => {
-            setRecordTransfer({
-              active: true,
-              progress: progress.percent ?? 94,
-              label: progress.percent != null ? "Downloading PDF" : pdfReady ? "Preparing PDF" : "Building PDF",
-            });
-          });
-          break;
-        } catch (error) {
-          if (attempt === 1) throw error;
-          setRecordTransfer((prev) => ({ ...prev, active: true, progress: Math.max(prev.progress, 62), label: "Retrying PDF download" }));
-          await delay(300);
-        }
-      }
-      saveDownloadedFile(file as Awaited<ReturnType<typeof downloadTrainingUserRecordPdf>>);
+      setRecordTransfer((prev) => ({ active: true, progress: Math.max(prev.progress, ready ? 66 : 52), label: ready ? "Opening PDF" : "Building PDF" }));
+      const blob = await previewTrainingUserRecordPdf(userId);
+      await openTrainingRecordPreview(blob);
       setPdfReady(true);
-      finalizeProgress(setRecordTransfer, "PDF ready");
+      finalizeProgress(setRecordTransfer, "PDF opened");
     } catch (e: any) {
       setRecordTransfer({ active: false, progress: 0, label: "Preparing PDF" });
-      setError(e?.message || "Failed to export individual training record.");
+      setError(e?.message || "Failed to open the individual training record PDF.");
     } finally {
       stopSim();
       setExportingRecord(false);
@@ -614,6 +702,18 @@ const QMSTrainingUserPage: React.FC = () => {
 
   const selectedCourse = useMemo(() => courseById.get(recordForm.coursePk) || null, [courseById, recordForm.coursePk]);
   const selectedCourseStatus = useMemo(() => itemByCoursePk.get(recordForm.coursePk) || null, [itemByCoursePk, recordForm.coursePk]);
+  const activeRecordsForSelectedCourse = useMemo(() => {
+    if (!recordForm.coursePk) return [] as TrainingRecordRead[];
+    return records
+      .filter((record) => !isHistoricalTrainingRecord(record))
+      .filter((record) => String(record.course_id || record.course_pk || "") === String(recordForm.coursePk))
+      .filter((record) => !editingRecordId || record.id !== editingRecordId)
+      .sort((a, b) => compareRecordRecency(b, a));
+  }, [editingRecordId, recordForm.coursePk, records]);
+  const exactDuplicateRecord = useMemo(() => {
+    if (!recordForm.coursePk || !recordForm.completionDate) return null;
+    return activeRecordsForSelectedCourse.find((record) => record.completion_date === recordForm.completionDate) || null;
+  }, [activeRecordsForSelectedCourse, recordForm.completionDate, recordForm.coursePk]);
   const linkedRefresherCourse = useMemo(() => {
     if (coursePhase(selectedCourse) !== "INITIAL") return null;
     const family = courseFamilyKey(selectedCourse);
@@ -857,7 +957,7 @@ const QMSTrainingUserPage: React.FC = () => {
     }
   };
 
-  const submitRecord = async () => {
+  const submitRecord = async (confirmRenewal = false) => {
     if (!recordForm.coursePk || !userId) {
       setError("Select a course before saving a training record.");
       return;
@@ -867,6 +967,29 @@ const QMSTrainingUserPage: React.FC = () => {
       setError("Attach the certificate file before saving a certificate reference.");
       return;
     }
+
+    if (exactDuplicateRecord) {
+      setError(null);
+      setRecordConflict({
+        kind: "duplicate",
+        title: "Duplicate training record detected",
+        message: "A current record already exists for the selected course and completion date. Review the existing details instead of saving a second copy.",
+        records: [exactDuplicateRecord],
+      });
+      return;
+    }
+
+    if (!editingRecordId && !confirmRenewal && activeRecordsForSelectedCourse.length > 0) {
+      setError(null);
+      setRecordConflict({
+        kind: "renewal",
+        title: "Confirm training renewal",
+        message: "This person already has a current record for the selected course. Saving this entry will mark the previous record as RENEWED in the database and hide it from the visible training record list.",
+        records: activeRecordsForSelectedCourse,
+      });
+      return;
+    }
+
     setSavingRecord(true);
     setError(null);
     try {
@@ -904,19 +1027,43 @@ const QMSTrainingUserPage: React.FC = () => {
           attachment_file_id: attachmentFileId,
           remarks: recordForm.remarks.trim() || null,
           is_manual_entry: true,
+          confirm_renewal: confirmRenewal,
         });
       }
+      setRecordConflict(null);
       await load();
       resetRecordForm();
       setPanelOpen((prev) => ({ ...prev, newRecord: false }));
       setViewMode("completed");
       setStatusFilter("ALL");
     } catch (e: any) {
+      const conflict = trainingApiConflictFromError(e);
+      if (conflict?.code === "TRAINING_RECORD_RENEWAL_CONFIRMATION_REQUIRED") {
+        setError(null);
+        setRecordConflict({
+          kind: "renewal",
+          title: "Confirm training renewal",
+          message: conflict.message || "Confirm that this new record renews the existing active record.",
+          records: conflict.records.length ? conflict.records : activeRecordsForSelectedCourse,
+        });
+        return;
+      }
+      if (conflict?.code === "DUPLICATE_TRAINING_RECORD") {
+        setError(null);
+        setRecordConflict({
+          kind: "duplicate",
+          title: "Duplicate training record detected",
+          message: conflict.message || "A matching training record already exists.",
+          records: conflict.records.length ? conflict.records : exactDuplicateRecord ? [exactDuplicateRecord] : [],
+        });
+        return;
+      }
       setError(e?.message || "Failed to save training record.");
     } finally {
       setSavingRecord(false);
     }
   };
+
 
   const submitDeferral = async () => {
     if (!userId || !deferralForm.coursePk) {
@@ -1022,46 +1169,6 @@ const QMSTrainingUserPage: React.FC = () => {
       }
     >
       <div className="training-module training-module--qms training-profile-page">
-        <section className="training-profile-toolbar">
-          <label className="qms-field training-profile-toolbar__field">
-            <span>Status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="ALL">All statuses</option>
-              <option value="OK">Current</option>
-              <option value="DUE_SOON">Due soon</option>
-              <option value="OVERDUE">Overdue</option>
-              <option value="DEFERRED">Deferred</option>
-              <option value="SCHEDULED_ONLY">Scheduled</option>
-              <option value="NOT_DONE">Not done</option>
-            </select>
-          </label>
-          <div className="training-profile-toolbar__actions">
-            <button
-              type="button"
-              className={viewMode === "completed" ? "primary-chip-btn" : "secondary-chip-btn"}
-              onClick={() => {
-                setViewMode("completed");
-                if (statusFilter === "NOT_DONE") setStatusFilter("ALL");
-              }}
-            >
-              Completed log
-            </button>
-            <button
-              type="button"
-              className={viewMode === "missing" ? "primary-chip-btn" : "secondary-chip-btn"}
-              onClick={() => {
-                setViewMode("missing");
-                setStatusFilter("NOT_DONE");
-              }}
-            >
-              Missing courses
-            </button>
-            <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
-              Back to training handler
-            </button>
-          </div>
-        </section>
-
         {state === "loading" && (
           <div className="card card--info">
             <p>Loading training profile...</p>
@@ -1081,11 +1188,17 @@ const QMSTrainingUserPage: React.FC = () => {
           <section className="training-profile-shell">
             <div className="qms-card qms-card--hero training-profile-hero">
               <div className="qms-card__header training-profile-hero__header">
-                <div>
-                  <p className="qms-card__eyebrow">Personnel record</p>
-                  <h3 className="qms-card__title">{user.full_name || "Training profile"}</h3>
+                <div className="training-profile-identity">
+                  <div className={`training-profile-avatar training-profile-avatar--${profileAvatarVariant(user)}`} aria-hidden="true">
+                    {profileAvatarUrl(user) ? <img src={profileAvatarUrl(user) || ""} alt="" /> : <span>{initialsForUser(user)}</span>}
+                  </div>
+                  <div>
+                    <p className="qms-card__eyebrow">Personnel record</p>
+                    <h3 className="qms-card__title">{user.full_name || "Training profile"}</h3>
+                    <p className="training-profile-identity__hint">Use the photo/initials to confirm the person before recording or reviewing training evidence.</p>
+                  </div>
                 </div>
-                <span className="qms-pill qms-pill--info">Compliance {compliance}%</span>
+                <span className="qms-pill qms-pill--info">Required compliance {compliance}%</span>
               </div>
 
               <div className="training-profile-hero__meta">
@@ -1110,19 +1223,7 @@ const QMSTrainingUserPage: React.FC = () => {
 
             <div className="training-profile-toolbar training-profile-toolbar--surface">
               <div className="training-profile-toolbar__group">
-                <label className="qms-field training-profile-toolbar__field">
-                  <span>Status</span>
-                  <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-                    <option value="ALL">All statuses</option>
-                    <option value="OK">Current</option>
-                    <option value="DUE_SOON">Due soon</option>
-                    <option value="OVERDUE">Overdue</option>
-                    <option value="DEFERRED">Deferred</option>
-                    <option value="SCHEDULED_ONLY">Scheduled</option>
-                    <option value="NOT_DONE">Not done</option>
-                  </select>
-                </label>
-                <div className="training-profile-toolbar__actions">
+                <div className="training-profile-toolbar__actions" aria-label="Training profile view">
                   <button
                     type="button"
                     className={viewMode === "completed" ? "primary-chip-btn" : "secondary-chip-btn"}
@@ -1141,7 +1242,7 @@ const QMSTrainingUserPage: React.FC = () => {
                       setStatusFilter("NOT_DONE");
                     }}
                   >
-                    Missing courses
+                    Missing required courses
                   </button>
                 </div>
               </div>
@@ -1157,9 +1258,6 @@ const QMSTrainingUserPage: React.FC = () => {
                     {panelOpen.newRecord ? "Hide new record" : "Show new record"}
                   </button>
                 ) : null}
-                <button type="button" className="secondary-chip-btn" onClick={() => navigate(-1)}>
-                  Back to training handler
-                </button>
               </div>
             </div>
 
@@ -1226,11 +1324,11 @@ const QMSTrainingUserPage: React.FC = () => {
                 <div className="qms-card training-profile-logcard training-profile-section-card">
                   <div className="qms-card__header">
                     <div>
-                      <h3 className="qms-card__title">{viewMode === "completed" ? "Training record log" : "Missing course view"}</h3>
+                      <h3 className="qms-card__title">{viewMode === "completed" ? "Training record log" : "Missing required courses"}</h3>
                       <p className="qms-card__subtitle">
                         {viewMode === "completed"
                           ? "Completed records and current due status are shown together here. This is the main working view for the individual profile."
-                          : "This view isolates courses that still have no captured completion for this person."}
+                          : "This view shows only courses required by the active course matrix for this person."}
                       </p>
                     </div>
                     <div className="training-profile-toolbar__actions">
@@ -1239,11 +1337,7 @@ const QMSTrainingUserPage: React.FC = () => {
                           <Plus size={14} /> Record new entry
                         </button>
                       ) : null}
-                      {viewMode === "completed" ? (
-                        <button type="button" className="secondary-chip-btn" onClick={handleExportRecord} disabled={exportingRecord || !userId}>
-                          {recordTransfer.active ? `${recordTransfer.label} ${formatTransferPercent(recordTransfer.progress)}` : "Export PDF"}
-                        </button>
-                      ) : null}
+
                     </div>
                   </div>
                   <div className="table-responsive training-table-wrap">
@@ -1352,7 +1446,7 @@ const QMSTrainingUserPage: React.FC = () => {
                           })}
                           {filteredMissingRows.length === 0 && (
                             <tr>
-                              <td colSpan={6} className="text-muted">No missing course rows match the selected filter.</td>
+                              <td colSpan={6} className="text-muted">No required courses are currently missing for this person.</td>
                             </tr>
                           )}
                         </tbody>
@@ -1665,6 +1759,51 @@ const QMSTrainingUserPage: React.FC = () => {
                   style={{ display: "none" }}
                   onChange={(e) => void handleInlineAttachmentChosen(e.target.files?.[0] || null)}
                 />
+
+                {recordConflict ? (
+                  <div className="training-record-conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="training-record-conflict-title">
+                    <div className="training-record-conflict-modal">
+                      <div className="training-record-conflict-modal__header">
+                        <div>
+                          <span className={`qms-pill ${recordConflict.kind === "duplicate" ? "qms-pill--danger" : "qms-pill--warning"}`}>
+                            {recordConflict.kind === "duplicate" ? "Duplicate" : "Renewal"}
+                          </span>
+                          <h3 id="training-record-conflict-title">{recordConflict.title}</h3>
+                        </div>
+                        <button type="button" className="training-icon-btn" onClick={() => setRecordConflict(null)} aria-label="Close record confirmation">
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <p className="training-record-conflict-modal__message">{recordConflict.message}</p>
+                      <div className="training-record-conflict-list">
+                        {(recordConflict.records.length ? recordConflict.records : activeRecordsForSelectedCourse).map((record) => (
+                          <div key={record.id || `${record.course_id}-${record.completion_date}`} className="training-record-conflict-item">
+                            <div>
+                              <strong>{record.course_code || selectedCourse?.course_id || record.course_id}</strong>
+                              <span>{record.course_name || selectedCourse?.course_name || "Training course"}</span>
+                            </div>
+                            <dl>
+                              <div><dt>Completed</dt><dd>{formatDate(record.completion_date)}</dd></div>
+                              <div><dt>Valid until</dt><dd>{formatDate(record.valid_until)}</dd></div>
+                              <div><dt>Certificate</dt><dd>{record.certificate_reference || "-"}</dd></div>
+                              <div><dt>Status</dt><dd>{normaliseRecordLifecycleStatus(record)}</dd></div>
+                            </dl>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="training-record-conflict-modal__actions">
+                        <button type="button" className="secondary-chip-btn" onClick={() => setRecordConflict(null)}>
+                          Review form
+                        </button>
+                        {recordConflict.kind === "renewal" ? (
+                          <button type="button" className="primary-chip-btn" disabled={savingRecord} onClick={() => void submitRecord(true)}>
+                            {savingRecord ? "Saving..." : "Confirm renewal and save"}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 {viewerFile ? (
                   <div className="training-file-viewer-backdrop" onClick={closeViewer}>

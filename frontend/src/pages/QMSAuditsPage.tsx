@@ -236,11 +236,11 @@ const QMSAuditsPage: React.FC = () => {
       subtitle="Direct access to the register, planning, and current audit workspace."
       actions={
         <>
-          <Button onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/plan`)}>Plan audit</Button>
-          <Button variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/register?tab=findings`)}>
+          <Button onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/plan`)}>Plan audit</Button>
+          <Button variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register?tab=findings`)}>
             Register & closeout
           </Button>
-          <Button variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/qms/audits/register`)}>
+          <Button variant="secondary" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register`)}>
             Register
           </Button>
         </>

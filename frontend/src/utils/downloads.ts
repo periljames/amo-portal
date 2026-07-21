@@ -76,9 +76,11 @@ export function sanitizeDownloadFilename(filename: string): string {
   return collapsed || "download";
 }
 
-export function saveDownloadedFile(file: DownloadedFile, overrideFilename?: string): void {
-  const filename = sanitizeDownloadFilename(overrideFilename || file.filename || "download");
-  const url = window.URL.createObjectURL(file.blob);
+export function saveDownloadedFile(file: DownloadedFile | Blob, overrideFilename?: string): void {
+  const blob = file instanceof Blob ? file : file.blob;
+  const sourceFilename = file instanceof Blob ? "download" : file.filename;
+  const filename = sanitizeDownloadFilename(overrideFilename || sourceFilename || "download");
+  const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;

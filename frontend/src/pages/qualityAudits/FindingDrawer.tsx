@@ -38,7 +38,18 @@ const severityPillClass = (value: string): string => {
   const upper = value.toUpperCase();
   if (upper === "CRITICAL" || upper === "LEVEL_1") return "qms-pill qms-pill--danger";
   if (upper === "MAJOR" || upper === "LEVEL_2") return "qms-pill qms-pill--warning";
+  if (upper === "LEVEL_4" || upper === "OBSERVATION") return "qms-pill qms-pill--success";
   return "qms-pill";
+};
+
+
+const formatFindingLevel = (value?: string | null): string => {
+  const upper = String(value || "").toUpperCase();
+  if (upper === "LEVEL_1") return "Level 1 · Critical";
+  if (upper === "LEVEL_2") return "Level 2 · Major";
+  if (upper === "LEVEL_3") return "Level 3 · Minor";
+  if (upper === "LEVEL_4") return "Observations";
+  return value || "Unclassified";
 };
 
 const formatDateTime = (value?: string | null): string => {
@@ -125,7 +136,7 @@ const FindingDrawer: React.FC<Props> = ({ isOpen, amoCode, department, finding, 
   const openEvidence = (item: EvidenceItem) => {
     if (item.mime === "text/plain") return;
     navigate(
-      `/maintenance/${amoCode}/qms/evidence-vault/${item.id}?name=${encodeURIComponent(item.filename)}&mime=${encodeURIComponent(item.mime)}&url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(item.source)}`
+      `/maintenance/${amoCode}/quality/evidence-vault/${item.id}?name=${encodeURIComponent(item.filename)}&mime=${encodeURIComponent(item.mime)}&url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(item.source)}`
     );
   };
 

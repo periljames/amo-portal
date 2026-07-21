@@ -110,20 +110,23 @@ class QMSFindingSeverity(str, enum.Enum):
 
 
 class FindingLevel(str, enum.Enum):
-    LEVEL_1 = "LEVEL_1"
-    LEVEL_2 = "LEVEL_2"
-    LEVEL_3 = "LEVEL_3"
+    LEVEL_1 = "LEVEL_1"  # Critical non-conformity
+    LEVEL_2 = "LEVEL_2"  # Major non-conformity
+    LEVEL_3 = "LEVEL_3"  # Minor non-conformity
+    LEVEL_4 = "LEVEL_4"  # Observation; normally monitored, not CAPA-mandatory
 
 
 FINDING_LEVEL_DUE_DAYS: dict[FindingLevel, int] = {
     FindingLevel.LEVEL_1: 7,
     FindingLevel.LEVEL_2: 28,
     FindingLevel.LEVEL_3: 90,
+    FindingLevel.LEVEL_4: 0,
 }
 
 
 def infer_level_from_severity(sev: QMSFindingSeverity) -> FindingLevel:
-    # Safe default mapping to meet your Level 1/2/3 rule.
+    # NCR/CAPA levels: L1 Critical, L2 Major, L3 Minor.
+    # Observations are explicitly L4 and are not inferred from severity.
     if sev == QMSFindingSeverity.CRITICAL:
         return FindingLevel.LEVEL_1
     if sev == QMSFindingSeverity.MAJOR:

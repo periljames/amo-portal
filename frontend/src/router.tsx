@@ -222,8 +222,10 @@ const OnboardingPasswordPage = lazyDefault(() => import("./pages/OnboardingPassw
 const PublicCertificateVerificationPage = lazyDefault(() => import("./pages/PublicCertificateVerificationPage"));
 const VerifyScanPage = lazyDefault(() => import("./pages/VerifyScanPage"));
 
+const QualityAuditAssuranceDashboardPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditAssuranceDashboardPage"));
 const QualityAuditPlanSchedulePage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditPlanSchedulePage"));
 const QualityAuditRegisterPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRegisterPage"));
+const QualityAuditRecycleBinPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRecycleBinPage"));
 const QualityAuditScheduleDetailPage = lazyDefault(() => import("./pages/QualityAuditScheduleDetailPage"));
 const QualityAuditRunHubPage = lazyDefault(() => import("./pages/QualityAuditRunHubPage"));
 const QualityEvidenceViewerPage = lazyDefault(() => import("./pages/QualityEvidenceViewerPage"));
@@ -263,7 +265,28 @@ type RequireTenantAdminProps = {
 function LegacyTrainingCompetenceRedirect(): React.ReactElement {
   const { amoCode } = useParams<{ amoCode?: string; department?: string }>();
   const location = useLocation();
-  const target = `/maintenance/${amoCode || "UNKNOWN"}/qms/training-competence${location.search}`;
+  const parts = location.pathname.split("/").filter(Boolean);
+  const markerIndex = parts.findIndex((part, index) => part === "training-competence" || (part === "training" && parts[index + 1] === "competence"));
+  let suffixParts: string[] = [];
+  if (markerIndex >= 0) {
+    suffixParts = parts[markerIndex] === "training" ? parts.slice(markerIndex + 2) : parts.slice(markerIndex + 1);
+  }
+  const suffix = suffixParts.join("/");
+  const target = `/maintenance/${amoCode || "UNKNOWN"}/training/competence${suffix ? `/${suffix}` : ""}${location.search}`;
+  return <Navigate to={target} replace />;
+}
+
+function QualityTrainingCompetenceRedirect(): React.ReactElement {
+  const { amoCode } = useParams<{ amoCode?: string }>();
+  const location = useLocation();
+  const parts = location.pathname.split("/").filter(Boolean);
+  const markerIndex = parts.findIndex((part, index) => part === "training-competence" || (part === "training" && parts[index + 1] === "competence"));
+  let suffixParts: string[] = [];
+  if (markerIndex >= 0) {
+    suffixParts = parts[markerIndex] === "training" ? parts.slice(markerIndex + 2) : parts.slice(markerIndex + 1);
+  }
+  const suffix = suffixParts.join("/");
+  const target = `/maintenance/${amoCode || "UNKNOWN"}/training/competence${suffix ? `/${suffix}` : ""}${location.search}`;
   return <Navigate to={target} replace />;
 }
 
@@ -273,18 +296,18 @@ function LegacyQmsRedirect(): React.ReactElement {
   const parts = location.pathname.split("/").filter(Boolean);
   const qmsIndex = parts.indexOf("qms");
   const suffix = qmsIndex >= 0 ? parts.slice(qmsIndex + 1).join("/") : "";
-  const target = `/maintenance/${amoCode || "UNKNOWN"}/qms${suffix ? `/${suffix}` : ""}${location.search}`;
+  const target = `/maintenance/${amoCode || "UNKNOWN"}/quality${suffix ? `/${suffix}` : ""}${location.search}`;
   return <Navigate to={target} replace />;
 }
 
 function QmsInboxRedirect(): React.ReactElement {
   const { amoCode } = useParams<{ amoCode?: string }>();
-  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/qms/inbox/assigned-to-me`} replace />;
+  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/quality/inbox/assigned-to-me`} replace />;
 }
 
 function QmsProgrammeRedirect(): React.ReactElement {
   const { amoCode } = useParams<{ amoCode?: string }>();
-  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/qms/audits/program`} replace />;
+  return <Navigate to={`/maintenance/${amoCode || "UNKNOWN"}/quality/audits/program`} replace />;
 }
 
 type RequireQmsPermissionProps = {
@@ -442,7 +465,7 @@ const QualityRootRedirect: React.FC = () => {
   const location = useLocation();
   if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
   const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
-  return <Navigate to={`/maintenance/${amoCode}/qms${location.search}`} replace />;
+  return <Navigate to={`/maintenance/${amoCode}/quality${location.search}`} replace />;
 };
 
 const LegacyEngineeringRedirect: React.FC = () => {
@@ -898,9 +921,9 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/production/records/settings" element={<RequireAuth><RequireFeatureAccess feature="production.records.settings"><TechnicalRecordsPages.TechnicalRecordsSettingsPage /></RequireFeatureAccess></RequireAuth>} />
 
 
-      {/* Canonical QMS route surface. Register, workflow, reporting, feedback, and archive views are remastered in QmsCanonicalPage. */}
+      {/* Canonical Quality route surface. Register, workflow, reporting, feedback, and archive views are remastered in QmsCanonicalPage. */}
       <Route
-        path="/maintenance/:amoCode/qms"
+        path="/maintenance/:amoCode/quality"
         element={
           <RequireAuth>
             <RequireQmsPermission permission="qms.dashboard.view">
@@ -910,35 +933,75 @@ export const AppRouter: React.FC = () => {
         }
       />
 
-      <Route path="/maintenance/:amoCode/qms/tasks" element={<RequireAuth><QmsInboxRedirect /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/audits/programme" element={<RequireAuth><QmsProgrammeRedirect /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/tasks" element={<RequireAuth><QmsInboxRedirect /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/programme" element={<RequireAuth><QmsProgrammeRedirect /></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/qms/documents/reader/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/documents/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/documents/reader/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/documents/:docId/revisions/:revId/view" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><ManualReaderPage /></RequireQmsPermission></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/qms/audits/plan" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/audits/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/audits/register" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRegisterPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/audits/schedules/:scheduleId" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditScheduleDetailPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/audits/:auditId/*" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRunHubPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditAssuranceDashboardPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/dashboard" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditAssuranceDashboardPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/program" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/checklists" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/reports" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/new" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/plan" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditPlanSchedulePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/register" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRegisterPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/bin" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRecycleBinPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/schedules/:scheduleId" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditScheduleDetailPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/audits/:auditId/*" element={<RequireAuth><RequireQmsPermission permission="qms.audit.view"><QualityAuditRunHubPage /></RequireQmsPermission></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/qms/cars/:carId/*" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QualityCarsPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/training-competence/people/:userId/*" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><QMSTrainingUserPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/training-competence/*" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars/register" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars/new" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars/overdue" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars/due-soon" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars/awaiting-auditee" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars/awaiting-quality-review" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars/awaiting-effectiveness-review" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars/closed" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/cars/:carId/*" element={<RequireAuth><RequireQmsPermission permission="qms.car.view"><QualityCarsPage /></RequireQmsPermission></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/quality/training-competence" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/training-competence/*" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/training/competence" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/training/competence/*" element={<RequireAuth><QualityTrainingCompetenceRedirect /></RequireAuth>} />
+
+      {/* Dedicated Training & Competence route surface. Keep these before the generic /quality/* route so training never falls into the canonical Quality table reader. */}
+      <Route path="/maintenance/:amoCode/training/competence" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/dashboard" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/people" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/courses" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/requirements" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/matrix" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/overdue" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/expiring" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/schedule" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/certificates" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/reports" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/people/:userId/*" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><QMSTrainingUserPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/training/competence/*" element={<RequireAuth><RequireQmsPermission permission="qms.training.view"><TrainingCompetencePage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/training" element={<RequireAuth><TrainingPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/training/*" element={<RequireAuth><TrainingPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/training" element={<RequireAuth><TrainingPage /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/training/*" element={<RequireAuth><TrainingPage /></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/evidence-vault/:evidenceId" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QualityEvidenceViewerPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/evidence-vault" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/evidence-vault/search" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/evidence-vault/audit-packages" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/evidence-vault/immutable-archive" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/evidence-vault/:evidenceId" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QualityEvidenceViewerPage /></RequireQmsPermission></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/qms/aerodoc/hangar" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocHangarDashboardPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/aerodoc/compliance" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocComplianceHealthPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/qms/aerodoc/audit-mode" element={<RequireAuth><RequireQmsPermission permission="qms.audit.execute"><AeroDocAuditModePage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/aerodoc/hangar" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocHangarDashboardPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/aerodoc/compliance" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocComplianceHealthPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/aerodoc/audit-mode" element={<RequireAuth><RequireQmsPermission permission="qms.audit.execute"><AeroDocAuditModePage /></RequireQmsPermission></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/qms/*" element={<RequireAuth><RequireQmsPermission permission="qms.dashboard.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/*" element={<RequireAuth><RequireQmsPermission permission="qms.dashboard.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
 
-      {/* Legacy QMS route surfaces are no longer active. They redirect to the canonical route. */}
-      <Route path="/maintenance/:amoCode/quality" element={<QualityRootRedirect />} />
+      <Route path="/maintenance/:amoCode/qms" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/qms/*" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
+
+      {/* Legacy Quality/QMS route surfaces are no longer active. They redirect to the canonical Quality route. */}
       <Route path="/maintenance/:amoCode/:department/training-competence" element={<RequireAuth><LegacyTrainingCompetenceRedirect /></RequireAuth>} />
       <Route path="/maintenance/:amoCode/:department/qms/*" element={<RequireAuth><LegacyQmsRedirect /></RequireAuth>} />
 

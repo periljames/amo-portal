@@ -55,7 +55,7 @@ export const MaintenancePageShell: React.FC<{
   const ctx = getContext();
   const params = useParams<{ amoCode?: string }>();
   const location = useLocation();
-  const { isGoLive } = usePortalRuntimeMode();
+  const { isDemoMode } = usePortalRuntimeMode();
   const currentUser = getCachedUser();
   const amoCode = params.amoCode || ctx.amoSlug || "system";
   const userCapabilities = formatCapabilitiesForUi(currentUser, ctx.department);
@@ -84,11 +84,11 @@ export const MaintenancePageShell: React.FC<{
             Active role scope: {userCapabilities.join(" · ") || "Unassigned"}
           </div>
         </div>
-        <StatusPill label={isGoLive ? "LIVE DATA MODE" : "DEMO DATA MODE"} />
+        {isDemoMode ? <StatusPill label="DEMO DATA MODE" /> : null}
       </div>
-      {!isGoLive ? (
+      {isDemoMode ? (
         <div className="card" style={{ marginBottom: 10 }}>
-          Demo mode is active. Maintenance forms use demo/local data. Switch to REAL + Go Live in Admin to lock demo data off.
+          Demo mode is active. Maintenance forms use demo/local data. Switch to Live in Admin to lock demo data off.
         </div>
       ) : null}
       {notice ? <MaintenancePermissionNotice text={notice} /> : null}

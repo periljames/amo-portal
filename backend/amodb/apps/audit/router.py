@@ -40,6 +40,8 @@ def list_audit_events(
         )
     ),
 ):
+    limit_value = int(getattr(limit, "default", limit))
+    offset_value = int(getattr(offset, "default", offset))
     return services.list_audit_events(
         db,
         amo_id=current_user.amo_id,
@@ -48,8 +50,8 @@ def list_audit_events(
         action=action,
         start=start,
         end=end,
-        limit=limit,
-        offset=offset,
+        limit=limit_value,
+        offset=offset_value,
     )
 
 

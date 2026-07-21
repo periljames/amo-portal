@@ -32,14 +32,15 @@ from amodb.apps.notifications import service as notification_service
 from amodb.apps.tasks import services as task_services
 from amodb.apps.tasks import models as task_models
 from amodb.security import get_current_active_user, require_admin, require_roles
+from amodb.apps.platform import models as platform_models
+from amodb.apps.platform import services as platform_services
 from . import models, schemas, services
 from .personnel_import import import_personnel_rows, parse_people_sheet
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
 RESERVED_PLATFORM_SLUGS = {"system", "root"}
 PLATFORM_MODULE_CATALOG = [
-    {"code": "qms", "label": "QMS Cockpit", "category": "Quality"},
-    {"code": "quality", "label": "Quality Legacy Tools", "category": "Quality"},
+    {"code": "quality", "label": "Quality", "category": "Quality"},
     {"code": "training", "label": "Training & Competence", "category": "Quality"},
     {"code": "manuals", "label": "Controlled Manuals", "category": "Documents"},
     {"code": "aerodoc_hybrid_dms", "label": "AeroDoc Hybrid DMS", "category": "Documents"},
@@ -137,10 +138,11 @@ def _resolve_presence_state(*, raw_state: str, last_seen_at: Optional[datetime],
     normalized_state = str(raw_state or "offline").lower()
     freshness_cutoff = now - timedelta(seconds=PRESENCE_HEARTBEAT_GRACE_SECONDS)
     is_fresh = bool(last_seen_at and last_seen_at >= freshness_cutoff)
-    is_online = bool(is_fresh and normalized_state in {"online", "away"})
-    if not is_online:
+    if not is_fresh:
         return "offline", False
-    return ("away" if normalized_state == "away" else "online"), True
+    if normalized_state == "away":
+        return "away", False
+    return "online", normalized_state == "online"
 
 
 def _format_role_for_display(role_value: object) -> str:
@@ -178,12 +180,19 @@ def _presence_display_for_user(
         )
 
     if presence.is_online:
-        state_label = "Away" if presence.state == "away" else "Online"
         return schemas.UserPresenceDisplayRead(
-            status_label=state_label,
-            last_seen_label="Away" if state_label == "Away" else "Active now",
+            status_label="Online",
+            last_seen_label="Active now",
             last_seen_at=presence.last_seen_at,
             last_seen_at_display=None,
+        )
+
+    if presence.state == "away" and presence.last_seen_at:
+        return schemas.UserPresenceDisplayRead(
+            status_label="Away",
+            last_seen_label="Away now",
+            last_seen_at=presence.last_seen_at,
+            last_seen_at_display=presence.last_seen_at.isoformat() if hasattr(presence.last_seen_at, "isoformat") else str(presence.last_seen_at),
         )
 
     last_seen = presence.last_seen_at or user.last_login_at
@@ -398,6 +407,35 @@ def _require_superuser(current_user: models.User) -> models.User:
         )
     return current_user
 
+
+
+
+def _require_tenant_support_approver(current_user: models.User) -> models.User:
+    if getattr(current_user, "is_superuser", False):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant-side approval must be performed by an AMO user.")
+    role_value = str(getattr(getattr(current_user, "role", None), "value", getattr(current_user, "role", "")) or "")
+    if not (getattr(current_user, "is_amo_admin", False) or role_value in {"AMO_ADMIN", "QUALITY_MANAGER"}):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AMO admin or Quality Manager approval is required.")
+    return current_user
+
+
+def _support_session_payload(row: platform_models.PlatformTenantSupportSession) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "tenant_id": row.tenant_id,
+        "platform_user_id": row.platform_user_id,
+        "access_level": row.access_level,
+        "status": row.status,
+        "reason": row.reason,
+        "approved_by_user_id": row.approved_by_user_id,
+        "approved_at": row.approved_at,
+        "denied_by_user_id": row.denied_by_user_id,
+        "denied_at": row.denied_at,
+        "expires_at": row.expires_at,
+        "ended_at": row.ended_at,
+        "created_at": row.created_at,
+        "metadata": row.metadata_json or {},
+    }
 
 def _parse_env_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
@@ -656,6 +694,26 @@ def _catalog_sku_summary(sku: models.CatalogSKU) -> dict[str, Any]:
     }
 
 
+def _normalise_admin_data_mode(value: str | None, *, default: str = "REAL") -> str:
+    mode = (value or default or "REAL").strip().upper()
+    if mode == "LIVE":
+        mode = "REAL"
+    if mode not in {"REAL", "DEMO"}:
+        mode = default.strip().upper() if default else "REAL"
+        if mode == "LIVE":
+            mode = "REAL"
+    return mode if mode in {"REAL", "DEMO"} else "REAL"
+
+
+def _apply_admin_data_mode(query, data_mode: str | None):
+    mode = _normalise_admin_data_mode(data_mode)
+    if mode == "REAL":
+        return query.filter(models.AMO.is_demo.is_(False))
+    if mode == "DEMO":
+        return query.filter(models.AMO.is_demo.is_(True))
+    return query.filter(models.AMO.is_demo.is_(False))
+
+
 def _tenant_control_summary(db: Session, *, amo: models.AMO, include_detail: bool = False) -> dict[str, Any]:
     users_total = db.query(func.count(models.User.id)).filter(models.User.amo_id == amo.id).scalar() or 0
     admins_total = (
@@ -700,6 +758,7 @@ def _tenant_control_summary(db: Session, *, amo: models.AMO, include_detail: boo
         "contact_phone": amo.contact_phone,
         "time_zone": amo.time_zone,
         "is_demo": bool(amo.is_demo),
+        "data_mode": "DEMO" if bool(amo.is_demo) else "REAL",
         "is_active": bool(amo.is_active),
         "created_at": _dt_value(amo.created_at),
         "updated_at": _dt_value(amo.updated_at),
@@ -1101,6 +1160,130 @@ def _csv_download_response(*, filename: str, rows: list[dict]) -> Response:
     )
 
 
+
+# ---------------------------------------------------------------------------
+# TENANT-SIDE PLATFORM SUPPORT APPROVAL
+# ---------------------------------------------------------------------------
+
+
+@router.get("/support-sessions/pending")
+def pending_support_sessions(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    current_user = _require_tenant_support_approver(current_user)
+    rows = (
+        db.query(platform_models.PlatformTenantSupportSession)
+        .filter(
+            platform_models.PlatformTenantSupportSession.tenant_id == current_user.amo_id,
+            platform_models.PlatformTenantSupportSession.status == "PENDING",
+            platform_models.PlatformTenantSupportSession.access_level == "ADMIN",
+            platform_models.PlatformTenantSupportSession.expires_at > datetime.now(timezone.utc),
+            platform_models.PlatformTenantSupportSession.ended_at.is_(None),
+        )
+        .order_by(platform_models.PlatformTenantSupportSession.created_at.desc())
+        .all()
+    )
+    return {"items": [_support_session_payload(row) for row in rows]}
+
+
+@router.post("/support-sessions/{session_id}/approve")
+def approve_support_session(
+    session_id: str,
+    payload: dict[str, Any] | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    current_user = _require_tenant_support_approver(current_user)
+    row = db.get(platform_models.PlatformTenantSupportSession, session_id)
+    if not row or row.tenant_id != current_user.amo_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Support session request not found.")
+    if row.status != "PENDING" or row.access_level != "ADMIN":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending ADMIN support requests can be approved.")
+    if row.expires_at <= datetime.now(timezone.utc):
+        row.status = "EXPIRED"
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Support session request has expired.")
+    row.status = "ACTIVE"
+    row.approved_by_user_id = current_user.id
+    row.approved_at = datetime.now(timezone.utc)
+    row.metadata_json = {**(row.metadata_json or {}), "approval_note": (payload or {}).get("approval_note")}
+    platform_services.audit(
+        db,
+        actor_user_id=str(current_user.id),
+        action="support.session.approved",
+        tenant_id=str(current_user.amo_id),
+        entity_type="platform_tenant_support_session",
+        entity_id=row.id,
+        reason=(payload or {}).get("reason") or "Tenant approved temporary platform admin support access",
+        details={"access_level": row.access_level, "platform_user_id": row.platform_user_id},
+    )
+    db.commit()
+    db.refresh(row)
+    return _support_session_payload(row)
+
+
+@router.post("/support-sessions/{session_id}/deny")
+def deny_support_session(
+    session_id: str,
+    payload: dict[str, Any] | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    current_user = _require_tenant_support_approver(current_user)
+    row = db.get(platform_models.PlatformTenantSupportSession, session_id)
+    if not row or row.tenant_id != current_user.amo_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Support session request not found.")
+    if row.status != "PENDING":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pending support requests can be denied.")
+    row.status = "DENIED"
+    row.denied_by_user_id = current_user.id
+    row.denied_at = datetime.now(timezone.utc)
+    row.metadata_json = {**(row.metadata_json or {}), "denial_reason": (payload or {}).get("reason")}
+    platform_services.audit(
+        db,
+        actor_user_id=str(current_user.id),
+        action="support.session.denied",
+        tenant_id=str(current_user.amo_id),
+        entity_type="platform_tenant_support_session",
+        entity_id=row.id,
+        reason=(payload or {}).get("reason") or "Tenant denied platform support admin access",
+        details={"access_level": row.access_level, "platform_user_id": row.platform_user_id},
+    )
+    db.commit()
+    db.refresh(row)
+    return _support_session_payload(row)
+
+
+@router.post("/support-sessions/{session_id}/end")
+def end_tenant_support_session(
+    session_id: str,
+    payload: dict[str, Any] | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    current_user = _require_tenant_support_approver(current_user)
+    row = db.get(platform_models.PlatformTenantSupportSession, session_id)
+    if not row or row.tenant_id != current_user.amo_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Support session not found.")
+    if row.status == "ACTIVE":
+        row.status = "ENDED"
+        row.ended_at = datetime.now(timezone.utc)
+        platform_services.audit(
+            db,
+            actor_user_id=str(current_user.id),
+            action="support.session.ended_by_tenant",
+            tenant_id=str(current_user.amo_id),
+            entity_type="platform_tenant_support_session",
+            entity_id=row.id,
+            reason=(payload or {}).get("reason") or "Tenant ended platform support session",
+            details={"access_level": row.access_level, "platform_user_id": row.platform_user_id},
+        )
+        db.commit()
+        db.refresh(row)
+    return _support_session_payload(row)
+
+
 # ---------------------------------------------------------------------------
 # SUPERUSER CONTEXT (DEMO / REAL)
 # ---------------------------------------------------------------------------
@@ -1255,6 +1438,7 @@ def create_amo(
     summary="List all AMOs (platform superuser only)",
 )
 def list_amos(
+    data_mode: str = "REAL",
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
@@ -1264,7 +1448,8 @@ def list_amos(
     Only SUPERUSER can see the full list.
     """
     _require_superuser(current_user)
-    return db.query(models.AMO).order_by(models.AMO.amo_code.asc()).all()
+    query = _apply_admin_data_mode(db.query(models.AMO), data_mode)
+    return query.order_by(models.AMO.amo_code.asc()).all()
 
 
 @router.put(
@@ -2567,11 +2752,13 @@ def export_users(
 
 @router.get("/platform/control-plane", summary="Full platform SaaS control-plane state for superusers")
 def get_platform_control_plane(
+    data_mode: str = "REAL",
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
     _require_superuser(current_user)
-    tenants = db.query(models.AMO).order_by(models.AMO.is_active.desc(), models.AMO.amo_code.asc()).all()
+    mode = _normalise_admin_data_mode(data_mode)
+    tenants = _apply_admin_data_mode(db.query(models.AMO), mode).order_by(models.AMO.is_active.desc(), models.AMO.amo_code.asc()).all()
     catalog = services.list_catalog_skus(db, include_inactive=True)
     settings = _get_or_create_platform_settings(db)
     recent_invoices = (
@@ -2581,6 +2768,8 @@ def get_platform_control_plane(
     )
     return {
         "scope": "platform",
+        "data_mode": mode,
+        "demo_data_rule": "Demo tenants are excluded unless data_mode=DEMO is requested. Live/REAL is the default.",
         "settings": _platform_settings_summary(settings),
         "module_catalog": PLATFORM_MODULE_CATALOG,
         "tenants": [_tenant_control_summary(db, amo=amo) for amo in tenants],
@@ -2589,6 +2778,28 @@ def get_platform_control_plane(
         "diagnostics": _run_platform_diagnostics(db, settings=settings),
         "support_items": _support_items_summary(db, limit=100),
     }
+
+
+@router.get("/platform/billing-control", summary="Commercial control panel with real/demo separation")
+def get_platform_billing_control(
+    data_mode: str = "REAL",
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    return platform_services.billing_control_summary(db, data_mode=data_mode)
+
+
+@router.post("/platform/billing/maintenance/run", summary="Run billing maintenance and trial reconciliation now")
+def run_platform_billing_maintenance(
+    payload: dict[str, Any] | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    _require_superuser(current_user)
+    payload = payload or {}
+    reason = str(payload.get("reason") or "manual billing maintenance run").strip()
+    return platform_services.run_billing_maintenance_now(db, actor_id=str(current_user.id), reason=reason)
 
 
 @router.get("/platform/tenants/{amo_id}", summary="Get one tenant with modules, subscription, users, invoices and usage meters")

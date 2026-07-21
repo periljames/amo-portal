@@ -21,6 +21,14 @@ export type QmsModuleKey =
 
 export type QmsCounterMap = Record<string, number>;
 
+export interface QmsSourceError {
+  label: string;
+  message: string;
+  type?: string;
+  trace_id?: string;
+}
+
+
 export interface QmsDashboardResponse {
   tenant?: {
     amo_code: string;
@@ -30,6 +38,9 @@ export interface QmsDashboardResponse {
   as_of?: string;
   counters: QmsCounterMap;
   links?: Record<string, string>;
+  source_errors?: QmsSourceError[];
+  warning?: string | null;
+  trace_id?: string | null;
 }
 
 export interface QmsListResponse<T = Record<string, unknown>> {
@@ -51,6 +62,11 @@ export interface QmsInboxResponse extends QmsListResponse {
 export interface QmsCalendarResponse extends QmsListResponse {
   start?: string;
   end?: string;
+  integration_contract?: string;
+  source_count?: number;
+  returned_count?: number;
+  limit?: number;
+  offset?: number;
   items?: Array<{
     id: string;
     module: string;
@@ -60,6 +76,22 @@ export interface QmsCalendarResponse extends QmsListResponse {
     date: string | null;
     event_type: string;
     link?: string | null;
+    personnel_name?: string | null;
+    course_name?: string | null;
+    due_state?: string | null;
+    audit_ref?: string | null;
+    kind?: string | null;
+    status?: string | null;
+    planned_start?: string | null;
+    planned_end?: string | null;
+    auditee?: string | null;
+    auditee_email?: string | null;
+    lead_auditor_user_id?: string | null;
+    frequency?: string | null;
+    calendar_group?: string | null;
+    source_origin?: string | null;
+    subtitle?: string | null;
+    actionable?: boolean | null;
   }>;
 }
 

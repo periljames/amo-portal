@@ -243,12 +243,13 @@ def get_current_user(
 
 def get_current_active_user(
     current_user: account_models.User = Depends(get_current_user),
+    db: Session = Depends(get_read_db),
 ) -> account_models.User:
-    """
-    Ensure the current user is active.
+    """Ensure the current user is active and attach request tenant context.
 
-    Uses the session already attached to `current_user` instead of opening a
-    second database session for every authenticated request.
+    Superusers remain platform actors, but their selected support AMO is exposed
+    through ``active_amo_id``/``effective_amo_id`` so admin/support screens can
+    be tenant-aware without silently converting the superuser into an AMO user.
     """
     if not getattr(current_user, "is_active", False):
         raise HTTPException(
@@ -258,13 +259,39 @@ def get_current_active_user(
     CURRENT_ACTOR_ID.set(str(current_user.id))
     active_amo_id = current_user.amo_id
     effective_amo_id = current_user.amo_id
+
     if getattr(current_user, "is_superuser", False):
-        # A platform superuser is not an AMO user. Keep tenant support context
-        # explicit and never mutate the ORM user into a customer tenant.
         active_amo_id = None
         effective_amo_id = None
-        set_committed_value(current_user, "amo_id", None)
-        set_committed_value(current_user, "amo", None)
+        try:
+            context = (
+                db.query(account_models.UserActiveContext)
+                .filter(account_models.UserActiveContext.user_id == str(current_user.id))
+                .first()
+            )
+            if context and context.active_amo_id:
+                amo = (
+                    db.query(account_models.AMO)
+                    .filter(
+                        account_models.AMO.id == context.active_amo_id,
+                        account_models.AMO.is_active.is_(True),
+                    )
+                    .first()
+                )
+                if amo:
+                    active_amo_id = str(amo.id)
+                    effective_amo_id = str(amo.id)
+                    set_committed_value(current_user, "amo", amo)
+        except Exception:
+            active_amo_id = None
+            effective_amo_id = None
+
+        # Keep the persisted user unchanged. Attribute assignment here only sets
+        # the request-scoped ORM instance for dependencies that still read amo_id.
+        set_committed_value(current_user, "amo_id", active_amo_id)
+        if active_amo_id is None:
+            set_committed_value(current_user, "amo", None)
+        setattr(current_user, "is_platform_context", True)
 
     setattr(current_user, "active_amo_id", active_amo_id)
     setattr(current_user, "effective_amo_id", effective_amo_id)

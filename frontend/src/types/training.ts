@@ -169,6 +169,9 @@ export interface TrainingRecordRead {
   course_code?: string;
   record_status?: string;
   source_status?: string;
+  superseded_by_record_id?: string | null;
+  superseded_at?: string | null;
+  purge_after?: string | null;
   attachment_file_id?: string | null;
   event_id?: string | null;
   completion_date: string;
@@ -196,6 +199,7 @@ export interface TrainingRecordCreate {
   course_code?: string;
   record_status?: string;
   source_status?: string;
+  confirm_renewal?: boolean;
   attachment_file_id?: string | null;
   event_id?: string | null;
   completion_date: string;
@@ -318,14 +322,24 @@ export interface TrainingEventBatchScheduleCreate {
   ends_on?: string | null;
   title?: string | null;
   provider?: string | null;
+  provider_kind?: string | null;
+  delivery_mode?: string | null;
+  venue_mode?: string | null;
+  instructor_name?: string | null;
   location?: string | null;
+  meeting_link?: string | null;
   notes?: string | null;
+  participant_status?: TrainingParticipantStatus | string;
+  auto_issue_certificates?: boolean;
+  allow_self_attendance?: boolean;
+  allow_online_overlap?: boolean;
   [key: string]: any;
 }
 
 export interface TrainingEventBatchScheduleRead {
   event: TrainingEventRead;
   participants: TrainingEventParticipantRead[];
+  created_count?: number;
   [key: string]: any;
 }
 
@@ -335,14 +349,55 @@ export interface TrainingAutoGroupScheduleCreate {
   base_start_on?: string | null;
   include_due_soon?: boolean;
   include_overdue?: boolean;
+  include_not_done?: boolean;
+  max_participants_per_session?: number;
+  schedule_search_days?: number;
+  avoid_weekends?: boolean;
+  allow_online_overlap?: boolean;
+  provider?: string | null;
+  provider_kind?: string | null;
+  delivery_mode?: string | null;
+  venue_mode?: string | null;
+  instructor_name?: string | null;
+  location?: string | null;
+  meeting_link?: string | null;
+  notes?: string | null;
+  participant_status?: TrainingParticipantStatus | string;
+  auto_issue_certificates?: boolean;
+  allow_self_attendance?: boolean;
+  [key: string]: any;
+}
+
+export interface TrainingAutoGroupSkippedRead {
+  user_id: string;
+  course_pk?: string | null;
+  course_code?: string | null;
+  course_name?: string | null;
+  reason: string;
+  availability_status?: string | null;
+  next_available_on?: string | null;
+  [key: string]: any;
+}
+
+export interface TrainingAutoGroupedSessionRead {
+  course_pk: string;
+  course_code: string;
+  course_name: string;
+  availability_bucket: string;
+  start_on: string;
+  end_on?: string | null;
+  event: TrainingEventRead;
+  participants: TrainingEventParticipantRead[];
   [key: string]: any;
 }
 
 export interface TrainingAutoGroupScheduleRead {
-  events: TrainingEventRead[];
-  participants: TrainingEventParticipantRead[];
-  sessions: any[];
-  skipped: any[];
+  events?: TrainingEventRead[];
+  participants?: TrainingEventParticipantRead[];
+  sessions: TrainingAutoGroupedSessionRead[];
+  skipped: TrainingAutoGroupSkippedRead[];
+  total_sessions?: number;
+  total_enrolled?: number;
   [key: string]: any;
 }
 

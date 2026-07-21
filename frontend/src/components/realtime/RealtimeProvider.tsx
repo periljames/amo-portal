@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { getApiBaseUrl } from "../../services/config";
+import { clearQmsApiResponseCache } from "../../services/apiClient";
 import { getCachedUser, getContext, getToken, onSessionEvent } from "../../services/auth";
 import { playNotificationChirp, pushDesktopNotification } from "../../services/notificationPreferences";
 import { fetchHealthz, fetchServerTime, RealtimeHttpError } from "../../services/realtime/api";
@@ -38,8 +39,6 @@ const eventSchema = z.object({
 });
 
 const MAX_ACTIVITY = 1500;
-const PRESENCE_HEARTBEAT_MS = 5_000;
-const PRESENCE_AWAY_AFTER_MS = 60_000;
 
 function isLoginSurface(): boolean {
   if (typeof window === "undefined") return false;
@@ -77,9 +76,6 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const connectRef = useRef<() => void>(() => undefined);
   const retryCount = useRef(0);
   const staleIntervalRef = useRef<number | null>(null);
-  const lastPresenceActivityRef = useRef<number>(Date.now());
-  const lastPresencePushRef = useRef<number>(0);
-  const currentPresenceStateRef = useRef<"online" | "away">("online");
   const [staleSeconds, setStaleSeconds] = useState(0);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator === "undefined" ? true : navigator.onLine);
   const [clockSource, setClockSource] = useState<"server" | "local">("local");
@@ -90,6 +86,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const cachedUser = getCachedUser();
   const isPlatformUser = Boolean(cachedUser?.is_superuser && !cachedUser?.amo_id);
   const lastEventKey = `amo:last-event-id:${ctx.amoCode || "unknown"}`;
+  const lastPortalActivityRef = useRef(Date.now());
+  const presenceStateRef = useRef<"online" | "away">("online");
 
   const isStale = !isOnline || (status === "offline" && !lastGoodServerTime);
 
@@ -115,20 +113,21 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
 
-  const sendPresenceHeartbeat = useCallback(async (state: "online" | "away" = "online", reason?: string, keepalive = false) => {
+  const sendPresenceHeartbeat = useCallback(async (state: "online" | "away" = "online", reason = "heartbeat", keepalive = false) => {
     if (isPlatformUser || isLoginSurface()) return;
     const token = getToken();
     if (!token || !isRealtimeEnabled()) return;
+    presenceStateRef.current = state;
     try {
       await fetch(`${getApiBaseUrl()}/api/realtime/presence`, {
         method: "POST",
         credentials: "include",
+        keepalive,
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        keepalive,
         body: JSON.stringify({ state, reason }),
       });
     } catch {
@@ -139,7 +138,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const handleEvent = useCallback((raw: unknown, transportCursor?: string) => {
     const parsed = eventSchema.safeParse(raw);
     if (!parsed.success) return;
-    const event = parsed.data;
+    const event = parsed.data as ActivityEvent;
     const cursor = transportCursor?.trim() || event.id?.trim();
     if (!cursor) return;
 
@@ -151,6 +150,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     playNotificationChirp();
     void pushDesktopNotification("Realtime event", `${event.type} ${event.action}`);
     queryClient.invalidateQueries({ queryKey: ["activity-history", ctx.amoCode || "unknown", ctx.department || "quality"] });
+    const invalidatesQms = /qms|quality|audit|finding|car|capa|training/i.test(`${event.type} ${event.entityType} ${event.action}`);
+    if (invalidatesQms) {
+      clearQmsApiResponseCache();
+      queryClient.invalidateQueries({ queryKey: ["qms"] });
+      queryClient.invalidateQueries({ queryKey: ["quality"] });
+      queryClient.invalidateQueries({ queryKey: ["training"] });
+    }
   }, [ctx.amoCode, ctx.department, lastEventKey, queryClient]);
 
   const connectSse = useCallback(() => {
@@ -244,15 +250,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return onSessionEvent((detail) => {
       if (!isRealtimeEnabled()) return;
       if (detail.type === "activity") {
-        lastPresenceActivityRef.current = Date.now();
-        if (currentPresenceStateRef.current === "away") {
-          currentPresenceStateRef.current = "online";
-          void sendPresenceHeartbeat("online", detail.reason || "activity");
-        }
+        lastPortalActivityRef.current = Date.now();
+        if (presenceStateRef.current === "away") void sendPresenceHeartbeat("online", detail.reason || "activity");
       }
 
       if (detail.type === "authenticated") {
-        lastPresenceActivityRef.current = Date.now();
         retryCount.current = 0;
 
         mqttRef.current?.disconnect();
@@ -296,7 +298,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setBrokerState("offline");
       }
     });
-  }, [isPlatformUser, reconnectNow, sendPresenceHeartbeat, serverNow, syncServerTime]);
+  }, [isPlatformUser, reconnectNow, serverNow, syncServerTime]);
 
   useEffect(() => {
     connectRef.current = connectSse;
@@ -424,38 +426,19 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (isPlatformUser || isLoginSurface() || !getToken() || !isRealtimeEnabled()) return;
 
-    const resolvePresenceState = () => {
-      if (typeof document !== "undefined" && document.hidden) return "away" as const;
-      return Date.now() - lastPresenceActivityRef.current > PRESENCE_AWAY_AFTER_MS ? "away" as const : "online" as const;
+    const resolvePresenceState = (): "online" | "away" => {
+      if (typeof document !== "undefined" && document.hidden) return "away";
+      return Date.now() - lastPortalActivityRef.current > 60_000 ? "away" : "online";
     };
 
-    const pushPresence = (reason = "heartbeat", force = false, keepalive = false) => {
-      const state = resolvePresenceState();
-      const now = Date.now();
-      if (!force && state === currentPresenceStateRef.current && now - lastPresencePushRef.current < PRESENCE_HEARTBEAT_MS) return;
-      currentPresenceStateRef.current = state;
-      lastPresencePushRef.current = now;
-      void sendPresenceHeartbeat(state, reason, keepalive);
+    const pushPresence = (reason = "heartbeat", keepalive = false) => {
+      void sendPresenceHeartbeat(resolvePresenceState(), reason, keepalive);
     };
 
-    const markActivity = () => {
-      lastPresenceActivityRef.current = Date.now();
-      if (currentPresenceStateRef.current === "away") pushPresence("activity", true);
-    };
-
-    const activityEvents: Array<keyof WindowEventMap> = ["mousemove", "mousedown", "mouseup", "keydown", "click", "scroll", "wheel", "touchstart", "touchmove", "pointerdown", "pointermove", "focus", "resize"];
-    activityEvents.forEach((eventName) => window.addEventListener(eventName, markActivity, { passive: true }));
-    document.addEventListener("scroll", markActivity, { passive: true, capture: true });
-    document.addEventListener("selectionchange", markActivity);
-
-    pushPresence("mount", true);
-    const timer = window.setInterval(() => pushPresence("heartbeat"), PRESENCE_HEARTBEAT_MS);
-    const handleVisibility = () => {
-      if (!document.hidden) markActivity();
-      pushPresence(document.hidden ? "hidden" : "visible", true);
-    };
+    pushPresence("start");
+    const timer = window.setInterval(() => pushPresence("heartbeat"), 5_000);
+    const handleVisibility = () => pushPresence("visibility");
     const handlePageHide = () => {
-      currentPresenceStateRef.current = "away";
       void sendPresenceHeartbeat("away", "pagehide", true);
     };
     document.addEventListener("visibilitychange", handleVisibility);
@@ -463,9 +446,6 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     window.addEventListener("beforeunload", handlePageHide);
     return () => {
       window.clearInterval(timer);
-      activityEvents.forEach((eventName) => window.removeEventListener(eventName, markActivity));
-      document.removeEventListener("scroll", markActivity, true);
-      document.removeEventListener("selectionchange", markActivity);
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("beforeunload", handlePageHide);

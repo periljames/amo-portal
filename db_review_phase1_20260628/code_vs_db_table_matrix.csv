@@ -1,0 +1,322 @@
+table_name,category,estimated_rows,total_bytes,index_bytes,model_refs,raw_code_refs
+auth_capability_definitions,active_raw_sql_or_canonical_router,0,24576,16384,,amodb/apps/quality/tenant_security.py; amodb/security.py
+auth_role_capability_bindings,active_raw_sql_or_canonical_router,0,24576,16384,,amodb/apps/quality/tenant_security.py; amodb/security.py
+auth_user_role_assignments,active_raw_sql_or_canonical_router,0,16384,16384,,amodb/apps/quality/tenant_security.py; amodb/security.py
+compliance_event_ledger,active_raw_sql_or_canonical_router,0,32768,24576,,amodb/apps/compliance/ledger.py
+qms_activity_logs,active_raw_sql_or_canonical_router,0,65536,57344,,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py
+qms_approval_matrix,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_archive_packages,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_archives,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_checklists,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_evidence,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_notices,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_post_briefs,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_programs,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_reports,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_scopes,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_team_members,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_audit_war_room_files,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_authority_correspondence,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_calibration_certificates,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_calibration_records,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py
+qms_car_action_items,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_car_closure_records,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_car_containment_actions,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_car_corrective_action_plans,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_car_effectiveness_reviews,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_car_evidence,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_car_rejections,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_car_reviews,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_car_root_causes,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_change_controls,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_competence_gaps,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_competence_matrix,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_customer_complaints,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_customer_feedback,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_dashboard_widgets,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_document_approval_letters,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_document_approvals,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_document_change_requests,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_document_distribution,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py; amodb/apps/quality/models.py; amodb/apps/quality/router.py
+qms_document_obsolete_records,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_document_templates,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_document_versions,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_equipment,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py
+qms_evidence_files,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_external_audits,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_external_commitments,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_external_items,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_external_responses,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_file_access_logs,active_raw_sql_or_canonical_router,0,57344,49152,,amodb/apps/quality/canonical_router.py
+qms_finding_classifications,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_finding_evidence,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_findings,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/accounts/router_admin.py; amodb/apps/quality/models.py
+qms_form_definitions,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_management_review_actions,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py
+qms_management_review_decisions,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_management_review_inputs,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_management_review_minutes,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_management_reviews,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py
+qms_notification_rules,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_numbering_rules,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_opportunities,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_out_of_tolerance_events,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_processes,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_quality_objectives,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_regulator_findings,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_report_definitions,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_report_exports,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_retention_rules,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_risk_actions,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_risks,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_settings,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_supplier_approvals,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_supplier_audits,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_supplier_evaluations,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py
+qms_supplier_findings,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_supplier_performance_scores,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_suppliers,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py
+qms_templates,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_training_evaluations,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+qms_workflow_rules,active_raw_sql_or_canonical_router,0,40960,32768,,amodb/apps/quality/canonical_router.py
+account_security_events,active_sqlalchemy_model,0,245760,131072,amodb/apps/accounts/models.py:AccountSecurityEvent,amodb/apps/accounts/models.py; amodb/apps/accounts/services.py
+accounting_periods,active_sqlalchemy_model,0,24576,24576,amodb/apps/finance/models.py:AccountingPeriod,amodb/apps/finance/models.py
+acknowledgements,active_sqlalchemy_model,0,16384,8192,amodb/apps/manuals/models.py:Acknowledgement,amodb/apps/doc_control/models.py; amodb/apps/doc_control/router.py; amodb/apps/doc_control/schemas.py; amodb/apps/manuals/models.py; amodb/apps/quality/schemas.py; amodb/apps/quality/service.py; amodb/apps/rostering/models.py
+aircraft,active_sqlalchemy_model,0,114688,106496,amodb/apps/fleet/models.py:Aircraft,amodb/__init__.py; amodb/apps/accounts/__init__.py; amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/services.py; amodb/apps/bootstrap/router.py; amodb/apps/bootstrap/schemas.py; amodb/apps/crs/models.py; amodb/apps/crs/pdf_renderer.py; amodb/apps/crs/router.py; amodb/apps/crs/schemas.py; amodb/apps/crs/validation.py; amodb/apps/fleet/models.py; amodb/apps/fleet/router.py; amodb/apps/fleet/schemas.py; amodb/apps/fleet/services.py; amodb/apps/foundations/services.py; amodb/apps/maintenance_program/__init__.py; amodb/apps/maintenance_program/api.py; amodb/apps/maintenance_program/models.py; amodb/apps/maintenance_program/schemas.py; amodb/apps/maintenance_program/service.py; amodb/apps/reliability/ehm.py; amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/schemas.py; amodb/apps/reliability/services.py; amodb/apps/rostering/schemas.py; amodb/apps/rostering/services.py; amodb/apps/technical_records/models.py; amodb/apps/technical_records/router.py; amodb/apps/work/models.py; amodb/apps/work/router.py; amodb/apps/work/schemas.py; amodb/apps/work/services.py
+aircraft_components,active_sqlalchemy_model,0,98304,90112,amodb/apps/fleet/models.py:AircraftComponent,amodb/apps/fleet/models.py; amodb/apps/maintenance_program/models.py; amodb/apps/reliability/models.py; amodb/apps/technical_records/models.py; amodb/apps/work/models.py
+aircraft_configuration_events,active_sqlalchemy_model,0,40960,40960,amodb/apps/fleet/models.py:AircraftConfigurationEvent,amodb/apps/fleet/models.py
+aircraft_documents,active_sqlalchemy_model,0,73728,65536,amodb/apps/fleet/models.py:AircraftDocument,amodb/apps/accounts/router_admin.py; amodb/apps/fleet/models.py; amodb/apps/fleet/router.py; amodb/apps/work/router.py; amodb/apps/work/services.py
+aircraft_import_preview_rows,active_sqlalchemy_model,0,32768,24576,amodb/apps/fleet/models.py:AircraftImportPreviewRow,amodb/apps/fleet/models.py; amodb/apps/fleet/router.py
+aircraft_import_preview_sessions,active_sqlalchemy_model,0,32768,24576,amodb/apps/fleet/models.py:AircraftImportPreviewSession,amodb/apps/fleet/models.py
+aircraft_import_reconciliation_logs,active_sqlalchemy_model,0,32768,24576,amodb/apps/fleet/models.py:ImportReconciliationLog,amodb/apps/fleet/models.py
+aircraft_import_snapshots,active_sqlalchemy_model,0,32768,24576,amodb/apps/fleet/models.py:ImportSnapshot,amodb/apps/fleet/models.py
+aircraft_import_templates,active_sqlalchemy_model,0,65536,57344,amodb/apps/fleet/models.py:AircraftImportTemplate,amodb/apps/fleet/models.py
+aircraft_program_items,active_sqlalchemy_model,0,114688,106496,amodb/apps/maintenance_program/models.py:AmpAircraftProgramItem,amodb/apps/maintenance_program/api.py; amodb/apps/maintenance_program/models.py; amodb/apps/maintenance_program/service.py
+aircraft_usage,active_sqlalchemy_model,0,90112,81920,amodb/apps/fleet/models.py:AircraftUsage,amodb/apps/fleet/models.py
+aircraft_utilization_daily,active_sqlalchemy_model,0,49152,49152,amodb/apps/reliability/models.py:AircraftUtilizationDaily,amodb/apps/reliability/models.py
+amo_assets,active_sqlalchemy_model,0,81920,65536,amodb/apps/accounts/models.py:AMOAsset,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/router_amo_assets.py; amodb/main.py
+amos,active_sqlalchemy_model,0,131072,114688,amodb/apps/accounts/models.py:AMO,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/audit/models.py; amodb/apps/bootstrap/router.py; amodb/apps/doc_control/models.py; amodb/apps/finance/models.py; amodb/apps/fleet/models.py; amodb/apps/foundations/models.py; amodb/apps/integrations/models.py; amodb/apps/inventory/models.py; amodb/apps/manuals/models.py; amodb/apps/notifications/models.py; amodb/apps/platform/models.py; amodb/apps/platform/services.py; amodb/apps/quality/models.py; amodb/apps/realtime/models.py; amodb/apps/reliability/models.py; amodb/apps/rostering/models.py; amodb/apps/tasks/models.py; amodb/apps/technical_records/models.py; amodb/apps/training/models.py; amodb/apps/work/models.py
+amp_program_items,active_sqlalchemy_model,0,114688,106496,amodb/apps/maintenance_program/models.py:AmpProgramItem,amodb/apps/maintenance_program/models.py; amodb/apps/reliability/models.py; amodb/apps/work/models.py
+audit_events,active_sqlalchemy_model,0,163840,98304,amodb/apps/audit/models.py:AuditEvent,amodb/apps/accounts/router_admin.py; amodb/apps/audit/models.py; amodb/apps/audit/router.py; amodb/apps/audit/router_events.py; amodb/apps/audit/services.py; amodb/apps/doc_control/models.py; amodb/apps/exports/evidence_pack.py; amodb/main.py
+authorisation_types,active_sqlalchemy_model,0,40960,32768,amodb/apps/accounts/models.py:AuthorisationType,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/foundations/services.py
+base_station_aliases,active_sqlalchemy_model,0,32768,32768,amodb/apps/foundations/models.py:BaseStationAlias,amodb/apps/foundations/models.py
+base_stations,active_sqlalchemy_model,0,65536,57344,amodb/apps/foundations/models.py:BaseStation,amodb/apps/foundations/models.py; amodb/apps/foundations/router.py; amodb/apps/foundations/services.py; amodb/apps/rostering/models.py; amodb/apps/rostering/services.py
+billing_audit_logs,active_sqlalchemy_model,0,49152,32768,amodb/apps/accounts/models.py:BillingAuditLog,amodb/apps/accounts/models.py; amodb/apps/accounts/router_billing.py; amodb/apps/accounts/services.py
+billing_invoices,active_sqlalchemy_model,0,131072,114688,amodb/apps/accounts/models.py:BillingInvoice,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/platform/router.py
+catalog_skus,active_sqlalchemy_model,0,98304,81920,amodb/apps/accounts/models.py:CatalogSKU,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/router_billing.py; amodb/apps/accounts/services.py; amodb/apps/platform/services.py
+chat_messages,active_sqlalchemy_model,0,32768,24576,amodb/apps/realtime/models.py:ChatMessage,amodb/apps/realtime/models.py
+chat_thread_members,active_sqlalchemy_model,0,16384,16384,amodb/apps/realtime/models.py:ChatThreadMember,amodb/apps/realtime/models.py
+chat_threads,active_sqlalchemy_model,0,8192,8192,amodb/apps/realtime/models.py:ChatThread,amodb/apps/realtime/models.py
+component_instances,active_sqlalchemy_model,0,81920,73728,amodb/apps/reliability/models.py:ComponentInstance,amodb/apps/fleet/models.py; amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/services.py
+crs,active_sqlalchemy_model,0,122880,114688,amodb/apps/crs/models.py:CRS,amodb/__init__.py; amodb/apps/__init__.py; amodb/apps/accounts/__init__.py; amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/router_amo_assets.py; amodb/apps/accounts/schemas.py; amodb/apps/accounts/services.py; amodb/apps/crs/__init__.py; amodb/apps/crs/models.py; amodb/apps/crs/pdf_renderer.py; amodb/apps/crs/router.py; amodb/apps/crs/schemas.py; amodb/apps/crs/utils.py; amodb/apps/crs/validation.py; amodb/apps/fleet/models.py; amodb/apps/technical_records/models.py; amodb/apps/technical_records/router.py; amodb/apps/technical_records/schemas.py; amodb/apps/training/compliance.py; amodb/apps/training/schemas.py; amodb/apps/work/models.py; amodb/apps/work/services.py; amodb/main.py
+crs_signoff,active_sqlalchemy_model,0,49152,40960,amodb/apps/crs/models.py:CRSSignoff,amodb/apps/crs/models.py
+currencies,active_sqlalchemy_model,0,40960,32768,amodb/apps/finance/models.py:Currency,amodb/apps/finance/models.py
+custody_logs,active_sqlalchemy_model,0,24576,16384,amodb/apps/quality/models.py:QMSCustodyLog,amodb/apps/quality/models.py; amodb/apps/quality/router.py
+customers,active_sqlalchemy_model,0,32768,24576,amodb/apps/finance/models.py:Customer,amodb/apps/finance/models.py
+defect_reports,active_sqlalchemy_model,0,49152,40960,amodb/apps/fleet/models.py:DefectReport,amodb/apps/fleet/models.py
+departments,active_sqlalchemy_model,0,81920,65536,amodb/apps/accounts/models.py:Department,amodb/apps/accounts/__init__.py; amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/router_modules_admin.py; amodb/apps/accounts/services.py; amodb/apps/reliability/models.py; amodb/scripts/seed_finance_inventory_module.py
+doc_control_acknowledgements,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:Acknowledgement,amodb/apps/doc_control/models.py
+doc_control_archive_records,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:ArchiveRecord,amodb/apps/doc_control/models.py
+doc_control_audit_events,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:AuditEvent,amodb/apps/doc_control/models.py
+doc_control_change_proposals,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:ChangeProposal,amodb/apps/doc_control/models.py
+doc_control_distribution_events,active_sqlalchemy_model,0,16384,16384,amodb/apps/doc_control/models.py:DistributionEvent,amodb/apps/doc_control/models.py
+doc_control_distribution_list_entries,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:DistributionListEntry,amodb/apps/doc_control/models.py
+doc_control_distribution_recipients,active_sqlalchemy_model,0,16384,16384,amodb/apps/doc_control/models.py:DistributionRecipient,amodb/apps/doc_control/models.py
+doc_control_documents,active_sqlalchemy_model,0,32768,24576,amodb/apps/doc_control/models.py:ControlledDocument,amodb/apps/accounts/router_admin.py; amodb/apps/doc_control/models.py
+doc_control_drafts,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:Draft,amodb/apps/doc_control/models.py
+doc_control_leps,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:LEP,amodb/apps/doc_control/models.py
+doc_control_reviews,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:PeriodicReview,amodb/apps/doc_control/models.py
+doc_control_revision_packages,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:RevisionPackage,amodb/apps/doc_control/models.py
+doc_control_settings,active_sqlalchemy_model,0,8192,8192,amodb/apps/doc_control/models.py:DocControlSettings,amodb/apps/doc_control/models.py
+doc_control_temporary_revisions,active_sqlalchemy_model,0,24576,16384,amodb/apps/doc_control/models.py:TemporaryRevision,amodb/apps/doc_control/models.py
+document_sections,active_sqlalchemy_model,0,106496,90112,amodb/apps/manuals/models.py:DocumentSection,amodb/apps/manuals/models.py
+document_versions,active_sqlalchemy_model,0,163840,65536,amodb/apps/manuals/models.py:DocumentVersion,amodb/apps/manuals/models.py; amodb/apps/quality/canonical_router.py
+ehm_parsed_records,active_sqlalchemy_model,0,73728,65536,amodb/apps/reliability/models.py:EhmParsedRecord,amodb/apps/reliability/models.py
+ehm_raw_logs,active_sqlalchemy_model,0,196608,180224,amodb/apps/reliability/models.py:EhmRawLog,amodb/apps/reliability/models.py
+email_logs,active_sqlalchemy_model,0,65536,57344,amodb/apps/notifications/models.py:EmailLog,amodb/apps/notifications/models.py; amodb/apps/notifications/router.py
+engine_flight_snapshots,active_sqlalchemy_model,0,65536,57344,amodb/apps/reliability/models.py:EngineFlightSnapshot,amodb/apps/reliability/models.py
+engine_trend_statuses,active_sqlalchemy_model,0,65536,65536,amodb/apps/reliability/models.py:EngineTrendStatus,amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/services.py
+engine_utilization_daily,active_sqlalchemy_model,0,57344,57344,amodb/apps/reliability/models.py:EngineUtilizationDaily,amodb/apps/reliability/models.py
+finance_credit_notes,active_sqlalchemy_model,0,32768,32768,amodb/apps/finance/models.py:CreditNote,amodb/apps/finance/models.py
+finance_invoice_lines,active_sqlalchemy_model,0,16384,16384,amodb/apps/finance/models.py:InvoiceLine,amodb/apps/finance/models.py
+finance_invoices,active_sqlalchemy_model,0,32768,32768,amodb/apps/finance/models.py:Invoice,amodb/apps/finance/models.py
+finance_payments,active_sqlalchemy_model,0,24576,24576,amodb/apps/finance/models.py:Payment,amodb/apps/finance/models.py
+fracas_actions,active_sqlalchemy_model,0,65536,57344,amodb/apps/reliability/models.py:FRACASAction,amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/services.py
+fracas_cases,active_sqlalchemy_model,0,131072,122880,amodb/apps/reliability/models.py:FRACASCase,amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/services.py
+gl_accounts,active_sqlalchemy_model,0,57344,49152,amodb/apps/finance/models.py:GLAccount,amodb/apps/finance/models.py
+goods_receipt_lines,active_sqlalchemy_model,0,16384,16384,amodb/apps/inventory/models.py:GoodsReceiptLine,amodb/apps/inventory/models.py
+goods_receipts,active_sqlalchemy_model,0,24576,16384,amodb/apps/inventory/models.py:GoodsReceipt,amodb/apps/inventory/models.py
+idempotency_keys,active_sqlalchemy_model,0,57344,49152,amodb/apps/accounts/models.py:IdempotencyKey,amodb/apps/accounts/models.py
+inspector_signoffs,active_sqlalchemy_model,0,32768,24576,amodb/apps/work/models.py:InspectorSignOff,amodb/apps/fleet/schemas.py; amodb/apps/work/models.py
+integration_configs,active_sqlalchemy_model,0,65536,57344,amodb/apps/integrations/models.py:IntegrationConfig,amodb/apps/integrations/models.py; amodb/apps/integrations/router.py; amodb/apps/integrations/services.py
+integration_inbound_events,active_sqlalchemy_model,0,98304,90112,amodb/apps/integrations/models.py:IntegrationInboundEvent,amodb/apps/integrations/models.py
+integration_outbound_events,active_sqlalchemy_model,0,98304,90112,amodb/apps/integrations/models.py:IntegrationOutboundEvent,amodb/apps/integrations/models.py
+inventory_locations,active_sqlalchemy_model,0,24576,24576,amodb/apps/inventory/models.py:InventoryLocation,amodb/apps/inventory/models.py
+inventory_lots,active_sqlalchemy_model,0,24576,24576,amodb/apps/inventory/models.py:InventoryLot,amodb/apps/inventory/models.py
+inventory_movement_ledger,active_sqlalchemy_model,0,40960,32768,amodb/apps/inventory/models.py:InventoryMovementLedger,amodb/apps/finance/models.py; amodb/apps/inventory/models.py
+inventory_parts,active_sqlalchemy_model,0,24576,24576,amodb/apps/inventory/models.py:InventoryPart,amodb/apps/inventory/models.py
+inventory_serials,active_sqlalchemy_model,0,32768,24576,amodb/apps/inventory/models.py:InventorySerial,amodb/apps/inventory/models.py
+journal_entries,active_sqlalchemy_model,0,16384,16384,amodb/apps/finance/models.py:JournalEntry,amodb/apps/finance/models.py
+journal_lines,active_sqlalchemy_model,0,16384,16384,amodb/apps/finance/models.py:JournalLine,amodb/apps/finance/models.py
+ledger_entries,active_sqlalchemy_model,0,114688,98304,amodb/apps/accounts/models.py:LedgerEntry,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/services.py
+license_entitlements,active_sqlalchemy_model,0,32768,24576,amodb/apps/accounts/models.py:LicenseEntitlement,amodb/apps/accounts/models.py
+manual_audit_log,active_sqlalchemy_model,0,24576,16384,amodb/apps/manuals/models.py:ManualAuditLog,amodb/apps/manuals/models.py; amodb/apps/manuals/router.py
+manual_blocks,active_sqlalchemy_model,0,65536,40960,amodb/apps/manuals/models.py:ManualBlock,amodb/apps/manuals/models.py; amodb/apps/manuals/router.py
+manual_reader_progress,active_sqlalchemy_model,0,57344,49152,amodb/apps/manuals/models.py:ManualReaderProgress,amodb/apps/manuals/models.py; amodb/apps/manuals/router.py
+manual_revisions,active_sqlalchemy_model,0,65536,49152,amodb/apps/manuals/models.py:ManualRevision,amodb/apps/manuals/models.py
+manual_sections,active_sqlalchemy_model,0,32768,16384,amodb/apps/manuals/models.py:ManualSection,amodb/apps/manuals/models.py; amodb/apps/manuals/router.py
+manual_tenants,active_sqlalchemy_model,0,65536,49152,amodb/apps/manuals/models.py:Tenant,amodb/apps/manuals/models.py
+manuals,active_sqlalchemy_model,0,49152,32768,amodb/apps/manuals/models.py:Manual,amodb/apps/accounts/router_admin.py; amodb/apps/doc_control/router.py; amodb/apps/doc_control/schemas.py; amodb/apps/fleet/schemas.py; amodb/apps/manuals/models.py; amodb/apps/manuals/router.py; amodb/apps/manuals/seed_demo.py; amodb/apps/quality/router.py; amodb/apps/training/models.py; amodb/apps/training/schemas.py; amodb/main.py
+message_receipts,active_sqlalchemy_model,0,24576,24576,amodb/apps/realtime/models.py:MessageReceipt,amodb/apps/realtime/models.py
+module_subscriptions,active_sqlalchemy_model,0,65536,49152,amodb/apps/accounts/models.py:ModuleSubscription,amodb/apps/accounts/models.py
+oil_consumption_rates,active_sqlalchemy_model,0,49152,49152,amodb/apps/reliability/models.py:OilConsumptionRate,amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/services.py
+oil_uplifts,active_sqlalchemy_model,0,49152,40960,amodb/apps/reliability/models.py:OilUplift,amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/services.py
+part_movement_ledger,active_sqlalchemy_model,0,131072,122880,amodb/apps/reliability/models.py:PartMovementLedger,amodb/apps/reliability/models.py
+password_reset_tokens,active_sqlalchemy_model,0,81920,65536,amodb/apps/accounts/models.py:PasswordResetToken,amodb/apps/accounts/models.py
+payment_allocations,active_sqlalchemy_model,0,16384,16384,amodb/apps/finance/models.py:PaymentAllocation,amodb/apps/finance/models.py
+payment_methods,active_sqlalchemy_model,0,40960,40960,amodb/apps/accounts/models.py:PaymentMethod,amodb/apps/accounts/models.py; amodb/apps/accounts/router_billing.py; amodb/apps/accounts/services.py
+personnel_profiles,active_sqlalchemy_model,0,221184,147456,amodb/apps/accounts/models.py:PersonnelProfile,amodb/apps/accounts/models.py; amodb/apps/foundations/models.py; amodb/apps/foundations/schemas.py; amodb/apps/foundations/services.py; amodb/apps/rostering/services.py
+physical_controlled_copies,active_sqlalchemy_model,0,40960,32768,amodb/apps/quality/models.py:QMSPhysicalControlledCopy,amodb/apps/quality/models.py
+platform_api_keys,active_sqlalchemy_model,0,32768,24576,amodb/apps/platform/models.py:PlatformAPIKey,amodb/apps/platform/models.py
+platform_audit_log,active_sqlalchemy_model,0,81920,65536,amodb/apps/platform/models.py:PlatformAuditLog,amodb/apps/platform/models.py
+platform_command_job_events,active_sqlalchemy_model,0,49152,32768,amodb/apps/platform/models.py:PlatformCommandJobEvent,amodb/apps/platform/models.py
+platform_command_jobs,active_sqlalchemy_model,0,131072,114688,amodb/apps/platform/models.py:PlatformCommandJob,amodb/apps/platform/models.py
+platform_diagnostic_runs,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformDiagnosticRun,amodb/apps/platform/models.py
+platform_feature_flags,active_sqlalchemy_model,0,32768,24576,amodb/apps/platform/models.py:PlatformFeatureFlag,amodb/apps/platform/models.py
+platform_health_snapshots,active_sqlalchemy_model,0,49152,32768,amodb/apps/platform/models.py:PlatformHealthSnapshot,amodb/apps/platform/models.py
+platform_infrastructure_snapshots,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformInfrastructureSnapshot,amodb/apps/platform/models.py
+platform_integration_providers,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformIntegrationProvider,amodb/apps/platform/models.py
+platform_maintenance_windows,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformMaintenanceWindow,amodb/apps/platform/models.py
+platform_notifications,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformNotification,amodb/apps/platform/models.py
+platform_route_metrics_1m,active_sqlalchemy_model,0,40960,40960,amodb/apps/platform/models.py:PlatformRouteMetric1m,amodb/apps/platform/models.py
+platform_security_alerts,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformSecurityAlert,amodb/apps/platform/models.py
+platform_settings,active_sqlalchemy_model,0,32768,16384,amodb/apps/accounts/models.py:PlatformSettings,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/router_billing.py; amodb/main.py
+platform_support_sessions,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformSupportSession,amodb/apps/platform/models.py
+platform_support_tickets,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformSupportTicket,amodb/apps/platform/models.py
+platform_tenant_resource_snapshots,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformTenantResourceSnapshot,amodb/apps/platform/models.py
+platform_webhook_configs,active_sqlalchemy_model,0,24576,16384,amodb/apps/platform/models.py:PlatformWebhookConfig,amodb/apps/platform/models.py
+platform_webhook_delivery_logs,active_sqlalchemy_model,0,16384,8192,amodb/apps/platform/models.py:PlatformWebhookDeliveryLog,amodb/apps/platform/models.py
+platform_worker_heartbeats,active_sqlalchemy_model,0,32768,24576,amodb/apps/platform/models.py:PlatformWorkerHeartbeat,amodb/apps/platform/models.py
+presence_state,active_sqlalchemy_model,0,57344,49152,amodb/apps/realtime/models.py:PresenceState,amodb/apps/accounts/router_admin.py; amodb/apps/realtime/models.py; amodb/apps/realtime/router.py; amodb/apps/realtime/services.py
+prompt_deliveries,active_sqlalchemy_model,0,32768,24576,amodb/apps/realtime/models.py:PromptDelivery,amodb/apps/realtime/models.py; amodb/apps/realtime/schemas.py; amodb/apps/realtime/services.py
+prompts,active_sqlalchemy_model,0,8192,8192,amodb/apps/realtime/models.py:Prompt,amodb/apps/realtime/models.py; amodb/apps/realtime/router.py; amodb/apps/realtime/schemas.py; amodb/apps/realtime/services.py
+purchase_order_lines,active_sqlalchemy_model,0,16384,16384,amodb/apps/inventory/models.py:PurchaseOrderLine,amodb/apps/inventory/models.py
+purchase_orders,active_sqlalchemy_model,0,32768,24576,amodb/apps/inventory/models.py:PurchaseOrder,amodb/apps/inventory/models.py
+qms_audit_findings,active_sqlalchemy_model,0,180224,172032,amodb/apps/quality/models.py:QMSAuditFinding,amodb/apps/quality/canonical_router.py; amodb/apps/quality/models.py; amodb/apps/reliability/models.py
+qms_audit_reference_counters,active_sqlalchemy_model,0,73728,65536,amodb/apps/quality/models.py:QMSAuditReferenceCounter,amodb/apps/quality/models.py; amodb/apps/quality/schema_compat.py
+qms_audit_schedules,active_sqlalchemy_model,0,122880,106496,amodb/apps/quality/models.py:QMSAuditSchedule,amodb/apps/quality/canonical_router.py; amodb/apps/quality/models.py; amodb/apps/quality/router.py
+qms_audits,active_sqlalchemy_model,0,786432,770048,amodb/apps/quality/models.py:QMSAudit,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py; amodb/apps/quality/models.py; amodb/apps/quality/router.py; amodb/apps/quality/schema_compat.py
+qms_document_distributions,active_sqlalchemy_model,0,81920,81920,amodb/apps/quality/models.py:QMSDocumentDistribution,amodb/apps/quality/models.py
+qms_document_revisions,active_sqlalchemy_model,0,65536,57344,amodb/apps/quality/models.py:QMSDocumentRevision,amodb/apps/quality/models.py
+qms_documents,active_sqlalchemy_model,0,114688,106496,amodb/apps/quality/models.py:QMSDocument,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py; amodb/apps/quality/models.py
+qms_manual_change_requests,active_sqlalchemy_model,0,57344,49152,amodb/apps/quality/models.py:QMSManualChangeRequest,amodb/apps/quality/models.py
+qms_notifications,active_sqlalchemy_model,0,180224,163840,amodb/apps/quality/models.py:QMSNotification,amodb/apps/quality/models.py
+quality_archive_packages,active_sqlalchemy_model,0,73728,65536,amodb/apps/quality/models.py:QualityArchivePackage,amodb/apps/quality/models.py
+quality_audit_checklist_items,active_sqlalchemy_model,0,106496,98304,amodb/apps/quality/models.py:QualityAuditChecklistItem,amodb/apps/quality/models.py
+quality_audit_document_requests,active_sqlalchemy_model,0,90112,81920,amodb/apps/quality/models.py:QualityAuditDocumentRequest,amodb/apps/quality/models.py
+quality_audit_post_briefs,active_sqlalchemy_model,0,49152,40960,amodb/apps/quality/models.py:QualityAuditPostBrief,amodb/apps/quality/models.py
+quality_audit_report_trackers,active_sqlalchemy_model,0,81920,81920,amodb/apps/quality/models.py:QualityAuditReportTracker,amodb/apps/quality/models.py
+quality_car_actions,active_sqlalchemy_model,0,98304,81920,amodb/apps/quality/models.py:CARActionLog,amodb/apps/quality/models.py
+quality_car_extension_requests,active_sqlalchemy_model,0,73728,65536,amodb/apps/quality/models.py:QualityCARExtensionRequest,amodb/apps/quality/models.py
+quality_car_responses,active_sqlalchemy_model,0,32768,24576,amodb/apps/quality/models.py:CARResponse,amodb/apps/quality/models.py; amodb/apps/quality/router.py
+quality_cars,active_sqlalchemy_model,0,540672,524288,amodb/apps/quality/models.py:CorrectiveActionRequest,amodb/apps/quality/canonical_router.py; amodb/apps/quality/models.py; amodb/apps/quality/router.py
+quality_reminder_milestones,active_sqlalchemy_model,0,106496,98304,amodb/apps/quality/models.py:QualityReminderMilestone,amodb/apps/quality/models.py
+quality_tenant_workflow_settings,active_sqlalchemy_model,0,57344,49152,amodb/apps/quality/models.py:QualityTenantWorkflowSettings,amodb/apps/quality/models.py
+realtime_connect_tokens,active_sqlalchemy_model,0,2580480,540672,amodb/apps/realtime/models.py:RealtimeConnectToken,amodb/apps/realtime/models.py
+realtime_outbox,active_sqlalchemy_model,0,24576,16384,amodb/apps/realtime/models.py:RealtimeOutbox,amodb/apps/realtime/models.py
+reliability_alert_rules,active_sqlalchemy_model,0,49152,49152,amodb/apps/reliability/models.py:AlertRule,amodb/apps/reliability/models.py
+reliability_alerts,active_sqlalchemy_model,0,106496,98304,amodb/apps/reliability/models.py:ReliabilityAlert,amodb/apps/accounts/router_admin.py; amodb/apps/reliability/models.py
+reliability_control_chart_configs,active_sqlalchemy_model,0,40960,32768,amodb/apps/reliability/models.py:ControlChartConfig,amodb/apps/reliability/models.py
+reliability_events,active_sqlalchemy_model,0,106496,98304,amodb/apps/reliability/models.py:ReliabilityEvent,amodb/apps/accounts/router_admin.py; amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/services.py
+reliability_kpis,active_sqlalchemy_model,0,81920,81920,amodb/apps/reliability/models.py:ReliabilityKPI,amodb/apps/reliability/models.py
+reliability_notification_rules,active_sqlalchemy_model,0,16384,16384,amodb/apps/reliability/models.py:ReliabilityNotificationRule,amodb/apps/reliability/models.py
+reliability_notifications,active_sqlalchemy_model,0,65536,57344,amodb/apps/reliability/models.py:ReliabilityNotification,amodb/apps/reliability/models.py
+reliability_reports,active_sqlalchemy_model,0,98304,81920,amodb/apps/reliability/models.py:ReliabilityReport,amodb/apps/reliability/models.py
+reliability_threshold_sets,active_sqlalchemy_model,0,40960,40960,amodb/apps/reliability/models.py:ThresholdSet,amodb/apps/reliability/models.py
+removal_events,active_sqlalchemy_model,0,90112,90112,amodb/apps/reliability/models.py:RemovalEvent,amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/services.py
+revision_diff_index,active_sqlalchemy_model,0,16384,8192,amodb/apps/manuals/models.py:RevisionDiffIndex,amodb/apps/manuals/models.py
+roster_assignments,active_sqlalchemy_model,0,106496,98304,amodb/apps/rostering/models.py:RosterAssignment,amodb/apps/foundations/services.py; amodb/apps/rostering/models.py
+roster_periods,active_sqlalchemy_model,0,81920,73728,amodb/apps/rostering/models.py:RosterPeriod,amodb/apps/rostering/models.py
+roster_publication_acknowledgements,active_sqlalchemy_model,0,57344,49152,amodb/apps/rostering/models.py:RosterPublicationAcknowledgement,amodb/apps/rostering/models.py
+roster_task_assignment_links,active_sqlalchemy_model,0,57344,57344,amodb/apps/rostering/models.py:RosterTaskAssignmentLink,amodb/apps/rostering/models.py; amodb/apps/rostering/services.py
+roster_validation_findings,active_sqlalchemy_model,0,90112,81920,amodb/apps/rostering/models.py:RosterValidationFinding,amodb/apps/rostering/models.py
+roster_versions,active_sqlalchemy_model,0,65536,57344,amodb/apps/rostering/models.py:RosterVersion,amodb/apps/rostering/models.py
+shift_templates,active_sqlalchemy_model,0,81920,73728,amodb/apps/rostering/models.py:ShiftTemplate,amodb/apps/rostering/models.py; amodb/apps/rostering/router.py; amodb/apps/rostering/services.py
+shop_visits,active_sqlalchemy_model,0,32768,24576,amodb/apps/reliability/models.py:ShopVisit,amodb/apps/reliability/models.py; amodb/apps/reliability/router.py; amodb/apps/reliability/schemas.py; amodb/apps/reliability/services.py
+task_assignments,active_sqlalchemy_model,0,90112,90112,amodb/apps/work/models.py:TaskAssignment,amodb/apps/accounts/router_admin.py; amodb/apps/rostering/models.py; amodb/apps/rostering/services.py; amodb/apps/work/models.py
+task_cards,active_sqlalchemy_model,0,212992,204800,amodb/apps/work/models.py:TaskCard,amodb/apps/accounts/router_admin.py; amodb/apps/fleet/models.py; amodb/apps/foundations/services.py; amodb/apps/inventory/models.py; amodb/apps/reliability/models.py; amodb/apps/rostering/services.py; amodb/apps/technical_records/models.py; amodb/apps/work/models.py
+task_step_executions,active_sqlalchemy_model,0,32768,24576,amodb/apps/work/models.py:TaskStepExecution,amodb/apps/work/models.py
+task_steps,active_sqlalchemy_model,0,32768,24576,amodb/apps/work/models.py:TaskStep,amodb/apps/fleet/router.py; amodb/apps/fleet/schemas.py; amodb/apps/work/models.py; amodb/apps/work/router.py; amodb/apps/work/services.py
+tasks,active_sqlalchemy_model,0,40960,32768,amodb/apps/tasks/models.py:Task,amodb/__init__.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/router_public.py; amodb/apps/accounts/schemas.py; amodb/apps/crs/router.py; amodb/apps/crs/validation.py; amodb/apps/fleet/models.py; amodb/apps/fleet/router.py; amodb/apps/fleet/schemas.py; amodb/apps/maintenance_program/api.py; amodb/apps/maintenance_program/models.py; amodb/apps/maintenance_program/schemas.py; amodb/apps/maintenance_program/service.py; amodb/apps/quality/router.py; amodb/apps/quality/schemas.py; amodb/apps/quality/service.py; amodb/apps/reliability/router.py; amodb/apps/reliability/services.py; amodb/apps/rostering/schemas.py; amodb/apps/rostering/services.py; amodb/apps/tasks/models.py; amodb/apps/tasks/router.py; amodb/apps/tasks/services.py; amodb/apps/technical_records/router.py; amodb/apps/training/router.py; amodb/apps/work/models.py; amodb/apps/work/router.py; amodb/apps/work/schemas.py; amodb/apps/work/services.py; amodb/database.py; amodb/jobs/quality_task_runner.py; amodb/main.py
+tax_codes,active_sqlalchemy_model,0,40960,32768,amodb/apps/finance/models.py:TaxCode,amodb/apps/finance/models.py
+technical_airworthiness_compliance_events,active_sqlalchemy_model,0,24576,16384,amodb/apps/technical_records/models.py:AirworthinessComplianceEvent,amodb/apps/technical_records/models.py
+technical_airworthiness_items,active_sqlalchemy_model,0,32768,24576,amodb/apps/technical_records/models.py:AirworthinessItem,amodb/apps/technical_records/models.py
+technical_airworthiness_publication_matches,active_sqlalchemy_model,0,32768,24576,amodb/apps/technical_records/models.py:AirworthinessPublicationMatch,amodb/apps/technical_records/models.py
+technical_airworthiness_publications,active_sqlalchemy_model,0,32768,24576,amodb/apps/technical_records/models.py:AirworthinessPublication,amodb/apps/technical_records/models.py
+technical_airworthiness_watchlists,active_sqlalchemy_model,0,24576,16384,amodb/apps/technical_records/models.py:AirworthinessWatchlist,amodb/apps/technical_records/models.py
+technical_compliance_action_history,active_sqlalchemy_model,0,24576,16384,amodb/apps/technical_records/models.py:ComplianceActionHistory,amodb/apps/technical_records/models.py
+technical_compliance_actions,active_sqlalchemy_model,0,24576,16384,amodb/apps/technical_records/models.py:ComplianceAction,amodb/apps/technical_records/models.py
+technical_deferrals,active_sqlalchemy_model,0,24576,16384,amodb/apps/technical_records/models.py:Deferral,amodb/apps/technical_records/models.py
+technical_exception_queue,active_sqlalchemy_model,0,24576,16384,amodb/apps/technical_records/models.py:ExceptionQueueItem,amodb/apps/technical_records/models.py
+technical_logbook_entries,active_sqlalchemy_model,0,24576,16384,amodb/apps/technical_records/models.py:LogbookEntry,amodb/apps/technical_records/models.py
+technical_maintenance_records,active_sqlalchemy_model,0,24576,16384,amodb/apps/technical_records/models.py:MaintenanceRecord,amodb/apps/technical_records/models.py
+technical_production_execution_evidence,active_sqlalchemy_model,0,24576,16384,amodb/apps/technical_records/models.py:ProductionExecutionEvidence,amodb/apps/technical_records/models.py
+technical_production_release_gates,active_sqlalchemy_model,0,32768,24576,amodb/apps/technical_records/models.py:ProductionReleaseGate,amodb/apps/technical_records/models.py
+technical_record_settings,active_sqlalchemy_model,0,57344,49152,amodb/apps/technical_records/models.py:TechnicalRecordSetting,amodb/apps/technical_records/models.py
+tenant_licenses,active_sqlalchemy_model,0,114688,98304,amodb/apps/accounts/models.py:TenantLicense,amodb/apps/accounts/models.py; amodb/apps/platform/services.py
+training_audit_logs,active_sqlalchemy_model,0,180224,163840,amodb/apps/training/models.py:TrainingAuditLog,amodb/apps/training/models.py
+training_certificate_issues,active_sqlalchemy_model,0,49152,40960,amodb/apps/training/models.py:TrainingCertificateIssue,amodb/apps/training/models.py
+training_certificate_status_history,active_sqlalchemy_model,0,24576,16384,amodb/apps/training/models.py:TrainingCertificateStatusHistory,amodb/apps/training/models.py
+training_courses,active_sqlalchemy_model,0,237568,180224,amodb/apps/training/models.py:TrainingCourse,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py; amodb/apps/training/models.py; amodb/apps/training/router.py
+training_deferral_requests,active_sqlalchemy_model,0,98304,90112,amodb/apps/training/models.py:TrainingDeferralRequest,amodb/apps/training/models.py
+training_event_participants,active_sqlalchemy_model,0,106496,98304,amodb/apps/training/models.py:TrainingEventParticipant,amodb/apps/quality/canonical_router.py; amodb/apps/training/models.py
+training_events,active_sqlalchemy_model,0,131072,122880,amodb/apps/training/models.py:TrainingEvent,amodb/apps/quality/canonical_router.py; amodb/apps/training/models.py
+training_files,active_sqlalchemy_model,0,311296,294912,amodb/apps/training/models.py:TrainingFile,amodb/apps/training/models.py; amodb/apps/training/router.py
+training_notifications,active_sqlalchemy_model,0,147456,131072,amodb/apps/training/models.py:TrainingNotification,amodb/apps/training/models.py
+training_records,active_sqlalchemy_model,0,1777664,1384448,amodb/apps/training/models.py:TrainingRecord,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py; amodb/apps/quality/schemas.py; amodb/apps/quality/service.py; amodb/apps/training/models.py; amodb/apps/training/records_import.py; amodb/apps/training/router.py
+training_requirements,active_sqlalchemy_model,0,303104,294912,amodb/apps/training/models.py:TrainingRequirement,amodb/apps/accounts/router_admin.py; amodb/apps/quality/canonical_router.py; amodb/apps/training/gates.py; amodb/apps/training/models.py; amodb/apps/training/router.py
+usage_meters,active_sqlalchemy_model,0,122880,81920,amodb/apps/accounts/models.py:UsageMeter,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/router_billing.py; amodb/apps/accounts/services.py
+user_active_context,active_sqlalchemy_model,0,90112,81920,amodb/apps/accounts/models.py:UserActiveContext,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/router_public.py; amodb/apps/accounts/services.py
+user_authorisations,active_sqlalchemy_model,0,49152,40960,amodb/apps/accounts/models.py:UserAuthorisation,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/foundations/services.py
+user_availability,active_sqlalchemy_model,0,40960,32768,amodb/apps/quality/models.py:UserAvailability,amodb/apps/foundations/services.py; amodb/apps/quality/models.py; amodb/apps/rostering/services.py
+user_base_assignments,active_sqlalchemy_model,0,40960,32768,amodb/apps/foundations/models.py:UserBaseAssignment,amodb/apps/foundations/models.py; amodb/apps/foundations/services.py
+user_group_members,active_sqlalchemy_model,0,49152,49152,amodb/apps/accounts/models.py:UserGroupMember,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py
+user_groups,active_sqlalchemy_model,0,73728,65536,amodb/apps/accounts/models.py:UserGroup,amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py
+users,active_sqlalchemy_model,0,311296,245760,amodb/models.py:User; amodb/apps/accounts/models.py:User,amodb/__init__.py; amodb/apps/accounts/__init__.py; amodb/apps/accounts/models.py; amodb/apps/accounts/router_admin.py; amodb/apps/accounts/router_billing.py; amodb/apps/accounts/schemas.py; amodb/apps/accounts/services.py; amodb/apps/audit/models.py; amodb/apps/bootstrap/router.py; amodb/apps/crs/models.py; amodb/apps/crs/router.py; amodb/apps/doc_control/models.py; amodb/apps/finance/models.py; amodb/apps/fleet/models.py; amodb/apps/fleet/router.py; amodb/apps/foundations/models.py; amodb/apps/foundations/schemas.py; amodb/apps/foundations/services.py; amodb/apps/integrations/models.py; amodb/apps/inventory/models.py; amodb/apps/maintenance_program/models.py; amodb/apps/manuals/models.py; amodb/apps/platform/models.py; amodb/apps/platform/router.py; amodb/apps/platform/services.py; amodb/apps/quality/canonical_router.py; amodb/apps/quality/models.py; amodb/apps/quality/router.py; amodb/apps/quality/service.py; amodb/apps/realtime/models.py; amodb/apps/realtime/services.py; amodb/apps/reliability/models.py; amodb/apps/reliability/services.py; amodb/apps/rostering/models.py; amodb/apps/rostering/schemas.py; amodb/apps/rostering/services.py; amodb/apps/tasks/models.py; amodb/apps/technical_records/models.py; amodb/apps/training/models.py; amodb/apps/training/records_import.py; amodb/apps/training/router.py; amodb/apps/training/schemas.py; amodb/apps/work/models.py; amodb/entitlements.py; amodb/models.py; amodb/scripts/alembic_doctor.py; amodb/scripts/fix_users_fk_types.py; amodb/scripts/seed_superuser.py; amodb/security.py
+vendors,active_sqlalchemy_model,0,32768,24576,amodb/apps/finance/models.py:Vendor,amodb/apps/finance/models.py; amodb/apps/inventory/models.py
+work_log_entries,active_sqlalchemy_model,0,65536,57344,amodb/apps/work/models.py:WorkLogEntry,amodb/apps/rostering/services.py; amodb/apps/work/models.py
+work_orders,active_sqlalchemy_model,0,163840,155648,amodb/apps/work/models.py:WorkOrder,amodb/apps/crs/models.py; amodb/apps/finance/models.py; amodb/apps/fleet/models.py; amodb/apps/fleet/router.py; amodb/apps/fleet/schemas.py; amodb/apps/foundations/services.py; amodb/apps/inventory/models.py; amodb/apps/reliability/models.py; amodb/apps/rostering/schemas.py; amodb/apps/rostering/services.py; amodb/apps/technical_records/models.py; amodb/apps/technical_records/router.py; amodb/apps/work/models.py; amodb/apps/work/router.py
+maintenance_program_items_legacy,legacy_drop_candidate_needs_exact_count,0,90112,81920,,
+maintenance_statuses_legacy,legacy_drop_candidate_needs_exact_count,0,65536,65536,,
+qms_corrective_actions_legacy,legacy_drop_candidate_needs_exact_count,0,73728,65536,,
+technical_aircraft_utilisation_legacy,legacy_drop_candidate_needs_exact_count,0,24576,16384,,
+alembic_version,migration_control,0,24576,16384,,
+auth_postholder_assignments,migration_only_or_stale_candidate,0,16384,16384,,
+auth_role_definitions,migration_only_or_stale_candidate,0,24576,16384,,
+auth_sod_policy_rules,migration_only_or_stale_candidate,0,24576,16384,,
+qms_archive_package_items,migration_only_or_stale_candidate,0,40960,32768,,
+qms_audit_checklist_items,migration_only_or_stale_candidate,0,40960,32768,,
+qms_calendar_settings,migration_only_or_stale_candidate,0,65536,49152,,
+qms_context_items,migration_only_or_stale_candidate,0,40960,32768,,
+qms_document_acknowledgements,migration_only_or_stale_candidate,0,40960,32768,,
+qms_document_sections,migration_only_or_stale_candidate,0,40960,32768,,
+qms_equipment_status_history,migration_only_or_stale_candidate,0,40960,32768,,
+qms_file_hashes,migration_only_or_stale_candidate,0,40960,32768,,
+qms_finding_links,migration_only_or_stale_candidate,0,40960,32768,,
+qms_finding_sources,migration_only_or_stale_candidate,0,40960,32768,,
+qms_interested_parties,migration_only_or_stale_candidate,0,40960,32768,,
+qms_management_review_approvals,migration_only_or_stale_candidate,0,40960,32768,,
+qms_metric_definitions,migration_only_or_stale_candidate,0,40960,32768,,
+qms_process_owners,migration_only_or_stale_candidate,0,40960,32768,,
+qms_public_holidays,migration_only_or_stale_candidate,0,32768,24576,,
+qms_quality_policy,migration_only_or_stale_candidate,0,40960,32768,,
+qms_risk_controls,migration_only_or_stale_candidate,0,40960,32768,,
+qms_supplier_documents,migration_only_or_stale_candidate,0,40960,32768,,
+qms_supplier_scopes,migration_only_or_stale_candidate,0,40960,32768,,
+qms_task_assignments,migration_only_or_stale_candidate,0,40960,32768,,
+qms_task_comments,migration_only_or_stale_candidate,0,40960,32768,,
+qms_tasks,migration_only_or_stale_candidate,0,40960,32768,,
+qms_training_courses,migration_only_or_stale_candidate,0,40960,32768,,
+qms_training_records,migration_only_or_stale_candidate,0,40960,32768,,
+qms_training_requirements,migration_only_or_stale_candidate,0,40960,32768,,
+quality_tenant_backfill_issues,migration_only_or_stale_candidate,0,24576,16384,,

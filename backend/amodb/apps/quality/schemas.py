@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, EmailStr
@@ -244,10 +244,53 @@ class QMSChangeRequestOut(BaseModel):
     submitted_at: datetime
 
 
+
+
+class QMSAuditScopeCreate(BaseModel):
+    code: str = Field(min_length=2, max_length=16, pattern=r"^[A-Za-z0-9]+$")
+    name: str = Field(min_length=1, max_length=120)
+    description: Optional[str] = None
+    party_level: str = Field(default="FIRST_PARTY", pattern=r"^(FIRST_PARTY|SECOND_PARTY|THIRD_PARTY|REGULATORY)$")
+    default_kind: QMSAuditKind = QMSAuditKind.INTERNAL
+    is_active: bool = True
+    sort_order: int = Field(default=100, ge=0, le=9999)
+
+
+class QMSAuditScopeUpdate(BaseModel):
+    code: Optional[str] = Field(default=None, min_length=2, max_length=16, pattern=r"^[A-Za-z0-9]+$")
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = None
+    party_level: Optional[str] = Field(default=None, pattern=r"^(FIRST_PARTY|SECOND_PARTY|THIRD_PARTY|REGULATORY)$")
+    default_kind: Optional[QMSAuditKind] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = Field(default=None, ge=0, le=9999)
+
+
+class QMSAuditScopeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    amo_id: str
+    code: str
+    name: str
+    description: Optional[str]
+    party_level: str
+    default_kind: QMSAuditKind
+    is_active: bool
+    is_system_default: bool
+    sort_order: int
+    created_by_user_id: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+
 class QMSAuditCreate(BaseModel):
     domain: QMSDomain
     kind: QMSAuditKind = QMSAuditKind.INTERNAL
+    audit_scope_id: Optional[UUID] = None
+    audit_scope_code: Optional[str] = Field(default=None, min_length=2, max_length=16)
 
+    # Kept for old frontend compatibility only; backend ignores user-supplied values.
     audit_ref: Optional[str] = Field(default=None, min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=255)
 
@@ -270,6 +313,10 @@ class QMSAuditCreate(BaseModel):
 
 class QMSAuditUpdate(BaseModel):
     status: Optional[QMSAuditStatus] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    kind: Optional[QMSAuditKind] = None
+    audit_scope_id: Optional[UUID] = None
+    audit_scope_code: Optional[str] = Field(default=None, min_length=2, max_length=16)
 
     scope: Optional[str] = None
     criteria: Optional[str] = None
@@ -303,6 +350,8 @@ class QMSAuditOut(BaseModel):
     status: QMSAuditStatus
 
     audit_ref: str
+    audit_scope_id: Optional[UUID] = None
+    audit_scope_code: Optional[str] = None
     reference_family: str
     unit_code: str
     ref_year: int
@@ -314,11 +363,15 @@ class QMSAuditOut(BaseModel):
     auditee: Optional[str]
     auditee_email: Optional[str]
     auditee_user_id: Optional[str]
+    auditee_user_name: Optional[str] = None
     external_auditees: List[QMSExternalAuditeeContact] = Field(default_factory=list)
 
     lead_auditor_user_id: Optional[str]
+    lead_auditor_name: Optional[str] = None
     observer_auditor_user_id: Optional[str]
+    observer_auditor_name: Optional[str] = None
     assistant_auditor_user_id: Optional[str]
+    assistant_auditor_name: Optional[str] = None
     notify_auditors: bool = True
     notify_auditees: bool = True
     reminder_interval_days: int = 7
@@ -336,6 +389,9 @@ class QMSAuditOut(BaseModel):
 
     created_by_user_id: Optional[str]
     created_at: datetime
+    deleted_at: Optional[datetime] = None
+    deleted_by_user_id: Optional[str] = None
+    delete_reason: Optional[str] = None
 
 
 class QMSAuditWorkflowStageOut(BaseModel):
@@ -369,6 +425,44 @@ class QMSAuditWorkspaceOut(BaseModel):
     workflow: QMSAuditWorkflowSummaryOut
 
 
+
+
+
+class QMSAuditWorkspaceSummaryOut(QMSAuditWorkflowSummaryOut):
+    pass
+
+
+class QMSAuditWorkspaceReadinessOut(BaseModel):
+    ready: bool
+    blockers: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class QMSAuditWorkspaceActionOut(BaseModel):
+    id: str
+    label: str
+    enabled: bool = True
+    helper: Optional[str] = None
+    path: Optional[str] = None
+
+
+class QMSAuditNoticeStateOut(BaseModel):
+    upcoming_notice_sent_at: Optional[datetime] = None
+    day_of_notice_sent_at: Optional[datetime] = None
+    reminder_interval_days: Optional[int] = None
+
+
+class QMSAuditWorkflowCheckOut(QMSAuditWorkspaceOut):
+    pass
+
+
+class QMSAuditNoticeDispatchOut(BaseModel):
+    audit_id: UUID
+    dispatched: bool
+    sent_at: datetime
+    message: str
+
+
 class QMSAuditRegisterRowOut(BaseModel):
     audit: QMSAuditOut
     finding: "QMSFindingOut"
@@ -384,7 +478,7 @@ class QMSFindingCreate(BaseModel):
     finding_type: QMSFindingType = QMSFindingType.NON_CONFORMITY
 
     severity: QMSFindingSeverity = QMSFindingSeverity.MINOR
-    level: Optional[FindingLevel] = None  # if None, inferred from severity
+    level: Optional[FindingLevel] = None  # if None, inferred from severity; observations default to LEVEL_4
 
     requirement_ref: Optional[str] = None
     description: str = Field(min_length=1)
@@ -392,7 +486,23 @@ class QMSFindingCreate(BaseModel):
 
     safety_sensitive: bool = False
 
-    target_close_date: Optional[date] = None  # if None, computed from level
+    target_close_date: Optional[date] = None  # if None, computed for Level 1-3; observations may remain open for monitoring
+
+
+class QMSFindingUpdate(BaseModel):
+    finding_ref: Optional[str] = Field(default=None, max_length=64)
+    finding_type: Optional[QMSFindingType] = None
+    severity: Optional[QMSFindingSeverity] = None
+    level: Optional[FindingLevel] = None
+    requirement_ref: Optional[str] = Field(default=None, max_length=255)
+    description: Optional[str] = Field(default=None, min_length=1)
+    objective_evidence: Optional[str] = None
+    safety_sensitive: Optional[bool] = None
+    target_close_date: Optional[date] = None
+
+
+class QMSFindingReviewFlag(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 class QMSFindingVerify(BaseModel):
@@ -432,8 +542,24 @@ class QMSFindingOut(BaseModel):
     acknowledged_by_user_id: Optional[str] = None
     acknowledged_by_name: Optional[str] = None
     acknowledged_by_email: Optional[str] = None
+    created_by_user_id: Optional[str] = None
 
     created_at: datetime
+
+
+class QMSFindingAttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    finding_id: UUID
+    filename: str
+    description: Optional[str] = None
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    sha256: Optional[str] = None
+    uploaded_by_user_id: Optional[str] = None
+    uploaded_at: datetime
+    download_url: str
 
 
 class QMSExternalAuditeeContact(BaseModel):
@@ -451,6 +577,8 @@ class QMSExternalAuditeeContact(BaseModel):
 class QMSAuditScheduleCreate(BaseModel):
     domain: QMSDomain
     kind: QMSAuditKind = QMSAuditKind.INTERNAL
+    audit_scope_id: Optional[UUID] = None
+    audit_scope_code: Optional[str] = Field(default=None, min_length=2, max_length=16)
     frequency: QMSAuditScheduleFrequency = QMSAuditScheduleFrequency.MONTHLY
     title: str = Field(min_length=1, max_length=255)
     scope: Optional[str] = None
@@ -471,6 +599,8 @@ class QMSAuditScheduleCreate(BaseModel):
 
 class QMSAuditScheduleUpdate(BaseModel):
     kind: Optional[QMSAuditKind] = None
+    audit_scope_id: Optional[UUID] = None
+    audit_scope_code: Optional[str] = Field(default=None, min_length=2, max_length=16)
     frequency: Optional[QMSAuditScheduleFrequency] = None
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     scope: Optional[str] = None
@@ -497,6 +627,8 @@ class QMSAuditScheduleOut(BaseModel):
     amo_id: Optional[str]
     domain: QMSDomain
     kind: QMSAuditKind
+    audit_scope_id: Optional[UUID] = None
+    audit_scope_code: Optional[str] = None
     frequency: QMSAuditScheduleFrequency
     title: str
     scope: Optional[str]
@@ -517,6 +649,9 @@ class QMSAuditScheduleOut(BaseModel):
     is_active: bool
     created_by_user_id: Optional[str]
     created_at: datetime
+    deleted_at: Optional[datetime] = None
+    deleted_by_user_id: Optional[str] = None
+    delete_reason: Optional[str] = None
 
 
 class QMSCAPUpsert(BaseModel):
@@ -576,6 +711,7 @@ class QMSDashboardOut(BaseModel):
     findings_open_level_1: int
     findings_open_level_2: int
     findings_open_level_3: int
+    findings_open_level_4: int = 0
 
     findings_overdue_total: int
 
@@ -681,6 +817,238 @@ class QMSCockpitSnapshotOut(BaseModel):
 
 
 # -----------------------------
+# Quality audit workflow enforcement
+# -----------------------------
+
+
+class QualityWorkflowSettingsOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    amo_id: str
+    report_due_days: int
+    report_reminder_days: List[int] = Field(default_factory=list)
+    car_reminder_percentages: List[int] = Field(default_factory=list)
+    final_reminder_days_before_due: int
+    auto_escalation_enabled: bool
+    auto_escalation_locked: bool
+    created_by_user_id: Optional[str] = None
+    updated_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QualityWorkflowSettingsUpdate(BaseModel):
+    report_due_days: Optional[int] = Field(default=None, ge=1, le=60)
+    report_reminder_days: Optional[List[int]] = None
+    car_reminder_percentages: Optional[List[int]] = None
+    final_reminder_days_before_due: Optional[int] = Field(default=None, ge=0, le=30)
+    auto_escalation_enabled: Optional[bool] = None
+
+
+class QualityDocumentRequestCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = None
+    due_date: Optional[date] = None
+
+
+class QualityDocumentRequestUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    due_date: Optional[date] = None
+    status: Optional[str] = Field(default=None, pattern="^(REQUESTED|UPLOADED|ACCEPTED|REJECTED|WAIVED)$")
+    file_ref: Optional[str] = None
+    review_note: Optional[str] = None
+
+
+class QualityDocumentRequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    amo_id: str
+    audit_id: UUID
+    title: str
+    description: Optional[str] = None
+    due_date: Optional[date] = None
+    status: str
+    requested_by_user_id: Optional[str] = None
+    uploaded_by_user_id: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
+    file_ref: Optional[str] = None
+    review_note: Optional[str] = None
+    reviewed_by_user_id: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QualityChecklistItemCreate(BaseModel):
+    section: Optional[str] = Field(default=None, max_length=128)
+    checklist_ref: Optional[str] = Field(default=None, max_length=128)
+    requirement_ref: Optional[str] = Field(default=None, max_length=255)
+    prompt: str = Field(min_length=1)
+    objective_evidence: Optional[str] = None
+    assigned_to_user_id: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class QualityChecklistItemUpdate(BaseModel):
+    section: Optional[str] = None
+    checklist_ref: Optional[str] = None
+    requirement_ref: Optional[str] = None
+    prompt: Optional[str] = None
+    response_status: Optional[str] = Field(default=None, pattern="^(PENDING|COMPLIANT|NON_CONFORMING|OBSERVATION|NOT_APPLICABLE)$")
+    objective_evidence: Optional[str] = None
+    finding_id: Optional[UUID] = None
+    assigned_to_user_id: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class QualityChecklistItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    amo_id: str
+    audit_id: UUID
+    section: Optional[str] = None
+    checklist_ref: Optional[str] = None
+    requirement_ref: Optional[str] = None
+    prompt: str
+    response_status: str
+    objective_evidence: Optional[str] = None
+    finding_id: Optional[UUID] = None
+    assigned_to_user_id: Optional[str] = None
+    completed_by_user_id: Optional[str] = None
+    completed_at: Optional[datetime] = None
+    sort_order: int
+    created_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QualityFieldworkComplete(BaseModel):
+    actual_end: Optional[date] = None
+    post_brief_summary: Optional[str] = None
+    attendees: List[dict[str, Any]] = Field(default_factory=list)
+
+
+class QualityPostBriefCreate(BaseModel):
+    briefing_at: Optional[datetime] = None
+    summary: str = Field(min_length=1)
+    attendees: List[dict[str, Any]] = Field(default_factory=list)
+    report_due_date: Optional[date] = None
+
+
+class QualityPostBriefOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    amo_id: str
+    audit_id: UUID
+    briefing_at: datetime
+    summary: str
+    attendees: List[dict[str, Any]] = Field(default_factory=list)
+    report_due_date: date
+    created_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QualityReportTrackerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    amo_id: str
+    audit_id: UUID
+    report_due_date: date
+    report_submitted_at: Optional[datetime] = None
+    feedback_due_date: Optional[date] = None
+    feedback_submitted_at: Optional[datetime] = None
+    status: str
+    next_reminder_at: Optional[datetime] = None
+    created_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QualityCARExtensionRequestCreate(BaseModel):
+    requested_due_date: date
+    reason: str = Field(min_length=1)
+
+
+class QualityCARExtensionReview(BaseModel):
+    approved: bool
+    review_note: Optional[str] = None
+
+
+class QualityCARExtensionRequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    amo_id: str
+    car_id: UUID
+    requested_due_date: date
+    reason: str
+    status: str
+    requested_by_user_id: Optional[str] = None
+    reviewed_by_user_id: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    review_note: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QualityReminderMilestoneOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    amo_id: str
+    entity_type: str
+    entity_id: str
+    milestone_key: str
+    recipient_user_id: Optional[str] = None
+    scheduled_for: datetime
+    due_date: Optional[date] = None
+    sent_at: Optional[datetime] = None
+    escalated_at: Optional[datetime] = None
+    severity: str
+    message: str
+    created_at: datetime
+
+
+class QualityArchivePackageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    amo_id: str
+    audit_id: UUID
+    package_ref: str
+    status: str
+    file_ref: Optional[str] = None
+    metrics_snapshot: dict[str, Any] = Field(default_factory=dict)
+    generated_by_user_id: Optional[str] = None
+    generated_at: datetime
+    created_at: datetime
+
+
+class QualityAuditMetricsOut(BaseModel):
+    audit_id: UUID
+    audit_ref: str
+    findings_total: int
+    findings_open: int
+    cars_total: int
+    cars_open: int
+    cars_overdue: int
+    document_requests_total: int
+    document_requests_open: int
+    checklist_total: int
+    checklist_completed: int
+    report_status: Optional[str] = None
+    report_due_date: Optional[date] = None
+    archive_ready: bool
+
+
+# -----------------------------
 # Corrective Action Requests (CAR)
 # -----------------------------
 
@@ -750,8 +1118,37 @@ class CAROut(BaseModel):
     evidence_required: bool
     evidence_received_at: Optional[datetime] = None
     evidence_verified_at: Optional[datetime] = None
+    can_current_user_modify: Optional[bool] = None
+    can_current_user_review: Optional[bool] = None
+    is_escalated_locked: Optional[bool] = None
+    audit_id: Optional[UUID] = None
+    audit_ref: Optional[str] = None
+    audit_title: Optional[str] = None
+    finding_ref: Optional[str] = None
+    finding_description: Optional[str] = None
+    date_issued: Optional[date] = None
+    date_closed: Optional[date] = None
+    days_out: Optional[int] = None
+    days_remaining_past: Optional[int] = None
+    auditor_remarks: Optional[str] = None
+    register_root_cause: Optional[str] = None
+    register_cap: Optional[str] = None
+    register_pap: Optional[str] = None
+    auditor_name: Optional[str] = None
+    requested_by_name: Optional[str] = None
+    responsible_department: Optional[str] = None
+    responsible_personnel: Optional[str] = None
+    car_category_limit: Optional[str] = None
+    car_sequence_no: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class CARRegisterResponse(BaseModel):
+    items: list[CAROut]
+    total: int
+    limit: int
+    offset: int
 
 
 class CARActionCreate(BaseModel):
@@ -781,10 +1178,23 @@ class CARAssigneeOut(BaseModel):
     department_name: Optional[str] = None
 
 
+class CARInviteRelatedOut(BaseModel):
+    car_id: UUID
+    invite_token: str
+    car_number: str
+    title: str
+    finding_ref: Optional[str] = None
+    finding_description: Optional[str] = None
+    status: CARStatus
+    due_date: Optional[date] = None
+    priority: CARPriority
+
+
 class CARInviteOut(BaseModel):
     car_id: UUID
     invite_token: str
     invite_url: str
+    car_form_download_url: Optional[str] = None
     next_reminder_at: Optional[datetime]
     car_number: str
     title: str
@@ -793,20 +1203,71 @@ class CARInviteOut(BaseModel):
     status: CARStatus
     due_date: Optional[date]
     target_closure_date: Optional[date]
-
-
-class CARInviteUpdate(BaseModel):
+    evidence_required: bool = True
+    evidence_received_at: Optional[datetime] = None
+    evidence_verified_at: Optional[datetime] = None
+    submitted_at: Optional[datetime] = None
     containment_action: Optional[str] = None
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
     preventive_action: Optional[str] = None
     evidence_ref: Optional[str] = None
+    submitted_by_name: Optional[str] = None
+    submitted_by_email: Optional[str] = None
+    root_cause_status: Optional[str] = None
+    capa_status: Optional[str] = None
+    root_cause_review_note: Optional[str] = None
+    capa_review_note: Optional[str] = None
+    finding_id: Optional[UUID] = None
+    finding_ref: Optional[str] = None
+    finding_description: Optional[str] = None
+    audit_id: Optional[UUID] = None
+    audit_ref: Optional[str] = None
+    audit_title: Optional[str] = None
+    auditee: Optional[str] = None
+    auditee_email: Optional[str] = None
+    submission_count: int = 0
+    remaining_submissions: int = 2
+    latest_submission_at: Optional[datetime] = None
+    review_opened_at: Optional[datetime] = None
+    can_edit: bool = True
+    can_submit: bool = True
+    can_recall: bool = False
+    locked_reason: Optional[str] = None
+    related_cars: List[CARInviteRelatedOut] = Field(default_factory=list)
+
+
+class CARInviteUpdate(BaseModel):
+    containment_action: Optional[str] = Field(default=None, max_length=500)
+    root_cause: Optional[str] = Field(default=None, max_length=500)
+    corrective_action: Optional[str] = Field(default=None, max_length=500)
+    preventive_action: Optional[str] = Field(default=None, max_length=500)
+    evidence_ref: Optional[str] = Field(default=None, max_length=500)
     target_closure_date: Optional[date] = None
     due_date: Optional[date] = None
     submitted_by_name: Optional[str] = Field(default=None, max_length=255)
     submitted_by_email: Optional[str] = Field(default=None, max_length=255)
-    root_cause_text: Optional[str] = None
-    capa_text: Optional[str] = None
+    root_cause_text: Optional[str] = Field(default=None, max_length=500)
+    capa_text: Optional[str] = Field(default=None, max_length=500)
+
+
+class CARResponseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    car_id: UUID
+    containment_action: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    preventive_action: Optional[str] = None
+    evidence_ref: Optional[str] = None
+    submitted_by_name: Optional[str] = None
+    submitted_by_email: Optional[str] = None
+    submitted_at: datetime
+    status: str
+    is_latest: bool = False
+    review_opened_at: Optional[datetime] = None
+    recalled_at: Optional[datetime] = None
 
 
 class CARReviewUpdate(BaseModel):
@@ -817,12 +1278,17 @@ class CARReviewUpdate(BaseModel):
     capa_review_note: Optional[str] = None
 
 
+class CARAttachmentUpdate(BaseModel):
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
 class CARAttachmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     car_id: UUID
     filename: str
+    description: Optional[str] = None
     content_type: Optional[str] = None
     size_bytes: Optional[int] = None
     sha256: Optional[str] = None
@@ -838,6 +1304,10 @@ class QMSNotificationOut(BaseModel):
     message: str
     severity: QMSNotificationSeverity
     created_by_user_id: Optional[str]
+    action_url: Optional[str] = None
+    action_label: Optional[str] = None
+    entity_type: Optional[str] = None
+    entity_id: Optional[str] = None
     created_at: datetime
     read_at: Optional[datetime]
 
@@ -855,6 +1325,7 @@ class QMSPersonOptionOut(BaseModel):
     role: Optional[str] = None
     department_id: Optional[str] = None
     position_title: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 class AuditorStatsOut(BaseModel):

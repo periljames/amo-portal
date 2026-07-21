@@ -39,6 +39,35 @@ def _safe_scalar(db: Session, sql: str, **params) -> Any:
         return None
 
 
+def _normalise_data_mode(value: str | None, *, default: str = "REAL") -> str:
+    mode = (value or default or "REAL").strip().upper()
+    if mode == "LIVE":
+        mode = "REAL"
+    if mode not in {"REAL", "DEMO"}:
+        mode = default.strip().upper() if default else "REAL"
+        if mode == "LIVE":
+            mode = "REAL"
+    return mode if mode in {"REAL", "DEMO"} else "REAL"
+
+
+def _apply_data_mode_filter(query, data_mode: str | None):
+    mode = _normalise_data_mode(data_mode)
+    if mode == "REAL":
+        return query.filter(account_models.AMO.is_demo.is_(False))
+    if mode == "DEMO":
+        return query.filter(account_models.AMO.is_demo.is_(True))
+    return query.filter(account_models.AMO.is_demo.is_(False))
+
+
+def _tenant_data_mode(amo: account_models.AMO | None) -> str:
+    return "DEMO" if bool(getattr(amo, "is_demo", False)) else "REAL"
+
+
+def _tenant_id_set(db: Session, *, data_mode: str | None) -> set[str]:
+    query = _apply_data_mode_filter(db.query(account_models.AMO.id), data_mode)
+    return {str(row[0]) for row in query.all() if row and row[0]}
+
+
 def audit(db: Session, *, actor_user_id: str | None, action: str, tenant_id: str | None = None, entity_type: str | None = None, entity_id: str | None = None, reason: str | None = None, details: dict[str, Any] | None = None) -> models.PlatformAuditLog:
     row = models.PlatformAuditLog(
         actor_user_id=actor_user_id,
@@ -96,18 +125,24 @@ def create_health_snapshot(db: Session, result: dict[str, Any]) -> models.Platfo
     return row
 
 
-def dashboard_summary(db: Session) -> dict[str, Any]:
-    active_tenants = _safe_count(db, account_models.AMO, account_models.AMO.is_active.is_(True))
-    inactive_tenants = _safe_count(db, account_models.AMO, account_models.AMO.is_active.is_(False))
-    total_users = _safe_count(db, account_models.User)
-    trialing = _safe_count(db, account_models.TenantLicense, account_models.TenantLicense.status == account_models.LicenseStatus.TRIALING)
-    locked = _safe_count(db, account_models.TenantLicense, account_models.TenantLicense.is_read_only.is_(True))
+def dashboard_summary(db: Session, data_mode: str | None = "REAL") -> dict[str, Any]:
+    mode = _normalise_data_mode(data_mode)
+    tenant_ids = _tenant_id_set(db, data_mode=mode)
+    tenant_filter = account_models.AMO.id.in_(tenant_ids) if tenant_ids else account_models.AMO.id == "__none__"
+    active_tenants = _safe_count(db, account_models.AMO, account_models.AMO.is_active.is_(True), tenant_filter)
+    inactive_tenants = _safe_count(db, account_models.AMO, account_models.AMO.is_active.is_(False), tenant_filter)
+    total_users = _safe_count(db, account_models.User, account_models.User.amo_id.in_(tenant_ids)) if tenant_ids else 0
+    trialing = _safe_count(db, account_models.TenantLicense, account_models.TenantLicense.amo_id.in_(tenant_ids), account_models.TenantLicense.status == account_models.LicenseStatus.TRIALING) if tenant_ids else 0
+    locked = _safe_count(db, account_models.TenantLicense, account_models.TenantLicense.amo_id.in_(tenant_ids), account_models.TenantLicense.is_read_only.is_(True)) if tenant_ids else 0
     platform_mrr = int(_safe_scalar(db, """
         SELECT COALESCE(SUM(CASE WHEN cs.term='MONTHLY' THEN cs.amount_cents ELSE cs.amount_cents / 12 END),0)
-        FROM tenant_licenses tl JOIN catalog_skus cs ON cs.id = tl.sku_id
+        FROM tenant_licenses tl
+        JOIN catalog_skus cs ON cs.id = tl.sku_id
+        JOIN amos a ON a.id = tl.amo_id
         WHERE tl.status IN ('ACTIVE','TRIALING')
-    """) or 0)
-    invoice_overdue = _safe_count(db, account_models.BillingInvoice, account_models.BillingInvoice.status == account_models.InvoiceStatus.PENDING, account_models.BillingInvoice.due_at.isnot(None), account_models.BillingInvoice.due_at <= now_utc())
+          AND ((:mode = 'REAL' AND a.is_demo IS FALSE) OR (:mode = 'DEMO' AND a.is_demo IS TRUE))
+    """, mode=mode) or 0)
+    invoice_overdue = _safe_count(db, account_models.BillingInvoice, account_models.BillingInvoice.amo_id.in_(tenant_ids), account_models.BillingInvoice.status == account_models.InvoiceStatus.PENDING, account_models.BillingInvoice.due_at.isnot(None), account_models.BillingInvoice.due_at <= now_utc()) if tenant_ids else 0
     support_open = _safe_count(db, models.PlatformSupportTicket, models.PlatformSupportTicket.status.in_(["OPEN", "NEW", "PENDING"]))
     security_open = _safe_count(db, models.PlatformSecurityAlert, models.PlatformSecurityAlert.status == "OPEN", models.PlatformSecurityAlert.severity.in_(["HIGH", "CRITICAL"]))
     throughput = metrics.live_summary()
@@ -138,11 +173,13 @@ def dashboard_summary(db: Session) -> dict[str, Any]:
         "critical_security_alerts": security_open,
         "last_health_probe_at": health.get("created_at") if health else None,
         "platform_status": status,
+        "data_mode": mode,
     }
 
 
-def list_tenants(db: Session, *, q: str | None = None, status_filter: str | None = None, limit: int = 50, offset: int = 0) -> dict[str, Any]:
-    query = db.query(account_models.AMO)
+def list_tenants(db: Session, *, q: str | None = None, status_filter: str | None = None, data_mode: str | None = "REAL", limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    mode = _normalise_data_mode(data_mode)
+    query = _apply_data_mode_filter(db.query(account_models.AMO), mode)
     if q:
         like = f"%{q.strip()}%"
         query = query.filter((account_models.AMO.name.ilike(like)) | (account_models.AMO.amo_code.ilike(like)) | (account_models.AMO.login_slug.ilike(like)))
@@ -162,6 +199,8 @@ def list_tenants(db: Session, *, q: str | None = None, status_filter: str | None
             "name": amo.name,
             "country": amo.country,
             "is_active": amo.is_active,
+            "is_demo": bool(amo.is_demo),
+            "data_mode": _tenant_data_mode(amo),
             "status": "ACTIVE" if amo.is_active else "INACTIVE",
             "plan_code": getattr(sku, "code", None),
             "license_status": getattr(getattr(license_row, "status", None), "value", getattr(license_row, "status", None)),
@@ -170,7 +209,7 @@ def list_tenants(db: Session, *, q: str | None = None, status_filter: str | None
             "created_at": amo.created_at,
             "updated_at": amo.updated_at,
         })
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+    return {"items": items, "total": total, "limit": limit, "offset": offset, "data_mode": mode}
 
 
 def get_tenant_detail(db: Session, tenant_id: str) -> dict[str, Any]:
@@ -191,10 +230,13 @@ def get_tenant_detail(db: Session, tenant_id: str) -> dict[str, Any]:
             "contact_email": amo.contact_email,
             "contact_phone": amo.contact_phone,
             "is_active": amo.is_active,
+            "is_demo": bool(amo.is_demo),
+            "data_mode": _tenant_data_mode(amo),
             "created_at": amo.created_at,
             "updated_at": amo.updated_at,
         },
         "subscription": _license_payload(license_row),
+        "access_status": account_services.get_billing_access_status(db, amo_id=amo.id).model_dump(mode="json"),
         "modules": [{"id": m.id, "module_code": m.module_code, "status": getattr(m.status, "value", str(m.status)), "plan_code": m.plan_code, "effective_to": m.effective_to} for m in modules],
         "users": {"total": _safe_count(db, account_models.User, account_models.User.amo_id == amo.id), "active": _safe_count(db, account_models.User, account_models.User.amo_id == amo.id, account_models.User.is_active.is_(True))},
         "invoices": [_invoice_payload(i) for i in invoices],
@@ -392,15 +434,105 @@ def revoke_user_sessions(db: Session, *, user_id: str, actor_id: str, reason: st
     return {"id": user.id, "token_revoked_at": user.token_revoked_at}
 
 
-def billing_summary(db: Session) -> dict[str, Any]:
-    summary = dashboard_summary(db)
-    return {**summary, "active_subscriptions": _safe_count(db, account_models.TenantLicense, account_models.TenantLicense.status == account_models.LicenseStatus.ACTIVE), "trial_subscriptions": _safe_count(db, account_models.TenantLicense, account_models.TenantLicense.status == account_models.LicenseStatus.TRIALING), "paid_invoices": _safe_count(db, account_models.BillingInvoice, account_models.BillingInvoice.status == account_models.InvoiceStatus.PAID), "failed_payments": 0, "grace_period_tenants": _safe_count(db, account_models.TenantLicense, account_models.TenantLicense.status == account_models.LicenseStatus.EXPIRED)}
+def billing_summary(db: Session, data_mode: str | None = "REAL") -> dict[str, Any]:
+    mode = _normalise_data_mode(data_mode)
+    tenant_ids = _tenant_id_set(db, data_mode=mode)
+    tenant_filter = account_models.TenantLicense.amo_id.in_(tenant_ids) if tenant_ids else account_models.TenantLicense.amo_id == "__none__"
+    invoice_filter = account_models.BillingInvoice.amo_id.in_(tenant_ids) if tenant_ids else account_models.BillingInvoice.amo_id == "__none__"
+    summary = dashboard_summary(db, data_mode=mode)
+    return {
+        **summary,
+        "active_subscriptions": _safe_count(db, account_models.TenantLicense, tenant_filter, account_models.TenantLicense.status == account_models.LicenseStatus.ACTIVE),
+        "trial_subscriptions": _safe_count(db, account_models.TenantLicense, tenant_filter, account_models.TenantLicense.status == account_models.LicenseStatus.TRIALING),
+        "paid_invoices": _safe_count(db, account_models.BillingInvoice, invoice_filter, account_models.BillingInvoice.status == account_models.InvoiceStatus.PAID),
+        "failed_payments": 0,
+        "grace_period_tenants": _safe_count(db, account_models.TenantLicense, tenant_filter, account_models.TenantLicense.status == account_models.LicenseStatus.EXPIRED),
+    }
 
 
-def list_invoices(db: Session, *, limit: int = 50, offset: int = 0) -> dict[str, Any]:
-    q = db.query(account_models.BillingInvoice).order_by(account_models.BillingInvoice.created_at.desc())
+def billing_control_summary(db: Session, *, data_mode: str | None = "REAL") -> dict[str, Any]:
+    """Commercial control-plane snapshot with demo/real separation.
+
+    Default scope is REAL so demo tenants cannot quietly pollute live revenue,
+    access, invoice, or trial counts. Use data_mode=DEMO explicitly for demo tenants.
+    """
+    mode = _normalise_data_mode(data_mode)
+    tenants = _apply_data_mode_filter(db.query(account_models.AMO), mode).order_by(account_models.AMO.amo_code.asc()).all()
+    tenant_ids = [tenant.id for tenant in tenants]
+    now = now_utc()
+    status_counts = {"ACTIVE": 0, "TRIALING": 0, "EXPIRED": 0, "CANCELLED": 0, "LOCKED": 0, "NO_SUBSCRIPTION": 0}
+    invoice_totals = {"PENDING": 0, "PAID": 0, "VOID": 0, "OVERDUE": 0, "pending_amount_cents": 0, "paid_amount_cents": 0}
+    tenant_rows: list[dict[str, Any]] = []
+    for tenant in tenants:
+        access = account_services.get_billing_access_status(db, amo_id=tenant.id, as_of=now)
+        latest_license = account_services.get_latest_subscription(db, amo_id=tenant.id)
+        invoices = db.query(account_models.BillingInvoice).filter(account_models.BillingInvoice.amo_id == tenant.id).all()
+        pending_amount = sum(int(inv.amount_cents or 0) for inv in invoices if inv.status == account_models.InvoiceStatus.PENDING)
+        paid_amount = sum(int(inv.amount_cents or 0) for inv in invoices if inv.status == account_models.InvoiceStatus.PAID)
+        overdue_count = sum(1 for inv in invoices if inv.status == account_models.InvoiceStatus.PENDING and inv.due_at and inv.due_at <= now)
+        access_state = str(access.access_state or "NO_SUBSCRIPTION")
+        if access_state in status_counts:
+            status_counts[access_state] += 1
+        elif access_state in {"PAYMENT_OVERDUE", "LOCKED", "TRIAL_EXPIRED", "CANCELLED"}:
+            status_counts["LOCKED"] += 1
+        else:
+            status_counts["NO_SUBSCRIPTION"] += 1
+        for inv in invoices:
+            key = getattr(inv.status, "value", str(inv.status))
+            if key in invoice_totals:
+                invoice_totals[key] += 1
+        invoice_totals["OVERDUE"] += overdue_count
+        invoice_totals["pending_amount_cents"] += pending_amount
+        invoice_totals["paid_amount_cents"] += paid_amount
+        tenant_rows.append({
+            "id": tenant.id,
+            "amo_code": tenant.amo_code,
+            "name": tenant.name,
+            "is_demo": bool(tenant.is_demo),
+            "data_mode": _tenant_data_mode(tenant),
+            "is_active": bool(tenant.is_active),
+            "access_state": access.access_state,
+            "has_access": access.has_access,
+            "lock_reason": access.lock_reason,
+            "subscription": _license_payload(latest_license),
+            "overdue_invoice_count": overdue_count,
+            "pending_invoice_amount_cents": pending_amount,
+            "paid_invoice_amount_cents": paid_amount,
+            "actionable_invoice_id": access.actionable_invoice_id,
+        })
+    return {
+        "data_mode": mode,
+        "generated_at": now,
+        "counts": {
+            "tenants": len(tenants),
+            "real_tenants": sum(1 for t in tenants if not t.is_demo),
+            "demo_tenants": sum(1 for t in tenants if t.is_demo),
+            **status_counts,
+        },
+        "invoices": invoice_totals,
+        "tenants": tenant_rows,
+        "rule": "Demo tenants are excluded unless data_mode=DEMO is requested. Live/REAL is the default.",
+    }
+
+
+def run_billing_maintenance_now(db: Session, *, actor_id: str, reason: str | None = None) -> dict[str, Any]:
+    result = account_services.roll_billing_periods_and_alert(db, as_of=now_utc())
+    audit(db, actor_user_id=actor_id, action="billing.maintenance.run", tenant_id=None, entity_type="billing_maintenance", entity_id="manual", reason=reason or "manual superuser run", details=result)
+    db.commit()
+    return result
+
+
+def list_invoices(db: Session, *, data_mode: str | None = "REAL", limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    mode = _normalise_data_mode(data_mode)
+    tenant_ids = _tenant_id_set(db, data_mode=mode)
+    q = db.query(account_models.BillingInvoice)
+    if tenant_ids:
+        q = q.filter(account_models.BillingInvoice.amo_id.in_(tenant_ids))
+    else:
+        q = q.filter(account_models.BillingInvoice.amo_id == "__none__")
+    q = q.order_by(account_models.BillingInvoice.created_at.desc())
     total = q.count()
-    return {"items": [_invoice_payload(row) for row in q.offset(offset).limit(min(limit, 200)).all()], "total": total, "limit": limit, "offset": offset}
+    return {"items": [_invoice_payload(row) for row in q.offset(offset).limit(min(limit, 200)).all()], "total": total, "limit": limit, "offset": offset, "data_mode": mode}
 
 
 def mark_invoice_paid(db: Session, *, invoice_id: str, actor_id: str, reason: str) -> dict[str, Any]:

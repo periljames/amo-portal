@@ -30,7 +30,7 @@ const QMSLayout: React.FC<Props> = ({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const breadcrumbs = useMemo(() => ([
-    { label: `QMS · ${amoDisplay}`, to: `/maintenance/${amoCode}/qms` },
+    { label: `Quality · ${amoDisplay}`, to: `/maintenance/${amoCode}/quality` },
     { label: title },
   ]), [amoCode, title, amoDisplay]);
 
@@ -39,7 +39,7 @@ const QMSLayout: React.FC<Props> = ({
       <div className="qms-shell">
         {customHeader ?? (
           <PageHeader
-            eyebrow={`QMS · ${amoDisplay}`}
+            eyebrow={`Quality · ${amoDisplay}`}
             title={title}
             subtitle={subtitle}
             breadcrumbs={breadcrumbs}
@@ -51,9 +51,9 @@ const QMSLayout: React.FC<Props> = ({
                     <button
                       type="button"
                       className="secondary-chip-btn qms-header__back-desktop"
-                      onClick={() => navigate(`/maintenance/${amoCode}/qms`)}
+                      onClick={() => navigate(`/maintenance/${amoCode}/quality`)}
                     >
-                      QMS overview
+                      Quality overview
                     </button>
                     <div className="qms-header__mobile-overflow">
                       <button
@@ -71,10 +71,10 @@ const QMSLayout: React.FC<Props> = ({
                             role="menuitem"
                             onClick={() => {
                               setMobileMenuOpen(false);
-                              navigate(`/maintenance/${amoCode}/qms`);
+                              navigate(`/maintenance/${amoCode}/quality`);
                             }}
                           >
-                            QMS overview
+                            Quality overview
                           </button>
                         </div>
                       ) : null}

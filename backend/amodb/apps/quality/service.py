@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import os
+import re
 import time
 import uuid
 from collections import defaultdict
@@ -34,6 +35,7 @@ from .enums import (
     QMSAuditStatus,
     QMSDocStatus,
     QMSDomain,
+    QMSFindingType,
     infer_level_from_severity,
 )
 
@@ -48,6 +50,7 @@ CAR_LEVEL_REMINDER_DAYS: dict[FindingLevel, int] = {
     FindingLevel.LEVEL_1: 2,
     FindingLevel.LEVEL_2: 7,
     FindingLevel.LEVEL_3: 14,
+    FindingLevel.LEVEL_4: 30,
 }
 
 _PERF_CACHE_TTL_SEC = float(os.getenv("QMS_PERF_CACHE_TTL_SEC", "5"))
@@ -126,9 +129,11 @@ def compute_target_close_date(level: FindingLevel, base: Optional[date] = None) 
     return base_date + timedelta(days=FINDING_LEVEL_DUE_DAYS[level])
 
 
-def normalize_finding_level(severity, level: Optional[FindingLevel]) -> FindingLevel:
+def normalize_finding_level(severity, level: Optional[FindingLevel], finding_type=None) -> FindingLevel:
     if level is not None:
         return level
+    if finding_type == QMSFindingType.OBSERVATION:
+        return FindingLevel.LEVEL_4
     return infer_level_from_severity(severity)
 
 
@@ -197,7 +202,16 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optio
     findings_open_total = findings_open.count()
     findings_open_level_1 = findings_open.filter(models.QMSAuditFinding.level == FindingLevel.LEVEL_1).count()
     findings_open_level_2 = findings_open.filter(models.QMSAuditFinding.level == FindingLevel.LEVEL_2).count()
-    findings_open_level_3 = findings_open.filter(models.QMSAuditFinding.level == FindingLevel.LEVEL_3).count()
+    findings_open_level_3 = findings_open.filter(
+        models.QMSAuditFinding.level == FindingLevel.LEVEL_3,
+        models.QMSAuditFinding.finding_type != QMSFindingType.OBSERVATION,
+    ).count()
+    findings_open_level_4 = findings_open.filter(
+        or_(
+            models.QMSAuditFinding.level == FindingLevel.LEVEL_4,
+            models.QMSAuditFinding.finding_type == QMSFindingType.OBSERVATION,
+        )
+    ).count()
 
     # Overdue (target date passed and still open)
     today = date.today()
@@ -222,6 +236,7 @@ def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optio
         "findings_open_level_1": findings_open_level_1,
         "findings_open_level_2": findings_open_level_2,
         "findings_open_level_3": findings_open_level_3,
+        "findings_open_level_4": findings_open_level_4,
         "findings_overdue_total": findings_overdue_total,
     }
     _set_perf_cache(cache_key, result)
@@ -612,26 +627,50 @@ def get_cockpit_snapshot(db: Session, domain: Optional[QMSDomain] = None, amo_id
 # -----------------------------
 
 
-def _next_car_number(db: Session, program: CARProgram, amo_id: Optional[str] = None) -> str:
-    year = date.today().year
-    prefix = "Q" if program == CARProgram.QUALITY else "R"
+def _derive_car_unit_code(db: Session, amo_id: Optional[str]) -> str:
+    if not amo_id:
+        return "MO"
+    amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
+    raw = (amo.amo_code if amo else "") or (amo.icao_code if amo else "") or "MO"
+    cleaned = re.sub(r"[^A-Z0-9]", "", raw.upper())
+    if len(cleaned) <= 8:
+        return cleaned or "MO"
+    compact = "".join(part[:3] for part in re.split(r"[^A-Z0-9]+", raw.upper()) if part)
+    compact_clean = re.sub(r"[^A-Z0-9]", "", compact)
+    return (compact_clean[:8] or cleaned[:8] or "MO")
 
-    pattern = f"{prefix}-{year}-"
-    qs = db.query(models.CorrectiveActionRequest).filter(
-        models.CorrectiveActionRequest.program == program,
-        models.CorrectiveActionRequest.car_number.like(f"{pattern}%"),
+
+def _next_car_number(db: Session, program: CARProgram, amo_id: Optional[str] = None) -> str:
+    if not amo_id:
+        raise ValueError("amo_id is required for CAR numbering")
+    today = date.today()
+    family = "CAR" if program == CARProgram.QUALITY else "RCAR"
+    unit_code = _derive_car_unit_code(db, amo_id)
+    ref_year = today.year % 100
+    counter = (
+        db.query(models.QMSAuditReferenceCounter)
+        .filter(
+            models.QMSAuditReferenceCounter.amo_id == amo_id,
+            models.QMSAuditReferenceCounter.reference_family == family,
+            models.QMSAuditReferenceCounter.unit_code == unit_code,
+            models.QMSAuditReferenceCounter.ref_year == ref_year,
+        )
+        .with_for_update(nowait=False)
+        .first()
     )
-    if amo_id:
-        qs = qs.filter(models.CorrectiveActionRequest.amo_id == amo_id)
-    last = qs.order_by(models.CorrectiveActionRequest.car_number.desc()).first()
-    if last and last.car_number.startswith(pattern):
-        try:
-            seq = int(last.car_number.split("-")[-1]) + 1
-        except ValueError:
-            seq = 1
-    else:
-        seq = 1
-    return f"{prefix}-{year}-{seq:04d}"
+    if not counter:
+        counter = models.QMSAuditReferenceCounter(
+            amo_id=amo_id,
+            reference_family=family,
+            unit_code=unit_code,
+            ref_year=ref_year,
+            last_value=0,
+        )
+        db.add(counter)
+        db.flush()
+    counter.last_value += 1
+    counter.updated_at = datetime.now(timezone.utc)
+    return f"{family}/{unit_code}/{ref_year:02d}/{counter.last_value:03d}"
 
 
 def create_car(
@@ -711,8 +750,26 @@ def schedule_next_reminder(car: models.CorrectiveActionRequest, days: Optional[i
     car.next_reminder_at = datetime.now(timezone.utc) + timedelta(days=interval)
 
 
-def build_car_invite_link(car: models.CorrectiveActionRequest) -> str:
-    base = os.getenv("PORTAL_FRONTEND_BASE_URL", "http://localhost:5173")
+def build_car_invite_link(
+    car: models.CorrectiveActionRequest,
+    request_origin: Optional[str] = None,
+) -> str:
+    configured_base = next(
+        (
+            os.getenv(name)
+            for name in (
+                "CAR_INVITE_PUBLIC_BASE_URL",
+                "PORTAL_FRONTEND_BASE_URL",
+                "APP_PUBLIC_BASE_URL",
+                "PUBLIC_BASE_URL",
+                "FRONTEND_BASE_URL",
+                "PORTAL_BASE_URL",
+            )
+            if os.getenv(name)
+        ),
+        None,
+    )
+    base = (configured_base or request_origin or "http://localhost:5173").rstrip("/")
     return f"{base}/car-invite?token={car.invite_token}"
 
 

@@ -30,7 +30,7 @@
 //   - Mutating endpoints require Quality / AMO Admin / Superuser etc.
 //     Enforcement lives in backend _require_training_editor.
 
-import { apiDelete, apiGet, apiPost, apiPut } from "./crs";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "./crs";
 import { authHeaders, handleAuthFailure } from "./auth";
 import { downloadWithXhr, downloadWithFetch, type DownloadedFile, saveDownloadedFile } from "../utils/downloads";
 import { getApiBaseUrl } from "./config";
@@ -201,6 +201,90 @@ async function cachedTrainingGet<T>(key: string, ttlMs: number, fetcher: () => P
   return promise.then((value) => cloneCachedValue(value));
 }
 
+
+export type TrainingReportSettings = {
+  id: string;
+  amo_id: string;
+  title: string;
+  subtitle?: string | null;
+  form_no: string;
+  issue_date: string;
+  revision: string;
+  show_compliance_summary: boolean;
+  show_training_history: boolean;
+  show_scheduled_events: boolean;
+  show_deferrals: boolean;
+  footer_note?: string | null;
+  updated_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TrainingReportSettingsUpdate = Partial<Omit<TrainingReportSettings, "id" | "amo_id" | "created_at" | "updated_at" | "updated_by_user_id">>;
+
+export type TrainingRecordPdfWarmResponse = {
+  queued: boolean;
+  ready: boolean;
+  preview_url?: string | null;
+  download_url?: string | null;
+  verify_url?: string | null;
+};
+
+export type TrainingCalendarResponse = {
+  module: "training";
+  view: string;
+  start: string;
+  end: string;
+  items: Array<Record<string, unknown>>;
+  limit: number;
+  offset: number;
+  next_offset?: number | null;
+  has_more: boolean;
+};
+
+export async function getTrainingReportSettings(): Promise<TrainingReportSettings> {
+  return apiGet<TrainingReportSettings>("/training/report-settings", { headers: authHeaders() });
+}
+
+export async function updateTrainingReportSettings(payload: TrainingReportSettingsUpdate): Promise<TrainingReportSettings> {
+  const updated = await apiPatch<TrainingReportSettings>("/training/report-settings", payload, {
+    headers: authHeaders(),
+  });
+  invalidateTrainingServiceCache();
+  return updated;
+}
+
+export function trainingRecordPdfPreviewUrl(userId: string): string {
+  return `${getApiBaseUrl()}/training/users/${encodeURIComponent(userId)}/record-pdf/preview`;
+}
+
+export async function previewTrainingUserRecordPdf(userId: string): Promise<Blob> {
+  const res = await fetch(trainingRecordPdfPreviewUrl(userId), {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      ...authHeaders(),
+      Accept: "application/pdf",
+    },
+  });
+  if (res.status === 401) {
+    throw new Error("Training record preview was not authorised. Refresh the page and try again.");
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(detail || `Training record preview failed with HTTP ${res.status}`);
+  }
+  return res.blob();
+}
+
+export async function listTrainingCalendar(params: { start?: string; end?: string; source?: string; limit?: number; offset?: number } = {}): Promise<TrainingCalendarResponse> {
+  const sp = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== "") sp.set(key, String(value));
+  });
+  const qs = sp.toString();
+  return apiGet<TrainingCalendarResponse>(qs ? `/training/calendar?${qs}` : "/training/calendar", { headers: authHeaders() });
+}
 
 // ---------------------------------------------------------------------------
 // COURSES
@@ -643,8 +727,8 @@ export async function downloadTrainingFile(
   });
 }
 
-export async function warmTrainingUserRecordPdf(userId: string): Promise<{ queued: boolean; ready: boolean }> {
-  return apiPost<{ queued: boolean; ready: boolean }>(
+export async function warmTrainingUserRecordPdf(userId: string): Promise<TrainingRecordPdfWarmResponse> {
+  return apiPost<TrainingRecordPdfWarmResponse>(
     `/training/users/${encodeURIComponent(userId)}/record-pdf/warm`,
     {},
     { headers: authHeaders() }

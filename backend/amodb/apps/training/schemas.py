@@ -276,6 +276,7 @@ class TrainingEventBatchScheduleCreate(BaseModel):
     )
     auto_issue_certificates: bool = Field(True, description="Auto-issue certificate numbers when attendance is later marked attended.")
     allow_self_attendance: bool = Field(True, description="Whether attendees may self-mark attendance from the portal.")
+    allow_online_overlap: bool = Field(True, description="Allow online sessions to overlap existing training bookings.")
 
 
 class TrainingEventBatchScheduleRead(BaseModel):
@@ -288,7 +289,12 @@ class TrainingAutoGroupScheduleCreate(BaseModel):
     user_ids: List[str] = Field(..., min_length=1, description="Users whose due and overdue courses should be auto-grouped into sessions.")
     include_due_soon: bool = Field(True, description="Include due-soon items in the auto-group scheduler.")
     include_overdue: bool = Field(True, description="Include overdue items in the auto-group scheduler.")
+    include_not_done: bool = Field(True, description="Include missing initial / no-completion mandatory items in the scheduler.")
     base_start_on: Optional[date] = Field(None, description="Optional scheduling floor date. Defaults to today.")
+    max_participants_per_session: int = Field(20, description="Maximum personnel per generated training session.")
+    schedule_search_days: int = Field(120, description="How far ahead the scheduler may look for a conflict-free window.")
+    avoid_weekends: bool = Field(True, description="Move generated sessions away from weekend dates.")
+    allow_online_overlap: bool = Field(True, description="Allow online sessions to overlap existing training bookings.")
     provider: Optional[str] = Field(None, description="Trainer / ATO / provider name applied to created sessions.")
     provider_kind: Optional[str] = Field("INTERNAL", description="INTERNAL or EXTERNAL provider delivery.")
     delivery_mode: Optional[str] = Field("CLASSROOM", description="CLASSROOM, ONLINE, OJT, MIXED, or other free text.")
@@ -417,9 +423,14 @@ class TrainingRecordBase(BaseModel):
 class TrainingRecordCreate(TrainingRecordBase):
     """
     amo_id and created_by_user_id come from current_user in the router.
+    confirm_renewal must be true when the new record replaces an existing active
+    record for the same user and course.
     """
 
-    pass
+    confirm_renewal: bool = Field(
+        False,
+        description="Set true after the user confirms that this completion renews the existing active record for the same user/course.",
+    )
 
 
 class TrainingRecordUpdate(BaseModel):
@@ -450,6 +461,7 @@ class TrainingRecordRead(TrainingRecordBase):
     amo_id: str
     created_by_user_id: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     course_id: Optional[str] = None
     course_code: Optional[str] = None
     course_name: Optional[str] = None
@@ -833,4 +845,81 @@ class TrainingRecordImportSummary(BaseModel):
     matched_inactive_rows: int = 0
     issues: List[TrainingRecordImportRowIssue] = Field(default_factory=list)
     preview_rows: List[TrainingRecordImportRowPreview] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# TRAINING REPORT SETTINGS / PREVIEW
+# ---------------------------------------------------------------------------
+
+
+class TrainingReportSettingsBase(BaseModel):
+    title: str = Field("Personnel Training Record", description="Main PDF report title.")
+    subtitle: Optional[str] = Field(None, description="Optional subtitle shown below the PDF title.")
+    form_no: str = Field("QAM/49A", description="Controlled form number shown in the PDF header.")
+    issue_date: str = Field("1 Sept 25", description="Controlled issue date shown in the PDF header.")
+    revision: str = Field("00", description="Controlled revision shown in the PDF header.")
+    show_compliance_summary: bool = True
+    show_training_history: bool = True
+    show_scheduled_events: bool = True
+    show_deferrals: bool = True
+    footer_note: Optional[str] = Field(None, description="Optional footer note for report governance.")
+
+
+class TrainingReportSettingsUpdate(BaseModel):
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    form_no: Optional[str] = None
+    issue_date: Optional[str] = None
+    revision: Optional[str] = None
+    show_compliance_summary: Optional[bool] = None
+    show_training_history: Optional[bool] = None
+    show_scheduled_events: Optional[bool] = None
+    show_deferrals: Optional[bool] = None
+    footer_note: Optional[str] = None
+
+
+class TrainingReportSettingsRead(TrainingReportSettingsBase):
+    id: str
+    amo_id: str
+    updated_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TrainingRecordPdfWarmRead(BaseModel):
+    queued: bool
+    ready: bool
+    preview_url: Optional[str] = None
+    download_url: Optional[str] = None
+    verify_url: Optional[str] = None
+
+
+class TrainingAuditorAccessCreate(BaseModel):
+    """Create a time-limited guest verification access code for an auditor."""
+
+    target_user_id: str
+    target_record_id: Optional[str] = None
+    purpose: str = Field("USER_TRAINING_PROFILE", max_length=64)
+    expires_in_hours: int = Field(8, ge=1, le=72)
+    max_uses: Optional[int] = Field(None, ge=1, le=500, description="Null means reusable until the access window expires.")
+    auditor_name: Optional[str] = Field(None, max_length=255)
+    audit_reference: Optional[str] = Field(None, max_length=255)
+    notes: Optional[str] = Field(None, max_length=1000)
+
+
+class TrainingAuditorAccessRead(BaseModel):
+    id: str
+    amo_id: str
+    purpose: str
+    target_user_id: Optional[str]
+    target_record_id: Optional[str] = None
+    expires_at: datetime
+    max_uses: Optional[int]
+    use_count: int
+    verify_url: str
+    access_code: str = Field(..., description="Shown once. Reusable until expiry unless max_uses was set.")
+    created_at: datetime
 

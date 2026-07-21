@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/platform", tags=["platform-control-plane"])
 def require_platform_superuser(current_user=Depends(get_current_active_user)):
     if not getattr(current_user, "is_superuser", False):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform superuser access is required.")
-    if getattr(current_user, "amo_id", None):
+    if getattr(current_user, "amo_id", None) and not getattr(current_user, "is_platform_context", False):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform user must not be bound to an AMO tenant.")
     return current_user
 
@@ -36,9 +37,36 @@ def _bad(exc: Exception, code: int = 400):
     raise HTTPException(status_code=code, detail=str(exc))
 
 
+def _support_session_payload(row: models.PlatformTenantSupportSession) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "tenant_id": row.tenant_id,
+        "platform_user_id": row.platform_user_id,
+        "access_level": row.access_level,
+        "status": row.status,
+        "reason": row.reason,
+        "requested_by_user_id": row.requested_by_user_id,
+        "approved_by_user_id": row.approved_by_user_id,
+        "approved_at": row.approved_at,
+        "denied_by_user_id": row.denied_by_user_id,
+        "denied_at": row.denied_at,
+        "expires_at": row.expires_at,
+        "ended_at": row.ended_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "metadata": row.metadata_json or {},
+    }
+
+
+def _support_session_expiry(payload: dict[str, Any]) -> datetime:
+    hours = int(payload.get("expires_in_hours") or 8)
+    hours = max(1, min(hours, 12))
+    return datetime.now(timezone.utc) + timedelta(hours=hours)
+
+
 @router.get("/dashboard/summary")
-def dashboard_summary(db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
-    return services.dashboard_summary(db)
+def dashboard_summary(data_mode: str = "REAL", db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    return services.dashboard_summary(db, data_mode=data_mode)
 
 
 @router.get("/dashboard/mrr-growth")
@@ -62,8 +90,8 @@ def recent_jobs(db: Session = Depends(get_read_db), user=Depends(require_platfor
 
 
 @router.get("/tenants")
-def list_tenants(q: str | None = None, status_filter: str | None = Query(None, alias="status"), limit: int = 50, offset: int = 0, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
-    return services.list_tenants(db, q=q, status_filter=status_filter, limit=limit, offset=offset)
+def list_tenants(q: str | None = None, status_filter: str | None = Query(None, alias="status"), data_mode: str = "REAL", limit: int = 50, offset: int = 0, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    return services.list_tenants(db, q=q, status_filter=status_filter, data_mode=data_mode, limit=limit, offset=offset)
 
 
 @router.post("/tenants")
@@ -124,6 +152,98 @@ def set_read_only(tenant_id: str, payload: dict[str, Any], db: Session = Depends
     try: return services.set_tenant_lock(db, tenant_id=tenant_id, locked=bool(payload.get("read_only", True)), actor_id=_actor_id(user), reason=_reason(payload))
     except Exception as exc: _bad(exc)
 
+
+
+
+@router.post("/tenants/{tenant_id}/support-sessions")
+def create_support_session(tenant_id: str, payload: dict[str, Any], db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    amo = db.get(account_models.AMO, tenant_id)
+    if not amo or not amo.is_active:
+        raise HTTPException(status_code=404, detail="Active tenant not found")
+    access_level = str(payload.get("access_level") or "READ_ONLY").strip().upper()
+    if access_level not in {"READ_ONLY", "ADMIN"}:
+        raise HTTPException(status_code=422, detail="access_level must be READ_ONLY or ADMIN")
+    reason = _reason(payload)
+    status_value = "ACTIVE" if access_level == "READ_ONLY" else "PENDING"
+    row = models.PlatformTenantSupportSession(
+        tenant_id=tenant_id,
+        platform_user_id=_actor_id(user),
+        access_level=access_level,
+        status=status_value,
+        reason=reason,
+        requested_by_user_id=_actor_id(user),
+        expires_at=_support_session_expiry(payload),
+        metadata_json={
+            "requested_route": payload.get("requested_route"),
+            "ticket_reference": payload.get("ticket_reference"),
+        },
+    )
+    db.add(row)
+    db.flush()
+    services.audit(
+        db,
+        actor_user_id=_actor_id(user),
+        action="support.session.created" if status_value == "ACTIVE" else "support.session.requested",
+        tenant_id=tenant_id,
+        entity_type="platform_tenant_support_session",
+        entity_id=row.id,
+        reason=reason,
+        details={"access_level": access_level, "status": status_value, "expires_at": row.expires_at.isoformat()},
+    )
+    db.commit()
+    db.refresh(row)
+    return _support_session_payload(row)
+
+
+@router.get("/support-sessions")
+def list_support_sessions(tenant_id: str | None = None, status_filter: str | None = Query(None, alias="status"), db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    q = db.query(models.PlatformTenantSupportSession)
+    if tenant_id:
+        q = q.filter(models.PlatformTenantSupportSession.tenant_id == tenant_id)
+    if status_filter:
+        q = q.filter(models.PlatformTenantSupportSession.status == status_filter.strip().upper())
+    rows = q.order_by(models.PlatformTenantSupportSession.created_at.desc()).limit(100).all()
+    return {"items": [_support_session_payload(row) for row in rows]}
+
+
+@router.get("/support-sessions/current")
+def current_support_sessions(db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    now = datetime.now(timezone.utc)
+    rows = (
+        db.query(models.PlatformTenantSupportSession)
+        .filter(
+            models.PlatformTenantSupportSession.platform_user_id == _actor_id(user),
+            models.PlatformTenantSupportSession.status == "ACTIVE",
+            models.PlatformTenantSupportSession.expires_at > now,
+            models.PlatformTenantSupportSession.ended_at.is_(None),
+        )
+        .order_by(models.PlatformTenantSupportSession.created_at.desc())
+        .all()
+    )
+    return {"items": [_support_session_payload(row) for row in rows]}
+
+
+@router.post("/support-sessions/{session_id}/end")
+def end_support_session(session_id: str, payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    row = db.get(models.PlatformTenantSupportSession, session_id)
+    if not row or row.platform_user_id != _actor_id(user):
+        raise HTTPException(status_code=404, detail="Support session not found")
+    if row.status in {"ACTIVE", "PENDING"}:
+        row.status = "ENDED"
+        row.ended_at = datetime.now(timezone.utc)
+        services.audit(
+            db,
+            actor_user_id=_actor_id(user),
+            action="support.session.ended",
+            tenant_id=row.tenant_id,
+            entity_type="platform_tenant_support_session",
+            entity_id=row.id,
+            reason=(payload or {}).get("reason") or "Platform support session ended",
+            details={"access_level": row.access_level},
+        )
+        db.commit()
+        db.refresh(row)
+    return _support_session_payload(row)
 
 @router.get("/tenants/{tenant_id}/insights")
 def tenant_insights(tenant_id: str, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
@@ -197,8 +317,19 @@ def user_activity(user_id: str, db: Session = Depends(get_read_db), user=Depends
 
 
 @router.get("/billing/summary")
-def platform_billing_summary(db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
-    return services.billing_summary(db)
+def platform_billing_summary(data_mode: str = "REAL", db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    return services.billing_summary(db, data_mode=data_mode)
+
+
+@router.get("/billing/control")
+def platform_billing_control(data_mode: str = "REAL", db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    return services.billing_control_summary(db, data_mode=data_mode)
+
+
+@router.post("/billing/maintenance/run")
+def platform_billing_maintenance_run(payload: dict[str, Any] | None = None, db: Session = Depends(get_db), user=Depends(require_platform_superuser)):
+    payload = payload or {}
+    return services.run_billing_maintenance_now(db, actor_id=_actor_id(user), reason=str(payload.get("reason") or "manual billing maintenance run"))
 
 
 @router.get("/billing/mrr-growth")
@@ -213,8 +344,8 @@ def revenue_by_plan(db: Session = Depends(get_read_db), user=Depends(require_pla
 
 
 @router.get("/billing/invoices")
-def billing_invoices(limit: int = 50, offset: int = 0, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
-    return services.list_invoices(db, limit=limit, offset=offset)
+def billing_invoices(data_mode: str = "REAL", limit: int = 50, offset: int = 0, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
+    return services.list_invoices(db, data_mode=data_mode, limit=limit, offset=offset)
 
 
 @router.get("/billing/tenants/{tenant_id}")
