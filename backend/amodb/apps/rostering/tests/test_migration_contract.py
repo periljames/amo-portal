@@ -22,6 +22,17 @@ def test_migration_descends_from_current_merge_head():
     assert assignment_value(module, "down_revision") == "qual_20260705_merge_heads"
 
 
+def test_migration_revision_graph_is_import_safe_without_database_url():
+    module = ast.parse(MIGRATION.read_text(encoding="utf-8"))
+    top_level_application_imports: list[str] = []
+    for node in module.body:
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("amodb"):
+            top_level_application_imports.append(node.module)
+        elif isinstance(node, ast.Import):
+            top_level_application_imports.extend(alias.name for alias in node.names if alias.name.startswith("amodb"))
+    assert top_level_application_imports == []
+
+
 def test_migration_creates_required_workforce_and_roster_tables():
     source = MIGRATION.read_text(encoding="utf-8")
     required = {
