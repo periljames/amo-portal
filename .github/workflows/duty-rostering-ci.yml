@@ -70,7 +70,21 @@ jobs:
       - name: Compile new backend modules
         run: python -m compileall -q amodb/apps/workforce amodb/apps/rostering amodb/alembic/versions/workforce_20260721_complete_rostering.py
       - name: Run workforce and rostering tests
-        run: pytest -q amodb/apps/workforce/tests amodb/apps/rostering/tests
+        shell: bash
+        run: |
+          set +e
+          pytest -q amodb/apps/workforce/tests amodb/apps/rostering/tests > duty-rostering-pytest.log 2>&1
+          status=$?
+          cat duty-rostering-pytest.log
+          exit "$status"
+      - name: Preserve backend test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: duty-rostering-pytest-log
+          path: backend/duty-rostering-pytest.log
+          if-no-files-found: error
+          retention-days: 7
 
   frontend:
     runs-on: ubuntu-latest
