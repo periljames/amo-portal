@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import sys
 
+from ..accounts import router_modules_admin as _module_admin
 from . import application_router as _application_router
 
+_module_admin.ALLOWED_MODULES.update({"rostering", "workforce"})
 sys.modules[f"{__name__}.router"] = _application_router
 router = _application_router
 
