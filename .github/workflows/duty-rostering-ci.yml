@@ -39,8 +39,10 @@ jobs:
         env:
           DATABASE_URL: ""
           DATABASE_WRITE_URL: ""
+        shell: bash
         run: |
-          python - <<'PY'
+          set +e
+          python - <<'PY' > duty-rostering-alembic-head.log 2>&1
           from alembic.config import Config
           from alembic.script import ScriptDirectory
           script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
@@ -48,6 +50,17 @@ jobs:
           print("Alembic heads:", heads)
           assert heads == ["workforce_20260721_complete"], heads
           PY
+          status=$?
+          cat duty-rostering-alembic-head.log
+          exit "$status"
+      - name: Preserve Alembic diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: duty-rostering-alembic-head-log
+          path: backend/duty-rostering-alembic-head.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Compile new backend modules
         run: python -m compileall -q amodb/apps/workforce amodb/apps/rostering amodb/alembic/versions/workforce_20260721_complete_rostering.py
       - name: Run workforce and rostering tests
