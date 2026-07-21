@@ -75,7 +75,6 @@ export function moveIntervalToZonedDay(
   const start = new Date(startsAt);
   const end = new Date(endsAt);
   const localStart = partsInZone(start, timeZone);
-  const localEnd = partsInZone(end, timeZone);
   const starts = zonedWallTimeToIso(day, `${String(localStart.hour).padStart(2, "0")}:${String(localStart.minute).padStart(2, "0")}`, timeZone);
   const duration = Math.max(end.getTime() - start.getTime(), 60_000);
   return { starts_at: starts, ends_at: new Date(new Date(starts).getTime() + duration).toISOString() };
