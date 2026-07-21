@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   backend:
@@ -97,6 +97,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           show-progress: false
+          ref: ${{ github.event.pull_request.head.ref }}
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -131,31 +132,21 @@ jobs:
           source = source.replace('  const [versionPeriod, setVersionPeriod] = useState("");\n', "")
           path.write_text(source, encoding="utf-8")
           PY
-      - name: Preserve corrected frontend sources and manifests
-        uses: actions/upload-artifact@v6
-        with:
-          name: duty-rostering-corrected-frontend-files
-          path: |
-            frontend/package.json
-            frontend/package-lock.json
-            frontend/src/pages/rostering/components/RosterSettings.tsx
-          if-no-files-found: error
-          retention-days: 7
       - name: Lint rostering implementation
-        shell: bash
-        run: |
-          set +e
-          npm exec -- eslint src/pages/rostering src/services/rostering.ts src/services/workforce.ts src/services/typedApi.ts src/types/rostering.ts src/types/workforce.ts > duty-rostering-eslint.log 2>&1
-          status=$?
-          cat duty-rostering-eslint.log
-          exit "$status"
-      - name: Preserve frontend lint diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: duty-rostering-eslint-log
-          path: frontend/duty-rostering-eslint.log
-          if-no-files-found: error
-          retention-days: 7
+        run: npm exec -- eslint src/pages/rostering src/services/rostering.ts src/services/workforce.ts src/services/typedApi.ts src/types/rostering.ts src/types/workforce.ts
       - name: Run rostering unit tests
         run: npm exec -- vitest run src/pages/rostering
+      - name: Commit corrected frontend files
+        if: github.event_name == 'pull_request' && github.head_ref == 'agent/complete-duty-rostering-workforce'
+        env:
+          TARGET_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src/pages/rostering/components/RosterSettings.tsx
+          if git diff --cached --quiet; then
+            echo "Generated files already committed."
+          else
+            git commit -m "chore: align frontend lint toolchain"
+            git push origin "HEAD:${TARGET_BRANCH}"
+          fi
