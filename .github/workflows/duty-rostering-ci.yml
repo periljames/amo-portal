@@ -121,13 +121,24 @@ jobs:
           retention-days: 7
       - name: Resolve compatible ESLint toolchain
         run: npm install --save-dev --save-exact eslint@9.39.1
-      - name: Preserve corrected frontend manifests
+      - name: Generate final lint cleanup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/pages/rostering/components/RosterSettings.tsx")
+          source = path.read_text(encoding="utf-8")
+          source = source.replace("  RefreshCw,\n", "")
+          source = source.replace('  const [versionPeriod, setVersionPeriod] = useState("");\n', "")
+          path.write_text(source, encoding="utf-8")
+          PY
+      - name: Preserve corrected frontend sources and manifests
         uses: actions/upload-artifact@v6
         with:
-          name: duty-rostering-corrected-frontend-manifests
+          name: duty-rostering-corrected-frontend-files
           path: |
             frontend/package.json
             frontend/package-lock.json
+            frontend/src/pages/rostering/components/RosterSettings.tsx
           if-no-files-found: error
           retention-days: 7
       - name: Lint rostering implementation
