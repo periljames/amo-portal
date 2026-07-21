@@ -11,6 +11,11 @@ from sqlalchemy.orm import sessionmaker
 ROOT = Path(__file__).resolve().parent
 sys.path.append(str(ROOT))
 
+# The shared test harness intentionally uses an isolated in-memory database.
+# Set the explicit test-only opt-in before importing amodb.database so runtime
+# PostgreSQL enforcement remains unchanged outside pytest.
+os.environ["APP_ENV"] = "test"
+os.environ["ALLOW_SQLITE_FOR_TESTS"] = "1"
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
 os.environ["DATABASE_WRITE_URL"] = "sqlite+pysqlite:///:memory:"
 os.environ["SECRET_KEY"] = "test-secret-key"
