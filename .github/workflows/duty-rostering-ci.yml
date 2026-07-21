@@ -118,6 +118,20 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Lint rostering implementation
-        run: npx eslint src/pages/rostering src/services/rostering.ts src/services/workforce.ts src/services/typedApi.ts src/types/rostering.ts src/types/workforce.ts
+        shell: bash
+        run: |
+          set +e
+          npx eslint src/pages/rostering src/services/rostering.ts src/services/workforce.ts src/services/typedApi.ts src/types/rostering.ts src/types/workforce.ts > duty-rostering-eslint.log 2>&1
+          status=$?
+          cat duty-rostering-eslint.log
+          exit "$status"
+      - name: Preserve frontend lint diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: duty-rostering-eslint-log
+          path: frontend/duty-rostering-eslint.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Run rostering unit tests
         run: npx vitest run src/pages/rostering
