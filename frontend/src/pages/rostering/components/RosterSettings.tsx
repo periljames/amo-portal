@@ -8,7 +8,6 @@ import {
   Download,
   FileClock,
   Plus,
-  RefreshCw,
   Save,
   Settings2,
   ShieldCheck,
@@ -161,7 +160,6 @@ function PeriodsPanel({ periods, canCreate, busy, run }: { periods: RosterPeriod
   const [startsOn, setStartsOn] = useState(isoDate(new Date(now.getFullYear(), now.getMonth(), 1)));
   const [endsOn, setEndsOn] = useState(isoDate(new Date(now.getFullYear(), now.getMonth() + 1, 0)));
   const [timezone, setTimezone] = useState("Africa/Nairobi");
-  const [versionPeriod, setVersionPeriod] = useState("");
   return <section className="wr-panel"><div className="wr-section-heading"><div><span className="wr-eyebrow">Planning control</span><h2>Roster periods and versions</h2></div></div>{canCreate ? <div className="wr-inline-create"><label><span>Code</span><input value={code} onChange={(event) => setCode(event.target.value)} /></label><label><span>Name</span><input value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>Starts</span><input type="date" value={startsOn} onChange={(event) => setStartsOn(event.target.value)} /></label><label><span>Ends</span><input type="date" value={endsOn} onChange={(event) => setEndsOn(event.target.value)} /></label><label><span>Time zone</span><input value={timezone} onChange={(event) => setTimezone(event.target.value)} /></label><button className="wr-button wr-button--primary" type="button" disabled={busy === "period"} onClick={() => run("period", () => createRosterPeriod({ period_code: code, name, starts_on: startsOn, ends_on: endsOn, timezone_name: timezone }))}><Plus size={16} /> Create period</button></div> : null}<div className="wr-data-list">{periods.map((period) => <article key={period.id} className="wr-data-row"><div><strong>{period.period_code} · {period.name}</strong><small>{period.starts_on} → {period.ends_on} · {period.timezone_name}</small></div><span>{period.versions.length} versions</span><StatusPill value={period.status} /><button type="button" className="wr-button wr-button--small" disabled={!canCreate || busy === `version:${period.id}`} onClick={() => run(`version:${period.id}`, () => createRosterVersion(period.id, { title: `Draft v${period.versions.length + 1}`, idempotency_key: newIdempotencyKey("version") }))}><Plus size={14} /> Draft</button></article>)}</div>{periods.length === 0 ? <EmptyState title="No periods" description="Create a period to start planning duty." /> : null}</section>;
 }
 
