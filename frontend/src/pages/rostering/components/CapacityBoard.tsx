@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { addDays, format } from "date-fns";
+import { addDays } from "date-fns";
 import {
   AlertTriangle,
   ArrowRight,
   BriefcaseBusiness,
   CalendarRange,
   Filter,
-  Gauge,
   RefreshCw,
   ShieldCheck,
   UsersRound,
