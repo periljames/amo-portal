@@ -6,8 +6,9 @@ Create Date: 2026-07-22
 
 Historical Phase 2 branches created overlapping calendar/dashboard indexes and
 could execute before tenant-normalisation columns existed. This terminal
-revision runs after SaaS, Quality, Training, Workforce, and core rostering
-convergence. It removes legacy variants and installs one bounded canonical set.
+revision runs after SaaS, Quality, Training, Workforce, core rostering and all
+independent Phase 2 read-index branches. It removes legacy variants and installs
+one bounded canonical set.
 """
 from __future__ import annotations
 
@@ -18,7 +19,11 @@ import sqlalchemy as sa
 revision = "saas_20260722_qms_read_idx"
 down_revision = "saas_20260722_finalize_training"
 branch_labels = None
-depends_on = None
+depends_on = (
+    "phase2_8_20260605",
+    "phase2_10_20260605",
+    "phase2_14_20260615",
+)
 
 
 LEGACY_INDEXES = (
