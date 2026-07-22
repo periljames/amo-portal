@@ -31,6 +31,7 @@ def _require_superuser(current_user: models.User) -> models.User:
         )
     return current_user
 
+
 ALLOWED_MODULES = {
     "aerodoc_hybrid_dms",
     "finance_inventory",
@@ -201,3 +202,9 @@ def disable_module(
     db.commit()
     db.refresh(subscription)
     return subscription
+
+
+# Imported after router_admin has registered its legacy route. The module removes
+# that route and installs the paginated implementation on the same router object
+# before amodb.main includes it in the FastAPI application.
+from . import router_user_directory as _router_user_directory  # noqa: E402,F401
