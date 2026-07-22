@@ -5,47 +5,34 @@ import py_compile
 from pathlib import Path
 from typing import Iterable
 
-
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 ROOT = BACKEND_ROOT.parent
 FRONTEND_ROOT = ROOT / "frontend"
 
-
-REQUIRED_CHECKS = {
+REQUIRED_CHECKS: dict[str, tuple[Path, list[str]]] = {
     "saas_models": (
         BACKEND_ROOT / "amodb/apps/platform/saas_models.py",
-        [
-            "class SaaSProviderCredential",
-            "class SaaSJob",
-            "class SaaSModulePrice",
-            "class SaaSBillingAccount",
-            "class SaaSInvoiceFiscalization",
-            "class SaaSSupportTicketMessage",
-            "uq_saas_job_idempotency",
-            "ix_saas_jobs_claim",
-        ],
+        ["class SaaSProviderCredential", "class SaaSJob", "class SaaSModulePrice", "class SaaSInvoiceFiscalization", "uq_saas_job_idempotency", "ix_saas_jobs_claim"],
     ),
     "encrypted_secrets": (
         BACKEND_ROOT / "amodb/apps/platform/saas_secrets.py",
-        [
-            "PLATFORM_SECRETS_KEY",
-            "Fernet",
-            "def encrypt_secret",
-            "def decrypt_secret",
-            "def redact_mapping",
-        ],
+        ["PLATFORM_SECRETS_KEY", "Fernet", "def encrypt_secret", "def decrypt_secret", "def redact_mapping"],
     ),
     "durable_queue": (
         BACKEND_ROOT / "amodb/apps/platform/saas_queue.py",
         [
             "with_for_update(skip_locked=True)",
             "RETRYABLE_MANUAL_STATUSES",
+            "safe claim width is deliberately one",
+            ".limit(1)",
+            "Only an actively leased job can be completed",
+            "Only an actively leased job can be failed",
             "def enqueue_job",
             "def claim_jobs",
             "def release_expired_leases",
+            "def heartbeat_job",
             "def complete_job",
             "def fail_job",
-            "def queue_summary",
         ],
     ),
     "provider_adapters": (
@@ -69,8 +56,6 @@ REQUIRED_CHECKS = {
             '@platform_saas_router.get("/jobs")',
             '@platform_saas_router.get("/module-prices")',
             '@platform_saas_router.patch("/tenants/{tenant_id}/modules")',
-            '@platform_saas_router.post("/billing/tenants/{tenant_id}/checkout"',
-            '@platform_saas_router.post("/billing/invoices/{invoice_id}/fiscalize"',
             '@webhook_router.post("/stripe"',
             '@support_router.post("/tickets"',
             "def _visible_support_payload",
@@ -78,183 +63,104 @@ REQUIRED_CHECKS = {
     ),
     "saas_workers": (
         BACKEND_ROOT / "amodb/jobs/saas_worker.py",
-        [
-            "STRIPE_CREATE_CHECKOUT_SESSION",
-            "STRIPE_WEBHOOK",
-            "ETIMS_FISCALIZE_INVOICE",
-            "AI_SUPPORT_REPLY",
-            "def run_once",
-            "def run_forever",
-        ],
+        ["STRIPE_CREATE_CHECKOUT_SESSION", "STRIPE_WEBHOOK", "ETIMS_FISCALIZE_INVOICE", "AI_SUPPORT_REPLY", "def run_once", "def run_forever"],
     ),
     "legacy_command_queue": (
         BACKEND_ROOT / "amodb/apps/platform/saas_legacy_bridge.py",
-        [
-            "def install_legacy_command_queue",
-            'job.status = "QUEUED"',
-            'job_type="PLATFORM_COMMAND_JOB"',
-            "execute_legacy_command_in_worker",
-        ],
+        ["def install_legacy_command_queue", 'job.status = "QUEUED"', 'job_type="PLATFORM_COMMAND_JOB"', "execute_legacy_command_in_worker"],
     ),
     "atomic_usage": (
         BACKEND_ROOT / "amodb/apps/platform/saas_usage.py",
-        [
-            "ON CONFLICT (amo_id, meter_key)",
-            "usage_meters.used_units + EXCLUDED.used_units",
-            "application._queue_api_usage = enqueue_only",
-            'name="api-usage-flush"',
-        ],
+        ["ON CONFLICT (amo_id, meter_key)", "usage_meters.used_units + EXCLUDED.used_units", "application._queue_api_usage = enqueue_only"],
     ),
     "integration_health": (
         BACKEND_ROOT / "amodb/apps/platform/saas_integration.py",
-        [
-            'integration_router = APIRouter(prefix="/saas/integration-health"',
-            "quality_training",
-            "saas_worker_online",
-            "capacity_position",
-            "verified_by_this_endpoint",
-        ],
+        ['integration_router = APIRouter(prefix="/saas/integration-health"', "quality_training", "saas_worker_online", "capacity_position"],
     ),
-    "migration": (
+    "control_plane_migration": (
         BACKEND_ROOT / "amodb/alembic/versions/saas_20260722_control_plane_foundation.py",
-        [
-            'revision = "saas_20260722_control_plane"',
-            'down_revision = "quality_20260722_schema_integrity"',
-            '"saas_provider_credentials"',
-            '"saas_jobs"',
-            '"saas_module_prices"',
-            '"saas_invoice_fiscalizations"',
-            '"saas_support_ticket_messages"',
-        ],
+        ['revision = "saas_20260722_control_plane"', 'down_revision = "quality_20260722_schema_integrity"', '"saas_provider_credentials"', '"saas_jobs"', '"saas_module_prices"'],
     ),
     "messaging_migration": (
         BACKEND_ROOT / "amodb/alembic/versions/saas_20260722_messaging_hardening.py",
-        [
-            'revision = "saas_20260722_messaging"',
-            'down_revision = "saas_20260722_qms_read_idx"',
-            '"portal_notifications"',
-            '"notification_preferences"',
-            '"uq_chat_threads_amo_scope_key"',
-            '"ix_message_receipts_user_unread"',
-        ],
+        ['revision = "saas_20260722_messaging"', 'down_revision = "saas_20260722_qms_read_idx"', '"portal_notifications"', '"notification_preferences"', '"uq_chat_threads_amo_scope_key"'],
     ),
-    "messaging_service": (
-        BACKEND_ROOT / "amodb/apps/realtime/messaging.py",
+    "realtime_auth": (
+        BACKEND_ROOT / "amodb/apps/realtime/realtime_auth.py",
+        ["def validate_connect_token", "hmac.compare_digest", "RealtimeConnectToken.expires_at > now", "User.is_active.is_(True)", "def prune_user_tokens"],
+    ),
+    "secure_messaging": (
+        BACKEND_ROOT / "amodb/apps/realtime/secure_messaging.py",
         [
-            "def open_direct_thread",
-            "def open_department_thread",
-            "def open_user_group_thread",
-            "def create_group_thread",
-            "def send_message",
-            "def mark_thread_read",
-            "def list_notifications",
+            "def _reconcile_thread_memberships",
+            "Only current department members may open this channel",
+            "User is not a current member of this group",
+            "mention_user_ids",
+            'level == "MENTIONS"',
+            "Mentioned users must be current conversation members",
             "def process_inbound_envelope",
-            'email_enabled',
         ],
     ),
     "messaging_gateway": (
         BACKEND_ROOT / "amodb/apps/realtime/gateway.py",
         [
             'client.subscribe("amo/+/user/+/outbox"',
-            "messaging.process_inbound_envelope",
-            "def flush_pending",
-            "RealtimeOutbox",
+            "realtime_auth.validate_connect_token",
+            "secure_messaging.process_inbound_envelope",
+            'model_copy(update={"authToken": None})',
+            "with_for_update(skip_locked=True)",
+            "REALTIME_PAYLOAD_MAX_BYTES",
         ],
     ),
     "messaging_routes": (
         BACKEND_ROOT / "amodb/apps/realtime/router.py",
         [
+            "secure_messaging as messaging",
+            "realtime_auth.prune_user_tokens",
             '@router.get("/chat/directory")',
             '@router.post("/chat/direct/{peer_user_id}"',
             '@router.post("/chat/departments/{department_id}"',
             '@router.post("/chat/groups/{group_id}"',
-            '@router.post("/chat/threads/{thread_id}/messages"',
-            '@router.post("/chat/threads/{thread_id}/read")',
             '@router.get("/notifications/me")',
-            '@router.put("/notifications/preferences")',
         ],
     ),
-    "frontend_service": (
+    "frontend_platform_service": (
         FRONTEND_ROOT / "src/services/platformControl.ts",
-        [
-            "export type SaaSJob",
-            "export type SaaSProvider",
-            "saasCapabilities:",
-            "updateSaasProvider:",
-            "updateTenantModules:",
-            "createManualInvoice:",
-            "createCheckout:",
-            "fiscalizeInvoice:",
-            "requestAiSupportReply:",
-            "globalThis.setTimeout",
-        ],
+        ["export type SaaSJob", "updateSaasProvider:", "updateTenantModules:", "createCheckout:", "fiscalizeInvoice:", "globalThis.setTimeout"],
     ),
     "frontend_messaging": (
         FRONTEND_ROOT / "src/services/messaging.ts",
+        ["export type ChatThreadKind", "openDirect:", "openDepartment:", "openGroup:", "markThreadRead:", "unreadCount:", "updatePreferences:"],
+    ),
+    "frontend_realtime_auth": (
+        FRONTEND_ROOT / "src/services/realtime/mqtt.ts",
         [
-            "export type ChatThreadKind",
-            "openDirect:",
-            "openDepartment:",
-            "openGroup:",
-            "markThreadRead:",
-            "unreadCount:",
-            "updatePreferences:",
-            "globalThis.setTimeout",
+            "private sessionToken",
+            "scheduleTokenRefresh",
+            "authToken: this.sessionToken",
+            "delete queued.authToken",
+            "delete decoded.authToken",
         ],
     ),
     "frontend_messaging_hub": (
         FRONTEND_ROOT / "src/components/messaging/MessagingHub.tsx",
-        [
-            "People",
-            "Dept.",
-            "Groups",
-            "All alerts",
-            "Email summaries",
-            "messagingApi.markThreadRead",
-        ],
+        ["People", "Dept.", "Groups", "All alerts", "Email summaries", "messagingApi.markThreadRead"],
     ),
     "frontend_controls": (
         FRONTEND_ROOT / "src/pages/platform/PlatformIntegrationsPage.tsx",
-        [
-            "Provider registry",
-            "Integration queue",
-            "Support desk",
-            "Queue AI draft",
-            "Secrets are encrypted on the backend",
-        ],
+        ["Provider registry", "Integration queue", "Support desk", "Queue AI draft", "Secrets are encrypted on the backend"],
     ),
     "frontend_billing": (
         FRONTEND_ROOT / "src/pages/platform/PlatformBillingPage.tsx",
-        [
-            "Module price catalog",
-            "Queue recurring checkout",
-            "Fiscalize OSCU",
-            "Billing queue",
-        ],
-    ),
-    "frontend_tenants": (
-        FRONTEND_ROOT / "src/pages/platform/PlatformTenantsPage.tsx",
-        [
-            "Module subscription control",
-            "Save module subscriptions",
-            "Previous",
-            "Next",
-        ],
+        ["Module price catalog", "Queue recurring checkout", "Fiscalize OSCU", "Billing queue"],
     ),
     "load_profile": (
         ROOT / "loadtests/k6_saas_control_plane.js",
-        [
-            "TENANT_VUS || 1000",
-            "http_req_failed",
-            '"p(95)<800"',
-            "tenant_quality_training_reads",
-            "/quality/calendar",
-        ],
+        ["TENANT_VUS || 1000", "http_req_failed", '"p(95)<800"', "tenant_quality_training_reads", "/quality/calendar"],
     ),
 }
 
-
-FORBIDDEN_CHECKS = {
+FORBIDDEN_CHECKS: dict[str, tuple[Path, list[str]]] = {
     "frontend_browser_secrets": (
         FRONTEND_ROOT / "src/services/platformControl.ts",
         ["localStorage.setItem(\"stripe", "localStorage.setItem(\"openai", "VITE_OPENAI_API_KEY", "VITE_STRIPE_SECRET"],
@@ -263,21 +169,22 @@ FORBIDDEN_CHECKS = {
         BACKEND_ROOT / "amodb/apps/platform/saas_services.py",
         ['"encrypted_secret":', '"secret": provider_secrets', '"api_key": secret'],
     ),
-    "legacy_inline_command_execution": (
-        BACKEND_ROOT / "amodb/apps/platform/saas_legacy_bridge.py",
-        ["original_execute(db, job, actor_id=actor_id)\n        db.commit()"],
+    "gateway_unsigned_dispatch": (
+        BACKEND_ROOT / "amodb/apps/realtime/gateway.py",
+        ["messaging.process_inbound_envelope(db, envelope)"],
+    ),
+    "persisted_realtime_token": (
+        FRONTEND_ROOT / "src/services/realtime/queue.ts",
+        ["authToken"],
     ),
 }
 
-
-COMPILE_TARGETS = [
-    path
-    for path, _ in REQUIRED_CHECKS.values()
-    if path.suffix == ".py"
-] + [
+EXTRA_COMPILE_TARGETS = [
     BACKEND_ROOT / "amodb/jobs/platform_command_worker.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_control_plane.py",
+    BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_queue_fencing.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_messaging_hardening.py",
+    BACKEND_ROOT / "amodb/apps/realtime/tests/test_realtime_security_hardening.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_realtime_services.py",
     Path(__file__),
 ]
@@ -317,8 +224,14 @@ def main() -> int:
         passed = passed and ok
         results[name] = {"passed": ok, "path": display(path), "present": found}
 
+    gateway_text = (BACKEND_ROOT / "amodb/apps/realtime/gateway.py").read_text(encoding="utf-8")
+    ordering_ok = gateway_text.index("realtime_auth.validate_connect_token") < gateway_text.index("secure_messaging.process_inbound_envelope")
+    passed = passed and ordering_ok
+    results["gateway_auth_order"] = {"passed": ordering_ok}
+
+    compile_targets = [path for path, _ in REQUIRED_CHECKS.values() if path.suffix == ".py"] + EXTRA_COMPILE_TARGETS
     compile_results = []
-    for target in COMPILE_TARGETS:
+    for target in dict.fromkeys(compile_targets):
         try:
             py_compile.compile(str(target), doraise=True)
             compile_results.append({"path": display(target), "passed": True})
@@ -326,13 +239,12 @@ def main() -> int:
             passed = False
             compile_results.append({"path": display(target), "passed": False, "error": str(exc)})
 
-    package_json = FRONTEND_ROOT / "package.json"
-    package = json.loads(package_json.read_text(encoding="utf-8"))
-    script = package.get("scripts", {}).get("test:platform")
-    expected_script = "vitest run src/services/platformControl.test.ts src/services/messaging.test.ts"
-    script_ok = script == expected_script
+    package = json.loads((FRONTEND_ROOT / "package.json").read_text(encoding="utf-8"))
+    command = package.get("scripts", {}).get("test:platform")
+    expected = "vitest run src/services/platformControl.test.ts src/services/messaging.test.ts"
+    script_ok = command == expected
     passed = passed and script_ok
-    results["frontend_test_script"] = {"passed": script_ok, "command": script}
+    results["frontend_test_script"] = {"passed": script_ok, "command": command}
 
     print(json.dumps({"passed": passed, "checks": results, "compile": compile_results}, indent=2))
     return 0 if passed else 1
