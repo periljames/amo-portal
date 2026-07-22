@@ -3,6 +3,11 @@
 Revision ID: quality_20260705_finding_attachment_description_repair
 Revises: qual_20260704_schedfix
 Create Date: 2026-07-05
+
+This is the first revision in the graph whose identifier exceeds Alembic's
+historical 32-character version-table default. Widen the version column inside
+the migration transaction before Alembic stamps this revision, preserving all
+published revision identifiers and upgrade paths.
 """
 
 from alembic import op
@@ -26,8 +31,36 @@ def _has_column(bind, table_name: str, column_name: str) -> bool:
     return column_name in {column["name"] for column in inspector.get_columns(table_name)}
 
 
+def _widen_alembic_version_column(bind) -> None:
+    if not _has_table(bind, "alembic_version") or not _has_column(bind, "alembic_version", "version_num"):
+        return
+
+    column = next(
+        column
+        for column in sa.inspect(bind).get_columns("alembic_version")
+        if column["name"] == "version_num"
+    )
+    current_type = column.get("type")
+    current_length = getattr(current_type, "length", None)
+    if current_length is not None and current_length >= 255:
+        return
+
+    if bind.dialect.name == "postgresql":
+        op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255)")
+    else:
+        op.alter_column(
+            "alembic_version",
+            "version_num",
+            existing_type=current_type,
+            type_=sa.String(length=255),
+            existing_nullable=False,
+        )
+
+
 def upgrade() -> None:
     bind = op.get_bind()
+    _widen_alembic_version_column(bind)
+
     if not _has_table(bind, "qms_finding_attachments"):
         op.execute(
             """
@@ -57,3 +90,5 @@ def downgrade() -> None:
     bind = op.get_bind()
     if _has_column(bind, "qms_finding_attachments", "description"):
         op.drop_column("qms_finding_attachments", "description")
+    # Keep the wider Alembic version column. Shrinking it would make later or
+    # parallel long revision identifiers impossible to stamp safely.
