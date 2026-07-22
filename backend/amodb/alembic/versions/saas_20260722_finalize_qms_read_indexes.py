@@ -4,11 +4,10 @@ Revision ID: saas_20260722_qms_read_idx
 Revises: saas_20260722_finalize_training
 Create Date: 2026-07-22
 
-Historical Phase 2 branches created several overlapping calendar/dashboard
-indexes and could execute before tenant-normalisation columns existed. This
-terminal revision runs after SaaS, Quality, Training, Workforce, and core
-rostering convergence. It removes the legacy variants and installs one bounded,
-canonical index set for the active read paths.
+Historical Phase 2 branches created overlapping calendar/dashboard indexes and
+could execute before tenant-normalisation columns existed. This terminal
+revision runs after SaaS, Quality, Training, Workforce, and core rostering
+convergence. It removes legacy variants and installs one bounded canonical set.
 """
 from __future__ import annotations
 
@@ -23,10 +22,25 @@ depends_on = None
 
 
 LEGACY_INDEXES = (
+    "ix_qms_audits_amo_status",
+    "ix_qms_audits_amo_planned_status",
+    "ix_quality_cars_amo_status",
+    "ix_quality_cars_amo_due_status",
+    "ix_qms_documents_amo_status",
+    "ix_qms_findings_amo_closed",
+    "ix_training_records_amo_valid_until",
+    "ix_training_records_amo_user_course",
+    "ix_training_events_amo_dates_status",
+    "ix_qms_audits_dashboard_open_partial",
+    "ix_qms_audits_dashboard_in_progress_partial",
+    "ix_qms_audits_dashboard_due_partial",
+    "ix_quality_cars_dashboard_open_partial",
+    "ix_quality_cars_dashboard_due_partial",
+    "ix_qms_findings_dashboard_open_partial",
+    "ix_training_records_dashboard_expired_partial",
     "ix_qms_audits_amo_planned_start",
     "ix_qms_audits_amo_planned_end",
     "ix_qms_audits_amo_status_created",
-    "ix_quality_cars_amo_due_status",
     "ix_training_events_amo_starts_status",
     "ix_training_events_amo_ends_status",
     "ix_training_records_currency_latest",
@@ -132,6 +146,12 @@ INDEX_SPECS = (
         ("amo_id", "ends_on", "id", "title", "status", "starts_on", "course_id"),
         "ix_training_events_amo_ends_id",
         "CREATE INDEX ix_training_events_amo_ends_id ON training_events (amo_id, ends_on, id) INCLUDE (title, status, starts_on, course_id) WHERE ends_on IS NOT NULL",
+    ),
+    (
+        "training_requirements",
+        ("amo_id", "is_active", "scope", "course_id"),
+        "ix_training_requirements_amo_active_scope_course",
+        "CREATE INDEX ix_training_requirements_amo_active_scope_course ON training_requirements (amo_id, is_active, scope, course_id)",
     ),
     (
         "users",
