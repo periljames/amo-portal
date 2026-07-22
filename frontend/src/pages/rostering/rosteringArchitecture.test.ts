@@ -40,10 +40,13 @@ describe("rostering architecture regressions", () => {
     expect(plannerHookSource).not.toContain("limit: 1000");
   });
 
-  it("persists optimistic assignment rows in the version workspace", () => {
+  it("persists and reapplies optimistic assignment rows over stale cached snapshots", () => {
     expect(plannerHookSource).toContain("single source of assignment state");
     expect(plannerHookSource).toContain("setQueryData<VersionWorkspace>");
     expect(plannerHookSource).toContain("assignments: next");
+    expect(plannerHookSource).toContain("mergePendingRosterOutbox");
+    expect(plannerHookSource).toContain("listOfflineMutations().catch");
+    expect(plannerHookSource).toContain("PENDING_OUTBOX_STATUSES");
     expect(plannerHookSource).not.toContain("useState<RosterAssignmentRead[]>([])");
   });
 
@@ -53,13 +56,16 @@ describe("rostering architecture regressions", () => {
     expect(workOrdersSource.match(/headers: authHeaders\(\)/g)?.length).toBeGreaterThanOrEqual(11);
   });
 
-  it("isolates persisted queries when the active AMO changes", () => {
+  it("isolates persisted queries for every same-tab and cross-tab AMO change", () => {
     expect(queryPersisterSource).toContain("type ScopedPersistedClient");
     expect(queryPersisterSource).toContain("scope !== boundScope");
     expect(queryPersisterSource).toContain("currentOfflineScope() !== scope");
     expect(mainSource).toContain("clearTenantScopedRuntimeState");
-    expect(mainSource).toContain("BRANDING_EVENT");
+    expect(mainSource).toContain("installActiveAmoStorageGuard");
+    expect(mainSource).toContain("Storage.prototype.setItem");
+    expect(mainSource).toContain("Storage.prototype.removeItem");
     expect(mainSource).toContain("ACTIVE_AMO_STORAGE_KEYS");
+    expect(mainSource).toContain("BRANDING_EVENT");
   });
 
   it("repairs legacy light surfaces after module CSS is loaded", () => {
