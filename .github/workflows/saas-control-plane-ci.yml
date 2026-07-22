@@ -229,6 +229,8 @@ jobs:
             src/services/messaging.ts \
             src/services/messaging.test.ts \
             src/services/realtime/mqtt.ts \
+            src/services/realtime/queue.ts \
+            src/services/realtime/reliability.test.ts \
             src/services/realtime/types.ts \
             src/services/rostering.ts \
             src/components/messaging/MessagingHub.tsx \
