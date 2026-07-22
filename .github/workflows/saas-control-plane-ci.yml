@@ -5,15 +5,20 @@ on:
     paths:
       - "backend/amodb/apps/platform/**"
       - "backend/amodb/apps/accounts/**"
+      - "backend/amodb/apps/realtime/**"
       - "backend/amodb/jobs/saas_worker.py"
       - "backend/amodb/jobs/platform_command_worker.py"
       - "backend/amodb/alembic/versions/**"
       - "backend/amodb/scripts/saas_control_plane_internal_check.py"
       - "backend/docs/platform/**"
       - "frontend/src/services/platformControl*"
+      - "frontend/src/services/messaging*"
       - "frontend/src/services/rostering.ts"
       - "frontend/src/services/rosterPeople.ts"
       - "frontend/src/types/rostering.ts"
+      - "frontend/src/components/messaging/**"
+      - "frontend/src/components/offline/OfflineSyncIndicator.tsx"
+      - "frontend/src/styles/components/messaging.css"
       - "frontend/src/pages/platform/**"
       - "frontend/src/pages/rostering/**"
       - "frontend/package.json"
@@ -80,6 +85,7 @@ jobs:
           quality_finalizer = script.get_revision("saas_20260722_finalize_idx")
           training_finalizer = script.get_revision("saas_20260722_finalize_training")
           read_index_finalizer = script.get_revision("saas_20260722_qms_read_idx")
+          messaging_finalizer = script.get_revision("saas_20260722_messaging")
           assert foundation is not None
           assert foundation.down_revision == "quality_20260722_schema_integrity"
           assert quality_finalizer is not None
@@ -88,9 +94,17 @@ jobs:
           assert training_finalizer.down_revision == "saas_20260722_finalize_idx"
           assert read_index_finalizer is not None
           assert read_index_finalizer.down_revision == "saas_20260722_finalize_training"
+          expected_dependencies = {
+              "phase2_8_20260605",
+              "phase2_10_20260605",
+              "phase2_14_20260615",
+          }
+          assert set(read_index_finalizer.dependencies or ()) == expected_dependencies
+          assert messaging_finalizer is not None
+          assert messaging_finalizer.down_revision == "saas_20260722_qms_read_idx"
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert "saas_20260722_qms_read_idx" in heads, heads
+          assert "saas_20260722_messaging" in heads, heads
           PY
       - name: Upgrade production schema graph
         id: migrate
@@ -119,18 +133,32 @@ jobs:
               "/platform/saas/webhooks/stripe",
               "/platform/saas/support/tickets",
               "/platform/saas/integration-health",
+              "/api/chat/directory",
+              "/api/chat/direct/{peer_user_id}",
+              "/api/chat/departments/{department_id}",
+              "/api/chat/groups/{group_id}",
+              "/api/chat/threads",
+              "/api/chat/threads/{thread_id}/messages",
+              "/api/chat/threads/{thread_id}/read",
+              "/api/notifications/me",
+              "/api/notifications/me/unread-count",
+              "/api/notifications/preferences",
           }
           missing = required - paths
           assert not missing, missing
-          print("SaaS route contract verified")
+          print("SaaS, messaging and notification route contracts verified")
           PY
-      - name: Run SaaS unit tests
+      - name: Run SaaS and messaging unit tests
         id: backend_tests
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          pytest -q amodb/apps/platform/tests/test_saas_control_plane.py 2>&1 | tee saas-backend-tests.log
+          pytest -q \
+            amodb/apps/platform/tests/test_saas_control_plane.py \
+            amodb/apps/realtime/tests/test_messaging_hardening.py \
+            amodb/apps/realtime/tests/test_realtime_services.py \
+            2>&1 | tee saas-backend-tests.log
       - name: Run empty-queue worker smoke tests
         id: workers
         continue-on-error: true
@@ -175,7 +203,7 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
-      - name: Run platform service regressions
+      - name: Run platform and messaging service regressions
         id: frontend_tests
         continue-on-error: true
         working-directory: frontend
@@ -191,7 +219,7 @@ jobs:
         run: |
           set -o pipefail
           npm run build 2>&1 | tee platform-build.log
-      - name: Lint changed platform and roster surfaces
+      - name: Lint changed platform, messaging and roster surfaces
         id: frontend_lint
         continue-on-error: true
         working-directory: frontend
@@ -201,7 +229,11 @@ jobs:
           npm exec -- eslint \
             src/services/platformControl.ts \
             src/services/platformControl.test.ts \
+            src/services/messaging.ts \
+            src/services/messaging.test.ts \
             src/services/rostering.ts \
+            src/components/messaging/MessagingHub.tsx \
+            src/components/offline/OfflineSyncIndicator.tsx \
             src/pages/platform/PlatformIntegrationsPage.tsx \
             src/pages/platform/PlatformBillingPage.tsx \
             src/pages/platform/PlatformTenantsPage.tsx \
