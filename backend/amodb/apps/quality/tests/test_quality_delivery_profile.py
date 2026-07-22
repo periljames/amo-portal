@@ -12,8 +12,9 @@ def test_quality_delivery_profile_exposes_required_route_families() -> None:
     assert any(path.startswith("/api/maintenance/{amo_code}/qms") for path in paths)
     assert any(path.startswith("/accounts") for path in paths)
     assert any(path.startswith("/training") for path in paths)
-    assert any(path.startswith("/notifications") for path in paths)
-    assert any(path.startswith("/tasks") for path in paths)
+    assert "/email-logs" in paths
+    assert "/tasks" in paths
+    assert "/tasks/my" in paths
 
 
 def test_quality_delivery_profile_omits_unrelated_operational_routes() -> None:
