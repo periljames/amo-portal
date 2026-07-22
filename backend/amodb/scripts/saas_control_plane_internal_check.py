@@ -106,6 +106,11 @@ REQUIRED: dict[Path, list[str]] = {
         'level == "MENTIONS"',
         "Mentioned users must be current conversation members",
     ],
+    BACKEND_ROOT / "amodb/apps/realtime/notification_counts.py": [
+        'PortalNotification.kind != "CHAT_MESSAGE"',
+        "MessageReceipt.read_at.is_(None)",
+        '"total": int(notifications) + int(messages)',
+    ],
     BACKEND_ROOT / "amodb/apps/realtime/gateway.py": [
         "broker_auth.validate_production_config",
         "username_pw_set",
@@ -118,21 +123,43 @@ REQUIRED: dict[Path, list[str]] = {
     BACKEND_ROOT / "amodb/apps/realtime/router.py": [
         "router.include_router(broker_router.router)",
         "secure_messaging as messaging",
+        "notification_counts.unread_notification_count",
         "realtime_auth.prune_user_tokens",
     ],
     FRONTEND_ROOT / "src/services/realtime/mqtt.ts": [
         "private sessionToken",
         "scheduleTokenRefresh",
-        "authToken: this.sessionToken",
+        "publishWithAcknowledgement",
+        "MQTT publish acknowledgement timed out",
+        "authToken: token",
+        "await removeOutbound(item.id)",
+        "queued MQTT publish retained for retry",
         "delete queued.authToken",
         "delete decoded.authToken",
     ],
+    FRONTEND_ROOT / "src/services/realtime/queue.ts": [
+        "MAX_OUTBOUND_MESSAGES = 500",
+        "def", 
+    ],
     FRONTEND_ROOT / "src/services/messaging.ts": [
+        "mentionUserIds: string[] = []",
+        "mention_user_ids",
         "openDirect:",
         "openDepartment:",
         "openGroup:",
         "markThreadRead:",
         "updatePreferences:",
+    ],
+    FRONTEND_ROOT / "src/components/messaging/MessagingHub.tsx": [
+        "mentionUserIds",
+        "Mentioned you",
+        "@ Mention",
+        'notification.kind !== "CHAT_MESSAGE"',
+    ],
+    FRONTEND_ROOT / "src/styles/components/messaging.css": [
+        ".messaging-mentions",
+        ".messaging-composer-row",
+        ".messaging-mentioned",
     ],
     ROOT / "deploy/saas/docker-compose.yml": [
         "CORS_ALLOWED_ORIGINS is required in production",
@@ -154,7 +181,6 @@ FORBIDDEN: dict[Path, list[str]] = {
         "VITE_OPENAI_API_KEY",
         "VITE_STRIPE_SECRET",
     ],
-    FRONTEND_ROOT / "src/services/realtime/queue.ts": ["authToken"],
     BACKEND_ROOT / "amodb/apps/realtime/gateway.py": [
         'client.subscribe("amo/+/user/+/outbox"',
         "messaging.process_inbound_envelope(db, envelope)",
@@ -201,6 +227,19 @@ def main() -> int:
         passed = passed and ok
         checks[_display(path)] = {"passed": ok, "missing": absent}
 
+    # Queue contract is checked structurally here instead of forbidding the word
+    # authToken, because sanitization must explicitly delete that field.
+    queue_text = (FRONTEND_ROOT / "src/services/realtime/queue.ts").read_text(encoding="utf-8")
+    queue_ok = all(token in queue_text for token in (
+        "export function sanitizeOutbound",
+        "delete clean.authToken",
+        "store.put(clean)",
+        "existing.slice(0, excess)",
+        "db.close()",
+    )) and "store.put(envelope)" not in queue_text
+    passed = passed and queue_ok
+    checks["realtime-outbound-sanitized-and-bounded"] = {"passed": queue_ok}
+
     for path, tokens in FORBIDDEN.items():
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         found = _present(text, tokens)
@@ -224,7 +263,7 @@ def main() -> int:
             compile_rows.append({"path": _display(path), "passed": False, "error": str(exc)})
 
     package = json.loads((FRONTEND_ROOT / "package.json").read_text(encoding="utf-8"))
-    expected_script = "vitest run src/services/platformControl.test.ts src/services/messaging.test.ts"
+    expected_script = "vitest run src/services/platformControl.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts"
     actual_script = package.get("scripts", {}).get("test:platform")
     script_ok = actual_script == expected_script
     passed = passed and script_ok
