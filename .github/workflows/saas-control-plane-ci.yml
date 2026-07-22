@@ -14,6 +14,7 @@ on:
       - "backend/docs/platform/**"
       - "frontend/src/services/platformControl*"
       - "frontend/src/services/messaging*"
+      - "frontend/src/services/realtime/**"
       - "frontend/src/services/rostering.ts"
       - "frontend/src/services/rosterPeople.ts"
       - "frontend/src/types/rostering.ts"
@@ -155,7 +156,9 @@ jobs:
           set -o pipefail
           pytest -q \
             amodb/apps/platform/tests/test_saas_control_plane.py \
+            amodb/apps/platform/tests/test_saas_queue_fencing.py \
             amodb/apps/realtime/tests/test_messaging_hardening.py \
+            amodb/apps/realtime/tests/test_realtime_security_hardening.py \
             amodb/apps/realtime/tests/test_realtime_services.py \
             2>&1 | tee saas-backend-tests.log
       - name: Run empty-queue worker smoke tests
@@ -230,6 +233,8 @@ jobs:
             src/services/platformControl.test.ts \
             src/services/messaging.ts \
             src/services/messaging.test.ts \
+            src/services/realtime/mqtt.ts \
+            src/services/realtime/types.ts \
             src/services/rostering.ts \
             src/components/messaging/MessagingHub.tsx \
             src/components/offline/OfflineSyncIndicator.tsx \
