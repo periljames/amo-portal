@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 from fastapi import HTTPException
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.realtime import messaging, models
+from amodb.apps.realtime import messaging, models, notification_counts, secure_messaging
 
 
 def _seed_tenant(db_session, code: str = "MSG"):
@@ -47,8 +45,8 @@ def _seed_tenant(db_session, code: str = "MSG"):
 
 def test_direct_thread_is_deduplicated_and_tenant_scoped(db_session):
     amo, _, first, second = _seed_tenant(db_session, "DIRECT")
-    first_thread = messaging.open_direct_thread(db_session, user=first, peer_user_id=second.id)
-    second_thread = messaging.open_direct_thread(db_session, user=second, peer_user_id=first.id)
+    first_thread = secure_messaging.open_direct_thread(db_session, user=first, peer_user_id=second.id)
+    second_thread = secure_messaging.open_direct_thread(db_session, user=second, peer_user_id=first.id)
 
     assert first_thread["id"] == second_thread["id"]
     assert first_thread["kind"] == "DIRECT"
@@ -58,31 +56,31 @@ def test_direct_thread_is_deduplicated_and_tenant_scoped(db_session):
     other_amo, _, outsider, _ = _seed_tenant(db_session, "OUTSIDE")
     assert other_amo.id != amo.id
     with pytest.raises(HTTPException) as exc:
-        messaging.open_direct_thread(db_session, user=first, peer_user_id=outsider.id)
+        secure_messaging.open_direct_thread(db_session, user=first, peer_user_id=outsider.id)
     assert exc.value.status_code == 404
 
 
 def test_department_channel_syncs_active_department_members(db_session):
     _, department, first, second = _seed_tenant(db_session, "DEPT")
-    thread = messaging.open_department_thread(db_session, user=first, department_id=department.id)
+    thread = secure_messaging.open_department_thread(db_session, user=first, department_id=department.id)
 
     assert thread["kind"] == "DEPARTMENT"
     assert thread["department_id"] == department.id
     assert set(thread["member_user_ids"]) == {first.id, second.id}
 
 
-def test_message_delivery_creates_receipt_notification_and_read_state(db_session):
+def test_message_delivery_creates_receipt_notification_and_one_unread_item(db_session):
     _, _, first, second = _seed_tenant(db_session, "READ")
-    thread = messaging.open_direct_thread(db_session, user=first, peer_user_id=second.id)
+    thread = secure_messaging.open_direct_thread(db_session, user=first, peer_user_id=second.id)
 
-    message = messaging.send_message(
+    message = secure_messaging.send_message(
         db_session,
         user=first,
         thread_id=thread["id"],
         body="Please review the audit pack.",
         client_msg_id="client-message-1",
     )
-    duplicate = messaging.send_message(
+    duplicate = secure_messaging.send_message(
         db_session,
         user=first,
         thread_id=thread["id"],
@@ -95,13 +93,13 @@ def test_message_delivery_creates_receipt_notification_and_read_state(db_session
     notification = db_session.query(models.PortalNotification).filter_by(user_id=second.id, entity_id=thread["id"]).one()
     assert receipt.read_at is None
     assert notification.read_at is None
-    assert messaging.unread_notification_count(db_session, user=second) == {
-        "notifications": 1,
+    assert notification_counts.unread_notification_count(db_session, user=second) == {
+        "notifications": 0,
         "messages": 1,
-        "total": 2,
+        "total": 1,
     }
 
-    result = messaging.mark_thread_read(db_session, user=second, thread_id=thread["id"])
+    result = secure_messaging.mark_thread_read(db_session, user=second, thread_id=thread["id"])
     assert result["updated_receipts"] == 1
     db_session.refresh(receipt)
     db_session.refresh(notification)
@@ -113,14 +111,14 @@ def test_message_delivery_creates_receipt_notification_and_read_state(db_session
 def test_non_member_cannot_read_or_send_to_thread(db_session):
     _, _, first, second = _seed_tenant(db_session, "MEMBERS")
     _, _, third, _ = _seed_tenant(db_session, "THIRD")
-    thread = messaging.open_direct_thread(db_session, user=first, peer_user_id=second.id)
+    thread = secure_messaging.open_direct_thread(db_session, user=first, peer_user_id=second.id)
 
     with pytest.raises(HTTPException) as read_exc:
-        messaging.list_messages(db_session, user=third, thread_id=thread["id"])
+        secure_messaging.list_messages(db_session, user=third, thread_id=thread["id"])
     assert read_exc.value.status_code == 404
 
     with pytest.raises(HTTPException) as send_exc:
-        messaging.send_message(
+        secure_messaging.send_message(
             db_session,
             user=third,
             thread_id=thread["id"],
