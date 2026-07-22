@@ -163,13 +163,25 @@ def _nullable_columns(connection, table_name: str) -> dict[str, bool]:
     return {str(name): nullable == "YES" for name, nullable in rows}
 
 
+def _assert_foreign_key_rejects_orphan(engine: sa.Engine) -> None:
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            connection.execute(text("INSERT INTO quality_car_responses (car_id) VALUES (gen_random_uuid())"))
+        except sa.exc.IntegrityError:
+            transaction.rollback()
+            return
+        transaction.rollback()
+    raise AssertionError("Orphaned CAR response insertion unexpectedly succeeded")
+
+
 def main() -> None:
     engine = create_engine(os.environ["DATABASE_URL"])
     ids = _create_runtime_fallback_baseline(engine)
     _run_alembic("stamp", BASE_REVISION)
     _run_alembic("upgrade", TARGET_REVISION)
 
-    with engine.begin() as connection:
+    with engine.connect() as connection:
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         assert revision == TARGET_REVISION
 
@@ -228,12 +240,7 @@ def main() -> None:
         assert cap.created_at is not None
         assert cap.updated_at is not None
 
-        try:
-            connection.execute(text("INSERT INTO quality_car_responses (car_id) VALUES (gen_random_uuid())"))
-        except sa.exc.IntegrityError:
-            pass
-        else:  # pragma: no cover - the probe must fail if the FK is ineffective
-            raise AssertionError("Orphaned CAR response insertion unexpectedly succeeded")
+    _assert_foreign_key_rejects_orphan(engine)
 
 
 if __name__ == "__main__":
