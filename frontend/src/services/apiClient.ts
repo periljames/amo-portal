@@ -227,7 +227,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
             cache: canUseCache,
             cacheTtlMs: effectiveCacheTtlMs,
             allowStaleFallback: true,
-            queueMutation: offline?.queueMutation ?? (["PUT", "PATCH", "DELETE"].includes(method) && !(body instanceof FormData)),
+            queueMutation: offline?.queueMutation === true,
             entityType: offline?.entityType,
             entityId: offline?.entityId,
             idempotencyKey: offline?.idempotencyKey,
