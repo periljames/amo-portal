@@ -12,6 +12,9 @@ class RealtimeKind(str, Enum):
     CHAT_MESSAGE_EDITED = "chat.message.edited"
     CHAT_MESSAGE_DELETED = "chat.message.deleted"
     CHAT_THREAD_CREATED = "chat.thread.created"
+    CHAT_THREAD_UPDATED = "chat.thread.updated"
+    NOTIFICATION_CREATED = "notification.created"
+    NOTIFICATION_READ = "notification.read"
     PROMPT_AUTHORIZATION = "prompt.authorization"
     PROMPT_TASK_ASSIGNED = "prompt.task_assigned"
     PRESENCE_SNAPSHOT = "presence.snapshot"
@@ -56,15 +59,42 @@ class RealtimeTokenResponse(BaseModel):
 
 class ThreadCreateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
-    member_user_ids: list[str] = Field(default_factory=list)
+    member_user_ids: list[str] = Field(default_factory=list, max_length=500)
 
 
 class ThreadRead(BaseModel):
     id: str
     title: str | None = None
+    kind: str = "GROUP"
+    scope_key: str | None = None
+    department_id: str | None = None
+    user_group_id: str | None = None
     created_by: str | None = None
     created_at: datetime
+    updated_at: datetime | None = None
+    last_message_at: datetime | None = None
+    last_message_preview: str = ""
     member_user_ids: list[str] = Field(default_factory=list)
+    members: list[dict[str, Any]] = Field(default_factory=list)
+    unread_count: int = 0
+    notification_level: str = "ALL"
+    muted_until: datetime | None = None
+
+
+class ChatMessageCreateRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=8000)
+    client_msg_id: str = Field(min_length=4, max_length=64)
+    reply_to_message_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatMessageUpdateRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=8000)
+
+
+class ThreadNotificationUpdateRequest(BaseModel):
+    notification_level: str = Field(default="ALL", pattern="^(ALL|MENTIONS|NONE)$")
+    muted_until: datetime | None = None
 
 
 class ChatMessageRead(BaseModel):
@@ -73,6 +103,9 @@ class ChatMessageRead(BaseModel):
     sender_id: str | None
     body_text: str
     body_mime: str
+    message_type: str = "TEXT"
+    reply_to_message_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     client_msg_id: str
     created_at: datetime
     edited_at: datetime | None = None
@@ -88,6 +121,7 @@ class RealtimeBootstrapResponse(BaseModel):
     unread_counts: dict[str, int] = Field(default_factory=dict)
     presence: dict[str, str] = Field(default_factory=dict)
     pending_prompts: list[dict[str, Any]] = Field(default_factory=list)
+    notification_unread_count: int = 0
 
 
 class RealtimeSyncResponse(BaseModel):
