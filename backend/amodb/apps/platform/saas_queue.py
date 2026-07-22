@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -114,15 +114,14 @@ def enqueue_job(
 
 def release_expired_leases(db: Session, *, now: datetime | None = None) -> int:
     now = now or utcnow()
-    rows = (
-        db.query(models.SaaSJob)
-        .filter(
-            models.SaaSJob.status == "RUNNING",
-            models.SaaSJob.lease_expires_at.isnot(None),
-            models.SaaSJob.lease_expires_at <= now,
-        )
-        .all()
+    query = db.query(models.SaaSJob).filter(
+        models.SaaSJob.status == "RUNNING",
+        models.SaaSJob.lease_expires_at.isnot(None),
+        models.SaaSJob.lease_expires_at <= now,
     )
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        query = query.with_for_update(skip_locked=True)
+    rows = query.all()
     for job in rows:
         if job.attempt_count >= job.max_attempts:
             job.status = "DEAD"
@@ -149,13 +148,21 @@ def claim_jobs(
     lease_seconds: int = 60,
     now: datetime | None = None,
 ) -> list[models.SaaSJob]:
-    """Atomically lease jobs using PostgreSQL ``FOR UPDATE SKIP LOCKED``."""
+    """Atomically lease one side-effect job per worker.
+
+    Workers scale horizontally. Claiming a serial batch caused later jobs to
+    expire before execution, which could duplicate external billing, eTIMS or
+    AI side effects. ``batch_size`` remains accepted for API compatibility but
+    the safe claim width is deliberately one.
+    """
 
     now = now or utcnow()
     release_expired_leases(db, now=now)
     normalized_queues = [name.strip().lower() for name in queue_names if name and name.strip()]
     if not normalized_queues:
         normalized_queues = ["default"]
+    requested_batch_size = max(1, min(int(batch_size), 100))
+    safe_lease_seconds = max(30, min(int(lease_seconds), 3600))
 
     query = (
         db.query(models.SaaSJob)
@@ -166,7 +173,7 @@ def claim_jobs(
             or_(models.SaaSJob.lease_expires_at.is_(None), models.SaaSJob.lease_expires_at <= now),
         )
         .order_by(models.SaaSJob.priority.asc(), models.SaaSJob.available_at.asc(), models.SaaSJob.created_at.asc())
-        .limit(max(1, min(int(batch_size), 100)))
+        .limit(1)
     )
     if db.bind is not None and db.bind.dialect.name == "postgresql":
         query = query.with_for_update(skip_locked=True)
@@ -174,14 +181,20 @@ def claim_jobs(
         query = query.with_for_update()
 
     jobs = query.all()
-    lease_until = now + timedelta(seconds=max(10, min(int(lease_seconds), 3600)))
+    lease_until = now + timedelta(seconds=safe_lease_seconds)
     for job in jobs:
         job.status = "RUNNING"
         job.locked_at = now
         job.locked_by = worker_id[:128]
         job.lease_expires_at = lease_until
         job.attempt_count = int(job.attempt_count or 0) + 1
-        add_event(db, job, "RUNNING", f"Claimed by worker {worker_id}.")
+        add_event(
+            db,
+            job,
+            "RUNNING",
+            f"Claimed by worker {worker_id}.",
+            {"requested_batch_size": requested_batch_size, "safe_claim_width": 1},
+        )
     db.commit()
     for job in jobs:
         db.refresh(job)
@@ -197,11 +210,13 @@ def heartbeat_job(
 ) -> None:
     if job.status != "RUNNING" or job.locked_by != worker_id:
         raise ValueError("Job is not leased by this worker")
-    job.lease_expires_at = utcnow() + timedelta(seconds=max(10, min(int(lease_seconds), 3600)))
+    job.lease_expires_at = utcnow() + timedelta(seconds=max(30, min(int(lease_seconds), 3600)))
     db.commit()
 
 
 def complete_job(db: Session, job: models.SaaSJob, result: dict[str, Any] | None = None) -> None:
+    if job.status != "RUNNING" or not job.locked_by:
+        raise ValueError("Only an actively leased job can be completed")
     job.status = "SUCCEEDED"
     job.result_json = result or {}
     job.last_error = None
@@ -225,6 +240,8 @@ def fail_job(
     *,
     retryable: bool = True,
 ) -> None:
+    if job.status != "RUNNING" or not job.locked_by:
+        raise ValueError("Only an actively leased job can be failed")
     message = str(error)[:4000]
     now = utcnow()
     job.last_error = message
