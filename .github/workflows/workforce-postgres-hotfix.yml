@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python amodb/apps/rostering/tests/postgres_migration_probe.py 2>&1 | tee workforce-postgres-migration.log
+          python -m amodb.apps.rostering.tests.postgres_migration_probe 2>&1 | tee workforce-postgres-migration.log
       - name: Upload PostgreSQL migration diagnostics
         if: always()
         uses: actions/upload-artifact@v6
