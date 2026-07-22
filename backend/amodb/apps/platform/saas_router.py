@@ -62,6 +62,21 @@ def _ticket_access(user: account_models.User, ticket: platform_models.PlatformSu
         raise HTTPException(status_code=404, detail="Support ticket not found")
 
 
+def _visible_support_payload(payload: dict[str, Any], user: account_models.User) -> dict[str, Any]:
+    """Strip platform-only notes at the API boundary for tenant viewers."""
+    if getattr(user, "is_superuser", False):
+        return payload
+    result = dict(payload)
+    messages = result.get("messages")
+    if isinstance(messages, list):
+        result["messages"] = [
+            message
+            for message in messages
+            if str(message.get("visibility") or "PUBLIC").upper() != "INTERNAL"
+        ]
+    return result
+
+
 @platform_saas_router.get("/capabilities")
 def capabilities(
     db: Session = Depends(get_read_db),
@@ -406,7 +421,7 @@ def support_ticket_create(
     if not tenant_id and not getattr(user, "is_superuser", False):
         raise HTTPException(status_code=403, detail="A tenant context is required")
     try:
-        return saas_services.create_support_ticket(
+        result = saas_services.create_support_ticket(
             db,
             tenant_id=tenant_id,
             title=str(payload.get("title") or ""),
@@ -416,6 +431,7 @@ def support_ticket_create(
             requester_user_id=_actor_id(user),
             requester_email=user.email,
         )
+        return _visible_support_payload(result, user)
     except Exception as exc:
         _bad(exc)
 
@@ -451,7 +467,8 @@ def support_ticket_detail(
     if not row:
         raise HTTPException(status_code=404, detail="Support ticket not found")
     _ticket_access(user, row)
-    return saas_services.support_ticket_payload(db, row, include_messages=True)
+    result = saas_services.support_ticket_payload(db, row, include_messages=True)
+    return _visible_support_payload(result, user)
 
 
 @support_router.patch("/tickets/{ticket_id}")
@@ -470,12 +487,13 @@ def support_ticket_update(
         if set(payload) - allowed:
             raise HTTPException(status_code=403, detail="Tenant users may only update ticket status")
     try:
-        return saas_services.update_support_ticket(
+        result = saas_services.update_support_ticket(
             db,
             ticket_id=ticket_id,
             payload=payload,
             actor_user_id=_actor_id(user),
         )
+        return _visible_support_payload(result, user)
     except Exception as exc:
         _bad(exc)
 
