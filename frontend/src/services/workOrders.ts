@@ -191,6 +191,7 @@ export async function getTask(taskId: number): Promise<TaskCardRead> {
 }
 
 export async function updateTask(taskId: number, payload: TaskUpdatePayload): Promise<TaskCardRead> {
+  // Task updates carry last_known_updated_at, so the backend can reject stale replay.
   return apiPut<TaskCardRead>(`/work-orders/tasks/${taskId}`, payload, {
     headers: authHeaders(),
     offline: {
@@ -202,13 +203,10 @@ export async function updateTask(taskId: number, payload: TaskUpdatePayload): Pr
 }
 
 export async function updateWorkOrder(id: number, payload: WorkOrderUpdatePayload): Promise<WorkOrderRead> {
+  // Work-order updates have no backend revision/idempotency contract yet.
+  // Keep them live-only so delayed replay cannot overwrite a newer planner edit.
   return apiPut<WorkOrderRead>(`/work-orders/${id}`, payload, {
     headers: authHeaders(),
-    offline: {
-      queueMutation: true,
-      entityType: "work-order",
-      entityId: String(id),
-    },
   });
 }
 
