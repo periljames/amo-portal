@@ -11,6 +11,7 @@ from . import saas_models as models
 
 
 TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "DEAD", "CANCELLED"}
+RETRYABLE_MANUAL_STATUSES = {"FAILED", "DEAD", "CANCELLED", "RETRY"}
 CLAIMABLE_STATUSES = {"PENDING", "RETRY"}
 
 
@@ -148,11 +149,7 @@ def claim_jobs(
     lease_seconds: int = 60,
     now: datetime | None = None,
 ) -> list[models.SaaSJob]:
-    """Atomically lease jobs.
-
-    PostgreSQL executes this query with ``FOR UPDATE SKIP LOCKED`` so many
-    workers can claim from the same queue without serialising unrelated jobs.
-    """
+    """Atomically lease jobs using PostgreSQL ``FOR UPDATE SKIP LOCKED``."""
 
     now = now or utcnow()
     release_expired_leases(db, now=now)
@@ -217,7 +214,6 @@ def complete_job(db: Session, job: models.SaaSJob, result: dict[str, Any] | None
 
 
 def _retry_delay(attempt_count: int) -> timedelta:
-    # 5s, 15s, 45s, 135s ... capped at 30 minutes.
     seconds = min(1800, 5 * (3 ** max(0, int(attempt_count) - 1)))
     return timedelta(seconds=seconds)
 
@@ -247,7 +243,7 @@ def fail_job(
 
 
 def retry_job(db: Session, job: models.SaaSJob, *, actor_user_id: str | None = None) -> models.SaaSJob:
-    if job.status not in TERMINAL_STATUSES | {"RETRY"}:
+    if job.status not in RETRYABLE_MANUAL_STATUSES:
         raise ValueError("Only failed, dead, cancelled or retrying jobs can be retried")
     job.status = "PENDING"
     job.available_at = utcnow()
@@ -288,20 +284,12 @@ def queue_summary(db: Session) -> dict[str, Any]:
             queues[str(queue_name)] = queues.get(str(queue_name), 0) + 1
     oldest = (
         db.query(models.SaaSJob)
-        .filter(models.SaaSJob.status.in_(CLAIMABLE_STATUSES))
+        .filter(models.SaaSJob.status.in_({"PENDING", "RETRY", "RUNNING"}))
         .order_by(models.SaaSJob.created_at.asc())
         .first()
     )
-    now = utcnow()
-    oldest_age = None
-    if oldest and oldest.created_at:
-        created = oldest.created_at
-        if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
-        oldest_age = max(0, int((now - created).total_seconds()))
     return {
         "counts": counts,
-        "queue_depth": sum(queues.values()),
         "queues": queues,
-        "oldest_pending_age_seconds": oldest_age,
+        "oldest_active_created_at": oldest.created_at if oldest else None,
     }
