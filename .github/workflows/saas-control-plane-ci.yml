@@ -8,6 +8,7 @@ on:
       - "backend/amodb/apps/accounts/**"
       - "backend/amodb/apps/realtime/**"
       - "backend/amodb/jobs/saas_worker.py"
+      - "backend/amodb/jobs/saas_worker_safe.py"
       - "backend/amodb/jobs/platform_command_worker.py"
       - "backend/amodb/alembic/versions/**"
       - "backend/amodb/scripts/saas_control_plane_internal_check.py"
@@ -88,6 +89,7 @@ jobs:
           training_finalizer = script.get_revision("saas_20260722_finalize_training")
           read_index_finalizer = script.get_revision("saas_20260722_qms_read_idx")
           messaging_finalizer = script.get_revision("saas_20260722_messaging")
+          runtime_fence = script.get_revision("saas_20260722_runtime_fence")
           assert foundation and foundation.down_revision == "quality_20260722_schema_integrity"
           assert quality_finalizer and quality_finalizer.down_revision == "saas_20260722_control_plane"
           assert training_finalizer and training_finalizer.down_revision == "saas_20260722_finalize_idx"
@@ -98,9 +100,10 @@ jobs:
           }
           assert not read_index_finalizer.dependencies
           assert messaging_finalizer and messaging_finalizer.down_revision == "saas_20260722_qms_read_idx"
+          assert runtime_fence and runtime_fence.down_revision == "saas_20260722_messaging"
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert "saas_20260722_messaging" in heads, heads
+          assert "saas_20260722_runtime_fence" in heads, heads
           PY
       - name: Upgrade production schema graph
         id: migrate
@@ -153,14 +156,14 @@ jobs:
         run: |
           set -o pipefail
           pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py 2>&1 | tee saas-backend-tests.log
-      - name: Run empty-queue worker smoke tests
+      - name: Run lease-fenced worker smoke tests
         id: workers
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
           {
-            python -m amodb.jobs.saas_worker --once --batch-size 5
+            python -m amodb.jobs.saas_worker_safe --once --batch-size 5
             python -m amodb.jobs.platform_command_worker --once --batch-size 5
           } 2>&1 | tee saas-workers.log
       - name: Upload backend diagnostics
