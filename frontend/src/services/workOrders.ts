@@ -1,8 +1,7 @@
 // src/services/workOrders.ts
 // Work order + task API helpers.
 
-import { getApiBaseUrl } from "./config";
-import { getToken, handleAuthFailure } from "./auth";
+import { apiGet, apiPost, apiPut } from "./crs";
 
 type QueryVal = string | number | boolean | null | undefined;
 
@@ -29,9 +28,7 @@ export type TaskStatus =
   | string;
 
 export type TaskOriginType = "SCHEDULED" | "NON_ROUTINE" | string;
-
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | string;
-
 export type TaskCategory = "SCHEDULED" | "UNSCHEDULED" | "DEFECT" | string;
 
 export interface WorkOrderRead {
@@ -72,7 +69,6 @@ export interface WorkOrderCreatePayload {
   work_package_ref?: string | null;
   operator_event_id?: string | null;
 }
-
 
 export interface WorkOrderUpdatePayload {
   description?: string | null;
@@ -135,68 +131,12 @@ export interface TaskUpdatePayload {
 
 function toQuery(params: Record<string, QueryVal>): string {
   const qs = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v === null || v === undefined || v === "") return;
-    qs.set(k, String(v));
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === "") return;
+    qs.set(key, String(value));
   });
-  const s = qs.toString();
-  return s ? `?${s}` : "";
-}
-
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getToken();
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers || {}),
-    },
-    credentials: "include",
-    ...init,
-  });
-
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Work Orders API ${res.status}: ${text || res.statusText}`);
-  }
-
-  return (await res.json()) as T;
-}
-
-async function sendJson<T>(
-  path: string,
-  method: "PUT" | "POST",
-  body: unknown
-): Promise<T> {
-  const token = getToken();
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
-    method,
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body ?? {}),
-    credentials: "include",
-  });
-
-  if (res.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Work Orders API ${res.status}: ${text || res.statusText}`);
-  }
-
-  return (await res.json()) as T;
+  const encoded = qs.toString();
+  return encoded ? `?${encoded}` : "";
 }
 
 export async function listWorkOrders(params?: {
@@ -206,54 +146,66 @@ export async function listWorkOrders(params?: {
   skip?: number;
   limit?: number;
 }): Promise<WorkOrderRead[]> {
-  return fetchJson<WorkOrderRead[]>(`/work-orders/${toQuery(params ?? {})}`);
+  return apiGet<WorkOrderRead[]>(`/work-orders/${toQuery(params ?? {})}`);
 }
 
-export async function createWorkOrder(
-  payload: WorkOrderCreatePayload
-): Promise<WorkOrderRead> {
-  return sendJson<WorkOrderRead>("/work-orders/", "POST", payload);
+export async function createWorkOrder(payload: WorkOrderCreatePayload): Promise<WorkOrderRead> {
+  // Creation stays server-controlled unless the API supplies a durable idempotency key.
+  return apiPost<WorkOrderRead>("/work-orders/", payload);
 }
 
 export async function getWorkOrder(id: number): Promise<WorkOrderRead> {
-  return fetchJson<WorkOrderRead>(`/work-orders/${id}`);
+  return apiGet<WorkOrderRead>(`/work-orders/${id}`);
 }
 
 export async function getWorkOrderByNumber(woNumber: string): Promise<WorkOrderRead> {
-  return fetchJson<WorkOrderRead>(`/work-orders/by-number/${encodeURIComponent(woNumber)}`);
+  return apiGet<WorkOrderRead>(`/work-orders/by-number/${encodeURIComponent(woNumber)}`);
 }
 
 export async function listTasksForWorkOrder(workOrderId: number): Promise<TaskCardRead[]> {
-  return fetchJson<TaskCardRead[]>(`/work-orders/${workOrderId}/tasks`);
+  return apiGet<TaskCardRead[]>(`/work-orders/${workOrderId}/tasks`);
 }
 
-export async function createTask(
-  workOrderId: number,
-  payload: TaskCreatePayload
-): Promise<TaskCardRead> {
-  return sendJson<TaskCardRead>(`/work-orders/${workOrderId}/tasks`, "POST", payload);
+export async function createTask(workOrderId: number, payload: TaskCreatePayload): Promise<TaskCardRead> {
+  // Creation stays live-only to avoid duplicate maintenance instructions.
+  return apiPost<TaskCardRead>(`/work-orders/${workOrderId}/tasks`, payload);
 }
 
 export async function getTask(taskId: number): Promise<TaskCardRead> {
-  return fetchJson<TaskCardRead>(`/work-orders/tasks/${taskId}`);
+  return apiGet<TaskCardRead>(`/work-orders/tasks/${taskId}`);
 }
 
-export async function updateTask(
-  taskId: number,
-  payload: TaskUpdatePayload
-): Promise<TaskCardRead> {
-  return sendJson<TaskCardRead>(`/work-orders/tasks/${taskId}`, "PUT", payload);
+export async function updateTask(taskId: number, payload: TaskUpdatePayload): Promise<TaskCardRead> {
+  return apiPut<TaskCardRead>(`/work-orders/tasks/${taskId}`, payload, {
+    offline: {
+      queueMutation: true,
+      entityType: "work-order-task",
+      entityId: String(taskId),
+    },
+  });
 }
-
 
 export async function updateWorkOrder(id: number, payload: WorkOrderUpdatePayload): Promise<WorkOrderRead> {
-  return sendJson<WorkOrderRead>(`/work-orders/${id}`, "PUT", payload);
+  return apiPut<WorkOrderRead>(`/work-orders/${id}`, payload, {
+    offline: {
+      queueMutation: true,
+      entityType: "work-order",
+      entityId: String(id),
+    },
+  });
 }
 
-export async function inspectTask(taskId: number, payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null }) {
-  return sendJson<any>(`/work-orders/tasks/${taskId}/inspect`, "POST", payload);
+export async function inspectTask(
+  taskId: number,
+  payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null },
+): Promise<unknown> {
+  // Inspection/signature actions must be confirmed by the live server.
+  return apiPost<unknown>(`/work-orders/tasks/${taskId}/inspect`, payload);
 }
 
-export async function inspectWorkOrder(workOrderId: number, payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null }) {
-  return sendJson<any>(`/work-orders/${workOrderId}/inspect`, "POST", payload);
+export async function inspectWorkOrder(
+  workOrderId: number,
+  payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null },
+): Promise<unknown> {
+  return apiPost<unknown>(`/work-orders/${workOrderId}/inspect`, payload);
 }
