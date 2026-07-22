@@ -31,14 +31,26 @@ type RosterAssignmentCreateInput = Omit<Roster.RosterAssignmentCreate, "status">
   status?: Roster.RosterAssignmentCreate["status"] | string;
 };
 
-const ROSTER_ASSIGNMENT_STATUSES = new Set([
-  "DRAFT",
-  "PUBLISHED",
-  "REST",
-  "LEAVE",
+const ROSTER_ASSIGNMENT_STATUSES = new Set<Roster.RosterAssignmentStatus>([
+  "DUTY",
+  "STANDBY",
   "TRAINING",
-  "ON_CALL",
+  "OFF",
+  "LEAVE",
+  "TRAVEL",
+  "UNAVAILABLE",
+  "OTHER",
 ]);
+
+function normalizedAssignmentStatus(
+  value: RosterAssignmentCreateInput["status"],
+): Roster.RosterAssignmentStatus {
+  const status = String(value || "DUTY").trim().toUpperCase();
+  if (!ROSTER_ASSIGNMENT_STATUSES.has(status as Roster.RosterAssignmentStatus)) {
+    throw new Error(`Unsupported roster assignment status: ${status}`);
+  }
+  return status as Roster.RosterAssignmentStatus;
+}
 
 export function getRosterContracts(): Promise<Roster.RosterContractResponse> {
   return apiJson("/rostering/contracts", { offline: { cacheTtlMs: 15 * 60_000 } });
@@ -140,14 +152,10 @@ export function createRosterAssignment(
   versionId: string,
   payload: RosterAssignmentCreateInput,
 ): Promise<Roster.RosterAssignmentRead> {
-  const status = String(payload.status || "DRAFT").toUpperCase();
-  if (!ROSTER_ASSIGNMENT_STATUSES.has(status)) {
-    throw new Error(`Unsupported roster assignment status: ${status}`);
-  }
   const idempotencyKey = payload.source_reference_id || newOfflineIdempotencyKey("roster-assignment");
   const normalized: Roster.RosterAssignmentCreate = {
     ...payload,
-    status: status as Roster.RosterAssignmentCreate["status"],
+    status: normalizedAssignmentStatus(payload.status),
     source_reference_id: idempotencyKey,
   };
   return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/assignments`, {
