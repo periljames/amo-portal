@@ -30,12 +30,6 @@ def _table_exists(bind, table_name: str) -> bool:
     return sa.inspect(bind).has_table(table_name)
 
 
-def _column_exists(bind, table_name: str, column_name: str) -> bool:
-    if not _table_exists(bind, table_name):
-        return False
-    return column_name in {column["name"] for column in sa.inspect(bind).get_columns(table_name)}
-
-
 def _constraint_exists(bind, table_name: str, constraint_name: str) -> bool:
     return bool(
         bind.execute(
@@ -56,22 +50,29 @@ def _constraint_exists(bind, table_name: str, constraint_name: str) -> bool:
 
 
 def _has_primary_key(bind, table_name: str) -> bool:
-    return bool(
-        bind.execute(
-            text(
-                """
-                SELECT 1
-                FROM pg_constraint c
-                JOIN pg_class t ON t.oid = c.conrelid
-                JOIN pg_namespace n ON n.oid = t.relnamespace
-                WHERE n.nspname = current_schema()
-                  AND t.relname = :table_name
-                  AND c.contype = 'p'
-                """
-            ),
-            {"table_name": table_name},
-        ).first()
-    )
+    return bool(sa.inspect(bind).get_pk_constraint(table_name).get("constrained_columns"))
+
+
+def _foreign_key_exists(bind, table_name: str, columns: Iterable[str], referred_table: str) -> bool:
+    expected_columns = tuple(columns)
+    for foreign_key in sa.inspect(bind).get_foreign_keys(table_name):
+        if tuple(foreign_key.get("constrained_columns") or ()) != expected_columns:
+            continue
+        if str(foreign_key.get("referred_table") or "") == referred_table:
+            return True
+    return False
+
+
+def _unique_columns_exist(bind, table_name: str, columns: Iterable[str]) -> bool:
+    expected_columns = tuple(columns)
+    inspector = sa.inspect(bind)
+    for constraint in inspector.get_unique_constraints(table_name):
+        if tuple(constraint.get("column_names") or ()) == expected_columns:
+            return True
+    for index in inspector.get_indexes(table_name):
+        if index.get("unique") and tuple(index.get("column_names") or ()) == expected_columns:
+            return True
+    return False
 
 
 def _assert_no_rows(bind, sql: str, message: str) -> None:
@@ -88,6 +89,23 @@ def _set_not_null(table_name: str, columns: Iterable[str]) -> None:
 def _add_constraint(bind, table_name: str, constraint_name: str, ddl: str) -> None:
     if not _constraint_exists(bind, table_name, constraint_name):
         op.execute(text(f'ALTER TABLE "{table_name}" ADD CONSTRAINT "{constraint_name}" {ddl}'))
+
+
+def _add_foreign_key(
+    bind,
+    table_name: str,
+    constraint_name: str,
+    columns: Iterable[str],
+    referred_table: str,
+    ddl: str,
+) -> None:
+    if not _foreign_key_exists(bind, table_name, columns, referred_table):
+        _add_constraint(bind, table_name, constraint_name, ddl)
+
+
+def _add_unique(bind, table_name: str, constraint_name: str, columns: Iterable[str], ddl: str) -> None:
+    if not _unique_columns_exist(bind, table_name, columns):
+        _add_constraint(bind, table_name, constraint_name, ddl)
 
 
 def _harden_car_responses(bind) -> None:
@@ -117,10 +135,12 @@ def _harden_car_responses(bind) -> None:
 
     if not _has_primary_key(bind, table_name):
         _add_constraint(bind, table_name, "pk_quality_car_responses", "PRIMARY KEY (id)")
-    _add_constraint(
+    _add_foreign_key(
         bind,
         table_name,
         "fk_quality_car_responses_car",
+        ("car_id",),
+        "quality_cars",
         "FOREIGN KEY (car_id) REFERENCES quality_cars(id) ON DELETE CASCADE",
     )
     _add_constraint(
@@ -160,10 +180,12 @@ def _harden_car_attachments(bind) -> None:
     _set_not_null(table_name, ("id", "car_id", "filename", "file_ref", "uploaded_at"))
     if not _has_primary_key(bind, table_name):
         _add_constraint(bind, table_name, "pk_quality_car_attachments", "PRIMARY KEY (id)")
-    _add_constraint(
+    _add_foreign_key(
         bind,
         table_name,
         "fk_quality_car_attachments_car",
+        ("car_id",),
+        "quality_cars",
         "FOREIGN KEY (car_id) REFERENCES quality_cars(id) ON DELETE CASCADE",
     )
     op.execute(text("CREATE INDEX IF NOT EXISTS ix_quality_car_attachments_car_id ON quality_car_attachments (car_id)"))
@@ -196,10 +218,12 @@ def _harden_finding_attachments(bind) -> None:
     _set_not_null(table_name, ("id", "finding_id", "filename", "file_ref", "uploaded_at"))
     if not _has_primary_key(bind, table_name):
         _add_constraint(bind, table_name, "pk_quality_finding_attachments", "PRIMARY KEY (id)")
-    _add_constraint(
+    _add_foreign_key(
         bind,
         table_name,
         "fk_quality_finding_attachments_finding",
+        ("finding_id",),
+        "qms_audit_findings",
         "FOREIGN KEY (finding_id) REFERENCES qms_audit_findings(id) ON DELETE CASCADE",
     )
     op.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_finding_attachments_finding_id ON qms_finding_attachments (finding_id)"))
@@ -258,19 +282,29 @@ def _harden_corrective_actions(bind) -> None:
     _set_not_null(table_name, ("id", "amo_id", "finding_id", "status", "created_at", "updated_at"))
     if not _has_primary_key(bind, table_name):
         _add_constraint(bind, table_name, "pk_quality_corrective_actions", "PRIMARY KEY (id)")
-    _add_constraint(
+    _add_foreign_key(
         bind,
         table_name,
         "fk_quality_corrective_actions_amo",
+        ("amo_id",),
+        "amos",
         "FOREIGN KEY (amo_id) REFERENCES amos(id) ON DELETE CASCADE",
     )
-    _add_constraint(
+    _add_foreign_key(
         bind,
         table_name,
         "fk_quality_corrective_actions_finding",
+        ("finding_id",),
+        "qms_audit_findings",
         "FOREIGN KEY (finding_id) REFERENCES qms_audit_findings(id) ON DELETE CASCADE",
     )
-    _add_constraint(bind, table_name, "uq_quality_corrective_actions_finding", "UNIQUE (finding_id)")
+    _add_unique(
+        bind,
+        table_name,
+        "uq_quality_corrective_actions_finding",
+        ("finding_id",),
+        "UNIQUE (finding_id)",
+    )
     _add_constraint(
         bind,
         table_name,
