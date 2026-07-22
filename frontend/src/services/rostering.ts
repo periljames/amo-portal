@@ -27,6 +27,19 @@ type DeleteAssignmentRequest = {
   expected_state_revision?: number | null;
 };
 
+type RosterAssignmentCreateInput = Omit<Roster.RosterAssignmentCreate, "status"> & {
+  status?: Roster.RosterAssignmentCreate["status"] | string;
+};
+
+const ROSTER_ASSIGNMENT_STATUSES = new Set([
+  "DRAFT",
+  "PUBLISHED",
+  "REST",
+  "LEAVE",
+  "TRAINING",
+  "ON_CALL",
+]);
+
 export function getRosterContracts(): Promise<Roster.RosterContractResponse> {
   return apiJson("/rostering/contracts", { offline: { cacheTtlMs: 15 * 60_000 } });
 }
@@ -125,10 +138,18 @@ export function listRosterAssignments(
 
 export function createRosterAssignment(
   versionId: string,
-  payload: Roster.RosterAssignmentCreate,
+  payload: RosterAssignmentCreateInput,
 ): Promise<Roster.RosterAssignmentRead> {
+  const status = String(payload.status || "DRAFT").toUpperCase();
+  if (!ROSTER_ASSIGNMENT_STATUSES.has(status)) {
+    throw new Error(`Unsupported roster assignment status: ${status}`);
+  }
   const idempotencyKey = payload.source_reference_id || newOfflineIdempotencyKey("roster-assignment");
-  const normalized = { ...payload, source_reference_id: idempotencyKey };
+  const normalized: Roster.RosterAssignmentCreate = {
+    ...payload,
+    status: status as Roster.RosterAssignmentCreate["status"],
+    source_reference_id: idempotencyKey,
+  };
   return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/assignments`, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
@@ -219,91 +240,8 @@ export function publishRosterVersion(
   });
 }
 
-export function acknowledgeRosterVersion(
-  versionId: string,
-  payload: string | { acknowledgement_note?: string | null; idempotency_key?: string | null } = {},
-): Promise<{ id: string }> {
-  const normalized = typeof payload === "string" ? { acknowledgement_note: payload } : payload;
-  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/acknowledge`, {
-    method: "POST",
-    body: jsonBody(normalized),
-  });
-}
-
-export function getMyRoster(range: DateRange): Promise<Roster.MyRosterResponse>;
-export function getMyRoster(from: string, to: string): Promise<Roster.MyRosterResponse>;
-export function getMyRoster(rangeOrFrom: DateRange | string, to?: string): Promise<Roster.MyRosterResponse> {
-  const range = typeof rangeOrFrom === "string" ? { from: rangeOrFrom, to: to || rangeOrFrom } : rangeOrFrom;
-  return apiJson(`/rostering/my-roster${queryString(range)}`, { offline: { cacheTtlMs: 2 * 60_000 } });
-}
-
-export async function exportMyRosterCalendar(range: DateRange): Promise<void> {
-  const result = await apiBlob(`/rostering/my-roster.ics${queryString(range)}`);
-  downloadBlob(result.blob, result.filename || "my-duty-roster.ics");
-}
-
-export function listRosterRules(includeInactive = false): Promise<Roster.RosterRuleRead[]> {
-  return apiJson(`/rostering/rules${queryString({ include_inactive: includeInactive })}`, { offline: { cacheTtlMs: 15 * 60_000 } });
-}
-
-export function createRosterRule(payload: Roster.RosterRuleCreate): Promise<Roster.RosterRuleRead> {
-  return apiJson("/rostering/rules", { method: "POST", body: jsonBody(payload) });
-}
-
-export function updateRosterRule(
-  ruleId: string,
-  payload: Partial<Roster.RosterRuleCreate>,
-): Promise<Roster.RosterRuleRead> {
-  return apiJson(`/rostering/rules/${encodeURIComponent(ruleId)}`, {
-    method: "PATCH",
-    body: jsonBody(payload),
-  });
-}
-
-export function getRosterReportSummary(range: DateRange): Promise<Roster.RosterReportSummary> {
-  return apiJson(`/rostering/reports/summary${queryString(range)}`, { offline: { cacheTtlMs: 2 * 60_000 } });
-}
-
-export async function exportRosterReport(
-  options: DateRange & { format: "csv" | "xlsx" | "pdf" | "ics" },
-): Promise<void> {
-  const result = await apiBlob(`/rostering/reports/export${queryString(options)}`);
-  const extension = options.format;
-  downloadBlob(result.blob, result.filename || `duty-roster-${options.from}-${options.to}.${extension}`);
-}
-
-export function listRosterTaskLinks(assignmentId: string): Promise<Roster.RosterTaskAssignmentLinkRead[]> {
-  return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-links`, { offline: { cacheTtlMs: 2 * 60_000 } });
-}
-
-export function linkRosterAssignmentToTaskAssignment(
-  assignmentId: string,
-  payload: {
-    task_assignment_id: number;
-    allocated_start?: string | null;
-    allocated_end?: string | null;
-    allocated_hours?: number | null;
-  },
-): Promise<Roster.RosterTaskAssignmentLinkRead> {
-  return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-links`, {
-    method: "POST",
-    body: jsonBody(payload),
-  });
-}
-
-export function allocateRosterAssignmentToTask(
-  assignmentId: string,
-  payload: {
-    task_id: number;
-    role_on_task?: string;
-    task_assignment_status?: string;
-    allocated_start?: string | null;
-    allocated_end?: string | null;
-    allocated_hours?: number | null;
-  },
-): Promise<Roster.RosterTaskAssignmentLinkRead> {
-  return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-allocations`, {
-    method: "POST",
-    body: jsonBody(payload),
+export function exportRosterVersion(versionId: string, format: "csv" | "pdf" | "xlsx"): Promise<void> {
+  return apiBlob(`/rostering/versions/${encodeURIComponent(versionId)}/export${queryString({ format })}`).then((blob) => {
+    downloadBlob(blob, `roster-${versionId}.${format}`);
   });
 }
