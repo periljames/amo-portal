@@ -11,7 +11,17 @@ from amodb.apps.accounts import models as account_models
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user, get_current_user
 
-from . import broker_router, gateway, presence_service, realtime_auth, schemas, secure_messaging as messaging, services
+from . import (
+    broker_router,
+    gateway,
+    models as realtime_models,
+    notification_counts,
+    presence_service,
+    realtime_auth,
+    schemas,
+    secure_messaging as messaging,
+    services,
+)
 
 router = APIRouter(prefix="/api", tags=["realtime"])
 router.include_router(broker_router.router)
@@ -44,15 +54,23 @@ def issue_realtime_token(
 ) -> schemas.RealtimeTokenResponse:
     result = services.issue_connect_token(db, user=current_user, request=request)
     token = (
-        db.query(__import__("amodb.apps.realtime.models", fromlist=["RealtimeConnectToken"]).RealtimeConnectToken)
-        .filter_by(amo_id=result.amo_id, user_id=str(current_user.id))
-        .order_by(__import__("amodb.apps.realtime.models", fromlist=["RealtimeConnectToken"]).RealtimeConnectToken.created_at.desc())
+        db.query(realtime_models.RealtimeConnectToken)
+        .filter(
+            realtime_models.RealtimeConnectToken.amo_id == result.amo_id,
+            realtime_models.RealtimeConnectToken.user_id == str(current_user.id),
+        )
+        .order_by(realtime_models.RealtimeConnectToken.created_at.desc())
         .first()
     )
     if token is None:
         raise HTTPException(status_code=500, detail="Realtime token persistence failed")
     result.client_id = f"rt-{token.session_id}"
-    realtime_auth.prune_user_tokens(db, amo_id=result.amo_id, user_id=str(current_user.id), keep_latest=3)
+    realtime_auth.prune_user_tokens(
+        db,
+        amo_id=result.amo_id,
+        user_id=str(current_user.id),
+        keep_latest=3,
+    )
     _flush_outbox()
     return result
 
@@ -66,7 +84,7 @@ def realtime_bootstrap(
     if not services.effective_amo_id(current_user):
         return base
     threads = messaging.list_threads(db, user=current_user)
-    counts = messaging.unread_notification_count(db, user=current_user)
+    counts = notification_counts.unread_notification_count(db, user=current_user)
     return schemas.RealtimeBootstrapResponse(
         threads=threads,
         unread_counts={str(row["id"]): int(row["unread_count"]) for row in threads},
@@ -147,7 +165,12 @@ def create_thread(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.ThreadRead:
-    result = messaging.create_group_thread(db, user=current_user, title=payload.title, member_user_ids=payload.member_user_ids)
+    result = messaging.create_group_thread(
+        db,
+        user=current_user,
+        title=payload.title,
+        member_user_ids=payload.member_user_ids,
+    )
     _flush_outbox()
     return result
 
@@ -169,7 +192,13 @@ def list_thread_messages(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> list[schemas.ChatMessageRead]:
-    return messaging.list_messages(db, user=current_user, thread_id=thread_id, limit=limit, before=before)
+    return messaging.list_messages(
+        db,
+        user=current_user,
+        thread_id=thread_id,
+        limit=limit,
+        before=before,
+    )
 
 
 @router.post("/chat/threads/{thread_id}/messages", response_model=schemas.ChatMessageRead, status_code=status.HTTP_201_CREATED)
@@ -250,7 +279,13 @@ def notification_list(
     db: Session = Depends(get_read_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ):
-    return messaging.list_notifications(db, user=current_user, unread_only=unread_only, limit=limit, offset=offset)
+    return messaging.list_notifications(
+        db,
+        user=current_user,
+        unread_only=unread_only,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/notifications/me/unread-count")
@@ -258,7 +293,7 @@ def notification_unread_count(
     db: Session = Depends(get_read_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ):
-    return messaging.unread_notification_count(db, user=current_user)
+    return notification_counts.unread_notification_count(db, user=current_user)
 
 
 @router.post("/notifications/{notification_id}/read")
@@ -306,4 +341,9 @@ def prompt_action(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> dict[str, str]:
-    return services.perform_prompt_action(db, user=current_user, prompt_id=prompt_id, action=payload.action)
+    return services.perform_prompt_action(
+        db,
+        user=current_user,
+        prompt_id=prompt_id,
+        action=payload.action,
+    )
