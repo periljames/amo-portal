@@ -1,0 +1,383 @@
+/*
+ * Portal-wide semantic theme contract.
+ *
+ * This file is intentionally imported after module styles. Legacy modules still
+ * contain literal light surfaces; these rules normalise shared structural
+ * surfaces and controls without changing status/severity colours.
+ */
+
+:root {
+  color-scheme: dark;
+  --portal-canvas: var(--bg-base);
+  --portal-surface: var(--surface);
+  --portal-surface-raised: var(--surface-elevated);
+  --portal-surface-muted: var(--surface-soft);
+  --portal-surface-hover: color-mix(in srgb, var(--surface-elevated) 82%, var(--text-primary) 6%);
+  --portal-control-bg: var(--input-bg);
+  --portal-control-bg-focus: var(--input-bg-focus);
+  --portal-control-bg-disabled: color-mix(in srgb, var(--input-bg) 78%, var(--text-muted) 10%);
+  --portal-control-text: var(--text-primary);
+  --portal-control-placeholder: var(--input-placeholder);
+  --portal-table-head: color-mix(in srgb, var(--surface-elevated) 95%, transparent);
+  --portal-row-hover: color-mix(in srgb, var(--surface-soft) 80%, var(--text-primary) 5%);
+  --portal-overlay: color-mix(in srgb, var(--bg-base-alt) 72%, transparent);
+  --portal-focus: color-mix(in srgb, var(--accent-primary) 45%, transparent);
+  --portal-shadow: 0 18px 42px color-mix(in srgb, #020617 30%, transparent);
+}
+
+body[data-color-scheme="light"] {
+  color-scheme: light;
+  --portal-surface-hover: color-mix(in srgb, var(--surface-elevated) 91%, var(--text-primary) 3%);
+  --portal-control-bg-disabled: color-mix(in srgb, var(--input-bg) 88%, var(--text-muted) 8%);
+  --portal-table-head: color-mix(in srgb, var(--surface-elevated) 96%, var(--bg-base) 4%);
+  --portal-row-hover: color-mix(in srgb, var(--surface-soft) 92%, var(--accent-primary) 3%);
+  --portal-overlay: color-mix(in srgb, #0f172a 40%, transparent);
+  --portal-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
+}
+
+body,
+#root,
+.app-shell__main,
+.app-shell-v2__main {
+  color: var(--text-primary);
+}
+
+/* Native controls: modules may size them, but colour always comes from tokens. */
+body :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+  background-color: var(--portal-control-bg);
+  border-color: var(--input-border);
+  color: var(--portal-control-text);
+  caret-color: var(--portal-control-text);
+}
+
+body :where(input, textarea)::placeholder {
+  color: var(--portal-control-placeholder);
+  opacity: 1;
+}
+
+body :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):focus {
+  background-color: var(--portal-control-bg-focus);
+}
+
+body :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):focus-visible {
+  outline: 2px solid var(--portal-focus);
+  outline-offset: 1px;
+}
+
+body :where(input, select, textarea):disabled {
+  background-color: var(--portal-control-bg-disabled);
+  color: var(--text-secondary);
+  opacity: 0.78;
+  -webkit-text-fill-color: var(--text-secondary);
+}
+
+body select option,
+body select optgroup {
+  background: var(--portal-surface-raised);
+  color: var(--text-primary);
+}
+
+/* Shared structural surfaces. Severity/status components keep their own colours. */
+body :where(
+  .glass-panel,
+  .section-card,
+  .admin-panel,
+  .admin-page-header,
+  .admin-card,
+  .qms-panel,
+  .qms-card,
+  .training-panel,
+  .training-card,
+  .dashboard-card,
+  .cockpit-card,
+  .planning-panel,
+  .production-panel
+) {
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+body :where(.data-table thead, .aum-table thead, .admin-table thead, .qms-table thead) th {
+  background: var(--portal-table-head);
+  color: var(--text-secondary);
+}
+
+body :where(.data-table, .aum-table, .admin-table, .qms-table) tbody tr:hover {
+  background: var(--portal-row-hover);
+}
+
+/* Repair the legacy create-user view shown in the dark-theme screenshot. */
+body:not([data-color-scheme="light"]) .admin-user-create-page :is(.admin-page-header, .admin-panel) {
+  background: var(--portal-surface-raised) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--portal-shadow) !important;
+}
+
+body:not([data-color-scheme="light"]) .admin-user-create-page :is(.aum-brand-page-header, .aum-brand-panel)::before {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--brand-accent) 12%, transparent), transparent 48%),
+    linear-gradient(145deg, color-mix(in srgb, var(--surface-elevated) 96%, var(--brand-accent-soft) 4%), var(--surface)) !important;
+}
+
+body:not([data-color-scheme="light"]) .admin-user-create-page :is(
+  .admin-page-header__title,
+  .admin-panel__title,
+  label,
+  h1,
+  h2,
+  strong
+) {
+  color: var(--text-primary) !important;
+}
+
+body:not([data-color-scheme="light"]) .admin-user-create-page :is(
+  .admin-page-header__subtitle,
+  .admin-panel__subtitle,
+  .admin-muted,
+  .form-hint,
+  p
+) {
+  color: var(--text-secondary) !important;
+}
+
+body:not([data-color-scheme="light"]) .admin-user-create-page :is(input, select, textarea) {
+  background: var(--portal-control-bg) !important;
+  border-color: var(--input-border) !important;
+  color: var(--text-primary) !important;
+  box-shadow: none;
+}
+
+body:not([data-color-scheme="light"]) .admin-user-create-page :is(input, select, textarea):focus {
+  background: var(--portal-control-bg-focus) !important;
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 0 0 3px var(--portal-focus) !important;
+}
+
+body:not([data-color-scheme="light"]) .admin-user-create-page :is(.admin-btn, .admin-link-btn) {
+  background: var(--portal-surface-muted) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Light mode remains explicitly token-driven rather than falling through to literals. */
+body[data-color-scheme="light"] .admin-user-create-page :is(.admin-page-header, .admin-panel) {
+  background: var(--portal-surface-raised) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Common overlays and menus should never inherit the opposite scheme. */
+body :where(.drawer, .modal, .popover, .dropdown-menu, .context-menu, .menu-surface) {
+  background-color: var(--portal-surface-raised);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+body :where(.modal-backdrop, .drawer-backdrop, .overlay-backdrop) {
+  background: var(--portal-overlay);
+}
+
+/* Compact offline/sync control used globally. */
+.portal-offline-indicator {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 10020;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--portal-surface-raised);
+  color: var(--text-secondary);
+  box-shadow: var(--portal-shadow);
+  cursor: pointer;
+}
+
+.portal-offline-indicator:focus-visible,
+.portal-offline-recovery button:focus-visible {
+  outline: 2px solid var(--portal-focus);
+  outline-offset: 2px;
+}
+
+.portal-offline-indicator[data-state="offline"],
+.portal-offline-indicator[data-state="conflict"] {
+  color: var(--accent-warning);
+}
+
+.portal-offline-indicator[data-state="syncing"] svg {
+  animation: portal-sync-spin 0.8s linear infinite;
+}
+
+.portal-offline-indicator__count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-warning);
+  color: #fff;
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.portal-offline-recovery {
+  position: fixed;
+  right: 14px;
+  bottom: 58px;
+  z-index: 10019;
+  width: min(390px, calc(100vw - 28px));
+  max-height: min(560px, calc(100vh - 90px));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--portal-surface-raised);
+  color: var(--text-primary);
+  box-shadow: var(--portal-shadow);
+}
+
+.portal-offline-recovery__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--panel-divider);
+}
+
+.portal-offline-recovery__header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.portal-offline-recovery__header strong {
+  font-size: 0.9rem;
+}
+
+.portal-offline-recovery__header span,
+.portal-offline-recovery__item-copy span {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.portal-offline-recovery__close {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--portal-surface-muted);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.portal-offline-recovery__error {
+  margin: 10px 14px 0;
+  padding: 9px 10px;
+  border: 1px solid var(--alert-error-border);
+  border-radius: 9px;
+  background: var(--alert-error-bg);
+  color: var(--alert-error-text);
+  font-size: 0.76rem;
+}
+
+.portal-offline-recovery__list {
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.portal-offline-recovery__item {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--portal-surface-muted);
+}
+
+.portal-offline-recovery__item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.portal-offline-recovery__item-copy strong {
+  text-transform: capitalize;
+  font-size: 0.8rem;
+}
+
+.portal-offline-recovery__item-copy code {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+}
+
+.portal-offline-recovery__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.portal-offline-recovery__actions button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--portal-control-bg);
+  color: var(--text-primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.portal-offline-recovery__actions button:hover:not(:disabled),
+.portal-offline-recovery__close:hover {
+  background: var(--portal-surface-hover);
+}
+
+.portal-offline-recovery__actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.portal-offline-recovery__actions .portal-offline-recovery__discard {
+  color: var(--accent-danger);
+}
+
+@keyframes portal-sync-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 520px) {
+  .portal-offline-recovery {
+    right: 10px;
+    bottom: 56px;
+    width: calc(100vw - 20px);
+  }
+
+  .portal-offline-indicator {
+    right: 10px;
+    bottom: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-offline-indicator[data-state="syncing"] svg { animation: none; }
+}

@@ -1,0 +1,118 @@
+/// <reference types="node" />
+
+import { readFileSync } from "node:fs";
+
+import { describe, expect, it } from "vitest";
+
+function readSource(relativePath: string): string {
+  return readFileSync(new URL(relativePath, import.meta.url), "utf8");
+}
+
+const plannerHookSource = readSource("./hooks/useRosterPlannerDataV2.ts");
+const rosterShellSource = readSource("./components/RosterShell.tsx");
+const rosterPeopleSource = readSource("../../services/rosterPeople.ts");
+const workOrdersSource = readSource("../../services/workOrders.ts");
+const fleetSource = readSource("../../services/fleet.ts");
+const offlineHttpSource = readSource("../../services/offlineHttp.ts");
+const offlinePersistenceSource = readSource("../../services/offlinePersistence.ts");
+const queryPersisterSource = readSource("../../services/queryPersister.ts");
+const offlineIndicatorSource = readSource("../../components/offline/OfflineSyncIndicator.tsx");
+const mainSource = readSource("../../main.tsx");
+const themeContractSource = readSource("../../styles/theme-contract.css");
+const themeRepairsSource = readSource("../../styles/theme-module-repairs.css");
+
+describe("rostering architecture regressions", () => {
+  it("keeps every rostering page inside the global department shell", () => {
+    expect(rosterShellSource).toContain("<DepartmentLayout");
+    expect(rosterShellSource).toContain('activeDepartment="rostering"');
+    expect(rosterShellSource).toContain("</DepartmentLayout>");
+  });
+
+  it("uses stable query resources instead of a recursive load-all effect", () => {
+    expect(plannerHookSource).toContain("useQuery({");
+    expect(plannerHookSource).toContain("useInfiniteQuery({");
+    expect(plannerHookSource).toContain('"eligible-people"');
+    expect(plannerHookSource).toContain('"version-workspace"');
+    expect(plannerHookSource).not.toContain("loadAll");
+    expect(plannerHookSource).not.toContain("useEffect(() => void");
+  });
+
+  it("loads roster personnel through the paginated planner contract", () => {
+    expect(rosterPeopleSource).toContain("/workforce/roster-people");
+    expect(plannerHookSource).toContain("PEOPLE_PAGE_SIZE = 100");
+    expect(plannerHookSource).toContain("getNextPageParam");
+    expect(plannerHookSource).not.toContain("limit: 1000");
+  });
+
+  it("persists and reapplies optimistic assignment rows over stale cached snapshots", () => {
+    expect(plannerHookSource).toContain("single source of assignment state");
+    expect(plannerHookSource).toContain("setQueryData<VersionWorkspace>");
+    expect(plannerHookSource).toContain("assignments: next");
+    expect(plannerHookSource).toContain("mergePendingRosterOutbox");
+    expect(plannerHookSource).toContain("listOfflineMutations().catch");
+    expect(plannerHookSource).toContain("PENDING_OUTBOX_STATUSES");
+    expect(plannerHookSource).not.toContain("useState<RosterAssignmentRead[]>([])");
+  });
+
+  it("passes bearer authentication while keeping unsafe work-order replay disabled", () => {
+    expect(workOrdersSource).toContain('import { authHeaders } from "./auth"');
+    expect(workOrdersSource).toContain("headers: authHeaders()");
+    expect(workOrdersSource.match(/headers: authHeaders\(\)/g)?.length).toBeGreaterThanOrEqual(11);
+    expect(workOrdersSource.match(/queueMutation: true/g)?.length).toBe(1);
+    expect(workOrdersSource).toContain("Work-order updates have no backend revision/idempotency contract yet");
+  });
+
+  it("keeps non-versioned compliance document edits live-only", () => {
+    expect(fleetSource).toContain("Compliance records currently have no backend revision precondition");
+    expect(fleetSource).not.toContain("queueMutation: true");
+  });
+
+  it("binds network reads, cache writes and queued mutations to their originating AMO", () => {
+    expect(offlineHttpSource).toContain("const requestScope = currentOfflineScope()");
+    expect(offlineHttpSource).toContain("assertRequestScope(requestScope)");
+    expect(offlineHttpSource).toContain("scope: requestScope");
+    expect(offlineHttpSource).toContain("requestScope,");
+    expect(offlinePersistenceSource).toContain("scope = currentOfflineScope()");
+    expect(offlinePersistenceSource).toContain("if (currentOfflineScope() !== scope) return null");
+    expect(offlinePersistenceSource).toContain("currentOfflineScope() !== entry.scope");
+  });
+
+  it("rejects late query hydration after an AMO switch", () => {
+    expect(queryPersisterSource).toContain("type ScopedPersistedClient");
+    expect(queryPersisterSource).toContain("scope !== boundScope");
+    expect(queryPersisterSource.match(/currentOfflineScope\(\) !== scope/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("isolates persisted queries for every same-tab and cross-tab AMO change", () => {
+    expect(mainSource).toContain("clearTenantScopedRuntimeState");
+    expect(mainSource).toContain("installActiveAmoStorageGuard");
+    expect(mainSource).toContain("Storage.prototype.setItem");
+    expect(mainSource).toContain("Storage.prototype.removeItem");
+    expect(mainSource).toContain("ACTIVE_AMO_STORAGE_KEYS");
+    expect(mainSource).toContain("BRANDING_EVENT");
+  });
+
+  it("retains the outbox on involuntary expiry and clears it only on manual logout", () => {
+    expect(mainSource).toContain('detail.type === "expired" || detail.type === "idle-logout"');
+    expect(mainSource).toContain("clearAllPortalApiCaches()");
+    expect(mainSource).toContain('detail.type === "manual-logout"');
+    expect(mainSource).toContain("clearAllPortalOfflineData()");
+  });
+
+  it("provides retry and discard controls for conflicted offline changes", () => {
+    expect(offlinePersistenceSource).toContain("export async function retryOfflineMutation");
+    expect(offlinePersistenceSource).toContain("export async function discardOfflineMutation");
+    expect(offlineIndicatorSource).toContain("retryOfflineMutation");
+    expect(offlineIndicatorSource).toContain("discardOfflineMutation");
+    expect(offlineIndicatorSource).toContain("Offline changes need review");
+    expect(themeContractSource).toContain(".portal-offline-recovery");
+  });
+
+  it("repairs legacy light surfaces after module CSS is loaded", () => {
+    expect(themeContractSource).toContain(".admin-user-create-page");
+    expect(themeContractSource).toContain("--portal-control-bg");
+    expect(themeRepairsSource).toContain(".tc-hero");
+    expect(themeRepairsSource).toContain(".manuals-hero-card");
+    expect(themeRepairsSource).toContain(".platform-shell");
+  });
+});

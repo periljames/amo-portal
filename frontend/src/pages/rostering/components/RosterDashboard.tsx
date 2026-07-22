@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -12,34 +13,27 @@ import {
 import { motion } from "framer-motion";
 
 import { getRosterDashboard } from "../../../services/rostering";
-import type { RosterDashboardResponse } from "../../../types/rostering";
 import { errorMessage, monthBounds } from "../rosterUi";
 import { EmptyState, MetricCard, RosterError, RosterLoading, StatusPill } from "./RosterShell";
 
+const DASHBOARD_STALE_MS = 2 * 60_000;
+const DASHBOARD_GC_MS = 7 * 24 * 60 * 60_000;
+
 export function RosterDashboard() {
   const { amoCode = "" } = useParams();
-  const [data, setData] = useState<RosterDashboardResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const range = monthBounds();
+  const range = useMemo(() => monthBounds(), []);
   const root = `/maintenance/${encodeURIComponent(amoCode)}/rostering`;
+  const query = useQuery({
+    queryKey: ["rostering", "dashboard", range.from, range.to],
+    queryFn: () => getRosterDashboard(range),
+    staleTime: DASHBOARD_STALE_MS,
+    gcTime: DASHBOARD_GC_MS,
+    networkMode: "offlineFirst",
+  });
+  const data = query.data;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setData(await getRosterDashboard(range));
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setLoading(false);
-    }
-  }, [range.from, range.to]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  if (loading && !data) return <RosterLoading label="Loading duty command centre…" />;
-  if (error && !data) return <RosterError message={error} onRetry={load} />;
+  if (query.isPending && !data) return <RosterLoading label="Loading duty command centre…" />;
+  if (query.error && !data) return <RosterError message={errorMessage(query.error)} onRetry={() => void query.refetch()} />;
   if (!data) return null;
 
   const operationalTone = data.blocker_count > 0 ? "danger" : data.warning_count > 0 ? "warning" : "good";
@@ -62,7 +56,7 @@ export function RosterDashboard() {
               <span className="wr-eyebrow">Operational pulse</span>
               <h2>Roster control</h2>
             </div>
-            <button type="button" className="wr-icon-button" onClick={load} aria-label="Refresh command centre"><RefreshCw size={17} className={loading ? "is-spinning" : ""} /></button>
+            <button type="button" className="wr-icon-button" onClick={() => void query.refetch()} aria-label="Refresh command centre"><RefreshCw size={17} className={query.isFetching ? "is-spinning" : ""} /></button>
           </div>
           <div className={`wr-readiness wr-tone-${operationalTone}`}>
             <div className="wr-readiness__score">

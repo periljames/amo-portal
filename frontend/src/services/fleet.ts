@@ -4,6 +4,7 @@
 import { getToken, handleAuthFailure } from "./auth";
 import { downloadWithXhr, type DownloadedFile } from "../utils/downloads";
 import { getApiBaseUrl } from "./config";
+import { portalFetch } from "./offlineHttp";
 
 export type AircraftDocumentStatus =
   | "CURRENT"
@@ -109,88 +110,83 @@ const DOCUMENT_ALERTS_TIMEOUT_MS = 4_000;
 type FetchJsonOptions<T> = {
   timeoutMs?: number;
   fallbackOnNotFound?: T;
+  cacheTtlMs?: number;
 };
 
 function toQuery(params: Record<string, QueryVal>): string {
   const qs = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v === null || v === undefined) return;
-    qs.set(k, String(v));
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === null || value === undefined) return;
+    qs.set(key, String(value));
   });
-  const s = qs.toString();
-  return s ? `?${s}` : "";
+  const encoded = qs.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
+function authenticatedHeaders(json = false): Headers {
+  const token = getToken();
+  const headers = new Headers({ Accept: "application/json" });
+  if (json) headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return headers;
+}
+
+async function parseFleetError(response: Response): Promise<Error> {
+  const text = await response.text().catch(() => "");
+  return new Error(`Fleet API ${response.status}: ${text || response.statusText}`);
 }
 
 async function fetchJson<T>(path: string, options?: FetchJsonOptions<T>): Promise<T> {
-  const token = getToken();
-  const controller = new AbortController();
-  const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(`${getApiBaseUrl()}${path}`, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      credentials: "include",
-      signal: controller.signal,
-    });
-
-    if (res.status === 401) {
-      handleAuthFailure("expired");
-      throw new Error("Session expired. Please sign in again.");
-    }
-
-    if (res.status === 404 && options && "fallbackOnNotFound" in options) {
-      return options.fallbackOnNotFound as T;
-    }
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Fleet API ${res.status}: ${text || res.statusText}`);
-    }
-    return (await res.json()) as T;
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error(`Fleet API timeout after ${timeoutMs}ms: ${path}`);
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
-}
-
-async function sendJson<T>(path: string, method: "POST" | "PUT", body: unknown): Promise<T> {
-  const token = getToken();
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
-    method,
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body ?? {}),
+  const response = await portalFetch(path, {
+    method: "GET",
+    headers: authenticatedHeaders(),
     credentials: "include",
+    timeoutMs: options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    offline: {
+      cache: true,
+      cacheTtlMs: options?.cacheTtlMs ?? 5 * 60_000,
+      allowStaleFallback: true,
+    },
   });
 
-  if (res.status === 401) {
+  if (response.status === 401) {
     handleAuthFailure("expired");
     throw new Error("Session expired. Please sign in again.");
   }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Fleet API ${res.status}: ${text || res.statusText}`);
+  if (response.status === 404 && options && "fallbackOnNotFound" in options) {
+    return options.fallbackOnNotFound as T;
   }
-  return (await res.json()) as T;
+  if (!response.ok) throw await parseFleetError(response);
+  return (await response.json()) as T;
+}
+
+async function sendJson<T>(
+  path: string,
+  method: "POST" | "PUT",
+  body: unknown,
+): Promise<T> {
+  const response = await portalFetch(path, {
+    method,
+    headers: authenticatedHeaders(true),
+    body: JSON.stringify(body ?? {}),
+    credentials: "include",
+    offline: {
+      queueMutation: false,
+    },
+  });
+
+  if (response.status === 401) {
+    handleAuthFailure("expired");
+    throw new Error("Session expired. Please sign in again.");
+  }
+  if (!response.ok) throw await parseFleetError(response);
+  return (await response.json()) as T;
 }
 
 function buildSpeed(
   loadedBytes: number,
   totalBytes: number | undefined,
-  startedAt: number
+  startedAt: number,
 ): TransferProgress {
   const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.001);
   const megaBytesPerSecond = loadedBytes / (1024 * 1024) / elapsedSeconds;
@@ -211,7 +207,8 @@ export async function listDocumentAlerts(params?: { due_within_days?: number }):
     {
       timeoutMs: DOCUMENT_ALERTS_TIMEOUT_MS,
       fallbackOnNotFound: [],
-    }
+      cacheTtlMs: 2 * 60_000,
+    },
   );
 }
 
@@ -220,21 +217,19 @@ export async function listAircraft(params?: {
   status?: string;
   is_active?: boolean;
 }): Promise<AircraftRead[]> {
-  return fetchJson<AircraftRead[]>(`/aircraft/${toQuery(params ?? {})}`);
+  return fetchJson<AircraftRead[]>(`/aircraft/${toQuery(params ?? {})}`, { cacheTtlMs: 10 * 60_000 });
 }
 
 export async function listAircraftDocuments(serialNumber: string): Promise<AircraftDocument[]> {
-  return fetchJson<AircraftDocument[]>(`/aircraft/${serialNumber}/documents`);
+  return fetchJson<AircraftDocument[]>(`/aircraft/${encodeURIComponent(serialNumber)}/documents`);
 }
 
-export async function getAircraftUsageSummary(
-  serialNumber: string
-): Promise<AircraftUsageSummary> {
-  return fetchJson<AircraftUsageSummary>(`/aircraft/${serialNumber}/usage/summary`);
+export async function getAircraftUsageSummary(serialNumber: string): Promise<AircraftUsageSummary> {
+  return fetchJson<AircraftUsageSummary>(`/aircraft/${encodeURIComponent(serialNumber)}/usage/summary`, { cacheTtlMs: 2 * 60_000 });
 }
 
 export async function getAircraftCompliance(serialNumber: string): Promise<AircraftComplianceSummary> {
-  return fetchJson<AircraftComplianceSummary>(`/aircraft/${serialNumber}/compliance`);
+  return fetchJson<AircraftComplianceSummary>(`/aircraft/${encodeURIComponent(serialNumber)}/compliance`, { cacheTtlMs: 2 * 60_000 });
 }
 
 export async function createAircraftDocument(
@@ -248,9 +243,10 @@ export async function createAircraftDocument(
     issued_on?: string | null;
     expires_on?: string | null;
     alert_window_days?: number;
-  }
+  },
 ): Promise<AircraftDocument> {
-  return sendJson<AircraftDocument>(`/aircraft/${serialNumber}/documents`, "POST", body);
+  // Compliance-record creation stays live-only to prevent duplicate evidence records.
+  return sendJson<AircraftDocument>(`/aircraft/${encodeURIComponent(serialNumber)}/documents`, "POST", body);
 }
 
 export async function updateAircraftDocument(
@@ -263,46 +259,38 @@ export async function updateAircraftDocument(
     expires_on: string | null;
     alert_window_days: number;
     status: AircraftDocumentStatus;
-  }>
+  }>,
 ): Promise<AircraftDocument> {
+  // Compliance records currently have no backend revision precondition.
+  // Keep edits live-only so delayed replay cannot revert newer regulatory data.
   return sendJson<AircraftDocument>(`/aircraft/documents/${documentId}`, "PUT", body);
 }
 
 export async function uploadAircraftDocumentFile(
   documentId: number,
-  file: File
+  file: File,
 ): Promise<AircraftDocument> {
-  const token = getToken();
   const form = new FormData();
   form.append("file", file);
-
-  const res = await fetch(
-    `${getApiBaseUrl()}/aircraft/documents/${documentId}/upload`,
-    {
-      method: "POST",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: form,
-      credentials: "include",
-    }
-  );
-
-  if (res.status === 401) {
+  const response = await portalFetch(`/aircraft/documents/${documentId}/upload`, {
+    method: "POST",
+    headers: authenticatedHeaders(),
+    body: form,
+    credentials: "include",
+    timeoutMs: 60_000,
+    offline: { cache: false, queueMutation: false },
+  });
+  if (response.status === 401) {
     handleAuthFailure("expired");
     throw new Error("Session expired. Please sign in again.");
   }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Fleet API ${res.status}: ${text || res.statusText}`);
-  }
-  return (await res.json()) as AircraftDocument;
+  if (!response.ok) throw await parseFleetError(response);
+  return (await response.json()) as AircraftDocument;
 }
 
 export async function downloadAircraftDocumentFile(
   documentId: number,
-  onProgress?: (progress: TransferProgress) => void
+  onProgress?: (progress: TransferProgress) => void,
 ): Promise<DownloadedFile> {
   const startedAt = performance.now();
   const token = getToken();
@@ -317,7 +305,7 @@ export async function downloadAircraftDocumentFile(
 
 export async function downloadAircraftDocumentsZip(
   documentIds: number[],
-  onProgress?: (progress: TransferProgress) => void
+  onProgress?: (progress: TransferProgress) => void,
 ): Promise<DownloadedFile> {
   const startedAt = performance.now();
   const token = getToken();
@@ -337,35 +325,22 @@ export async function downloadAircraftDocumentsZip(
 
 export async function overrideAircraftDocument(
   documentId: number,
-  body: { reason: string; override_expires_on?: string | null }
+  body: { reason: string; override_expires_on?: string | null },
 ): Promise<AircraftDocument> {
-  return sendJson<AircraftDocument>(
-    `/aircraft/documents/${documentId}/override`,
-    "POST",
-    body
-  );
+  // Regulatory overrides require immediate server confirmation.
+  return sendJson<AircraftDocument>(`/aircraft/documents/${documentId}/override`, "POST", body);
 }
 
 export async function clearAircraftDocumentOverride(documentId: number): Promise<void> {
-  const token = getToken();
-  const res = await fetch(
-    `${getApiBaseUrl()}/aircraft/documents/${documentId}/override`,
-    {
-      method: "DELETE",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      credentials: "include",
-    }
-  );
-
-  if (res.status === 401) {
+  const response = await portalFetch(`/aircraft/documents/${documentId}/override`, {
+    method: "DELETE",
+    headers: authenticatedHeaders(),
+    credentials: "include",
+    offline: { cache: false, queueMutation: false },
+  });
+  if (response.status === 401) {
     handleAuthFailure("expired");
     throw new Error("Session expired. Please sign in again.");
   }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Fleet API ${res.status}: ${text || res.statusText}`);
-  }
+  if (!response.ok) throw await parseFleetError(response);
 }

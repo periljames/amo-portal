@@ -30,8 +30,9 @@ import {
   updateRosterAssignment,
   validateRosterVersion,
 } from "../../../services/rostering";
+import { isOfflineQueuedError } from "../../../services/offlineHttp";
+import type { RosterPersonRead } from "../../../services/rosterPeople";
 import type { RosterAssignmentRead, RosterValidationFindingRead, ShiftTemplateRead } from "../../../types/rostering";
-import type { WorkforcePersonRead } from "../../../services/workforce";
 import { errorMessage, formatDay, isoDate, newIdempotencyKey } from "../rosterUi";
 import { formatInZone, moveIntervalToZonedDay, templateWindowInZone } from "../timezone";
 import { EmptyState, RosterError, RosterLoading, StatusPill } from "./RosterShell";
@@ -53,7 +54,7 @@ function getDrag(event: DragEvent<HTMLElement>): DragPayload | null {
   }
 }
 
-function PersonCard({ person }: { person: WorkforcePersonRead }) {
+function PersonCard({ person }: { person: RosterPersonRead }) {
   return (
     <button type="button" className="wr-person" draggable onDragStart={(event) => setDrag(event, { type: "person", userId: person.user_id })}>
       <GripVertical size={14} aria-hidden="true" />
@@ -70,8 +71,9 @@ function AssignmentCard({ assignment, timezoneName, selected, onSelect, onMove }
   onSelect: () => void;
   onMove: (days: number) => void;
 }) {
+  const pendingSync = assignment.id.startsWith("offline-");
   const keydown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (assignment.locked_after_publish || !event.altKey) return;
+    if (pendingSync || assignment.locked_after_publish || !event.altKey) return;
     if (event.key === "ArrowLeft") { event.preventDefault(); onMove(-1); }
     if (event.key === "ArrowRight") { event.preventDefault(); onMove(1); }
   };
@@ -79,16 +81,16 @@ function AssignmentCard({ assignment, timezoneName, selected, onSelect, onMove }
     <motion.div layout>
       <button
         type="button"
-        className={`wr-assignment wr-assignment--${assignment.status.toLowerCase()}${selected ? " is-selected" : ""}`}
-        draggable={!assignment.locked_after_publish}
+        className={`wr-assignment wr-assignment--${assignment.status.toLowerCase()}${selected ? " is-selected" : ""}${pendingSync ? " is-pending-sync" : ""}`}
+        draggable={!pendingSync && !assignment.locked_after_publish}
         onDragStart={(event) => setDrag(event, { type: "assignment", assignmentId: assignment.id })}
         onClick={onSelect}
         onKeyDown={keydown}
       >
-        <span className="wr-assignment__top"><strong>{assignment.shift_code || assignment.status}</strong>{assignment.locked_after_publish ? <LockKeyhole size={12} /> : <GripVertical size={12} />}</span>
+        <span className="wr-assignment__top"><strong>{assignment.shift_code || assignment.status}</strong>{pendingSync ? <RefreshCw size={12} /> : assignment.locked_after_publish ? <LockKeyhole size={12} /> : <GripVertical size={12} />}</span>
         <span>{formatInZone(assignment.starts_at, timezoneName, "HH:mm")}–{formatInZone(assignment.ends_at, timezoneName, "HH:mm")}</span>
         <small>{assignment.role_label || assignment.base_code || "Duty"}</small>
-        {assignment.linked_task_count ? <em>{assignment.linked_task_count} task{assignment.linked_task_count === 1 ? "" : "s"}</em> : null}
+        {pendingSync ? <em>Pending sync</em> : assignment.linked_task_count ? <em>{assignment.linked_task_count} task{assignment.linked_task_count === 1 ? "" : "s"}</em> : null}
       </button>
     </motion.div>
   );
@@ -125,19 +127,36 @@ function AssignmentDrawer({ assignment, templates, timezoneName, editable, onClo
 
   const save = async () => {
     setBusy(true); setError(null);
+    const patch = {
+      status,
+      shift_template_id: shiftTemplateId || null,
+      role_label: roleLabel || null,
+      team_code: teamCode || null,
+      location_label: locationLabel || null,
+      task_note: taskNote || null,
+      change_reason: reason || "Planner edit",
+      expected_state_revision: assignment.state_revision,
+    };
     try {
-      const row = await updateRosterAssignment(assignment.id, {
-        status,
-        shift_template_id: shiftTemplateId || null,
-        role_label: roleLabel || null,
-        team_code: teamCode || null,
-        location_label: locationLabel || null,
-        task_note: taskNote || null,
-        change_reason: reason || "Planner edit",
-        expected_state_revision: assignment.state_revision,
-      });
+      const row = await updateRosterAssignment(assignment.id, patch);
       onSaved(row); onClose();
-    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
+    } catch (cause) {
+      if (isOfflineQueuedError(cause)) {
+        const template = templates.find((item) => item.id === shiftTemplateId);
+        onSaved({
+          ...assignment,
+          ...patch,
+          shift_code: template?.code || assignment.shift_code,
+          shift_label: template?.label || assignment.shift_label,
+          shift_kind: template?.kind || assignment.shift_kind,
+          state_revision: assignment.state_revision + 1,
+          updated_at: new Date().toISOString(),
+        });
+        onClose();
+      } else {
+        setError(errorMessage(cause));
+      }
+    } finally { setBusy(false); }
   };
 
   const remove = async () => {
@@ -147,7 +166,13 @@ function AssignmentDrawer({ assignment, templates, timezoneName, editable, onClo
     try {
       await deleteRosterAssignment(assignment.id, { reason: deleteReason, expected_state_revision: assignment.state_revision });
       onDeleted(assignment.id); onClose();
-    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
+    } catch (cause) {
+      if (isOfflineQueuedError(cause)) {
+        onDeleted(assignment.id); onClose();
+      } else {
+        setError(errorMessage(cause));
+      }
+    } finally { setBusy(false); }
   };
 
   return (
@@ -163,19 +188,18 @@ function AssignmentDrawer({ assignment, templates, timezoneName, editable, onClo
         <label className="wr-span-2"><span>Change reason</span><textarea rows={2} value={reason} disabled={!editable} onChange={(event) => setReason(event.target.value)} /></label>
       </div>
       {error ? <div className="wr-inline-error">{error}</div> : null}
-      <div className="wr-drawer__footer">{editable ? <button type="button" className="wr-button wr-button--danger-ghost" onClick={remove} disabled={busy}><Trash2 size={16} /> Remove</button> : <StatusPill value="PUBLISHED LOCK" />}<div className="wr-actions"><button type="button" className="wr-button wr-button--secondary" onClick={onClose}>Cancel</button>{editable ? <button type="button" className="wr-button wr-button--primary" onClick={save} disabled={busy}><Save size={16} /> Save</button> : null}</div></div>
+      <div className="wr-drawer__footer">{editable ? <button type="button" className="wr-button wr-button--danger-ghost" onClick={remove} disabled={busy}><Trash2 size={16} /> Remove</button> : <StatusPill value={assignment.id.startsWith("offline-") ? "PENDING SYNC" : "PUBLISHED LOCK"} />}<div className="wr-actions"><button type="button" className="wr-button wr-button--secondary" onClick={onClose}>Cancel</button>{editable ? <button type="button" className="wr-button wr-button--primary" onClick={save} disabled={busy}><Save size={16} /> Save</button> : null}</div></div>
     </motion.aside>
   );
 }
 
 export function RosterPlannerV2() {
   const data = useRosterPlannerDataV2();
-  const [search, setSearch] = useState("");
-  const [department, setDepartment] = useState("ALL");
   const [templateId, setTemplateId] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   const period = data.periods.find((row) => row.id === data.selectedPeriodId);
@@ -183,11 +207,7 @@ export function RosterPlannerV2() {
   const editable = Boolean(data.selectedVersion?.can_edit && data.contracts?.capabilities.edit);
   const selectedTemplate = data.templates.find((row) => row.id === templateId) || data.templates.find((row) => row.kind === "DAY") || data.templates[0];
   const selected = data.assignments.find((row) => row.id === selectedId) || null;
-  const departments = useMemo(() => [...new Set(data.people.map((person) => person.department_code).filter((value): value is string => Boolean(value)))].sort(), [data.people]);
-  const people = useMemo(() => {
-    const term = search.toLowerCase().trim();
-    return data.people.filter((person) => (department === "ALL" || person.department_code === department) && (!term || `${person.full_name} ${person.staff_code} ${person.position_title || ""}`.toLowerCase().includes(term)));
-  }, [data.people, department, search]);
+  const people = data.people;
   const byId = useMemo(() => new Map(data.assignments.map((assignment) => [assignment.id, assignment])), [data.assignments]);
 
   const assignmentsFor = useCallback((userId: string, day: Date) => data.assignments.filter((assignment) => {
@@ -198,25 +218,77 @@ export function RosterPlannerV2() {
 
   const replace = (row: RosterAssignmentRead) => data.setAssignments((current) => current.map((item) => item.id === row.id ? row : item));
 
-  const create = async (person: WorkforcePersonRead, day: Date) => {
+  const create = async (person: RosterPersonRead, day: Date) => {
     if (!data.selectedVersion || !selectedTemplate || !editable) return;
-    setBusy(`create:${person.user_id}:${isoDate(day)}`); setError(null);
+    setBusy(`create:${person.user_id}:${isoDate(day)}`); setError(null); setNotice(null);
+    const dutyWindow = templateWindowInZone(day, selectedTemplate.default_start_time || "08:00", selectedTemplate.default_end_time || "17:00", timezoneName);
+    const status = selectedTemplate.kind === "STANDBY" ? "STANDBY" : selectedTemplate.kind === "TRAINING" ? "TRAINING" : selectedTemplate.kind === "OFF" ? "OFF" : selectedTemplate.kind === "LEAVE" ? "LEAVE" : "DUTY";
+    const payload = { user_id: person.user_id, department_id: person.department_id, base_station_id: person.primary_base_station_id, shift_template_id: selectedTemplate.id, status, source: "MANUAL" as const, starts_at: dutyWindow.starts_at, ends_at: dutyWindow.ends_at, planned_minutes: selectedTemplate.duration_minutes ?? dutyWindow.planned_minutes, change_reason: "Planner assignment" };
     try {
-      const window = templateWindowInZone(day, selectedTemplate.default_start_time || "08:00", selectedTemplate.default_end_time || "17:00", timezoneName);
-      const status = selectedTemplate.kind === "STANDBY" ? "STANDBY" : selectedTemplate.kind === "TRAINING" ? "TRAINING" : selectedTemplate.kind === "OFF" ? "OFF" : selectedTemplate.kind === "LEAVE" ? "LEAVE" : "DUTY";
-      const row = await createRosterAssignment(data.selectedVersion.id, { user_id: person.user_id, department_id: person.department_id, base_station_id: person.primary_base_station_id, shift_template_id: selectedTemplate.id, status, source: "MANUAL", starts_at: window.starts_at, ends_at: window.ends_at, planned_minutes: selectedTemplate.duration_minutes ?? window.planned_minutes, change_reason: "Planner assignment" });
+      const row = await createRosterAssignment(data.selectedVersion.id, payload);
       data.setAssignments((current) => [...current, row]); setSelectedId(row.id);
-    } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(null); }
+    } catch (cause) {
+      if (isOfflineQueuedError(cause)) {
+        const now = new Date().toISOString();
+        const optimistic: RosterAssignmentRead = {
+          id: `offline-${cause.operation.id}`,
+          amo_id: data.selectedVersion.amo_id,
+          version_id: data.selectedVersion.id,
+          user_id: person.user_id,
+          department_id: person.department_id,
+          base_station_id: person.primary_base_station_id,
+          shift_template_id: selectedTemplate.id,
+          status,
+          source: "MANUAL",
+          source_reference_id: cause.operation.idempotencyKey,
+          starts_at: dutyWindow.starts_at,
+          ends_at: dutyWindow.ends_at,
+          planned_minutes: selectedTemplate.duration_minutes ?? dutyWindow.planned_minutes,
+          role_label: null,
+          team_code: null,
+          location_label: null,
+          task_note: null,
+          change_reason: "Planner assignment",
+          locked_after_publish: false,
+          state_revision: 1,
+          deleted_at: null,
+          created_by_user_id: null,
+          updated_by_user_id: null,
+          created_at: now,
+          updated_at: now,
+          user_full_name: person.full_name,
+          user_staff_code: person.staff_code,
+          user_role: person.role,
+          department_code: person.department_code,
+          department_name: person.department_name,
+          base_code: person.primary_base_code,
+          base_name: null,
+          shift_code: selectedTemplate.code,
+          shift_label: selectedTemplate.label,
+          shift_kind: selectedTemplate.kind,
+          linked_task_count: 0,
+          linked_task_hours: 0,
+        };
+        data.setAssignments((current) => [...current, optimistic]);
+        setSelectedId(optimistic.id);
+        setNotice(cause.message);
+      } else {
+        setError(errorMessage(cause));
+      }
+    } finally { setBusy(null); }
   };
 
   const move = async (assignment: RosterAssignmentRead, day: Date) => {
-    if (!editable || assignment.locked_after_publish) return;
+    if (!editable || assignment.locked_after_publish || assignment.id.startsWith("offline-")) return;
     const previous = assignment;
     const moved = moveIntervalToZonedDay(assignment.starts_at, assignment.ends_at, day, timezoneName);
     replace({ ...assignment, ...moved, state_revision: assignment.state_revision + 1 });
-    setBusy(`move:${assignment.id}`); setError(null);
+    setBusy(`move:${assignment.id}`); setError(null); setNotice(null);
     try { replace(await updateRosterAssignment(assignment.id, { ...moved, change_reason: "Planner drag and drop", expected_state_revision: assignment.state_revision })); }
-    catch (cause) { replace(previous); setError(errorMessage(cause)); }
+    catch (cause) {
+      if (isOfflineQueuedError(cause)) setNotice(cause.message);
+      else { replace(previous); setError(errorMessage(cause)); }
+    }
     finally { setBusy(null); }
   };
 
@@ -235,7 +307,7 @@ export function RosterPlannerV2() {
 
   const lifecycle = async (action: "validate" | "submit" | "approve" | "publish") => {
     const version = data.selectedVersion; if (!version) return;
-    setBusy(action); setError(null);
+    setBusy(action); setError(null); setNotice(null);
     try {
       if (action === "validate") await validateRosterVersion(version.id);
       if (action === "submit") await submitRosterVersion(version.id, { expected_state_revision: version.state_revision, comment: "Submitted from planner" });
@@ -258,17 +330,28 @@ export function RosterPlannerV2() {
             <label className="wr-compact-field"><span>Version</span><select value={data.selectedVersionId} onChange={(event) => data.setSelectedVersionId(event.target.value)}><option value="">Select version</option>{[...data.versions].sort((a, b) => b.version_no - a.version_no).map((row) => <option key={row.id} value={row.id}>v{row.version_no} · {row.status}</option>)}</select></label>
             <label className="wr-compact-field"><span>Template</span><select value={selectedTemplate?.id || ""} onChange={(event) => setTemplateId(event.target.value)} disabled={!editable}>{data.templates.map((row) => <option key={row.id} value={row.id}>{row.code} · {row.label}</option>)}</select></label>
           </div>
-          <button type="button" className="wr-icon-button" onClick={data.refresh}><RefreshCw size={17} className={data.refreshing ? "is-spinning" : ""} /></button>
+          <button type="button" className="wr-icon-button" onClick={() => void data.refresh()}><RefreshCw size={17} className={data.refreshing ? "is-spinning" : ""} /></button>
         </div>
         <div className="wr-workflow-bar"><div className="wr-workflow-state"><StatusPill value={data.selectedVersion?.status || "NO VERSION"} /><span>{timezoneName}</span>{data.selectedVersion ? <span>Revision {data.selectedVersion.state_revision}</span> : null}</div><div className="wr-actions"><button type="button" className="wr-button wr-button--secondary" onClick={() => lifecycle("validate")} disabled={!data.selectedVersion || Boolean(busy)}><ShieldCheck size={16} /> Validate</button>{data.selectedVersion?.can_submit ? <button type="button" className="wr-button wr-button--primary" onClick={() => lifecycle("submit")} disabled={Boolean(busy)}><Send size={16} /> Submit</button> : null}{data.selectedVersion?.can_approve ? <button type="button" className="wr-button wr-button--primary" onClick={() => lifecycle("approve")} disabled={Boolean(busy)}><ClipboardCheck size={16} /> Approve</button> : null}{data.selectedVersion?.can_publish ? <button type="button" className="wr-button wr-button--success" onClick={() => lifecycle("publish")} disabled={Boolean(busy)}><CheckCircle2 size={16} /> Publish</button> : null}</div></div>
+        {notice ? <div className="wr-inline-warning"><RefreshCw size={16} /> {notice}</div> : null}
         {error ? <div className="wr-inline-error"><AlertTriangle size={16} /> {error}</div> : null}
         {!data.selectedVersion ? <EmptyState title="No roster version selected" description="Create or select a draft version before assigning duty." /> : <div className="wr-planner-body">
-          <aside className="wr-people-panel"><div className="wr-people-panel__controls"><label className="wr-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search personnel" /></label><label className="wr-filter-select"><Filter size={14} /><select value={department} onChange={(event) => setDepartment(event.target.value)}><option value="ALL">All departments</option>{departments.map((value) => <option key={value}>{value}</option>)}</select></label></div><div className="wr-people-panel__summary"><UsersRound size={15} /> {people.length} eligible people</div><div className="wr-person-list">{people.map((person) => <PersonCard key={person.user_id} person={person} />)}</div></aside>
+          <aside className="wr-people-panel">
+            <div className="wr-people-panel__controls">
+              <label className="wr-search"><Search size={15} /><input value={data.peopleSearch} onChange={(event) => data.setPeopleSearch(event.target.value)} placeholder="Search name, staff code or title" /></label>
+              <label className="wr-filter-select"><Filter size={14} /><select value={data.peopleDepartmentId} onChange={(event) => data.setPeopleDepartmentId(event.target.value)}><option value="">All departments</option>{data.peopleDepartments.map((department) => <option key={department.id} value={department.id}>{department.code} · {department.name}</option>)}</select></label>
+            </div>
+            <div className="wr-people-panel__summary"><UsersRound size={15} /> {people.length} of {data.peopleTotal} eligible people</div>
+            <div className="wr-person-list">
+              {people.map((person) => <PersonCard key={person.user_id} person={person} />)}
+              {data.peopleHasMore ? <button type="button" className="wr-button wr-button--secondary wr-people-load-more" onClick={() => void data.loadMorePeople()} disabled={data.peopleLoadingMore}>{data.peopleLoadingMore ? <RefreshCw size={15} className="is-spinning" /> : <Plus size={15} />} Load next 100</button> : null}
+            </div>
+          </aside>
           <div className="wr-grid-scroll" tabIndex={0}><div className="wr-roster-grid" style={{ "--wr-days": data.week.days.length } as CSSProperties}><div className="wr-grid-corner">Personnel</div>{data.week.days.map((day) => <div key={isoDate(day)} className={`wr-day-header${isoDate(day) === isoDate(new Date()) ? " is-today" : ""}`}><strong>{formatDay(day)}</strong><small>{format(day, "yyyy")}</small></div>)}{people.map((person) => <div className="wr-grid-row" key={person.user_id}><div className="wr-grid-person"><strong>{person.full_name}</strong><small>{person.staff_code} · {person.primary_base_code || "No base"}</small></div>{data.week.days.map((day) => { const key = `${person.user_id}:${isoDate(day)}`; const rows = assignmentsFor(person.user_id, day); return <div key={key} className={`wr-drop-cell${dropTarget === key ? " is-drop-target" : ""}`} onDragOver={(event) => { if (editable) { event.preventDefault(); setDropTarget(key); } }} onDragLeave={() => setDropTarget((value) => value === key ? null : value)} onDrop={(event) => void drop(event, person.user_id, day)} onDoubleClick={() => void create(person, day)}>{rows.map((assignment) => <AssignmentCard key={assignment.id} assignment={assignment} timezoneName={timezoneName} selected={selectedId === assignment.id} onSelect={() => setSelectedId(assignment.id)} onMove={(days) => void move(assignment, addDays(day, days))} />)}{rows.length === 0 && editable ? <button type="button" className="wr-cell-add" onClick={() => void create(person, day)} disabled={busy === `create:${person.user_id}:${isoDate(day)}`}><Plus size={14} /> Assign</button> : null}</div>; })}</div>)}</div></div>
         </div>}
       </section>
       <FindingRail findings={data.findings} onFocus={setSelectedId} />
-      <AnimatePresence>{selected ? <AssignmentDrawer key={selected.id} assignment={selected} templates={data.templates} timezoneName={timezoneName} editable={editable && !selected.locked_after_publish} onClose={() => setSelectedId(null)} onSaved={replace} onDeleted={(id) => data.setAssignments((current) => current.filter((row) => row.id !== id))} /> : null}</AnimatePresence>
+      <AnimatePresence>{selected ? <AssignmentDrawer key={selected.id} assignment={selected} templates={data.templates} timezoneName={timezoneName} editable={editable && !selected.locked_after_publish && !selected.id.startsWith("offline-")} onClose={() => setSelectedId(null)} onSaved={replace} onDeleted={(id) => data.setAssignments((current) => current.filter((row) => row.id !== id))} /> : null}</AnimatePresence>
     </div>
   );
 }

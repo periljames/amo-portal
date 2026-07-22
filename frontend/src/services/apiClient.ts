@@ -1,10 +1,12 @@
 // src/services/apiClient.ts
 import { authHeaders, handleAuthFailure, markSessionActivity, extendSessionIfNeeded } from "./auth";
 import { getApiBaseUrl, normaliseBaseUrl } from "./config";
+import { portalFetch, type PortalOfflineOptions } from "./offlineHttp";
 
 export type ApiClientOptions = RequestInit & {
   timeoutMs?: number;
   cacheTtlMs?: number;
+  offline?: PortalOfflineOptions;
 };
 
 export class ApiClientError extends Error {
@@ -86,10 +88,8 @@ function buildRequestUrls(path: string): string[] {
   const primary = `${configuredBase}${cleanPath}`;
   const direct = `${resolveDirectDevBackend()}${cleanPath}`;
 
-  // On localhost Vite, prefer the backend directly. This bypasses stale Vite proxy
-  // sockets after backend restarts, which was causing blank QMS pages despite a
-  // healthy FastAPI server. If CORS or the direct backend fails, the same-origin
-  // proxy remains as fallback.
+  // Local Vite can lose its proxy socket when the backend restarts. Prefer the
+  // direct API and retain the same-origin proxy as a fallback.
   if (isLocalDevSurface()) {
     return direct === primary ? [primary] : [direct, primary];
   }
@@ -126,7 +126,8 @@ async function fetchOnce<T>(
   url: string,
   init: RequestInit,
   timeoutMs: number,
-  callerSignal?: AbortSignal | null,
+  callerSignal: AbortSignal | null | undefined,
+  offline: PortalOfflineOptions,
 ): Promise<ParsedResponse<T>> {
   const controller = new AbortController();
   let timedOut = false;
@@ -146,7 +147,12 @@ async function fetchOnce<T>(
   }
 
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
+    const response = await portalFetch(url, {
+      ...init,
+      signal: controller.signal,
+      timeoutMs,
+      offline,
+    });
     const body = await readResponseBody<T>(response);
     return { response, body };
   } catch (error) {
@@ -166,13 +172,18 @@ function isRetryableNetworkError(error: unknown): boolean {
   if (error instanceof ApiClientError) return false;
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
-    return message.includes("failed to fetch") || message.includes("networkerror") || message.includes("request timed out");
+    return message.includes("failed to fetch")
+      || message.includes("networkerror")
+      || message.includes("request timed out")
+      || message.includes("server could not be reached")
+      || message.includes("no cached copy is available")
+      || message.includes("connection");
   }
   return false;
 }
 
 export async function apiRequest<T>(path: string, options: ApiClientOptions = {}): Promise<T> {
-  const { timeoutMs = 30000, cacheTtlMs, headers, body, signal, ...rest } = options;
+  const { timeoutMs = 30000, cacheTtlMs, offline, headers, body, signal, ...rest } = options;
   const finalHeaders = new Headers(authHeaders(headers));
   if (body && !(body instanceof FormData) && !finalHeaders.has("Content-Type")) {
     finalHeaders.set("Content-Type", "application/json");
@@ -212,6 +223,15 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
           },
           timeoutMs,
           signal,
+          {
+            cache: canUseCache,
+            cacheTtlMs: effectiveCacheTtlMs,
+            allowStaleFallback: true,
+            queueMutation: offline?.queueMutation === true,
+            entityType: offline?.entityType,
+            entityId: offline?.entityId,
+            idempotencyKey: offline?.idempotencyKey,
+          },
         );
 
         if (!response.ok) {
@@ -229,7 +249,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
         lastError = error;
         const canTryNext = index < urls.length - 1 && isRetryableNetworkError(error) && !(signal?.aborted);
         if (!canTryNext) throw error;
-        console.warn("[apiClient] proxied request failed; retrying direct backend", { path, error });
+        console.warn("[apiClient] direct request failed; retrying alternate backend route", { path, error });
       }
     }
     throw lastError instanceof Error ? lastError : new Error("Request failed.");
