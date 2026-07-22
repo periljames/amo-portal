@@ -4,13 +4,13 @@ import { loadOutbound, queueOutbound, removeOutbound } from "./queue";
 import type { BrokerState, RealtimeEnvelope } from "./types";
 
 type Packet = Uint8Array;
-
 type PublishOpts = { qos?: number; retain?: boolean };
+type PublishCallback = (error?: Error) => void;
 type MqttLikeClient = {
   connected: boolean;
   on: (event: string, cb: (...args: unknown[]) => void) => void;
   subscribe: (topics: string[] | string, opts?: PublishOpts) => void;
-  publish: (topic: string, payload: Uint8Array, opts: PublishOpts, cb?: () => void) => void;
+  publish: (topic: string, payload: Uint8Array, opts: PublishOpts, cb?: PublishCallback) => void;
   end: (force?: boolean) => void;
 };
 type MqttModule = { connect: (url: string, options: Record<string, unknown>) => MqttLikeClient };
@@ -24,6 +24,7 @@ type Handlers = {
 let mqttLibPromise: Promise<MqttModule | null> | null = null;
 let msgpackPromise: Promise<MsgpackModule | null> | null = null;
 const MAX_MQTT_RECONNECT_ATTEMPTS = 6;
+const PUBLISH_TIMEOUT_MS = 10_000;
 
 async function getMqttLib(): Promise<MqttModule | null> {
   if (!mqttLibPromise) {
@@ -77,6 +78,33 @@ function backoffMs(attempt: number): number {
   return Math.min(30_000, base + jitter);
 }
 
+export function publishWithAcknowledgement(
+  client: MqttLikeClient,
+  topic: string,
+  payload: Uint8Array,
+  timeoutMs = PUBLISH_TIMEOUT_MS,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = globalThis.setTimeout(
+      () => finish(new Error("MQTT publish acknowledgement timed out")),
+      Math.max(1000, timeoutMs),
+    );
+    try {
+      client.publish(topic, payload, { qos: 1 }, (error) => finish(error));
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
+
 export class RealtimeMqttClient {
   private client: MqttLikeClient | null = null;
   private handlers: Handlers;
@@ -90,6 +118,7 @@ export class RealtimeMqttClient {
   private attempt = 0;
   private authBlocked = false;
   private tokenRefreshInProgress = false;
+  private flushing = false;
 
   constructor(handlers: Handlers) {
     const ctx = getContext();
@@ -218,7 +247,6 @@ export class RealtimeMqttClient {
         if (!this.msgpack) return;
         try {
           const decoded = this.msgpack.decode(payload as Packet) as RealtimeEnvelope;
-          // Server-to-client envelopes never need to expose a connect token.
           delete decoded.authToken;
           this.handlers.onMessage(decoded, String(topic));
         } catch {
@@ -240,26 +268,53 @@ export class RealtimeMqttClient {
     }
   }
 
+  private async publishConnected(envelope: RealtimeEnvelope): Promise<void> {
+    const client = this.client;
+    const msgpack = this.msgpack;
+    const token = this.sessionToken;
+    if (!client || !client.connected || !msgpack || !token) {
+      throw new Error("MQTT connection is not ready")
+    }
+    const topic = `amo/${this.amoId}/user/${this.userId}/outbox`;
+    const wireEnvelope: RealtimeEnvelope = { ...envelope, authToken: token };
+    await publishWithAcknowledgement(client, topic, msgpack.encode(wireEnvelope));
+  }
+
   async publish(envelope: RealtimeEnvelope): Promise<void> {
+    const queued = { ...envelope };
+    delete queued.authToken;
     if (!this.client || !this.client.connected || !this.msgpack || !this.sessionToken) {
-      const queued = { ...envelope };
-      delete queued.authToken;
       await queueOutbound(queued);
       return;
     }
-    const topic = `amo/${this.amoId}/user/${this.userId}/outbox`;
-    const wireEnvelope: RealtimeEnvelope = { ...envelope, authToken: this.sessionToken };
-    await new Promise<void>((resolve) => {
-      this.client?.publish(topic, this.msgpack!.encode(wireEnvelope), { qos: 1 }, () => resolve());
-    });
+    try {
+      await this.publishConnected(queued);
+    } catch (error) {
+      await queueOutbound(queued);
+      this.handlers.onState("offline");
+      this.scheduleReconnect("publish");
+      throw error;
+    }
   }
 
   async flushQueue(): Promise<void> {
-    if (!this.client || !this.client.connected || !this.sessionToken) return;
-    const pending = await loadOutbound();
-    for (const item of pending) {
-      await this.publish(item);
-      await removeOutbound(item.id);
+    if (this.flushing || !this.client || !this.client.connected || !this.sessionToken) return;
+    this.flushing = true;
+    try {
+      const pending = await loadOutbound();
+      for (const item of pending) {
+        try {
+          await this.publishConnected(item);
+          await removeOutbound(item.id);
+        } catch (error) {
+          console.warn("[realtime] queued MQTT publish retained for retry", error);
+          this.handlers.onState("offline");
+          this.scheduleReconnect("queued-publish");
+          break;
+        }
+      }
+    } finally {
+      this.flushing = false;
     }
   }
 
