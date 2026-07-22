@@ -2,18 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import (
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Index,
-    Integer,
-    JSON,
-    String,
-    Text,
-    UniqueConstraint,
-)
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 
 from amodb.database import Base
 from amodb.user_id import generate_user_id
@@ -24,12 +13,6 @@ def utcnow() -> datetime:
 
 
 class SaaSProviderCredential(Base):
-    """Encrypted, scoped provider configuration.
-
-    Secret values are encrypted by :mod:`saas_secrets` before persistence. API
-    responses must expose only ``secret_fingerprint`` and ``has_secret``.
-    """
-
     __tablename__ = "saas_provider_credentials"
     __table_args__ = (
         UniqueConstraint("provider", "tenant_id", name="uq_saas_provider_scope"),
@@ -64,6 +47,7 @@ class SaaSJob(Base):
         UniqueConstraint("job_type", "tenant_scope", "idempotency_key", name="uq_saas_job_idempotency"),
         Index("ix_saas_jobs_claim", "queue_name", "status", "available_at", "priority"),
         Index("ix_saas_jobs_lease", "status", "lease_expires_at"),
+        Index("ix_saas_jobs_lease_fence", "id", "status", "lease_token"),
         Index("ix_saas_jobs_tenant", "tenant_id", "status", "created_at"),
         Index("ix_saas_jobs_correlation", "correlation_id"),
     )
@@ -72,8 +56,6 @@ class SaaSJob(Base):
     queue_name = Column(String(64), nullable=False, default="default", index=True)
     job_type = Column(String(96), nullable=False, index=True)
     tenant_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=True, index=True)
-    # PostgreSQL treats NULLs as distinct in unique constraints. This stable
-    # scope value preserves global-job idempotency as well as tenant idempotency.
     tenant_scope = Column(String(36), nullable=False, default="__platform__")
     status = Column(String(32), nullable=False, default="PENDING", index=True)
     priority = Column(Integer, nullable=False, default=100)
@@ -86,6 +68,7 @@ class SaaSJob(Base):
     available_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     locked_at = Column(DateTime(timezone=True), nullable=True)
     locked_by = Column(String(128), nullable=True)
+    lease_token = Column(String(64), nullable=True)
     lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     last_error = Column(Text, nullable=True)
     created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
