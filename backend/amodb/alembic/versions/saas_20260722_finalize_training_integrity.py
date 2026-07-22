@@ -13,6 +13,7 @@ are marked RENEWED rather than deleted.
 from __future__ import annotations
 
 from collections.abc import Iterable
+import re
 
 from alembic import op
 import sqlalchemy as sa
@@ -55,14 +56,22 @@ def _index_names(table_name: str) -> set[str]:
     }
 
 
-def _check_names(table_name: str) -> set[str]:
+def _normalise_check_sql(value: object) -> str:
+    return re.sub(r"[^a-z0-9_<>=]", "", str(value or "").lower())
+
+
+def _check_exists(table_name: str, desired_name: str, expression: str) -> bool:
     if not _has_table(table_name):
-        return set()
-    return {
-        str(item.get("name"))
-        for item in _inspector().get_check_constraints(table_name)
-        if item.get("name")
-    }
+        return False
+    expected_sql = _normalise_check_sql(expression)
+    for constraint in _inspector().get_check_constraints(table_name):
+        actual_name = str(constraint.get("name") or "")
+        if actual_name == desired_name or actual_name.endswith(desired_name):
+            return True
+        actual_sql = _normalise_check_sql(constraint.get("sqltext"))
+        if actual_sql == expected_sql:
+            return True
+    return False
 
 
 def _foreign_key_exists(table_name: str, columns: Iterable[str], referred_table: str) -> bool:
@@ -81,32 +90,43 @@ def _add_column_if_missing(table_name: str, column: sa.Column) -> None:
         op.add_column(table_name, column)
 
 
+def _ensure_check(table_name: str, name: str, expression: str) -> None:
+    if not _check_exists(table_name, name, expression):
+        op.create_check_constraint(name, table_name, expression)
+
+
 def _finalize_course_planning() -> None:
     if not _has_table(COURSE_TABLE):
         return
 
-    _add_column_if_missing(COURSE_TABLE, sa.Column("nominal_hours", sa.Integer(), nullable=True))
     _add_column_if_missing(
         COURSE_TABLE,
-        sa.Column("planning_lead_days", sa.Integer(), nullable=True, server_default=sa.text("45")),
+        sa.Column("nominal_hours", sa.Integer(), nullable=True),
+    )
+    _add_column_if_missing(
+        COURSE_TABLE,
+        sa.Column(
+            "planning_lead_days",
+            sa.Integer(),
+            nullable=True,
+            server_default=sa.text("45"),
+        ),
     )
     _add_column_if_missing(
         COURSE_TABLE,
         sa.Column("candidate_requirement_text", sa.Text(), nullable=True),
     )
 
-    checks = _check_names(COURSE_TABLE)
-    if "nominal_hours" in _columns(COURSE_TABLE) and "ck_training_course_nominal_hours_nonneg" not in checks:
-        op.create_check_constraint(
-            "ck_training_course_nominal_hours_nonneg",
+    if "nominal_hours" in _columns(COURSE_TABLE):
+        _ensure_check(
             COURSE_TABLE,
+            "ck_training_course_nominal_hours_nonneg",
             "nominal_hours IS NULL OR nominal_hours >= 0",
         )
-    checks = _check_names(COURSE_TABLE)
-    if "planning_lead_days" in _columns(COURSE_TABLE) and "ck_training_course_planning_lead_nonneg" not in checks:
-        op.create_check_constraint(
-            "ck_training_course_planning_lead_nonneg",
+    if "planning_lead_days" in _columns(COURSE_TABLE):
+        _ensure_check(
             COURSE_TABLE,
+            "ck_training_course_planning_lead_nonneg",
             "planning_lead_days IS NULL OR planning_lead_days >= 0",
         )
 
@@ -127,7 +147,11 @@ def _finalize_record_columns() -> None:
 
     if (
         _has_columns(RECORD_TABLE, ("id", "superseded_by_record_id"))
-        and not _foreign_key_exists(RECORD_TABLE, ("superseded_by_record_id",), RECORD_TABLE)
+        and not _foreign_key_exists(
+            RECORD_TABLE,
+            ("superseded_by_record_id",),
+            RECORD_TABLE,
+        )
     ):
         op.create_foreign_key(
             "fk_training_records_superseded_by",
@@ -223,7 +247,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # This is a non-destructive convergence repair. Earlier P0 revisions own the
-    # individual columns and indexes, so reversing them here could remove schema
-    # that existed before this finalizer ran.
+    # Non-destructive convergence repair. Earlier P0 revisions own the columns,
+    # indexes and constraints, so reversing them here could remove prior schema.
     pass
