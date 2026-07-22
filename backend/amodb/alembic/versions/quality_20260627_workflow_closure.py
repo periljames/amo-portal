@@ -15,7 +15,10 @@ import sqlalchemy as sa
 revision: str = "qual_20260627_wf_close"
 down_revision: Union[str, Sequence[str], None] = "plat_20260627_support"
 branch_labels = None
-depends_on = None
+# This revision creates CAR extension/reminder tables with foreign keys to
+# quality_cars. The CAR base table is created on a separate historical branch,
+# so a clean database must complete that revision before this one runs.
+depends_on = "a4d6f8b0c2e1"
 
 
 def _insp():
@@ -124,13 +127,13 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["assigned_to_user_id"], ["users.id"], ondelete="SET NULL"),
             sa.ForeignKeyConstraint(["completed_by_user_id"], ["users.id"], ondelete="SET NULL"),
             sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
-            sa.CheckConstraint("response_status IN ('PENDING','COMPLIANT','NON_CONFORMING','OBSERVATION','NOT_APPLICABLE')", name="ck_quality_checklist_response_status"),
             sa.PrimaryKeyConstraint("id"),
         )
     for name, cols in {
-        "ix_quality_checklist_audit_order": ["audit_id", "section", "sort_order"],
+        "ix_quality_checklist_audit_sort": ["audit_id", "sort_order"],
         "ix_quality_audit_checklist_items_amo_id": ["amo_id"],
-        "ix_quality_audit_checklist_items_response_status": ["response_status"],
+        "ix_quality_audit_checklist_items_assigned_to_user_id": ["assigned_to_user_id"],
+        "ix_quality_audit_checklist_items_finding_id": ["finding_id"],
     }.items():
         _create_index(name, "quality_audit_checklist_items", cols)
 
@@ -140,10 +143,11 @@ def upgrade() -> None:
             sa.Column("id", sa.UUID(), nullable=False),
             sa.Column("amo_id", sa.String(length=36), nullable=False),
             sa.Column("audit_id", sa.UUID(), nullable=False),
-            sa.Column("briefing_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-            sa.Column("summary", sa.Text(), nullable=False),
+            sa.Column("brief_date", sa.Date(), nullable=False),
             sa.Column("attendees_json", sa.Text(), nullable=False, server_default="[]"),
-            sa.Column("report_due_date", sa.Date(), nullable=False),
+            sa.Column("summary", sa.Text(), nullable=True),
+            sa.Column("decisions", sa.Text(), nullable=True),
+            sa.Column("follow_up_actions", sa.Text(), nullable=True),
             sa.Column("created_by_user_id", sa.String(length=36), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
@@ -151,10 +155,9 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["audit_id"], ["qms_audits.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("audit_id", name="uq_quality_audit_post_brief_audit"),
         )
     _create_index("ix_quality_audit_post_briefs_amo_id", "quality_audit_post_briefs", ["amo_id"])
-    _create_index("ix_quality_audit_post_briefs_report_due_date", "quality_audit_post_briefs", ["report_due_date"])
+    _create_index("ix_quality_audit_post_briefs_audit_id", "quality_audit_post_briefs", ["audit_id"])
 
     if not _has_table("quality_audit_report_trackers"):
         op.create_table(
@@ -162,24 +165,25 @@ def upgrade() -> None:
             sa.Column("id", sa.UUID(), nullable=False),
             sa.Column("amo_id", sa.String(length=36), nullable=False),
             sa.Column("audit_id", sa.UUID(), nullable=False),
-            sa.Column("report_due_date", sa.Date(), nullable=False),
+            sa.Column("due_date", sa.Date(), nullable=False),
+            sa.Column("status", sa.String(length=32), nullable=False, server_default="PENDING"),
             sa.Column("report_submitted_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("feedback_due_date", sa.Date(), nullable=True),
-            sa.Column("feedback_submitted_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("status", sa.String(length=32), nullable=False, server_default="DUE"),
+            sa.Column("accepted_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("accepted_by_user_id", sa.String(length=36), nullable=True),
             sa.Column("next_reminder_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("created_by_user_id", sa.String(length=36), nullable=True),
+            sa.Column("reminder_count", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["audit_id"], ["qms_audits.id"], ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
-            sa.CheckConstraint("status IN ('DUE','SUBMITTED','FEEDBACK_DUE','ACCEPTED','OVERDUE')", name="ck_quality_report_tracker_status"),
+            sa.ForeignKeyConstraint(["accepted_by_user_id"], ["users.id"], ondelete="SET NULL"),
+            sa.CheckConstraint("status IN ('PENDING','SUBMITTED','ACCEPTED','OVERDUE')", name="ck_quality_report_tracker_status"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("audit_id", name="uq_quality_audit_report_tracker_audit"),
+            sa.UniqueConstraint("audit_id", name="uq_quality_audit_report_trackers_audit"),
         )
     for name, cols in {
-        "ix_quality_report_tracker_status_due": ["amo_id", "status", "report_due_date"],
+        "ix_quality_report_trackers_status_due": ["status", "due_date"],
+        "ix_quality_audit_report_trackers_amo_id": ["amo_id"],
         "ix_quality_audit_report_trackers_next_reminder_at": ["next_reminder_at"],
     }.items():
         _create_index(name, "quality_audit_report_trackers", cols)
@@ -190,10 +194,10 @@ def upgrade() -> None:
             sa.Column("id", sa.UUID(), nullable=False),
             sa.Column("amo_id", sa.String(length=36), nullable=False),
             sa.Column("car_id", sa.UUID(), nullable=False),
+            sa.Column("requested_by_user_id", sa.String(length=36), nullable=True),
             sa.Column("requested_due_date", sa.Date(), nullable=False),
             sa.Column("reason", sa.Text(), nullable=False),
             sa.Column("status", sa.String(length=32), nullable=False, server_default="PENDING"),
-            sa.Column("requested_by_user_id", sa.String(length=36), nullable=True),
             sa.Column("reviewed_by_user_id", sa.String(length=36), nullable=True),
             sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("review_note", sa.Text(), nullable=True),
@@ -203,11 +207,15 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["car_id"], ["quality_cars.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["requested_by_user_id"], ["users.id"], ondelete="SET NULL"),
             sa.ForeignKeyConstraint(["reviewed_by_user_id"], ["users.id"], ondelete="SET NULL"),
-            sa.CheckConstraint("status IN ('PENDING','APPROVED','REJECTED')", name="ck_quality_car_extension_status"),
+            sa.CheckConstraint("status IN ('PENDING','APPROVED','REJECTED','CANCELLED')", name="ck_quality_car_extension_status"),
             sa.PrimaryKeyConstraint("id"),
         )
-    _create_index("ix_quality_car_ext_car_status", "quality_car_extension_requests", ["car_id", "status"])
-    _create_index("ix_quality_car_extension_requests_amo_id", "quality_car_extension_requests", ["amo_id"])
+    for name, cols in {
+        "ix_quality_car_extension_requests_amo_id": ["amo_id"],
+        "ix_quality_car_extension_requests_car_id": ["car_id"],
+        "ix_quality_car_extension_requests_status": ["status"],
+    }.items():
+        _create_index(name, "quality_car_extension_requests", cols)
 
     if not _has_table("quality_reminder_milestones"):
         op.create_table(
@@ -217,24 +225,17 @@ def upgrade() -> None:
             sa.Column("entity_type", sa.String(length=64), nullable=False),
             sa.Column("entity_id", sa.String(length=64), nullable=False),
             sa.Column("milestone_key", sa.String(length=64), nullable=False),
-            sa.Column("recipient_user_id", sa.String(length=36), nullable=True),
-            sa.Column("scheduled_for", sa.DateTime(timezone=True), nullable=False),
-            sa.Column("due_date", sa.Date(), nullable=True),
+            sa.Column("due_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("escalated_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("severity", sa.String(length=32), nullable=False, server_default="ACTION_REQUIRED"),
-            sa.Column("message", sa.Text(), nullable=False),
+            sa.Column("recipient_user_ids_json", sa.Text(), nullable=False, server_default="[]"),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(["recipient_user_id"], ["users.id"], ondelete="SET NULL"),
             sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("amo_id", "entity_type", "entity_id", "milestone_key", name="uq_quality_reminder_milestone"),
         )
-    for name, cols in {
-        "ix_quality_reminder_entity_key": ["amo_id", "entity_type", "entity_id", "milestone_key"],
-        "ix_quality_reminder_due_unsent": ["amo_id", "scheduled_for", "sent_at"],
-        "ix_quality_reminder_milestones_recipient_user_id": ["recipient_user_id"],
-    }.items():
-        _create_index(name, "quality_reminder_milestones", cols)
+    _create_index("ix_quality_reminders_due_sent", "quality_reminder_milestones", ["due_at", "sent_at"])
+    _create_index("ix_quality_reminder_milestones_amo_id", "quality_reminder_milestones", ["amo_id"])
 
     if not _has_table("quality_archive_packages"):
         op.create_table(
@@ -243,25 +244,25 @@ def upgrade() -> None:
             sa.Column("amo_id", sa.String(length=36), nullable=False),
             sa.Column("audit_id", sa.UUID(), nullable=False),
             sa.Column("package_ref", sa.String(length=128), nullable=False),
-            sa.Column("status", sa.String(length=32), nullable=False, server_default="READY"),
-            sa.Column("file_ref", sa.String(length=512), nullable=True),
-            sa.Column("metrics_snapshot_json", sa.Text(), nullable=False, server_default="{}"),
-            sa.Column("generated_by_user_id", sa.String(length=36), nullable=True),
-            sa.Column("generated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column("storage_ref", sa.String(length=512), nullable=False),
+            sa.Column("retention_until", sa.Date(), nullable=True),
+            sa.Column("manifest_json", sa.Text(), nullable=False, server_default="{}"),
+            sa.Column("sha256", sa.String(length=64), nullable=True),
+            sa.Column("created_by_user_id", sa.String(length=36), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["audit_id"], ["qms_audits.id"], ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(["generated_by_user_id"], ["users.id"], ondelete="SET NULL"),
-            sa.CheckConstraint("status IN ('READY','LOCKED','SUPERSEDED')", name="ck_quality_archive_status"),
+            sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("amo_id", "audit_id", "package_ref", name="uq_quality_archive_package_ref"),
+            sa.UniqueConstraint("amo_id", "package_ref", name="uq_quality_archive_package_ref"),
         )
-    _create_index("ix_quality_archive_audit_generated", "quality_archive_packages", ["audit_id", "generated_at"])
     _create_index("ix_quality_archive_packages_amo_id", "quality_archive_packages", ["amo_id"])
+    _create_index("ix_quality_archive_packages_audit_id", "quality_archive_packages", ["audit_id"])
+    _create_index("ix_quality_archive_packages_retention_until", "quality_archive_packages", ["retention_until"])
 
 
 def downgrade() -> None:
-    for table in [
+    for table in (
         "quality_archive_packages",
         "quality_reminder_milestones",
         "quality_car_extension_requests",
@@ -270,6 +271,6 @@ def downgrade() -> None:
         "quality_audit_checklist_items",
         "quality_audit_document_requests",
         "quality_tenant_workflow_settings",
-    ]:
+    ):
         if _has_table(table):
             op.drop_table(table)
