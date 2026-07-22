@@ -305,7 +305,10 @@ export async function enqueueOfflineMutation(input: EnqueueOfflineMutationInput)
 }
 
 export async function listOfflineMutations(scope = currentOfflineScope()): Promise<OfflineOutboxEntry[]> {
+  if (currentOfflineScope() !== scope) return [];
   const stored = await recordsForScope<OfflineOutboxEntry>(OUTBOX_STORE, scope).catch(() => []);
+  if (currentOfflineScope() !== scope) return [];
+
   if (!stored.length && memoryOutbox.size) {
     return [...memoryOutbox.values()]
       .filter((entry) => entry.scope === scope)
@@ -334,8 +337,24 @@ async function saveOutboxEntry(entry: OfflineOutboxEntry): Promise<void> {
 }
 
 async function findOutboxEntry(id: string): Promise<OfflineOutboxEntry | undefined> {
-  return memoryOutbox.get(id)
-    || await readRecord<OfflineOutboxEntry>(OUTBOX_STORE, id).catch(() => undefined);
+  const memory = memoryOutbox.get(id);
+  if (memory) return memory;
+  return readRecord<OfflineOutboxEntry>(OUTBOX_STORE, id).catch(() => undefined);
+}
+
+async function removeOutboxEntry(entry: OfflineOutboxEntry, reason?: "discarded"): Promise<void> {
+  memoryOutbox.delete(entry.id);
+  await deleteRecord(OUTBOX_STORE, entry.id).catch(() => undefined);
+  notifyOfflineStateChanged();
+  if (reason === "discarded") {
+    notifyOfflineSyncComplete({
+      scope: entry.scope,
+      synced: 0,
+      paths: [entry.path],
+      entityTypes: entry.entityType ? [entry.entityType] : [],
+      reason,
+    });
+  }
 }
 
 export async function retryOfflineMutation(id: string): Promise<OfflineOutboxEntry> {
@@ -357,21 +376,11 @@ export async function retryOfflineMutation(id: string): Promise<OfflineOutboxEnt
 
 export async function discardOfflineMutation(id: string): Promise<void> {
   const entry = await findOutboxEntry(id);
-  if (entry && entry.scope !== currentOfflineScope()) {
+  if (!entry) return;
+  if (entry.scope !== currentOfflineScope()) {
     throw new Error("Switch back to the AMO where this change was created before discarding it.");
   }
-  memoryOutbox.delete(id);
-  await deleteRecord(OUTBOX_STORE, id).catch(() => undefined);
-  notifyOfflineStateChanged();
-  if (entry) {
-    notifyOfflineSyncComplete({
-      scope: entry.scope,
-      synced: 0,
-      paths: [entry.path],
-      entityTypes: entry.entityType ? [entry.entityType] : [],
-      reason: "discarded",
-    });
-  }
+  await removeOutboxEntry(entry, "discarded");
 }
 
 function readReplayLease(): ReplayLease | null {
@@ -496,7 +505,7 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
           synced += 1;
           syncedPaths.add(syncing.path);
           if (syncing.entityType) syncedEntityTypes.add(syncing.entityType);
-          await discardOfflineMutation(syncing.id);
+          await removeOutboxEntry(syncing);
           continue;
         }
 
