@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from . import models, realtime_auth
 
+GATEWAY_SHARED_SUBSCRIPTION = "$share/amo-portal-gateway/amo/+/user/+/outbox"
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -20,7 +22,8 @@ def _secret(name: str) -> str:
 
 
 def realtime_enabled() -> bool:
-    return _secret("REALTIME_ENABLED").lower() in {"1", "true", "yes", "on"} if _secret("REALTIME_ENABLED") else True
+    raw = _secret("REALTIME_ENABLED")
+    return raw.lower() in {"1", "true", "yes", "on"} if raw else True
 
 
 def validate_production_config() -> None:
@@ -124,10 +127,12 @@ def authorize_topic(
     gateway_username = _secret("REALTIME_GATEWAY_USERNAME")
     if username == gateway_username and gateway_username:
         allowed = (
-            normalized_action in {"subscribe", "sub"} and topic == "amo/+/user/+/outbox"
+            normalized_action in {"subscribe", "sub"}
+            and topic == GATEWAY_SHARED_SUBSCRIPTION
         ) or (
             normalized_action in {"publish", "pub"}
             and topic.startswith("amo/")
+            and topic.count("/") == 4
             and (topic.endswith("/inbox") or topic.endswith("/ack"))
         )
         return {"result": "allow" if allowed else "deny"}
