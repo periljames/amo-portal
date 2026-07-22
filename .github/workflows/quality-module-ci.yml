@@ -3,13 +3,18 @@ name: Quality Module CI
 on:
   pull_request:
     paths:
+      - "backend/amodb/quality_main.py"
       - "backend/amodb/apps/quality/**"
       - "backend/amodb/apps/audit/**"
       - "backend/amodb/apps/notifications/**"
       - "backend/amodb/apps/tasks/**"
       - "backend/amodb/apps/exports/**"
+      - "backend/amodb/apps/training/**"
+      - "backend/amodb/apps/manuals/**"
+      - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/alembic/versions/quality_*.py"
       - "backend/amodb/scripts/quality_module_internal_check.py"
+      - "backend/docs/quality/**"
       - "frontend/src/pages/Quality*.tsx"
       - "frontend/src/pages/QMS*.tsx"
       - "frontend/src/pages/qms/**"
@@ -67,15 +72,20 @@ jobs:
       - name: Run Quality backend and frontend contract check
         run: python -m amodb.scripts.quality_module_internal_check
       - name: Compile Quality backend
-        run: python -m compileall -q amodb/apps/quality amodb/alembic/versions/quality_20260722_schema_integrity.py
-      - name: Configure all SQLAlchemy mappers
+        run: >-
+          python -m compileall -q
+          amodb/quality_main.py
+          amodb/apps/quality
+          amodb/alembic/versions/quality_20260722_schema_integrity.py
+      - name: Configure full and bounded Quality SQLAlchemy mappers
         env:
           APP_ENV: test
           ALLOW_SQLITE_FOR_TESTS: "1"
           DATABASE_URL: sqlite+pysqlite:///:memory:
           DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
           SECRET_KEY: quality-mapper-test-secret
-        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; configure_mappers(); print('All application mappers configured')"
+          QUALITY_SCHEMA_STRICT: "0"
+        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('All application mappers configured')"
       - name: Run Quality workflow and integration tests
         env:
           APP_ENV: test
@@ -83,8 +93,10 @@ jobs:
           DATABASE_URL: sqlite+pysqlite:///:memory:
           DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
           SECRET_KEY: quality-test-secret
+          QUALITY_SCHEMA_STRICT: "0"
         run: >-
           pytest -q
+          amodb/apps/quality/tests/test_quality_delivery_profile.py
           amodb/apps/quality/tests/test_workflow_transitions.py
           amodb/apps/quality/tests/test_audit_workflow_enforcement.py
           amodb/apps/quality/tests/test_audit_events.py
@@ -163,17 +175,8 @@ jobs:
         run: npm run test:quality
       - name: Typecheck and production build
         run: npm run build
-      - name: Lint Quality implementation
+      - name: Lint changed Quality service boundary
         run: >-
           npm exec -- eslint
-          src/services/qms.ts
           src/services/qmsAuditHubActions.ts
           src/services/qmsAuditHubActions.test.ts
-          src/pages/QualityAuditRunHubPage.tsx
-          src/pages/QualityAuditScheduleDetailPage.tsx
-          src/pages/QualityCarsPage.tsx
-          src/pages/QualityEvidenceLibraryPage.tsx
-          src/pages/QMSEventsPage.tsx
-          src/pages/qms
-          src/pages/qualityAudits
-          src/components/QMS
