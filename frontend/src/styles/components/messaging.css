@@ -196,11 +196,31 @@
 .messaging-message p { margin: 0; padding: 8px 10px; border: 1px solid var(--border-color, #dbe3ee); border-radius: 12px 12px 12px 4px; background: var(--surface-page, #fff); white-space: pre-wrap; overflow-wrap: anywhere; }
 .messaging-message.is-own p { border-radius: 12px 12px 4px 12px; border-color: color-mix(in srgb, var(--accent-color, #2563eb) 35%, transparent); background: color-mix(in srgb, var(--accent-color, #2563eb) 12%, var(--surface-page, #fff)); }
 .messaging-message time { display: block; margin: 3px 4px 0; color: var(--text-muted, #64748b); font-size: 10px; text-align: right; }
+.messaging-mentioned { color: var(--accent-color, #2563eb) !important; font-weight: 700; }
 
-.messaging-composer { display: flex; align-items: flex-end; gap: 8px; padding: 9px 10px; border-top: 1px solid var(--border-color, #e2e8f0); }
+.messaging-composer { display: grid; gap: 7px; padding: 9px 10px; border-top: 1px solid var(--border-color, #e2e8f0); }
+.messaging-composer-row { display: flex; align-items: flex-end; gap: 8px; min-width: 0; }
 .messaging-composer textarea { min-height: 38px; max-height: 120px; flex: 1; resize: vertical; border: 1px solid var(--border-color, #cbd5e1); border-radius: 10px; background: var(--surface-page, #fff); color: inherit; padding: 8px 9px; font: inherit; }
 .messaging-composer button { border: 0; border-radius: 9px; background: var(--accent-color, #2563eb); color: #fff; cursor: pointer; padding: 9px 13px; font: inherit; font-weight: 650; }
 .messaging-composer button:disabled { cursor: default; opacity: .55; }
+.messaging-mentions { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.messaging-mentions select,
+.messaging-mentions button {
+  max-width: 190px;
+  min-height: 27px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 8px;
+  background: var(--surface-muted, #f8fafc);
+  color: var(--text-secondary, #334155);
+  padding: 4px 7px;
+  font: inherit;
+}
+.messaging-mentions button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
 .messaging-error { margin: 0; padding: 0 10px 8px; color: var(--danger, #b91c1c); font-size: 11px; }
 
 .messaging-notifications { min-height: 0; display: flex; flex: 1; flex-direction: column; }
@@ -227,4 +247,8 @@
   .messaging-thread-copy time { display: none; }
   .messaging-avatar { width: 28px; height: 28px; border-radius: 9px; }
   .messaging-message > div { max-width: 88%; }
+  .messaging-composer-row { align-items: stretch; }
+  .messaging-composer-row button { align-self: flex-end; }
+  .messaging-mentions select,
+  .messaging-mentions button { max-width: 140px; }
 }
