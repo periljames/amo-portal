@@ -1,6 +1,7 @@
 // src/services/crs.ts
 // Generic HTTP helpers used across the portal. JSON reads are persisted in the
-// user/tenant offline cache. Idempotent JSON mutations can be queued and replayed.
+// user/tenant offline cache. Only explicitly marked idempotent/version-aware
+// mutations may enter the replay outbox.
 
 import type { CRSCreate, CRSRead, CRSPrefill } from "../types/crs";
 import { authHeaders, handleAuthFailure, markSessionActivity, extendSessionIfNeeded } from "./auth";
@@ -41,8 +42,6 @@ async function request<T>(
   try {
     markSessionActivity(`api:${method.toLowerCase()}:start:${path}`);
     void extendSessionIfNeeded(`api:${method.toLowerCase()}:${path}`)?.catch(() => undefined);
-    const queueMutation = offline?.queueMutation
-      ?? (["PUT", "PATCH", "DELETE"].includes(method) && !(body instanceof FormData));
     const res = await portalFetch(path, {
       method,
       body,
@@ -52,7 +51,7 @@ async function request<T>(
         cache: method === "GET",
         cacheTtlMs: offline?.cacheTtlMs ?? 5 * 60_000,
         allowStaleFallback: offline?.allowStaleFallback ?? true,
-        queueMutation,
+        queueMutation: offline?.queueMutation === true,
         entityType: offline?.entityType,
         entityId: offline?.entityId,
         idempotencyKey: offline?.idempotencyKey,
