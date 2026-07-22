@@ -6,6 +6,7 @@ from sqlalchemy.orm import configure_mappers
 
 
 def test_core_application_mappers_configure_without_ambiguous_relationships():
+    """Login must never be the first code path that discovers a broken mapper."""
     for module_name in (
         "amodb.apps.accounts.models",
         "amodb.apps.foundations.models",
