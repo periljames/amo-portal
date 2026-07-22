@@ -1,18 +1,23 @@
 import {
-  type Dispatch,
-  type SetStateAction,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import {
   keepPreviousData,
   useInfiniteQuery,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { addWeeks } from "date-fns";
 
+import {
+  listOfflineMutations,
+  type OfflineOutboxEntry,
+} from "../../../services/offlinePersistence";
 import {
   getRosterContracts,
   getRosterVersion,
@@ -21,48 +26,41 @@ import {
   listRosterPeriods,
   listShiftTemplates,
 } from "../../../services/rostering";
-import { listRosterPeoplePage } from "../../../services/workforce";
 import {
-  listOfflineMutations,
-  type OfflineMutationEntry,
-} from "../../../services/offlinePersistence";
-import { useDebouncedValue } from "../../../hooks/useDebouncedValue";
+  listRosterPeoplePage,
+  type RosterDepartmentOption,
+  type RosterPersonRead,
+} from "../../../services/rosterPeople";
 import type {
   RosterAssignmentRead,
   RosterContractResponse,
-  RosterEmployeeRead,
   RosterPeriodRead,
   RosterValidationFindingRead,
   RosterVersionRead,
   ShiftTemplateRead,
 } from "../../../types/rostering";
+import { errorMessage, weekBounds } from "../rosterUi";
 
-type VersionWorkspace = {
-  version: RosterVersionRead;
-  assignments: RosterAssignmentRead[];
-  findings: RosterValidationFindingRead[];
-};
-
-type PlannerDataV2 = {
+export type PlannerDataV2 = {
   loading: boolean;
   refreshing: boolean;
   error: string | null;
   anchor: Date;
-  setAnchor: (next: Date) => void;
-  week: { from: string; to: string };
+  setAnchor: (date: Date) => void;
+  week: ReturnType<typeof weekBounds>;
   periods: RosterPeriodRead[];
   selectedPeriodId: string;
-  setSelectedPeriodId: (value: string) => void;
+  setSelectedPeriodId: (id: string) => void;
   versions: RosterVersionRead[];
   selectedVersionId: string;
-  setSelectedVersionId: (value: string) => void;
+  setSelectedVersionId: (id: string) => void;
   selectedVersion: RosterVersionRead | null;
   assignments: RosterAssignmentRead[];
   setAssignments: Dispatch<SetStateAction<RosterAssignmentRead[]>>;
   findings: RosterValidationFindingRead[];
-  people: RosterEmployeeRead[];
+  people: RosterPersonRead[];
   peopleTotal: number;
-  peopleDepartments: Array<{ id: string; name: string; code?: string | null }>;
+  peopleDepartments: RosterDepartmentOption[];
   peopleSearch: string;
   setPeopleSearch: (value: string) => void;
   peopleDepartmentId: string;
@@ -76,59 +74,53 @@ type PlannerDataV2 = {
   moveWeek: (direction: -1 | 1) => void;
 };
 
-const PEOPLE_PAGE_SIZE = 120;
-const PERIOD_STALE_MS = 30_000;
-const WORKSPACE_STALE_MS = 15_000;
-const REFERENCE_STALE_MS = 10 * 60_000;
-const ROSTER_GC_MS = 30 * 60_000;
-const PENDING_OUTBOX_STATUSES = new Set(["PENDING", "SYNCING", "RETRY"]);
+type VersionWorkspace = {
+  version: RosterVersionRead;
+  assignments: RosterAssignmentRead[];
+  findings: RosterValidationFindingRead[];
+};
+
+const PERIOD_STALE_MS = 2 * 60_000;
+const REFERENCE_STALE_MS = 15 * 60_000;
+const WORKSPACE_STALE_MS = 45_000;
+const ROSTER_GC_MS = 7 * 24 * 60 * 60_000;
+const PEOPLE_PAGE_SIZE = 100;
+const PENDING_OUTBOX_STATUSES = new Set(["queued", "syncing", "conflict", "failed"]);
 const ASSIGNMENT_PATCH_FIELDS = [
-  "user_id",
-  "roster_date",
-  "shift_template_id",
-  "start_time",
-  "end_time",
-  "status",
-  "station_id",
   "department_id",
-  "notes",
-  "source_type",
-  "source_reference_id",
+  "base_station_id",
+  "shift_template_id",
+  "status",
+  "starts_at",
+  "ends_at",
+  "planned_minutes",
+  "role_label",
+  "team_code",
+  "location_label",
+  "task_note",
+  "change_reason",
 ] as const;
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Failed to load roster planner data.";
+function newest(period?: RosterPeriodRead): RosterVersionRead | undefined {
+  return [...(period?.versions || [])].sort((a, b) => b.version_no - a.version_no)[0];
 }
 
-function isoDate(value: Date) {
-  return value.toISOString().slice(0, 10);
+function periodsKey(from: string, to: string) {
+  return ["rostering", "planner", "periods", from, to] as const;
 }
 
-function weekBounds(anchor: Date) {
-  const normalized = new Date(anchor);
-  normalized.setHours(12, 0, 0, 0);
-  const weekday = normalized.getDay();
-  const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
-  const from = new Date(normalized);
-  from.setDate(normalized.getDate() + mondayOffset);
-  const to = new Date(from);
-  to.setDate(from.getDate() + 6);
-  return { from: isoDate(from), to: isoDate(to) };
+function workspaceKey(versionId: string) {
+  return ["rostering", "planner", "version-workspace", versionId] as const;
 }
 
-function addWeeks(value: Date, amount: number) {
-  const next = new Date(value);
-  next.setDate(next.getDate() + amount * 7);
-  return next;
+function useDebouncedValue(value: string, delayMs: number): string {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = globalThis.setTimeout(() => setDebounced(value), delayMs);
+    return () => globalThis.clearTimeout(timer);
+  }, [delayMs, value]);
+  return debounced;
 }
-
-function newest(period: RosterPeriodRead | undefined) {
-  return [...(period?.versions || [])]
-    .sort((left, right) => right.version_number - left.version_number)[0];
-}
-
-const periodsKey = (from: string, to: string) => ["rostering", "planner", "periods", from, to] as const;
-const workspaceKey = (versionId: string) => ["rostering", "planner", "workspace", versionId] as const;
 
 async function loadVersionWorkspace(versionId: string): Promise<VersionWorkspace> {
   const [version, assignments, findings] = await Promise.all([
@@ -139,7 +131,7 @@ async function loadVersionWorkspace(versionId: string): Promise<VersionWorkspace
   return { version, assignments, findings };
 }
 
-function parseOutboxBody(entry: OfflineMutationEntry): Record<string, unknown> {
+function parseOutboxBody(entry: OfflineOutboxEntry): Record<string, unknown> {
   if (!entry.body) return {};
   try {
     const parsed = JSON.parse(entry.body) as unknown;
@@ -155,55 +147,14 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function pendingCreateRow(
-  workspace: VersionWorkspace,
-  versionId: string,
-  entry: OfflineMutationEntry,
-  body: Record<string, unknown>,
-): RosterAssignmentRead | null {
-  const userId = stringValue(body.user_id);
-  const rosterDate = stringValue(body.roster_date);
-  if (!userId || !rosterDate) return null;
-  const sourceReference = stringValue(body.source_reference_id) || entry.idempotencyKey;
-  const optimisticId = `offline-${entry.id}`;
-  const existing = workspace.assignments.find((row) => (
-    row.id === optimisticId || row.source_reference_id === sourceReference
-  ));
-  if (existing) return existing;
-  const now = new Date(entry.createdAt).toISOString();
-  return {
-    id: optimisticId,
-    version_id: versionId,
-    user_id: userId,
-    user_name: `Pending assignment (${userId.slice(0, 8)})`,
-    department_id: stringValue(body.department_id),
-    station_id: stringValue(body.station_id),
-    roster_date: rosterDate,
-    shift_template_id: stringValue(body.shift_template_id),
-    shift_code: null,
-    shift_name: null,
-    shift_kind: null,
-    shift_color: null,
-    start_time: stringValue(body.start_time),
-    end_time: stringValue(body.end_time),
-    break_minutes: 0,
-    crosses_midnight: false,
-    paid_hours: 0,
-    status: (stringValue(body.status) || "DRAFT") as RosterAssignmentRead["status"],
-    notes: stringValue(body.notes),
-    source_type: stringValue(body.source_type) || "MANUAL",
-    source_reference_id: sourceReference,
-    compliance_hold: false,
-    compliance_summary: null,
-    state_revision: 1,
-    created_at: now,
-    updated_at: now,
-  };
+function nullableString(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === "string" ? value : undefined;
 }
 
 function assignmentIdFromPath(path: string): string | null {
-  const match = path.match(/^\/rostering\/assignments\/([^/?]+)$/);
-  if (!match) return null;
+  const match = path.split("?", 1)[0].match(/^\/rostering\/assignments\/([^/]+)$/);
+  if (!match?.[1]) return null;
   try {
     return decodeURIComponent(match[1]);
   } catch {
@@ -211,30 +162,89 @@ function assignmentIdFromPath(path: string): string | null {
   }
 }
 
+function pendingCreateRow(
+  workspace: VersionWorkspace,
+  versionId: string,
+  entry: OfflineOutboxEntry,
+  body: Record<string, unknown>,
+): RosterAssignmentRead | null {
+  const userId = stringValue(body.user_id);
+  const startsAt = stringValue(body.starts_at);
+  const endsAt = stringValue(body.ends_at);
+  if (!userId || !startsAt || !endsAt) return null;
+
+  const timestamp = new Date(entry.createdAt).toISOString();
+  const sourceReference = stringValue(body.source_reference_id) || entry.idempotencyKey;
+  return {
+    id: `offline-${entry.id}`,
+    amo_id: workspace.version.amo_id,
+    version_id: versionId,
+    user_id: userId,
+    department_id: nullableString(body.department_id) ?? null,
+    base_station_id: nullableString(body.base_station_id) ?? null,
+    shift_template_id: nullableString(body.shift_template_id) ?? null,
+    status: (stringValue(body.status) || "DUTY") as RosterAssignmentRead["status"],
+    source: (stringValue(body.source) || "MANUAL") as RosterAssignmentRead["source"],
+    source_reference_id: sourceReference,
+    starts_at: startsAt,
+    ends_at: endsAt,
+    planned_minutes: typeof body.planned_minutes === "number" ? body.planned_minutes : null,
+    role_label: nullableString(body.role_label) ?? null,
+    team_code: nullableString(body.team_code) ?? null,
+    location_label: nullableString(body.location_label) ?? null,
+    task_note: nullableString(body.task_note) ?? null,
+    change_reason: nullableString(body.change_reason) ?? "Planner assignment",
+    locked_after_publish: false,
+    state_revision: 1,
+    deleted_at: null,
+    created_by_user_id: null,
+    updated_by_user_id: null,
+    created_at: timestamp,
+    updated_at: timestamp,
+    user_full_name: null,
+    user_staff_code: null,
+    user_role: null,
+    department_code: null,
+    department_name: null,
+    base_code: null,
+    base_name: null,
+    shift_code: null,
+    shift_label: null,
+    shift_kind: null,
+    linked_task_count: 0,
+    linked_task_hours: 0,
+  };
+}
+
 function applyPendingPatch(
-  row: RosterAssignmentRead,
-  previousRow: RosterAssignmentRead | undefined,
-  entry: OfflineMutationEntry,
+  current: RosterAssignmentRead,
+  previous: RosterAssignmentRead | undefined,
+  entry: OfflineOutboxEntry,
   body: Record<string, unknown>,
 ): RosterAssignmentRead {
-  const restored = previousRow && Number(previousRow.state_revision || 0) > Number(row.state_revision || 0)
-    ? { ...previousRow }
-    : { ...row };
-  const patched: Record<string, unknown> = { ...restored };
+  const base = previous && previous.state_revision > current.state_revision
+    ? previous
+    : current;
+  const patched: Record<string, unknown> = { ...base };
+
   for (const field of ASSIGNMENT_PATCH_FIELDS) {
-    if (field in body) patched[field] = body[field];
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      patched[field] = body[field];
+    }
   }
-  if (typeof body.compliance_hold === "boolean") patched.compliance_hold = body.compliance_hold;
-  const requestedRevision = Number(body.expected_state_revision || 0);
-  patched.state_revision = Math.max(Number(restored.state_revision || 0) + 1, requestedRevision + 1);
-  patched.updated_at = new Date(entry.updatedAt || entry.createdAt).toISOString();
+
+  const expectedRevision = typeof body.expected_state_revision === "number"
+    ? body.expected_state_revision
+    : current.state_revision;
+  patched.state_revision = Math.max(current.state_revision + 1, expectedRevision + 1);
+  patched.updated_at = new Date(entry.updatedAt).toISOString();
   return patched as unknown as RosterAssignmentRead;
 }
 
 function mergePendingRosterOutbox(
   workspace: VersionWorkspace,
   previous: VersionWorkspace | undefined,
-  entries: OfflineMutationEntry[],
+  entries: OfflineOutboxEntry[],
   versionId: string,
 ): VersionWorkspace {
   const previousAssignments = previous?.assignments || [];
@@ -349,7 +359,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
 
   useEffect(() => {
     if (!periods.length) {
-      setSelectedPeriodId("");
+      if (selectedPeriodId) setSelectedPeriodId("");
       return;
     }
     const current = periods.find((row) => row.id === selectedPeriodId);
@@ -361,7 +371,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
 
   useEffect(() => {
     if (!selectedPeriod) {
-      setSelectedVersionId("");
+      if (selectedVersionId) setSelectedVersionId("");
       return;
     }
     const current = selectedPeriod.versions.find((row) => row.id === selectedVersionId);
@@ -385,10 +395,6 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     networkMode: "offlineFirst",
   });
 
-  // The persisted version workspace is the single source of assignment state.
-  // Offline optimistic creates/updates/deletes therefore survive reloads. Every
-  // subsequent cached or network workspace load projects the durable outbox over
-  // the server snapshot before React Query can publish it.
   const assignments = workspaceQuery.data?.assignments || [];
   const setAssignments = useCallback<Dispatch<SetStateAction<RosterAssignmentRead[]>>>((update) => {
     if (!selectedVersionId) return;
@@ -441,7 +447,10 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     workspaceQuery.error,
   ].find(Boolean);
 
-  const referenceDataMissing = !periodsQuery.data || !peopleQuery.data || !templatesQuery.data || !contractsQuery.data;
+  const referenceDataMissing = !periodsQuery.data
+    || !peopleQuery.data
+    || !templatesQuery.data
+    || !contractsQuery.data;
   const versionDataMissing = Boolean(selectedVersionId) && !workspaceQuery.data;
   const loading = (referenceDataMissing || versionDataMissing) && (
     periodsQuery.isPending
