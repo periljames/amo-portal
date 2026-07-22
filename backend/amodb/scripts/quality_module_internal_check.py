@@ -28,7 +28,7 @@ REQUIRED_CHECKS = {
             '@router.get("/audits/{audit_id}/workspace"',
             '@router.get("/audits/{audit_id}/workflow-check"',
             '@router.post("/audits/{audit_id}/issue-notice"',
-            '@router.get("/audits/{audit_id}/report/download"',
+            '@router.get("/audits/{audit_id}/report"',
             '@router.post("/audits/{audit_id}/report/share"',
             '@router.get("/cars/{car_id}/actions"',
             '@router.post("/cars/{car_id}/actions"',
@@ -57,6 +57,8 @@ REQUIRED_CHECKS = {
         [
             'revision = "quality_20260722_schema_integrity"',
             'down_revision = "workforce_20260721_complete"',
+            "def _foreign_key_exists(",
+            "def _unique_columns_exist(",
             "pk_quality_car_responses",
             "fk_quality_car_responses_car",
             "pk_quality_car_attachments",
@@ -73,7 +75,32 @@ REQUIRED_CHECKS = {
         [
             'TARGET_REVISION = "quality_20260722_schema_integrity"',
             "_create_runtime_fallback_baseline",
+            "_assert_foreign_key_rejects_orphan",
             "Orphaned CAR response insertion unexpectedly succeeded",
+        ],
+    ),
+    "backend_quality_delivery_profile": (
+        BACKEND_ROOT / "amodb/quality_main.py",
+        [
+            'PROFILE_NAME: Final = "quality"',
+            "PROFILE_MODULES:",
+            "OMITTED_OPERATIONAL_MODULES:",
+            "def _enforce_schema_head_sync()",
+            'app.include_router(quality_router)',
+            'app.include_router(canonical_quality_router)',
+            'app.include_router(training_router)',
+            'app.include_router(audit_events_router)',
+            'app.include_router(notifications_router)',
+            'app.include_router(tasks_router)',
+            'app.include_router(doc_control_router)',
+        ],
+    ),
+    "backend_quality_delivery_profile_tests": (
+        BACKEND_ROOT / "amodb/apps/quality/tests/test_quality_delivery_profile.py",
+        [
+            "test_quality_delivery_profile_exposes_required_route_families",
+            "test_quality_delivery_profile_omits_unrelated_operational_routes",
+            "test_quality_delivery_manifest_is_explicit",
         ],
     ),
     "frontend_quality_root_redirect": (
@@ -136,6 +163,7 @@ REQUIRED_CHECKS = {
             "name: Quality Module CI",
             "python -m amodb.scripts.quality_module_internal_check",
             "python -m amodb.apps.quality.tests.postgres_schema_integrity_probe",
+            "test_quality_delivery_profile.py",
             "npm run test:quality",
             "npm run build",
         ],
@@ -151,14 +179,29 @@ FORBIDDEN_CHECKS = {
         FRONTEND_ROOT / "src/pages/QualityAuditRunHubPage.tsx",
         ['qmsAddCarAction,\n} from "../services/qms"'],
     ),
+    "backend_quality_profile_operational_routers": (
+        BACKEND_ROOT / "amodb/quality_main.py",
+        [
+            "fleet_router",
+            "work_router",
+            "crs_router",
+            "reliability_router",
+            "inventory_router",
+            "finance_router",
+            "rostering_router",
+            "workforce_router",
+        ],
+    ),
 }
 
 COMPILE_TARGETS = [
+    BACKEND_ROOT / "amodb/quality_main.py",
     BACKEND_ROOT / "amodb/apps/quality/router.py",
     BACKEND_ROOT / "amodb/apps/quality/service.py",
     BACKEND_ROOT / "amodb/apps/quality/schemas.py",
     BACKEND_ROOT / "amodb/alembic/versions/quality_20260722_schema_integrity.py",
     BACKEND_ROOT / "amodb/apps/quality/tests/postgres_schema_integrity_probe.py",
+    BACKEND_ROOT / "amodb/apps/quality/tests/test_quality_delivery_profile.py",
     Path(__file__),
 ]
 
