@@ -6,6 +6,7 @@ from . import saas_models as _saas_models  # noqa: F401
 from .router import router
 from .saas_router import platform_saas_router, support_router, webhook_router
 from .saas_legacy_bridge import install_legacy_command_queue
+from .saas_usage import install_usage_meter_hardening
 
 # ``amodb.main`` already mounts this package router at /platform. Keeping the
 # expansion here avoids a second top-level router and preserves one audited
@@ -17,5 +18,9 @@ router.include_router(support_router)
 # Existing diagnostics/maintenance endpoints keep their response contracts but
 # no longer run low/medium work inside the HTTP request.
 install_legacy_command_queue()
+
+# Usage aggregation remains batched per API worker, but database increments are
+# atomic across workers and batch flushing is never performed by a request.
+install_usage_meter_hardening(router)
 
 __all__ = ["router"]
