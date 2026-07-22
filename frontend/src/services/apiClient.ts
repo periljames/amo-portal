@@ -172,7 +172,12 @@ function isRetryableNetworkError(error: unknown): boolean {
   if (error instanceof ApiClientError) return false;
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
-    return message.includes("failed to fetch") || message.includes("networkerror") || message.includes("request timed out");
+    return message.includes("failed to fetch")
+      || message.includes("networkerror")
+      || message.includes("request timed out")
+      || message.includes("server could not be reached")
+      || message.includes("no cached copy is available")
+      || message.includes("connection");
   }
   return false;
 }
