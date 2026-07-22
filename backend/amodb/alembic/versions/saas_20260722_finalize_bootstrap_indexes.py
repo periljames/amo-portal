@@ -1,4 +1,4 @@
-"""Finalize deferred indexes and Quality tenant normalization after branch convergence.
+"""Finalize deferred cross-branch schema work after SaaS/Quality convergence.
 
 Revision ID: saas_20260722_finalize_idx
 Revises: saas_20260722_control_plane
@@ -6,8 +6,9 @@ Create Date: 2026-07-22
 
 Historical migrations on parallel branches intentionally skip tables that do
 not exist yet. This finalizer runs after the SaaS/Quality chain has converged,
-re-applies deferred indexes, and recalculates Quality ``amo_id`` backfills from
-the final schema rather than preserving stale early-migration issue rows.
+re-applies deferred operational indexes and training-gate fields, and
+recalculates Quality ``amo_id`` backfills from the final schema rather than
+preserving stale early-migration issue rows.
 """
 
 from __future__ import annotations
@@ -145,6 +146,13 @@ def _execute_if_columns(required: Mapping[str, Iterable[str]], sql: str) -> None
         op.get_bind().execute(sa.text(sql))
 
 
+def _add_column_if_missing(table_name: str, column: sa.Column) -> None:
+    if not _has_table(table_name):
+        return
+    if column.name not in _columns(table_name):
+        op.add_column(table_name, column)
+
+
 def _ensure_issue_table() -> None:
     if _has_table("quality_tenant_backfill_issues"):
         return
@@ -159,10 +167,7 @@ def _ensure_issue_table() -> None:
 
 
 def _ensure_amo_column(table_name: str) -> None:
-    if not _has_table(table_name):
-        return
-    if "amo_id" not in _columns(table_name):
-        op.add_column(table_name, sa.Column("amo_id", sa.String(length=36), nullable=True))
+    _add_column_if_missing(table_name, sa.Column("amo_id", sa.String(length=36), nullable=True))
 
 
 def _ensure_amo_integrity(table_name: str) -> None:
@@ -204,6 +209,30 @@ def _set_user_triggers(table_name: str, enabled: bool) -> None:
         return
     state = "ENABLE" if enabled else "DISABLE"
     op.execute(sa.text(f'ALTER TABLE "{table_name}" {state} TRIGGER USER'))
+
+
+def _finalize_training_gate_fields() -> None:
+    _add_column_if_missing(
+        "doc_control_revision_packages",
+        sa.Column("requires_training", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
+    _add_column_if_missing(
+        "doc_control_revision_packages",
+        sa.Column("training_gate_policy", sa.String(length=32), nullable=False, server_default="NONE"),
+    )
+
+    _add_column_if_missing("training_requirements", sa.Column("source_type", sa.String(length=32), nullable=True))
+    _add_column_if_missing("training_requirements", sa.Column("source_id", sa.String(length=64), nullable=True))
+    _add_column_if_missing(
+        "training_requirements",
+        sa.Column("blocking", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    )
+    _add_column_if_missing("training_requirements", sa.Column("required_by_date", sa.Date(), nullable=True))
+
+    if _has_columns("training_requirements", ("amo_id", "source_type", "source_id")):
+        index_name = "ix_training_requirements_amo_source"
+        if index_name not in _index_names("training_requirements"):
+            op.create_index(index_name, "training_requirements", ["amo_id", "source_type", "source_id"])
 
 
 def _backfill_quality_tenants() -> None:
@@ -317,15 +346,14 @@ def _backfill_quality_tenants() -> None:
 
 
 def upgrade() -> None:
-    inspector = _inspector()
     for name, table_name, expressions, required_columns in INDEXES:
         if not _has_columns(table_name, required_columns):
             continue
         if name in _index_names(table_name):
             continue
         op.create_index(name, table_name, list(expressions))
-        inspector = _inspector()
 
+    _finalize_training_gate_fields()
     _backfill_quality_tenants()
 
 
