@@ -13,6 +13,7 @@ from . import saas_models as models
 TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "DEAD", "CANCELLED"}
 RETRYABLE_MANUAL_STATUSES = {"FAILED", "DEAD", "CANCELLED", "RETRY"}
 CLAIMABLE_STATUSES = {"PENDING", "RETRY"}
+NON_REPEATABLE_JOB_TYPES = {"AI_SUPPORT_REPLY", "ETIMS_FISCALIZE_INVOICE"}
 
 
 class LeaseLostError(RuntimeError):
@@ -78,6 +79,7 @@ def enqueue_job(
     if existing:
         return existing
 
+    effective_max_attempts = 1 if normalized_type in NON_REPEATABLE_JOB_TYPES else max(1, min(int(max_attempts), 25))
     job = models.SaaSJob(
         queue_name=(queue_name or "default").strip().lower(),
         job_type=normalized_type,
@@ -88,7 +90,7 @@ def enqueue_job(
         payload_json=payload or {},
         idempotency_key=normalized_key,
         correlation_id=correlation_id,
-        max_attempts=max(1, min(int(max_attempts), 25)),
+        max_attempts=effective_max_attempts,
         available_at=available_at or utcnow(),
         created_by=created_by,
     )
@@ -105,7 +107,13 @@ def enqueue_job(
         if existing:
             return existing
         raise
-    add_event(db, job, "PENDING", "Job accepted by the durable queue.")
+    add_event(
+        db,
+        job,
+        "PENDING",
+        "Job accepted by the durable queue.",
+        {"non_repeatable": normalized_type in NON_REPEATABLE_JOB_TYPES},
+    )
     if commit:
         db.commit()
         db.refresh(job)
@@ -127,10 +135,16 @@ def release_expired_leases(db: Session, *, now: datetime | None = None) -> int:
         job.locked_by = None
         job.lease_token = None
         job.lease_expires_at = None
-        if int(job.attempt_count or 0) >= int(job.max_attempts or 1):
+        exhausted = int(job.attempt_count or 0) >= int(job.max_attempts or 1)
+        if exhausted or job.job_type in NON_REPEATABLE_JOB_TYPES:
             job.status = "DEAD"
             job.finished_at = now
-            add_event(db, job, "DEAD", "Worker lease expired and retry allowance was exhausted.")
+            reason = (
+                "Non-repeatable job lease expired; manual reconciliation is required."
+                if job.job_type in NON_REPEATABLE_JOB_TYPES
+                else "Worker lease expired and retry allowance was exhausted."
+            )
+            add_event(db, job, "DEAD", reason)
         else:
             job.status = "RETRY"
             job.available_at = now + _retry_delay(job.attempt_count)
@@ -274,7 +288,8 @@ def fail_job(
 ) -> None:
     message = str(error)[:4000]
     now = utcnow()
-    if retryable and int(job.attempt_count or 0) < int(job.max_attempts or 1):
+    effective_retryable = retryable and job.job_type not in NON_REPEATABLE_JOB_TYPES
+    if effective_retryable and int(job.attempt_count or 0) < int(job.max_attempts or 1):
         status = "RETRY"
         available_at = now + _retry_delay(job.attempt_count)
         finished_at = None
@@ -283,7 +298,7 @@ def fail_job(
         status = "DEAD" if retryable else "FAILED"
         available_at = job.available_at
         finished_at = now
-        event_data = {}
+        event_data = {"manual_reconciliation_required": job.job_type in NON_REPEATABLE_JOB_TYPES}
     updated = _lease_filter(db, job, worker_id).update(
         {
             models.SaaSJob.status: status,
@@ -307,6 +322,10 @@ def fail_job(
 
 
 def retry_job(db: Session, job: models.SaaSJob, *, actor_user_id: str | None = None) -> models.SaaSJob:
+    if job.job_type in NON_REPEATABLE_JOB_TYPES:
+        raise ValueError(
+            "This non-repeatable job cannot be retried automatically; reconcile the external provider state and create a new audited action"
+        )
     if job.status not in RETRYABLE_MANUAL_STATUSES:
         raise ValueError("Only failed, dead, cancelled or retrying jobs can be retried")
     job.status = "PENDING"
