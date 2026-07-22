@@ -88,20 +88,16 @@ jobs:
           training_finalizer = script.get_revision("saas_20260722_finalize_training")
           read_index_finalizer = script.get_revision("saas_20260722_qms_read_idx")
           messaging_finalizer = script.get_revision("saas_20260722_messaging")
-          assert foundation is not None
-          assert foundation.down_revision == "quality_20260722_schema_integrity"
-          assert quality_finalizer is not None
-          assert quality_finalizer.down_revision == "saas_20260722_control_plane"
-          assert training_finalizer is not None
-          assert training_finalizer.down_revision == "saas_20260722_finalize_idx"
-          assert read_index_finalizer is not None
+          assert foundation and foundation.down_revision == "quality_20260722_schema_integrity"
+          assert quality_finalizer and quality_finalizer.down_revision == "saas_20260722_control_plane"
+          assert training_finalizer and training_finalizer.down_revision == "saas_20260722_finalize_idx"
+          assert read_index_finalizer
           assert set(read_index_finalizer.down_revision) == {
               "saas_20260722_finalize_training",
               "phase2_8_20260605",
           }
           assert not read_index_finalizer.dependencies
-          assert messaging_finalizer is not None
-          assert messaging_finalizer.down_revision == "saas_20260722_qms_read_idx"
+          assert messaging_finalizer and messaging_finalizer.down_revision == "saas_20260722_qms_read_idx"
           heads = script.get_heads()
           print("Alembic heads:", heads)
           assert "saas_20260722_messaging" in heads, heads
@@ -113,7 +109,7 @@ jobs:
         run: |
           set -o pipefail
           alembic -c amodb/alembic.ini upgrade heads 2>&1 | tee saas-migration.log
-      - name: Configure all SQLAlchemy mappers and route contracts
+      - name: Configure mappers and route contracts
         id: mapper
         continue-on-error: true
         shell: bash
@@ -133,6 +129,8 @@ jobs:
               "/platform/saas/webhooks/stripe",
               "/platform/saas/support/tickets",
               "/platform/saas/integration-health",
+              "/api/realtime/broker/authenticate",
+              "/api/realtime/broker/authorize",
               "/api/chat/directory",
               "/api/chat/direct/{peer_user_id}",
               "/api/chat/departments/{department_id}",
@@ -146,21 +144,15 @@ jobs:
           }
           missing = required - paths
           assert not missing, missing
-          print("SaaS, messaging and notification route contracts verified")
+          print("SaaS, broker, messaging and notification routes verified")
           PY
-      - name: Run SaaS and messaging unit tests
+      - name: Run SaaS and realtime regression suites
         id: backend_tests
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          pytest -q \
-            amodb/apps/platform/tests/test_saas_control_plane.py \
-            amodb/apps/platform/tests/test_saas_queue_fencing.py \
-            amodb/apps/realtime/tests/test_messaging_hardening.py \
-            amodb/apps/realtime/tests/test_realtime_security_hardening.py \
-            amodb/apps/realtime/tests/test_realtime_services.py \
-            2>&1 | tee saas-backend-tests.log
+          pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py 2>&1 | tee saas-backend-tests.log
       - name: Run empty-queue worker smoke tests
         id: workers
         continue-on-error: true
@@ -221,7 +213,7 @@ jobs:
         run: |
           set -o pipefail
           npm run build 2>&1 | tee platform-build.log
-      - name: Lint changed platform, messaging and roster surfaces
+      - name: Lint changed platform, messaging and realtime surfaces
         id: frontend_lint
         continue-on-error: true
         working-directory: frontend
@@ -281,4 +273,10 @@ jobs:
           DATABASE_URL: postgresql+psycopg2://example:example@database.example.invalid:5432/amodb
           SECRET_KEY: compose-validation-secret
           PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+          CORS_ALLOWED_ORIGINS: https://portal.example.invalid
+          MQTT_BROKER_INTERNAL_URL: mqtt://broker.example.invalid:1883
+          MQTT_BROKER_WS_URL: wss://broker.example.invalid/mqtt
+          REALTIME_BROKER_WEBHOOK_SECRET: ci-broker-webhook-secret-more-than-32-characters
+          REALTIME_GATEWAY_USERNAME: amo-gateway
+          REALTIME_GATEWAY_PASSWORD: ci-gateway-password-more-than-24-characters
         run: docker compose -f deploy/saas/docker-compose.yml config
