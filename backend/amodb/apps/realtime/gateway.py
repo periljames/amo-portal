@@ -64,7 +64,7 @@ class RealtimeGateway:
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         self._connected = rc == 0
         if self._connected:
-            client.subscribe("amo/+/user/+/outbox", qos=1)
+            client.subscribe(broker_auth.GATEWAY_SHARED_SUBSCRIPTION, qos=1)
             self.flush_pending()
         logger.info("mqtt connected", extra={"mqtt_connects": 1, "rc": rc})
 
