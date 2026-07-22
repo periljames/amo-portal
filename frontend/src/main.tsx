@@ -8,7 +8,9 @@ import "@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css";
 import App from "./App";
 import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
+import { clearApiResponseCache } from "./services/apiClient";
 import { onSessionEvent } from "./services/auth";
+import { BRANDING_EVENT } from "./services/branding";
 import {
   clearAllPortalOfflineData,
   onOfflineSyncComplete,
@@ -37,6 +39,7 @@ import "./styles/theme-contract.css";
 import "./styles/theme-module-repairs.css";
 
 const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const ACTIVE_AMO_STORAGE_KEYS = new Set(["amodb_active_amo_id", "amodb_admin_active_amo_id"]);
 const SENSITIVE_QUERY_MARKERS = [
   "auth",
   "password",
@@ -108,6 +111,14 @@ const queryClient = new QueryClient({
 
 const queryPersister = createPortalQueryPersister();
 
+function clearTenantScopedRuntimeState(): void {
+  // Context changes are synchronous. Cancel and clear before another persistence
+  // notification can write the previous AMO's QueryClient under the new scope.
+  void queryClient.cancelQueries();
+  queryClient.clear();
+  clearApiResponseCache();
+}
+
 ensureManifest();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
@@ -116,7 +127,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       client={queryClient}
       persistOptions={{
         persister: queryPersister,
-        buster: "amo-portal-query-v2",
+        buster: "amo-portal-query-v3",
         maxAge: QUERY_MAX_AGE_MS,
         dehydrateOptions: {
           shouldDehydrateQuery: shouldPersistQuery,
@@ -184,13 +195,22 @@ async function configurePortalServiceWorker(): Promise<void> {
 if (typeof window !== "undefined") {
   onSessionEvent((detail) => {
     if (detail.type === "authenticated") {
+      clearTenantScopedRuntimeState();
       void replayOfflineMutations();
       return;
     }
     if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
-      queryClient.clear();
+      clearTenantScopedRuntimeState();
       void Promise.all([clearAllPortalOfflineData(), clearAllPortalQueryCaches()]);
     }
+  });
+
+  // Superuser AMO switching emits the branding event in the same tab. Clearing
+  // here prevents the old tenant's successful queries from remaining visible or
+  // being persisted after the localStorage scope changes.
+  window.addEventListener(BRANDING_EVENT, clearTenantScopedRuntimeState);
+  window.addEventListener("storage", (event) => {
+    if (event.key && ACTIVE_AMO_STORAGE_KEYS.has(event.key)) clearTenantScopedRuntimeState();
   });
 
   onOfflineSyncComplete((detail) => {
