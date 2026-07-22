@@ -33,16 +33,20 @@ describe("realtime publish reliability", () => {
 
   it("rejects when the broker never acknowledges the publish", async () => {
     vi.useFakeTimers();
-    const client = clientWithCallback(() => undefined);
-    const pending = publishWithAcknowledgement(
-      client,
-      "amo/a/user/u/outbox",
-      new Uint8Array([1]),
-      1000,
-    );
-    await vi.advanceTimersByTimeAsync(1000);
-    await expect(pending).rejects.toThrow("acknowledgement timed out");
-    vi.useRealTimers();
+    try {
+      const client = clientWithCallback(() => undefined);
+      const pending = publishWithAcknowledgement(
+        client,
+        "amo/a/user/u/outbox",
+        new Uint8Array([1]),
+        1000,
+      );
+      const rejection = expect(pending).rejects.toThrow("acknowledgement timed out");
+      await vi.advanceTimersByTimeAsync(1000);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("removes connect tokens before an envelope can enter IndexedDB", () => {
