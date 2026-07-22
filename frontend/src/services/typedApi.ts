@@ -1,5 +1,5 @@
 import { authHeaders } from "./auth";
-import { getApiBaseUrl } from "./config";
+import { portalFetch, type PortalFetchInit } from "./offlineHttp";
 
 export type StructuredApiError = Error & {
   status: number;
@@ -16,11 +16,6 @@ function buildHeaders(extra?: HeadersInit): Headers {
     new Headers(extra).forEach((value, key) => headers.set(key, value));
   }
   return headers;
-}
-
-function absoluteApiUrl(path: string): string {
-  const base = getApiBaseUrl().replace(/\/$/, "");
-  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 async function parseError(response: Response): Promise<StructuredApiError> {
@@ -53,13 +48,17 @@ async function parseError(response: Response): Promise<StructuredApiError> {
 
 export async function apiJson<T>(
   path: string,
-  init: RequestInit = {},
+  init: PortalFetchInit = {},
 ): Promise<T> {
   const headers = buildHeaders(init.headers);
   if (init.body !== undefined && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(absoluteApiUrl(path), { ...init, headers });
+  const response = await portalFetch(path, {
+    credentials: "include",
+    ...init,
+    headers,
+  });
   if (!response.ok) throw await parseError(response);
   if (response.status === 204) return undefined as T;
   return await response.json() as T;
@@ -67,10 +66,12 @@ export async function apiJson<T>(
 
 export async function apiBlob(
   path: string,
-  init: RequestInit = {},
+  init: PortalFetchInit = {},
 ): Promise<{ blob: Blob; filename?: string }> {
-  const response = await fetch(absoluteApiUrl(path), {
+  const response = await portalFetch(path, {
+    credentials: "include",
     ...init,
+    offline: { ...init.offline, cache: false, queueMutation: false },
     headers: buildHeaders(init.headers),
   });
   if (!response.ok) throw await parseError(response);
