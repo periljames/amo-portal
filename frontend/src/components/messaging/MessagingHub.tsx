@@ -1,16 +1,19 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getCachedUser, getToken } from "../../services/auth";
-import {
+import { messagingApi } from "../../services/messaging";
+import type {
   ChatDirectory,
   ChatThread,
-  messagingApi,
   NotificationPreferences,
   PortalNotification,
 } from "../../services/messaging";
 
 const EVENT_NAME = "amo:realtime-envelope";
+
+type DirectoryTab = "users" | "departments" | "groups";
 
 function initials(value?: string | null): string {
   return (value || "?")
@@ -48,7 +51,7 @@ export function MessagingHub() {
   const [tab, setTab] = useState<"chats" | "notifications">("chats");
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [showDirectory, setShowDirectory] = useState(false);
-  const [directoryTab, setDirectoryTab] = useState<"users" | "departments" | "groups">("users");
+  const [directoryTab, setDirectoryTab] = useState<DirectoryTab>("users");
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -87,25 +90,21 @@ export function MessagingHub() {
     enabled: authenticated && open,
     staleTime: 60_000,
   });
-  const messagesQuery = useQuery({
-    queryKey: ["messaging", "messages", selectedThreadId],
-    queryFn: () => messagingApi.messages(selectedThreadId as string),
-    enabled: authenticated && open && Boolean(selectedThreadId),
-    refetchInterval: selectedThreadId ? 3_000 : false,
-    staleTime: 1_000,
-  });
 
-  const threads = threadsQuery.data || [];
+  const threads = useMemo(() => threadsQuery.data || [], [threadsQuery.data]);
+  const effectiveThreadId = selectedThreadId || (open && tab === "chats" ? threads[0]?.id || null : null);
   const selectedThread = useMemo(
-    () => threads.find((thread) => thread.id === selectedThreadId) || null,
-    [threads, selectedThreadId],
+    () => threads.find((thread) => thread.id === effectiveThreadId) || null,
+    [effectiveThreadId, threads],
   );
 
-  useEffect(() => {
-    if (!selectedThreadId && threads.length > 0 && open && tab === "chats") {
-      setSelectedThreadId(threads[0].id);
-    }
-  }, [open, selectedThreadId, tab, threads]);
+  const messagesQuery = useQuery({
+    queryKey: ["messaging", "messages", effectiveThreadId],
+    queryFn: () => messagingApi.messages(effectiveThreadId as string),
+    enabled: authenticated && open && Boolean(effectiveThreadId),
+    refetchInterval: effectiveThreadId ? 3_000 : false,
+    staleTime: 1_000,
+  });
 
   useEffect(() => {
     const onRealtime = () => {
@@ -116,17 +115,17 @@ export function MessagingHub() {
   }, [queryClient]);
 
   useEffect(() => {
-    if (!selectedThreadId || !open || tab !== "chats") return;
-    void messagingApi.markThreadRead(selectedThreadId).then(() => {
+    if (!effectiveThreadId || !open || tab !== "chats") return;
+    void messagingApi.markThreadRead(effectiveThreadId).then(() => {
       void queryClient.invalidateQueries({ queryKey: ["messaging", "unread"] });
       void queryClient.invalidateQueries({ queryKey: ["messaging", "threads"] });
     });
-  }, [open, queryClient, selectedThreadId, tab, messagesQuery.data?.length]);
+  }, [effectiveThreadId, messagesQuery.data?.length, open, queryClient, tab]);
 
   useEffect(() => {
     const element = messageListRef.current;
     if (element) element.scrollTop = element.scrollHeight;
-  }, [messagesQuery.data?.length, selectedThreadId]);
+  }, [effectiveThreadId, messagesQuery.data?.length]);
 
   useEffect(() => {
     const latest = notificationsQuery.data?.items?.[0];
@@ -143,7 +142,7 @@ export function MessagingHub() {
   const refreshMessaging = () => queryClient.invalidateQueries({ queryKey: ["messaging"] });
 
   const openTarget = useMutation({
-    mutationFn: async (target: { kind: "users" | "departments" | "groups"; id: string }) => {
+    mutationFn: async (target: { kind: DirectoryTab; id: string }) => {
       if (target.kind === "users") return messagingApi.openDirect(target.id);
       if (target.kind === "departments") return messagingApi.openDepartment(target.id);
       return messagingApi.openGroup(target.id);
@@ -195,8 +194,8 @@ export function MessagingHub() {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const body = draft.trim();
-    if (!selectedThreadId || !body || sendMessage.isPending) return;
-    sendMessage.mutate({ threadId: selectedThreadId, body });
+    if (!effectiveThreadId || !body || sendMessage.isPending) return;
+    sendMessage.mutate({ threadId: effectiveThreadId, body });
   };
 
   if (!authenticated) return null;
@@ -263,7 +262,7 @@ export function MessagingHub() {
                   {threads.map((thread) => (
                     <button
                       type="button"
-                      className={`messaging-thread ${thread.id === selectedThreadId ? "is-selected" : ""}`}
+                      className={`messaging-thread ${thread.id === effectiveThreadId ? "is-selected" : ""}`}
                       key={thread.id}
                       onClick={() => { setSelectedThreadId(thread.id); setShowDirectory(false); }}
                     >
@@ -343,8 +342,8 @@ function DirectoryPicker({
 }: {
   data?: ChatDirectory;
   loading: boolean;
-  activeTab: "users" | "departments" | "groups";
-  onTab: (value: "users" | "departments" | "groups") => void;
+  activeTab: DirectoryTab;
+  onTab: (value: DirectoryTab) => void;
   onSelect: (id: string) => void;
 }) {
   const entries = data?.[activeTab] || [];
@@ -356,12 +355,22 @@ function DirectoryPicker({
         <button type="button" className={activeTab === "groups" ? "is-active" : ""} onClick={() => onTab("groups")}>Groups</button>
       </div>
       <div className="messaging-directory-list">
-        {entries.map((entry) => (
-          <button type="button" key={entry.id} onClick={() => onSelect(entry.id)}>
-            <span className="messaging-avatar is-small">{initials("full_name" in entry ? entry.full_name : entry.name)}</span>
-            <span><strong>{"full_name" in entry ? entry.full_name : entry.name}</strong><small>{"position_title" in entry ? entry.position_title : "code" in entry ? entry.code : entry.group_type}</small></span>
-          </button>
-        ))}
+        {entries.map((entry) => {
+          const label = activeTab === "users"
+            ? (entry as ChatDirectory["users"][number]).full_name
+            : (entry as ChatDirectory["departments"][number] | ChatDirectory["groups"][number]).name;
+          const detail = activeTab === "users"
+            ? (entry as ChatDirectory["users"][number]).position_title
+            : activeTab === "departments"
+              ? (entry as ChatDirectory["departments"][number]).code
+              : (entry as ChatDirectory["groups"][number]).group_type;
+          return (
+            <button type="button" key={entry.id} onClick={() => onSelect(entry.id)}>
+              <span className="messaging-avatar is-small">{initials(label)}</span>
+              <span><strong>{label}</strong><small>{detail || ""}</small></span>
+            </button>
+          );
+        })}
         {loading ? <p className="messaging-empty">Loading directory…</p> : null}
         {!loading && entries.length === 0 ? <p className="messaging-empty">Nothing available here.</p> : null}
       </div>
