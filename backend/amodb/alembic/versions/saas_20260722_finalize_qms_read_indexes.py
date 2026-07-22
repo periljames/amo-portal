@@ -1,14 +1,15 @@
 """Finalize canonical QMS and Training read indexes after schema convergence.
 
 Revision ID: saas_20260722_qms_read_idx
-Revises: saas_20260722_finalize_training
+Revises: saas_20260722_finalize_training, phase2_8_20260605
 Create Date: 2026-07-22
 
 Historical Phase 2 branches created overlapping calendar/dashboard indexes and
-could execute before tenant-normalisation columns existed. This terminal
-revision runs after SaaS, Quality, Training, Workforce, core rostering and all
-independent Phase 2 read-index branches. It removes legacy variants and installs
-one bounded canonical set.
+could execute before tenant-normalisation columns existed. This terminal merge
+revision runs after SaaS, Quality, Training, Workforce, core rostering and the
+remaining independent Phase 2 calendar branch. The main SaaS chain already
+contains phase2_14a (and therefore phase2_10); merging only phase2_8 here avoids
+redundant Alembic dependency bookkeeping while guaranteeing final cleanup order.
 """
 from __future__ import annotations
 
@@ -17,13 +18,9 @@ import sqlalchemy as sa
 
 
 revision = "saas_20260722_qms_read_idx"
-down_revision = "saas_20260722_finalize_training"
+down_revision = ("saas_20260722_finalize_training", "phase2_8_20260605")
 branch_labels = None
-depends_on = (
-    "phase2_8_20260605",
-    "phase2_10_20260605",
-    "phase2_14_20260615",
-)
+depends_on = None
 
 
 LEGACY_INDEXES = (
