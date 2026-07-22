@@ -4,12 +4,14 @@ import hashlib
 import hmac
 import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from amodb.apps.platform import saas_models, saas_providers, saas_queue, saas_secrets, saas_services
+from amodb.apps.platform.saas_router import _visible_support_payload
 
 
 def _session():
@@ -105,6 +107,22 @@ def test_queue_is_idempotent_and_claimable() -> None:
     assert claimed[0].result_json == {"ok": True}
 
 
+def test_successful_job_cannot_be_manually_retried() -> None:
+    db = _session()
+    job = saas_queue.enqueue_job(
+        db,
+        job_type="EXTERNAL_SIDE_EFFECT",
+        payload={},
+        idempotency_key="side-effect:1",
+    )
+    claimed = saas_queue.claim_jobs(db, worker_id="worker", batch_size=1)[0]
+    saas_queue.complete_job(db, claimed, {"external_reference": "done"})
+
+    with pytest.raises(ValueError, match="failed, dead, cancelled or retrying"):
+        saas_queue.retry_job(db, job)
+    assert job.status == "SUCCEEDED"
+
+
 def test_failed_job_moves_to_retry_then_dead() -> None:
     db = _session()
     job = saas_queue.enqueue_job(
@@ -124,6 +142,22 @@ def test_failed_job_moves_to_retry_then_dead() -> None:
     saas_queue.fail_job(db, claimed, RuntimeError("final"), retryable=True)
     assert job.status == "DEAD"
     assert job.finished_at is not None
+
+
+def test_tenant_support_payload_hides_internal_notes() -> None:
+    payload = {
+        "id": "ticket-1",
+        "messages": [
+            {"id": "public", "visibility": "PUBLIC", "body": "Visible reply"},
+            {"id": "internal", "visibility": "INTERNAL", "body": "Platform-only diagnosis"},
+        ],
+    }
+    tenant_view = _visible_support_payload(payload, SimpleNamespace(is_superuser=False))
+    platform_view = _visible_support_payload(payload, SimpleNamespace(is_superuser=True))
+
+    assert [item["id"] for item in tenant_view["messages"]] == ["public"]
+    assert [item["id"] for item in platform_view["messages"]] == ["public", "internal"]
+    assert len(payload["messages"]) == 2
 
 
 def test_provider_catalog_covers_required_saas_services() -> None:
