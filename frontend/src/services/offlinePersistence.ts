@@ -45,6 +45,7 @@ export type OfflineSyncDetail = {
   synced: number;
   paths: string[];
   entityTypes: string[];
+  reason?: "synced" | "discarded";
 };
 
 export type ApiCacheRecord<T = unknown> = {
@@ -59,6 +60,17 @@ export type ApiCacheRecord<T = unknown> = {
 type ReplayLease = {
   owner: string;
   expiresAt: number;
+};
+
+type EnqueueOfflineMutationInput = {
+  path: string;
+  method: string;
+  headers?: HeadersInit;
+  body?: string;
+  entityType?: string;
+  entityId?: string;
+  idempotencyKey?: string;
+  scope?: string;
 };
 
 let databasePromise: Promise<IDBDatabase | null> | null = null;
@@ -151,7 +163,8 @@ function notifyOfflineStateChanged(): void {
 }
 
 function notifyOfflineSyncComplete(detail: OfflineSyncDetail): void {
-  if (typeof window === "undefined" || detail.synced <= 0) return;
+  if (typeof window === "undefined") return;
+  if (detail.synced <= 0 && detail.paths.length === 0) return;
   window.dispatchEvent(new CustomEvent<OfflineSyncDetail>(OFFLINE_SYNC_EVENT, { detail }));
 }
 
@@ -218,8 +231,12 @@ async function deleteScopeRecords(storeName: string, scope: string): Promise<voi
   await done;
 }
 
-export async function writeApiCache<T>(path: string, value: T, ttlMs: number): Promise<void> {
-  const scope = currentOfflineScope();
+export async function writeApiCache<T>(
+  path: string,
+  value: T,
+  ttlMs: number,
+  scope = currentOfflineScope(),
+): Promise<void> {
   const key = scopedKey("api", path, scope);
   const now = Date.now();
   const record: ApiCacheRecord<T> = {
@@ -234,34 +251,32 @@ export async function writeApiCache<T>(path: string, value: T, ttlMs: number): P
   await putRecord(API_STORE, record).catch((error) => console.warn("[offline] Could not cache API response", error));
 }
 
-export async function readApiCache<T>(path: string, allowExpired = false): Promise<ApiCacheRecord<T> | null> {
-  const scope = currentOfflineScope();
+export async function readApiCache<T>(
+  path: string,
+  allowExpired = false,
+  scope = currentOfflineScope(),
+): Promise<ApiCacheRecord<T> | null> {
+  if (currentOfflineScope() !== scope) return null;
   const key = scopedKey("api", path, scope);
   const memory = memoryApiCache.get(key) as ApiCacheRecord<T> | undefined;
   if (memory && (allowExpired || memory.expiresAt > Date.now())) return memory;
+
   const stored = await readRecord<ApiCacheRecord<T>>(API_STORE, key).catch(() => undefined);
-  if (!stored) return null;
+  if (currentOfflineScope() !== scope) return null;
+  if (!stored || stored.scope !== scope) return null;
   memoryApiCache.set(key, stored);
   if (!allowExpired && stored.expiresAt <= Date.now()) return null;
   return stored;
 }
 
-export async function removeApiCache(path: string): Promise<void> {
-  const key = scopedKey("api", path);
+export async function removeApiCache(path: string, scope = currentOfflineScope()): Promise<void> {
+  const key = scopedKey("api", path, scope);
   memoryApiCache.delete(key);
   await deleteRecord(API_STORE, key).catch(() => undefined);
 }
 
-export async function enqueueOfflineMutation(input: {
-  path: string;
-  method: string;
-  headers?: HeadersInit;
-  body?: string;
-  entityType?: string;
-  entityId?: string;
-  idempotencyKey?: string;
-}): Promise<OfflineOutboxEntry> {
-  const scope = currentOfflineScope();
+export async function enqueueOfflineMutation(input: EnqueueOfflineMutationInput): Promise<OfflineOutboxEntry> {
+  const scope = input.scope || currentOfflineScope();
   const idempotencyKey = input.idempotencyKey || randomId("offline-operation");
   const headers = new Headers(input.headers);
   headers.delete("Authorization");
@@ -292,7 +307,9 @@ export async function enqueueOfflineMutation(input: {
 export async function listOfflineMutations(scope = currentOfflineScope()): Promise<OfflineOutboxEntry[]> {
   const stored = await recordsForScope<OfflineOutboxEntry>(OUTBOX_STORE, scope).catch(() => []);
   if (!stored.length && memoryOutbox.size) {
-    return [...memoryOutbox.values()].filter((entry) => entry.scope === scope).sort((a, b) => a.createdAt - b.createdAt);
+    return [...memoryOutbox.values()]
+      .filter((entry) => entry.scope === scope)
+      .sort((a, b) => a.createdAt - b.createdAt);
   }
   stored.forEach((entry) => memoryOutbox.set(entry.id, entry));
   return stored.sort((a, b) => a.createdAt - b.createdAt);
@@ -316,10 +333,45 @@ async function saveOutboxEntry(entry: OfflineOutboxEntry): Promise<void> {
   notifyOfflineStateChanged();
 }
 
+async function findOutboxEntry(id: string): Promise<OfflineOutboxEntry | undefined> {
+  return memoryOutbox.get(id)
+    || await readRecord<OfflineOutboxEntry>(OUTBOX_STORE, id).catch(() => undefined);
+}
+
+export async function retryOfflineMutation(id: string): Promise<OfflineOutboxEntry> {
+  const entry = await findOutboxEntry(id);
+  if (!entry) throw new Error("The local change no longer exists.");
+  if (entry.scope !== currentOfflineScope()) {
+    throw new Error("Switch back to the AMO where this change was created before retrying it.");
+  }
+  const queued: OfflineOutboxEntry = {
+    ...entry,
+    status: "queued",
+    updatedAt: Date.now(),
+    error: undefined,
+    conflict: undefined,
+  };
+  await saveOutboxEntry(queued);
+  return queued;
+}
+
 export async function discardOfflineMutation(id: string): Promise<void> {
+  const entry = await findOutboxEntry(id);
+  if (entry && entry.scope !== currentOfflineScope()) {
+    throw new Error("Switch back to the AMO where this change was created before discarding it.");
+  }
   memoryOutbox.delete(id);
   await deleteRecord(OUTBOX_STORE, id).catch(() => undefined);
   notifyOfflineStateChanged();
+  if (entry) {
+    notifyOfflineSyncComplete({
+      scope: entry.scope,
+      synced: 0,
+      paths: [entry.path],
+      entityTypes: entry.entityType ? [entry.entityType] : [],
+      reason: "discarded",
+    });
+  }
 }
 
 function readReplayLease(): ReplayLease | null {
@@ -351,7 +403,10 @@ function renewReplayLease(owner: string): boolean {
   try {
     const current = readReplayLease();
     if (!current || current.owner !== owner) return false;
-    window.localStorage.setItem(REPLAY_LEASE_KEY, JSON.stringify({ owner, expiresAt: Date.now() + REPLAY_LEASE_MS } satisfies ReplayLease));
+    window.localStorage.setItem(
+      REPLAY_LEASE_KEY,
+      JSON.stringify({ owner, expiresAt: Date.now() + REPLAY_LEASE_MS } satisfies ReplayLease),
+    );
     return true;
   } catch {
     return true;
@@ -369,6 +424,9 @@ function releaseReplayLease(owner: string): void {
 }
 
 async function fetchForReplay(entry: OfflineOutboxEntry): Promise<Response> {
+  if (currentOfflineScope() !== entry.scope) {
+    throw new Error("AMO context changed. This change will retry when you return to its AMO.");
+  }
   const controller = new AbortController();
   const timeout = window.setTimeout(
     () => controller.abort(new DOMException("Offline replay request timed out", "AbortError")),
@@ -377,13 +435,20 @@ async function fetchForReplay(entry: OfflineOutboxEntry): Promise<Response> {
   try {
     const headers = new Headers(authHeaders(entry.headers));
     headers.set("Idempotency-Key", entry.idempotencyKey);
-    return await fetch(`${getApiBaseUrl().replace(/\/$/, "")}${entry.path.startsWith("/") ? entry.path : `/${entry.path}`}`, {
-      method: entry.method,
-      headers,
-      body: entry.body,
-      credentials: "include",
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      `${getApiBaseUrl().replace(/\/$/, "")}${entry.path.startsWith("/") ? entry.path : `/${entry.path}`}`,
+      {
+        method: entry.method,
+        headers,
+        body: entry.body,
+        credentials: "include",
+        signal: controller.signal,
+      },
+    );
+    if (currentOfflineScope() !== entry.scope) {
+      throw new Error("AMO context changed during synchronisation. The operation remains queued in its original AMO.");
+    }
+    return response;
   } finally {
     window.clearTimeout(timeout);
   }
@@ -411,10 +476,19 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
   let synced = 0;
 
   try {
-    const entries = (await listOfflineMutations(scope)).filter((entry) => entry.status === "queued" || entry.status === "syncing");
+    const entries = (await listOfflineMutations(scope))
+      .filter((entry) => entry.status === "queued" || entry.status === "syncing");
+    if (currentOfflineScope() !== scope) return getOfflineOutboxSummary(scope);
+
     for (const entry of entries) {
+      if (currentOfflineScope() !== scope || entry.scope !== scope) break;
       if (!renewReplayLease(leaseOwner)) break;
-      const syncing: OfflineOutboxEntry = { ...entry, status: "syncing", updatedAt: Date.now(), error: undefined };
+      const syncing: OfflineOutboxEntry = {
+        ...entry,
+        status: "syncing",
+        updatedAt: Date.now(),
+        error: undefined,
+      };
       await saveOutboxEntry(syncing);
       try {
         const response = await fetchForReplay(syncing);
@@ -479,19 +553,34 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
     synced,
     paths: [...syncedPaths],
     entityTypes: [...syncedEntityTypes],
+    reason: "synced",
   });
   return getOfflineOutboxSummary(scope);
 }
 
 export async function clearCurrentOfflineScope(): Promise<void> {
   const scope = currentOfflineScope();
-  [...memoryApiCache.entries()].forEach(([key, value]) => { if (value.scope === scope) memoryApiCache.delete(key); });
-  [...memoryOutbox.entries()].forEach(([key, value]) => { if (value.scope === scope) memoryOutbox.delete(key); });
+  [...memoryApiCache.entries()].forEach(([key, value]) => {
+    if (value.scope === scope) memoryApiCache.delete(key);
+  });
+  [...memoryOutbox.entries()].forEach(([key, value]) => {
+    if (value.scope === scope) memoryOutbox.delete(key);
+  });
   await Promise.all([
     deleteScopeRecords(API_STORE, scope),
     deleteScopeRecords(OUTBOX_STORE, scope),
   ]).catch(() => undefined);
   notifyOfflineStateChanged();
+}
+
+export async function clearAllPortalApiCaches(): Promise<void> {
+  memoryApiCache.clear();
+  const database = await openDatabase();
+  if (!database) return;
+  const transaction = database.transaction(API_STORE, "readwrite");
+  const done = transactionDone(transaction);
+  transaction.objectStore(API_STORE).clear();
+  await done.catch(() => undefined);
 }
 
 export async function clearAllPortalOfflineData(): Promise<void> {
