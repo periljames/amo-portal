@@ -173,7 +173,10 @@ class SaaSSupportTicketDetail(Base):
 
 class SaaSSupportTicketMessage(Base):
     __tablename__ = "saas_support_ticket_messages"
-    __table_args__ = (Index("ix_saas_support_message_ticket", "ticket_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_saas_support_message_ticket", "ticket_id", "created_at"),
+        Index("ix_saas_support_message_source_job", "source_job_id", unique=True),
+    )
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
     ticket_id = Column(String(36), ForeignKey("platform_support_tickets.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -181,4 +184,5 @@ class SaaSSupportTicketMessage(Base):
     author_type = Column(String(32), nullable=False, default="USER")
     visibility = Column(String(32), nullable=False, default="PUBLIC")
     body = Column(Text, nullable=False)
+    source_job_id = Column(String(36), ForeignKey("saas_jobs.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
