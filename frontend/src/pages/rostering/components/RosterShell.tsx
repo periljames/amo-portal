@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 
+import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
 import "../../../styles/rostering-workforce.css";
 
 type Props = {
@@ -33,45 +34,47 @@ const NAV = [
 ] as const;
 
 export function RosterShell({ title, eyebrow, description, actions, children, context }: Props) {
-  const { amoCode = "" } = useParams();
+  const { amoCode = "UNKNOWN" } = useParams();
   const reduceMotion = useReducedMotion();
   const root = `/maintenance/${encodeURIComponent(amoCode)}/rostering`;
 
   return (
-    <div className="wr-page">
-      <header className="wr-header">
-        <div className="wr-header__copy">
-          <span className="wr-eyebrow">{eyebrow}</span>
-          <h1>{title}</h1>
-          <p>{description}</p>
-        </div>
-        {actions ? <div className="wr-header__actions">{actions}</div> : null}
-      </header>
+    <DepartmentLayout amoCode={amoCode || "UNKNOWN"} activeDepartment="rostering">
+      <div className="wr-page">
+        <header className="wr-header">
+          <div className="wr-header__copy">
+            <span className="wr-eyebrow">{eyebrow}</span>
+            <h1>{title}</h1>
+            <p>{description}</p>
+          </div>
+          {actions ? <div className="wr-header__actions">{actions}</div> : null}
+        </header>
 
-      <nav className="wr-tabs" aria-label="Duty rostering sections">
-        {NAV.map(({ suffix, label, icon: Icon }) => (
-          <NavLink
-            key={suffix}
-            to={`${root}/${suffix}`}
-            className={({ isActive }) => `wr-tab${isActive ? " wr-tab--active" : ""}`}
-          >
-            <Icon aria-hidden="true" size={16} strokeWidth={1.9} />
-            <span>{label}</span>
-          </NavLink>
-        ))}
-      </nav>
+        <nav className="wr-tabs" aria-label="Duty rostering sections">
+          {NAV.map(({ suffix, label, icon: Icon }) => (
+            <NavLink
+              key={suffix}
+              to={`${root}/${suffix}`}
+              className={({ isActive }) => `wr-tab${isActive ? " wr-tab--active" : ""}`}
+            >
+              <Icon aria-hidden="true" size={16} strokeWidth={1.9} />
+              <span>{label}</span>
+            </NavLink>
+          ))}
+        </nav>
 
-      {context ? <div className="wr-context">{context}</div> : null}
+        {context ? <div className="wr-context">{context}</div> : null}
 
-      <motion.main
-        className="wr-main"
-        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
-      >
-        {children}
-      </motion.main>
-    </div>
+        <motion.main
+          className="wr-main"
+          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
+        >
+          {children}
+        </motion.main>
+      </div>
+    </DepartmentLayout>
   );
 }
 
