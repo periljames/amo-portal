@@ -77,14 +77,17 @@ jobs:
 
           script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
           foundation = script.get_revision("saas_20260722_control_plane")
-          finalizer = script.get_revision("saas_20260722_finalize_idx")
+          quality_finalizer = script.get_revision("saas_20260722_finalize_idx")
+          training_finalizer = script.get_revision("saas_20260722_finalize_training")
           assert foundation is not None
           assert foundation.down_revision == "quality_20260722_schema_integrity"
-          assert finalizer is not None
-          assert finalizer.down_revision == "saas_20260722_control_plane"
+          assert quality_finalizer is not None
+          assert quality_finalizer.down_revision == "saas_20260722_control_plane"
+          assert training_finalizer is not None
+          assert training_finalizer.down_revision == "saas_20260722_finalize_idx"
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert "saas_20260722_finalize_idx" in heads, heads
+          assert "saas_20260722_finalize_training" in heads, heads
           PY
       - name: Upgrade production schema graph
         id: migrate
