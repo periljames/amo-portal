@@ -9,7 +9,7 @@ import msgpack
 
 from amodb.database import WriteSessionLocal
 
-from . import messaging, models, schemas
+from . import models, realtime_auth, schemas, secure_messaging
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +72,20 @@ class RealtimeGateway:
         try:
             envelope = self.parse(bytes(message.payload))
             if envelope.amoId != amo_id or envelope.userId != user_id:
-                raise ValueError("Realtime topic identity does not match the signed envelope")
-            messaging.process_inbound_envelope(db, envelope)
+                raise ValueError("Realtime topic identity does not match the envelope")
+            realtime_auth.validate_connect_token(
+                db,
+                raw_token=envelope.authToken,
+                amo_id=amo_id,
+                user_id=user_id,
+            )
+            authenticated = envelope.model_copy(update={"authToken": None})
+            secure_messaging.process_inbound_envelope(db, authenticated)
             db.commit()
         except Exception:
             db.rollback()
-            logger.exception("Failed to process inbound realtime message", extra={"topic": topic})
+            # Never log packet bytes or authToken values.
+            logger.exception("Failed to process authenticated realtime message", extra={"topic": topic})
         finally:
             db.close()
         self.flush_pending()
@@ -85,7 +93,8 @@ class RealtimeGateway:
     def publish(self, *, topic: str, envelope: schemas.RealtimeEnvelope, qos: int = 0, retain: bool = False) -> None:
         if not self.enabled:
             return
-        payload = msgpack.packb(envelope.model_dump(mode="python"), use_bin_type=True)
+        safe_envelope = envelope.model_copy(update={"authToken": None})
+        payload = msgpack.packb(safe_envelope.model_dump(mode="python", exclude_none=True), use_bin_type=True)
         if not self._client or not self._connected:
             raise RuntimeError("Broker not connected")
         result = self._client.publish(topic, payload=payload, qos=qos, retain=retain)
@@ -93,6 +102,9 @@ class RealtimeGateway:
             raise RuntimeError(f"Broker publish failed: {result.rc}")
 
     def parse(self, payload: bytes) -> schemas.RealtimeEnvelope:
+        max_bytes = max(1024, int(os.getenv("REALTIME_PAYLOAD_MAX_BYTES", "8192")))
+        if len(payload) > max_bytes:
+            raise ValueError("Realtime packet exceeds the configured payload limit")
         data = msgpack.unpackb(payload, raw=False, strict_map_key=False)
         return schemas.RealtimeEnvelope.model_validate(data)
 
@@ -104,13 +116,17 @@ class RealtimeGateway:
         published = 0
         db = WriteSessionLocal()
         try:
-            rows = (
+            query = (
                 db.query(models.RealtimeOutbox)
                 .filter(models.RealtimeOutbox.published_at.is_(None))
                 .order_by(models.RealtimeOutbox.created_at.asc(), models.RealtimeOutbox.id.asc())
                 .limit(max(1, min(limit, 1000)))
-                .all()
             )
+            if db.bind is not None and db.bind.dialect.name == "postgresql":
+                query = query.with_for_update(skip_locked=True)
+            else:
+                query = query.with_for_update()
+            rows = query.all()
             for row in rows:
                 try:
                     envelope = self.parse(row.payload_bin)
