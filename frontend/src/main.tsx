@@ -11,10 +11,10 @@ import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { onSessionEvent } from "./services/auth";
 import {
   clearAllPortalOfflineData,
-  createPortalQueryPersister,
   onOfflineSyncComplete,
   replayOfflineMutations,
 } from "./services/offlinePersistence";
+import { clearAllPortalQueryCaches, createPortalQueryPersister } from "./services/queryPersister";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/global.css";
@@ -189,7 +189,7 @@ if (typeof window !== "undefined") {
     }
     if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
       queryClient.clear();
-      void clearAllPortalOfflineData();
+      void Promise.all([clearAllPortalOfflineData(), clearAllPortalQueryCaches()]);
     }
   });
 
