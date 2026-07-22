@@ -5,6 +5,7 @@
 from . import saas_models as _saas_models  # noqa: F401
 from .router import router
 from .saas_router import platform_saas_router, support_router, webhook_router
+from .saas_integration import integration_router
 from .saas_legacy_bridge import install_legacy_command_queue
 from .saas_usage import install_usage_meter_hardening
 
@@ -14,6 +15,7 @@ from .saas_usage import install_usage_meter_hardening
 router.include_router(platform_saas_router)
 router.include_router(webhook_router)
 router.include_router(support_router)
+router.include_router(integration_router)
 
 # Existing diagnostics/maintenance endpoints keep their response contracts but
 # no longer run low/medium work inside the HTTP request.
