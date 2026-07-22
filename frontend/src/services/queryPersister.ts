@@ -5,13 +5,18 @@ import { currentOfflineScope } from "./offlinePersistence";
 const DATABASE_NAME = "amo-portal-query-cache";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "persisted_clients";
-const CACHE_KEY = "tanstack-query-cache-v2";
+const CACHE_KEY = "tanstack-query-cache-v3";
+
+type ScopedPersistedClient = {
+  scope: string;
+  client: PersistedClient;
+};
 
 let databasePromise: Promise<IDBDatabase | null> | null = null;
-let memoryClient: PersistedClient | undefined;
+const memoryClients = new Map<string, PersistedClient>();
 
-function storageKey(): string {
-  return `${currentOfflineScope()}:${CACHE_KEY}`;
+function storageKey(scope: string): string {
+  return `${scope}:${CACHE_KEY}`;
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
@@ -56,44 +61,65 @@ async function openDatabase(): Promise<IDBDatabase | null> {
 }
 
 export function createPortalQueryPersister(): Persister {
+  // The QueryClient belongs to the scope active when the provider is hydrated.
+  // A context switch must clear the QueryClient before a snapshot can be rebound.
+  let boundScope = currentOfflineScope();
+
   return {
     async persistClient(client: PersistedClient): Promise<void> {
-      memoryClient = client;
+      const scope = currentOfflineScope();
+      if (scope !== boundScope) {
+        // Reject the first snapshot after a context switch. It can still contain
+        // the previous AMO's queries. main.tsx clears the QueryClient synchronously,
+        // and the following empty/new-tenant snapshot is safe to persist.
+        boundScope = scope;
+        return;
+      }
+
+      memoryClients.set(scope, client);
       const database = await openDatabase();
-      if (!database) return;
+      if (!database || currentOfflineScope() !== scope) return;
       const transaction = database.transaction(STORE_NAME, "readwrite");
       const done = transactionDone(transaction);
-      transaction.objectStore(STORE_NAME).put(client, storageKey());
+      const record: ScopedPersistedClient = { scope, client };
+      transaction.objectStore(STORE_NAME).put(record, storageKey(scope));
       await done;
     },
 
     async restoreClient(): Promise<PersistedClient | undefined> {
+      const scope = currentOfflineScope();
+      boundScope = scope;
       const database = await openDatabase();
-      if (!database) return memoryClient;
+      if (!database) return memoryClients.get(scope);
+      if (currentOfflineScope() !== scope) return undefined;
+
       const transaction = database.transaction(STORE_NAME, "readonly");
       const done = transactionDone(transaction);
-      const client = await requestResult<PersistedClient | undefined>(
-        transaction.objectStore(STORE_NAME).get(storageKey()),
+      const record = await requestResult<ScopedPersistedClient | undefined>(
+        transaction.objectStore(STORE_NAME).get(storageKey(scope)),
       );
       await done;
-      memoryClient = client;
-      return client;
+      if (!record || record.scope !== scope) return memoryClients.get(scope);
+      memoryClients.set(scope, record.client);
+      return record.client;
     },
 
     async removeClient(): Promise<void> {
-      memoryClient = undefined;
+      const scope = currentOfflineScope();
+      boundScope = scope;
+      memoryClients.delete(scope);
       const database = await openDatabase();
       if (!database) return;
       const transaction = database.transaction(STORE_NAME, "readwrite");
       const done = transactionDone(transaction);
-      transaction.objectStore(STORE_NAME).delete(storageKey());
+      transaction.objectStore(STORE_NAME).delete(storageKey(scope));
       await done;
     },
   } satisfies Persister;
 }
 
 export async function clearAllPortalQueryCaches(): Promise<void> {
-  memoryClient = undefined;
+  memoryClients.clear();
   const database = await openDatabase();
   if (!database) return;
   const transaction = database.transaction(STORE_NAME, "readwrite");
