@@ -90,7 +90,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   if (!token) throw new MessagingHttpError("Messaging requires an authenticated session", 401);
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort("timeout"), 15_000);
+  const timer = globalThis.setTimeout(() => controller.abort("timeout"), 15_000);
   try {
     const response = await fetch(`${getApiBaseUrl()}${path}`, {
       ...init,
@@ -116,7 +116,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (response.status === 204) return undefined as T;
     return await response.json() as T;
   } finally {
-    window.clearTimeout(timer);
+    globalThis.clearTimeout(timer);
   }
 }
 
