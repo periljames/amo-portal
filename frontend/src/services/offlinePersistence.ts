@@ -1,4 +1,4 @@
-import { authHeaders, getActiveAmoId, getCachedUser, getContext, getToken } from "./auth";
+import { authHeaders, getCachedUser, getContext, getToken } from "./auth";
 import { getApiBaseUrl } from "./config";
 
 const DATABASE_NAME = "amo-portal-offline";
@@ -8,8 +8,10 @@ const API_STORE = "api_cache";
 const OUTBOX_STORE = "outbox";
 const QUERY_CACHE_KEY = "tanstack-query-cache-v2";
 const OFFLINE_EVENT = "amo:offline-state-changed";
+const OFFLINE_SYNC_EVENT = "amo:offline-sync-complete";
 const REPLAY_LEASE_KEY = "amo:offline-replay-lease";
-const REPLAY_LEASE_MS = 20_000;
+const REPLAY_LEASE_MS = 30_000;
+const ACTIVE_AMO_KEYS = ["amodb_active_amo_id", "amodb_admin_active_amo_id"];
 
 export type OfflineOutboxStatus = "queued" | "syncing" | "conflict" | "failed";
 
@@ -39,6 +41,13 @@ export type OfflineOutboxSummary = {
   total: number;
 };
 
+export type OfflineSyncDetail = {
+  scope: string;
+  synced: number;
+  paths: string[];
+  entityTypes: string[];
+};
+
 export type ApiCacheRecord<T = unknown> = {
   key: string;
   scope: string;
@@ -59,6 +68,11 @@ type QueryPersister = {
   persistClient(client: unknown): Promise<void>;
   restoreClient(): Promise<unknown | undefined>;
   removeClient(): Promise<void>;
+};
+
+type ReplayLease = {
+  owner: string;
+  expiresAt: number;
 };
 
 let databasePromise: Promise<IDBDatabase | null> | null = null;
@@ -131,9 +145,18 @@ function randomId(prefix: string): string {
   return `${prefix}-${uuid}`;
 }
 
+function activeAmoId(): string | null {
+  if (typeof window === "undefined") return null;
+  for (const key of ACTIVE_AMO_KEYS) {
+    const value = window.localStorage.getItem(key)?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
 export function currentOfflineScope(): string {
   const user = getCachedUser();
-  const tenant = getActiveAmoId() || user?.amo_id || getContext().amoCode || "platform";
+  const tenant = activeAmoId() || user?.amo_id || getContext().amoCode || "platform";
   return `${user?.id || "anonymous"}:${tenant || "platform"}`;
 }
 
@@ -146,10 +169,22 @@ function notifyOfflineStateChanged(): void {
   window.dispatchEvent(new CustomEvent(OFFLINE_EVENT));
 }
 
+function notifyOfflineSyncComplete(detail: OfflineSyncDetail): void {
+  if (typeof window === "undefined" || detail.synced <= 0) return;
+  window.dispatchEvent(new CustomEvent<OfflineSyncDetail>(OFFLINE_SYNC_EVENT, { detail }));
+}
+
 export function onOfflineStateChanged(listener: () => void): () => void {
   if (typeof window === "undefined") return () => undefined;
   window.addEventListener(OFFLINE_EVENT, listener);
   return () => window.removeEventListener(OFFLINE_EVENT, listener);
+}
+
+export function onOfflineSyncComplete(listener: (detail: OfflineSyncDetail) => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const handler = (event: Event) => listener((event as CustomEvent<OfflineSyncDetail>).detail);
+  window.addEventListener(OFFLINE_SYNC_EVENT, handler);
+  return () => window.removeEventListener(OFFLINE_SYNC_EVENT, handler);
 }
 
 async function putRecord(storeName: string, value: unknown): Promise<void> {
@@ -306,7 +341,12 @@ export async function listOfflineMutations(scope = currentOfflineScope()): Promi
 export async function getOfflineOutboxSummary(scope = currentOfflineScope()): Promise<OfflineOutboxSummary> {
   const entries = await listOfflineMutations(scope);
   const summary: OfflineOutboxSummary = { queued: 0, syncing: 0, conflict: 0, failed: 0, total: entries.length };
-  entries.forEach((entry) => { summary[entry.status] += 1; });
+  entries.forEach((entry) => {
+    if (entry.status === "queued") summary.queued += 1;
+    if (entry.status === "syncing") summary.syncing += 1;
+    if (entry.status === "conflict") summary.conflict += 1;
+    if (entry.status === "failed") summary.failed += 1;
+  });
   return summary;
 }
 
@@ -322,24 +362,30 @@ export async function discardOfflineMutation(id: string): Promise<void> {
   notifyOfflineStateChanged();
 }
 
-function hasReplayLease(): boolean {
-  if (typeof window === "undefined") return true;
-  const now = Date.now();
+function acquireReplayLease(): string | null {
+  if (typeof window === "undefined") return "server";
   const owner = randomId("tab");
+  const now = Date.now();
   try {
-    const current = JSON.parse(window.localStorage.getItem(REPLAY_LEASE_KEY) || "null") as { owner?: string; expiresAt?: number } | null;
-    if (current?.expiresAt && current.expiresAt > now) return false;
-    window.localStorage.setItem(REPLAY_LEASE_KEY, JSON.stringify({ owner, expiresAt: now + REPLAY_LEASE_MS }));
-    const confirmed = JSON.parse(window.localStorage.getItem(REPLAY_LEASE_KEY) || "null") as { owner?: string } | null;
-    return confirmed?.owner === owner;
+    const current = JSON.parse(window.localStorage.getItem(REPLAY_LEASE_KEY) || "null") as ReplayLease | null;
+    if (current?.expiresAt && current.expiresAt > now) return null;
+    const lease: ReplayLease = { owner, expiresAt: now + REPLAY_LEASE_MS };
+    window.localStorage.setItem(REPLAY_LEASE_KEY, JSON.stringify(lease));
+    const confirmed = JSON.parse(window.localStorage.getItem(REPLAY_LEASE_KEY) || "null") as ReplayLease | null;
+    return confirmed?.owner === owner ? owner : null;
   } catch {
-    return true;
+    return owner;
   }
 }
 
-function releaseReplayLease(): void {
+function releaseReplayLease(owner: string): void {
   if (typeof window === "undefined") return;
-  try { window.localStorage.removeItem(REPLAY_LEASE_KEY); } catch { /* best effort */ }
+  try {
+    const current = JSON.parse(window.localStorage.getItem(REPLAY_LEASE_KEY) || "null") as ReplayLease | null;
+    if (!current || current.owner === owner) window.localStorage.removeItem(REPLAY_LEASE_KEY);
+  } catch {
+    // Best effort only.
+  }
 }
 
 async function parseReplayError(response: Response): Promise<unknown> {
@@ -350,9 +396,15 @@ async function parseReplayError(response: Response): Promise<unknown> {
 
 export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
   if (typeof navigator !== "undefined" && !navigator.onLine) return getOfflineOutboxSummary();
-  if (!getToken() || !hasReplayLease()) return getOfflineOutboxSummary();
+  if (!getToken()) return getOfflineOutboxSummary();
+  const leaseOwner = acquireReplayLease();
+  if (!leaseOwner) return getOfflineOutboxSummary();
 
   const scope = currentOfflineScope();
+  const syncedPaths = new Set<string>();
+  const syncedEntityTypes = new Set<string>();
+  let synced = 0;
+
   try {
     const entries = (await listOfflineMutations(scope)).filter((entry) => entry.status === "queued" || entry.status === "syncing");
     for (const entry of entries) {
@@ -368,6 +420,9 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
           credentials: "include",
         });
         if (response.ok) {
+          synced += 1;
+          syncedPaths.add(syncing.path);
+          if (syncing.entityType) syncedEntityTypes.add(syncing.entityType);
           await discardOfflineMutation(syncing.id);
           continue;
         }
@@ -393,7 +448,13 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
           });
           continue;
         }
-        await saveOutboxEntry({ ...syncing, status: "queued", attempts: syncing.attempts + 1, updatedAt: Date.now(), error: `Server unavailable (${response.status})` });
+        await saveOutboxEntry({
+          ...syncing,
+          status: "queued",
+          attempts: syncing.attempts + 1,
+          updatedAt: Date.now(),
+          error: `Server unavailable (${response.status})`,
+        });
         break;
       } catch (error) {
         await saveOutboxEntry({
@@ -407,8 +468,15 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
       }
     }
   } finally {
-    releaseReplayLease();
+    releaseReplayLease(leaseOwner);
   }
+
+  notifyOfflineSyncComplete({
+    scope,
+    synced,
+    paths: [...syncedPaths],
+    entityTypes: [...syncedEntityTypes],
+  });
   return getOfflineOutboxSummary(scope);
 }
 
