@@ -1,4 +1,4 @@
-"""Add durable source references for non-repeatable side effects.
+"""Add durable source references and notification policy safety.
 
 Revision ID: saas_20260722_side_effect_safe
 Revises: saas_20260722_runtime_fence
@@ -19,8 +19,11 @@ def upgrade() -> None:
     inspector = sa.inspect(op.get_bind())
     if not inspector.has_table("saas_support_ticket_messages"):
         raise RuntimeError("Side-effect safety requires SaaS support messages")
-    columns = {str(column["name"]) for column in inspector.get_columns("saas_support_ticket_messages")}
-    if "source_job_id" not in columns:
+    message_columns = {
+        str(column["name"])
+        for column in inspector.get_columns("saas_support_ticket_messages")
+    }
+    if "source_job_id" not in message_columns:
         op.add_column(
             "saas_support_ticket_messages",
             sa.Column("source_job_id", sa.String(length=36), nullable=True),
@@ -40,15 +43,47 @@ def upgrade() -> None:
         )
     )
 
+    if not inspector.has_table("notification_preferences"):
+        raise RuntimeError("Notification policy safety requires notification preferences")
+    preference_columns = {
+        str(column["name"])
+        for column in inspector.get_columns("notification_preferences")
+    }
+    if "timezone_name" not in preference_columns:
+        op.add_column(
+            "notification_preferences",
+            sa.Column(
+                "timezone_name",
+                sa.String(length=64),
+                nullable=False,
+                server_default="UTC",
+            ),
+        )
+
 
 def downgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
+    if inspector.has_table("notification_preferences"):
+        preference_columns = {
+            str(column["name"])
+            for column in inspector.get_columns("notification_preferences")
+        }
+        if "timezone_name" in preference_columns:
+            op.drop_column("notification_preferences", "timezone_name")
+
     op.execute(sa.text("DROP INDEX IF EXISTS ix_saas_support_message_source_job"))
     inspector = sa.inspect(op.get_bind())
     if inspector.has_table("saas_support_ticket_messages"):
-        columns = {str(column["name"]) for column in inspector.get_columns("saas_support_ticket_messages")}
+        columns = {
+            str(column["name"])
+            for column in inspector.get_columns("saas_support_ticket_messages")
+        }
         if "source_job_id" in columns:
             foreign_keys = inspector.get_foreign_keys("saas_support_ticket_messages")
-            if any(key.get("name") == "fk_saas_support_message_source_job" for key in foreign_keys):
+            if any(
+                key.get("name") == "fk_saas_support_message_source_job"
+                for key in foreign_keys
+            ):
                 op.drop_constraint(
                     "fk_saas_support_message_source_job",
                     "saas_support_ticket_messages",
