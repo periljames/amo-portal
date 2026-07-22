@@ -155,6 +155,7 @@ class NotificationPreference(Base):
     chat_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     quiet_hours_start = Column(String(5), nullable=True)
     quiet_hours_end = Column(String(5), nullable=True)
+    timezone_name = Column(String(64), nullable=False, default="UTC", server_default="UTC")
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
