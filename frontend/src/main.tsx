@@ -31,8 +31,9 @@ import "./styles/components/action-panel.css";
 import "./styles/components/planning-production.css";
 import "./styles/components/liquid-glass.css";
 import "./styles/rostering.css";
-// The contract must load after module CSS so literal legacy colours cannot win.
+// Theme adapters must load after all module CSS so literal legacy colours cannot win.
 import "./styles/theme-contract.css";
+import "./styles/theme-module-repairs.css";
 
 const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const SENSITIVE_QUERY_MARKERS = [
