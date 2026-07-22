@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "perf:report": "node scripts/perf-report.mjs",
     "test:e2e": "playwright test",
-    "test:unit": "vitest run src/utils/verificationScan.test.ts"
+    "test:unit": "vitest run src/utils/verificationScan.test.ts",
+    "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
