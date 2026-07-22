@@ -106,6 +106,10 @@ function isNetworkFailure(error: unknown): boolean {
     || message.includes("connection");
 }
 
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
 function cachedResponse(value: unknown, storedAt: number): Response {
   return new Response(JSON.stringify(value), {
     status: 200,
@@ -192,15 +196,27 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
 
   try {
     const response = await fetch(absoluteUrl(path), { ...requestInit, signal: controller.signal });
-    if (cacheEnabled && response.ok) {
-      const contentType = response.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        const value = await response.clone().json().catch(() => undefined);
-        if (value !== undefined) {
-          void writeApiCache(cachePath, value, offline?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS);
+    if (response.ok) {
+      if (cacheEnabled) {
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const value = await response.clone().json().catch(() => undefined);
+          if (value !== undefined) {
+            void writeApiCache(cachePath, value, offline?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS);
+          }
         }
       }
+      return response;
     }
+
+    if (isRetryableStatus(response.status)) {
+      if (cacheEnabled) {
+        const cached = await cachedFallback(cachePath, allowStaleFallback);
+        if (cached) return cached;
+      }
+      if (queueMutation) return queueRequest(cachePath, method, init);
+    }
+
     return response;
   } catch (error) {
     if (!isNetworkFailure(error)) throw error;
