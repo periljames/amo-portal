@@ -204,7 +204,8 @@ def disable_module(
     return subscription
 
 
-# Imported after router_admin has registered its legacy route. The module removes
-# that route and installs the paginated implementation on the same router object
-# before amodb.main includes it in the FastAPI application.
+# Imported after router_admin has registered its legacy route. These modules
+# align the presence policy, remove the legacy directory route and install the
+# paginated implementation before amodb.main includes the router.
+from . import presence_policy as _presence_policy  # noqa: E402,F401
 from . import router_user_directory as _router_user_directory  # noqa: E402,F401
