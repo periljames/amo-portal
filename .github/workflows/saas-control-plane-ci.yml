@@ -150,5 +150,6 @@ jobs:
       - name: Validate compose deployment
         env:
           DATABASE_URL: postgresql+psycopg2://example:example@database.example.invalid:5432/amodb
+          SECRET_KEY: compose-validation-secret
           PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
         run: docker compose -f deploy/saas/docker-compose.yml config
