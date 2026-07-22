@@ -1,7 +1,7 @@
 """complete workforce-integrated duty rostering
 
 Revision ID: workforce_20260721_complete
-Revises: qual_20260705_merge_heads
+Revises: workforce_20260721_precreate
 Create Date: 2026-07-21
 
 The revision graph is import-safe: importing this module never loads the
@@ -21,7 +21,7 @@ from sqlalchemy import inspect, text
 
 
 revision = "workforce_20260721_complete"
-down_revision = "qual_20260705_merge_heads"
+down_revision = "workforce_20260721_precreate"
 branch_labels = None
 depends_on = None
 

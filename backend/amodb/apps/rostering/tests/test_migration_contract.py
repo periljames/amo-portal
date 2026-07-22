@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 MIGRATION = Path(__file__).resolve().parents[3] / "alembic" / "versions" / "workforce_20260721_complete_rostering.py"
+PRECREATE = Path(__file__).resolve().parents[3] / "alembic" / "versions" / "workforce_20260721_precreate_tables.py"
 
 
 def assignment_value(module: ast.Module, name: str):
@@ -19,7 +20,10 @@ def assignment_value(module: ast.Module, name: str):
 def test_migration_descends_from_current_merge_head():
     module = ast.parse(MIGRATION.read_text(encoding="utf-8"))
     assert assignment_value(module, "revision") == "workforce_20260721_complete"
-    assert assignment_value(module, "down_revision") == "qual_20260705_merge_heads"
+    assert assignment_value(module, "down_revision") == "workforce_20260721_precreate"
+    predecessor = ast.parse(PRECREATE.read_text(encoding="utf-8"))
+    assert assignment_value(predecessor, "revision") == "workforce_20260721_precreate"
+    assert assignment_value(predecessor, "down_revision") == "qual_20260705_merge_heads"
 
 
 def test_migration_revision_graph_is_import_safe_without_database_url():

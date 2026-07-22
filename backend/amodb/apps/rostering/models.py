@@ -296,7 +296,7 @@ class RosterRule(Base):
     __table_args__ = (
         UniqueConstraint("amo_id", "code", name="uq_roster_rules_amo_code"),
         Index("ix_roster_rules_amo_active", "amo_id", "is_active"),
-        Index("ix_roster_rules_scope", "amo_id", "scope", "department_id", "base_station_id"),
+        Index("ix_wr_roster_rules_scope", "amo_id", "scope", "department_id", "base_station_id"),
         CheckConstraint("effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from", name="ck_roster_rule_effective_dates"),
     )
 

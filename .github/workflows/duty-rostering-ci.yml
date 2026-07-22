@@ -6,6 +6,7 @@ on:
       - "backend/amodb/apps/rostering/**"
       - "backend/amodb/apps/workforce/**"
       - "backend/amodb/alembic/versions/workforce_20260721_complete_rostering.py"
+      - "backend/amodb/alembic/versions/workforce_20260721_precreate_tables.py"
       - "frontend/src/pages/rostering/**"
       - "frontend/src/services/rostering.ts"
       - "frontend/src/services/workforce.ts"
@@ -38,7 +39,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
-      - name: Verify Alembic graph and workforce head without database configuration
+      - name: Verify Alembic graph without database configuration
         env:
           DATABASE_URL: ""
           DATABASE_WRITE_URL: ""
@@ -53,9 +54,12 @@ jobs:
           heads = script.get_heads()
           print("Alembic heads:", heads)
           assert "workforce_20260721_complete" in heads, heads
-          workforce = script.get_revision("workforce_20260721_complete")
-          assert workforce is not None
-          assert workforce.down_revision == "qual_20260705_merge_heads", workforce.down_revision
+          complete = script.get_revision("workforce_20260721_complete")
+          predecessor = script.get_revision("workforce_20260721_precreate")
+          assert complete is not None
+          assert predecessor is not None
+          assert complete.down_revision == "workforce_20260721_precreate"
+          assert predecessor.down_revision == "qual_20260705_merge_heads"
           assert len(heads) == len(set(heads)), heads
           PY
           status=$?
@@ -69,8 +73,8 @@ jobs:
           path: backend/duty-rostering-alembic-head.log
           if-no-files-found: error
           retention-days: 7
-      - name: Compile new backend modules
-        run: python -m compileall -q amodb/apps/workforce amodb/apps/rostering amodb/alembic/versions/workforce_20260721_complete_rostering.py
+      - name: Compile backend modules and migrations
+        run: python -m compileall -q amodb/apps/workforce amodb/apps/rostering amodb/alembic/versions/workforce_20260721_complete_rostering.py amodb/alembic/versions/workforce_20260721_precreate_tables.py
       - name: Run workforce and rostering tests
         shell: bash
         run: |
