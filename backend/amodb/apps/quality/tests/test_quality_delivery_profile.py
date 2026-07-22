@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from amodb.apps.quality import router as direct_quality_router
 from amodb.quality_main import OMITTED_OPERATIONAL_MODULES, PROFILE_MODULES, app
 
 
@@ -34,6 +35,18 @@ def test_quality_delivery_profile_omits_unrelated_operational_routes() -> None:
 
     for prefix in blocked_prefixes:
         assert not any(path == prefix or path.startswith(f"{prefix}/") for path in paths), prefix
+
+
+def test_quality_direct_router_has_no_exact_duplicate_registrations() -> None:
+    signatures = [
+        (
+            str(getattr(route, "path", "")),
+            frozenset(getattr(route, "methods", None) or ()),
+            id(getattr(route, "endpoint", route)),
+        )
+        for route in direct_quality_router.routes
+    ]
+    assert len(signatures) == len(set(signatures))
 
 
 def test_quality_delivery_manifest_is_explicit() -> None:
