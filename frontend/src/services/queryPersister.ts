@@ -94,8 +94,8 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
       const scope = currentOfflineScope();
       boundScope = scope;
       const database = await openDatabase();
-      if (!database) return memoryClients.get(scope);
       if (currentOfflineScope() !== scope) return undefined;
+      if (!database) return memoryClients.get(scope);
 
       const transaction = database.transaction(STORE_NAME, "readonly");
       const done = transactionDone(transaction);
@@ -103,6 +103,7 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
         transaction.objectStore(STORE_NAME).get(storageKey(scope)),
       );
       await done;
+      if (currentOfflineScope() !== scope) return undefined;
       if (!record || record.scope !== scope) return memoryClients.get(scope);
       memoryClients.set(scope, record.client);
       return record.client;
