@@ -3,14 +3,13 @@ import { getApiBaseUrl } from "./config";
 
 const DATABASE_NAME = "amo-portal-offline";
 const DATABASE_VERSION = 1;
-const KV_STORE = "key_value";
 const API_STORE = "api_cache";
 const OUTBOX_STORE = "outbox";
-const QUERY_CACHE_KEY = "tanstack-query-cache-v2";
 const OFFLINE_EVENT = "amo:offline-state-changed";
 const OFFLINE_SYNC_EVENT = "amo:offline-sync-complete";
 const REPLAY_LEASE_KEY = "amo:offline-replay-lease";
-const REPLAY_LEASE_MS = 30_000;
+const REPLAY_LEASE_MS = 45_000;
+const REPLAY_REQUEST_TIMEOUT_MS = 30_000;
 const ACTIVE_AMO_KEYS = ["amodb_active_amo_id", "amodb_admin_active_amo_id"];
 
 export type OfflineOutboxStatus = "queued" | "syncing" | "conflict" | "failed";
@@ -57,26 +56,12 @@ export type ApiCacheRecord<T = unknown> = {
   expiresAt: number;
 };
 
-type KeyValueRecord = {
-  key: string;
-  scope: string;
-  value: unknown;
-  updatedAt: number;
-};
-
-type QueryPersister = {
-  persistClient(client: unknown): Promise<void>;
-  restoreClient(): Promise<unknown | undefined>;
-  removeClient(): Promise<void>;
-};
-
 type ReplayLease = {
   owner: string;
   expiresAt: number;
 };
 
 let databasePromise: Promise<IDBDatabase | null> | null = null;
-let memoryQueryCache: unknown;
 const memoryApiCache = new Map<string, ApiCacheRecord>();
 const memoryOutbox = new Map<string, OfflineOutboxEntry>();
 
@@ -107,10 +92,6 @@ async function openDatabase(): Promise<IDBDatabase | null> {
     const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = () => {
       const database = request.result;
-      if (!database.objectStoreNames.contains(KV_STORE)) {
-        const store = database.createObjectStore(KV_STORE, { keyPath: "key" });
-        store.createIndex("scope", "scope", { unique: false });
-      }
       if (!database.objectStoreNames.contains(API_STORE)) {
         const store = database.createObjectStore(API_STORE, { keyPath: "key" });
         store.createIndex("scope", "scope", { unique: false });
@@ -132,7 +113,7 @@ async function openDatabase(): Promise<IDBDatabase | null> {
       console.warn("[offline] IndexedDB unavailable; using memory fallback", request.error);
       resolve(null);
     };
-    request.onblocked = () => console.warn("[offline] IndexedDB upgrade blocked by another tab");
+    request.onblocked = () => console.warn("[offline] IndexedDB upgrade blocked by another portal tab");
   });
 
   return databasePromise;
@@ -191,24 +172,27 @@ async function putRecord(storeName: string, value: unknown): Promise<void> {
   const database = await openDatabase();
   if (!database) return;
   const transaction = database.transaction(storeName, "readwrite");
+  const done = transactionDone(transaction);
   transaction.objectStore(storeName).put(value);
-  await transactionDone(transaction);
+  await done;
 }
 
 async function deleteRecord(storeName: string, key: IDBValidKey): Promise<void> {
   const database = await openDatabase();
   if (!database) return;
   const transaction = database.transaction(storeName, "readwrite");
+  const done = transactionDone(transaction);
   transaction.objectStore(storeName).delete(key);
-  await transactionDone(transaction);
+  await done;
 }
 
 async function readRecord<T>(storeName: string, key: IDBValidKey): Promise<T | undefined> {
   const database = await openDatabase();
   if (!database) return undefined;
   const transaction = database.transaction(storeName, "readonly");
+  const done = transactionDone(transaction);
   const value = await requestResult(transaction.objectStore(storeName).get(key));
-  await transactionDone(transaction);
+  await done;
   return value as T | undefined;
 }
 
@@ -216,9 +200,10 @@ async function recordsForScope<T>(storeName: string, scope: string): Promise<T[]
   const database = await openDatabase();
   if (!database) return [];
   const transaction = database.transaction(storeName, "readonly");
+  const done = transactionDone(transaction);
   const index = transaction.objectStore(storeName).index("scope");
   const values = await requestResult(index.getAll(IDBKeyRange.only(scope)));
-  await transactionDone(transaction);
+  await done;
   return values as T[];
 }
 
@@ -226,36 +211,11 @@ async function deleteScopeRecords(storeName: string, scope: string): Promise<voi
   const database = await openDatabase();
   if (!database) return;
   const transaction = database.transaction(storeName, "readwrite");
+  const done = transactionDone(transaction);
   const index = transaction.objectStore(storeName).index("scope");
   const keys = await requestResult(index.getAllKeys(IDBKeyRange.only(scope)));
   keys.forEach((key) => transaction.objectStore(storeName).delete(key));
-  await transactionDone(transaction);
-}
-
-export function createPortalQueryPersister(): QueryPersister {
-  return {
-    async persistClient(client: unknown) {
-      memoryQueryCache = client;
-      const scope = currentOfflineScope();
-      const record: KeyValueRecord = {
-        key: scopedKey("query", QUERY_CACHE_KEY, scope),
-        scope,
-        value: client,
-        updatedAt: Date.now(),
-      };
-      await putRecord(KV_STORE, record).catch((error) => console.warn("[offline] Could not persist query cache", error));
-    },
-    async restoreClient() {
-      const scope = currentOfflineScope();
-      const record = await readRecord<KeyValueRecord>(KV_STORE, scopedKey("query", QUERY_CACHE_KEY, scope)).catch(() => undefined);
-      return record?.value ?? memoryQueryCache;
-    },
-    async removeClient() {
-      const scope = currentOfflineScope();
-      memoryQueryCache = undefined;
-      await deleteRecord(KV_STORE, scopedKey("query", QUERY_CACHE_KEY, scope)).catch(() => undefined);
-    },
-  };
+  await done;
 }
 
 export async function writeApiCache<T>(path: string, value: T, ttlMs: number): Promise<void> {
@@ -362,29 +322,70 @@ export async function discardOfflineMutation(id: string): Promise<void> {
   notifyOfflineStateChanged();
 }
 
+function readReplayLease(): ReplayLease | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return JSON.parse(window.localStorage.getItem(REPLAY_LEASE_KEY) || "null") as ReplayLease | null;
+  } catch {
+    return null;
+  }
+}
+
 function acquireReplayLease(): string | null {
   if (typeof window === "undefined") return "server";
   const owner = randomId("tab");
   const now = Date.now();
   try {
-    const current = JSON.parse(window.localStorage.getItem(REPLAY_LEASE_KEY) || "null") as ReplayLease | null;
+    const current = readReplayLease();
     if (current?.expiresAt && current.expiresAt > now) return null;
     const lease: ReplayLease = { owner, expiresAt: now + REPLAY_LEASE_MS };
     window.localStorage.setItem(REPLAY_LEASE_KEY, JSON.stringify(lease));
-    const confirmed = JSON.parse(window.localStorage.getItem(REPLAY_LEASE_KEY) || "null") as ReplayLease | null;
-    return confirmed?.owner === owner ? owner : null;
+    return readReplayLease()?.owner === owner ? owner : null;
   } catch {
     return owner;
   }
 }
 
-function releaseReplayLease(owner: string): void {
-  if (typeof window === "undefined") return;
+function renewReplayLease(owner: string): boolean {
+  if (typeof window === "undefined" || owner === "server") return true;
   try {
-    const current = JSON.parse(window.localStorage.getItem(REPLAY_LEASE_KEY) || "null") as ReplayLease | null;
+    const current = readReplayLease();
+    if (!current || current.owner !== owner) return false;
+    window.localStorage.setItem(REPLAY_LEASE_KEY, JSON.stringify({ owner, expiresAt: Date.now() + REPLAY_LEASE_MS } satisfies ReplayLease));
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function releaseReplayLease(owner: string): void {
+  if (typeof window === "undefined" || owner === "server") return;
+  try {
+    const current = readReplayLease();
     if (!current || current.owner === owner) window.localStorage.removeItem(REPLAY_LEASE_KEY);
   } catch {
     // Best effort only.
+  }
+}
+
+async function fetchForReplay(entry: OfflineOutboxEntry): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(new DOMException("Offline replay request timed out", "AbortError")),
+    REPLAY_REQUEST_TIMEOUT_MS,
+  );
+  try {
+    const headers = new Headers(authHeaders(entry.headers));
+    headers.set("Idempotency-Key", entry.idempotencyKey);
+    return await fetch(`${getApiBaseUrl().replace(/\/$/, "")}${entry.path.startsWith("/") ? entry.path : `/${entry.path}`}`, {
+      method: entry.method,
+      headers,
+      body: entry.body,
+      credentials: "include",
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -392,6 +393,10 @@ async function parseReplayError(response: Response): Promise<unknown> {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) return response.json().catch(() => ({ status: response.status }));
   return response.text().catch(() => response.statusText);
+}
+
+function retryableReplayStatus(status: number): boolean {
+  return status === 401 || status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
@@ -408,17 +413,11 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
   try {
     const entries = (await listOfflineMutations(scope)).filter((entry) => entry.status === "queued" || entry.status === "syncing");
     for (const entry of entries) {
+      if (!renewReplayLease(leaseOwner)) break;
       const syncing: OfflineOutboxEntry = { ...entry, status: "syncing", updatedAt: Date.now(), error: undefined };
       await saveOutboxEntry(syncing);
       try {
-        const headers = new Headers(authHeaders(syncing.headers));
-        headers.set("Idempotency-Key", syncing.idempotencyKey);
-        const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}${syncing.path.startsWith("/") ? syncing.path : `/${syncing.path}`}`, {
-          method: syncing.method,
-          headers,
-          body: syncing.body,
-          credentials: "include",
-        });
+        const response = await fetchForReplay(syncing);
         if (response.ok) {
           synced += 1;
           syncedPaths.add(syncing.path);
@@ -426,6 +425,7 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
           await discardOfflineMutation(syncing.id);
           continue;
         }
+
         const detail = await parseReplayError(response);
         if (response.status === 409 || response.status === 412 || response.status === 422) {
           await saveOutboxEntry({
@@ -438,24 +438,27 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
           });
           continue;
         }
-        if (response.status >= 400 && response.status < 500) {
+
+        if (retryableReplayStatus(response.status)) {
           await saveOutboxEntry({
             ...syncing,
-            status: "failed",
+            status: "queued",
             attempts: syncing.attempts + 1,
             updatedAt: Date.now(),
-            error: typeof detail === "string" ? detail : JSON.stringify(detail),
+            error: response.status === 401
+              ? "Session expired. This change will retry after sign-in."
+              : `Server unavailable (${response.status})`,
           });
-          continue;
+          break;
         }
+
         await saveOutboxEntry({
           ...syncing,
-          status: "queued",
+          status: "failed",
           attempts: syncing.attempts + 1,
           updatedAt: Date.now(),
-          error: `Server unavailable (${response.status})`,
+          error: typeof detail === "string" ? detail : JSON.stringify(detail),
         });
-        break;
       } catch (error) {
         await saveOutboxEntry({
           ...syncing,
@@ -482,11 +485,9 @@ export async function replayOfflineMutations(): Promise<OfflineOutboxSummary> {
 
 export async function clearCurrentOfflineScope(): Promise<void> {
   const scope = currentOfflineScope();
-  memoryQueryCache = undefined;
   [...memoryApiCache.entries()].forEach(([key, value]) => { if (value.scope === scope) memoryApiCache.delete(key); });
   [...memoryOutbox.entries()].forEach(([key, value]) => { if (value.scope === scope) memoryOutbox.delete(key); });
   await Promise.all([
-    deleteScopeRecords(KV_STORE, scope),
     deleteScopeRecords(API_STORE, scope),
     deleteScopeRecords(OUTBOX_STORE, scope),
   ]).catch(() => undefined);
@@ -494,16 +495,15 @@ export async function clearCurrentOfflineScope(): Promise<void> {
 }
 
 export async function clearAllPortalOfflineData(): Promise<void> {
-  memoryQueryCache = undefined;
   memoryApiCache.clear();
   memoryOutbox.clear();
   const database = await openDatabase();
   if (database) {
-    const transaction = database.transaction([KV_STORE, API_STORE, OUTBOX_STORE], "readwrite");
-    transaction.objectStore(KV_STORE).clear();
+    const transaction = database.transaction([API_STORE, OUTBOX_STORE], "readwrite");
+    const done = transactionDone(transaction);
     transaction.objectStore(API_STORE).clear();
     transaction.objectStore(OUTBOX_STORE).clear();
-    await transactionDone(transaction).catch(() => undefined);
+    await done.catch(() => undefined);
   }
   notifyOfflineStateChanged();
 }
