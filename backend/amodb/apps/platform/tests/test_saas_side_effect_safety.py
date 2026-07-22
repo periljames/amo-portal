@@ -1,0 +1,189 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from amodb.apps.accounts import models as account_models
+from amodb.apps.platform import models as platform_models
+from amodb.apps.platform import saas_models, saas_queue, saas_side_effects
+
+
+def test_non_repeatable_jobs_have_one_attempt_and_cannot_be_manually_retried():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    saas_models.SaaSJob.__table__.create(engine)
+    saas_models.SaaSJobEvent.__table__.create(engine)
+    db = sessionmaker(bind=engine, future=True, expire_on_commit=False)()
+
+    job = saas_queue.enqueue_job(
+        db,
+        job_type="ETIMS_FISCALIZE_INVOICE",
+        payload={},
+        idempotency_key="etims:invoice:one",
+        max_attempts=9,
+    )
+    assert job.max_attempts == 1
+    job.status = "DEAD"
+    db.commit()
+    with pytest.raises(ValueError, match="non-repeatable"):
+        saas_queue.retry_job(db, job)
+
+
+def test_uncertain_etims_outcome_moves_to_reconciliation_without_resubmission(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fiscalization = SimpleNamespace(
+        id="fiscal-1",
+        invoice_id="invoice-1",
+        status="PENDING",
+        request_json={},
+        response_json=None,
+        submitted_at=None,
+        fiscalized_at=None,
+        last_error=None,
+        fiscal_document_number=None,
+        control_unit_serial=None,
+        receipt_signature=None,
+    )
+    credential = SimpleNamespace(
+        id="credential-1",
+        provider="etims_oscu",
+        encrypted_secret="encrypted",
+        config_json={"certified": True},
+    )
+    invoice = SimpleNamespace(
+        id="invoice-1",
+        invoice_number="INV-1",
+        amo_id="amo-1",
+        currency="KES",
+        subtotal_cents=10000,
+        tax_cents=1600,
+        total_cents=11600,
+        issued_at=None,
+        due_at=None,
+    )
+    job = SimpleNamespace(
+        id="job-1",
+        idempotency_key="fiscalize:invoice-1",
+        payload_json={
+            "fiscalization_id": fiscalization.id,
+            "credential_id": credential.id,
+        },
+    )
+    db = MagicMock()
+
+    def get(model, identifier):
+        if model is saas_models.SaaSInvoiceFiscalization:
+            return fiscalization
+        if model is saas_models.SaaSProviderCredential:
+            return credential
+        if model is account_models.BillingInvoice:
+            return invoice
+        raise AssertionError((model, identifier))
+
+    db.get.side_effect = get
+    monkeypatch.setattr(
+        saas_side_effects.saas_secrets,
+        "decrypt_secret",
+        lambda value: {"api_key": "secret"},
+    )
+    provider = MagicMock(side_effect=TimeoutError("provider timed out"))
+    monkeypatch.setattr(
+        saas_side_effects.saas_providers,
+        "fiscalize_etims_invoice",
+        provider,
+    )
+
+    with pytest.raises(saas_side_effects.NonRepeatableJobError):
+        saas_side_effects.process_etims_fiscalization(db, job=job)
+    assert fiscalization.status == "RECONCILIATION_REQUIRED"
+    assert fiscalization.response_json["submission_reference"] == "amo-portal:fiscalize:invoice-1"
+    assert db.commit.call_count >= 2
+
+    with pytest.raises(saas_side_effects.NonRepeatableJobError, match="reconcile"):
+        saas_side_effects.process_etims_fiscalization(db, job=job)
+    assert provider.call_count == 1
+
+
+def test_ai_support_reply_is_deduplicated_by_source_job(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    job = SimpleNamespace(
+        id="job-ai-1",
+        created_by="support-user",
+        payload_json={"ticket_id": "ticket-1", "credential_id": "credential-1"},
+    )
+    credential = SimpleNamespace(
+        id="credential-1",
+        encrypted_secret="encrypted",
+        config_json={},
+    )
+    ticket = SimpleNamespace(
+        id="ticket-1",
+        title="Unable to upload",
+        priority="NORMAL",
+        updated_at=None,
+    )
+    detail = SimpleNamespace(description="Upload failed", category="GENERAL")
+    db = MagicMock()
+    existing_holder = {"message": None}
+
+    def query(model):
+        chain = MagicMock()
+        if model is saas_models.SaaSSupportTicketMessage:
+            chain.filter.return_value.first.side_effect = lambda: existing_holder["message"]
+            chain.filter.return_value.order_by.return_value.all.return_value = []
+        return chain
+
+    db.query.side_effect = query
+
+    def get(model, identifier):
+        if model is saas_models.SaaSProviderCredential:
+            return credential
+        if model is platform_models.PlatformSupportTicket:
+            return ticket
+        if model is saas_models.SaaSSupportTicketDetail:
+            return detail
+        raise AssertionError((model, identifier))
+
+    db.get.side_effect = get
+
+    def add(message):
+        message.id = "message-ai-1"
+        existing_holder["message"] = message
+
+    db.add.side_effect = add
+    monkeypatch.setattr(
+        saas_side_effects.saas_secrets,
+        "decrypt_secret",
+        lambda value: {"api_key": "secret"},
+    )
+    provider = MagicMock(
+        return_value={
+            "reply": "Please retry the upload and share the correlation ID.",
+            "provider": "openai",
+            "model": "test-model",
+            "usage": {},
+        }
+    )
+    monkeypatch.setattr(
+        saas_side_effects.saas_providers,
+        "generate_openai_support_response",
+        provider,
+    )
+
+    first = saas_side_effects.process_ai_support_reply(db, job=job)
+    second = saas_side_effects.process_ai_support_reply(db, job=job)
+
+    assert first["message_id"] == "message-ai-1"
+    assert second == {
+        "ticket_id": "ticket-1",
+        "message_id": "message-ai-1",
+        "replayed": False,
+    }
+    assert existing_holder["message"].source_job_id == job.id
+    assert provider.call_count == 1
