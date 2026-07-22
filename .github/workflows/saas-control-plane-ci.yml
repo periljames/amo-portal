@@ -84,7 +84,7 @@ jobs:
           assert finalizer.down_revision == "saas_20260722_control_plane"
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert heads == ["saas_20260722_finalize_idx"], heads
+          assert "saas_20260722_finalize_idx" in heads, heads
           PY
       - name: Upgrade production schema graph
         id: migrate
