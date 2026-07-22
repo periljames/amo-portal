@@ -25,6 +25,17 @@ Start the QMS-only API surface with:
 uvicorn amodb.quality_main:app --host 0.0.0.0 --port 8000
 ```
 
+The standard backend image defaults to the full portal (`amodb.main:app`). Launch the same image as the bounded Quality product by setting `ASGI_APP`:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e ASGI_APP=amodb.quality_main:app \
+  -e QUALITY_SCHEMA_STRICT=1 \
+  -e DATABASE_URL='postgresql+psycopg2://user:password@database:5432/amodb' \
+  -e SECRET_KEY='replace-with-a-production-secret' \
+  amo-portal-backend
+```
+
 Production startup is schema-strict by default. The database must be at every repository Alembic head before the application starts:
 
 ```bash
@@ -67,7 +78,7 @@ The canonical router applies tenant context and Quality permissions. The direct 
 
 ## 4. End-to-end process flow
 
-The audited workflow is represented as seven explicit stages. A workflow check and the audit workspace must calculate the same state.
+The audited workflow is represented as seven explicit stages. The audit workspace and workflow-check endpoint intentionally return the same `{ audit, workflow }` contract so the frontend has one authoritative progress model.
 
 1. **War room / planning** — audit type, scope, criteria, dates, auditee, lead auditor and supporting auditors are assigned. Internal audit identity and schedule fields are locked after creation where required.
 2. **Checklist** — a controlled checklist file is uploaded or portal checklist rows are created, assigned and completed.
@@ -137,7 +148,7 @@ The existing frontend remains the delivery UI. A Quality-only client is controll
 
 - `/maintenance/:amoCode/quality` redirects to the Quality QMS overview.
 - Quality schedule, audit workspace, findings, CAR, evidence, report, document and calendar pages use the same tenant context.
-- The audit run hub uses the dedicated `qmsAuditHubActions` service boundary for CAR action history and report sharing.
+- The audit run hub consumes the active `{ audit, workflow }` contract and uses the dedicated `qmsAuditHubActions` service boundary for CAR action history and report sharing.
 - Requests have deterministic read/write timeouts, session-expiry handling, parsed backend error details and guaranteed loading-state cleanup.
 - Production build and targeted regression tests are release gates.
 
