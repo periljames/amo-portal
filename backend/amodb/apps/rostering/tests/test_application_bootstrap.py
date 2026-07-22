@@ -7,6 +7,7 @@ def test_main_application_mounts_workforce_and_rostering_routes():
     paths = {route.path for route in app.routes}
     assert "/workforce/employment-contracts" in paths
     assert "/workforce/leave-requests" in paths
+    assert "/workforce/roster-people" in paths
     assert "/rostering/dashboard" in paths
     assert "/rostering/my-roster" in paths
     assert "/rostering/versions/{version_id}/assignments" in paths
@@ -20,6 +21,7 @@ def test_main_application_has_one_route_per_method_and_path():
         ("POST", "/workforce/employment-contracts"),
         ("GET", "/workforce/leave-requests"),
         ("POST", "/workforce/leave-requests"),
+        ("GET", "/workforce/roster-people"),
         ("GET", "/rostering/dashboard"),
         ("GET", "/rostering/planning-board"),
         ("GET", "/rostering/my-roster"),
