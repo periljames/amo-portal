@@ -5,7 +5,7 @@ import subprocess
 from importlib import import_module
 
 import sqlalchemy as sa
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 
 from amodb.database import Base
 
@@ -38,6 +38,10 @@ NEW_TABLES = {
     "workforce_notification_preferences",
 }
 
+QUALITY_PARENT = "qual_20260705_merge_heads"
+ROSTER_PARENT = "phase2_14a_20260615"
+TARGET_REVISION = "workforce_20260721_complete"
+
 
 def _load_metadata() -> None:
     for module_name in (
@@ -52,7 +56,7 @@ def _load_metadata() -> None:
 
 
 def _create_current_database_baseline(engine: sa.Engine) -> None:
-    """Create only the existing tables required by the two new revisions."""
+    """Create the existing tables required by the Workforce revisions."""
     baseline = sa.MetaData()
     manual = {
         "amos": [
@@ -138,13 +142,49 @@ def _run_alembic(*arguments: str) -> None:
     )
 
 
+def _stamp_converged_parents(engine: sa.Engine) -> None:
+    _run_alembic("stamp", QUALITY_PARENT)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO alembic_version (version_num) VALUES (:revision) "
+                "ON CONFLICT (version_num) DO NOTHING"
+            ),
+            {"revision": ROSTER_PARENT},
+        )
+
+
+def _metadata_fk_signatures(table: sa.Table) -> set[tuple[tuple[str, ...], str, tuple[str, ...]]]:
+    return {
+        (
+            tuple(str(element.parent.name) for element in constraint.elements),
+            constraint.referred_table.name,
+            tuple(str(element.column.name) for element in constraint.elements),
+        )
+        for constraint in table.foreign_key_constraints
+    }
+
+
+def _database_fk_signatures(
+    inspector: sa.Inspector,
+    table_name: str,
+) -> set[tuple[tuple[str, ...], str, tuple[str, ...]]]:
+    return {
+        (
+            tuple(str(column) for column in (foreign_key.get("constrained_columns") or ())),
+            str(foreign_key.get("referred_table") or ""),
+            tuple(str(column) for column in (foreign_key.get("referred_columns") or ())),
+        )
+        for foreign_key in inspector.get_foreign_keys(table_name)
+    }
+
+
 def main() -> None:
     database_url = os.environ["DATABASE_URL"]
     engine = create_engine(database_url)
     _load_metadata()
     _create_current_database_baseline(engine)
-
-    _run_alembic("stamp", "qual_20260705_merge_heads")
+    _stamp_converged_parents(engine)
 
     with engine.begin() as connection:
         connection.execute(text("CREATE TABLE migration_collision_probe (id integer)"))
@@ -152,14 +192,16 @@ def main() -> None:
         connection.execute(text("CREATE INDEX ix_roster_rules_amo_active ON migration_collision_probe (id)"))
         connection.execute(text("CREATE INDEX uq_roster_rules_amo_code ON migration_collision_probe (id)"))
 
-    _run_alembic("upgrade", "workforce_20260721_complete")
+    _run_alembic("upgrade", TARGET_REVISION)
 
+    inspector = inspect(engine)
     with engine.connect() as connection:
         revision = connection.execute(
             text(
                 "SELECT version_num FROM alembic_version "
-                "WHERE version_num = 'workforce_20260721_complete'"
-            )
+                "WHERE version_num = :revision"
+            ),
+            {"revision": TARGET_REVISION},
         ).scalar_one()
         roster_table = connection.execute(
             text("SELECT to_regclass('public.roster_rules')")
@@ -173,7 +215,7 @@ def main() -> None:
             ).scalars()
         )
 
-    assert revision == "workforce_20260721_complete"
+    assert revision == TARGET_REVISION
     assert roster_table == "roster_rules"
     assert "ix_wr_roster_rules_scope" in indexes
     assert any(
@@ -184,6 +226,18 @@ def main() -> None:
         name.startswith("uq_roster_rules_amo_code__roster_rules")
         for name in indexes
     ), indexes
+
+    shift_columns = {column["name"] for column in inspector.get_columns("shift_templates")}
+    assert {"color_token", "icon_name"}.issubset(shift_columns), shift_columns
+
+    missing_foreign_keys: dict[str, list[tuple[tuple[str, ...], str, tuple[str, ...]]]] = {}
+    for table_name in sorted(NEW_TABLES):
+        expected = _metadata_fk_signatures(Base.metadata.tables[table_name])
+        actual = _database_fk_signatures(inspector, table_name)
+        missing = sorted(expected - actual)
+        if missing:
+            missing_foreign_keys[table_name] = missing
+    assert missing_foreign_keys == {}, missing_foreign_keys
 
 
 if __name__ == "__main__":
