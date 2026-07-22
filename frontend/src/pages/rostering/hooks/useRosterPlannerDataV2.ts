@@ -1,5 +1,17 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { addWeeks } from "date-fns";
 
 import {
@@ -10,7 +22,11 @@ import {
   listRosterPeriods,
   listShiftTemplates,
 } from "../../../services/rostering";
-import { listWorkforcePeople, type WorkforcePersonRead } from "../../../services/workforce";
+import {
+  listRosterPeoplePage,
+  type RosterDepartmentOption,
+  type RosterPersonRead,
+} from "../../../services/rosterPeople";
 import type {
   RosterAssignmentRead,
   RosterContractResponse,
@@ -38,7 +54,16 @@ export type PlannerDataV2 = {
   assignments: RosterAssignmentRead[];
   setAssignments: Dispatch<SetStateAction<RosterAssignmentRead[]>>;
   findings: RosterValidationFindingRead[];
-  people: WorkforcePersonRead[];
+  people: RosterPersonRead[];
+  peopleTotal: number;
+  peopleDepartments: RosterDepartmentOption[];
+  peopleSearch: string;
+  setPeopleSearch: (value: string) => void;
+  peopleDepartmentId: string;
+  setPeopleDepartmentId: (value: string) => void;
+  peopleHasMore: boolean;
+  peopleLoadingMore: boolean;
+  loadMorePeople: () => Promise<void>;
   templates: ShiftTemplateRead[];
   contracts: RosterContractResponse | null;
   refresh: () => Promise<void>;
@@ -55,6 +80,7 @@ const PERIOD_STALE_MS = 2 * 60_000;
 const REFERENCE_STALE_MS = 15 * 60_000;
 const WORKSPACE_STALE_MS = 45_000;
 const ROSTER_GC_MS = 7 * 24 * 60 * 60_000;
+const PEOPLE_PAGE_SIZE = 100;
 
 function newest(period?: RosterPeriodRead): RosterVersionRead | undefined {
   return [...(period?.versions || [])].sort((a, b) => b.version_no - a.version_no)[0];
@@ -62,6 +88,15 @@ function newest(period?: RosterPeriodRead): RosterVersionRead | undefined {
 
 function periodsKey(from: string, to: string) {
   return ["rostering", "planner", "periods", from, to] as const;
+}
+
+function useDebouncedValue(value: string, delayMs: number): string {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [delayMs, value]);
+  return debounced;
 }
 
 async function loadVersionWorkspace(versionId: string): Promise<VersionWorkspace> {
@@ -81,6 +116,9 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [assignments, setAssignments] = useState<RosterAssignmentRead[]>([]);
   const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [peopleSearch, setPeopleSearch] = useState("");
+  const [peopleDepartmentId, setPeopleDepartmentId] = useState("");
+  const debouncedPeopleSearch = useDebouncedValue(peopleSearch.trim(), 250);
 
   const periodsQuery = useQuery({
     queryKey: periodsKey(week.from, week.to),
@@ -91,9 +129,24 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     networkMode: "offlineFirst",
   });
 
-  const peopleQuery = useQuery({
-    queryKey: ["rostering", "planner", "eligible-people"],
-    queryFn: () => listWorkforcePeople({ active_only: true, roster_eligible_only: true, limit: 1000 }),
+  const peopleQuery = useInfiniteQuery({
+    queryKey: [
+      "rostering",
+      "planner",
+      "eligible-people",
+      debouncedPeopleSearch,
+      peopleDepartmentId,
+    ],
+    queryFn: ({ pageParam }) => listRosterPeoplePage({
+      page: pageParam,
+      page_size: PEOPLE_PAGE_SIZE,
+      search: debouncedPeopleSearch || null,
+      department_id: peopleDepartmentId || null,
+      active_only: true,
+      roster_eligible_only: true,
+    }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.page + 1 : undefined,
     staleTime: REFERENCE_STALE_MS,
     gcTime: ROSTER_GC_MS,
     networkMode: "offlineFirst",
@@ -118,6 +171,13 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
   const periods = periodsQuery.data || [];
   const selectedPeriod = periods.find((row) => row.id === selectedPeriodId);
   const versions = selectedPeriod?.versions || [];
+  const peoplePages = peopleQuery.data?.pages || [];
+  const people = useMemo(
+    () => peoplePages.flatMap((page) => page.items),
+    [peoplePages],
+  );
+  const peopleTotal = peoplePages[0]?.total || 0;
+  const peopleDepartments = peoplePages[0]?.departments || [];
 
   useEffect(() => {
     if (!periods.length) {
@@ -186,6 +246,11 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     }
   }, [contractsQuery, peopleQuery, periodsQuery, selectedVersionId, templatesQuery, workspaceQuery]);
 
+  const loadMorePeople = useCallback(async () => {
+    if (!peopleQuery.hasNextPage || peopleQuery.isFetchingNextPage) return;
+    await peopleQuery.fetchNextPage();
+  }, [peopleQuery]);
+
   const firstError = [
     periodsQuery.error,
     peopleQuery.error,
@@ -230,7 +295,16 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     assignments,
     setAssignments,
     findings: workspaceQuery.data?.findings || [],
-    people: peopleQuery.data || [],
+    people,
+    peopleTotal,
+    peopleDepartments,
+    peopleSearch,
+    setPeopleSearch,
+    peopleDepartmentId,
+    setPeopleDepartmentId,
+    peopleHasMore: Boolean(peopleQuery.hasNextPage),
+    peopleLoadingMore: peopleQuery.isFetchingNextPage,
+    loadMorePeople,
     templates: templatesQuery.data || [],
     contracts: contractsQuery.data || null,
     refresh,
