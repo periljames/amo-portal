@@ -131,7 +131,13 @@ export const messagingApi = {
     method: "POST",
     body: JSON.stringify({ title, member_user_ids: memberUserIds }),
   }),
-  send: (threadId: string, body: string, clientMsgId: string, replyToMessageId?: string | null) => request<ChatMessage>(
+  send: (
+    threadId: string,
+    body: string,
+    clientMsgId: string,
+    replyToMessageId?: string | null,
+    mentionUserIds: string[] = [],
+  ) => request<ChatMessage>(
     `/api/chat/threads/${encodeURIComponent(threadId)}/messages`,
     {
       method: "POST",
@@ -139,7 +145,7 @@ export const messagingApi = {
         body,
         client_msg_id: clientMsgId,
         reply_to_message_id: replyToMessageId || null,
-        metadata: {},
+        metadata: mentionUserIds.length ? { mention_user_ids: [...new Set(mentionUserIds)] } : {},
       }),
     },
   ),
