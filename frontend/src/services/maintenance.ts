@@ -1,5 +1,4 @@
-import { getToken, handleAuthFailure } from "./auth";
-import { getApiBaseUrl } from "./config";
+import { apiGet } from "./crs";
 import { listAircraft } from "./fleet";
 import { shouldUseMockData } from "./runtimeMode";
 
@@ -57,19 +56,19 @@ export const savePartToolRequest = (item: PartToolRequest) => {
   const all = listPartToolRequests(); const idx = all.findIndex((x) => x.id === item.id); if (idx >= 0) all[idx] = item; else all.unshift(item); writeLocal(STORAGE_KEYS.parts, all); return true;
 };
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const token = getToken();
-  const res = await fetch(`${getApiBaseUrl()}${path}`, { headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, credentials: "include" });
-  if (res.status === 401) { handleAuthFailure("expired"); throw new Error("Session expired"); }
-  if (!res.ok) throw new Error(await res.text());
-  return await res.json() as T;
-}
-
 export async function listAllDefects(): Promise<DefectRead[]> {
   if (!shouldUseMockData()) {
     const aircraft = await listAircraft({ is_active: true });
-    const rows = await Promise.all(aircraft.map(async (a) => { try { return await fetchJson<DefectRead[]>(`/aircraft/${encodeURIComponent(a.serial_number)}/defects`); } catch { return []; } }));
-    return rows.flat().sort((a,b)=> new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+    const rows = await Promise.all(aircraft.map(async (item) => {
+      try {
+        return await apiGet<DefectRead[]>(`/aircraft/${encodeURIComponent(item.serial_number)}/defects`, {
+          offline: { cacheTtlMs: 5 * 60_000 },
+        });
+      } catch {
+        return [];
+      }
+    }));
+    return rows.flat().sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
   }
   return [{ id: 9001, aircraft_serial_number: "DEMO-001", description: "Hydraulic seep observed", source: "MAINTENANCE", ata_chapter: "29", occurred_at: demoNow, work_order_id: 2, operator_event_id: "DEF-DEMO-9001" }];
 }
