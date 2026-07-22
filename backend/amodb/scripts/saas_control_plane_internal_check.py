@@ -37,29 +37,11 @@ REQUIRED_CHECKS: dict[str, tuple[Path, list[str]]] = {
     ),
     "provider_adapters": (
         BACKEND_ROOT / "amodb/apps/platform/saas_providers.py",
-        [
-            'ProviderDefinition("stripe"',
-            'ProviderDefinition("mpesa_daraja"',
-            'ProviderDefinition("etims_oscu"',
-            'ProviderDefinition("smtp"',
-            'ProviderDefinition("openai"',
-            "def verify_stripe_signature",
-            "def create_stripe_checkout_session",
-            "def fiscalize_etims_invoice",
-        ],
+        ['ProviderDefinition("stripe"', 'ProviderDefinition("mpesa_daraja"', 'ProviderDefinition("etims_oscu"', 'ProviderDefinition("smtp"', 'ProviderDefinition("openai"', "def verify_stripe_signature", "def create_stripe_checkout_session", "def fiscalize_etims_invoice"],
     ),
     "saas_routes": (
         BACKEND_ROOT / "amodb/apps/platform/saas_router.py",
-        [
-            '@platform_saas_router.get("/capabilities")',
-            '@platform_saas_router.get("/providers")',
-            '@platform_saas_router.get("/jobs")',
-            '@platform_saas_router.get("/module-prices")',
-            '@platform_saas_router.patch("/tenants/{tenant_id}/modules")',
-            '@webhook_router.post("/stripe"',
-            '@support_router.post("/tickets"',
-            "def _visible_support_payload",
-        ],
+        ['@platform_saas_router.get("/capabilities")', '@platform_saas_router.get("/providers")', '@platform_saas_router.get("/jobs")', '@platform_saas_router.get("/module-prices")', '@platform_saas_router.patch("/tenants/{tenant_id}/modules")', '@webhook_router.post("/stripe"', '@support_router.post("/tickets"', "def _visible_support_payload"],
     ),
     "saas_workers": (
         BACKEND_ROOT / "amodb/jobs/saas_worker.py",
@@ -89,22 +71,38 @@ REQUIRED_CHECKS: dict[str, tuple[Path, list[str]]] = {
         BACKEND_ROOT / "amodb/apps/realtime/realtime_auth.py",
         ["def validate_connect_token", "hmac.compare_digest", "RealtimeConnectToken.expires_at > now", "User.is_active.is_(True)", "def prune_user_tokens"],
     ),
+    "broker_auth": (
+        BACKEND_ROOT / "amodb/apps/realtime/broker_auth.py",
+        [
+            'GATEWAY_SHARED_SUBSCRIPTION = "$share/amo-portal-gateway/amo/+/user/+/outbox"',
+            "def validate_production_config",
+            "MQTT_BROKER_WS_URL must use wss:// in production",
+            "def authenticate_client",
+            "def authorize_topic",
+            "topic == GATEWAY_SHARED_SUBSCRIPTION",
+            'topic == f"{base}/outbox"',
+            'topic in {f"{base}/inbox", f"{base}/ack"}',
+        ],
+    ),
+    "broker_router": (
+        BACKEND_ROOT / "amodb/apps/realtime/broker_router.py",
+        [
+            'router = APIRouter(prefix="/realtime/broker"',
+            '@router.post("/authenticate"',
+            '@router.post("/authorize"',
+            "broker_auth.require_broker_webhook_secret",
+        ],
+    ),
     "secure_messaging": (
         BACKEND_ROOT / "amodb/apps/realtime/secure_messaging.py",
-        [
-            "def _reconcile_thread_memberships",
-            "Only current department members may open this channel",
-            "User is not a current member of this group",
-            "mention_user_ids",
-            'level == "MENTIONS"',
-            "Mentioned users must be current conversation members",
-            "def process_inbound_envelope",
-        ],
+        ["def _reconcile_thread_memberships", "Only current department members may open this channel", "User is not a current member of this group", "mention_user_ids", 'level == "MENTIONS"', "Mentioned users must be current conversation members", "def process_inbound_envelope"],
     ),
     "messaging_gateway": (
         BACKEND_ROOT / "amodb/apps/realtime/gateway.py",
         [
-            'client.subscribe("amo/+/user/+/outbox"',
+            "broker_auth.validate_production_config",
+            "username_pw_set",
+            "broker_auth.GATEWAY_SHARED_SUBSCRIPTION",
             "realtime_auth.validate_connect_token",
             "secure_messaging.process_inbound_envelope",
             'model_copy(update={"authToken": None})',
@@ -114,15 +112,7 @@ REQUIRED_CHECKS: dict[str, tuple[Path, list[str]]] = {
     ),
     "messaging_routes": (
         BACKEND_ROOT / "amodb/apps/realtime/router.py",
-        [
-            "secure_messaging as messaging",
-            "realtime_auth.prune_user_tokens",
-            '@router.get("/chat/directory")',
-            '@router.post("/chat/direct/{peer_user_id}"',
-            '@router.post("/chat/departments/{department_id}"',
-            '@router.post("/chat/groups/{group_id}"',
-            '@router.get("/notifications/me")',
-        ],
+        ["router.include_router(broker_router.router)", "secure_messaging as messaging", "realtime_auth.prune_user_tokens", '@router.get("/chat/directory")', '@router.post("/chat/direct/{peer_user_id}"', '@router.post("/chat/departments/{department_id}"', '@router.post("/chat/groups/{group_id}"', '@router.get("/notifications/me")'],
     ),
     "frontend_platform_service": (
         FRONTEND_ROOT / "src/services/platformControl.ts",
@@ -134,13 +124,7 @@ REQUIRED_CHECKS: dict[str, tuple[Path, list[str]]] = {
     ),
     "frontend_realtime_auth": (
         FRONTEND_ROOT / "src/services/realtime/mqtt.ts",
-        [
-            "private sessionToken",
-            "scheduleTokenRefresh",
-            "authToken: this.sessionToken",
-            "delete queued.authToken",
-            "delete decoded.authToken",
-        ],
+        ["private sessionToken", "scheduleTokenRefresh", "authToken: this.sessionToken", "delete queued.authToken", "delete decoded.authToken"],
     ),
     "frontend_messaging_hub": (
         FRONTEND_ROOT / "src/components/messaging/MessagingHub.tsx",
@@ -153,6 +137,17 @@ REQUIRED_CHECKS: dict[str, tuple[Path, list[str]]] = {
     "frontend_billing": (
         FRONTEND_ROOT / "src/pages/platform/PlatformBillingPage.tsx",
         ["Module price catalog", "Queue recurring checkout", "Fiscalize OSCU", "Billing queue"],
+    ),
+    "production_compose": (
+        ROOT / "deploy/saas/docker-compose.yml",
+        [
+            "CORS_ALLOWED_ORIGINS is required in production",
+            "MQTT_BROKER_INTERNAL_URL is required",
+            "MQTT_BROKER_WS_URL is required",
+            "REALTIME_BROKER_WEBHOOK_SECRET is required",
+            "REALTIME_GATEWAY_PASSWORD is required",
+            "SAAS_WORKER_BATCH_SIZE:-1",
+        ],
     ),
     "load_profile": (
         ROOT / "loadtests/k6_saas_control_plane.js",
@@ -173,6 +168,10 @@ FORBIDDEN_CHECKS: dict[str, tuple[Path, list[str]]] = {
         BACKEND_ROOT / "amodb/apps/realtime/gateway.py",
         ["messaging.process_inbound_envelope(db, envelope)"],
     ),
+    "gateway_non_shared_subscription": (
+        BACKEND_ROOT / "amodb/apps/realtime/gateway.py",
+        ['client.subscribe("amo/+/user/+/outbox"'],
+    ),
     "persisted_realtime_token": (
         FRONTEND_ROOT / "src/services/realtime/queue.ts",
         ["authToken"],
@@ -183,6 +182,7 @@ EXTRA_COMPILE_TARGETS = [
     BACKEND_ROOT / "amodb/jobs/platform_command_worker.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_control_plane.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_queue_fencing.py",
+    BACKEND_ROOT / "amodb/apps/realtime/tests/test_broker_auth.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_messaging_hardening.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_realtime_security_hardening.py",
     BACKEND_ROOT / "amodb/apps/realtime/tests/test_realtime_services.py",
