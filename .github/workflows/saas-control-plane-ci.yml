@@ -80,10 +80,19 @@ jobs:
           assert "saas_20260722_control_plane" in heads
           PY
       - name: Upgrade production schema graph
-        run: alembic -c amodb/alembic.ini upgrade heads
-      - name: Configure all SQLAlchemy mappers and route contracts
+        id: migrate
+        continue-on-error: true
+        shell: bash
         run: |
-          python - <<'PY'
+          set -o pipefail
+          alembic -c amodb/alembic.ini upgrade heads 2>&1 | tee saas-migration.log
+      - name: Configure all SQLAlchemy mappers and route contracts
+        id: mapper
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee saas-mappers.log
           from sqlalchemy.orm import configure_mappers
           from amodb.main import app
 
@@ -103,11 +112,41 @@ jobs:
           print("SaaS route contract verified")
           PY
       - name: Run SaaS unit tests
-        run: pytest -q amodb/apps/platform/tests/test_saas_control_plane.py
-      - name: Run empty-queue worker smoke tests
+        id: backend_tests
+        continue-on-error: true
+        shell: bash
         run: |
-          python -m amodb.jobs.saas_worker --once --batch-size 5
-          python -m amodb.jobs.platform_command_worker --once --batch-size 5
+          set -o pipefail
+          pytest -q amodb/apps/platform/tests/test_saas_control_plane.py 2>&1 | tee saas-backend-tests.log
+      - name: Run empty-queue worker smoke tests
+        id: workers
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            python -m amodb.jobs.saas_worker --once --batch-size 5
+            python -m amodb.jobs.platform_command_worker --once --batch-size 5
+          } 2>&1 | tee saas-workers.log
+      - name: Upload backend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: saas-backend-diagnostics
+          path: |
+            backend/saas-migration.log
+            backend/saas-mappers.log
+            backend/saas-backend-tests.log
+            backend/saas-workers.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail backend gate
+        if: >-
+          steps.migrate.outcome != 'success' ||
+          steps.mapper.outcome != 'success' ||
+          steps.backend_tests.outcome != 'success' ||
+          steps.workers.outcome != 'success'
+        run: exit 1
 
   frontend:
     runs-on: ubuntu-latest
@@ -124,22 +163,61 @@ jobs:
         working-directory: frontend
         run: npm ci
       - name: Run platform service regressions
+        id: frontend_tests
+        continue-on-error: true
         working-directory: frontend
-        run: npm run test:platform
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:platform 2>&1 | tee platform-tests.log
       - name: Typecheck and production build
+        id: frontend_build
+        continue-on-error: true
         working-directory: frontend
-        run: npm run build
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee platform-build.log
       - name: Lint changed platform surfaces
+        id: frontend_lint
+        continue-on-error: true
         working-directory: frontend
-        run: >-
-          npm exec -- eslint
-          src/services/platformControl.ts
-          src/services/platformControl.test.ts
-          src/pages/platform/PlatformIntegrationsPage.tsx
-          src/pages/platform/PlatformBillingPage.tsx
-          src/pages/platform/PlatformTenantsPage.tsx
+        shell: bash
+        run: |
+          set -o pipefail
+          npm exec -- eslint \
+            src/services/platformControl.ts \
+            src/services/platformControl.test.ts \
+            src/pages/platform/PlatformIntegrationsPage.tsx \
+            src/pages/platform/PlatformBillingPage.tsx \
+            src/pages/platform/PlatformTenantsPage.tsx \
+            2>&1 | tee platform-lint.log
       - name: Validate k6 script syntax
-        run: node --check loadtests/k6_saas_control_plane.js
+        id: k6_syntax
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          node --check loadtests/k6_saas_control_plane.js 2>&1 | tee frontend/platform-k6.log
+      - name: Upload frontend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: saas-frontend-diagnostics
+          path: |
+            frontend/platform-tests.log
+            frontend/platform-build.log
+            frontend/platform-lint.log
+            frontend/platform-k6.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail frontend gate
+        if: >-
+          steps.frontend_tests.outcome != 'success' ||
+          steps.frontend_build.outcome != 'success' ||
+          steps.frontend_lint.outcome != 'success' ||
+          steps.k6_syntax.outcome != 'success'
+        run: exit 1
 
   deployment-config:
     runs-on: ubuntu-latest
