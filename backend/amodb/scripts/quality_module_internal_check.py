@@ -10,16 +10,15 @@ ROOT = BACKEND_ROOT.parent
 FRONTEND_ROOT = ROOT / "frontend"
 
 REQUIRED_CHECKS = {
-    "backend_schema_workspace_models": (
+    "backend_schema_workflow_models": (
         BACKEND_ROOT / "amodb/apps/quality/schemas.py",
         [
-            "class QMSAuditWorkspaceSummaryOut",
-            "class QMSAuditWorkspaceReadinessOut",
-            "class QMSAuditWorkspaceActionOut",
-            "class QMSAuditNoticeStateOut",
+            "class QMSAuditWorkflowStageOut",
+            "class QMSAuditWorkflowSummaryOut",
             "class QMSAuditWorkspaceOut",
-            "class QMSAuditWorkflowCheckOut",
             "class QMSAuditNoticeDispatchOut",
+            "dispatched: bool",
+            "message: str",
         ],
     ),
     "backend_router_workspace_endpoints": (
@@ -27,6 +26,7 @@ REQUIRED_CHECKS = {
         [
             '@router.get("/audits/{audit_id}/workspace"',
             '@router.get("/audits/{audit_id}/workflow-check"',
+            "return QMSAuditWorkspaceOut(audit=_serialize_audit(audit, db), workflow=workflow)",
             '@router.post("/audits/{audit_id}/issue-notice"',
             '@router.get("/audits/{audit_id}/report"',
             '@router.post("/audits/{audit_id}/report/share"',
@@ -43,6 +43,15 @@ REQUIRED_CHECKS = {
             "def _get_car_for_amo(",
             "def _get_audit_for_amo(",
             "def _get_finding_for_amo(",
+        ],
+    ),
+    "backend_quality_route_deduplication": (
+        BACKEND_ROOT / "amodb/apps/quality/__init__.py",
+        [
+            "def _deduplicate_exact_routes(",
+            "signature = (path, methods, endpoint_marker)",
+            "_deduplicate_exact_routes(router)",
+            "_deduplicate_exact_routes(public_router)",
         ],
     ),
     "backend_service_dashboard_scoped": (
@@ -100,7 +109,16 @@ REQUIRED_CHECKS = {
         [
             "test_quality_delivery_profile_exposes_required_route_families",
             "test_quality_delivery_profile_omits_unrelated_operational_routes",
+            "test_quality_direct_router_has_no_exact_duplicate_registrations",
             "test_quality_delivery_manifest_is_explicit",
+        ],
+    ),
+    "backend_quality_container_profile": (
+        ROOT / "backend/Dockerfile",
+        [
+            "ASGI_APP=amodb.main:app",
+            'exec uvicorn \\"${ASGI_APP}\\"',
+            '${PORT:-8080}',
         ],
     ),
     "frontend_quality_root_redirect": (
@@ -118,14 +136,16 @@ REQUIRED_CHECKS = {
             "navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/qms`)",
         ],
     ),
-    "frontend_qms_service_orchestration": (
+    "frontend_active_audit_workflow_contract": (
         FRONTEND_ROOT / "src/services/qms.ts",
         [
-            "export interface QMSAuditWorkspaceOut {",
-            "export interface QMSAuditWorkflowCheckOut {",
-            "export interface QMSAuditNoticeDispatchOut {",
-            "export async function qmsGetAuditWorkspace(auditId: string)",
-            "export async function qmsGetAuditWorkflowCheck(auditId: string)",
+            "export interface QMSAuditWorkflowStageOut {",
+            "export interface QMSAuditWorkflowSummaryOut {",
+            "export interface QMSAuditWorkflowOut {",
+            "audit: QMSAuditOut;",
+            "workflow: QMSAuditWorkflowSummaryOut;",
+            "export async function qmsGetAuditWorkflow(auditId: string",
+            "Promise<QMSAuditWorkflowOut>",
             "export async function qmsIssueAuditNotice(",
         ],
     ),
@@ -152,6 +172,8 @@ REQUIRED_CHECKS = {
         FRONTEND_ROOT / "src/pages/QualityAuditRunHubPage.tsx",
         [
             'from "../services/qmsAuditHubActions";',
+            "qmsGetAuditWorkflow",
+            "qmsIssueAuditNotice",
             "qmsAddCarAction",
             "qmsListCarActions",
             "qmsShareAuditReport",
@@ -196,6 +218,7 @@ FORBIDDEN_CHECKS = {
 
 COMPILE_TARGETS = [
     BACKEND_ROOT / "amodb/quality_main.py",
+    BACKEND_ROOT / "amodb/apps/quality/__init__.py",
     BACKEND_ROOT / "amodb/apps/quality/router.py",
     BACKEND_ROOT / "amodb/apps/quality/service.py",
     BACKEND_ROOT / "amodb/apps/quality/schemas.py",
