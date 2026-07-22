@@ -41,7 +41,6 @@ import "./styles/theme-module-repairs.css";
 
 const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const ACTIVE_AMO_STORAGE_KEYS = new Set(["amodb_active_amo_id", "amodb_admin_active_amo_id"]);
-const ACTIVE_AMO_STORAGE_GUARD = Symbol.for("amo.portal.active-amo-storage-guard");
 const SENSITIVE_QUERY_MARKERS = [
   "auth",
   "password",
@@ -57,6 +56,10 @@ const SENSITIVE_QUERY_MARKERS = [
   "download",
   "export",
 ];
+
+type GuardedWindow = Window & {
+  __amoPortalActiveAmoStorageGuardInstalled?: boolean;
+};
 
 function shouldPersistQuery(query: { queryKey: readonly unknown[]; state: { status: string } }): boolean {
   if (query.state.status !== "success") return false;
@@ -131,8 +134,8 @@ function clearIfTenantScopeChanged(): boolean {
 
 function installActiveAmoStorageGuard(): void {
   if (typeof window === "undefined" || typeof Storage === "undefined") return;
-  const guardedPrototype = Storage.prototype as Storage & { [ACTIVE_AMO_STORAGE_GUARD]?: boolean };
-  if (guardedPrototype[ACTIVE_AMO_STORAGE_GUARD]) return;
+  const guardedWindow = window as GuardedWindow;
+  if (guardedWindow.__amoPortalActiveAmoStorageGuardInstalled) return;
 
   const originalSetItem = Storage.prototype.setItem;
   const originalRemoveItem = Storage.prototype.removeItem;
@@ -159,11 +162,7 @@ function installActiveAmoStorageGuard(): void {
     if (hadActiveAmo) clearIfTenantScopeChanged();
   };
 
-  Object.defineProperty(guardedPrototype, ACTIVE_AMO_STORAGE_GUARD, {
-    configurable: false,
-    enumerable: false,
-    value: true,
-  });
+  guardedWindow.__amoPortalActiveAmoStorageGuardInstalled = true;
 }
 
 const queryPersister = createPortalQueryPersister((_previousScope, nextScope) => {
