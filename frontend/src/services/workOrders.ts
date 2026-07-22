@@ -1,6 +1,7 @@
 // src/services/workOrders.ts
 // Work order + task API helpers.
 
+import { authHeaders } from "./auth";
 import { apiGet, apiPost, apiPut } from "./crs";
 
 type QueryVal = string | number | boolean | null | undefined;
@@ -146,37 +147,52 @@ export async function listWorkOrders(params?: {
   skip?: number;
   limit?: number;
 }): Promise<WorkOrderRead[]> {
-  return apiGet<WorkOrderRead[]>(`/work-orders/${toQuery(params ?? {})}`);
+  return apiGet<WorkOrderRead[]>(`/work-orders/${toQuery(params ?? {})}`, {
+    headers: authHeaders(),
+  });
 }
 
 export async function createWorkOrder(payload: WorkOrderCreatePayload): Promise<WorkOrderRead> {
   // Creation stays server-controlled unless the API supplies a durable idempotency key.
-  return apiPost<WorkOrderRead>("/work-orders/", payload);
+  return apiPost<WorkOrderRead>("/work-orders/", payload, {
+    headers: authHeaders(),
+  });
 }
 
 export async function getWorkOrder(id: number): Promise<WorkOrderRead> {
-  return apiGet<WorkOrderRead>(`/work-orders/${id}`);
+  return apiGet<WorkOrderRead>(`/work-orders/${id}`, {
+    headers: authHeaders(),
+  });
 }
 
 export async function getWorkOrderByNumber(woNumber: string): Promise<WorkOrderRead> {
-  return apiGet<WorkOrderRead>(`/work-orders/by-number/${encodeURIComponent(woNumber)}`);
+  return apiGet<WorkOrderRead>(`/work-orders/by-number/${encodeURIComponent(woNumber)}`, {
+    headers: authHeaders(),
+  });
 }
 
 export async function listTasksForWorkOrder(workOrderId: number): Promise<TaskCardRead[]> {
-  return apiGet<TaskCardRead[]>(`/work-orders/${workOrderId}/tasks`);
+  return apiGet<TaskCardRead[]>(`/work-orders/${workOrderId}/tasks`, {
+    headers: authHeaders(),
+  });
 }
 
 export async function createTask(workOrderId: number, payload: TaskCreatePayload): Promise<TaskCardRead> {
   // Creation stays live-only to avoid duplicate maintenance instructions.
-  return apiPost<TaskCardRead>(`/work-orders/${workOrderId}/tasks`, payload);
+  return apiPost<TaskCardRead>(`/work-orders/${workOrderId}/tasks`, payload, {
+    headers: authHeaders(),
+  });
 }
 
 export async function getTask(taskId: number): Promise<TaskCardRead> {
-  return apiGet<TaskCardRead>(`/work-orders/tasks/${taskId}`);
+  return apiGet<TaskCardRead>(`/work-orders/tasks/${taskId}`, {
+    headers: authHeaders(),
+  });
 }
 
 export async function updateTask(taskId: number, payload: TaskUpdatePayload): Promise<TaskCardRead> {
   return apiPut<TaskCardRead>(`/work-orders/tasks/${taskId}`, payload, {
+    headers: authHeaders(),
     offline: {
       queueMutation: true,
       entityType: "work-order-task",
@@ -187,6 +203,7 @@ export async function updateTask(taskId: number, payload: TaskUpdatePayload): Pr
 
 export async function updateWorkOrder(id: number, payload: WorkOrderUpdatePayload): Promise<WorkOrderRead> {
   return apiPut<WorkOrderRead>(`/work-orders/${id}`, payload, {
+    headers: authHeaders(),
     offline: {
       queueMutation: true,
       entityType: "work-order",
@@ -200,12 +217,16 @@ export async function inspectTask(
   payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null },
 ): Promise<unknown> {
   // Inspection/signature actions must be confirmed by the live server.
-  return apiPost<unknown>(`/work-orders/tasks/${taskId}/inspect`, payload);
+  return apiPost<unknown>(`/work-orders/tasks/${taskId}/inspect`, payload, {
+    headers: authHeaders(),
+  });
 }
 
 export async function inspectWorkOrder(
   workOrderId: number,
   payload: { notes?: string | null; signed_flag: boolean; signature_hash?: string | null },
 ): Promise<unknown> {
-  return apiPost<unknown>(`/work-orders/${workOrderId}/inspect`, payload);
+  return apiPost<unknown>(`/work-orders/${workOrderId}/inspect`, payload, {
+    headers: authHeaders(),
+  });
 }
