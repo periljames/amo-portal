@@ -50,6 +50,7 @@ async function openDatabase(): Promise<IDBDatabase | null> {
       console.warn("[query-cache] IndexedDB unavailable; using memory fallback", request.error);
       resolve(null);
     };
+    request.onblocked = () => console.warn("[query-cache] IndexedDB upgrade blocked by another portal tab");
   });
   return databasePromise;
 }
@@ -61,18 +62,20 @@ export function createPortalQueryPersister(): Persister {
       const database = await openDatabase();
       if (!database) return;
       const transaction = database.transaction(STORE_NAME, "readwrite");
+      const done = transactionDone(transaction);
       transaction.objectStore(STORE_NAME).put(client, storageKey());
-      await transactionDone(transaction);
+      await done;
     },
 
     async restoreClient(): Promise<PersistedClient | undefined> {
       const database = await openDatabase();
       if (!database) return memoryClient;
       const transaction = database.transaction(STORE_NAME, "readonly");
+      const done = transactionDone(transaction);
       const client = await requestResult<PersistedClient | undefined>(
         transaction.objectStore(STORE_NAME).get(storageKey()),
       );
-      await transactionDone(transaction);
+      await done;
       memoryClient = client;
       return client;
     },
@@ -82,8 +85,9 @@ export function createPortalQueryPersister(): Persister {
       const database = await openDatabase();
       if (!database) return;
       const transaction = database.transaction(STORE_NAME, "readwrite");
+      const done = transactionDone(transaction);
       transaction.objectStore(STORE_NAME).delete(storageKey());
-      await transactionDone(transaction);
+      await done;
     },
   } satisfies Persister;
 }
@@ -93,6 +97,7 @@ export async function clearAllPortalQueryCaches(): Promise<void> {
   const database = await openDatabase();
   if (!database) return;
   const transaction = database.transaction(STORE_NAME, "readwrite");
+  const done = transactionDone(transaction);
   transaction.objectStore(STORE_NAME).clear();
-  await transactionDone(transaction).catch(() => undefined);
+  await done.catch(() => undefined);
 }
