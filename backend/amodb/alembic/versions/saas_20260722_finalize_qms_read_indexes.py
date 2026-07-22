@@ -71,6 +71,10 @@ LEGACY_INDEXES = (
     "ix_quality_cars_amo_due_status_read",
     "ix_qms_findings_amo_closed_read",
     "ix_training_records_amo_valid_user_course_read",
+    "ix_qms_audit_schedules_amo_due_active",
+    "ix_qms_findings_amo_closed_target",
+    "ix_training_records_amo_valid_until_user_course",
+    "ix_training_event_participants_amo_event",
 )
 
 
@@ -100,6 +104,12 @@ INDEX_SPECS = (
         "CREATE INDEX ix_qms_audits_amo_created_id ON qms_audits (amo_id, created_at DESC, id)",
     ),
     (
+        "qms_audit_schedules",
+        ("amo_id", "next_due_date", "is_active", "id"),
+        "ix_qms_audit_schedules_amo_due_active_id",
+        "CREATE INDEX ix_qms_audit_schedules_amo_due_active_id ON qms_audit_schedules (amo_id, next_due_date, is_active, id) WHERE next_due_date IS NOT NULL",
+    ),
+    (
         "quality_cars",
         ("amo_id", "status", "id"),
         "ix_quality_cars_amo_status_id",
@@ -118,6 +128,12 @@ INDEX_SPECS = (
         "CREATE INDEX ix_qms_findings_amo_closed_id ON qms_audit_findings (amo_id, closed_at, id)",
     ),
     (
+        "qms_audit_findings",
+        ("amo_id", "target_close_date", "id"),
+        "ix_qms_findings_amo_target_close_id",
+        "CREATE INDEX ix_qms_findings_amo_target_close_id ON qms_audit_findings (amo_id, target_close_date, id) WHERE target_close_date IS NOT NULL",
+    ),
+    (
         "qms_documents",
         ("amo_id", "status", "id"),
         "ix_qms_documents_amo_status_id",
@@ -125,9 +141,9 @@ INDEX_SPECS = (
     ),
     (
         "training_records",
-        ("amo_id", "user_id", "course_id", "completion_date", "created_at", "id"),
+        ("amo_id", "user_id", "course_id", "valid_until", "completion_date", "created_at", "id"),
         "ix_training_records_amo_user_course_latest",
-        "CREATE INDEX ix_training_records_amo_user_course_latest ON training_records (amo_id, user_id, course_id, completion_date DESC, created_at DESC, id DESC)",
+        "CREATE INDEX ix_training_records_amo_user_course_latest ON training_records (amo_id, user_id, course_id, valid_until DESC NULLS LAST, completion_date DESC, created_at DESC, id DESC)",
     ),
     (
         "training_records",
@@ -146,6 +162,12 @@ INDEX_SPECS = (
         ("amo_id", "ends_on", "id", "title", "status", "starts_on", "course_id"),
         "ix_training_events_amo_ends_id",
         "CREATE INDEX ix_training_events_amo_ends_id ON training_events (amo_id, ends_on, id) INCLUDE (title, status, starts_on, course_id) WHERE ends_on IS NOT NULL",
+    ),
+    (
+        "training_event_participants",
+        ("amo_id", "event_id", "user_id", "id"),
+        "ix_training_event_participants_amo_event_user_id",
+        "CREATE INDEX ix_training_event_participants_amo_event_user_id ON training_event_participants (amo_id, event_id, user_id, id)",
     ),
     (
         "training_requirements",
