@@ -11,9 +11,10 @@ from amodb.apps.accounts import models as account_models
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user, get_current_user
 
-from . import gateway, presence_service, realtime_auth, schemas, secure_messaging as messaging, services
+from . import broker_router, gateway, presence_service, realtime_auth, schemas, secure_messaging as messaging, services
 
 router = APIRouter(prefix="/api", tags=["realtime"])
+router.include_router(broker_router.router)
 realtime_bearer = HTTPBearer(auto_error=False)
 
 
@@ -42,12 +43,16 @@ def issue_realtime_token(
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.RealtimeTokenResponse:
     result = services.issue_connect_token(db, user=current_user, request=request)
-    realtime_auth.prune_user_tokens(
-        db,
-        amo_id=result.amo_id,
-        user_id=str(current_user.id),
-        keep_latest=3,
+    token = (
+        db.query(__import__("amodb.apps.realtime.models", fromlist=["RealtimeConnectToken"]).RealtimeConnectToken)
+        .filter_by(amo_id=result.amo_id, user_id=str(current_user.id))
+        .order_by(__import__("amodb.apps.realtime.models", fromlist=["RealtimeConnectToken"]).RealtimeConnectToken.created_at.desc())
+        .first()
     )
+    if token is None:
+        raise HTTPException(status_code=500, detail="Realtime token persistence failed")
+    result.client_id = f"rt-{token.session_id}"
+    realtime_auth.prune_user_tokens(db, amo_id=result.amo_id, user_id=str(current_user.id), keep_latest=3)
     _flush_outbox()
     return result
 
@@ -142,12 +147,7 @@ def create_thread(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.ThreadRead:
-    result = messaging.create_group_thread(
-        db,
-        user=current_user,
-        title=payload.title,
-        member_user_ids=payload.member_user_ids,
-    )
+    result = messaging.create_group_thread(db, user=current_user, title=payload.title, member_user_ids=payload.member_user_ids)
     _flush_outbox()
     return result
 
@@ -169,13 +169,7 @@ def list_thread_messages(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> list[schemas.ChatMessageRead]:
-    return messaging.list_messages(
-        db,
-        user=current_user,
-        thread_id=thread_id,
-        limit=limit,
-        before=before,
-    )
+    return messaging.list_messages(db, user=current_user, thread_id=thread_id, limit=limit, before=before)
 
 
 @router.post("/chat/threads/{thread_id}/messages", response_model=schemas.ChatMessageRead, status_code=status.HTTP_201_CREATED)
@@ -256,13 +250,7 @@ def notification_list(
     db: Session = Depends(get_read_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ):
-    return messaging.list_notifications(
-        db,
-        user=current_user,
-        unread_only=unread_only,
-        limit=limit,
-        offset=offset,
-    )
+    return messaging.list_notifications(db, user=current_user, unread_only=unread_only, limit=limit, offset=offset)
 
 
 @router.get("/notifications/me/unread-count")
@@ -318,9 +306,4 @@ def prompt_action(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> dict[str, str]:
-    return services.perform_prompt_action(
-        db,
-        user=current_user,
-        prompt_id=prompt_id,
-        action=payload.action,
-    )
+    return services.perform_prompt_action(db, user=current_user, prompt_id=prompt_id, action=payload.action)
