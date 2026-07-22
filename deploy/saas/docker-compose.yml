@@ -1,0 +1,91 @@
+name: amo-portal-saas
+
+x-backend: &backend
+  build:
+    context: ../..
+    dockerfile: backend/Dockerfile
+  restart: unless-stopped
+  env_file:
+    - ../../.env
+  environment: &backend-environment
+    APP_ENV: production
+    SCHEMA_STRICT: "1"
+    DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    DATABASE_WRITE_URL: ${DATABASE_WRITE_URL:-${DATABASE_URL}}
+    DATABASE_READ_URL: ${DATABASE_READ_URL:-${DATABASE_URL}}
+    PLATFORM_SECRETS_KEY: ${PLATFORM_SECRETS_KEY:?PLATFORM_SECRETS_KEY is required}
+    DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+    DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+    DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-5}
+    API_USAGE_FLUSH_INTERVAL_SEC: ${API_USAGE_FLUSH_INTERVAL_SEC:-5}
+  networks:
+    - amo-saas
+  stop_grace_period: 20s
+
+services:
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: ["alembic", "-c", "amodb/alembic.ini", "upgrade", "heads"]
+
+  api:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - uvicorn
+      - amodb.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --workers
+      - ${API_WORKERS_PER_CONTAINER:-2}
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - ${FORWARDED_ALLOW_IPS:-*}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  saas-worker:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - python
+      - -m
+      - amodb.jobs.saas_worker
+      - --batch-size
+      - ${SAAS_WORKER_BATCH_SIZE:-20}
+    environment:
+      <<: *backend-environment
+      SAAS_JOB_LEASE_SECONDS: ${SAAS_JOB_LEASE_SECONDS:-90}
+      SAAS_WORKER_POLL_SECONDS: ${SAAS_WORKER_POLL_SECONDS:-1}
+
+  platform-command-worker:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - python
+      - -m
+      - amodb.jobs.platform_command_worker
+      - --batch-size
+      - ${PLATFORM_COMMAND_BATCH_SIZE:-10}
+    environment:
+      <<: *backend-environment
+      PLATFORM_COMMAND_LEASE_SECONDS: ${PLATFORM_COMMAND_LEASE_SECONDS:-120}
+      PLATFORM_COMMAND_POLL_SECONDS: ${PLATFORM_COMMAND_POLL_SECONDS:-1}
+
+networks:
+  amo-saas:
+    driver: bridge
