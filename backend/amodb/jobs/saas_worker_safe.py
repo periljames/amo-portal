@@ -8,7 +8,12 @@ import time
 from typing import Any
 
 from amodb.apps.accounts import models as account_models
-from amodb.apps.platform import saas_lease, saas_models as models, saas_queue
+from amodb.apps.platform import (
+    saas_lease,
+    saas_models as models,
+    saas_queue,
+    saas_side_effects,
+)
 from amodb.database import WriteSessionLocal, close_session_safely
 
 
@@ -17,8 +22,6 @@ def _worker_id() -> str:
 
 
 def _record_worker_heartbeat(db, worker_id: str) -> None:
-    # Import lazily so the existing handler module remains the single source for
-    # provider processing while this module owns execution safety.
     from amodb.jobs import saas_worker as handlers
 
     handlers._heartbeat(db, worker_id)
@@ -36,9 +39,17 @@ def _mark_webhook_failure(db, job: models.SaaSJob, exc: Exception) -> None:
         db.flush()
 
 
-def run_once(*, batch_size: int = 1, worker_id: str | None = None) -> dict[str, Any]:
+def _process_job(db, job: models.SaaSJob) -> dict[str, Any]:
+    if job.job_type == "ETIMS_FISCALIZE_INVOICE":
+        return saas_side_effects.process_etims_fiscalization(db, job=job)
+    if job.job_type == "AI_SUPPORT_REPLY":
+        return saas_side_effects.process_ai_support_reply(db, job=job)
     from amodb.jobs import saas_worker as handlers
 
+    return handlers.process_job(db, job)
+
+
+def run_once(*, batch_size: int = 1, worker_id: str | None = None) -> dict[str, Any]:
     worker_id = worker_id or _worker_id()
     lease_seconds = int(os.getenv("SAAS_JOB_LEASE_SECONDS", "120"))
     db = WriteSessionLocal()
@@ -61,23 +72,22 @@ def run_once(*, batch_size: int = 1, worker_id: str | None = None) -> dict[str, 
                     worker_id=worker_id,
                     lease_seconds=lease_seconds,
                 ) as heartbeat:
-                    result = handlers.process_job(db, job)
+                    result = _process_job(db, job)
                     heartbeat.raise_if_lost()
                 saas_queue.complete_job(db, job, result, worker_id=worker_id)
                 processed += 1
             except saas_queue.LeaseLostError:
-                # A different worker owns the job now. Never overwrite or retry it
-                # from this stale worker session.
                 db.rollback()
                 lease_lost += 1
             except Exception as exc:
                 try:
                     _mark_webhook_failure(db, job, exc)
+                    retryable = not isinstance(exc, saas_side_effects.NonRepeatableJobError)
                     saas_queue.fail_job(
                         db,
                         job,
                         exc,
-                        retryable=job.job_type != "AI_SUPPORT_REPLY",
+                        retryable=retryable,
                         worker_id=worker_id,
                     )
                 except saas_queue.LeaseLostError:
