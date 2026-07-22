@@ -12,7 +12,6 @@ import type {
 } from "../../services/messaging";
 
 const EVENT_NAME = "amo:realtime-envelope";
-
 type DirectoryTab = "users" | "departments" | "groups";
 
 function initials(value?: string | null): string {
@@ -53,6 +52,7 @@ export function MessagingHub() {
   const [showDirectory, setShowDirectory] = useState(false);
   const [directoryTab, setDirectoryTab] = useState<DirectoryTab>("users");
   const [draft, setDraft] = useState("");
+  const [mentionUserIds, setMentionUserIds] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const lastNotificationId = useRef<string | null>(null);
@@ -97,6 +97,14 @@ export function MessagingHub() {
     () => threads.find((thread) => thread.id === effectiveThreadId) || null,
     [effectiveThreadId, threads],
   );
+  const mentionCandidates = useMemo(
+    () => (selectedThread?.members || []).filter((member) => member.id !== user?.id),
+    [selectedThread, user?.id],
+  );
+  const visibleNotifications = useMemo(
+    () => (notificationsQuery.data?.items || []).filter((notification) => notification.kind !== "CHAT_MESSAGE"),
+    [notificationsQuery.data?.items],
+  );
 
   const messagesQuery = useQuery({
     queryKey: ["messaging", "messages", effectiveThreadId],
@@ -107,9 +115,7 @@ export function MessagingHub() {
   });
 
   useEffect(() => {
-    const onRealtime = () => {
-      void queryClient.invalidateQueries({ queryKey: ["messaging"] });
-    };
+    const onRealtime = () => void queryClient.invalidateQueries({ queryKey: ["messaging"] });
     window.addEventListener(EVENT_NAME, onRealtime);
     return () => window.removeEventListener(EVENT_NAME, onRealtime);
   }, [queryClient]);
@@ -140,6 +146,11 @@ export function MessagingHub() {
   }, [notificationsQuery.data, preferencesQuery.data]);
 
   const refreshMessaging = () => queryClient.invalidateQueries({ queryKey: ["messaging"] });
+  const selectThread = (threadId: string) => {
+    setSelectedThreadId(threadId);
+    setMentionUserIds([]);
+    setShowDirectory(false);
+  };
 
   const openTarget = useMutation({
     mutationFn: async (target: { kind: DirectoryTab; id: string }) => {
@@ -148,21 +159,23 @@ export function MessagingHub() {
       return messagingApi.openGroup(target.id);
     },
     onSuccess: (thread) => {
-      setSelectedThreadId(thread.id);
-      setShowDirectory(false);
+      selectThread(thread.id);
       setTab("chats");
       void refreshMessaging();
     },
   });
 
   const sendMessage = useMutation({
-    mutationFn: ({ threadId, body }: { threadId: string; body: string }) => messagingApi.send(
+    mutationFn: ({ threadId, body, mentions }: { threadId: string; body: string; mentions: string[] }) => messagingApi.send(
       threadId,
       body,
       `web-${Date.now()}-${crypto.randomUUID().slice(0, 12)}`,
+      null,
+      mentions,
     ),
     onSuccess: () => {
       setDraft("");
+      setMentionUserIds([]);
       void refreshMessaging();
     },
   });
@@ -172,34 +185,26 @@ export function MessagingHub() {
     onSuccess: (notification) => {
       const threadId = notification.entity_type === "chat_thread" ? notification.entity_id : null;
       if (threadId) {
-        setSelectedThreadId(threadId);
+        selectThread(threadId);
         setTab("chats");
       }
       void refreshMessaging();
     },
   });
-
-  const markAll = useMutation({
-    mutationFn: messagingApi.markAllNotificationsRead,
-    onSuccess: () => void refreshMessaging(),
-  });
-
+  const markAll = useMutation({ mutationFn: messagingApi.markAllNotificationsRead, onSuccess: () => void refreshMessaging() });
   const updatePreferences = useMutation({
     mutationFn: (payload: Partial<NotificationPreferences>) => messagingApi.updatePreferences(payload),
-    onSuccess: (value) => {
-      queryClient.setQueryData(["messaging", "preferences"], value);
-    },
+    onSuccess: (value) => queryClient.setQueryData(["messaging", "preferences"], value),
   });
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const body = draft.trim();
     if (!effectiveThreadId || !body || sendMessage.isPending) return;
-    sendMessage.mutate({ threadId: effectiveThreadId, body });
+    sendMessage.mutate({ threadId: effectiveThreadId, body, mentions: mentionUserIds });
   };
 
   if (!authenticated) return null;
-
   const unreadTotal = unreadQuery.data?.total || 0;
   const preferences = preferencesQuery.data;
 
@@ -208,10 +213,7 @@ export function MessagingHub() {
       {open ? (
         <section className="messaging-panel" aria-label="Messages and notifications">
           <header className="messaging-header">
-            <div>
-              <strong>Inbox</strong>
-              <span>{unreadTotal ? `${unreadTotal} unread` : "All caught up"}</span>
-            </div>
+            <div><strong>Inbox</strong><span>{unreadTotal ? `${unreadTotal} unread` : "All caught up"}</span></div>
             <div className="messaging-header-actions">
               <button type="button" className="messaging-icon-button" onClick={() => setShowSettings((value) => !value)} aria-label="Notification settings">⚙</button>
               <button type="button" className="messaging-icon-button" onClick={() => setOpen(false)} aria-label="Close inbox">×</button>
@@ -236,41 +238,17 @@ export function MessagingHub() {
           </nav>
 
           {tab === "notifications" ? (
-            <NotificationList
-              notifications={notificationsQuery.data?.items || []}
-              loading={notificationsQuery.isLoading}
-              onRead={(notification) => markNotification.mutate(notification.id)}
-              onReadAll={() => markAll.mutate()}
-            />
+            <NotificationList notifications={visibleNotifications} loading={notificationsQuery.isLoading} onRead={(notification) => markNotification.mutate(notification.id)} onReadAll={() => markAll.mutate()} />
           ) : (
             <div className="messaging-chat-layout">
               <aside className="messaging-thread-list">
-                <div className="messaging-thread-toolbar">
-                  <span>Conversations</span>
-                  <button type="button" onClick={() => setShowDirectory((value) => !value)}>New</button>
-                </div>
-                {showDirectory ? (
-                  <DirectoryPicker
-                    data={directoryQuery.data}
-                    loading={directoryQuery.isLoading}
-                    activeTab={directoryTab}
-                    onTab={setDirectoryTab}
-                    onSelect={(id) => openTarget.mutate({ kind: directoryTab, id })}
-                  />
-                ) : null}
+                <div className="messaging-thread-toolbar"><span>Conversations</span><button type="button" onClick={() => setShowDirectory((value) => !value)}>New</button></div>
+                {showDirectory ? <DirectoryPicker data={directoryQuery.data} loading={directoryQuery.isLoading} activeTab={directoryTab} onTab={setDirectoryTab} onSelect={(id) => openTarget.mutate({ kind: directoryTab, id })} /> : null}
                 <div className="messaging-thread-scroll">
                   {threads.map((thread) => (
-                    <button
-                      type="button"
-                      className={`messaging-thread ${thread.id === effectiveThreadId ? "is-selected" : ""}`}
-                      key={thread.id}
-                      onClick={() => { setSelectedThreadId(thread.id); setShowDirectory(false); }}
-                    >
+                    <button type="button" className={`messaging-thread ${thread.id === effectiveThreadId ? "is-selected" : ""}`} key={thread.id} onClick={() => selectThread(thread.id)}>
                       <span className="messaging-avatar">{initials(thread.title)}</span>
-                      <span className="messaging-thread-copy">
-                        <span><strong>{thread.title || "Conversation"}</strong><time>{relativeTime(thread.last_message_at || thread.updated_at)}</time></span>
-                        <span>{thread.last_message_preview || targetLabel(thread.kind)}</span>
-                      </span>
+                      <span className="messaging-thread-copy"><span><strong>{thread.title || "Conversation"}</strong><time>{relativeTime(thread.last_message_at || thread.updated_at)}</time></span><span>{thread.last_message_preview || targetLabel(thread.kind)}</span></span>
                       {thread.unread_count ? <b className="messaging-badge">{thread.unread_count}</b> : null}
                     </button>
                   ))}
@@ -283,27 +261,21 @@ export function MessagingHub() {
                   <>
                     <div className="messaging-conversation-title">
                       <div><strong>{selectedThread.title || "Conversation"}</strong><span>{targetLabel(selectedThread.kind)} · {selectedThread.members.length} member{selectedThread.members.length === 1 ? "" : "s"}</span></div>
-                      <select
-                        aria-label="Conversation notification level"
-                        value={selectedThread.notification_level}
-                        onChange={(event) => {
-                          void messagingApi.updateThreadNotifications(selectedThread.id, event.target.value as "ALL" | "MENTIONS" | "NONE").then(refreshMessaging);
-                        }}
-                      >
-                        <option value="ALL">All alerts</option>
-                        <option value="MENTIONS">Mentions</option>
-                        <option value="NONE">Muted</option>
+                      <select aria-label="Conversation notification level" value={selectedThread.notification_level} onChange={(event) => void messagingApi.updateThreadNotifications(selectedThread.id, event.target.value as "ALL" | "MENTIONS" | "NONE").then(refreshMessaging)}>
+                        <option value="ALL">All alerts</option><option value="MENTIONS">Mentions</option><option value="NONE">Muted</option>
                       </select>
                     </div>
                     <div className="messaging-message-list" ref={messageListRef}>
                       {(messagesQuery.data || []).map((message) => {
                         const own = message.sender_id === user?.id;
                         const sender = selectedThread.members.find((member) => member.id === message.sender_id);
+                        const mentions = Array.isArray(message.metadata.mention_user_ids) ? message.metadata.mention_user_ids.map(String) : [];
                         return (
                           <article className={`messaging-message ${own ? "is-own" : ""}`} key={message.id}>
                             {!own ? <span className="messaging-avatar is-small">{initials(sender?.full_name)}</span> : null}
                             <div>
                               {!own ? <small>{sender?.full_name || "User"}</small> : null}
+                              {mentions.includes(String(user?.id)) ? <small className="messaging-mentioned">Mentioned you</small> : null}
                               <p>{message.deleted_at ? "Message removed" : message.body_text}</p>
                               <time>{new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{message.edited_at ? " · edited" : ""}</time>
                             </div>
@@ -313,8 +285,25 @@ export function MessagingHub() {
                       {messagesQuery.isLoading ? <p className="messaging-empty">Loading conversation…</p> : null}
                     </div>
                     <form className="messaging-composer" onSubmit={submit}>
-                      <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write a message" rows={2} maxLength={8000} />
-                      <button type="submit" disabled={!draft.trim() || sendMessage.isPending}>{sendMessage.isPending ? "Sending" : "Send"}</button>
+                      {mentionCandidates.length ? (
+                        <div className="messaging-mentions">
+                          <select aria-label="Mention a conversation member" value="" onChange={(event) => {
+                            const id = event.target.value;
+                            if (id) setMentionUserIds((values) => values.includes(id) ? values : [...values, id]);
+                          }}>
+                            <option value="">@ Mention</option>
+                            {mentionCandidates.filter((member) => !mentionUserIds.includes(member.id)).map((member) => <option value={member.id} key={member.id}>{member.full_name}</option>)}
+                          </select>
+                          {mentionUserIds.map((id) => {
+                            const member = mentionCandidates.find((candidate) => candidate.id === id);
+                            return <button type="button" key={id} onClick={() => setMentionUserIds((values) => values.filter((value) => value !== id))}>@{member?.full_name || "User"} ×</button>;
+                          })}
+                        </div>
+                      ) : null}
+                      <div className="messaging-composer-row">
+                        <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write a message" rows={2} maxLength={8000} />
+                        <button type="submit" disabled={!draft.trim() || sendMessage.isPending}>{sendMessage.isPending ? "Sending" : "Send"}</button>
+                      </div>
                     </form>
                     {sendMessage.error ? <p className="messaging-error">{sendMessage.error.message}</p> : null}
                   </>
@@ -324,52 +313,21 @@ export function MessagingHub() {
           )}
         </section>
       ) : null}
-
-      <button type="button" className="messaging-launcher" onClick={() => setOpen(true)} aria-label={`Open inbox${unreadTotal ? `, ${unreadTotal} unread` : ""}`}>
-        <span aria-hidden="true">✉</span>
-        {unreadTotal ? <b>{unreadTotal > 99 ? "99+" : unreadTotal}</b> : null}
-      </button>
+      <button type="button" className="messaging-launcher" onClick={() => setOpen(true)} aria-label={`Open inbox${unreadTotal ? `, ${unreadTotal} unread` : ""}`}><span aria-hidden="true">✉</span>{unreadTotal ? <b>{unreadTotal > 99 ? "99+" : unreadTotal}</b> : null}</button>
     </div>
   );
 }
 
-function DirectoryPicker({
-  data,
-  loading,
-  activeTab,
-  onTab,
-  onSelect,
-}: {
-  data?: ChatDirectory;
-  loading: boolean;
-  activeTab: DirectoryTab;
-  onTab: (value: DirectoryTab) => void;
-  onSelect: (id: string) => void;
-}) {
+function DirectoryPicker({ data, loading, activeTab, onTab, onSelect }: { data?: ChatDirectory; loading: boolean; activeTab: DirectoryTab; onTab: (value: DirectoryTab) => void; onSelect: (id: string) => void }) {
   const entries = data?.[activeTab] || [];
   return (
     <div className="messaging-directory">
-      <div className="messaging-directory-tabs">
-        <button type="button" className={activeTab === "users" ? "is-active" : ""} onClick={() => onTab("users")}>People</button>
-        <button type="button" className={activeTab === "departments" ? "is-active" : ""} onClick={() => onTab("departments")}>Dept.</button>
-        <button type="button" className={activeTab === "groups" ? "is-active" : ""} onClick={() => onTab("groups")}>Groups</button>
-      </div>
+      <div className="messaging-directory-tabs"><button type="button" className={activeTab === "users" ? "is-active" : ""} onClick={() => onTab("users")}>People</button><button type="button" className={activeTab === "departments" ? "is-active" : ""} onClick={() => onTab("departments")}>Dept.</button><button type="button" className={activeTab === "groups" ? "is-active" : ""} onClick={() => onTab("groups")}>Groups</button></div>
       <div className="messaging-directory-list">
         {entries.map((entry) => {
-          const label = activeTab === "users"
-            ? (entry as ChatDirectory["users"][number]).full_name
-            : (entry as ChatDirectory["departments"][number] | ChatDirectory["groups"][number]).name;
-          const detail = activeTab === "users"
-            ? (entry as ChatDirectory["users"][number]).position_title
-            : activeTab === "departments"
-              ? (entry as ChatDirectory["departments"][number]).code
-              : (entry as ChatDirectory["groups"][number]).group_type;
-          return (
-            <button type="button" key={entry.id} onClick={() => onSelect(entry.id)}>
-              <span className="messaging-avatar is-small">{initials(label)}</span>
-              <span><strong>{label}</strong><small>{detail || ""}</small></span>
-            </button>
-          );
+          const label = activeTab === "users" ? (entry as ChatDirectory["users"][number]).full_name : (entry as ChatDirectory["departments"][number] | ChatDirectory["groups"][number]).name;
+          const detail = activeTab === "users" ? (entry as ChatDirectory["users"][number]).position_title : activeTab === "departments" ? (entry as ChatDirectory["departments"][number]).code : (entry as ChatDirectory["groups"][number]).group_type;
+          return <button type="button" key={entry.id} onClick={() => onSelect(entry.id)}><span className="messaging-avatar is-small">{initials(label)}</span><span><strong>{label}</strong><small>{detail || ""}</small></span></button>;
         })}
         {loading ? <p className="messaging-empty">Loading directory…</p> : null}
         {!loading && entries.length === 0 ? <p className="messaging-empty">Nothing available here.</p> : null}
@@ -378,25 +336,12 @@ function DirectoryPicker({
   );
 }
 
-function NotificationList({ notifications, loading, onRead, onReadAll }: {
-  notifications: PortalNotification[];
-  loading: boolean;
-  onRead: (notification: PortalNotification) => void;
-  onReadAll: () => void;
-}) {
+function NotificationList({ notifications, loading, onRead, onReadAll }: { notifications: PortalNotification[]; loading: boolean; onRead: (notification: PortalNotification) => void; onReadAll: () => void }) {
   return (
     <div className="messaging-notifications">
-      <div className="messaging-notification-toolbar">
-        <span>{notifications.length} recent</span>
-        <button type="button" onClick={onReadAll}>Mark all read</button>
-      </div>
+      <div className="messaging-notification-toolbar"><span>{notifications.length} recent</span><button type="button" onClick={onReadAll}>Mark all read</button></div>
       <div className="messaging-notification-scroll">
-        {notifications.map((notification) => (
-          <button type="button" className={notification.read_at ? "" : "is-unread"} key={notification.id} onClick={() => onRead(notification)}>
-            <span className="messaging-notification-dot" />
-            <span><strong>{notification.title}</strong><p>{notification.body}</p><time>{relativeTime(notification.created_at)}</time></span>
-          </button>
-        ))}
+        {notifications.map((notification) => <button type="button" className={notification.read_at ? "" : "is-unread"} key={notification.id} onClick={() => onRead(notification)}><span className="messaging-notification-dot" /><span><strong>{notification.title}</strong><p>{notification.body}</p><time>{relativeTime(notification.created_at)}</time></span></button>)}
         {loading ? <p className="messaging-empty">Loading notifications…</p> : null}
         {!loading && notifications.length === 0 ? <p className="messaging-empty is-centered">No notifications.</p> : null}
       </div>
