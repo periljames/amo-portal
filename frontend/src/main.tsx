@@ -12,6 +12,7 @@ import { onSessionEvent } from "./services/auth";
 import {
   clearAllPortalOfflineData,
   createPortalQueryPersister,
+  onOfflineSyncComplete,
   replayOfflineMutations,
 } from "./services/offlinePersistence";
 import "./styles/tokens.css";
@@ -191,6 +192,17 @@ if (typeof window !== "undefined") {
       void clearAllPortalOfflineData();
     }
   });
+
+  onOfflineSyncComplete((detail) => {
+    const rosterChanged = detail.entityTypes.includes("roster-assignment")
+      || detail.paths.some((path) => path.startsWith("/rostering/"));
+    if (rosterChanged) {
+      void queryClient.invalidateQueries({ queryKey: ["rostering"] });
+      return;
+    }
+    void queryClient.invalidateQueries();
+  });
+
   window.addEventListener("online", () => void replayOfflineMutations());
   window.addEventListener("load", () => {
     void configurePortalServiceWorker().catch((error) => console.warn("[offline] Service worker unavailable", error));
