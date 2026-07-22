@@ -3,6 +3,7 @@ name: Quality Module CI
 on:
   pull_request:
     paths:
+      - "backend/Dockerfile"
       - "backend/amodb/quality_main.py"
       - "backend/amodb/apps/quality/**"
       - "backend/amodb/apps/audit/**"
