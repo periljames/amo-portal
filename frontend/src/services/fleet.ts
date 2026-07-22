@@ -164,7 +164,6 @@ async function sendJson<T>(
   path: string,
   method: "POST" | "PUT",
   body: unknown,
-  options: { queueMutation?: boolean; entityType?: string; entityId?: string } = {},
 ): Promise<T> {
   const response = await portalFetch(path, {
     method,
@@ -172,9 +171,7 @@ async function sendJson<T>(
     body: JSON.stringify(body ?? {}),
     credentials: "include",
     offline: {
-      queueMutation: options.queueMutation === true,
-      entityType: options.entityType,
-      entityId: options.entityId,
+      queueMutation: false,
     },
   });
 
@@ -264,11 +261,9 @@ export async function updateAircraftDocument(
     status: AircraftDocumentStatus;
   }>,
 ): Promise<AircraftDocument> {
-  return sendJson<AircraftDocument>(`/aircraft/documents/${documentId}`, "PUT", body, {
-    queueMutation: true,
-    entityType: "aircraft-document",
-    entityId: String(documentId),
-  });
+  // Compliance records currently have no backend revision precondition.
+  // Keep edits live-only so delayed replay cannot revert newer regulatory data.
+  return sendJson<AircraftDocument>(`/aircraft/documents/${documentId}`, "PUT", body);
 }
 
 export async function uploadAircraftDocumentFile(
