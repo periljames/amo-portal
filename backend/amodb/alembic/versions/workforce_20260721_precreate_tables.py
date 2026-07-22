@@ -5,10 +5,10 @@ Revises: qual_20260705_merge_heads
 Create Date: 2026-07-22
 
 This predecessor isolates table creation from ORM-driven automatic index
-creation. PostgreSQL relation names are schema-global, so each index is created
-only after checking the whole current schema. A deterministic table-qualified
-fallback name is used when an unrelated relation already owns the requested
-name.
+creation. PostgreSQL relation names are schema-global, so indexes and the
+backing indexes of named unique constraints are created only after checking the
+whole current schema. A deterministic table-qualified fallback name is used
+when an unrelated relation already owns the requested name.
 """
 from __future__ import annotations
 
@@ -115,10 +115,22 @@ def _relation_owner(bind, relation_name: str) -> dict[str, Any] | None:
     return None
 
 
-def _fallback_index_name(desired_name: str, table_name: str, attempt: int) -> str:
+def _fallback_relation_name(desired_name: str, table_name: str, attempt: int) -> str:
     suffix = f"__{table_name}" if attempt == 1 else f"__{table_name}_{attempt}"
     available = max(1, POSTGRES_IDENTIFIER_LIMIT - len(suffix))
     return f"{desired_name[:available]}{suffix}"
+
+
+def _available_relation_name(bind, desired_name: str, table_name: str) -> str:
+    if _relation_owner(bind, desired_name) is None:
+        return desired_name
+
+    attempt = 1
+    while True:
+        fallback = _fallback_relation_name(desired_name, table_name, attempt)
+        if _relation_owner(bind, fallback) is None:
+            return fallback
+        attempt += 1
 
 
 def _available_index_name(bind, desired_name: str, table_name: str) -> str | None:
@@ -130,13 +142,31 @@ def _available_index_name(bind, desired_name: str, table_name: str) -> str | Non
 
     attempt = 1
     while True:
-        fallback = _fallback_index_name(desired_name, table_name, attempt)
+        fallback = _fallback_relation_name(desired_name, table_name, attempt)
         owner = _relation_owner(bind, fallback)
         if owner is None:
             return fallback
         if owner.get("table_name") == table_name and owner.get("kind") in {"i", "I", "index"}:
             return None
         attempt += 1
+
+
+def _create_table_with_safe_unique_names(bind, table: sa.Table) -> None:
+    renamed: list[tuple[sa.UniqueConstraint, str]] = []
+    for constraint in table.constraints:
+        if not isinstance(constraint, sa.UniqueConstraint) or not constraint.name:
+            continue
+        desired_name = str(constraint.name)
+        actual_name = _available_relation_name(bind, desired_name, table.name)
+        if actual_name != desired_name:
+            renamed.append((constraint, desired_name))
+            constraint.name = actual_name
+
+    try:
+        bind.execute(sa.schema.CreateTable(table))
+    finally:
+        for constraint, original_name in renamed:
+            constraint.name = original_name
 
 
 def _create_tables_without_indexes(bind, metadata: sa.MetaData) -> None:
@@ -146,7 +176,7 @@ def _create_tables_without_indexes(bind, metadata: sa.MetaData) -> None:
         if table is None:
             raise RuntimeError(f"Migration metadata table missing: {table_name}")
         if not inspector.has_table(table_name):
-            bind.execute(sa.schema.CreateTable(table))
+            _create_table_with_safe_unique_names(bind, table)
             inspector = inspect(bind)
 
 
