@@ -90,6 +90,10 @@ function periodsKey(from: string, to: string) {
   return ["rostering", "planner", "periods", from, to] as const;
 }
 
+function workspaceKey(versionId: string) {
+  return ["rostering", "planner", "version-workspace", versionId] as const;
+}
+
 function useDebouncedValue(value: string, delayMs: number): string {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -114,7 +118,6 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
   const week = useMemo(() => weekBounds(anchor), [anchor]);
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedVersionId, setSelectedVersionId] = useState("");
-  const [assignments, setAssignments] = useState<RosterAssignmentRead[]>([]);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [peopleSearch, setPeopleSearch] = useState("");
   const [peopleDepartmentId, setPeopleDepartmentId] = useState("");
@@ -202,7 +205,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
   }, [selectedPeriod, selectedVersionId]);
 
   const workspaceQuery = useQuery({
-    queryKey: ["rostering", "planner", "version-workspace", selectedVersionId],
+    queryKey: workspaceKey(selectedVersionId),
     queryFn: () => loadVersionWorkspace(selectedVersionId),
     enabled: Boolean(selectedVersionId),
     staleTime: WORKSPACE_STALE_MS,
@@ -210,13 +213,19 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     networkMode: "offlineFirst",
   });
 
-  useEffect(() => {
-    if (workspaceQuery.data?.assignments) {
-      setAssignments(workspaceQuery.data.assignments);
-    } else if (!selectedVersionId) {
-      setAssignments([]);
-    }
-  }, [selectedVersionId, workspaceQuery.data]);
+  // The persisted version workspace is the single source of assignment state.
+  // Offline optimistic creates/updates/deletes therefore survive reloads and are
+  // reconciled when replay invalidates the rostering query family.
+  const assignments = workspaceQuery.data?.assignments || [];
+  const setAssignments = useCallback<Dispatch<SetStateAction<RosterAssignmentRead[]>>>((update) => {
+    if (!selectedVersionId) return;
+    queryClient.setQueryData<VersionWorkspace>(workspaceKey(selectedVersionId), (current) => {
+      if (!current) return current;
+      const next = typeof update === "function" ? update(current.assignments) : update;
+      if (next === current.assignments) return current;
+      return { ...current, assignments: next };
+    });
+  }, [queryClient, selectedVersionId]);
 
   useEffect(() => {
     for (const direction of [-1, 1] as const) {
