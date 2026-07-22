@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any
 
@@ -29,6 +29,18 @@ class RealtimeKind(str, Enum):
     PRESENCE_TYPING = "presence.typing"
 
 
+def _wire_value(value: Any) -> Any:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _wire_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_wire_value(item) for item in value]
+    return value
+
+
 class RealtimeEnvelope(BaseModel):
     # MQTT/MessagePack clients serialize enum members as strings. Keep extra
     # fields forbidden, while allowing Pydantic to coerce those wire values.
@@ -44,10 +56,10 @@ class RealtimeEnvelope(BaseModel):
 
     @field_validator("payload")
     @classmethod
-    def _payload_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+    def _payload_size_and_wire_values(cls, value: dict[str, Any]) -> dict[str, Any]:
         if len(value) > 64:
             raise ValueError("payload has too many keys")
-        return value
+        return _wire_value(value)
 
 
 class RealtimeTokenResponse(BaseModel):
