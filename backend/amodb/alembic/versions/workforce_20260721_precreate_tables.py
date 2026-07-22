@@ -1,14 +1,15 @@
-"""precreate workforce-integrated rostering tables safely
+"""Precreate workforce-integrated rostering tables safely.
 
 Revision ID: workforce_20260721_precreate
 Revises: qual_20260705_merge_heads
 Create Date: 2026-07-22
 
 This predecessor isolates table creation from ORM-driven automatic index
-creation. PostgreSQL relation names are schema-global, so indexes and the
-backing indexes of named unique constraints are created only after checking the
-whole current schema. A deterministic table-qualified fallback name is used
-when an unrelated relation already owns the requested name.
+creation. PostgreSQL relation names are schema-global, so indexes and backing
+indexes of named unique constraints are created only after checking the whole
+current schema. Foreign keys whose referenced module table is not present on
+this Alembic branch are omitted during precreation and restored by the
+completion migration after all available dependencies have landed.
 """
 from __future__ import annotations
 
@@ -151,6 +152,23 @@ def _available_index_name(bind, desired_name: str, table_name: str) -> str | Non
         attempt += 1
 
 
+def _available_foreign_keys(bind, table: sa.Table) -> list[sa.ForeignKeyConstraint]:
+    """Return only FKs whose remote table can be resolved in the current schema.
+
+    Self-references are valid in the same CREATE TABLE statement. References to
+    later Workforce tables or other module heads are deferred to the completion
+    migration rather than making this precreate revision order-dependent.
+    """
+    inspector = inspect(bind)
+    available_tables = set(inspector.get_table_names())
+    included: list[sa.ForeignKeyConstraint] = []
+    for constraint in table.foreign_key_constraints:
+        remote_table = constraint.referred_table.name
+        if remote_table == table.name or remote_table in available_tables:
+            included.append(constraint)
+    return included
+
+
 def _create_table_with_safe_unique_names(bind, table: sa.Table) -> None:
     renamed: list[tuple[sa.UniqueConstraint, str]] = []
     for constraint in table.constraints:
@@ -163,7 +181,12 @@ def _create_table_with_safe_unique_names(bind, table: sa.Table) -> None:
             constraint.name = actual_name
 
     try:
-        bind.execute(sa.schema.CreateTable(table))
+        bind.execute(
+            sa.schema.CreateTable(
+                table,
+                include_foreign_key_constraints=_available_foreign_keys(bind, table),
+            )
+        )
     finally:
         for constraint, original_name in renamed:
             constraint.name = original_name
