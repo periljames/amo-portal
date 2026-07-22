@@ -39,6 +39,7 @@ REQUIRED_CHECKS = {
         BACKEND_ROOT / "amodb/apps/platform/saas_queue.py",
         [
             "with_for_update(skip_locked=True)",
+            "RETRYABLE_MANUAL_STATUSES",
             "def enqueue_job",
             "def claim_jobs",
             "def release_expired_leases",
@@ -72,6 +73,7 @@ REQUIRED_CHECKS = {
             '@platform_saas_router.post("/billing/invoices/{invoice_id}/fiscalize"',
             '@webhook_router.post("/stripe"',
             '@support_router.post("/tickets"',
+            "def _visible_support_payload",
         ],
     ),
     "saas_workers": (
@@ -125,6 +127,53 @@ REQUIRED_CHECKS = {
             '"saas_support_ticket_messages"',
         ],
     ),
+    "messaging_migration": (
+        BACKEND_ROOT / "amodb/alembic/versions/saas_20260722_messaging_hardening.py",
+        [
+            'revision = "saas_20260722_messaging"',
+            'down_revision = "saas_20260722_qms_read_idx"',
+            '"portal_notifications"',
+            '"notification_preferences"',
+            '"uq_chat_threads_amo_scope_key"',
+            '"ix_message_receipts_user_unread"',
+        ],
+    ),
+    "messaging_service": (
+        BACKEND_ROOT / "amodb/apps/realtime/messaging.py",
+        [
+            "def open_direct_thread",
+            "def open_department_thread",
+            "def open_user_group_thread",
+            "def create_group_thread",
+            "def send_message",
+            "def mark_thread_read",
+            "def list_notifications",
+            "def process_inbound_envelope",
+            'email_enabled',
+        ],
+    ),
+    "messaging_gateway": (
+        BACKEND_ROOT / "amodb/apps/realtime/gateway.py",
+        [
+            'client.subscribe("amo/+/user/+/outbox"',
+            "messaging.process_inbound_envelope",
+            "def flush_pending",
+            "RealtimeOutbox",
+        ],
+    ),
+    "messaging_routes": (
+        BACKEND_ROOT / "amodb/apps/realtime/router.py",
+        [
+            '@router.get("/chat/directory")',
+            '@router.post("/chat/direct/{peer_user_id}"',
+            '@router.post("/chat/departments/{department_id}"',
+            '@router.post("/chat/groups/{group_id}"',
+            '@router.post("/chat/threads/{thread_id}/messages"',
+            '@router.post("/chat/threads/{thread_id}/read")',
+            '@router.get("/notifications/me")',
+            '@router.put("/notifications/preferences")',
+        ],
+    ),
     "frontend_service": (
         FRONTEND_ROOT / "src/services/platformControl.ts",
         [
@@ -138,6 +187,30 @@ REQUIRED_CHECKS = {
             "fiscalizeInvoice:",
             "requestAiSupportReply:",
             "globalThis.setTimeout",
+        ],
+    ),
+    "frontend_messaging": (
+        FRONTEND_ROOT / "src/services/messaging.ts",
+        [
+            "export type ChatThreadKind",
+            "openDirect:",
+            "openDepartment:",
+            "openGroup:",
+            "markThreadRead:",
+            "unreadCount:",
+            "updatePreferences:",
+            "globalThis.setTimeout",
+        ],
+    ),
+    "frontend_messaging_hub": (
+        FRONTEND_ROOT / "src/components/messaging/MessagingHub.tsx",
+        [
+            "People",
+            "Dept.",
+            "Groups",
+            "All alerts",
+            "Email summaries",
+            "messagingApi.markThreadRead",
         ],
     ),
     "frontend_controls": (
@@ -204,6 +277,8 @@ COMPILE_TARGETS = [
 ] + [
     BACKEND_ROOT / "amodb/jobs/platform_command_worker.py",
     BACKEND_ROOT / "amodb/apps/platform/tests/test_saas_control_plane.py",
+    BACKEND_ROOT / "amodb/apps/realtime/tests/test_messaging_hardening.py",
+    BACKEND_ROOT / "amodb/apps/realtime/tests/test_realtime_services.py",
     Path(__file__),
 ]
 
@@ -254,7 +329,8 @@ def main() -> int:
     package_json = FRONTEND_ROOT / "package.json"
     package = json.loads(package_json.read_text(encoding="utf-8"))
     script = package.get("scripts", {}).get("test:platform")
-    script_ok = script == "vitest run src/services/platformControl.test.ts"
+    expected_script = "vitest run src/services/platformControl.test.ts src/services/messaging.test.ts"
+    script_ok = script == expected_script
     passed = passed and script_ok
     results["frontend_test_script"] = {"passed": script_ok, "command": script}
 
