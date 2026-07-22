@@ -75,6 +75,34 @@ describe("messaging API", () => {
     });
   });
 
+  it("deduplicates and sends validated mention identifiers", async () => {
+    const response = {
+      id: "message-2",
+      thread_id: "thread-mentions",
+      sender_id: "me",
+      body_text: "Please review",
+      body_mime: "text/plain",
+      message_type: "TEXT",
+      metadata: { mention_user_ids: ["user-1", "user-2"] },
+      client_msg_id: "client-mentions",
+      created_at: "2026-07-22T00:00:00Z",
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(response, 201));
+
+    await messagingApi.send(
+      "thread-mentions",
+      "Please review",
+      "client-mentions",
+      null,
+      ["user-1", "user-1", "user-2"],
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      metadata: { mention_user_ids: ["user-1", "user-2"] },
+    });
+  });
+
   it("keeps routine email notifications opt-in", async () => {
     const preferences = {
       in_app_enabled: true,
