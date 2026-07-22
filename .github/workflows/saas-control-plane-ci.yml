@@ -3,6 +3,7 @@ name: SaaS Control Plane CI
 on:
   pull_request:
     paths:
+      - "backend/conftest.py"
       - "backend/amodb/apps/platform/**"
       - "backend/amodb/apps/accounts/**"
       - "backend/amodb/apps/realtime/**"
@@ -93,13 +94,11 @@ jobs:
           assert training_finalizer is not None
           assert training_finalizer.down_revision == "saas_20260722_finalize_idx"
           assert read_index_finalizer is not None
-          assert read_index_finalizer.down_revision == "saas_20260722_finalize_training"
-          expected_dependencies = {
+          assert set(read_index_finalizer.down_revision) == {
+              "saas_20260722_finalize_training",
               "phase2_8_20260605",
-              "phase2_10_20260605",
-              "phase2_14_20260615",
           }
-          assert set(read_index_finalizer.dependencies or ()) == expected_dependencies
+          assert not read_index_finalizer.dependencies
           assert messaging_finalizer is not None
           assert messaging_finalizer.down_revision == "saas_20260722_qms_read_idx"
           heads = script.get_heads()
