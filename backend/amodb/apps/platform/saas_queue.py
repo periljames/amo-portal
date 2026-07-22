@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -9,10 +10,13 @@ from sqlalchemy.orm import Session
 
 from . import saas_models as models
 
-
 TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "DEAD", "CANCELLED"}
 RETRYABLE_MANUAL_STATUSES = {"FAILED", "DEAD", "CANCELLED", "RETRY"}
 CLAIMABLE_STATUSES = {"PENDING", "RETRY"}
+
+
+class LeaseLostError(RuntimeError):
+    pass
 
 
 def utcnow() -> datetime:
@@ -30,14 +34,18 @@ def add_event(
     message: str | None = None,
     data: dict[str, Any] | None = None,
 ) -> None:
-    db.add(
-        models.SaaSJobEvent(
-            job_id=job.id,
-            status=status,
-            message=message,
-            data_json=data or {},
-        )
-    )
+    db.add(models.SaaSJobEvent(job_id=job.id, status=status, message=message, data_json=data or {}))
+
+
+def _add_event_by_id(
+    db: Session,
+    *,
+    job_id: str,
+    status: str,
+    message: str | None = None,
+    data: dict[str, Any] | None = None,
+) -> None:
+    db.add(models.SaaSJobEvent(job_id=job_id, status=status, message=message, data_json=data or {}))
 
 
 def enqueue_job(
@@ -62,15 +70,11 @@ def enqueue_job(
     if not normalized_key:
         raise ValueError("idempotency_key is required")
 
-    existing = (
-        db.query(models.SaaSJob)
-        .filter(
-            models.SaaSJob.job_type == normalized_type,
-            models.SaaSJob.tenant_scope == _scope(tenant_id),
-            models.SaaSJob.idempotency_key == normalized_key,
-        )
-        .first()
-    )
+    existing = db.query(models.SaaSJob).filter(
+        models.SaaSJob.job_type == normalized_type,
+        models.SaaSJob.tenant_scope == _scope(tenant_id),
+        models.SaaSJob.idempotency_key == normalized_key,
+    ).first()
     if existing:
         return existing
 
@@ -93,15 +97,11 @@ def enqueue_job(
         db.flush()
     except IntegrityError:
         db.rollback()
-        existing = (
-            db.query(models.SaaSJob)
-            .filter(
-                models.SaaSJob.job_type == normalized_type,
-                models.SaaSJob.tenant_scope == _scope(tenant_id),
-                models.SaaSJob.idempotency_key == normalized_key,
-            )
-            .first()
-        )
+        existing = db.query(models.SaaSJob).filter(
+            models.SaaSJob.job_type == normalized_type,
+            models.SaaSJob.tenant_scope == _scope(tenant_id),
+            models.SaaSJob.idempotency_key == normalized_key,
+        ).first()
         if existing:
             return existing
         raise
@@ -123,16 +123,17 @@ def release_expired_leases(db: Session, *, now: datetime | None = None) -> int:
         query = query.with_for_update(skip_locked=True)
     rows = query.all()
     for job in rows:
-        if job.attempt_count >= job.max_attempts:
+        job.locked_at = None
+        job.locked_by = None
+        job.lease_token = None
+        job.lease_expires_at = None
+        if int(job.attempt_count or 0) >= int(job.max_attempts or 1):
             job.status = "DEAD"
             job.finished_at = now
             add_event(db, job, "DEAD", "Worker lease expired and retry allowance was exhausted.")
         else:
             job.status = "RETRY"
             job.available_at = now + _retry_delay(job.attempt_count)
-            job.locked_at = None
-            job.locked_by = None
-            job.lease_expires_at = None
             add_event(db, job, "RETRY", "Expired worker lease released for retry.")
     if rows:
         db.flush()
@@ -151,30 +152,25 @@ def claim_jobs(
     """Atomically lease one side-effect job per worker.
 
     Workers scale horizontally. Claiming a serial batch caused later jobs to
-    expire before execution, which could duplicate external billing, eTIMS or
-    AI side effects. ``batch_size`` remains accepted for API compatibility but
-    the safe claim width is deliberately one.
+    expire before execution, which could duplicate external side effects.
+    ``batch_size`` remains accepted for compatibility; safe claim width is one.
     """
 
     now = now or utcnow()
     release_expired_leases(db, now=now)
-    normalized_queues = [name.strip().lower() for name in queue_names if name and name.strip()]
-    if not normalized_queues:
-        normalized_queues = ["default"]
+    normalized_queues = [name.strip().lower() for name in queue_names if name and name.strip()] or ["default"]
     requested_batch_size = max(1, min(int(batch_size), 100))
     safe_lease_seconds = max(30, min(int(lease_seconds), 3600))
-
-    query = (
-        db.query(models.SaaSJob)
-        .filter(
-            models.SaaSJob.queue_name.in_(normalized_queues),
-            models.SaaSJob.status.in_(CLAIMABLE_STATUSES),
-            models.SaaSJob.available_at <= now,
-            or_(models.SaaSJob.lease_expires_at.is_(None), models.SaaSJob.lease_expires_at <= now),
-        )
-        .order_by(models.SaaSJob.priority.asc(), models.SaaSJob.available_at.asc(), models.SaaSJob.created_at.asc())
-        .limit(1)
-    )
+    query = db.query(models.SaaSJob).filter(
+        models.SaaSJob.queue_name.in_(normalized_queues),
+        models.SaaSJob.status.in_(CLAIMABLE_STATUSES),
+        models.SaaSJob.available_at <= now,
+        or_(models.SaaSJob.lease_expires_at.is_(None), models.SaaSJob.lease_expires_at <= now),
+    ).order_by(
+        models.SaaSJob.priority.asc(),
+        models.SaaSJob.available_at.asc(),
+        models.SaaSJob.created_at.asc(),
+    ).limit(1)
     if db.bind is not None and db.bind.dialect.name == "postgresql":
         query = query.with_for_update(skip_locked=True)
     else:
@@ -186,6 +182,7 @@ def claim_jobs(
         job.status = "RUNNING"
         job.locked_at = now
         job.locked_by = worker_id[:128]
+        job.lease_token = secrets.token_urlsafe(32)[:64]
         job.lease_expires_at = lease_until
         job.attempt_count = int(job.attempt_count or 0) + 1
         add_event(
@@ -201,6 +198,19 @@ def claim_jobs(
     return jobs
 
 
+def _lease_filter(db: Session, job: models.SaaSJob, worker_id: str | None = None):
+    expected_worker = (worker_id or job.locked_by or "")[:128]
+    expected_token = str(job.lease_token or "")
+    if not expected_worker or not expected_token:
+        raise LeaseLostError("Job has no active lease fence")
+    return db.query(models.SaaSJob).filter(
+        models.SaaSJob.id == job.id,
+        models.SaaSJob.status == "RUNNING",
+        models.SaaSJob.locked_by == expected_worker,
+        models.SaaSJob.lease_token == expected_token,
+    )
+
+
 def heartbeat_job(
     db: Session,
     job: models.SaaSJob,
@@ -208,29 +218,50 @@ def heartbeat_job(
     worker_id: str,
     lease_seconds: int = 60,
 ) -> None:
-    if job.status != "RUNNING" or job.locked_by != worker_id:
-        raise ValueError("Job is not leased by this worker")
-    job.lease_expires_at = utcnow() + timedelta(seconds=max(30, min(int(lease_seconds), 3600)))
+    next_expiry = utcnow() + timedelta(seconds=max(30, min(int(lease_seconds), 3600)))
+    updated = _lease_filter(db, job, worker_id).update(
+        {models.SaaSJob.lease_expires_at: next_expiry},
+        synchronize_session=False,
+    )
+    if updated != 1:
+        db.rollback()
+        raise LeaseLostError("Job lease was lost before heartbeat")
     db.commit()
+    job.lease_expires_at = next_expiry
 
 
-def complete_job(db: Session, job: models.SaaSJob, result: dict[str, Any] | None = None) -> None:
-    if job.status != "RUNNING" or not job.locked_by:
-        raise ValueError("Only an actively leased job can be completed")
-    job.status = "SUCCEEDED"
-    job.result_json = result or {}
-    job.last_error = None
-    job.finished_at = utcnow()
-    job.locked_at = None
-    job.locked_by = None
-    job.lease_expires_at = None
-    add_event(db, job, "SUCCEEDED", "Job completed.", result)
+def complete_job(
+    db: Session,
+    job: models.SaaSJob,
+    result: dict[str, Any] | None = None,
+    *,
+    worker_id: str | None = None,
+) -> None:
+    now = utcnow()
+    updated = _lease_filter(db, job, worker_id).update(
+        {
+            models.SaaSJob.status: "SUCCEEDED",
+            models.SaaSJob.result_json: result or {},
+            models.SaaSJob.last_error: None,
+            models.SaaSJob.finished_at: now,
+            models.SaaSJob.locked_at: None,
+            models.SaaSJob.locked_by: None,
+            models.SaaSJob.lease_token: None,
+            models.SaaSJob.lease_expires_at: None,
+        },
+        synchronize_session=False,
+    )
+    if updated != 1:
+        db.rollback()
+        raise LeaseLostError("Job lease was lost before completion")
+    _add_event_by_id(db, job_id=job.id, status="SUCCEEDED", message="Job completed.", data=result)
     db.commit()
+    db.expire(job)
+    db.refresh(job)
 
 
 def _retry_delay(attempt_count: int) -> timedelta:
-    seconds = min(1800, 5 * (3 ** max(0, int(attempt_count) - 1)))
-    return timedelta(seconds=seconds)
+    return timedelta(seconds=min(1800, 5 * (3 ** max(0, int(attempt_count) - 1))))
 
 
 def fail_job(
@@ -239,24 +270,40 @@ def fail_job(
     error: BaseException | str,
     *,
     retryable: bool = True,
+    worker_id: str | None = None,
 ) -> None:
-    if job.status != "RUNNING" or not job.locked_by:
-        raise ValueError("Only an actively leased job can be failed")
     message = str(error)[:4000]
     now = utcnow()
-    job.last_error = message
-    job.locked_at = None
-    job.locked_by = None
-    job.lease_expires_at = None
     if retryable and int(job.attempt_count or 0) < int(job.max_attempts or 1):
-        job.status = "RETRY"
-        job.available_at = now + _retry_delay(job.attempt_count)
-        add_event(db, job, "RETRY", message, {"available_at": job.available_at.isoformat()})
+        status = "RETRY"
+        available_at = now + _retry_delay(job.attempt_count)
+        finished_at = None
+        event_data = {"available_at": available_at.isoformat()}
     else:
-        job.status = "DEAD" if retryable else "FAILED"
-        job.finished_at = now
-        add_event(db, job, job.status, message)
+        status = "DEAD" if retryable else "FAILED"
+        available_at = job.available_at
+        finished_at = now
+        event_data = {}
+    updated = _lease_filter(db, job, worker_id).update(
+        {
+            models.SaaSJob.status: status,
+            models.SaaSJob.available_at: available_at,
+            models.SaaSJob.finished_at: finished_at,
+            models.SaaSJob.last_error: message,
+            models.SaaSJob.locked_at: None,
+            models.SaaSJob.locked_by: None,
+            models.SaaSJob.lease_token: None,
+            models.SaaSJob.lease_expires_at: None,
+        },
+        synchronize_session=False,
+    )
+    if updated != 1:
+        db.rollback()
+        raise LeaseLostError("Job lease was lost before failure handling")
+    _add_event_by_id(db, job_id=job.id, status=status, message=message, data=event_data)
     db.commit()
+    db.expire(job)
+    db.refresh(job)
 
 
 def retry_job(db: Session, job: models.SaaSJob, *, actor_user_id: str | None = None) -> models.SaaSJob:
@@ -268,6 +315,7 @@ def retry_job(db: Session, job: models.SaaSJob, *, actor_user_id: str | None = N
     job.last_error = None
     job.locked_at = None
     job.locked_by = None
+    job.lease_token = None
     job.lease_expires_at = None
     if actor_user_id:
         job.created_by = actor_user_id
@@ -285,6 +333,7 @@ def cancel_job(db: Session, job: models.SaaSJob, *, reason: str) -> models.SaaSJ
     job.status = "CANCELLED"
     job.finished_at = utcnow()
     job.last_error = reason[:4000]
+    job.lease_token = None
     add_event(db, job, "CANCELLED", reason)
     db.commit()
     db.refresh(job)
@@ -299,12 +348,9 @@ def queue_summary(db: Session) -> dict[str, Any]:
         counts[str(status)] = counts.get(str(status), 0) + 1
         if str(status) not in TERMINAL_STATUSES:
             queues[str(queue_name)] = queues.get(str(queue_name), 0) + 1
-    oldest = (
-        db.query(models.SaaSJob)
-        .filter(models.SaaSJob.status.in_({"PENDING", "RETRY", "RUNNING"}))
-        .order_by(models.SaaSJob.created_at.asc())
-        .first()
-    )
+    oldest = db.query(models.SaaSJob).filter(
+        models.SaaSJob.status.in_({"PENDING", "RETRY", "RUNNING"})
+    ).order_by(models.SaaSJob.created_at.asc()).first()
     return {
         "counts": counts,
         "queues": queues,
