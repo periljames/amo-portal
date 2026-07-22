@@ -1,0 +1,85 @@
+name: User Management Stabilization CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/accounts/**"
+      - "backend/amodb/apps/workforce/**"
+      - "backend/amodb/apps/realtime/**"
+      - "frontend/src/pages/AdminDashboardPage.tsx"
+      - "frontend/src/pages/admin-users/**"
+      - "frontend/src/services/adminUserDirectory.ts"
+      - "frontend/src/components/realtime/RealtimeProvider.tsx"
+      - "frontend/src/styles/admin-user-management-v2.css"
+      - "scripts/apply_user_management_stabilization.py"
+      - ".github/workflows/user-management-stabilization-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply deterministic source patch
+        if: hashFiles('scripts/apply_user_management_stabilization.py') != ''
+        run: python scripts/apply_user_management_stabilization.py
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Compile affected backend modules
+        run: python -m compileall -q backend/amodb/apps/accounts backend/amodb/apps/workforce backend/amodb/apps/realtime
+      - name: Verify full mapper startup
+        working-directory: backend
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          SECRET_KEY: mapper-test-secret
+        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; configure_mappers(); print('All application mappers configured')"
+      - name: Run account and workforce tests
+        working-directory: backend
+        env:
+          APP_ENV: test
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          SECRET_KEY: mapper-test-secret
+        run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Typecheck and production build
+        working-directory: frontend
+        run: npm run build
+      - name: Lint user management and presence changes
+        working-directory: frontend
+        run: npm exec -- eslint src/pages/AdminDashboardPage.tsx src/pages/admin-users src/services/adminUserDirectory.ts src/components/realtime/RealtimeProvider.tsx
+      - name: Commit validated implementation
+        if: github.event_name == 'pull_request' && github.head_ref == 'agent/stabilize-user-management-presence'
+        env:
+          TARGET_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f scripts/apply_user_management_stabilization.py 2>/dev/null || true
+          git add backend/amodb/apps/accounts backend/amodb/apps/workforce frontend/src/pages/AdminDashboardPage.tsx frontend/src/pages/admin-users frontend/src/services/adminUserDirectory.ts frontend/src/components/realtime/RealtimeProvider.tsx frontend/src/styles/admin-user-management-v2.css scripts
+          if git diff --cached --quiet; then
+            echo "Validated sources already committed."
+          else
+            git commit -m "fix: stabilize user management and presence"
+            git push origin "HEAD:${TARGET_BRANCH}"
+          fi
