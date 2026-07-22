@@ -41,6 +41,7 @@ import "./styles/theme-module-repairs.css";
 
 const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const ACTIVE_AMO_STORAGE_KEYS = new Set(["amodb_active_amo_id", "amodb_admin_active_amo_id"]);
+const ACTIVE_AMO_STORAGE_GUARD = Symbol.for("amo.portal.active-amo-storage-guard");
 const SENSITIVE_QUERY_MARKERS = [
   "auth",
   "password",
@@ -128,14 +129,52 @@ function clearIfTenantScopeChanged(): boolean {
   return true;
 }
 
+function installActiveAmoStorageGuard(): void {
+  if (typeof window === "undefined" || typeof Storage === "undefined") return;
+  const guardedPrototype = Storage.prototype as Storage & { [ACTIVE_AMO_STORAGE_GUARD]?: boolean };
+  if (guardedPrototype[ACTIVE_AMO_STORAGE_GUARD]) return;
+
+  const originalSetItem = Storage.prototype.setItem;
+  const originalRemoveItem = Storage.prototype.removeItem;
+  const originalClear = Storage.prototype.clear;
+
+  Storage.prototype.setItem = function guardedSetItem(key: string, value: string): void {
+    const isActiveAmoWrite = this === window.localStorage && ACTIVE_AMO_STORAGE_KEYS.has(key);
+    const previous = isActiveAmoWrite ? this.getItem(key) : null;
+    originalSetItem.call(this, key, value);
+    if (isActiveAmoWrite && previous !== value) clearIfTenantScopeChanged();
+  };
+
+  Storage.prototype.removeItem = function guardedRemoveItem(key: string): void {
+    const isActiveAmoWrite = this === window.localStorage && ACTIVE_AMO_STORAGE_KEYS.has(key);
+    const previous = isActiveAmoWrite ? this.getItem(key) : null;
+    originalRemoveItem.call(this, key);
+    if (isActiveAmoWrite && previous !== null) clearIfTenantScopeChanged();
+  };
+
+  Storage.prototype.clear = function guardedClear(): void {
+    const hadActiveAmo = this === window.localStorage
+      && [...ACTIVE_AMO_STORAGE_KEYS].some((key) => this.getItem(key) !== null);
+    originalClear.call(this);
+    if (hadActiveAmo) clearIfTenantScopeChanged();
+  };
+
+  Object.defineProperty(guardedPrototype, ACTIVE_AMO_STORAGE_GUARD, {
+    configurable: false,
+    enumerable: false,
+    value: true,
+  });
+}
+
 const queryPersister = createPortalQueryPersister((_previousScope, nextScope) => {
-  // This callback catches legacy pages that write the active-AMO localStorage key
-  // directly without dispatching a context event.
+  // This callback is a second line of defence for context mutations that happen
+  // before the storage guard is installed or in non-browser test environments.
   if (nextScope === observedTenantScope) return;
   observedTenantScope = nextScope;
   clearTenantScopedRuntimeState();
 });
 
+installActiveAmoStorageGuard();
 ensureManifest();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
