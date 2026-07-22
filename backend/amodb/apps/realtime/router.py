@@ -11,7 +11,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user, get_current_user
 
-from . import gateway, messaging, presence_service, schemas, services
+from . import gateway, presence_service, realtime_auth, schemas, secure_messaging as messaging, services
 
 router = APIRouter(prefix="/api", tags=["realtime"])
 realtime_bearer = HTTPBearer(auto_error=False)
@@ -42,6 +42,12 @@ def issue_realtime_token(
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.RealtimeTokenResponse:
     result = services.issue_connect_token(db, user=current_user, request=request)
+    realtime_auth.prune_user_tokens(
+        db,
+        amo_id=result.amo_id,
+        user_id=str(current_user.id),
+        keep_latest=3,
+    )
     _flush_outbox()
     return result
 
