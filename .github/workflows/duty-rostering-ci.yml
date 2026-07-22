@@ -19,6 +19,7 @@ on:
       - "frontend/src/services/crs.ts"
       - "frontend/src/services/offlineHttp.ts"
       - "frontend/src/services/offlinePersistence.ts"
+      - "frontend/src/services/queryPersister.ts"
       - "frontend/src/styles/**"
       - "frontend/src/main.tsx"
       - "frontend/public/portal-sw.js"
@@ -113,5 +114,6 @@ jobs:
           src/services/crs.ts
           src/services/offlineHttp.ts
           src/services/offlinePersistence.ts
+          src/services/queryPersister.ts
       - name: Run rostering and offline regression tests
         run: npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts
