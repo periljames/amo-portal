@@ -13,6 +13,7 @@ import { onSessionEvent } from "./services/auth";
 import { BRANDING_EVENT } from "./services/branding";
 import {
   clearAllPortalOfflineData,
+  currentOfflineScope,
   onOfflineSyncComplete,
   replayOfflineMutations,
 } from "./services/offlinePersistence";
@@ -109,7 +110,7 @@ const queryClient = new QueryClient({
   },
 });
 
-const queryPersister = createPortalQueryPersister();
+let observedTenantScope = currentOfflineScope();
 
 function clearTenantScopedRuntimeState(): void {
   // Context changes are synchronous. Cancel and clear before another persistence
@@ -118,6 +119,22 @@ function clearTenantScopedRuntimeState(): void {
   queryClient.clear();
   clearApiResponseCache();
 }
+
+function clearIfTenantScopeChanged(): boolean {
+  const nextScope = currentOfflineScope();
+  if (nextScope === observedTenantScope) return false;
+  observedTenantScope = nextScope;
+  clearTenantScopedRuntimeState();
+  return true;
+}
+
+const queryPersister = createPortalQueryPersister((_previousScope, nextScope) => {
+  // This callback catches legacy pages that write the active-AMO localStorage key
+  // directly without dispatching a context event.
+  if (nextScope === observedTenantScope) return;
+  observedTenantScope = nextScope;
+  clearTenantScopedRuntimeState();
+});
 
 ensureManifest();
 
@@ -195,22 +212,22 @@ async function configurePortalServiceWorker(): Promise<void> {
 if (typeof window !== "undefined") {
   onSessionEvent((detail) => {
     if (detail.type === "authenticated") {
-      clearTenantScopedRuntimeState();
+      clearIfTenantScopeChanged();
       void replayOfflineMutations();
       return;
     }
     if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
+      observedTenantScope = currentOfflineScope();
       clearTenantScopedRuntimeState();
       void Promise.all([clearAllPortalOfflineData(), clearAllPortalQueryCaches()]);
     }
   });
 
-  // Superuser AMO switching emits the branding event in the same tab. Clearing
-  // here prevents the old tenant's successful queries from remaining visible or
-  // being persisted after the localStorage scope changes.
-  window.addEventListener(BRANDING_EVENT, clearTenantScopedRuntimeState);
+  // Superuser AMO switching uses the branding event in the same tab. The scope
+  // comparison prevents ordinary logo/theme refreshes from clearing query data.
+  window.addEventListener(BRANDING_EVENT, clearIfTenantScopeChanged);
   window.addEventListener("storage", (event) => {
-    if (event.key && ACTIVE_AMO_STORAGE_KEYS.has(event.key)) clearTenantScopedRuntimeState();
+    if (event.key && ACTIVE_AMO_STORAGE_KEYS.has(event.key)) clearIfTenantScopeChanged();
   });
 
   onOfflineSyncComplete((detail) => {
