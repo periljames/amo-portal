@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 from amodb.database import WriteSessionLocal, close_session_safely
 
@@ -55,15 +56,18 @@ class LeaseHeartbeat:
             while not self._stop.wait(self.interval_seconds):
                 db = WriteSessionLocal()
                 try:
-                    job = db.get(models.SaaSJob, self.identity.job_id)
-                    if job is None:
-                        raise saas_queue.LeaseLostError("Job disappeared during heartbeat")
-                    # Use the original fence even if this session observes a newer claim.
-                    job.locked_by = self.identity.worker_id
-                    job.lease_token = self.identity.lease_token
+                    # Use an untracked identity object. Loading a newer ORM row and
+                    # assigning the old fence could autoflush stale ownership before
+                    # the conditional heartbeat update executes.
+                    lease_ref = SimpleNamespace(
+                        id=self.identity.job_id,
+                        locked_by=self.identity.worker_id,
+                        lease_token=self.identity.lease_token,
+                        lease_expires_at=None,
+                    )
                     saas_queue.heartbeat_job(
                         db,
-                        job,
+                        lease_ref,  # type: ignore[arg-type]
                         worker_id=self.identity.worker_id,
                         lease_seconds=self.lease_seconds,
                     )
