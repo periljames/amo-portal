@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const endSession = vi.fn();
+const { endSession } = vi.hoisted(() => ({ endSession: vi.fn() }));
 
 vi.mock("./auth", () => ({
   authHeaders: () => ({ Authorization: "Bearer platform-token" }),
@@ -55,7 +55,7 @@ describe("platform SaaS control API", () => {
   });
 
   it("sends provider secrets only in an explicit update request", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ provider: "openai", status: "CONFIGURED", has_secret: true }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -68,7 +68,7 @@ describe("platform SaaS control API", () => {
       enabled: true,
     });
 
-    const [, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [, init] = fetchMock.mock.calls[0];
     expect(JSON.parse(String(init?.body))).toEqual({
       config: { model: "configured-model" },
       secret: { api_key: "server-only-key" },
@@ -103,7 +103,8 @@ describe("platform SaaS control API", () => {
     }));
 
     const pending = platformApi.createModulePrice({ module_code: "quality", amount_cents: 1000 });
+    const assertion = expect(pending).rejects.toThrow("Platform request timed out after 25 seconds.");
     await vi.advanceTimersByTimeAsync(25_000);
-    await expect(pending).rejects.toThrow("Platform request timed out after 25 seconds.");
+    await assertion;
   });
 });
