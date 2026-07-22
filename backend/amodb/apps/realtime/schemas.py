@@ -30,7 +30,9 @@ class RealtimeKind(str, Enum):
 
 
 class RealtimeEnvelope(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    # MQTT/MessagePack clients serialize enum members as strings. Keep extra
+    # fields forbidden, while allowing Pydantic to coerce those wire values.
+    model_config = ConfigDict(extra="forbid")
 
     v: int = Field(ge=1)
     id: str = Field(min_length=4, max_length=64)
