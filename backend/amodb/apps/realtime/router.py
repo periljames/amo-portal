@@ -10,7 +10,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user, get_current_user
 
-from . import schemas, services
+from . import presence_service, schemas, services
 
 router = APIRouter(prefix="/api", tags=["realtime"])
 realtime_bearer = HTTPBearer(auto_error=False)
@@ -67,7 +67,11 @@ def realtime_presence_update(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> schemas.PresenceStateRead:
-    return services.update_presence_state(db, user=current_user, payload=payload)
+    return presence_service.update_presence_state(
+        db,
+        user=current_user,
+        payload=payload,
+    )
 
 
 @router.post("/chat/threads", response_model=schemas.ThreadRead)
@@ -94,7 +98,12 @@ def list_thread_messages(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> list[schemas.ChatMessageRead]:
-    return services.list_thread_messages(db, user=current_user, thread_id=thread_id, limit=limit)
+    return services.list_thread_messages(
+        db,
+        user=current_user,
+        thread_id=thread_id,
+        limit=limit,
+    )
 
 
 @router.post("/prompts/{prompt_id}/action")
@@ -104,4 +113,9 @@ def prompt_action(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_realtime_user),
 ) -> dict[str, str]:
-    return services.perform_prompt_action(db, user=current_user, prompt_id=prompt_id, action=payload.action)
+    return services.perform_prompt_action(
+        db,
+        user=current_user,
+        prompt_id=prompt_id,
+        action=payload.action,
+    )

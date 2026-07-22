@@ -311,7 +311,8 @@ class EmployeeLeaveBalance(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     leave_type = relationship("LeaveType", lazy="joined")
-    user = relationship("User", lazy="joined")
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+    updated_by = relationship("User", foreign_keys=[updated_by_user_id], lazy="joined")
 
 
 class LeaveRequest(Base):
@@ -365,7 +366,7 @@ class LeaveRequestApproval(Base):
     decided_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     leave_request = relationship("LeaveRequest", back_populates="approvals", lazy="joined")
-    actor = relationship("User", lazy="joined")
+    actor = relationship("User", foreign_keys=[actor_user_id], lazy="joined")
 
 
 class EmployeeAvailabilityEvent(Base):
@@ -394,7 +395,9 @@ class EmployeeAvailabilityEvent(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    user = relationship("User", lazy="joined")
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+    created_by = relationship("User", foreign_keys=[created_by_user_id], lazy="joined")
+    updated_by = relationship("User", foreign_keys=[updated_by_user_id], lazy="joined")
 
 
 class PublicHolidayCalendar(Base):
@@ -488,7 +491,9 @@ class Timesheet(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    user = relationship("User", lazy="joined")
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+    created_by = relationship("User", foreign_keys=[created_by_user_id], lazy="joined")
+    updated_by = relationship("User", foreign_keys=[updated_by_user_id], lazy="joined")
     lines = relationship("TimesheetLine", back_populates="timesheet", cascade="all, delete-orphan", lazy="selectin")
 
 
@@ -536,7 +541,8 @@ class OvertimeRequest(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
-    user = relationship("User", lazy="joined")
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+    created_by = relationship("User", foreign_keys=[created_by_user_id], lazy="joined")
     approvals = relationship("OvertimeApproval", back_populates="overtime_request", cascade="all, delete-orphan", lazy="selectin")
 
 
@@ -554,6 +560,7 @@ class OvertimeApproval(Base):
     decided_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     overtime_request = relationship("OvertimeRequest", back_populates="approvals", lazy="joined")
+    actor = relationship("User", foreign_keys=[actor_user_id], lazy="joined")
 
 
 class RosterActualVariance(Base):

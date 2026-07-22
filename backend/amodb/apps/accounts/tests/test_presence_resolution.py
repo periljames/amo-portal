@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import presence_policy  # noqa: F401
 from amodb.apps.accounts import router_admin
 
 
-def test_presence_resolution_marks_fresh_away_as_active():
+def test_presence_resolution_marks_fresh_away_as_connected():
     now = datetime.now(timezone.utc)
     state, is_online = router_admin._resolve_presence_state(
         raw_state="away",
@@ -21,7 +22,9 @@ def test_presence_resolution_marks_stale_away_as_offline():
     now = datetime.now(timezone.utc)
     state, is_online = router_admin._resolve_presence_state(
         raw_state="away",
-        last_seen_at=now - timedelta(seconds=router_admin.PRESENCE_HEARTBEAT_GRACE_SECONDS + 5),
+        last_seen_at=now - timedelta(
+            seconds=router_admin.PRESENCE_HEARTBEAT_GRACE_SECONDS + 5
+        ),
         now=now,
     )
     assert state == "offline"
@@ -35,6 +38,18 @@ def test_presence_resolution_marks_fresh_online_as_online():
         last_seen_at=now - timedelta(seconds=5),
         now=now,
     )
+    assert state == "online"
+    assert is_online is True
+
+
+def test_presence_policy_tolerates_browser_throttling():
+    now = datetime.now(timezone.utc)
+    state, is_online = router_admin._resolve_presence_state(
+        raw_state="online",
+        last_seen_at=now - timedelta(seconds=60),
+        now=now,
+    )
+    assert router_admin.PRESENCE_HEARTBEAT_GRACE_SECONDS >= 90
     assert state == "online"
     assert is_online is True
 

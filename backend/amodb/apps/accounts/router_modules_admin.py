@@ -31,6 +31,7 @@ def _require_superuser(current_user: models.User) -> models.User:
         )
     return current_user
 
+
 ALLOWED_MODULES = {
     "aerodoc_hybrid_dms",
     "finance_inventory",
@@ -201,3 +202,10 @@ def disable_module(
     db.commit()
     db.refresh(subscription)
     return subscription
+
+
+# Imported after router_admin has registered its legacy route. These modules
+# align the presence policy, remove the legacy directory route and install the
+# paginated implementation before amodb.main includes the router.
+from . import presence_policy as _presence_policy  # noqa: E402,F401
+from . import router_user_directory as _router_user_directory  # noqa: E402,F401
