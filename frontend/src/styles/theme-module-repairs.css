@@ -1,0 +1,189 @@
+/* Legacy module adapters.
+ * These selectors are intentionally namespaced. They translate old literal-light
+ * modules to the semantic theme contract without flattening status/severity tones.
+ */
+
+body:not([data-color-scheme="light"]) :where(
+  .tc-hero,
+  .tc-panel,
+  .tc-kpi-card,
+  .tc-subpanel,
+  .tc-tabs-wrap,
+  .tc-tab,
+  .tc-bulkbar
+) {
+  background: var(--portal-surface-raised) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--portal-shadow) !important;
+}
+
+body:not([data-color-scheme="light"]) .tc-alert--soft {
+  background: var(--portal-surface-muted) !important;
+  border-color: var(--border-subtle) !important;
+}
+
+body:not([data-color-scheme="light"]) .tc-alert--warning {
+  background: color-mix(in srgb, var(--accent-warning) 12%, var(--portal-surface-raised)) !important;
+  border-color: color-mix(in srgb, var(--accent-warning) 36%, var(--border-subtle)) !important;
+}
+
+body:not([data-color-scheme="light"]) .tc-tab.is-active {
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--portal-surface-raised)) !important;
+  border-color: color-mix(in srgb, var(--accent-primary) 42%, var(--border-subtle)) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(.tc-title, .tc-panel__title, .tc-tab span, .tc-kpi-card strong) {
+  color: var(--text-primary) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(.tc-muted, .tc-table__hint, .tc-empty, .tc-field__label, .tc-tab small) {
+  color: var(--text-secondary) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .manuals-hero-card,
+  .manuals-panel-card,
+  .manuals-kpi-card,
+  .manuals-featured-card,
+  .manuals-action-row,
+  .manuals-upload-modal,
+  .manuals-search-field,
+  .manuals-ghost-btn,
+  .manuals-inline-btn
+) {
+  background: var(--portal-surface-raised) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--portal-shadow) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .manuals-hero-card h2,
+  .manuals-panel-card h3,
+  .manuals-kpi-card strong,
+  .manuals-featured-card strong,
+  .manuals-action-row strong,
+  .manuals-search-field input
+) {
+  color: var(--text-primary) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .manuals-hero-card p,
+  .manuals-panel-card p,
+  .manuals-kpi-card span,
+  .manuals-empty-note,
+  .manuals-preview-excerpt,
+  .manuals-action-row small,
+  .manuals-featured-card small,
+  .manuals-featured-meta
+) {
+  color: var(--text-secondary) !important;
+}
+
+body:not([data-color-scheme="light"]) .platform-shell {
+  --platform-ink: var(--text-primary);
+  --platform-muted: var(--text-secondary);
+  --platform-soft: color-mix(in srgb, var(--surface-elevated) 88%, transparent);
+  --platform-line: var(--border-subtle);
+  background:
+    radial-gradient(circle at 13% 0%, color-mix(in srgb, var(--accent-primary) 14%, transparent), transparent 29rem),
+    radial-gradient(circle at 89% 9%, color-mix(in srgb, var(--accent-info) 12%, transparent), transparent 28rem),
+    var(--portal-canvas) !important;
+  color: var(--text-primary) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .platform-profile-chip,
+  .platform-btn:not(.primary):not(.danger),
+  .platform-hero-card,
+  .platform-card,
+  .platform-health-orb
+) {
+  background: var(--portal-surface-raised) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--portal-shadow) !important;
+}
+
+body:not([data-color-scheme="light"]) .platform-btn.danger {
+  background: color-mix(in srgb, var(--accent-danger) 10%, var(--portal-surface-raised)) !important;
+  color: var(--accent-danger) !important;
+  border-color: color-mix(in srgb, var(--accent-danger) 34%, var(--border-subtle)) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(.platform-title p, .platform-hero-card p, .platform-section-title p, .platform-profile-chip small) {
+  color: var(--text-secondary) !important;
+}
+
+/* Old training.css and rostering.css share these generic surface names. */
+body:not([data-color-scheme="light"]) :where(
+  .training-page .panel,
+  .training-page .card,
+  .training-page .toolbar,
+  .training-page .table-wrap,
+  .roster-page .panel,
+  .roster-page .card,
+  .rostering-page .panel,
+  .rostering-page .card
+) {
+  background: var(--portal-surface-raised) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+/* QMS pages are tokenised, but this closes the remaining literal table/form gaps. */
+body:not([data-color-scheme="light"]) :where(
+  .qms-ops-card,
+  .qms-calendar-shell,
+  .qms-calendar-inspector,
+  .quality-audit-dashboard .card,
+  .quality-audit-dashboard .panel
+) {
+  background-color: var(--portal-surface-raised) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .qms-ops-card,
+  .qms-calendar-shell,
+  .qms-calendar-inspector,
+  .quality-audit-dashboard
+) :where(h1, h2, h3, h4, strong) {
+  color: var(--text-primary) !important;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .qms-ops-card,
+  .qms-calendar-shell,
+  .qms-calendar-inspector,
+  .quality-audit-dashboard
+) :where(p, small, .muted) {
+  color: var(--text-secondary) !important;
+}
+
+/* Pending local roster edits remain distinguishable without a large pill. */
+.wr-assignment.is-pending-sync {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent-warning) 62%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-warning) 8%, var(--surface-elevated));
+}
+
+.wr-assignment.is-pending-sync em {
+  color: var(--accent-warning);
+}
+
+.wr-inline-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 34%, var(--border-subtle));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-warning) 9%, var(--surface-elevated));
+  color: var(--text-primary);
+  font-size: 0.84rem;
+}
