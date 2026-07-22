@@ -12,6 +12,8 @@ type ScopedPersistedClient = {
   client: PersistedClient;
 };
 
+type ScopeChangeHandler = (previousScope: string, nextScope: string) => void;
+
 let databasePromise: Promise<IDBDatabase | null> | null = null;
 const memoryClients = new Map<string, PersistedClient>();
 
@@ -60,7 +62,7 @@ async function openDatabase(): Promise<IDBDatabase | null> {
   return databasePromise;
 }
 
-export function createPortalQueryPersister(): Persister {
+export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): Persister {
   // The QueryClient belongs to the scope active when the provider is hydrated.
   // A context switch must clear the QueryClient before a snapshot can be rebound.
   let boundScope = currentOfflineScope();
@@ -70,9 +72,11 @@ export function createPortalQueryPersister(): Persister {
       const scope = currentOfflineScope();
       if (scope !== boundScope) {
         // Reject the first snapshot after a context switch. It can still contain
-        // the previous AMO's queries. main.tsx clears the QueryClient synchronously,
-        // and the following empty/new-tenant snapshot is safe to persist.
+        // the previous AMO's queries. Set the new binding before notifying the
+        // runtime so QueryClient.clear() cannot recursively report the same switch.
+        const previousScope = boundScope;
         boundScope = scope;
+        onScopeChange?.(previousScope, scope);
         return;
       }
 
