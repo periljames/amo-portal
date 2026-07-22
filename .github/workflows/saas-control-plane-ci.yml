@@ -79,15 +79,18 @@ jobs:
           foundation = script.get_revision("saas_20260722_control_plane")
           quality_finalizer = script.get_revision("saas_20260722_finalize_idx")
           training_finalizer = script.get_revision("saas_20260722_finalize_training")
+          read_index_finalizer = script.get_revision("saas_20260722_qms_read_idx")
           assert foundation is not None
           assert foundation.down_revision == "quality_20260722_schema_integrity"
           assert quality_finalizer is not None
           assert quality_finalizer.down_revision == "saas_20260722_control_plane"
           assert training_finalizer is not None
           assert training_finalizer.down_revision == "saas_20260722_finalize_idx"
+          assert read_index_finalizer is not None
+          assert read_index_finalizer.down_revision == "saas_20260722_finalize_training"
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert "saas_20260722_finalize_training" in heads, heads
+          assert "saas_20260722_qms_read_idx" in heads, heads
           PY
       - name: Upgrade production schema graph
         id: migrate
