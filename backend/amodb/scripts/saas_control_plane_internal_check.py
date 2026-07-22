@@ -137,10 +137,6 @@ REQUIRED: dict[Path, list[str]] = {
         "delete queued.authToken",
         "delete decoded.authToken",
     ],
-    FRONTEND_ROOT / "src/services/realtime/queue.ts": [
-        "MAX_OUTBOUND_MESSAGES = 500",
-        "def", 
-    ],
     FRONTEND_ROOT / "src/services/messaging.ts": [
         "mentionUserIds: string[] = []",
         "mention_user_ids",
@@ -227,10 +223,10 @@ def main() -> int:
         passed = passed and ok
         checks[_display(path)] = {"passed": ok, "missing": absent}
 
-    # Queue contract is checked structurally here instead of forbidding the word
-    # authToken, because sanitization must explicitly delete that field.
-    queue_text = (FRONTEND_ROOT / "src/services/realtime/queue.ts").read_text(encoding="utf-8")
-    queue_ok = all(token in queue_text for token in (
+    queue_path = FRONTEND_ROOT / "src/services/realtime/queue.ts"
+    queue_text = queue_path.read_text(encoding="utf-8") if queue_path.exists() else ""
+    queue_ok = queue_path.exists() and all(token in queue_text for token in (
+        "export const MAX_OUTBOUND_MESSAGES = 500",
         "export function sanitizeOutbound",
         "delete clean.authToken",
         "store.put(clean)",
