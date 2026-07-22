@@ -31,8 +31,8 @@ import {
   validateRosterVersion,
 } from "../../../services/rostering";
 import { isOfflineQueuedError } from "../../../services/offlineHttp";
+import type { RosterPersonRead } from "../../../services/rosterPeople";
 import type { RosterAssignmentRead, RosterValidationFindingRead, ShiftTemplateRead } from "../../../types/rostering";
-import type { WorkforcePersonRead } from "../../../services/workforce";
 import { errorMessage, formatDay, isoDate, newIdempotencyKey } from "../rosterUi";
 import { formatInZone, moveIntervalToZonedDay, templateWindowInZone } from "../timezone";
 import { EmptyState, RosterError, RosterLoading, StatusPill } from "./RosterShell";
@@ -54,7 +54,7 @@ function getDrag(event: DragEvent<HTMLElement>): DragPayload | null {
   }
 }
 
-function PersonCard({ person }: { person: WorkforcePersonRead }) {
+function PersonCard({ person }: { person: RosterPersonRead }) {
   return (
     <button type="button" className="wr-person" draggable onDragStart={(event) => setDrag(event, { type: "person", userId: person.user_id })}>
       <GripVertical size={14} aria-hidden="true" />
@@ -195,8 +195,6 @@ function AssignmentDrawer({ assignment, templates, timezoneName, editable, onClo
 
 export function RosterPlannerV2() {
   const data = useRosterPlannerDataV2();
-  const [search, setSearch] = useState("");
-  const [department, setDepartment] = useState("ALL");
   const [templateId, setTemplateId] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -209,11 +207,7 @@ export function RosterPlannerV2() {
   const editable = Boolean(data.selectedVersion?.can_edit && data.contracts?.capabilities.edit);
   const selectedTemplate = data.templates.find((row) => row.id === templateId) || data.templates.find((row) => row.kind === "DAY") || data.templates[0];
   const selected = data.assignments.find((row) => row.id === selectedId) || null;
-  const departments = useMemo(() => [...new Set(data.people.map((person) => person.department_code).filter((value): value is string => Boolean(value)))].sort(), [data.people]);
-  const people = useMemo(() => {
-    const term = search.toLowerCase().trim();
-    return data.people.filter((person) => (department === "ALL" || person.department_code === department) && (!term || `${person.full_name} ${person.staff_code} ${person.position_title || ""}`.toLowerCase().includes(term)));
-  }, [data.people, department, search]);
+  const people = data.people;
   const byId = useMemo(() => new Map(data.assignments.map((assignment) => [assignment.id, assignment])), [data.assignments]);
 
   const assignmentsFor = useCallback((userId: string, day: Date) => data.assignments.filter((assignment) => {
@@ -224,7 +218,7 @@ export function RosterPlannerV2() {
 
   const replace = (row: RosterAssignmentRead) => data.setAssignments((current) => current.map((item) => item.id === row.id ? row : item));
 
-  const create = async (person: WorkforcePersonRead, day: Date) => {
+  const create = async (person: RosterPersonRead, day: Date) => {
     if (!data.selectedVersion || !selectedTemplate || !editable) return;
     setBusy(`create:${person.user_id}:${isoDate(day)}`); setError(null); setNotice(null);
     const dutyWindow = templateWindowInZone(day, selectedTemplate.default_start_time || "08:00", selectedTemplate.default_end_time || "17:00", timezoneName);
@@ -342,7 +336,17 @@ export function RosterPlannerV2() {
         {notice ? <div className="wr-inline-warning"><RefreshCw size={16} /> {notice}</div> : null}
         {error ? <div className="wr-inline-error"><AlertTriangle size={16} /> {error}</div> : null}
         {!data.selectedVersion ? <EmptyState title="No roster version selected" description="Create or select a draft version before assigning duty." /> : <div className="wr-planner-body">
-          <aside className="wr-people-panel"><div className="wr-people-panel__controls"><label className="wr-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search personnel" /></label><label className="wr-filter-select"><Filter size={14} /><select value={department} onChange={(event) => setDepartment(event.target.value)}><option value="ALL">All departments</option>{departments.map((value) => <option key={value}>{value}</option>)}</select></label></div><div className="wr-people-panel__summary"><UsersRound size={15} /> {people.length} eligible people</div><div className="wr-person-list">{people.map((person) => <PersonCard key={person.user_id} person={person} />)}</div></aside>
+          <aside className="wr-people-panel">
+            <div className="wr-people-panel__controls">
+              <label className="wr-search"><Search size={15} /><input value={data.peopleSearch} onChange={(event) => data.setPeopleSearch(event.target.value)} placeholder="Search name, staff code or title" /></label>
+              <label className="wr-filter-select"><Filter size={14} /><select value={data.peopleDepartmentId} onChange={(event) => data.setPeopleDepartmentId(event.target.value)}><option value="">All departments</option>{data.peopleDepartments.map((department) => <option key={department.id} value={department.id}>{department.code} · {department.name}</option>)}</select></label>
+            </div>
+            <div className="wr-people-panel__summary"><UsersRound size={15} /> {people.length} of {data.peopleTotal} eligible people</div>
+            <div className="wr-person-list">
+              {people.map((person) => <PersonCard key={person.user_id} person={person} />)}
+              {data.peopleHasMore ? <button type="button" className="wr-button wr-button--secondary wr-people-load-more" onClick={() => void data.loadMorePeople()} disabled={data.peopleLoadingMore}>{data.peopleLoadingMore ? <RefreshCw size={15} className="is-spinning" /> : <Plus size={15} />} Load next 100</button> : null}
+            </div>
+          </aside>
           <div className="wr-grid-scroll" tabIndex={0}><div className="wr-roster-grid" style={{ "--wr-days": data.week.days.length } as CSSProperties}><div className="wr-grid-corner">Personnel</div>{data.week.days.map((day) => <div key={isoDate(day)} className={`wr-day-header${isoDate(day) === isoDate(new Date()) ? " is-today" : ""}`}><strong>{formatDay(day)}</strong><small>{format(day, "yyyy")}</small></div>)}{people.map((person) => <div className="wr-grid-row" key={person.user_id}><div className="wr-grid-person"><strong>{person.full_name}</strong><small>{person.staff_code} · {person.primary_base_code || "No base"}</small></div>{data.week.days.map((day) => { const key = `${person.user_id}:${isoDate(day)}`; const rows = assignmentsFor(person.user_id, day); return <div key={key} className={`wr-drop-cell${dropTarget === key ? " is-drop-target" : ""}`} onDragOver={(event) => { if (editable) { event.preventDefault(); setDropTarget(key); } }} onDragLeave={() => setDropTarget((value) => value === key ? null : value)} onDrop={(event) => void drop(event, person.user_id, day)} onDoubleClick={() => void create(person, day)}>{rows.map((assignment) => <AssignmentCard key={assignment.id} assignment={assignment} timezoneName={timezoneName} selected={selectedId === assignment.id} onSelect={() => setSelectedId(assignment.id)} onMove={(days) => void move(assignment, addDays(day, days))} />)}{rows.length === 0 && editable ? <button type="button" className="wr-cell-add" onClick={() => void create(person, day)} disabled={busy === `create:${person.user_id}:${isoDate(day)}`}><Plus size={14} /> Assign</button> : null}</div>; })}</div>)}</div></div>
         </div>}
       </section>
