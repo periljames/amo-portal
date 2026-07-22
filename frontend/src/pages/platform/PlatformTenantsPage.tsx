@@ -22,6 +22,22 @@ type ModuleDraft = {
   plan_code: string;
 };
 
+type TenantDetailView = {
+  tenant?: {
+    name?: unknown;
+    amo_code?: unknown;
+    login_slug?: unknown;
+  } | null;
+  subscription?: {
+    status?: unknown;
+    sku_code?: unknown;
+  } | null;
+  users?: { total?: unknown } | null;
+  assets?: { total?: unknown } | null;
+  asset_count?: unknown;
+  [key: string]: unknown;
+};
+
 export default function PlatformTenantsPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
@@ -66,7 +82,7 @@ export default function PlatformTenantsPage() {
     })));
   }, [modules.data?.items]);
 
-  const selectedDetail = detail.data as Record<string, any> | null;
+  const selectedDetail = detail.data as TenantDetailView | null;
   const tenantRecord = selectedDetail?.tenant ?? null;
   const tenantTotal = tenants.data?.total ?? 0;
   const enabledCount = useMemo(
