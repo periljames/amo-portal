@@ -9,7 +9,7 @@ import msgpack
 
 from amodb.database import WriteSessionLocal
 
-from . import models, realtime_auth, schemas, secure_messaging
+from . import broker_auth, models, realtime_auth, schemas, secure_messaging
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +30,23 @@ class RealtimeGateway:
         self._flush_lock = threading.Lock()
 
     def connect(self) -> None:
-        if not self.enabled or not mqtt or not self.internal_url:
+        broker_auth.validate_production_config()
+        if not self.enabled:
+            return
+        if not mqtt:
+            if os.getenv("APP_ENV", "").lower() in {"production", "prod"}:
+                raise RuntimeError("paho-mqtt is required when production realtime is enabled")
+            return
+        if not self.internal_url:
             return
         if self._client:
             return
         self._stop.clear()
         self._client = mqtt.Client(protocol=mqtt.MQTTv311)
+        username = (os.getenv("REALTIME_GATEWAY_USERNAME") or "").strip()
+        password = (os.getenv("REALTIME_GATEWAY_PASSWORD") or "").strip()
+        if username:
+            self._client.username_pw_set(username=username, password=password)
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
@@ -47,7 +58,7 @@ class RealtimeGateway:
         return self.internal_url.split("://", 1)[-1].split(":", 1)[0]
 
     def _port(self) -> int:
-        value = self.internal_url.split(":")[-1]
+        value = self.internal_url.rsplit(":", 1)[-1]
         return int(value) if value.isdigit() else 1883
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
@@ -84,7 +95,6 @@ class RealtimeGateway:
             db.commit()
         except Exception:
             db.rollback()
-            # Never log packet bytes or authToken values.
             logger.exception("Failed to process authenticated realtime message", extra={"topic": topic})
         finally:
             db.close()
