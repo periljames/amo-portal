@@ -150,6 +150,7 @@ def main() -> None:
         connection.execute(text("CREATE TABLE migration_collision_probe (id integer)"))
         connection.execute(text("CREATE INDEX ix_roster_rules_scope ON migration_collision_probe (id)"))
         connection.execute(text("CREATE INDEX ix_roster_rules_amo_active ON migration_collision_probe (id)"))
+        connection.execute(text("CREATE INDEX uq_roster_rules_amo_code ON migration_collision_probe (id)"))
 
     _run_alembic("upgrade", "workforce_20260721_complete")
 
@@ -177,6 +178,10 @@ def main() -> None:
     assert "ix_wr_roster_rules_scope" in indexes
     assert any(
         name.startswith("ix_roster_rules_amo_active__roster_rules")
+        for name in indexes
+    ), indexes
+    assert any(
+        name.startswith("uq_roster_rules_amo_code__roster_rules")
         for name in indexes
     ), indexes
 
