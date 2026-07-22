@@ -1,5 +1,6 @@
 import { getApiBaseUrl } from "./config";
 import {
+  currentOfflineScope,
   enqueueOfflineMutation,
   newOfflineIdempotencyKey,
   readApiCache,
@@ -110,6 +111,12 @@ function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+function assertRequestScope(scope: string): void {
+  if (currentOfflineScope() !== scope) {
+    throw new Error("AMO context changed while the request was in progress. Retry in the active AMO.");
+  }
+}
+
 function cachedResponse(value: unknown, storedAt: number): Response {
   return new Response(JSON.stringify(value), {
     status: 200,
@@ -121,8 +128,9 @@ function cachedResponse(value: unknown, storedAt: number): Response {
   });
 }
 
-async function cachedFallback(path: string, allowExpired: boolean): Promise<Response | null> {
-  const cached = await readApiCache(path, allowExpired);
+async function cachedFallback(path: string, allowExpired: boolean, scope: string): Promise<Response | null> {
+  const cached = await readApiCache(path, allowExpired, scope);
+  assertRequestScope(scope);
   return cached ? cachedResponse(cached.value, cached.storedAt) : null;
 }
 
@@ -137,7 +145,12 @@ function canQueueBody(body: BodyInit | null | undefined): boolean {
   return body == null || typeof body === "string" || body instanceof URLSearchParams;
 }
 
-async function queueRequest(path: string, method: string, init: PortalFetchInit): Promise<never> {
+async function queueRequest(
+  path: string,
+  method: string,
+  init: PortalFetchInit,
+  requestScope: string,
+): Promise<never> {
   if (!canQueueBody(init.body)) {
     throw new Error("This file or binary operation cannot be stored offline. Reconnect before retrying.");
   }
@@ -154,6 +167,7 @@ async function queueRequest(path: string, method: string, init: PortalFetchInit)
     entityType: init.offline?.entityType,
     entityId: init.offline?.entityId,
     idempotencyKey,
+    scope: requestScope,
   });
   throw new OfflineQueuedError(operation);
 }
@@ -174,13 +188,15 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const allowStaleFallback = offline?.allowStaleFallback !== false;
   const queueMutation = !isGet && offline?.queueMutation === true;
   const cachePath = normalizedCachePath(path);
+  const requestScope = currentOfflineScope();
 
   if (!networkAvailable()) {
     if (cacheEnabled) {
-      const cached = await cachedFallback(cachePath, allowStaleFallback);
+      const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
       if (cached) return cached;
     }
-    if (queueMutation) return queueRequest(cachePath, method, init);
+    assertRequestScope(requestScope);
+    if (queueMutation) return queueRequest(cachePath, method, init, requestScope);
     throw new Error(isGet
       ? "This data has not been cached on this device yet. Reconnect once to make it available offline."
       : "The server is offline. This operation requires a live connection.");
@@ -196,13 +212,21 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
 
   try {
     const response = await fetch(absoluteUrl(path), { ...requestInit, signal: controller.signal });
+    assertRequestScope(requestScope);
+
     if (response.ok) {
       if (cacheEnabled) {
         const contentType = response.headers.get("content-type") || "";
         if (contentType.includes("application/json")) {
           const value = await response.clone().json().catch(() => undefined);
+          assertRequestScope(requestScope);
           if (value !== undefined) {
-            void writeApiCache(cachePath, value, offline?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS);
+            void writeApiCache(
+              cachePath,
+              value,
+              offline?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS,
+              requestScope,
+            );
           }
         }
       }
@@ -211,20 +235,22 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
 
     if (isRetryableStatus(response.status)) {
       if (cacheEnabled) {
-        const cached = await cachedFallback(cachePath, allowStaleFallback);
+        const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
         if (cached) return cached;
       }
-      if (queueMutation) return queueRequest(cachePath, method, init);
+      assertRequestScope(requestScope);
+      if (queueMutation) return queueRequest(cachePath, method, init, requestScope);
     }
 
     return response;
   } catch (error) {
     if (!isNetworkFailure(error)) throw error;
     if (cacheEnabled) {
-      const cached = await cachedFallback(cachePath, allowStaleFallback);
+      const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
       if (cached) return cached;
     }
-    if (queueMutation) return queueRequest(cachePath, method, init);
+    assertRequestScope(requestScope);
+    if (queueMutation) return queueRequest(cachePath, method, init, requestScope);
     throw new Error(isGet
       ? "The server could not be reached and no cached copy is available."
       : "The server could not be reached. Reconnect and retry this operation.");
