@@ -69,7 +69,7 @@ services:
     command:
       - python
       - -m
-      - amodb.jobs.saas_worker
+      - amodb.jobs.saas_worker_safe
       - --batch-size
       - ${SAAS_WORKER_BATCH_SIZE:-1}
     environment:
