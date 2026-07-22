@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
 import {
   platformApi,
@@ -28,7 +28,7 @@ export default function PlatformIntegrationsPage() {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [rawKey, setRawKey] = useState<string | null>(null);
   const [tenantScope, setTenantScope] = useState("");
-  const [selectedProvider, setSelectedProvider] = useState<string>("stripe");
+  const [selectedProvider, setSelectedProvider] = useState<string>("");
   const [configDraft, setConfigDraft] = useState<Record<string, string>>({});
   const [secretDraft, setSecretDraft] = useState<Record<string, string>>({});
   const [providerNotice, setProviderNotice] = useState<string | null>(null);
@@ -44,16 +44,10 @@ export default function PlatformIntegrationsPage() {
     () => platformApi.saasProviders(tenantScope.trim() || null),
     [tenantScope],
   );
-  const jobs = usePlatformData(
-    () => platformApi.saasJobs({ limit: 30 }),
-    [],
-  );
+  const jobs = usePlatformData(() => platformApi.saasJobs({ limit: 30 }), []);
   const keys = usePlatformData(() => platformApi.apiKeys(), []);
   const hooks = usePlatformData(() => platformApi.webhooks(), []);
-  const tickets = usePlatformData(
-    () => platformApi.saasSupportTickets({ limit: 30 }),
-    [],
-  );
+  const tickets = usePlatformData(() => platformApi.saasSupportTickets({ limit: 30 }), []);
   const ticketDetail = usePlatformData(
     () => selectedTicketId ? platformApi.saasSupportTicket(selectedTicketId) : Promise.resolve(null),
     [selectedTicketId],
@@ -64,18 +58,27 @@ export default function PlatformIntegrationsPage() {
     [providers.data?.items, selectedProvider],
   );
 
-  useEffect(() => {
-    if (!provider) return;
+  const beginProviderEdit = (item: SaaSProvider) => {
     const next: Record<string, string> = {};
-    provider.config_fields.forEach((field) => {
-      const value = provider.config?.[field];
+    item.config_fields.forEach((field) => {
+      const value = item.config?.[field];
       next[field] = value === undefined || value === null ? "" : String(value);
     });
+    setSelectedProvider(item.provider);
     setConfigDraft(next);
     setSecretDraft({});
     setProviderNotice(null);
     setProviderError(null);
-  }, [provider?.provider, provider?.tenant_id, provider?.updated_at]);
+  };
+
+  const changeTenantScope = (value: string) => {
+    setTenantScope(value);
+    setSelectedProvider("");
+    setConfigDraft({});
+    setSecretDraft({});
+    setProviderNotice(null);
+    setProviderError(null);
+  };
 
   const saveProvider = async () => {
     if (!provider) return;
@@ -162,7 +165,7 @@ export default function PlatformIntegrationsPage() {
             <input
               placeholder="Tenant ID for optional override"
               value={tenantScope}
-              onChange={(event) => setTenantScope(event.target.value)}
+              onChange={(event) => changeTenantScope(event.target.value)}
             />
             <button className="platform-btn" onClick={providers.reload}>Load scope</button>
           </div>
@@ -177,7 +180,7 @@ export default function PlatformIntegrationsPage() {
                     <td>{item.category}</td>
                     <td><StatusBadge value={item.status} /></td>
                     <td>{item.last_latency_ms != null ? `${item.last_latency_ms} ms` : "-"}</td>
-                    <td><button className="platform-btn" onClick={() => setSelectedProvider(item.provider)}>Configure</button></td>
+                    <td><button className="platform-btn" onClick={() => beginProviderEdit(item)}>Configure</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -195,23 +198,13 @@ export default function PlatformIntegrationsPage() {
                 {provider.config_fields.map((field) => (
                   <label key={field}>
                     <span>{field.replaceAll("_", " ")}</span>
-                    <input
-                      value={configDraft[field] ?? ""}
-                      onChange={(event) => setConfigDraft((current) => ({ ...current, [field]: event.target.value }))}
-                      placeholder={field}
-                    />
+                    <input value={configDraft[field] ?? ""} onChange={(event) => setConfigDraft((current) => ({ ...current, [field]: event.target.value }))} placeholder={field} />
                   </label>
                 ))}
                 {provider.secret_fields.map((field) => (
                   <label key={field}>
                     <span>{field.replaceAll("_", " ")}</span>
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      value={secretDraft[field] ?? ""}
-                      onChange={(event) => setSecretDraft((current) => ({ ...current, [field]: event.target.value }))}
-                      placeholder={provider.has_secret ? "Leave blank to preserve stored value" : field}
-                    />
+                    <input type="password" autoComplete="new-password" value={secretDraft[field] ?? ""} onChange={(event) => setSecretDraft((current) => ({ ...current, [field]: event.target.value }))} placeholder={provider.has_secret ? "Leave blank to preserve stored value" : field} />
                   </label>
                 ))}
               </div>
@@ -232,64 +225,33 @@ export default function PlatformIntegrationsPage() {
         {jobs.data?.items?.length ? (
           <DataTable>
             <thead><tr><th>Created</th><th>Queue</th><th>Job</th><th>Tenant</th><th>Status</th><th>Attempts</th><th>Error</th></tr></thead>
-            <tbody>
-              {jobs.data.items.map((job) => (
-                <tr key={job.id}>
-                  <td>{job.created_at ? new Date(job.created_at).toLocaleString() : "-"}</td>
-                  <td>{job.queue_name}</td>
-                  <td>{job.job_type}<br /><small>{job.id}</small></td>
-                  <td>{job.tenant_id ?? "Platform"}</td>
-                  <td><StatusBadge value={job.status} /></td>
-                  <td>{job.attempt_count}/{job.max_attempts}</td>
-                  <td>{job.last_error ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
+            <tbody>{jobs.data.items.map((job) => (
+              <tr key={job.id}>
+                <td>{job.created_at ? new Date(job.created_at).toLocaleString() : "-"}</td><td>{job.queue_name}</td><td>{job.job_type}<br /><small>{job.id}</small></td><td>{job.tenant_id ?? "Platform"}</td><td><StatusBadge value={job.status} /></td><td>{job.attempt_count}/{job.max_attempts}</td><td>{job.last_error ?? "-"}</td>
+              </tr>
+            ))}</tbody>
           </DataTable>
         ) : <EmptyState label="No SaaS jobs are recorded." />}
       </section>
 
-      {rawKey ? (
-        <div className="platform-error">
-          <strong>Copy this API key now. It will not be shown again.</strong><br />
-          <code>{rawKey}</code>
-        </div>
-      ) : null}
+      {rawKey ? <div className="platform-error"><strong>Copy this API key now. It will not be shown again.</strong><br /><code>{rawKey}</code></div> : null}
 
       <section className="platform-two">
         <div className="platform-card">
           <h2>Platform API keys</h2>
           <div className="platform-form" style={{ gridTemplateColumns: "1fr auto", marginBottom: 12 }}>
             <input value={keyName} onChange={(event) => setKeyName(event.target.value)} />
-            <button
-              className="platform-btn primary"
-              onClick={() => platformApi.createApiKey({ name: keyName, scopes: ["platform.read"] }).then((result) => {
-                setRawKey(String(result.raw_key ?? ""));
-                keys.reload();
-              })}
-            >Issue key</button>
+            <button className="platform-btn primary" onClick={() => platformApi.createApiKey({ name: keyName, scopes: ["platform.read"] }).then((result) => { setRawKey(String(result.raw_key ?? "")); keys.reload(); })}>Issue key</button>
           </div>
           {keys.data?.items?.length ? (
-            <DataTable>
-              <thead><tr><th>Name</th><th>Prefix</th><th>Status</th><th /></tr></thead>
-              <tbody>{keys.data.items.map((item) => {
-                const key = item as Record<string, unknown>;
-                return <tr key={String(key.id)}><td>{String(key.name)}</td><td>{String(key.key_prefix)}</td><td><StatusBadge value={key.status} /></td><td><button className="platform-btn danger" onClick={() => platformApi.revokeApiKey(String(key.id), "Platform key revoked").then(keys.reload)}>Revoke</button></td></tr>;
-              })}</tbody>
-            </DataTable>
+            <DataTable><thead><tr><th>Name</th><th>Prefix</th><th>Status</th><th /></tr></thead><tbody>{keys.data.items.map((item) => { const key = item as Record<string, unknown>; return <tr key={String(key.id)}><td>{String(key.name)}</td><td>{String(key.key_prefix)}</td><td><StatusBadge value={key.status} /></td><td><button className="platform-btn danger" onClick={() => platformApi.revokeApiKey(String(key.id), "Platform key revoked").then(keys.reload)}>Revoke</button></td></tr>; })}</tbody></DataTable>
           ) : <EmptyState label="No API keys." />}
         </div>
 
         <div className="platform-card">
           <h2>Outbound webhooks</h2>
-          <div className="platform-form" style={{ marginBottom: 12 }}>
-            <input placeholder="https://example.com/webhook" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} />
-            <button className="platform-btn primary" onClick={() => platformApi.createWebhook({ name: "Global webhook", event_type: "platform.event", target_url: webhookUrl }).then(hooks.reload)}>Configure webhook</button>
-          </div>
-          {hooks.data?.items?.length ? hooks.data.items.map((item) => {
-            const hook = item as Record<string, unknown>;
-            return <p key={String(hook.id)}><StatusBadge value={hook.status} /> {String(hook.name)}<br /><small>{String(hook.target_url)}</small></p>;
-          }) : <EmptyState label="No webhooks configured." />}
+          <div className="platform-form" style={{ marginBottom: 12 }}><input placeholder="https://example.com/webhook" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} /><button className="platform-btn primary" onClick={() => platformApi.createWebhook({ name: "Global webhook", event_type: "platform.event", target_url: webhookUrl }).then(hooks.reload)}>Configure webhook</button></div>
+          {hooks.data?.items?.length ? hooks.data.items.map((item) => { const hook = item as Record<string, unknown>; return <p key={String(hook.id)}><StatusBadge value={hook.status} /> {String(hook.name)}<br /><small>{String(hook.target_url)}</small></p>; }) : <EmptyState label="No webhooks configured." />}
         </div>
       </section>
 
@@ -302,39 +264,12 @@ export default function PlatformIntegrationsPage() {
             <textarea placeholder="Describe the problem" value={ticketDescription} onChange={(event) => setTicketDescription(event.target.value)} />
             <button className="platform-btn primary" onClick={createTicket}>Open ticket</button>
           </div>
-          {tickets.data?.items?.length ? (
-            <DataTable>
-              <thead><tr><th>Ticket</th><th>Tenant</th><th>Priority</th><th>Status</th></tr></thead>
-              <tbody>{tickets.data.items.map((ticket) => (
-                <tr key={ticket.id} onClick={() => setSelectedTicketId(ticket.id)} style={{ cursor: "pointer" }}>
-                  <td><strong>{ticket.title}</strong><br /><small>{ticket.external_id}</small></td>
-                  <td>{ticket.tenant_id ?? "Platform"}</td>
-                  <td>{ticket.priority}</td>
-                  <td><StatusBadge value={ticket.status} /></td>
-                </tr>
-              ))}</tbody>
-            </DataTable>
-          ) : <EmptyState label="No support tickets." />}
+          {tickets.data?.items?.length ? <DataTable><thead><tr><th>Ticket</th><th>Tenant</th><th>Priority</th><th>Status</th></tr></thead><tbody>{tickets.data.items.map((ticket) => <tr key={ticket.id} onClick={() => setSelectedTicketId(ticket.id)} style={{ cursor: "pointer" }}><td><strong>{ticket.title}</strong><br /><small>{ticket.external_id}</small></td><td>{ticket.tenant_id ?? "Platform"}</td><td>{ticket.priority}</td><td><StatusBadge value={ticket.status} /></td></tr>)}</tbody></DataTable> : <EmptyState label="No support tickets." />}
         </div>
 
         <div className="platform-card">
           <h2>Ticket conversation</h2>
-          {selectedTicket ? (
-            <>
-              <p><strong>{selectedTicket.title}</strong><br /><StatusBadge value={selectedTicket.status} /> {selectedTicket.external_id}</p>
-              {(selectedTicket.messages ?? []).map((message) => (
-                <div key={message.id} className="platform-card" style={{ marginBottom: 8 }}>
-                  <small>{message.author_type} · {new Date(message.created_at).toLocaleString()}</small>
-                  <p>{message.body}</p>
-                </div>
-              ))}
-              <textarea placeholder="Reply to the ticket" value={ticketMessage} onChange={(event) => setTicketMessage(event.target.value)} />
-              <div className="platform-actions">
-                <button className="platform-btn primary" onClick={() => selectedTicketId && platformApi.addSupportMessage(selectedTicketId, ticketMessage).then(() => { setTicketMessage(""); ticketDetail.reload(); tickets.reload(); })}>Send reply</button>
-                <button className="platform-btn" onClick={() => selectedTicketId && platformApi.requestAiSupportReply(selectedTicketId).then(() => { jobs.reload(); })}>Queue AI draft</button>
-              </div>
-            </>
-          ) : <EmptyState label="Select a ticket to view the conversation." />}
+          {selectedTicket ? <><p><strong>{selectedTicket.title}</strong><br /><StatusBadge value={selectedTicket.status} /> {selectedTicket.external_id}</p>{(selectedTicket.messages ?? []).map((message) => <div key={message.id} className="platform-card" style={{ marginBottom: 8 }}><small>{message.author_type} · {new Date(message.created_at).toLocaleString()}</small><p>{message.body}</p></div>)}<textarea placeholder="Reply to the ticket" value={ticketMessage} onChange={(event) => setTicketMessage(event.target.value)} /><div className="platform-actions"><button className="platform-btn primary" onClick={() => selectedTicketId && platformApi.addSupportMessage(selectedTicketId, ticketMessage).then(() => { setTicketMessage(""); ticketDetail.reload(); tickets.reload(); })}>Send reply</button><button className="platform-btn" onClick={() => selectedTicketId && platformApi.requestAiSupportReply(selectedTicketId).then(jobs.reload)}>Queue AI draft</button></div></> : <EmptyState label="Select a ticket to view the conversation." />}
         </div>
       </section>
     </PlatformShell>
