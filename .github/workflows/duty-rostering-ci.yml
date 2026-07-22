@@ -14,6 +14,9 @@ on:
       - "frontend/src/components/realtime/**"
       - "frontend/src/services/rostering.ts"
       - "frontend/src/services/workforce.ts"
+      - "frontend/src/services/fleet.ts"
+      - "frontend/src/services/maintenance.ts"
+      - "frontend/src/services/workOrders.ts"
       - "frontend/src/services/typedApi.ts"
       - "frontend/src/services/apiClient.ts"
       - "frontend/src/services/crs.ts"
@@ -109,6 +112,9 @@ jobs:
           src/pages/rostering
           src/services/rostering.ts
           src/services/workforce.ts
+          src/services/fleet.ts
+          src/services/maintenance.ts
+          src/services/workOrders.ts
           src/services/typedApi.ts
           src/services/apiClient.ts
           src/services/crs.ts
