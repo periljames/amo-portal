@@ -7,11 +7,15 @@ on:
       - "backend/amodb/apps/accounts/**"
       - "backend/amodb/jobs/saas_worker.py"
       - "backend/amodb/jobs/platform_command_worker.py"
-      - "backend/amodb/alembic/versions/saas_*.py"
+      - "backend/amodb/alembic/versions/**"
       - "backend/amodb/scripts/saas_control_plane_internal_check.py"
       - "backend/docs/platform/**"
       - "frontend/src/services/platformControl*"
+      - "frontend/src/services/rostering.ts"
+      - "frontend/src/services/rosterPeople.ts"
+      - "frontend/src/types/rostering.ts"
       - "frontend/src/pages/platform/**"
+      - "frontend/src/pages/rostering/**"
       - "frontend/package.json"
       - "frontend/package-lock.json"
       - "loadtests/**"
@@ -72,12 +76,15 @@ jobs:
           from alembic.script import ScriptDirectory
 
           script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-          revision = script.get_revision("saas_20260722_control_plane")
-          assert revision is not None
-          assert revision.down_revision == "quality_20260722_schema_integrity"
+          foundation = script.get_revision("saas_20260722_control_plane")
+          finalizer = script.get_revision("saas_20260722_finalize_idx")
+          assert foundation is not None
+          assert foundation.down_revision == "quality_20260722_schema_integrity"
+          assert finalizer is not None
+          assert finalizer.down_revision == "saas_20260722_control_plane"
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert "saas_20260722_control_plane" in heads
+          assert heads == ["saas_20260722_finalize_idx"], heads
           PY
       - name: Upgrade production schema graph
         id: migrate
@@ -178,7 +185,7 @@ jobs:
         run: |
           set -o pipefail
           npm run build 2>&1 | tee platform-build.log
-      - name: Lint changed platform surfaces
+      - name: Lint changed platform and roster surfaces
         id: frontend_lint
         continue-on-error: true
         working-directory: frontend
@@ -188,9 +195,11 @@ jobs:
           npm exec -- eslint \
             src/services/platformControl.ts \
             src/services/platformControl.test.ts \
+            src/services/rostering.ts \
             src/pages/platform/PlatformIntegrationsPage.tsx \
             src/pages/platform/PlatformBillingPage.tsx \
             src/pages/platform/PlatformTenantsPage.tsx \
+            src/pages/rostering/hooks/useRosterPlannerDataV2.ts \
             2>&1 | tee platform-lint.log
       - name: Validate k6 script syntax
         id: k6_syntax
