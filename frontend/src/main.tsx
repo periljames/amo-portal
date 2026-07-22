@@ -12,6 +12,7 @@ import { clearApiResponseCache } from "./services/apiClient";
 import { onSessionEvent } from "./services/auth";
 import { BRANDING_EVENT } from "./services/branding";
 import {
+  clearAllPortalApiCaches,
   clearAllPortalOfflineData,
   currentOfflineScope,
   onOfflineSyncComplete,
@@ -254,7 +255,17 @@ if (typeof window !== "undefined") {
       void replayOfflineMutations();
       return;
     }
-    if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
+
+    if (detail.type === "expired" || detail.type === "idle-logout") {
+      // Clear readable caches after involuntary expiry, but retain the scoped outbox.
+      // The user can sign in again and safely resume changes created while offline.
+      observedTenantScope = currentOfflineScope();
+      clearTenantScopedRuntimeState();
+      void Promise.all([clearAllPortalApiCaches(), clearAllPortalQueryCaches()]);
+      return;
+    }
+
+    if (detail.type === "manual-logout") {
       observedTenantScope = currentOfflineScope();
       clearTenantScopedRuntimeState();
       void Promise.all([clearAllPortalOfflineData(), clearAllPortalQueryCaches()]);
