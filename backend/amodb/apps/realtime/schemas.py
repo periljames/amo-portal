@@ -42,8 +42,6 @@ def _wire_value(value: Any) -> Any:
 
 
 class RealtimeEnvelope(BaseModel):
-    # MQTT/MessagePack clients serialize enum members as strings. Keep extra
-    # fields forbidden, while allowing Pydantic to coerce those wire values.
     model_config = ConfigDict(extra="forbid")
 
     v: int = Field(ge=1)
@@ -53,6 +51,8 @@ class RealtimeEnvelope(BaseModel):
     userId: str = Field(min_length=2, max_length=64)
     kind: RealtimeKind
     payload: dict[str, Any] = Field(default_factory=dict)
+    # Present only on client-to-gateway outbox messages. Server fan-out strips it.
+    authToken: str | None = Field(default=None, min_length=20, max_length=256, repr=False)
 
     @field_validator("payload")
     @classmethod
