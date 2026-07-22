@@ -4,10 +4,16 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
-import '@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css';
+import "@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css";
 import App from "./App";
+import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
+import { onSessionEvent } from "./services/auth";
+import {
+  clearAllPortalOfflineData,
+  createPortalQueryPersister,
+  replayOfflineMutations,
+} from "./services/offlinePersistence";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/global.css";
@@ -25,20 +31,49 @@ import "./styles/components/action-panel.css";
 import "./styles/components/planning-production.css";
 import "./styles/components/liquid-glass.css";
 import "./styles/rostering.css";
+// The contract must load after module CSS so literal legacy colours cannot win.
+import "./styles/theme-contract.css";
 
+const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const SENSITIVE_QUERY_MARKERS = [
+  "auth",
+  "password",
+  "token",
+  "billing",
+  "invoice",
+  "email-log",
+  "email-setting",
+  "security",
+  "diagnostic",
+  "platform-control",
+  "attachment",
+  "download",
+  "export",
+];
 
-if (typeof document !== "undefined" && import.meta.env.VITE_MANUALS_PWA_ENABLED === "1") {
-  const link = document.createElement("link");
-  link.rel = "manifest";
-  link.href = "/manuals-reader.webmanifest";
-  document.head.appendChild(link);
+function shouldPersistQuery(query: { queryKey: readonly unknown[]; state: { status: string } }): boolean {
+  if (query.state.status !== "success") return false;
+  const marker = query.queryKey.map((part) => String(part)).join(":").toLowerCase();
+  return !SENSITIVE_QUERY_MARKERS.some((value) => marker.includes(value));
+}
+
+function ensureManifest(): void {
+  if (typeof document === "undefined") return;
+  let link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "manifest";
+    document.head.appendChild(link);
+  }
+  link.href = "/portal.webmanifest";
 }
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 60_000,
-      gcTime: 15 * 60_000,
+      networkMode: "offlineFirst",
+      staleTime: 5 * 60_000,
+      gcTime: QUERY_MAX_AGE_MS,
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
       refetchOnMount: false,
@@ -46,13 +81,15 @@ const queryClient = new QueryClient({
       retry(failureCount, error) {
         const message = error instanceof Error ? error.message.toLowerCase() : "";
         if (
-          message.includes("401") ||
-          message.includes("403") ||
-          message.includes("404") ||
-          message.includes("session expired") ||
-          message.includes("unauthorized") ||
-          message.includes("timeout") ||
-          message.includes("abort")
+          message.includes("401")
+          || message.includes("403")
+          || message.includes("404")
+          || message.includes("session expired")
+          || message.includes("unauthorized")
+          || message.includes("timeout")
+          || message.includes("abort")
+          || message.includes("offline")
+          || message.includes("cached copy")
         ) {
           return false;
         }
@@ -61,16 +98,15 @@ const queryClient = new QueryClient({
       retryOnMount: false,
     },
     mutations: {
+      networkMode: "offlineFirst",
       retry: 0,
     },
   },
 });
 
-const queryPersister = createSyncStoragePersister({
-  storage: typeof window !== "undefined" ? window.localStorage : undefined,
-  key: "amodb-query-cache-v1",
-  throttleTime: 1500,
-});
+const queryPersister = createPortalQueryPersister();
+
+ensureManifest();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -78,54 +114,52 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       client={queryClient}
       persistOptions={{
         persister: queryPersister,
-        maxAge: 24 * 60 * 60 * 1000,
+        buster: "amo-portal-query-v2",
+        maxAge: QUERY_MAX_AGE_MS,
         dehydrateOptions: {
-          shouldDehydrateQuery: (query) => {
-            const head = Array.isArray(query.queryKey) ? query.queryKey[0] : query.queryKey;
-            return typeof head === "string" && ["subscription", "entitlements", "qms-audit-personnel-options"].includes(head);
-          },
+          shouldDehydrateQuery: shouldPersistQuery,
+          shouldDehydrateMutation: (mutation) => mutation.state.isPaused,
         },
+      }}
+      onSuccess={() => {
+        void queryClient.resumePausedMutations();
+        void replayOfflineMutations();
       }}
     >
       <RealtimeProvider>
         <BrowserRouter>
           <App />
         </BrowserRouter>
+        <OfflineSyncIndicator />
       </RealtimeProvider>
     </PersistQueryClientProvider>
-  </React.StrictMode>
+  </React.StrictMode>,
 );
 
-const AERODOC_CACHE_PREFIX = "aerodoc-hybrid-dms-";
-
-async function clearAeroDocCaches(): Promise<void> {
-  if (!("caches" in window)) return;
-  const keys = await window.caches.keys();
-  await Promise.all(keys.filter((key) => key.startsWith(AERODOC_CACHE_PREFIX)).map((key) => window.caches.delete(key)));
-}
-
-async function configureAeroDocServiceWorker(): Promise<void> {
+async function configurePortalServiceWorker(): Promise<void> {
   if (!("serviceWorker" in navigator)) return;
-  const enabled = import.meta.env.VITE_AERODOC_PWA_ENABLED === "1";
+  const enabled = import.meta.env.PROD || import.meta.env.VITE_PORTAL_OFFLINE_ENABLED === "1";
+  const registrations = await navigator.serviceWorker.getRegistrations();
 
   if (!enabled) {
-    const registrations = await navigator.serviceWorker.getRegistrations();
     await Promise.all(
       registrations
-        .filter((registration) => registration.active?.scriptURL.includes("/aerodoc-sw.js"))
+        .filter((registration) => registration.active?.scriptURL.includes("/portal-sw.js"))
         .map((registration) => registration.unregister()),
     );
-    await clearAeroDocCaches();
     return;
   }
 
+  await Promise.all(
+    registrations
+      .filter((registration) => registration.active?.scriptURL.includes("/aerodoc-sw.js"))
+      .map((registration) => registration.unregister()),
+  );
+
   const hadController = Boolean(navigator.serviceWorker.controller);
   let reloadScheduled = false;
-  const registration = await navigator.serviceWorker.register("/aerodoc-sw.js", { updateViaCache: "none" });
-
-  const activateWaitingWorker = () => {
-    registration.waiting?.postMessage({ type: "SKIP_WAITING" });
-  };
+  const registration = await navigator.serviceWorker.register("/portal-sw.js", { scope: "/", updateViaCache: "none" });
+  const activateWaitingWorker = () => registration.waiting?.postMessage({ type: "SKIP_WAITING" });
 
   registration.addEventListener("updatefound", () => {
     const worker = registration.installing;
@@ -146,7 +180,18 @@ async function configureAeroDocServiceWorker(): Promise<void> {
 }
 
 if (typeof window !== "undefined") {
+  onSessionEvent((detail) => {
+    if (detail.type === "authenticated") {
+      void replayOfflineMutations();
+      return;
+    }
+    if (detail.type === "expired" || detail.type === "idle-logout" || detail.type === "manual-logout") {
+      queryClient.clear();
+      void clearAllPortalOfflineData();
+    }
+  });
+  window.addEventListener("online", () => void replayOfflineMutations());
   window.addEventListener("load", () => {
-    void configureAeroDocServiceWorker().catch(() => undefined);
+    void configurePortalServiceWorker().catch((error) => console.warn("[offline] Service worker unavailable", error));
   });
 }
