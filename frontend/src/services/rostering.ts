@@ -1,122 +1,283 @@
-// src/services/rostering.ts
-import { authHeaders } from "./auth";
-import { apiGet, apiPost, apiPut } from "./crs";
-import type {
-  MyRosterResponse,
-  RosterAssignmentCreate,
-  RosterAssignmentRead,
-  RosterContractResponse,
-  RosterPeriodCreate,
-  RosterPeriodRead,
-  RosterPlanningBoardResponse,
-  RosterTaskAssignmentLinkRead,
-  RosterValidationResult,
-  RosterVersionCreate,
-  RosterVersionRead,
-  ShiftTemplateCreate,
-  ShiftTemplateRead,
-} from "../types/rostering";
+import { apiBlob, apiJson, downloadBlob, jsonBody, queryString } from "./typedApi";
+import type * as Roster from "../types/rostering";
 
-function qs(params: Record<string, string | number | boolean | null | undefined>): string {
-  const sp = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== "") sp.set(key, String(value));
+type DateRange = {
+  from: string;
+  to: string;
+  base_station_id?: string | null;
+  department_id?: string | null;
+  user_id?: string | null;
+};
+
+type PeriodFilters = {
+  status?: string | null;
+  from?: string | null;
+  to?: string | null;
+};
+
+type LifecycleRequest = {
+  expected_state_revision?: number | null;
+  idempotency_key?: string | null;
+  comment?: string | null;
+};
+
+type DeleteAssignmentRequest = {
+  reason: string;
+  expected_state_revision?: number | null;
+};
+
+export function getRosterContracts(): Promise<Roster.RosterContractResponse> {
+  return apiJson("/rostering/contracts");
+}
+
+export function getRosterDashboard(range: DateRange): Promise<Roster.RosterDashboardResponse> {
+  return apiJson(`/rostering/dashboard${queryString(range)}`);
+}
+
+export function getPlanningBoard(range: DateRange): Promise<Roster.RosterPlanningBoardResponse> {
+  return apiJson(`/rostering/planning-board${queryString(range)}`);
+}
+
+export function getRosterPlanningBoard(
+  from: string,
+  to: string,
+  baseStationId?: string,
+): Promise<Roster.RosterPlanningBoardResponse> {
+  return getPlanningBoard({ from, to, base_station_id: baseStationId || null });
+}
+
+export function listShiftTemplates(includeInactive = false): Promise<Roster.ShiftTemplateRead[]> {
+  return apiJson(`/rostering/shift-templates${queryString({ include_inactive: includeInactive })}`);
+}
+
+export function createShiftTemplate(payload: Roster.ShiftTemplateCreate): Promise<Roster.ShiftTemplateRead> {
+  return apiJson("/rostering/shift-templates", { method: "POST", body: jsonBody(payload) });
+}
+
+export function updateShiftTemplate(
+  templateId: string,
+  payload: Partial<Roster.ShiftTemplateCreate>,
+): Promise<Roster.ShiftTemplateRead> {
+  return apiJson(`/rostering/shift-templates/${encodeURIComponent(templateId)}`, {
+    method: "PATCH",
+    body: jsonBody(payload),
   });
-  const rendered = sp.toString();
-  return rendered ? `?${rendered}` : "";
 }
 
-export function getRosterContracts(): Promise<RosterContractResponse> {
-  return apiGet<RosterContractResponse>("/rostering/contracts", { headers: authHeaders() });
+export function listRosterPeriods(filters?: string | PeriodFilters): Promise<Roster.RosterPeriodRead[]> {
+  const normalized: PeriodFilters = typeof filters === "string" ? { status: filters } : (filters || {});
+  return apiJson(`/rostering/periods${queryString(normalized)}`);
 }
 
-export function listShiftTemplates(includeInactive = false): Promise<ShiftTemplateRead[]> {
-  return apiGet<ShiftTemplateRead[]>(`/rostering/shift-templates${qs({ include_inactive: includeInactive })}`, { headers: authHeaders() });
+export function createRosterPeriod(payload: Roster.RosterPeriodCreate): Promise<Roster.RosterPeriodRead> {
+  return apiJson("/rostering/periods", { method: "POST", body: jsonBody(payload) });
 }
 
-export function createShiftTemplate(payload: ShiftTemplateCreate): Promise<ShiftTemplateRead> {
-  return apiPost<ShiftTemplateRead>("/rostering/shift-templates", payload, { headers: authHeaders() });
+export function updateRosterPeriod(
+  periodId: string,
+  payload: Partial<Roster.RosterPeriodCreate> & { status?: string },
+): Promise<Roster.RosterPeriodRead> {
+  return apiJson(`/rostering/periods/${encodeURIComponent(periodId)}`, {
+    method: "PATCH",
+    body: jsonBody(payload),
+  });
 }
 
-export function updateShiftTemplate(templateId: string, payload: Partial<ShiftTemplateCreate>): Promise<ShiftTemplateRead> {
-  return apiPut<ShiftTemplateRead>(`/rostering/shift-templates/${encodeURIComponent(templateId)}`, payload, { headers: authHeaders() });
+export function getRosterPeriod(periodId: string): Promise<Roster.RosterPeriodRead> {
+  return apiJson(`/rostering/periods/${encodeURIComponent(periodId)}`);
 }
 
-export function listRosterPeriods(status?: string): Promise<RosterPeriodRead[]> {
-  return apiGet<RosterPeriodRead[]>(`/rostering/periods${qs({ status })}`, { headers: authHeaders() });
+export function listRosterVersions(periodId: string): Promise<Roster.RosterVersionRead[]> {
+  return apiJson(`/rostering/periods/${encodeURIComponent(periodId)}/versions`);
 }
 
-export function createRosterPeriod(payload: RosterPeriodCreate): Promise<RosterPeriodRead> {
-  return apiPost<RosterPeriodRead>("/rostering/periods", payload, { headers: authHeaders() });
+export function createRosterVersion(
+  periodId: string,
+  payload: Roster.RosterVersionCreate,
+): Promise<Roster.RosterVersionRead> {
+  return apiJson(`/rostering/periods/${encodeURIComponent(periodId)}/versions`, {
+    method: "POST",
+    body: jsonBody(payload),
+  });
 }
 
-export function updateRosterPeriod(periodId: string, payload: Partial<RosterPeriodCreate> & { status?: string }): Promise<RosterPeriodRead> {
-  return apiPut<RosterPeriodRead>(`/rostering/periods/${encodeURIComponent(periodId)}`, payload, { headers: authHeaders() });
+export function amendPublishedRoster(
+  versionId: string,
+  payload: Roster.RosterVersionCreate,
+): Promise<Roster.RosterVersionRead> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/amend`, {
+    method: "POST",
+    body: jsonBody(payload),
+  });
 }
 
-export function listRosterVersions(periodId: string): Promise<RosterVersionRead[]> {
-  return apiGet<RosterVersionRead[]>(`/rostering/periods/${encodeURIComponent(periodId)}/versions`, { headers: authHeaders() });
+export function getRosterVersion(versionId: string): Promise<Roster.RosterVersionRead> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}`);
 }
 
-export function createRosterVersion(periodId: string, payload: RosterVersionCreate): Promise<RosterVersionRead> {
-  return apiPost<RosterVersionRead>(`/rostering/periods/${encodeURIComponent(periodId)}/versions`, payload, { headers: authHeaders() });
+export function listRosterAssignments(
+  versionId: string,
+  includeDeleted = false,
+): Promise<Roster.RosterAssignmentRead[]> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/assignments${queryString({ include_deleted: includeDeleted })}`);
 }
 
-export function listRosterAssignments(versionId: string): Promise<RosterAssignmentRead[]> {
-  return apiGet<RosterAssignmentRead[]>(`/rostering/versions/${encodeURIComponent(versionId)}/assignments`, { headers: authHeaders() });
+export function createRosterAssignment(
+  versionId: string,
+  payload: Roster.RosterAssignmentCreate,
+): Promise<Roster.RosterAssignmentRead> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/assignments`, {
+    method: "POST",
+    body: jsonBody(payload),
+  });
 }
 
-export function createRosterAssignment(versionId: string, payload: RosterAssignmentCreate): Promise<RosterAssignmentRead> {
-  return apiPost<RosterAssignmentRead>(`/rostering/versions/${encodeURIComponent(versionId)}/assignments`, payload, { headers: authHeaders() });
+export function updateRosterAssignment(
+  assignmentId: string,
+  payload: Roster.RosterAssignmentUpdate,
+): Promise<Roster.RosterAssignmentRead> {
+  return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}`, {
+    method: "PATCH",
+    body: jsonBody(payload),
+  });
 }
 
-export function updateRosterAssignment(assignmentId: string, payload: Partial<RosterAssignmentCreate>): Promise<RosterAssignmentRead> {
-  return apiPut<RosterAssignmentRead>(`/rostering/assignments/${encodeURIComponent(assignmentId)}`, payload, { headers: authHeaders() });
+export function deleteRosterAssignment(
+  assignmentId: string,
+  payload: DeleteAssignmentRequest,
+): Promise<void> {
+  return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}`, {
+    method: "DELETE",
+    body: jsonBody(payload),
+  });
 }
 
-export function validateRosterVersion(versionId: string): Promise<RosterValidationResult> {
-  return apiPost<RosterValidationResult>(`/rostering/versions/${encodeURIComponent(versionId)}/validate`, undefined, { headers: authHeaders() });
+export function listRosterFindings(
+  versionId: string,
+  includeResolved = true,
+): Promise<Roster.RosterValidationFindingRead[]> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/findings${queryString({ include_resolved: includeResolved })}`);
 }
 
-export function submitRosterVersion(versionId: string): Promise<RosterVersionRead> {
-  return apiPost<RosterVersionRead>(`/rostering/versions/${encodeURIComponent(versionId)}/submit`, undefined, { headers: authHeaders() });
+export function validateRosterVersion(versionId: string): Promise<Roster.RosterValidationResult> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/validate`, { method: "POST" });
 }
 
-export function approveRosterVersion(versionId: string): Promise<RosterVersionRead> {
-  return apiPost<RosterVersionRead>(`/rostering/versions/${encodeURIComponent(versionId)}/approve`, undefined, { headers: authHeaders() });
+export function submitRosterVersion(
+  versionId: string,
+  payload: LifecycleRequest = {},
+): Promise<Roster.RosterVersionRead> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/submit`, {
+    method: "POST",
+    body: jsonBody(payload),
+  });
 }
 
-export function publishRosterVersion(versionId: string): Promise<RosterVersionRead> {
-  return apiPost<RosterVersionRead>(`/rostering/versions/${encodeURIComponent(versionId)}/publish`, undefined, { headers: authHeaders() });
+export function approveRosterVersion(
+  versionId: string,
+  payload: LifecycleRequest = {},
+): Promise<Roster.RosterVersionRead> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/approve`, {
+    method: "POST",
+    body: jsonBody(payload),
+  });
 }
 
-export function acknowledgeRosterVersion(versionId: string, acknowledgement_note?: string): Promise<{ id: string }> {
-  return apiPost<{ id: string }>(`/rostering/versions/${encodeURIComponent(versionId)}/acknowledge`, { acknowledgement_note }, { headers: authHeaders() });
+export function publishRosterVersion(
+  versionId: string,
+  payload: LifecycleRequest = {},
+): Promise<Roster.RosterVersionRead> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/publish`, {
+    method: "POST",
+    body: jsonBody(payload),
+  });
 }
 
-export function getMyRoster(from: string, to: string): Promise<MyRosterResponse> {
-  return apiGet<MyRosterResponse>(`/rostering/my-roster${qs({ from, to })}`, { headers: authHeaders() });
+export function acknowledgeRosterVersion(
+  versionId: string,
+  payload: string | { acknowledgement_note?: string | null; idempotency_key?: string | null } = {},
+): Promise<{ id: string }> {
+  const normalized = typeof payload === "string" ? { acknowledgement_note: payload } : payload;
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/acknowledge`, {
+    method: "POST",
+    body: jsonBody(normalized),
+  });
 }
 
-export function getRosterPlanningBoard(from: string, to: string, baseStationId?: string): Promise<RosterPlanningBoardResponse> {
-  return apiGet<RosterPlanningBoardResponse>(`/rostering/planning-board${qs({ from, to, base_station_id: baseStationId })}`, { headers: authHeaders() });
+export function getMyRoster(range: DateRange): Promise<Roster.MyRosterResponse>;
+export function getMyRoster(from: string, to: string): Promise<Roster.MyRosterResponse>;
+export function getMyRoster(rangeOrFrom: DateRange | string, to?: string): Promise<Roster.MyRosterResponse> {
+  const range = typeof rangeOrFrom === "string" ? { from: rangeOrFrom, to: to || rangeOrFrom } : rangeOrFrom;
+  return apiJson(`/rostering/my-roster${queryString(range)}`);
 }
 
+export async function exportMyRosterCalendar(range: DateRange): Promise<void> {
+  const result = await apiBlob(`/rostering/my-roster.ics${queryString(range)}`);
+  downloadBlob(result.blob, result.filename || "my-duty-roster.ics");
+}
 
-export function listRosterTaskLinks(assignmentId: string): Promise<RosterTaskAssignmentLinkRead[]> {
-  return apiGet<RosterTaskAssignmentLinkRead[]>(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-links`, { headers: authHeaders() });
+export function listRosterRules(includeInactive = false): Promise<Roster.RosterRuleRead[]> {
+  return apiJson(`/rostering/rules${queryString({ include_inactive: includeInactive })}`);
+}
+
+export function createRosterRule(payload: Roster.RosterRuleCreate): Promise<Roster.RosterRuleRead> {
+  return apiJson("/rostering/rules", { method: "POST", body: jsonBody(payload) });
+}
+
+export function updateRosterRule(
+  ruleId: string,
+  payload: Partial<Roster.RosterRuleCreate>,
+): Promise<Roster.RosterRuleRead> {
+  return apiJson(`/rostering/rules/${encodeURIComponent(ruleId)}`, {
+    method: "PATCH",
+    body: jsonBody(payload),
+  });
+}
+
+export function getRosterReportSummary(range: DateRange): Promise<Roster.RosterReportSummary> {
+  return apiJson(`/rostering/reports/summary${queryString(range)}`);
+}
+
+export async function exportRosterReport(
+  options: DateRange & { format: "csv" | "xlsx" | "pdf" | "ics" },
+): Promise<void> {
+  const result = await apiBlob(`/rostering/reports/export${queryString(options)}`);
+  const extension = options.format;
+  downloadBlob(result.blob, result.filename || `duty-roster-${options.from}-${options.to}.${extension}`);
+}
+
+export function listRosterTaskLinks(assignmentId: string): Promise<Roster.RosterTaskAssignmentLinkRead[]> {
+  return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-links`);
 }
 
 export function linkRosterAssignmentToTaskAssignment(
   assignmentId: string,
-  payload: { task_assignment_id: number; allocated_start?: string | null; allocated_end?: string | null; allocated_hours?: number | null },
-): Promise<RosterTaskAssignmentLinkRead> {
-  return apiPost<RosterTaskAssignmentLinkRead>(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-links`, payload, { headers: authHeaders() });
+  payload: {
+    task_assignment_id: number;
+    allocated_start?: string | null;
+    allocated_end?: string | null;
+    allocated_hours?: number | null;
+  },
+): Promise<Roster.RosterTaskAssignmentLinkRead> {
+  return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-links`, {
+    method: "POST",
+    body: jsonBody(payload),
+  });
 }
 
 export function allocateRosterAssignmentToTask(
   assignmentId: string,
-  payload: { task_id: number; role_on_task?: string; task_assignment_status?: string; allocated_start?: string | null; allocated_end?: string | null; allocated_hours?: number | null },
-): Promise<RosterTaskAssignmentLinkRead> {
-  return apiPost<RosterTaskAssignmentLinkRead>(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-allocations`, payload, { headers: authHeaders() });
+  payload: {
+    task_id: number;
+    role_on_task?: string;
+    task_assignment_status?: string;
+    allocated_start?: string | null;
+    allocated_end?: string | null;
+    allocated_hours?: number | null;
+  },
+): Promise<Roster.RosterTaskAssignmentLinkRead> {
+  return apiJson(`/rostering/assignments/${encodeURIComponent(assignmentId)}/task-allocations`, {
+    method: "POST",
+    body: jsonBody(payload),
+  });
 }
