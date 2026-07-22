@@ -1,0 +1,10 @@
+{
+  "name": "AMO Portal",
+  "short_name": "AMO Portal",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "description": "Offline-capable aircraft maintenance organisation operations portal"
+}
