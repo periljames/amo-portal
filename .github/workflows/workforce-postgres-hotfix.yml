@@ -6,10 +6,11 @@ on:
       - "backend/amodb/alembic/versions/workforce_20260721_complete_rostering.py"
       - "backend/amodb/alembic/versions/workforce_20260721_precreate_tables.py"
       - "backend/amodb/apps/rostering/models.py"
+      - "backend/amodb/apps/rostering/tests/test_migration_contract.py"
       - ".github/workflows/workforce-postgres-hotfix.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   postgres-migration:
@@ -60,6 +61,18 @@ jobs:
               'Index("ix_wr_roster_rules_scope", "amo_id", "scope", "department_id", "base_station_id")',
           )
           models.write_text(source, encoding="utf-8")
+
+          test_file = Path("amodb/apps/rostering/tests/test_migration_contract.py")
+          source = test_file.read_text(encoding="utf-8")
+          source = source.replace(
+              'MIGRATION = Path(__file__).resolve().parents[3] / "alembic" / "versions" / "workforce_20260721_complete_rostering.py"',
+              'MIGRATION = Path(__file__).resolve().parents[3] / "alembic" / "versions" / "workforce_20260721_complete_rostering.py"\nPRECREATE = Path(__file__).resolve().parents[3] / "alembic" / "versions" / "workforce_20260721_precreate_tables.py"',
+          )
+          source = source.replace(
+              'assert assignment_value(module, "down_revision") == "qual_20260705_merge_heads"',
+              'assert assignment_value(module, "down_revision") == "workforce_20260721_precreate"\n    predecessor = ast.parse(PRECREATE.read_text(encoding="utf-8"))\n    assert assignment_value(predecessor, "revision") == "workforce_20260721_precreate"\n    assert assignment_value(predecessor, "down_revision") == "qual_20260705_merge_heads"',
+          )
+          test_file.write_text(source, encoding="utf-8")
           PY
       - name: Run focused PostgreSQL migration
         id: migrate
@@ -212,3 +225,17 @@ jobs:
       - name: Fail when migration failed
         if: steps.migrate.outcome != 'success'
         run: exit 1
+      - name: Commit validated migration hotfix
+        if: steps.migrate.outcome == 'success' && github.event_name == 'pull_request' && github.head_ref == 'hotfix/workforce-postgres-index-collisions'
+        env:
+          TARGET_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add amodb/alembic/versions/workforce_20260721_complete_rostering.py amodb/apps/rostering/models.py amodb/apps/rostering/tests/test_migration_contract.py
+          if git diff --cached --quiet; then
+            echo "Validated migration hotfix is already committed."
+          else
+            git commit -m "fix: order workforce table creation before migration"
+            git push origin "HEAD:${TARGET_BRANCH}"
+          fi
