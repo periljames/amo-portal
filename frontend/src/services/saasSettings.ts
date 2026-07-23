@@ -145,6 +145,16 @@ export class SaaSSettingsError extends Error {
   }
 }
 
+export class SaaSJobTimeoutError extends Error {
+  jobId: string;
+
+  constructor(jobId: string) {
+    super("The backend job is still processing. Refresh the pipeline to continue.");
+    this.name = "SaaSJobTimeoutError";
+    this.jobId = jobId;
+  }
+}
+
 function query(params: Record<string, string | number | boolean | null | undefined>): string {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -203,6 +213,42 @@ function tenantParams(tenantId?: string | null): { tenant_id?: string } {
   return tenantId ? { tenant_id: tenantId } : {};
 }
 
+async function fetchJob(jobId: string, tenantId?: string | null): Promise<SaaSAdminJob> {
+  return request<SaaSAdminJob>(
+    `/platform/tenant-saas/jobs/${encodeURIComponent(jobId)}${query(tenantParams(tenantId))}`,
+  );
+}
+
+export function checkoutUrlFromJob(job?: SaaSAdminJob | null): string | null {
+  if (!job || job.status.toUpperCase() !== "SUCCEEDED") return null;
+  const raw = job.result?.checkout_url;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "https:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function waitForSaaSJob(
+  jobId: string,
+  tenantId?: string | null,
+  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
+): Promise<SaaSAdminJob> {
+  const timeoutMs = Math.max(1_000, options.timeoutMs ?? 75_000);
+  const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? 750);
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const job = await fetchJob(jobId, tenantId);
+    if (["SUCCEEDED", "FAILED", "DEAD", "CANCELLED"].includes(job.status.toUpperCase())) {
+      return job;
+    }
+    if (Date.now() >= deadline) throw new SaaSJobTimeoutError(jobId);
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, pollIntervalMs));
+  }
+}
+
 export const saasSettingsApi = {
   setup: (tenantId?: string | null) => request<SaaSSetupSummary>(
     `/platform/tenant-saas/setup${query(tenantParams(tenantId))}`,
@@ -225,6 +271,8 @@ export const saasSettingsApi = {
   jobs: (tenantId?: string | null, status?: string) => request<{ items: SaaSAdminJob[]; total: number }>(
     `/platform/tenant-saas/jobs${query({ ...tenantParams(tenantId), status, limit: 100 })}`,
   ),
+  job: fetchJob,
+  waitForJob: waitForSaaSJob,
   modules: (tenantId?: string | null) => request<{ items: SaaSAdminModule[]; prices: SaaSAdminModulePrice[] }>(
     `/platform/tenant-saas/modules${query(tenantParams(tenantId))}`,
   ),
