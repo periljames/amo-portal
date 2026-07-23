@@ -12,7 +12,7 @@
     "test:e2e": "playwright test",
     "test:unit": "vitest run src/utils/verificationScan.test.ts",
     "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts",
-    "test:platform": "vitest run src/services/platformControl.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts"
+    "test:platform": "vitest run src/services/platformControl.test.ts src/services/saasSettings.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
