@@ -27,7 +27,9 @@ on:
       - "frontend/src/router.tsx"
       - "frontend/package.json"
       - "frontend/package-lock.json"
+      - ".github/scripts/**"
       - ".github/workflows/quality-module-ci.yml"
+      - ".github/workflows/recheck-transient-ci.yml"
   workflow_dispatch:
 
 permissions:
@@ -40,6 +42,7 @@ concurrency:
 jobs:
   backend-contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: backend
@@ -52,7 +55,12 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - run: pip install -r requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "quality backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Verify Alembic graph and Quality revision
         env:
           DATABASE_URL: ""
@@ -106,6 +114,7 @@ jobs:
 
   postgres-schema-integrity:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16
@@ -132,7 +141,12 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - run: pip install -r requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "quality PostgreSQL dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Run Quality fallback-schema hardening probe
         id: quality_schema
         continue-on-error: true
@@ -147,11 +161,12 @@ jobs:
           python -m amodb.apps.quality.tests.postgres_schema_integrity_probe 2>&1 | tee quality-postgres-schema.log
       - name: Upload Quality schema diagnostics
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: quality-postgres-schema-log
           path: backend/quality-postgres-schema.log
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
       - name: Fail when Quality schema probe failed
         if: steps.quality_schema.outcome != 'success'
@@ -159,6 +174,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: frontend
@@ -171,7 +187,13 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
+      - name: Install frontend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "quality frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Run Quality service regression tests
         run: npm run test:quality
       - name: Typecheck and production build
