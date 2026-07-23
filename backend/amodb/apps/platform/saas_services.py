@@ -625,6 +625,10 @@ def enqueue_checkout(
         .first()
     )
     if existing_job is not None:
+        existing_payload = getattr(existing_job, "payload_json", None) or {}
+        existing_price_id = str(existing_payload.get("module_price_id") or "").strip()
+        if existing_price_id and existing_price_id != module_price_id:
+            raise ValueError("idempotency_key is already used for a different checkout request")
         return existing_job
     price = db.get(models.SaaSModulePrice, module_price_id)
     if not price or not price.is_active:

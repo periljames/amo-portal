@@ -314,3 +314,48 @@ def test_checkout_rejects_blank_idempotency_key():
 
 def test_expired_checkout_is_tenant_mutating():
     assert "checkout.session.expired" in saas_worker.TENANT_MUTATING_STRIPE_EVENTS
+
+
+
+def test_checkout_session_id_is_not_stored_as_subscription_reference(monkeypatch: pytest.MonkeyPatch):
+    event = _checkout_event("checkout.session.expired")
+    payload = json.loads(event.payload)
+    payload["data"]["object"].pop("subscription", None)
+    event.payload = json.dumps(payload)
+    account = _pending_account(previous_status="ACTIVE")
+    db = MagicMock()
+    db.get.return_value = event
+    monkeypatch.setattr(
+        saas_worker,
+        "_validate_pending_checkout",
+        lambda *_args, **_kwargs: (account, dict(account.metadata_json), "quality", "price-1", "price_stripe_1"),
+    )
+    upsert = MagicMock(return_value=account)
+    monkeypatch.setattr(saas_worker, "_upsert_billing_account", upsert)
+    monkeypatch.setattr(saas_worker, "_set_module_state", MagicMock())
+    saas_worker._process_stripe_webhook(db, _webhook_job())
+    assert upsert.call_args.kwargs["subscription_ref"] is None
+
+
+def test_idempotency_key_reuse_with_different_price_is_rejected():
+    tenant = SimpleNamespace(id="amo-1", contact_email="admin@example.test")
+    existing_job = SimpleNamespace(
+        id="job-complete",
+        status="SUCCEEDED",
+        idempotency_key="checkout-action-1",
+        payload_json={"module_price_id": "price-old"},
+    )
+    tenant_query = MagicMock()
+    tenant_query.filter.return_value.with_for_update.return_value.first.return_value = tenant
+    job_query = MagicMock()
+    job_query.filter.return_value.first.return_value = existing_job
+    db = MagicMock()
+    db.query.side_effect = [tenant_query, job_query]
+    with pytest.raises(ValueError, match="different checkout request"):
+        saas_services.enqueue_checkout(
+            db,
+            tenant_id="amo-1",
+            module_price_id="price-new",
+            actor_user_id="admin-1",
+            idempotency_key="checkout-action-1",
+        )

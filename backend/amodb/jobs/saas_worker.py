@@ -279,7 +279,10 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     )
     module_code = str(metadata.get("module_code") or "").strip()
     customer_ref = str(obj.get("customer") or "").strip() or None
-    subscription_ref = str(obj.get("subscription") or obj.get("id") or "").strip() or None
+    if event_type.startswith("customer.subscription."):
+        subscription_ref = str(obj.get("id") or "").strip() or None
+    else:
+        subscription_ref = str(obj.get("subscription") or "").strip() or None
     outcome: dict[str, Any] = {
         "event_type": event_type,
         "event_id": payload.get("id"),
