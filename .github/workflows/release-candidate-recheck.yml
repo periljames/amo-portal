@@ -56,7 +56,17 @@ jobs:
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
       - name: Verify Quality release contract
         working-directory: backend
-        run: python -m amodb.scripts.quality_module_internal_check
+        run: |
+          set -o pipefail
+          python -m amodb.scripts.quality_module_internal_check | tee /tmp/pr333-quality-contract.json
+      - name: Upload Quality contract report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-quality-contract
+          path: /tmp/pr333-quality-contract.json
+          if-no-files-found: error
+          retention-days: 2
       - name: Verify SaaS control-plane contract
         working-directory: backend
         run: python -m amodb.scripts.saas_control_plane_internal_check
