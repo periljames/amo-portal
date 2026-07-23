@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - hotfix/alembic-legacy-head-convergence
+  pull_request:
+    paths:
+      - "backend/amodb/alembic/versions/**"
+      - ".github/workflows/alembic-legacy-graph-diagnostic.yml"
 
 permissions:
   contents: read
