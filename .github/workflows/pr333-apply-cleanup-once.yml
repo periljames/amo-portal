@@ -38,17 +38,14 @@ jobs:
           mkdir -p /tmp/pr333-validation
           cat .github/maintenance/pr333/offline.*.b64 | tr -d '\r\n' | base64 --decode > /tmp/offlinePersistence.ts
           cp .github/maintenance/pr333/presence_policy.py.new /tmp/presence_policy.py
-          cp .github/maintenance/pr333/user-management-stabilization-ci.yml.new /tmp/user-management-stabilization-ci.yml
           cp .github/maintenance/pr333/rosteringArchitecture.test.ts.new /tmp/rosteringArchitecture.test.ts
           printf '%s  %s\n' \
             '0274283e21ec867ba6b8fb4c94d957770914ce6c61836235b8823d5437044761' /tmp/offlinePersistence.ts \
             '5541d0e198028302b4abb5e35ed7ec002cafa1246a741f96f4383e9862804ad7' /tmp/presence_policy.py \
-            '0b4dc0649f408fa5ec11003fa940529d256efa6a8d563674c9472ece12fce5af' /tmp/user-management-stabilization-ci.yml \
             '2d4682b517f706ea7501fdcdcbbeffa2dccb444a15818f4d56b7085dea88a48b' /tmp/rosteringArchitecture.test.ts \
             | sha256sum --check --strict
           install -m 0644 /tmp/offlinePersistence.ts frontend/src/services/offlinePersistence.ts
           install -m 0644 /tmp/presence_policy.py backend/amodb/apps/accounts/presence_policy.py
-          install -m 0644 /tmp/user-management-stabilization-ci.yml .github/workflows/user-management-stabilization-ci.yml
           install -m 0644 /tmp/rosteringArchitecture.test.ts frontend/src/pages/rostering/rosteringArchitecture.test.ts
       - name: Compile inherited presence policy cleanup
         shell: bash
@@ -92,18 +89,17 @@ jobs:
           path: /tmp/pr333-validation
           if-no-files-found: warn
           retention-days: 2
-      - name: Commit validated cleanup and remove staging workflow
+      - name: Commit validated source cleanup
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -r .github/maintenance/pr333 .github/workflows/pr333-apply-cleanup-once.yml
+          git rm -r .github/maintenance/pr333
           git add \
             frontend/src/services/offlinePersistence.ts \
             frontend/src/pages/rostering/rosteringArchitecture.test.ts \
-            backend/amodb/apps/accounts/presence_policy.py \
-            .github/workflows/user-management-stabilization-ci.yml
+            backend/amodb/apps/accounts/presence_policy.py
           git diff --cached --check
-          git commit -m "Fix inherited offline, presence and CI regressions"
+          git commit -m "Fix inherited offline and presence regressions"
           git push origin HEAD:agent/saas-control-plane-hardening
