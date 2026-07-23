@@ -127,6 +127,7 @@ def main() -> int:
     assert "rerun-failed-jobs" in rerun_text
     assert "current_pr_head" in rerun_text
     assert "refusing to re-run stale checks" in rerun_text
+    assert "_belongs_to_pr" in rerun_text
     checks["ci-retry-safety"] = {"passed": True}
 
     workflow_paths = (
@@ -134,6 +135,7 @@ def main() -> int:
         ROOT / ".github/workflows/quality-module-ci.yml",
         ROOT / ".github/workflows/workforce-postgres-hotfix.yml",
         ROOT / ".github/workflows/duty-rostering-ci.yml",
+        ROOT / ".github/workflows/main-merge-readiness.yml",
     )
     workflow_rows: list[dict[str, Any]] = []
     for path in workflow_paths:
@@ -146,6 +148,18 @@ def main() -> int:
         "passed": True,
         "workflows": workflow_rows,
     }
+
+    merge_workflow = _read(ROOT / ".github/workflows/main-merge-readiness.yml")
+    for token in (
+        "name: Main Merge Readiness",
+        "alembic -c amodb/alembic.ini upgrade heads",
+        "amodb/apps/accounts/tests amodb/apps/workforce/tests amodb/apps/rostering/tests",
+        "npm run test:quality",
+        "npm run test:platform",
+        "src/services/offlineHttp.test.ts",
+    ):
+        assert token in merge_workflow, token
+    checks["integrated-main-merge-gate"] = {"passed": True}
 
     recheck_workflow = _read(ROOT / ".github/workflows/recheck-transient-ci.yml")
     for token in (
