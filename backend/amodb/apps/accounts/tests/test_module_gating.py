@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from amodb.database import Base
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import services as account_services
 from amodb.apps.crs import models as crs_models
 from amodb.apps.maintenance_program import models as maintenance_models
 from amodb.entitlements import require_module
@@ -32,13 +33,6 @@ def db_session():
             crs_models.CRSSignoff.__table__,
             maintenance_models.AmpProgramItem.__table__,
             maintenance_models.AmpAircraftProgramItem.__table__,
-            account_models.CatalogSKU.__table__,
-            account_models.TenantLicense.__table__,
-            account_models.LicenseEntitlement.__table__,
-            account_models.UsageMeter.__table__,
-            account_models.LedgerEntry.__table__,
-            account_models.PaymentMethod.__table__,
-            account_models.BillingInvoice.__table__,
             account_models.ModuleSubscription.__table__,
         ],
     )
@@ -80,37 +74,19 @@ def _create_user(db, amo_id: str) -> account_models.User:
     return user
 
 
-def _create_active_license(db, amo_id: str) -> account_models.TenantLicense:
-    now = datetime.utcnow()
-    sku = account_models.CatalogSKU(
-        code="MODULE-GATING-MONTHLY",
-        name="Module gating test plan",
-        term=account_models.BillingTerm.MONTHLY,
-        trial_days=0,
-        amount_cents=100,
-        currency="KES",
-        is_active=True,
-    )
-    db.add(sku)
-    db.flush()
-    license_row = account_models.TenantLicense(
-        amo_id=amo_id,
-        sku_id=sku.id,
-        term=account_models.BillingTerm.MONTHLY,
-        status=account_models.LicenseStatus.ACTIVE,
-        current_period_start=now,
-        current_period_end=now + timedelta(days=30),
-        is_read_only=False,
-    )
-    db.add(license_row)
-    db.commit()
-    return license_row
-
-
-def test_module_subscription_blocks_access(db_session):
+def test_module_subscription_blocks_access(db_session, monkeypatch: pytest.MonkeyPatch):
     amo = _create_amo(db_session)
     user = _create_user(db_session, amo.id)
-    _create_active_license(db_session, amo.id)
+    monkeypatch.setattr(
+        account_services,
+        "get_billing_access_status",
+        lambda _db, *, amo_id: SimpleNamespace(has_access=True, lock_reason=None),
+    )
+    monkeypatch.setattr(
+        account_services,
+        "resolve_entitlements",
+        lambda _db, *, amo_id: {},
+    )
 
     subscription = account_models.ModuleSubscription(
         amo_id=amo.id,
