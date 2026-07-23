@@ -5,6 +5,8 @@ import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
 import { getApiBaseUrl } from "../services/config";
 import {
+  checkoutUrlFromJob,
+  SaaSJobTimeoutError,
   saasSettingsApi,
   type SaaSAdminInvoice,
   type SaaSAdminJob,
@@ -79,6 +81,7 @@ export default function AdminSaaSSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [checkoutLink, setCheckoutLink] = useState<string | null>(null);
   const [selectedProviderCode, setSelectedProviderCode] = useState<string | null>(null);
   const [configDraft, setConfigDraft] = useState<Record<string, string>>({});
   const [secretDraft, setSecretDraft] = useState<Record<string, string>>({});
@@ -106,6 +109,7 @@ export default function AdminSaaSSettingsPage() {
   }, [effectiveTenantId]);
 
   useEffect(() => {
+    setCheckoutLink(null);
     void load();
   }, [load]);
 
@@ -125,7 +129,6 @@ export default function AdminSaaSSettingsPage() {
     setSecretDraft({});
     setProviderEnabled(provider.status !== "DISABLED");
     setClearSecret(false);
-    setNotice(null);
   }, [provider]);
 
   const run = async (key: string, action: () => Promise<unknown>, success: string) => {
@@ -134,8 +137,8 @@ export default function AdminSaaSSettingsPage() {
     setNotice(null);
     try {
       await action();
-      setNotice(success);
       await load();
+      setNotice(success);
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : String(actionError));
     } finally {
@@ -195,11 +198,39 @@ export default function AdminSaaSSettingsPage() {
     );
   };
 
-  const checkout = async (priceId: string) => run(
-    `checkout:${priceId}`,
-    () => saasSettingsApi.checkout(priceId, effectiveTenantId),
-    "Stripe checkout creation queued. Follow the pipeline status below.",
-  );
+  const checkout = async (priceId: string) => {
+    const key = `checkout:${priceId}`;
+    setBusyAction(key);
+    setError(null);
+    setNotice("Creating a secure Stripe checkout session in the backend pipeline…");
+    setCheckoutLink(null);
+    setTab("pipeline");
+    try {
+      const queued = await saasSettingsApi.checkout(priceId, effectiveTenantId);
+      const completed = await saasSettingsApi.waitForJob(queued.id, effectiveTenantId);
+      await load();
+      if (completed.status.toUpperCase() !== "SUCCEEDED") {
+        throw new Error(completed.last_error || `Stripe checkout job ended with status ${completed.status}.`);
+      }
+      const url = checkoutUrlFromJob(completed);
+      if (!url) {
+        throw new Error("Stripe checkout completed without a valid HTTPS checkout URL.");
+      }
+      setCheckoutLink(url);
+      setNotice("Stripe checkout is ready. Redirecting now; use the link below if navigation is blocked.");
+      window.location.assign(url);
+    } catch (actionError) {
+      await load();
+      if (actionError instanceof SaaSJobTimeoutError) {
+        setNotice(actionError.message);
+        setTab("pipeline");
+      } else {
+        setError(actionError instanceof Error ? actionError.message : String(actionError));
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
 
   const fiscalize = async (invoice: SaaSAdminInvoice, providerCode: "etims_oscu" | "etims_vscu") => run(
     `fiscalize:${invoice.id}`,
@@ -263,6 +294,11 @@ export default function AdminSaaSSettingsPage() {
 
         {error ? <div className="saas-admin__alert saas-admin__alert--error" role="alert">{error}</div> : null}
         {notice ? <div className="saas-admin__alert saas-admin__alert--success" role="status">{notice}</div> : null}
+        {checkoutLink ? (
+          <div className="saas-admin__alert saas-admin__alert--success" role="status">
+            <a href={checkoutLink}>Continue to secure Stripe checkout</a>
+          </div>
+        ) : null}
         {loading ? <div className="saas-admin__loading">Loading current backend configuration…</div> : null}
 
         <nav className="saas-admin__tabs" aria-label="SaaS administration sections">
@@ -376,7 +412,7 @@ export default function AdminSaaSSettingsPage() {
                       <td>
                         {setup?.permissions.start_tenant_checkout ? (
                           <button type="button" onClick={() => void checkout(price.id)} disabled={busyAction !== null || !price.external_price_ref}>
-                            {busyAction === `checkout:${price.id}` ? "Queueing…" : price.external_price_ref ? "Start Stripe checkout" : "Stripe price not configured"}
+                            {busyAction === `checkout:${price.id}` ? "Preparing checkout…" : price.external_price_ref ? "Start Stripe checkout" : "Stripe price not configured"}
                           </button>
                         ) : <span>Superadmin pricing control</span>}
                       </td>
@@ -426,17 +462,23 @@ export default function AdminSaaSSettingsPage() {
           <section className="saas-admin__card">
             <div className="saas-admin__card-heading"><div><h2>Durable backend pipeline</h2><p>Provider health, billing, AI and fiscalization actions are processed asynchronously with leases, retries and audit events.</p></div><button type="button" onClick={() => void load()}>Refresh</button></div>
             <div className="saas-admin__table-wrap">
-              <table><thead><tr><th>Created</th><th>Job</th><th>Queue</th><th>Status</th><th>Attempts</th><th>Worker/error</th></tr></thead><tbody>
-                {jobs.map((job) => (
-                  <tr key={job.id}>
-                    <td>{formatTime(job.created_at)}</td>
-                    <td><strong>{job.job_type}</strong><small>{job.id}</small></td>
-                    <td>{job.queue_name}</td>
-                    <td><Status value={job.status} /></td>
-                    <td>{job.attempt_count}/{job.max_attempts}</td>
-                    <td>{job.last_error || job.locked_by || "—"}</td>
-                  </tr>
-                ))}
+              <table><thead><tr><th>Created</th><th>Job</th><th>Queue</th><th>Status</th><th>Attempts</th><th>Worker/error/action</th></tr></thead><tbody>
+                {jobs.map((job) => {
+                  const jobCheckoutUrl = checkoutUrlFromJob(job);
+                  return (
+                    <tr key={job.id}>
+                      <td>{formatTime(job.created_at)}</td>
+                      <td><strong>{job.job_type}</strong><small>{job.id}</small></td>
+                      <td>{job.queue_name}</td>
+                      <td><Status value={job.status} /></td>
+                      <td>{job.attempt_count}/{job.max_attempts}</td>
+                      <td>
+                        {job.last_error || job.locked_by || "—"}
+                        {jobCheckoutUrl ? <small><a href={jobCheckoutUrl}>Open secure Stripe checkout</a></small> : null}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody></table>
             </div>
           </section>
