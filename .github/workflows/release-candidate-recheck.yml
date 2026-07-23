@@ -1,0 +1,223 @@
+name: Release Candidate Recheck
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-recheck-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  schema-and-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_release_recheck
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_release_recheck"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      SECRET_KEY: release-candidate-recheck-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_release_recheck
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_release_recheck
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_release_recheck
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "release-recheck backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Verify release contracts
+        run: |
+          python -m amodb.scripts.quality_module_internal_check
+          python -m amodb.scripts.saas_control_plane_internal_check
+          python -m amodb.scripts.saas_release_cleanup_check
+      - name: Verify Alembic graph and clean PostgreSQL upgrade
+        run: |
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          heads = script.get_heads()
+          print("Alembic heads:", heads)
+          assert len(heads) == len(set(heads)), heads
+          assert script.get_revision("workforce_20260721_complete")
+          assert script.get_revision("quality_20260722_schema_integrity")
+          assert script.get_revision("saas_20260722_side_effect_safe")
+          PY
+          alembic -c amodb/alembic.ini upgrade heads
+      - name: Configure mappers and verify critical routes
+        run: |
+          python - <<'PY'
+          from sqlalchemy.orm import configure_mappers
+          from amodb.main import app
+          import amodb.quality_main
+
+          configure_mappers()
+          paths = {route.path for route in app.routes}
+          required = {
+              "/platform/tenant-saas/setup",
+              "/platform/tenant-saas/providers/{provider}",
+              "/platform/tenant-saas/invoices/{invoice_id}/fiscalize",
+              "/platform/saas/webhooks/stripe",
+              "/api/realtime/broker/authenticate",
+              "/api/realtime/broker/authorize",
+              "/api/chat/threads",
+          }
+          missing = required - paths
+          assert not missing, missing
+          print("All SQLAlchemy mappers and critical routes verified")
+          PY
+
+  backend-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+      SECRET_KEY: release-candidate-backend-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      QUALITY_SCHEMA_STRICT: "0"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "release-recheck regression dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile cleanup-sensitive backend modules
+        run: >-
+          python -m compileall -q
+          amodb/apps/accounts
+          amodb/apps/audit
+          amodb/apps/platform
+          amodb/apps/quality
+          amodb/apps/realtime
+          amodb/apps/rostering
+          amodb/apps/training
+          amodb/apps/workforce
+          amodb/jobs
+      - name: Configure complete application mappers
+        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('All application mappers configured')"
+      - name: Run integrated backend regressions
+        run: >-
+          pytest -q
+          amodb/apps/quality/tests/test_quality_delivery_profile.py
+          amodb/apps/quality/tests/test_workflow_transitions.py
+          amodb/apps/quality/tests/test_audit_workflow_enforcement.py
+          amodb/apps/quality/tests/test_audit_events.py
+          amodb/apps/quality/tests/test_task_integrations.py
+          amodb/apps/quality/tests/test_evidence_pack_exports.py
+          amodb/apps/accounts/tests
+          amodb/apps/workforce/tests
+          amodb/apps/rostering/tests
+          amodb/apps/platform/tests/test_saas_*.py
+          amodb/apps/realtime/tests/test_*.py
+      - name: Run safe worker smoke tests
+        run: |
+          python -m amodb.jobs.saas_worker_safe --once --batch-size 5
+          python -m amodb.jobs.platform_command_worker --once --batch-size 5
+
+  frontend-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "release-recheck frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Typecheck and build production frontend
+        run: npm run build
+      - name: Run integrated frontend regressions
+        run: |
+          npm run test:quality
+          npm run test:platform
+          npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts
+      - name: Lint integrated cleanup surfaces
+        run: >-
+          npm exec -- eslint
+          src/main.tsx
+          src/components/messaging
+          src/components/offline
+          src/pages/AdminSaaSSettingsPage.tsx
+          src/pages/EmailServerSettingsPage.tsx
+          src/pages/platform
+          src/pages/rostering
+          src/services/apiClient.ts
+          src/services/crs.ts
+          src/services/fleet.ts
+          src/services/maintenance.ts
+          src/services/messaging.ts
+          src/services/messaging.test.ts
+          src/services/offlineHttp.ts
+          src/services/offlinePersistence.ts
+          src/services/platformControl.ts
+          src/services/platformControl.test.ts
+          src/services/qmsAuditHubActions.ts
+          src/services/qmsAuditHubActions.test.ts
+          src/services/queryPersister.ts
+          src/services/realtime
+          src/services/rostering.ts
+          src/services/saasSettings.ts
+          src/services/saasSettings.test.ts
+          src/services/typedApi.ts
+          src/services/workOrders.ts
