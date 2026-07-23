@@ -36,7 +36,7 @@ from .catalog import (
     list_demand_requirements,
     list_periods,
     list_rules,
-    list_shift_templates,
+    list_shift_templates as _list_shift_templates,
     list_versions,
     roster_contracts,
     seed_default_shift_templates,
@@ -75,6 +75,23 @@ from .reports import assignment_export_rows, report_summary
 
 def get_effective_amo_id(user: account_models.User) -> str:
     return effective_amo_id(user)
+
+
+def list_shift_templates(db: Session, *, amo_id: str, include_inactive: bool = False):
+    """Return tenant templates while repairing the historical TRAIN semantic.
+
+    Training occupies an employee's working time and must participate in duty,
+    overlap, rest and timesheet calculations.  Earlier seeds marked the default
+    TRAIN template as non-duty; reconcile it whenever templates are loaded so
+    both upgraded and newly provisioned tenants receive the canonical meaning.
+    """
+    rows = _list_shift_templates(db, amo_id=amo_id, include_inactive=include_inactive)
+    for row in rows:
+        if row.code == "TRAIN" and not row.counts_as_duty:
+            row.counts_as_duty = True
+            db.add(row)
+    db.flush()
+    return rows
 
 
 def get_shift_template(db: Session, *, amo_id: str, template_id: str):
