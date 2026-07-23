@@ -211,7 +211,17 @@ jobs:
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Typecheck and build production frontend
         working-directory: frontend
-        run: npm run build
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/rostering-frontend-build.log
+      - name: Upload frontend build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rostering-frontend-build
+          path: /tmp/rostering-frontend-build.log
+          if-no-files-found: warn
+          retention-days: 2
       - name: Run Quality and platform frontend regressions
         working-directory: frontend
         run: |
