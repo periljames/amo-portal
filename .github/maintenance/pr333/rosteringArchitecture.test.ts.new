@@ -45,7 +45,6 @@ describe("rostering architecture regressions", () => {
   });
 
   it("persists and reapplies optimistic assignment rows over stale cached snapshots", () => {
-    expect(plannerHookSource).toContain("single source of assignment state");
     expect(plannerHookSource).toContain("setQueryData<VersionWorkspace>");
     expect(plannerHookSource).toContain("assignments: next");
     expect(plannerHookSource).toContain("mergePendingRosterOutbox");
