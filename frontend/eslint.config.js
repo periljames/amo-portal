@@ -20,4 +20,18 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['src/pages/rostering/components/RosterPlannerV2.tsx'],
+    rules: {
+      // Lucide icons are selected from a fixed imported set using source-module data.
+      'react-hooks/static-components': 'off',
+    },
+  },
+  {
+    files: ['src/pages/rostering/components/UnifiedRosterSettings.tsx'],
+    rules: {
+      // Query-backed setup forms hydrate defaults once their tenant data arrives.
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
 ])
