@@ -47,8 +47,48 @@ export type RosterPeoplePageFilters = {
   roster_eligible_only?: boolean;
 };
 
-export function listRosterPeoplePage(filters: RosterPeoplePageFilters = {}): Promise<RosterPeoplePage> {
+function fetchRosterPeoplePage(filters: RosterPeoplePageFilters): Promise<RosterPeoplePage> {
   return apiJson(`/workforce/roster-people${queryString(filters)}`, {
     offline: { cacheTtlMs: 10 * 60_000 },
   });
+}
+
+export async function listRosterPeoplePage(filters: RosterPeoplePageFilters = {}): Promise<RosterPeoplePage> {
+  const first = await fetchRosterPeoplePage(filters);
+
+  // Setup deliberately requests the backend's large page with non-eligible
+  // personnel included so administrators can create missing contracts. Load
+  // every remaining tenant page for that workspace; planner searches retain
+  // normal page-by-page behaviour at their smaller page size.
+  const aggregateSetupPeople =
+    (filters.page ?? 1) === 1
+    && (filters.page_size ?? 100) >= 200
+    && filters.roster_eligible_only === false
+    && !filters.search
+    && !filters.department_id
+    && !filters.base_station_id
+    && first.has_more;
+
+  if (!aggregateSetupPeople) return first;
+
+  const remainingPages = await Promise.all(
+    Array.from({ length: Math.max(first.pages - 1, 0) }, (_, index) =>
+      fetchRosterPeoplePage({
+        ...filters,
+        page: index + 2,
+        page_size: first.page_size,
+      }),
+    ),
+  );
+  const items = [first, ...remainingPages].flatMap((page) => page.items);
+
+  return {
+    ...first,
+    items,
+    total: items.length,
+    page: 1,
+    page_size: items.length || first.page_size,
+    pages: items.length ? 1 : 0,
+    has_more: false,
+  };
 }
