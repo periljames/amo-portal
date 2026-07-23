@@ -5,6 +5,8 @@ import subprocess
 from importlib import import_module
 
 import sqlalchemy as sa
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 from amodb.database import Base
@@ -179,6 +181,48 @@ def _database_fk_signatures(
     }
 
 
+def _version_rows(engine: sa.Engine) -> set[str]:
+    with engine.connect() as connection:
+        return {
+            str(revision)
+            for revision in connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalars()
+        }
+
+
+def _verify_redundant_phase2_overlap_repair(engine: sa.Engine) -> None:
+    """Reproduce the released overlapping-head state and run real Alembic commands."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO alembic_version (version_num) VALUES (:revision) "
+                "ON CONFLICT (version_num) DO NOTHING"
+            ),
+            {"revision": ROSTER_PARENT},
+        )
+
+    assert _version_rows(engine) == {TARGET_REVISION, ROSTER_PARENT}
+    _run_alembic("upgrade", TARGET_REVISION)
+    assert _version_rows(engine) == {TARGET_REVISION}
+
+    script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+    expected_heads = set(script.get_heads())
+    assert "saas_20260722_side_effect_safe" in expected_heads
+
+    # Reproduce the exact `upgrade heads` overlap at a fully-stamped installation:
+    # all legitimate heads plus the now-redundant historical Phase 2 marker.
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM alembic_version"))
+        connection.execute(
+            text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
+            [{"revision": revision} for revision in sorted(expected_heads | {ROSTER_PARENT})],
+        )
+
+    _run_alembic("upgrade", "heads")
+    assert _version_rows(engine) == expected_heads
+
+
 def main() -> None:
     database_url = os.environ["DATABASE_URL"]
     engine = create_engine(database_url)
@@ -238,6 +282,8 @@ def main() -> None:
         if missing:
             missing_foreign_keys[table_name] = missing
     assert missing_foreign_keys == {}, missing_foreign_keys
+
+    _verify_redundant_phase2_overlap_repair(engine)
 
 
 if __name__ == "__main__":
