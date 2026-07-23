@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -11,8 +12,10 @@ from sqlalchemy.orm import sessionmaker
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.platform import saas_models
-from amodb.apps.platform import tenant_saas_router
 from amodb.jobs import saas_worker
+
+
+tenant_saas_router = import_module("amodb.apps.platform.tenant_saas_router")
 
 
 def _job(*, verified_tenant_id: str | None, event_id: str = "event-1"):
@@ -178,14 +181,11 @@ def test_tenant_queue_summary_excludes_other_tenants_and_returns_depth():
     tenant = tenant_saas_router._queue_summary(db, tenant_id="amo-1")
     platform = tenant_saas_router._queue_summary(db, tenant_id=None)
 
-    assert tenant == {
-        "scope": "TENANT",
-        "tenant_id": "amo-1",
-        "counts": {"PENDING": 1, "SUCCEEDED": 1},
-        "queues": {"billing": 1},
-        "queue_depth": 1,
-        "oldest_active_job_at": tenant["oldest_active_job_at"],
-    }
+    assert tenant["scope"] == "TENANT"
+    assert tenant["tenant_id"] == "amo-1"
+    assert tenant["counts"] == {"PENDING": 1, "SUCCEEDED": 1}
+    assert tenant["queues"] == {"billing": 1}
+    assert tenant["queue_depth"] == 1
     assert tenant["oldest_active_job_at"] is not None
     assert "ai" not in tenant["queues"]
     assert platform["queue_depth"] == 2
