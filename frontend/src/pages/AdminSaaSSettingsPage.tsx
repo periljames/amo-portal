@@ -7,7 +7,6 @@ import {
   saasSettingsApi,
   type SaaSAdminInvoice,
   type SaaSAdminJob,
-  type SaaSAdminProvider,
   type SaaSSetupSummary,
 } from "../services/saasSettings";
 import "../styles/adminSaaSSettings.css";
