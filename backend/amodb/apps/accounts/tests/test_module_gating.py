@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -8,6 +10,7 @@ from fastapi import HTTPException
 
 from amodb.database import Base
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import services as account_services
 from amodb.apps.crs import models as crs_models
 from amodb.apps.maintenance_program import models as maintenance_models
 from amodb.entitlements import require_module
@@ -71,9 +74,19 @@ def _create_user(db, amo_id: str) -> account_models.User:
     return user
 
 
-def test_module_subscription_blocks_access(db_session):
+def test_module_subscription_blocks_access(db_session, monkeypatch: pytest.MonkeyPatch):
     amo = _create_amo(db_session)
     user = _create_user(db_session, amo.id)
+    monkeypatch.setattr(
+        account_services,
+        "get_billing_access_status",
+        lambda _db, *, amo_id: SimpleNamespace(has_access=True, lock_reason=None),
+    )
+    monkeypatch.setattr(
+        account_services,
+        "resolve_entitlements",
+        lambda _db, *, amo_id: {},
+    )
 
     subscription = account_models.ModuleSubscription(
         amo_id=amo.id,

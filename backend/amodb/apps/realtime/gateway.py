@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 
 import msgpack
 
-from . import schemas
+from amodb.database import WriteSessionLocal
+
+from . import broker_auth, models, production_messaging, realtime_auth, schemas
 
 logger = logging.getLogger(__name__)
 
 try:
     import paho.mqtt.client as mqtt
-except Exception:  # pragma: no cover - optional dependency in dev
+except Exception:  # pragma: no cover - optional dependency in development
     mqtt = None
 
 
@@ -22,51 +25,214 @@ class RealtimeGateway:
         self.internal_url = os.getenv("MQTT_BROKER_INTERNAL_URL", "")
         self._client = None
         self._connected = False
+        self._stop = threading.Event()
+        self._drain_wakeup = threading.Event()
+        self._drain_thread: threading.Thread | None = None
+        self._flush_lock = threading.Lock()
 
     def connect(self) -> None:
-        if not self.enabled or not mqtt or not self.internal_url:
+        broker_auth.validate_production_config()
+        if not self.enabled:
+            return
+        if not mqtt:
+            if os.getenv("APP_ENV", "").lower() in {"production", "prod"}:
+                raise RuntimeError("paho-mqtt is required when production realtime is enabled")
+            return
+        if not self.internal_url:
             return
         if self._client:
             return
+        self._stop.clear()
+        self._drain_wakeup.clear()
         self._client = mqtt.Client(protocol=mqtt.MQTTv311)
+        username = (os.getenv("REALTIME_GATEWAY_USERNAME") or "").strip()
+        password = (os.getenv("REALTIME_GATEWAY_PASSWORD") or "").strip()
+        if username:
+            self._client.username_pw_set(username=username, password=password)
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
+        self._client.on_message = self._on_message
         self._client.connect_async(self._host(), self._port(), keepalive=30)
         self._client.loop_start()
+        self._start_drain_thread()
 
     def _host(self) -> str:
         return self.internal_url.split("://", 1)[-1].split(":", 1)[0]
 
     def _port(self) -> int:
-        value = self.internal_url.split(":")[-1]
+        value = self.internal_url.rsplit(":", 1)[-1]
         return int(value) if value.isdigit() else 1883
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         self._connected = rc == 0
+        if self._connected:
+            client.subscribe(broker_auth.GATEWAY_SHARED_SUBSCRIPTION, qos=1)
+            # Never wait for PUBACK inside Paho's network-loop callback. Wake the
+            # dedicated drain thread so the callback can continue processing I/O.
+            self._drain_wakeup.set()
         logger.info("mqtt connected", extra={"mqtt_connects": 1, "rc": rc})
 
     def _on_disconnect(self, client, userdata, rc, properties=None):
         self._connected = False
         logger.warning("mqtt disconnected", extra={"mqtt_disconnects": 1, "rc": rc})
 
-    def publish(self, *, topic: str, envelope: schemas.RealtimeEnvelope, qos: int = 0, retain: bool = False) -> None:
+    def _on_message(self, client, userdata, message) -> None:
+        topic = str(getattr(message, "topic", ""))
+        parts = topic.split("/")
+        if len(parts) != 5 or parts[0] != "amo" or parts[2] != "user" or parts[4] != "outbox":
+            logger.warning("Rejected realtime message on unexpected topic", extra={"topic": topic})
+            return
+        amo_id, user_id = parts[1], parts[3]
+        db = WriteSessionLocal()
+        try:
+            envelope = self.parse(bytes(message.payload))
+            if envelope.amoId != amo_id or envelope.userId != user_id:
+                raise ValueError("Realtime topic identity does not match the envelope")
+            realtime_auth.validate_connect_token(
+                db,
+                raw_token=envelope.authToken,
+                amo_id=amo_id,
+                user_id=user_id,
+            )
+            authenticated = envelope.model_copy(update={"authToken": None})
+            production_messaging.process_inbound_envelope(db, authenticated)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to process authenticated realtime message", extra={"topic": topic})
+        finally:
+            db.close()
+        # Recipient events created above are drained by a separate thread. Paho
+        # callbacks must never block waiting for their own network loop.
+        self._drain_wakeup.set()
+
+    def publish(
+        self,
+        *,
+        topic: str,
+        envelope: schemas.RealtimeEnvelope,
+        qos: int = 0,
+        retain: bool = False,
+    ) -> None:
+        """Publish and wait for broker acknowledgement for durable QoS messages."""
+
         if not self.enabled:
             return
-        payload = msgpack.packb(envelope.model_dump(mode="python"), use_bin_type=True)
+        safe_envelope = envelope.model_copy(update={"authToken": None})
+        payload = msgpack.packb(
+            safe_envelope.model_dump(mode="python", exclude_none=True),
+            use_bin_type=True,
+        )
         if not self._client or not self._connected:
             raise RuntimeError("Broker not connected")
         result = self._client.publish(topic, payload=payload, qos=qos, retain=retain)
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError(f"Broker publish failed: {result.rc}")
+        if qos > 0:
+            timeout = max(
+                1.0,
+                min(float(os.getenv("REALTIME_PUBLISH_ACK_TIMEOUT_SEC", "8") or "8"), 30.0),
+            )
+            result.wait_for_publish(timeout=timeout)
+            if hasattr(result, "is_published") and not result.is_published():
+                raise TimeoutError("MQTT publish acknowledgement timed out")
 
     def parse(self, payload: bytes) -> schemas.RealtimeEnvelope:
+        max_bytes = max(1024, int(os.getenv("REALTIME_PAYLOAD_MAX_BYTES", "8192")))
+        if len(payload) > max_bytes:
+            raise ValueError("Realtime packet exceeds the configured payload limit")
         data = msgpack.unpackb(payload, raw=False, strict_map_key=False)
         return schemas.RealtimeEnvelope.model_validate(data)
+
+    def flush_pending(self, *, limit: int = 200) -> int:
+        """Drain one locked row at a time and clear it only after PUBACK.
+
+        A database commit failure after PUBACK may deliver an event twice, which
+        is safer than dropping it. Consumers already use stable envelope IDs and
+        idempotent message identifiers to tolerate at-least-once delivery.
+        """
+
+        if not self.enabled or not self._connected or not self._client:
+            return 0
+        if not self._flush_lock.acquire(blocking=False):
+            return 0
+        published = 0
+        try:
+            for _ in range(max(1, min(limit, 1000))):
+                db = WriteSessionLocal()
+                try:
+                    query = (
+                        db.query(models.RealtimeOutbox)
+                        .filter(models.RealtimeOutbox.published_at.is_(None))
+                        .order_by(
+                            models.RealtimeOutbox.created_at.asc(),
+                            models.RealtimeOutbox.id.asc(),
+                        )
+                        .limit(1)
+                    )
+                    if db.bind is not None and db.bind.dialect.name == "postgresql":
+                        query = query.with_for_update(skip_locked=True)
+                    else:
+                        query = query.with_for_update()
+                    row = query.first()
+                    if row is None:
+                        db.rollback()
+                        break
+                    try:
+                        envelope = self.parse(row.payload_bin)
+                        self.publish(topic=row.topic, envelope=envelope, qos=1)
+                        row.published_at = datetime.now(timezone.utc)
+                        row.last_error = None
+                        db.commit()
+                        published += 1
+                    except Exception as exc:
+                        row.retry_count = int(row.retry_count or 0) + 1
+                        row.last_error = str(exc)[:2000]
+                        db.commit()
+                        logger.warning(
+                            "Realtime outbox delivery failed",
+                            extra={"outbox_id": row.id, "topic": row.topic},
+                        )
+                        break
+                except Exception:
+                    db.rollback()
+                    logger.exception("Realtime outbox drain failed")
+                    break
+                finally:
+                    db.close()
+        finally:
+            self._flush_lock.release()
+        return published
+
+    def _start_drain_thread(self) -> None:
+        if self._drain_thread and self._drain_thread.is_alive():
+            return
+
+        def _drain() -> None:
+            while not self._stop.is_set():
+                self._drain_wakeup.wait(timeout=1.0)
+                self._drain_wakeup.clear()
+                if self._stop.is_set():
+                    break
+                if self._connected:
+                    self.flush_pending()
+
+        self._drain_thread = threading.Thread(
+            target=_drain,
+            name="realtime-outbox-drain",
+            daemon=True,
+        )
+        self._drain_thread.start()
 
     def disconnect(self) -> None:
         client = self._client
         self._client = None
         self._connected = False
+        self._stop.set()
+        self._drain_wakeup.set()
+        if self._drain_thread and self._drain_thread.is_alive():
+            self._drain_thread.join(timeout=2)
+        self._drain_thread = None
         if not client:
             return
         try:
@@ -90,4 +256,3 @@ class RealtimeGateway:
 
 
 gateway = RealtimeGateway()
-

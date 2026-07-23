@@ -11,21 +11,21 @@ on:
       - "frontend/src/services/adminUserDirectory.ts"
       - "frontend/src/components/realtime/RealtimeProvider.tsx"
       - "frontend/src/styles/admin-user-management-v2.css"
-      - "scripts/apply_user_management_stabilization.py"
+      - ".github/scripts/retry_transient.py"
       - ".github/workflows/user-management-stabilization-ci.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  validate-and-commit:
+  validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
         with:
           show-progress: false
-          ref: ${{ github.event.pull_request.head.ref }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -36,11 +36,12 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Apply deterministic source patch
-        if: hashFiles('scripts/apply_user_management_stabilization.py') != ''
-        run: python scripts/apply_user_management_stabilization.py
-      - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python .github/scripts/retry_transient.py
+          --attempts 4
+          --label "user-management backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
       - name: Compile affected backend modules
         run: python -m compileall -q backend/amodb/apps/accounts backend/amodb/apps/workforce backend/amodb/apps/realtime
       - name: Verify full mapper startup
@@ -59,27 +60,17 @@ jobs:
           ALLOW_SQLITE_FOR_TESTS: "1"
           SECRET_KEY: mapper-test-secret
         run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests
-      - name: Install frontend dependencies
+      - name: Install frontend dependencies with bounded transient retries
         working-directory: frontend
-        run: npm ci
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "user-management frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Typecheck and production build
         working-directory: frontend
         run: npm run build
       - name: Lint user management and presence changes
         working-directory: frontend
         run: npm exec -- eslint src/pages/AdminDashboardPage.tsx src/pages/admin-users src/services/adminUserDirectory.ts src/components/realtime/RealtimeProvider.tsx
-      - name: Commit validated implementation
-        if: github.event_name == 'pull_request' && github.head_ref == 'agent/stabilize-user-management-presence'
-        env:
-          TARGET_BRANCH: ${{ github.head_ref }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -f scripts/apply_user_management_stabilization.py 2>/dev/null || true
-          git add backend/amodb/apps/accounts backend/amodb/apps/workforce frontend/src/pages/AdminDashboardPage.tsx frontend/src/pages/admin-users frontend/src/services/adminUserDirectory.ts frontend/src/components/realtime/RealtimeProvider.tsx frontend/src/styles/admin-user-management-v2.css scripts
-          if git diff --cached --quiet; then
-            echo "Validated sources already committed."
-          else
-            git commit -m "fix: stabilize user management and presence"
-            git push origin "HEAD:${TARGET_BRANCH}"
-          fi

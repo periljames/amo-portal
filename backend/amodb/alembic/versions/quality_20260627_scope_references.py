@@ -48,6 +48,8 @@ def _has_table(conn, table_name: str) -> bool:
 
 
 def _column_names(conn, table_name: str) -> set[str]:
+    if not _has_table(conn, table_name):
+        return set()
     rows = conn.execute(
         text(
             """
@@ -64,6 +66,10 @@ def _column_names(conn, table_name: str) -> set[str]:
 
 def _has_column(conn, table_name: str, column_name: str) -> bool:
     return column_name in _column_names(conn, table_name)
+
+
+def _has_columns(conn, table_name: str, columns: set[str]) -> bool:
+    return columns.issubset(_column_names(conn, table_name))
 
 
 def _column_udt(conn, table_name: str, column_name: str) -> str | None:
@@ -111,13 +117,7 @@ def _legacy_backup_name(conn) -> str:
 
 
 def _prepare_scope_definition_table(conn) -> None:
-    """Preserve any old non-scope table, then create the real audit-scope table.
-
-    The live database has previously used qms_audit_scopes for a legacy artifact/task
-    shape. That table must not be mutated into this new definition table because its
-    columns and id type do not match this model. We keep it by renaming it and create
-    the real table from a clean shape.
-    """
+    """Preserve an old artifact-shaped table, then create the real scope table."""
     if _has_table(conn, "qms_audit_scopes") and not _is_real_scope_definition_table(conn):
         backup_name = _legacy_backup_name(conn)
         conn.execute(text(f"ALTER TABLE qms_audit_scopes RENAME TO {backup_name}"))
@@ -141,7 +141,6 @@ def _prepare_scope_definition_table(conn) -> None:
             sa.CheckConstraint("code = upper(code)", name="ck_qms_audit_scope_code_upper"),
         )
 
-    # Ensure old partial attempts or manually-created tables have required columns.
     if not _has_column(conn, "qms_audit_scopes", "created_by_user_id"):
         op.add_column("qms_audit_scopes", sa.Column("created_by_user_id", sa.String(length=36), nullable=True))
 
@@ -155,8 +154,6 @@ def _ensure_uuid_column(conn, table_name: str, column_name: str) -> None:
     if not _has_column(conn, table_name, column_name):
         op.add_column(table_name, sa.Column(column_name, postgresql.UUID(as_uuid=True), nullable=True))
         return
-    # Do not attempt risky in-place conversion during this migration. If a legacy DB
-    # ever has this column with the wrong type, preserve it and add a clean UUID column.
     if _column_udt(conn, table_name, column_name) != "uuid":
         backup = f"{column_name}_legacy_text"
         if not _has_column(conn, table_name, backup):
@@ -176,10 +173,15 @@ def _ensure_audit_scope_columns(conn) -> None:
 
 
 def _stable_scope_uuid(amo_id: str, code: str) -> uuid.UUID:
-    return uuid.UUID("00000000-0000-4000-8000-" + re.sub(r"[^0-9a-f]", "", uuid.uuid5(uuid.NAMESPACE_DNS, f"{amo_id}:qms_audit_scope:{code}").hex)[:12])
+    return uuid.UUID(
+        "00000000-0000-4000-8000-"
+        + re.sub(r"[^0-9a-f]", "", uuid.uuid5(uuid.NAMESPACE_DNS, f"{amo_id}:qms_audit_scope:{code}").hex)[:12]
+    )
 
 
 def _seed_default_scopes(conn) -> None:
+    if not _has_table(conn, "amos") or not _is_real_scope_definition_table(conn):
+        return
     insert_stmt = text(
         """
         INSERT INTO qms_audit_scopes
@@ -219,13 +221,17 @@ def _seed_default_scopes(conn) -> None:
 
 
 def _normalise_schedules(conn) -> None:
-    if not _has_table(conn, "qms_audit_schedules"):
+    required_schedule = {"amo_id", "kind", "audit_scope_code", "audit_scope_id"}
+    required_scopes = {"id", "amo_id", "code"}
+    if not _has_columns(conn, "qms_audit_schedules", required_schedule):
+        return
+    if not _has_columns(conn, "qms_audit_scopes", required_scopes):
         return
     conn.execute(
         text(
             """
             UPDATE qms_audit_schedules s
-            SET audit_scope_code = COALESCE(s.audit_scope_code, ds.code, 'MO'),
+            SET audit_scope_code = COALESCE(NULLIF(s.audit_scope_code, ''), ds.code, 'MO'),
                 audit_scope_id = COALESCE(s.audit_scope_id, ds.id)
             FROM qms_audit_scopes ds
             WHERE ds.amo_id = s.amo_id
@@ -234,7 +240,7 @@ def _normalise_schedules(conn) -> None:
                     WHEN s.kind = 'EXTERNAL' THEN 'SC'
                     ELSE 'MO'
                   END
-              AND (s.audit_scope_code IS NULL OR s.audit_scope_id IS NULL)
+              AND (s.audit_scope_code IS NULL OR s.audit_scope_code = '' OR s.audit_scope_id IS NULL)
             """
         )
     )
@@ -243,15 +249,27 @@ def _normalise_schedules(conn) -> None:
 def _normalise_audits(conn) -> None:
     if not _has_table(conn, "qms_audits"):
         return
-    conn.execute(
-        text(
-            """
-            UPDATE qms_audits
-            SET audit_scope_code = COALESCE(audit_scope_code, NULLIF(unit_code, ''), 'MO')
-            WHERE audit_scope_code IS NULL
-            """
+    audit_columns = _column_names(conn, "qms_audits")
+    if {"audit_scope_code", "unit_code"}.issubset(audit_columns):
+        conn.execute(
+            text(
+                """
+                UPDATE qms_audits
+                SET audit_scope_code = COALESCE(NULLIF(audit_scope_code, ''), NULLIF(unit_code, ''), 'MO')
+                WHERE audit_scope_code IS NULL OR audit_scope_code = ''
+                """
+            )
         )
-    )
+
+    required_audit = {
+        "id", "amo_id", "kind", "audit_scope_id", "audit_scope_code", "planned_start",
+        "created_at", "reference_family", "unit_code", "ref_year", "ref_sequence", "audit_ref",
+    }
+    if not required_audit.issubset(audit_columns):
+        return
+    if not _has_columns(conn, "qms_audit_scopes", {"id", "amo_id", "code"}):
+        return
+
     conn.execute(
         text(
             """
@@ -299,7 +317,9 @@ def _normalise_audits(conn) -> None:
             """
         )
     )
-    if _has_table(conn, "qms_audit_reference_counters"):
+
+    counter_columns = {"id", "amo_id", "reference_family", "unit_code", "ref_year", "last_value", "created_at", "updated_at"}
+    if _has_columns(conn, "qms_audit_reference_counters", counter_columns):
         conn.execute(
             text(
                 """

@@ -116,8 +116,8 @@ function workspaceKey(versionId: string) {
 function useDebouncedValue(value: string, delayMs: number): string {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(timer);
+    const timer = globalThis.setTimeout(() => setDebounced(value), delayMs);
+    return () => globalThis.clearTimeout(timer);
   }, [delayMs, value]);
   return debounced;
 }
@@ -135,7 +135,9 @@ function parseOutboxBody(entry: OfflineOutboxEntry): Record<string, unknown> {
   if (!entry.body) return {};
   try {
     const parsed = JSON.parse(entry.body) as unknown;
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
   } catch {
     return {};
   }
@@ -220,16 +222,23 @@ function applyPendingPatch(
   entry: OfflineOutboxEntry,
   body: Record<string, unknown>,
 ): RosterAssignmentRead {
-  const patched = { ...current, ...(previous || {}) } as RosterAssignmentRead & Record<string, unknown>;
-  ASSIGNMENT_PATCH_FIELDS.forEach((field) => {
-    if (Object.prototype.hasOwnProperty.call(body, field)) patched[field] = body[field];
-  });
+  const base = previous && previous.state_revision > current.state_revision
+    ? previous
+    : current;
+  const patched: Record<string, unknown> = { ...base };
+
+  for (const field of ASSIGNMENT_PATCH_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      patched[field] = body[field];
+    }
+  }
+
   const expectedRevision = typeof body.expected_state_revision === "number"
     ? body.expected_state_revision
     : current.state_revision;
   patched.state_revision = Math.max(current.state_revision + 1, expectedRevision + 1);
   patched.updated_at = new Date(entry.updatedAt).toISOString();
-  return patched;
+  return patched as unknown as RosterAssignmentRead;
 }
 
 function mergePendingRosterOutbox(
@@ -350,7 +359,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
 
   useEffect(() => {
     if (!periods.length) {
-      setSelectedPeriodId("");
+      if (selectedPeriodId) setSelectedPeriodId("");
       return;
     }
     const current = periods.find((row) => row.id === selectedPeriodId);
@@ -362,7 +371,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
 
   useEffect(() => {
     if (!selectedPeriod) {
-      setSelectedVersionId("");
+      if (selectedVersionId) setSelectedVersionId("");
       return;
     }
     const current = selectedPeriod.versions.find((row) => row.id === selectedVersionId);
@@ -386,10 +395,6 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     networkMode: "offlineFirst",
   });
 
-  // The persisted version workspace is the single source of assignment state.
-  // Offline optimistic creates/updates/deletes therefore survive reloads. Every
-  // subsequent cached or network workspace load projects the durable outbox over
-  // the server snapshot before React Query can publish it.
   const assignments = workspaceQuery.data?.assignments || [];
   const setAssignments = useCallback<Dispatch<SetStateAction<RosterAssignmentRead[]>>>((update) => {
     if (!selectedVersionId) return;
@@ -442,7 +447,10 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     workspaceQuery.error,
   ].find(Boolean);
 
-  const referenceDataMissing = !periodsQuery.data || !peopleQuery.data || !templatesQuery.data || !contractsQuery.data;
+  const referenceDataMissing = !periodsQuery.data
+    || !peopleQuery.data
+    || !templatesQuery.data
+    || !contractsQuery.data;
   const versionDataMissing = Boolean(selectedVersionId) && !workspaceQuery.data;
   const loading = (referenceDataMissing || versionDataMissing) && (
     periodsQuery.isPending

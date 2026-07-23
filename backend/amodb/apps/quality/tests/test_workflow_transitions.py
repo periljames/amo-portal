@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 
+import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from amodb.apps.accounts import models as account_models
@@ -66,6 +68,7 @@ def test_close_audit_requires_closed_findings(db_session):
     db_session.commit()
 
     finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
         audit_id=audit.id,
         description="Open finding",
         severity=quality_models.QMSFindingSeverity.MINOR,
@@ -76,18 +79,17 @@ def test_close_audit_requires_closed_findings(db_session):
 
     payload = quality_schemas.QMSAuditUpdate(status=quality_models.QMSAuditStatus.CLOSED)
 
-    response = quality_router.update_audit(
-        audit_id=audit.id,
-        payload=payload,
-        request=_make_request(),
-        db=db_session,
-        current_user=user,
-    )
+    with pytest.raises(HTTPException) as exc:
+        quality_router.update_audit(
+            audit_id=audit.id,
+            payload=payload,
+            request=_make_request(),
+            db=db_session,
+            current_user=user,
+        )
 
-    assert response.status_code == 400
-    body = json.loads(response.body)
-    assert body["error"] == "missing_requirements"
-    assert body["detail"][0]["field"] == "findings"
+    assert exc.value.status_code == 400
+    assert "issued CAR" in str(exc.value.detail)
 
 
 def test_close_finding_requires_evidence_and_verification(db_session):
@@ -111,6 +113,7 @@ def test_close_finding_requires_evidence_and_verification(db_session):
     db_session.commit()
 
     finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
         audit_id=audit.id,
         description="Missing evidence",
         severity=quality_models.QMSFindingSeverity.MINOR,
@@ -154,6 +157,7 @@ def test_close_finding_with_requirements_logs_transition(db_session):
     db_session.commit()
 
     finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
         audit_id=audit.id,
         description="Evidence ok",
         severity=quality_models.QMSFindingSeverity.MINOR,
@@ -202,6 +206,7 @@ def test_close_cap_requires_actions_evidence_and_verification(db_session):
     db_session.commit()
 
     finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
         audit_id=audit.id,
         description="CAP finding",
         severity=quality_models.QMSFindingSeverity.MINOR,
@@ -214,6 +219,7 @@ def test_close_cap_requires_actions_evidence_and_verification(db_session):
     db_session.commit()
 
     cap = quality_models.QMSCorrectiveAction(
+        amo_id=amo.id,
         finding_id=finding.id,
     )
     db_session.add(cap)

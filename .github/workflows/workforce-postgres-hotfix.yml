@@ -2,37 +2,48 @@ name: Workforce PostgreSQL Hotfix
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
     paths:
-      - "backend/amodb/alembic/versions/workforce_20260721_complete_rostering.py"
-      - "backend/amodb/alembic/versions/workforce_20260721_precreate_tables.py"
-      - "backend/amodb/apps/rostering/models.py"
-      - "backend/amodb/apps/rostering/tests/postgres_migration_probe.py"
-      - ".github/workflows/workforce-postgres-hotfix.yml"
+      - "backend/**"
+      - "frontend/**"
+      - "deploy/saas/**"
+      - "loadtests/**"
+      - ".github/scripts/**"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: registered-main-merge-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  postgres-migration:
+  integrated-main-gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     services:
       postgres:
         image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: amodb_migration_test
+          POSTGRES_DB: amodb_merge_readiness
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d amodb_migration_test"
+          --health-cmd "pg_isready -U postgres -d amodb_merge_readiness"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-    defaults:
-      run:
-        working-directory: backend
+    env:
+      APP_ENV: test
+      SECRET_KEY: registered-main-merge-gate-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      MAIN_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_merge_readiness
+      WORKFORCE_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_workforce_probe
+      QUALITY_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_probe
     steps:
       - uses: actions/checkout@v6
         with:
@@ -42,27 +53,317 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - run: pip install -r requirements.txt
-      - name: Run PostgreSQL migration collision probe
-        id: migrate
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend dependencies with bounded transient retries
+        working-directory: backend
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "integrated backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Install frontend dependencies with bounded transient retries
+        working-directory: frontend
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "integrated frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Create isolated PostgreSQL probe databases
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import psycopg2
+
+          connection = psycopg2.connect(
+              host="127.0.0.1",
+              port=5432,
+              user="postgres",
+              password="postgres",
+              dbname="postgres",
+          )
+          connection.autocommit = True
+          with connection.cursor() as cursor:
+              for name in ("amodb_workforce_probe", "amodb_quality_probe"):
+                  cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,))
+                  if cursor.fetchone() is None:
+                      cursor.execute(f'CREATE DATABASE "{name}"')
+          connection.close()
+          PY
+      - name: Verify static Quality, SaaS and cleanup contracts
+        id: contracts
         continue-on-error: true
-        env:
-          APP_ENV: test
-          SECRET_KEY: migration-test-secret
-          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_migration_test
-          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_migration_test
+        working-directory: backend
         shell: bash
         run: |
           set -o pipefail
-          python -m amodb.apps.rostering.tests.postgres_migration_probe 2>&1 | tee workforce-postgres-migration.log
-      - name: Upload PostgreSQL migration diagnostics
+          {
+            python -m amodb.scripts.quality_module_internal_check
+            python -m amodb.scripts.saas_control_plane_internal_check
+            python -m amodb.scripts.saas_release_cleanup_check
+          } 2>&1 | tee integrated-contracts.log
+      - name: Upgrade clean production schema to every Alembic head
+        id: migrate
+        continue-on-error: true
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.MAIN_DATABASE_URL }}
+          DATABASE_WRITE_URL: ${{ env.MAIN_DATABASE_URL }}
+          DATABASE_READ_URL: ${{ env.MAIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -o pipefail
+          alembic -c amodb/alembic.ini upgrade heads 2>&1 | tee integrated-migration.log
+      - name: Configure every mapper and verify critical routes
+        id: mapper_routes
+        continue-on-error: true
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.MAIN_DATABASE_URL }}
+          DATABASE_WRITE_URL: ${{ env.MAIN_DATABASE_URL }}
+          DATABASE_READ_URL: ${{ env.MAIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee integrated-mappers.log
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          from sqlalchemy.orm import configure_mappers
+          from amodb.main import app
+          import amodb.quality_main
+
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          heads = script.get_heads()
+          assert len(heads) == len(set(heads)), heads
+          assert "saas_20260722_side_effect_safe" in heads, heads
+          assert script.get_revision("quality_20260722_schema_integrity")
+          assert script.get_revision("workforce_20260721_complete")
+
+          configure_mappers()
+          paths = {route.path for route in app.routes}
+          required = {
+              "/platform/saas/webhooks/stripe",
+              "/platform/saas/integration-health",
+              "/platform/tenant-saas/setup",
+              "/platform/tenant-saas/providers/{provider}",
+              "/platform/tenant-saas/invoices/{invoice_id}/fiscalize",
+              "/api/realtime/broker/authenticate",
+              "/api/realtime/broker/authorize",
+              "/api/chat/threads",
+              "/api/notifications/me",
+          }
+          missing = required - paths
+          assert not missing, missing
+          print("All application mappers and critical routes verified")
+          PY
+      - name: Run Workforce PostgreSQL migration collision probe
+        id: workforce_probe
+        continue-on-error: true
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.WORKFORCE_DATABASE_URL }}
+          DATABASE_WRITE_URL: ${{ env.WORKFORCE_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m amodb.apps.rostering.tests.postgres_migration_probe 2>&1 | tee integrated-workforce-probe.log
+      - name: Run Quality PostgreSQL schema integrity probe
+        id: quality_probe
+        continue-on-error: true
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.QUALITY_DATABASE_URL }}
+          DATABASE_WRITE_URL: ${{ env.QUALITY_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m amodb.apps.quality.tests.postgres_schema_integrity_probe 2>&1 | tee integrated-quality-probe.log
+      - name: Compile cleanup-sensitive backend modules
+        id: compile_backend
+        continue-on-error: true
+        working-directory: backend
+        run: >-
+          python -m compileall -q
+          amodb/apps/accounts
+          amodb/apps/audit
+          amodb/apps/platform
+          amodb/apps/quality
+          amodb/apps/realtime
+          amodb/apps/rostering
+          amodb/apps/training
+          amodb/apps/workforce
+          amodb/jobs
+      - name: Run Quality workflow regressions
+        id: quality_tests
+        continue-on-error: true
+        working-directory: backend
+        env:
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          QUALITY_SCHEMA_STRICT: "0"
+        run: >-
+          pytest -q
+          amodb/apps/quality/tests/test_quality_delivery_profile.py
+          amodb/apps/quality/tests/test_workflow_transitions.py
+          amodb/apps/quality/tests/test_audit_workflow_enforcement.py
+          amodb/apps/quality/tests/test_audit_events.py
+          amodb/apps/quality/tests/test_task_integrations.py
+          amodb/apps/quality/tests/test_evidence_pack_exports.py
+      - name: Run account, Workforce and Rostering regressions
+        id: domain_tests
+        continue-on-error: true
+        working-directory: backend
+        env:
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          QUALITY_SCHEMA_STRICT: "0"
+        run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests amodb/apps/rostering/tests
+      - name: Run SaaS and realtime regressions
+        id: saas_tests
+        continue-on-error: true
+        working-directory: backend
+        env:
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          QUALITY_SCHEMA_STRICT: "0"
+        run: pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py
+      - name: Run lease-fenced worker smoke tests
+        id: workers
+        continue-on-error: true
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.MAIN_DATABASE_URL }}
+          DATABASE_WRITE_URL: ${{ env.MAIN_DATABASE_URL }}
+          DATABASE_READ_URL: ${{ env.MAIN_DATABASE_URL }}
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            python -m amodb.jobs.saas_worker_safe --once --batch-size 5
+            python -m amodb.jobs.platform_command_worker --once --batch-size 5
+          } 2>&1 | tee integrated-workers.log
+      - name: Run Quality and SaaS frontend service regressions
+        id: frontend_services
+        continue-on-error: true
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            npm run test:quality
+            npm run test:platform
+          } 2>&1 | tee integrated-frontend-services.log
+      - name: Run Rostering and offline frontend regressions
+        id: frontend_rostering
+        continue-on-error: true
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts 2>&1 | tee integrated-frontend-rostering.log
+      - name: Typecheck and build complete production frontend
+        id: frontend_build
+        continue-on-error: true
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee integrated-frontend-build.log
+      - name: Lint integrated cleanup surfaces
+        id: frontend_lint
+        continue-on-error: true
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm exec -- eslint \
+            src/main.tsx \
+            src/components/messaging \
+            src/components/offline \
+            src/pages/AdminSaaSSettingsPage.tsx \
+            src/pages/EmailServerSettingsPage.tsx \
+            src/pages/platform \
+            src/pages/rostering \
+            src/services/apiClient.ts \
+            src/services/crs.ts \
+            src/services/fleet.ts \
+            src/services/maintenance.ts \
+            src/services/messaging.ts \
+            src/services/messaging.test.ts \
+            src/services/offlineHttp.ts \
+            src/services/offlinePersistence.ts \
+            src/services/platformControl.ts \
+            src/services/platformControl.test.ts \
+            src/services/qmsAuditHubActions.ts \
+            src/services/qmsAuditHubActions.test.ts \
+            src/services/queryPersister.ts \
+            src/services/realtime \
+            src/services/rostering.ts \
+            src/services/saasSettings.ts \
+            src/services/saasSettings.test.ts \
+            src/services/typedApi.ts \
+            src/services/workOrders.ts \
+            2>&1 | tee integrated-frontend-lint.log
+      - name: Validate k6 and deployment configuration
+        id: deployment
+        continue-on-error: true
+        env:
+          DATABASE_URL: postgresql+psycopg2://example:example@database.example.invalid:5432/amodb
+          CORS_ALLOWED_ORIGINS: https://portal.example.invalid
+          MQTT_BROKER_INTERNAL_URL: mqtt://broker.example.invalid:1883
+          MQTT_BROKER_WS_URL: wss://broker.example.invalid/mqtt
+          REALTIME_BROKER_WEBHOOK_SECRET: ci-broker-webhook-secret-more-than-32-characters
+          REALTIME_GATEWAY_USERNAME: amo-gateway
+          REALTIME_GATEWAY_PASSWORD: ci-gateway-password-more-than-24-characters
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            node --check loadtests/k6_saas_control_plane.js
+            docker compose -f deploy/saas/docker-compose.yml config
+          } 2>&1 | tee integrated-deployment.log
+      - name: Upload integrated diagnostics
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: workforce-postgres-migration-log
-          path: backend/workforce-postgres-migration.log
-          if-no-files-found: error
+          name: integrated-main-gate-diagnostics
+          path: |
+            backend/integrated-contracts.log
+            backend/integrated-migration.log
+            backend/integrated-mappers.log
+            backend/integrated-workforce-probe.log
+            backend/integrated-quality-probe.log
+            backend/integrated-workers.log
+            frontend/integrated-frontend-services.log
+            frontend/integrated-frontend-rostering.log
+            frontend/integrated-frontend-build.log
+            frontend/integrated-frontend-lint.log
+            integrated-deployment.log
+          if-no-files-found: warn
           retention-days: 7
-      - name: Fail when migration failed
-        if: steps.migrate.outcome != 'success'
+      - name: Fail integrated main gate
+        if: >-
+          steps.contracts.outcome != 'success' ||
+          steps.migrate.outcome != 'success' ||
+          steps.mapper_routes.outcome != 'success' ||
+          steps.workforce_probe.outcome != 'success' ||
+          steps.quality_probe.outcome != 'success' ||
+          steps.compile_backend.outcome != 'success' ||
+          steps.quality_tests.outcome != 'success' ||
+          steps.domain_tests.outcome != 'success' ||
+          steps.saas_tests.outcome != 'success' ||
+          steps.workers.outcome != 'success' ||
+          steps.frontend_services.outcome != 'success' ||
+          steps.frontend_rostering.outcome != 'success' ||
+          steps.frontend_build.outcome != 'success' ||
+          steps.frontend_lint.outcome != 'success' ||
+          steps.deployment.outcome != 'success'
         run: exit 1

@@ -1,0 +1,47 @@
+name: Recheck Failed PR Jobs
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number whose exact current head should be rechecked
+        required: true
+        type: string
+      dry_run:
+        description: Report eligible failed runs without requesting reruns
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+concurrency:
+  group: recheck-pr-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  rerun-failed-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - name: Validate retry wrapper
+        run: >-
+          python .github/scripts/retry_transient.py
+          --attempts 1
+          --label "retry wrapper smoke test"
+          -- python -c "print('retry wrapper ready')"
+      - name: Re-run failed jobs for exact PR head
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          args=(--repo "${GITHUB_REPOSITORY}" --pr "${{ inputs.pr_number }}")
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          python .github/scripts/rerun_failed_pr_checks.py "${args[@]}"

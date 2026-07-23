@@ -2,7 +2,8 @@
 FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    ASGI_APP=amodb.main:app
 
 WORKDIR /app
 
@@ -17,4 +18,4 @@ COPY backend /app/backend
 ENV PYTHONPATH=/app/backend
 
 EXPOSE 8080
-CMD ["uvicorn", "amodb.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "exec uvicorn \"${ASGI_APP}\" --host 0.0.0.0 --port \"${PORT:-8080}\""]

@@ -219,8 +219,42 @@ def ensure_qms_audit_scope_schema(db: Session) -> bool:
     if not callable(get_bind):
         return False
 
+    bind = db.get_bind()
+    if getattr(bind.dialect, "name", "") != "postgresql":
+        from amodb.apps.accounts import models as account_models
+        from amodb.apps.quality import models as quality_models
+
+        quality_models.QMSAuditScope.__table__.create(bind=bind, checkfirst=True)
+        for amo_id, in db.query(account_models.AMO.id).all():
+            for code, name, party_level, default_kind, sort_order, description in _DEFAULT_AUDIT_SCOPES:
+                exists = (
+                    db.query(quality_models.QMSAuditScope.id)
+                    .filter(
+                        quality_models.QMSAuditScope.amo_id == amo_id,
+                        quality_models.QMSAuditScope.code == code,
+                    )
+                    .first()
+                )
+                if exists:
+                    continue
+                db.add(
+                    quality_models.QMSAuditScope(
+                        amo_id=amo_id,
+                        code=code,
+                        name=name,
+                        description=description,
+                        party_level=party_level,
+                        default_kind=quality_models.QMSAuditKind(default_kind),
+                        is_active=True,
+                        is_system_default=True,
+                        sort_order=sort_order,
+                    )
+                )
+        db.flush()
+        return True
+
     changed = False
-    inspector = inspect(db.get_bind())
+    inspector = inspect(bind)
     table_names = set(inspector.get_table_names())
 
     # Some tenant databases already contain data migrated by earlier patches but

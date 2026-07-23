@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Integer,
     Column,
     DateTime,
@@ -39,25 +40,43 @@ class PresenceKind(str, enum.Enum):
 
 class ChatThread(Base):
     __tablename__ = "chat_threads"
+    __table_args__ = (
+        Index("ix_chat_threads_amo_kind_updated", "amo_id", "kind", "updated_at"),
+        Index("ix_chat_threads_department", "amo_id", "department_id"),
+        Index("ix_chat_threads_user_group", "amo_id", "user_group_id"),
+    )
 
     id = Column(String(36), primary_key=True, default=generate_uuid7)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), nullable=True)
+    kind = Column(String(32), nullable=False, default="GROUP", server_default="GROUP")
+    scope_key = Column(String(255), nullable=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+    user_group_id = Column(String(36), nullable=True)
     created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+    last_message_at = Column(DateTime(timezone=True), nullable=True)
+    is_archived = Column(Boolean, nullable=False, default=False, server_default="false")
 
 
 class ChatThreadMember(Base):
     __tablename__ = "chat_thread_members"
     __table_args__ = (
         UniqueConstraint("thread_id", "user_id", name="uq_chat_thread_members_thread_user"),
+        Index("ix_chat_thread_members_user_active", "user_id", "thread_id"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_uuid7)
     thread_id = Column(String(36), ForeignKey("chat_threads.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String(32), nullable=True)
+    notification_level = Column(String(32), nullable=False, default="ALL", server_default="ALL")
     joined_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    last_read_at = Column(DateTime(timezone=True), nullable=True)
+    muted_until = Column(DateTime(timezone=True), nullable=True)
+    left_at = Column(DateTime(timezone=True), nullable=True)
+    added_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
 class ChatMessage(Base):
@@ -65,6 +84,7 @@ class ChatMessage(Base):
     __table_args__ = (
         UniqueConstraint("sender_id", "client_msg_id", name="uq_chat_messages_sender_client_msg"),
         Index("ix_chat_messages_amo_thread_created_at", "amo_id", "thread_id", "created_at"),
+        Index("ix_chat_messages_thread_created_id", "thread_id", "created_at", "id"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_uuid7)
@@ -73,6 +93,9 @@ class ChatMessage(Base):
     sender_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     body_bin = Column(LargeBinary, nullable=False)
     body_mime = Column(String(64), nullable=False, default="text/plain")
+    message_type = Column(String(32), nullable=False, default="TEXT", server_default="TEXT")
+    reply_to_message_id = Column(String(36), ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
+    metadata_json = Column("metadata", JSON, nullable=True)
     client_msg_id = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     edited_at = Column(DateTime(timezone=True), nullable=True)
@@ -84,6 +107,7 @@ class MessageReceipt(Base):
     __table_args__ = (
         UniqueConstraint("message_id", "user_id", name="uq_message_receipts_message_user"),
         Index("ix_message_receipts_message_user", "message_id", "user_id"),
+        Index("ix_message_receipts_user_unread", "amo_id", "user_id", "message_id"),
     )
 
     id = Column(String(36), primary_key=True, default=generate_uuid7)
@@ -92,6 +116,48 @@ class MessageReceipt(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     delivered_at = Column(DateTime(timezone=True), nullable=True)
     read_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class PortalNotification(Base):
+    __tablename__ = "portal_notifications"
+    __table_args__ = (
+        Index("ix_portal_notifications_user_created", "amo_id", "user_id", "created_at", "id"),
+        Index("ix_portal_notifications_user_unread", "amo_id", "user_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_uuid7)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(64), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    body = Column(Text, nullable=False)
+    entity_type = Column(String(64), nullable=True)
+    entity_id = Column(String(64), nullable=True)
+    action_url = Column(String(512), nullable=True)
+    dedupe_key = Column(String(255), nullable=True)
+    metadata_json = Column("metadata", JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    __table_args__ = (UniqueConstraint("amo_id", "user_id", name="uq_notification_preferences_amo_user"),)
+
+    id = Column(String(36), primary_key=True, default=generate_uuid7)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    in_app_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    desktop_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    sound_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    email_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    chat_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    quiet_hours_start = Column(String(5), nullable=True)
+    quiet_hours_end = Column(String(5), nullable=True)
+    timezone_name = Column(String(64), nullable=False, default="UTC", server_default="UTC")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
 class Prompt(Base):
@@ -142,9 +208,7 @@ class PresenceState(Base):
 
 class RealtimeOutbox(Base):
     __tablename__ = "realtime_outbox"
-    __table_args__ = (
-        Index("ix_realtime_outbox_pending", "published_at", "created_at"),
-    )
+    __table_args__ = (Index("ix_realtime_outbox_pending", "published_at", "created_at"),)
 
     id = Column(String(36), primary_key=True, default=generate_uuid7)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -160,9 +224,7 @@ class RealtimeOutbox(Base):
 
 class RealtimeConnectToken(Base):
     __tablename__ = "realtime_connect_tokens"
-    __table_args__ = (
-        Index("ix_realtime_connect_tokens_user_exp", "user_id", "expires_at"),
-    )
+    __table_args__ = (Index("ix_realtime_connect_tokens_user_exp", "user_id", "expires_at"),)
 
     id = Column(String(36), primary_key=True, default=generate_uuid7)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)

@@ -3,6 +3,9 @@ export type RealtimeKind =
   | "chat.message.edited"
   | "chat.message.deleted"
   | "chat.thread.created"
+  | "chat.thread.updated"
+  | "notification.created"
+  | "notification.read"
   | "prompt.authorization"
   | "prompt.task_assigned"
   | "presence.snapshot"
@@ -24,6 +27,8 @@ export type RealtimeEnvelope = {
   userId: string;
   kind: RealtimeKind;
   payload: Record<string, unknown>;
+  /** Added only immediately before client-to-gateway publish. Never persisted. */
+  authToken?: string;
 };
 
 export type BrokerState = "connected" | "reconnecting" | "offline";

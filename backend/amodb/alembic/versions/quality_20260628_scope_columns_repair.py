@@ -1,8 +1,14 @@
-"""repair audit scope columns after legacy scope migration
+"""Repair audit-scope columns after legacy scope migration.
 
 Revision ID: qual_20260628_scope_fix
 Revises: qual_20260627_scope
 Create Date: 2026-06-28
+
+This repair is deliberately commutative with parallel Quality branches. It may
+run before schedule tenant ownership or some audit reference fields exist, so
+all data normalization and index work is guarded by the actual table-column
+contract. Later migrations repeat schedule normalization after adding
+``qms_audit_schedules.amo_id``.
 """
 from __future__ import annotations
 
@@ -48,12 +54,15 @@ def _column_names(conn, table_name: str) -> set[str]:
     return {str(row) for row in rows}
 
 
+def _has_columns(conn, table_name: str, columns: set[str]) -> bool:
+    return columns.issubset(_column_names(conn, table_name))
+
+
 def _create_or_repair_scope_table(conn) -> None:
     required = {"id", "amo_id", "code", "name"}
     if _has_table(conn, "qms_audit_scopes"):
         existing = _column_names(conn, "qms_audit_scopes")
         if required.issubset(existing):
-            # Ensure newer optional columns exist even if an older clean table was created.
             conn.execute(text("ALTER TABLE qms_audit_scopes ADD COLUMN IF NOT EXISTS description TEXT"))
             conn.execute(text("ALTER TABLE qms_audit_scopes ADD COLUMN IF NOT EXISTS party_level VARCHAR(32) DEFAULT 'FIRST_PARTY'"))
             conn.execute(text("ALTER TABLE qms_audit_scopes ADD COLUMN IF NOT EXISTS default_kind VARCHAR(32) DEFAULT 'INTERNAL'"))
@@ -64,17 +73,17 @@ def _create_or_repair_scope_table(conn) -> None:
             conn.execute(text("ALTER TABLE qms_audit_scopes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()"))
             conn.execute(text("ALTER TABLE qms_audit_scopes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()"))
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_qms_audit_scope_code_per_amo ON qms_audit_scopes (amo_id, code)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_audit_scope_amo_active ON qms_audit_scopes (amo_id, is_active)"))
+            if _has_columns(conn, "qms_audit_scopes", {"amo_id", "is_active"}):
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_audit_scope_amo_active ON qms_audit_scopes (amo_id, is_active)"))
             return
 
-        # Legacy artifact table with same name. Preserve it; do not mutate it.
         suffix = "legacy_artifacts_20260628"
         target = f"qms_audit_scopes_{suffix}"
         n = 1
         while _has_table(conn, target):
             n += 1
             target = f"qms_audit_scopes_{suffix}_{n}"
-        conn.execute(text(f'ALTER TABLE qms_audit_scopes RENAME TO {target}'))
+        conn.execute(text(f'ALTER TABLE qms_audit_scopes RENAME TO "{target}"'))
 
     op.create_table(
         "qms_audit_scopes",
@@ -106,7 +115,12 @@ def _ensure_audit_columns(conn) -> None:
         conn.execute(text("ALTER TABLE qms_audits ADD COLUMN IF NOT EXISTS ref_sequence INTEGER"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_audits_audit_scope_id ON qms_audits (audit_scope_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_audits_audit_scope_code ON qms_audits (audit_scope_code)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_audits_ref_scope ON qms_audits (amo_id, domain, reference_family, unit_code, ref_year, ref_sequence)"))
+        if _has_columns(
+            conn,
+            "qms_audits",
+            {"amo_id", "domain", "reference_family", "unit_code", "ref_year", "ref_sequence"},
+        ):
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_audits_ref_scope ON qms_audits (amo_id, domain, reference_family, unit_code, ref_year, ref_sequence)"))
 
     if _has_table(conn, "qms_audit_schedules"):
         conn.execute(text("ALTER TABLE qms_audit_schedules ADD COLUMN IF NOT EXISTS audit_scope_id UUID"))
@@ -137,27 +151,38 @@ def _ensure_counter_table(conn) -> None:
         conn.execute(text("ALTER TABLE qms_audit_reference_counters ADD COLUMN IF NOT EXISTS last_value INTEGER DEFAULT 0"))
         conn.execute(text("ALTER TABLE qms_audit_reference_counters ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()"))
         conn.execute(text("ALTER TABLE qms_audit_reference_counters ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()"))
-        conn.execute(text("UPDATE qms_audit_reference_counters SET id = ('00000000-0000-4000-8000-' || substring(md5(COALESCE(amo_id, '') || COALESCE(reference_family, '') || COALESCE(unit_code, '') || COALESCE(ref_year::text, '')) for 12))::uuid WHERE id IS NULL AND amo_id IS NOT NULL AND unit_code IS NOT NULL AND ref_year IS NOT NULL"))
-    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_qms_audit_ref_counter_scope ON qms_audit_reference_counters (amo_id, reference_family, unit_code, ref_year)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_audit_ref_counter_scope ON qms_audit_reference_counters (amo_id, reference_family, unit_code, ref_year)"))
+        if _has_columns(
+            conn,
+            "qms_audit_reference_counters",
+            {"id", "amo_id", "reference_family", "unit_code", "ref_year"},
+        ):
+            conn.execute(text("UPDATE qms_audit_reference_counters SET id = ('00000000-0000-4000-8000-' || substring(md5(COALESCE(amo_id, '') || COALESCE(reference_family, '') || COALESCE(unit_code, '') || COALESCE(ref_year::text, '')) for 12))::uuid WHERE id IS NULL AND amo_id IS NOT NULL AND unit_code IS NOT NULL AND ref_year IS NOT NULL"))
+
+    required = {"amo_id", "reference_family", "unit_code", "ref_year"}
+    if _has_columns(conn, "qms_audit_reference_counters", required):
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_qms_audit_ref_counter_scope ON qms_audit_reference_counters (amo_id, reference_family, unit_code, ref_year)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_qms_audit_ref_counter_scope ON qms_audit_reference_counters (amo_id, reference_family, unit_code, ref_year)"))
 
 
 def _scope_seed_tenants(conn) -> list[str]:
     tenant_ids: set[str] = set()
-    for sql in (
-        "SELECT id FROM amos WHERE id IS NOT NULL",
-        "SELECT DISTINCT amo_id AS id FROM qms_audits WHERE amo_id IS NOT NULL" if _has_table(conn, "qms_audits") else None,
-        "SELECT DISTINCT amo_id AS id FROM qms_audit_schedules WHERE amo_id IS NOT NULL" if _has_table(conn, "qms_audit_schedules") else None,
-    ):
-        if not sql:
+    if _has_columns(conn, "amos", {"id"}):
+        for row in conn.execute(text("SELECT id FROM amos WHERE id IS NOT NULL")).mappings().all():
+            if row.get("id"):
+                tenant_ids.add(str(row["id"]))
+
+    for table_name in ("qms_audits", "qms_audit_schedules"):
+        if not _has_columns(conn, table_name, {"amo_id"}):
             continue
-        for row in conn.execute(text(sql)).mappings().all():
+        for row in conn.execute(text(f"SELECT DISTINCT amo_id AS id FROM {table_name} WHERE amo_id IS NOT NULL")).mappings().all():
             if row.get("id"):
                 tenant_ids.add(str(row["id"]))
     return sorted(tenant_ids)
 
 
 def _seed_default_scopes(conn) -> None:
+    if not _has_columns(conn, "qms_audit_scopes", {"id", "amo_id", "code", "name"}):
+        return
     for amo_id in _scope_seed_tenants(conn):
         for code, name, party_level, default_kind, sort_order, description in _DEFAULT_SCOPES:
             conn.execute(
@@ -185,9 +210,17 @@ def _seed_default_scopes(conn) -> None:
             )
 
 
-def _normalise_audit_rows(conn) -> None:
-    if _has_table(conn, "qms_audit_schedules"):
-        conn.execute(text("""
+def _normalise_schedule_rows(conn) -> None:
+    schedule_required = {"amo_id", "kind", "audit_scope_id", "audit_scope_code"}
+    scope_required = {"id", "amo_id", "code"}
+    if not _has_columns(conn, "qms_audit_schedules", schedule_required):
+        return
+    if not _has_columns(conn, "qms_audit_scopes", scope_required):
+        return
+
+    conn.execute(
+        text(
+            """
             UPDATE qms_audit_schedules s
             SET audit_scope_code = COALESCE(NULLIF(s.audit_scope_code, ''), ds.code, 'MO'),
                 audit_scope_id = COALESCE(s.audit_scope_id, ds.id)
@@ -195,15 +228,37 @@ def _normalise_audit_rows(conn) -> None:
             WHERE ds.amo_id = s.amo_id
               AND ds.code = CASE WHEN s.kind = 'THIRD_PARTY' THEN 'REG' WHEN s.kind = 'EXTERNAL' THEN 'SC' ELSE 'MO' END
               AND (s.audit_scope_code IS NULL OR s.audit_scope_code = '' OR s.audit_scope_id IS NULL)
-        """))
-        conn.execute(text("""
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
             UPDATE qms_audit_schedules
-            SET audit_scope_code = COALESCE(NULLIF(audit_scope_code, ''), CASE WHEN kind = 'THIRD_PARTY' THEN 'REG' WHEN kind = 'EXTERNAL' THEN 'SC' ELSE 'MO' END)
+            SET audit_scope_code = COALESCE(
+                NULLIF(audit_scope_code, ''),
+                CASE WHEN kind = 'THIRD_PARTY' THEN 'REG' WHEN kind = 'EXTERNAL' THEN 'SC' ELSE 'MO' END
+            )
             WHERE audit_scope_code IS NULL OR audit_scope_code = ''
-        """))
+            """
+        )
+    )
 
-    if _has_table(conn, "qms_audits"):
-        conn.execute(text("""
+
+def _normalise_audit_rows(conn) -> None:
+    audit_required = {
+        "id", "amo_id", "kind", "audit_scope_id", "audit_scope_code", "reference_family",
+        "unit_code", "ref_year", "ref_sequence", "audit_ref", "planned_start", "created_at",
+    }
+    scope_required = {"id", "amo_id", "code"}
+    if not _has_columns(conn, "qms_audits", audit_required):
+        return
+    if not _has_columns(conn, "qms_audit_scopes", scope_required):
+        return
+
+    conn.execute(
+        text(
+            """
             WITH scoped AS (
                 SELECT
                     a.id,
@@ -234,8 +289,16 @@ def _normalise_audit_rows(conn) -> None:
                 audit_ref = COALESCE(NULLIF(a.audit_ref, ''), 'QAR/' || scoped.scope_code || '/' || LPAD(scoped.ref_year::text, 2, '0') || '/' || LPAD(scoped.seq::text, 3, '0'))
             FROM scoped
             WHERE a.id = scoped.id
-        """))
-        conn.execute(text("""
+            """
+        )
+    )
+
+    counter_required = {"id", "amo_id", "reference_family", "unit_code", "ref_year", "last_value", "created_at", "updated_at"}
+    if not _has_columns(conn, "qms_audit_reference_counters", counter_required):
+        return
+    conn.execute(
+        text(
+            """
             INSERT INTO qms_audit_reference_counters
                 (id, amo_id, reference_family, unit_code, ref_year, last_value, created_at, updated_at)
             SELECT
@@ -258,7 +321,9 @@ def _normalise_audit_rows(conn) -> None:
             DO UPDATE SET
                 last_value = GREATEST(qms_audit_reference_counters.last_value, EXCLUDED.last_value),
                 updated_at = NOW()
-        """))
+            """
+        )
+    )
 
 
 def upgrade() -> None:
@@ -267,6 +332,7 @@ def upgrade() -> None:
     _ensure_audit_columns(conn)
     _ensure_counter_table(conn)
     _seed_default_scopes(conn)
+    _normalise_schedule_rows(conn)
     _normalise_audit_rows(conn)
 
 

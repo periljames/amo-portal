@@ -58,6 +58,7 @@ def test_car_evidence_pack_contains_pdf_and_timeline(db_session, monkeypatch, tm
 
     car = quality_service.create_car(
         db_session,
+        amo_id=amo.id,
         program=quality_models.CARProgram.QUALITY,
         title="Test CAR",
         summary="Summary",

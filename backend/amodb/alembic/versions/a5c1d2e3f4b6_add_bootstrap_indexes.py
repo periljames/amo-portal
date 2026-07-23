@@ -1,12 +1,23 @@
-"""Add bootstrap workflow indexes.
+"""Add bootstrap workflow indexes without assuming branch-local columns exist.
 
 Revision ID: a5c1d2e3f4b6
 Revises: f4c7f0c1d2ab
 Create Date: 2025-02-21 00:00:00.000000
+
+The repository has parallel Alembic branches. On a clean database this revision
+can run before later tenant-normalisation revisions add ``amo_id`` to every
+target table. Index creation must therefore be conditional here; the current
+SaaS finalisation migration re-applies the same indexes after the full graph has
+converged.
 """
+
+from __future__ import annotations
+
+from collections.abc import Iterable
 
 from alembic import op
 import sqlalchemy as sa
+
 
 revision = "a5c1d2e3f4b6"
 down_revision = "f4c7f0c1d2ab"
@@ -14,40 +25,69 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade() -> None:
-    op.create_index(
+INDEXES: tuple[tuple[str, str, tuple[object, ...], tuple[str, ...]], ...] = (
+    (
         "ix_work_orders_amo_aircraft_created",
         "work_orders",
-        ["amo_id", "aircraft_serial_number", sa.text("created_at DESC")],
-    )
-    op.create_index(
+        ("amo_id", "aircraft_serial_number", sa.text("created_at DESC")),
+        ("amo_id", "aircraft_serial_number", "created_at"),
+    ),
+    (
         "ix_task_cards_amo_workorder_status",
         "task_cards",
-        ["amo_id", "work_order_id", "status"],
-    )
-    op.create_index(
+        ("amo_id", "work_order_id", "status"),
+        ("amo_id", "work_order_id", "status"),
+    ),
+    (
         "ix_audit_events_amo_time_desc",
         "audit_events",
-        ["amo_id", sa.text("occurred_at DESC")],
-    )
-    op.create_index(
+        ("amo_id", sa.text("occurred_at DESC")),
+        ("amo_id", "occurred_at"),
+    ),
+    (
         "ix_config_events_amo_aircraft_date_desc",
         "aircraft_configuration_events",
-        ["amo_id", "aircraft_serial_number", sa.text("occurred_at DESC")],
-    )
-    op.create_index(
+        ("amo_id", "aircraft_serial_number", sa.text("occurred_at DESC")),
+        ("amo_id", "aircraft_serial_number", "occurred_at"),
+    ),
+    (
         "ix_part_movement_amo_aircraft_date",
         "part_movement_ledger",
-        ["amo_id", "aircraft_serial_number", sa.text("event_date DESC")],
-    )
+        ("amo_id", "aircraft_serial_number", sa.text("event_date DESC")),
+        ("amo_id", "aircraft_serial_number", "event_date"),
+    ),
+)
+
+
+def _index_names(inspector: sa.Inspector, table_name: str) -> set[str]:
+    if not inspector.has_table(table_name):
+        return set()
+    return {str(index.get("name")) for index in inspector.get_indexes(table_name) if index.get("name")}
+
+
+def _has_columns(inspector: sa.Inspector, table_name: str, columns: Iterable[str]) -> bool:
+    if not inspector.has_table(table_name):
+        return False
+    available = {str(column["name"]) for column in inspector.get_columns(table_name)}
+    return set(columns).issubset(available)
+
+
+def _create_supported_indexes() -> None:
+    inspector = sa.inspect(op.get_bind())
+    for name, table_name, expressions, required_columns in INDEXES:
+        if not _has_columns(inspector, table_name, required_columns):
+            continue
+        if name in _index_names(inspector, table_name):
+            continue
+        op.create_index(name, table_name, list(expressions))
+
+
+def upgrade() -> None:
+    _create_supported_indexes()
 
 
 def downgrade() -> None:
-    op.drop_index("ix_part_movement_amo_aircraft_date", table_name="part_movement_ledger")
-    op.drop_index(
-        "ix_config_events_amo_aircraft_date_desc",
-        table_name="aircraft_configuration_events",
-    )
-    op.drop_index("ix_audit_events_amo_time_desc", table_name="audit_events")
-    op.drop_index("ix_task_cards_amo_workorder_status", table_name="task_cards")
-    op.drop_index("ix_work_orders_amo_aircraft_created", table_name="work_orders")
+    inspector = sa.inspect(op.get_bind())
+    for name, table_name, _expressions, _required_columns in reversed(INDEXES):
+        if name in _index_names(inspector, table_name):
+            op.drop_index(name, table_name=table_name)

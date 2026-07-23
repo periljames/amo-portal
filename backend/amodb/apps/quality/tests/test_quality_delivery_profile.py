@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+from amodb.apps.quality import router as direct_quality_router
+from amodb.quality_main import OMITTED_OPERATIONAL_MODULES, PROFILE_MODULES, app
+
+
+def test_quality_delivery_profile_exposes_required_route_families() -> None:
+    paths = {route.path for route in app.routes}
+
+    assert "/deployment-profile" in paths
+    assert any(path.startswith("/quality") for path in paths)
+    assert any(path.startswith("/api/maintenance/{amo_code}/quality") for path in paths)
+    assert any(path.startswith("/api/maintenance/{amo_code}/qms") for path in paths)
+    assert any(path.startswith("/auth") for path in paths)
+    assert any(path.startswith("/training") for path in paths)
+    assert "/email-logs" in paths
+    assert "/tasks" in paths
+    assert "/tasks/my" in paths
+
+
+def test_quality_delivery_profile_omits_unrelated_operational_routes() -> None:
+    paths = {route.path for route in app.routes}
+    blocked_prefixes = (
+        "/fleet",
+        "/work",
+        "/crs",
+        "/reliability",
+        "/inventory",
+        "/finance",
+        "/billing",
+        "/technical-records",
+        "/rostering",
+        "/workforce",
+    )
+
+    for prefix in blocked_prefixes:
+        assert not any(path == prefix or path.startswith(f"{prefix}/") for path in paths), prefix
+
+
+def test_quality_direct_router_has_no_exact_duplicate_registrations() -> None:
+    signatures = [
+        (
+            str(getattr(route, "path", "")),
+            frozenset(getattr(route, "methods", None) or ()),
+            id(getattr(route, "endpoint", route)),
+        )
+        for route in direct_quality_router.routes
+    ]
+    assert len(signatures) == len(set(signatures))
+
+
+def test_quality_delivery_manifest_is_explicit() -> None:
+    assert "quality" in PROFILE_MODULES
+    assert "training" in PROFILE_MODULES
+    assert "audit" in PROFILE_MODULES
+    assert "notifications" in PROFILE_MODULES
+    assert "tasks" in PROFILE_MODULES
+    assert "reliability" in OMITTED_OPERATIONAL_MODULES
+    assert "inventory" in OMITTED_OPERATIONAL_MODULES
+    assert "finance" in OMITTED_OPERATIONAL_MODULES

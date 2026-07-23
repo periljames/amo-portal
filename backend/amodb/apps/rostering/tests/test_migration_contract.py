@@ -17,28 +17,34 @@ def assignment_value(module: ast.Module, name: str):
     raise AssertionError(f"Missing migration variable: {name}")
 
 
-def test_migration_descends_from_current_merge_head():
+def test_migration_descends_from_quality_and_core_rostering_heads():
     module = ast.parse(MIGRATION.read_text(encoding="utf-8"))
     assert assignment_value(module, "revision") == "workforce_20260721_complete"
     assert assignment_value(module, "down_revision") == "workforce_20260721_precreate"
+
     predecessor = ast.parse(PRECREATE.read_text(encoding="utf-8"))
     assert assignment_value(predecessor, "revision") == "workforce_20260721_precreate"
-    assert assignment_value(predecessor, "down_revision") == "qual_20260705_merge_heads"
+    assert assignment_value(predecessor, "down_revision") == (
+        "qual_20260705_merge_heads",
+        "phase2_14a_20260615",
+    )
 
 
 def test_migration_revision_graph_is_import_safe_without_database_url():
-    module = ast.parse(MIGRATION.read_text(encoding="utf-8"))
-    top_level_application_imports: list[str] = []
-    for node in module.body:
-        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("amodb"):
-            top_level_application_imports.append(node.module)
-        elif isinstance(node, ast.Import):
-            top_level_application_imports.extend(alias.name for alias in node.names if alias.name.startswith("amodb"))
-    assert top_level_application_imports == []
+    for path in (PRECREATE, MIGRATION):
+        module = ast.parse(path.read_text(encoding="utf-8"))
+        top_level_application_imports: list[str] = []
+        for node in module.body:
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("amodb"):
+                top_level_application_imports.append(node.module)
+            elif isinstance(node, ast.Import):
+                top_level_application_imports.extend(alias.name for alias in node.names if alias.name.startswith("amodb"))
+        assert top_level_application_imports == []
 
 
 def test_migration_creates_required_workforce_and_roster_tables():
     source = MIGRATION.read_text(encoding="utf-8")
+    precreate_source = PRECREATE.read_text(encoding="utf-8")
     required = {
         "employment_contracts",
         "work_patterns",
@@ -53,8 +59,13 @@ def test_migration_creates_required_workforce_and_roster_tables():
         "roster_demand_requirements",
         "roster_command_receipts",
     }
-    missing = sorted(name for name in required if f'"{name}"' not in source)
+    missing = sorted(
+        name
+        for name in required
+        if f'"{name}"' not in source and f'"{name}"' not in precreate_source
+    )
     assert missing == []
+    assert "_restore_deferred_foreign_keys" in precreate_source
 
 
 def test_historical_phase1_migration_is_not_revised():

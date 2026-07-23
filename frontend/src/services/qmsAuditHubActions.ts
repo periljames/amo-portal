@@ -33,93 +33,107 @@ export interface QMSAuditReportShareOut {
   shared: number;
 }
 
-async function hubFetchJson<T>(path: string): Promise<T> {
-  const token = getToken();
-  beginBackgroundLoading();
-  try {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort("timeout"), 20000);
-    const res = await fetch(`${getApiBaseUrl()}${path}`, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      credentials: "include",
-      signal: controller.signal,
-    });
-    window.clearTimeout(timeout);
+type HubRequestMode = "background" | "foreground";
+type HubRequestMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
-    if (res.status === 401) {
-      handleAuthFailure("expired");
-      throw new Error("Session expired. Please sign in again.");
+const READ_TIMEOUT_MS = 20_000;
+const WRITE_TIMEOUT_MS = 45_000;
+
+async function readApiError(res: Response): Promise<string> {
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const payload = await res.json().catch(() => null) as Record<string, unknown> | null;
+    if (payload) {
+      const detail = payload.detail;
+      if (typeof detail === "string" && detail.trim()) return detail.trim();
+      if (Array.isArray(detail) && detail.length > 0) return JSON.stringify(detail);
+      for (const key of ["message", "error", "error_code"] as const) {
+        const value = payload[key];
+        if (typeof value === "string" && value.trim()) return value.trim();
+      }
     }
-
-    if (res.status === 503) {
-      const text = await res.text().catch(() => "");
-      throw new Error(text || "Service unavailable. Please retry or contact support.");
-    }
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
-    }
-
-    return (await res.json()) as T;
-  } finally {
-    endBackgroundLoading();
   }
+
+  const text = await res.text().catch(() => "");
+  return text.trim();
 }
 
-async function hubSendJson<T>(path: string, method: "POST" | "PATCH" | "DELETE", body: unknown): Promise<T> {
+async function hubRequest<T>(
+  path: string,
+  options: {
+    method?: HubRequestMethod;
+    body?: unknown;
+    mode?: HubRequestMode;
+    timeoutMs?: number;
+  } = {},
+): Promise<T> {
+  const method = options.method ?? "GET";
+  const mode = options.mode ?? (method === "GET" ? "background" : "foreground");
+  const timeoutMs = options.timeoutMs ?? (method === "GET" ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS);
   const token = getToken();
-  beginLoading();
+  const controller = new AbortController();
+  let timedOut = false;
+
+  if (mode === "background") beginBackgroundLoading();
+  else beginLoading();
+
+  const timeout = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
   try {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort("timeout"), 45000);
+    const hasBody = method !== "GET" && options.body !== undefined;
     const res = await fetch(`${getApiBaseUrl()}${path}`, {
       method,
       headers: {
         Accept: "application/json",
-        "Content-Type": "application/json",
+        ...(hasBody ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify(body ?? {}),
+      ...(hasBody ? { body: JSON.stringify(options.body) } : {}),
       credentials: "include",
       signal: controller.signal,
     });
-    window.clearTimeout(timeout);
 
     if (res.status === 401) {
       handleAuthFailure("expired");
       throw new Error("Session expired. Please sign in again.");
     }
 
-    if (res.status === 503) {
-      const text = await res.text().catch(() => "");
-      throw new Error(text || "Service unavailable. Please retry or contact support.");
-    }
-
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+      const detail = await readApiError(res);
+      if (res.status === 503) {
+        throw new Error(detail || "Quality service is temporarily unavailable. Please retry or contact support.");
+      }
+      throw new Error(detail || `Quality API request failed with status ${res.status}.`);
     }
 
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(`Quality API request timed out after ${Math.ceil(timeoutMs / 1000)} seconds.`);
+    }
+    throw error;
   } finally {
-    endLoading();
+    globalThis.clearTimeout(timeout);
+    if (mode === "background") endBackgroundLoading();
+    else endLoading();
   }
 }
 
 export async function qmsListCarActions(carId: string): Promise<CARActionOut[]> {
-  return hubFetchJson<CARActionOut[]>(`/quality/cars/${encodeURIComponent(carId)}/actions`);
+  return hubRequest<CARActionOut[]>(`/quality/cars/${encodeURIComponent(carId)}/actions`);
 }
 
 export async function qmsAddCarAction(carId: string, payload: CARActionCreate): Promise<CARActionOut> {
-  return hubSendJson<CARActionOut>(`/quality/cars/${encodeURIComponent(carId)}/actions`, "POST", {
-    action_type: payload.action_type ?? "COMMENT",
-    message: payload.message,
+  return hubRequest<CARActionOut>(`/quality/cars/${encodeURIComponent(carId)}/actions`, {
+    method: "POST",
+    body: {
+      action_type: payload.action_type ?? "COMMENT",
+      message: payload.message,
+    },
   });
 }
 
@@ -133,10 +147,13 @@ export async function qmsRequestCarAccess(carId: string, message?: string): Prom
 
 export async function qmsShareAuditReport(
   auditId: string,
-  payload: QMSAuditReportSharePayload
+  payload: QMSAuditReportSharePayload,
 ): Promise<QMSAuditReportShareOut> {
-  return hubSendJson<QMSAuditReportShareOut>(`/quality/audits/${encodeURIComponent(auditId)}/report/share`, "POST", {
-    recipient_groups: payload.recipient_groups,
-    message: payload.message ?? null,
+  return hubRequest<QMSAuditReportShareOut>(`/quality/audits/${encodeURIComponent(auditId)}/report/share`, {
+    method: "POST",
+    body: {
+      recipient_groups: payload.recipient_groups,
+      message: payload.message ?? null,
+    },
   });
 }

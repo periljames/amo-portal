@@ -45,7 +45,6 @@ describe("rostering architecture regressions", () => {
   });
 
   it("persists and reapplies optimistic assignment rows over stale cached snapshots", () => {
-    expect(plannerHookSource).toContain("single source of assignment state");
     expect(plannerHookSource).toContain("setQueryData<VersionWorkspace>");
     expect(plannerHookSource).toContain("assignments: next");
     expect(plannerHookSource).toContain("mergePendingRosterOutbox");
@@ -106,6 +105,28 @@ describe("rostering architecture regressions", () => {
     expect(offlineIndicatorSource).toContain("discardOfflineMutation");
     expect(offlineIndicatorSource).toContain("Offline changes need review");
     expect(themeContractSource).toContain(".portal-offline-recovery");
+  });
+
+  it("treats an empty IndexedDB outbox as authoritative", () => {
+    expect(offlinePersistenceSource).toContain("const storedIds = new Set");
+    expect(offlinePersistenceSource).toContain("entry.scope === scope && !storedIds.has(id)");
+    expect(offlinePersistenceSource).not.toContain("if (!stored.length && memoryOutbox.size)");
+    expect(offlinePersistenceSource).toContain("if (!result.available)");
+  });
+
+  it("rebases concurrency tokens before explicit conflict retries", () => {
+    expect(offlinePersistenceSource).toContain("export function currentConflictRevision");
+    expect(offlinePersistenceSource).toContain("body.expected_state_revision = revision");
+    expect(offlinePersistenceSource).toContain("body.last_known_updated_at = await currentTaskUpdatedAt(entry)");
+    expect(offlinePersistenceSource).toContain("const body = await rebaseConflictBody(entry)");
+  });
+
+  it("serializes replay ownership with an IndexedDB lease and fenced outbox writes", () => {
+    expect(offlinePersistenceSource).toContain('database.transaction(LEASE_STORE, "readwrite")');
+    expect(offlinePersistenceSource).toContain("await acquireReplayLease(scope)");
+    expect(offlinePersistenceSource).toContain("await renewReplayLease(leaseOwner, scope)");
+    expect(offlinePersistenceSource).toContain("current.updatedAt !== expected.updatedAt");
+    expect(offlinePersistenceSource).not.toContain("window.localStorage.setItem(REPLAY_LEASE_KEY");
   });
 
   it("repairs legacy light surfaces after module CSS is loaded", () => {

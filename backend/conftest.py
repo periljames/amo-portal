@@ -96,6 +96,8 @@ def db_session():
             realtime_models.ChatThreadMember.__table__,
             realtime_models.ChatMessage.__table__,
             realtime_models.MessageReceipt.__table__,
+            realtime_models.PortalNotification.__table__,
+            realtime_models.NotificationPreference.__table__,
             realtime_models.Prompt.__table__,
             realtime_models.PromptDelivery.__table__,
             realtime_models.PresenceState.__table__,

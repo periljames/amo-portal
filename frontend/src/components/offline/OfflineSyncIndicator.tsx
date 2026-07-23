@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { MessagingHub } from "../messaging/MessagingHub";
 import {
   discardOfflineMutation,
   getOfflineOutboxSummary,
@@ -19,6 +20,7 @@ import {
   type OfflineOutboxEntry,
   type OfflineOutboxSummary,
 } from "../../services/offlinePersistence";
+import "../../styles/components/messaging.css";
 
 const EMPTY: OfflineOutboxSummary = { queued: 0, syncing: 0, conflict: 0, failed: 0, total: 0 };
 
@@ -131,7 +133,7 @@ export function OfflineSyncIndicator() {
     return "online";
   }, [manualSync, online, summary]);
 
-  if (state === "online") return null;
+  if (state === "online") return <MessagingHub />;
 
   const pending = summary.queued + summary.syncing + summary.conflict + summary.failed;
   const title = state === "offline"
@@ -160,6 +162,7 @@ export function OfflineSyncIndicator() {
 
   return (
     <>
+      <MessagingHub />
       <button
         type="button"
         className="portal-offline-indicator"
