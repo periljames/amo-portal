@@ -66,10 +66,12 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "source_job_id=job.id",
     ),
     BACKEND_ROOT / "amodb/apps/platform/saas_admin_policy.py": (
-        "def validate_tenant_provider_override",
+        "def prepare_provider_payload",
         "allow_platform_fallback=False",
+        "merged_secret = {**existing_secret, **submitted}",
         "Tenant-specific secret values are required",
-        "An enabled tenant provider cannot clear its stored secret",
+        "An enabled provider cannot clear its stored secret",
+        "Enabled provider configuration is missing required secret field(s)",
         "def install_tenant_provider_override_policy",
         "saas_services.upsert_provider_credential = guarded_upsert_provider_credential",
     ),
@@ -159,7 +161,7 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
     ),
     FRONTEND_ROOT / "src/pages/AdminSaaSSettingsPage.tsx": (
         "Integrations & automation setup",
-        "Tenant-specific secret values are required",
+        "Enter tenant-specific secret values",
         "Save encrypted configuration",
         "Queue backend health check",
         "Durable backend pipeline",
