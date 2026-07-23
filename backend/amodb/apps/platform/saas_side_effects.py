@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import services as account_services
 from amodb.apps.platform import models as platform_models
 
 from . import saas_models as models
@@ -16,17 +17,25 @@ class NonRepeatableJobError(RuntimeError):
 
 
 def _invoice_payload(invoice: account_models.BillingInvoice, *, submission_reference: str) -> dict[str, Any]:
+    """Build the certified-adapter payload only from persisted invoice fields."""
+
+    tenant = invoice.amo
     return {
         "submission_reference": submission_reference,
-        "invoice_id": invoice.id,
-        "invoice_number": invoice.invoice_number,
-        "tenant_id": invoice.amo_id,
-        "currency": invoice.currency,
-        "subtotal_cents": invoice.subtotal_cents,
-        "tax_cents": invoice.tax_cents,
-        "total_cents": invoice.total_cents,
+        "portal_invoice_id": invoice.id,
+        "invoice_number": account_services.format_invoice_number(invoice),
         "issued_at": invoice.issued_at.isoformat() if invoice.issued_at else None,
         "due_at": invoice.due_at.isoformat() if invoice.due_at else None,
+        "currency": invoice.currency,
+        "total_amount_cents": int(invoice.amount_cents),
+        "description": invoice.description,
+        "buyer": {
+            "tenant_id": invoice.amo_id,
+            "name": getattr(tenant, "name", None),
+            "email": getattr(tenant, "contact_email", None),
+            "phone": getattr(tenant, "contact_phone", None),
+            "country": getattr(tenant, "country", None),
+        },
     }
 
 
@@ -118,25 +127,38 @@ def process_ai_support_reply(
     if credential is None or ticket is None or detail is None:
         raise ValueError("Support ticket or OpenAI credential is missing")
 
-    messages = (
-        db.query(models.SaaSSupportTicketMessage)
-        .filter(models.SaaSSupportTicketMessage.ticket_id == ticket_id)
-        .order_by(models.SaaSSupportTicketMessage.created_at.asc())
-        .all()
+    messages = list(
+        reversed(
+            db.query(models.SaaSSupportTicketMessage)
+            .filter(
+                models.SaaSSupportTicketMessage.ticket_id == ticket_id,
+                models.SaaSSupportTicketMessage.visibility == "PUBLIC",
+            )
+            .order_by(models.SaaSSupportTicketMessage.created_at.desc())
+            .limit(20)
+            .all()
+        )
+    )
+    transcript = "\n".join(f"{row.author_type}: {row.body}" for row in messages)
+    instructions = (
+        "You are the AMO Portal support assistant. Give a factual, safe troubleshooting reply. "
+        "Do not claim that actions were performed. Do not expose secrets. Escalate aviation safety, billing disputes, "
+        "security incidents, tax/fiscalization issues, or account access changes to a human support agent."
     )
     secret = saas_secrets.decrypt_secret(credential.encrypted_secret)
-    draft = saas_providers.generate_openai_support_response(
+    draft = saas_providers.openai_support_response(
         secret=secret,
         config=credential.config_json or {},
-        ticket={
-            "title": ticket.title,
-            "description": detail.description,
-            "priority": ticket.priority,
-            "category": detail.category,
-        },
-        messages=[{"author_type": row.author_type, "body": row.body} for row in messages],
+        instructions=instructions,
+        user_message=(
+            f"Ticket: {ticket.title}\n"
+            f"Category: {detail.category}\n"
+            f"Priority: {ticket.priority}\n"
+            f"Description: {detail.description}\n"
+            f"Conversation:\n{transcript}"
+        ),
     )
-    reply = str(draft.get("reply") or "").strip()
+    reply = str(draft.get("text") or "").strip()
     if not reply:
         raise NonRepeatableJobError("AI provider returned an empty support draft")
 
