@@ -103,7 +103,7 @@ def test_deployment_readiness_never_returns_secret_values(monkeypatch: pytest.Mo
     assert "do-not-return-this-value" not in json.dumps(rows)
 
 
-def test_enabled_tenant_override_requires_its_own_secret(monkeypatch: pytest.MonkeyPatch):
+def test_enabled_tenant_override_requires_its_own_complete_secret(monkeypatch: pytest.MonkeyPatch):
     platform = _credential("platform", tenant_id=None)
 
     def get_credential(db, *, provider, tenant_id, allow_platform_fallback):
@@ -112,19 +112,85 @@ def test_enabled_tenant_override_requires_its_own_secret(monkeypatch: pytest.Mon
     monkeypatch.setattr(saas_admin_policy.saas_services, "get_provider_credential", get_credential)
 
     with pytest.raises(ValueError, match="Tenant-specific secret values"):
-        saas_admin_policy.validate_tenant_provider_override(
+        saas_admin_policy.prepare_provider_payload(
             MagicMock(),
             provider="stripe",
             tenant_id="amo-1",
             payload={"enabled": True, "config": {"success_url": "https://portal.test/success"}},
         )
 
-    saas_admin_policy.validate_tenant_provider_override(
+    with pytest.raises(ValueError, match="webhook_secret"):
+        saas_admin_policy.prepare_provider_payload(
+            MagicMock(),
+            provider="stripe",
+            tenant_id="amo-1",
+            payload={"enabled": True, "secret": {"secret_key": "sk_tenant"}},
+        )
+
+    prepared = saas_admin_policy.prepare_provider_payload(
         MagicMock(),
         provider="stripe",
         tenant_id="amo-1",
-        payload={"enabled": True, "secret": {"webhook_secret": "tenant-secret"}},
+        payload={
+            "enabled": True,
+            "secret": {
+                "secret_key": "sk_tenant",
+                "webhook_secret": "whsec_tenant",
+            },
+        },
     )
+    assert prepared["secret"] == {
+        "secret_key": "sk_tenant",
+        "webhook_secret": "whsec_tenant",
+    }
+
+
+def test_partial_secret_rotation_merges_with_exact_scoped_secret(monkeypatch: pytest.MonkeyPatch):
+    tenant = _credential("tenant", tenant_id="amo-1")
+
+    def get_credential(db, *, provider, tenant_id, allow_platform_fallback):
+        return tenant if tenant_id == "amo-1" else None
+
+    monkeypatch.setattr(saas_admin_policy.saas_services, "get_provider_credential", get_credential)
+    monkeypatch.setattr(
+        saas_admin_policy.saas_secrets,
+        "decrypt_secret",
+        lambda value: {
+            "secret_key": "sk_existing",
+            "webhook_secret": "whsec_existing",
+        },
+    )
+
+    prepared = saas_admin_policy.prepare_provider_payload(
+        MagicMock(),
+        provider="stripe",
+        tenant_id="amo-1",
+        payload={
+            "enabled": True,
+            "secret": {"webhook_secret": "whsec_rotated"},
+        },
+    )
+
+    assert prepared["secret"] == {
+        "secret_key": "sk_existing",
+        "webhook_secret": "whsec_rotated",
+    }
+
+
+def test_first_enabled_platform_provider_requires_complete_secret(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        saas_admin_policy.saas_services,
+        "get_provider_credential",
+        lambda db, *, provider, tenant_id, allow_platform_fallback: None,
+    )
+
+    with pytest.raises(ValueError, match="webhook_secret"):
+        saas_admin_policy.prepare_provider_payload(
+            MagicMock(),
+            provider="stripe",
+            tenant_id=None,
+            payload={"enabled": True, "secret": {"secret_key": "sk_platform"}},
+        )
 
 
 def test_disabling_inherited_provider_does_not_require_copying_secret(monkeypatch: pytest.MonkeyPatch):
@@ -135,12 +201,13 @@ def test_disabling_inherited_provider_does_not_require_copying_secret(monkeypatc
         lambda db, *, provider, tenant_id, allow_platform_fallback: platform if tenant_id is None else None,
     )
 
-    saas_admin_policy.validate_tenant_provider_override(
+    prepared = saas_admin_policy.prepare_provider_payload(
         MagicMock(),
         provider="stripe",
         tenant_id="amo-1",
         payload={"enabled": False, "reason": "Disable card billing for this tenant"},
     )
+    assert prepared["enabled"] is False
 
 
 def test_enabled_tenant_provider_cannot_clear_existing_secret(monkeypatch: pytest.MonkeyPatch):
@@ -150,9 +217,17 @@ def test_enabled_tenant_provider_cannot_clear_existing_secret(monkeypatch: pytes
         "get_provider_credential",
         lambda db, *, provider, tenant_id, allow_platform_fallback: tenant if tenant_id else None,
     )
+    monkeypatch.setattr(
+        saas_admin_policy.saas_secrets,
+        "decrypt_secret",
+        lambda value: {
+            "secret_key": "sk_existing",
+            "webhook_secret": "whsec_existing",
+        },
+    )
 
     with pytest.raises(ValueError, match="cannot clear"):
-        saas_admin_policy.validate_tenant_provider_override(
+        saas_admin_policy.prepare_provider_payload(
             MagicMock(),
             provider="stripe",
             tenant_id="amo-1",
