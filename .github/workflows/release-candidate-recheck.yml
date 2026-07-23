@@ -137,9 +137,15 @@ jobs:
           amodb/apps/quality/tests/test_audit_events.py
           amodb/apps/quality/tests/test_task_integrations.py
           amodb/apps/quality/tests/test_evidence_pack_exports.py
-      - name: Run account, Workforce and Rostering regressions
+      - name: Run account regressions
         working-directory: backend
-        run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests amodb/apps/rostering/tests
+        run: pytest -q amodb/apps/accounts/tests
+      - name: Run Workforce regressions
+        working-directory: backend
+        run: pytest -q amodb/apps/workforce/tests
+      - name: Run Rostering regressions
+        working-directory: backend
+        run: pytest -q amodb/apps/rostering/tests
       - name: Run SaaS and realtime regressions
         working-directory: backend
         run: pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py
