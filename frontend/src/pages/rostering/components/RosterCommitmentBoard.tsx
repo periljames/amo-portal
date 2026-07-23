@@ -23,10 +23,10 @@ import "../../../styles/rostering-unified.css";
 
 type RangeMode = 7 | 28;
 
-function commitmentIcon(source: string) {
-  if (source === "TRAINING") return GraduationCap;
-  if (source === "QUALITY") return ShieldCheck;
-  return Umbrella;
+function CommitmentSourceIcon({ source, size = 13 }: { source: string; size?: number }) {
+  if (source === "TRAINING") return <GraduationCap size={size} aria-hidden="true" />;
+  if (source === "QUALITY") return <ShieldCheck size={size} aria-hidden="true" />;
+  return <Umbrella size={size} aria-hidden="true" />;
 }
 
 function localDate(value: string, timezoneName: string): string {
@@ -167,10 +167,13 @@ export function RosterCommitmentBoard() {
                 });
                 return (
                   <div className="wr-commitment-grid__cell" key={`${person.userId}:${dateKey}`}>
-                    {cellItems.map((item) => {
-                      const Icon = commitmentIcon(item.source_module);
-                      return <article key={item.id} className={`wr-commitment wr-commitment--${item.source_module.toLowerCase()}`} title={[item.title, item.detail, item.location_label].filter(Boolean).join(" · ")}><Icon size={13} /><span><strong>{item.kind.replace(/_/g, " ")}</strong><small>{item.title}</small></span>{item.provisional ? <StatusPill value="PROVISIONAL" /> : null}</article>;
-                    })}
+                    {cellItems.map((item) => (
+                      <article key={item.id} className={`wr-commitment wr-commitment--${item.source_module.toLowerCase()}`} title={[item.title, item.detail, item.location_label].filter(Boolean).join(" · ")}>
+                        <CommitmentSourceIcon source={item.source_module} />
+                        <span><strong>{item.kind.replace(/_/g, " ")}</strong><small>{item.title}</small></span>
+                        {item.provisional ? <StatusPill value="PROVISIONAL" /> : null}
+                      </article>
+                    ))}
                   </div>
                 );
               })}
