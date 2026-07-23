@@ -1,0 +1,116 @@
+name: PR333 Checkout Consistency Fix
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr333-checkout-consistency-fix
+  cancel-in-progress: false
+
+jobs:
+  fix-and-validate:
+    if: github.actor == 'periljames'
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      SECRET_KEY: pr333-checkout-consistency-secret
+      PLATFORM_SECRETS_KEY: "5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU="
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_WRITE_URL: "sqlite+pysqlite:///:memory:"
+      DATABASE_READ_URL: "sqlite+pysqlite:///:memory:"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/saas-control-plane-hardening
+          fetch-depth: 0
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python .github/scripts/retry_transient.py
+          --attempts 4
+          --label "PR333 checkout consistency dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+      - name: Apply comprehensive checkout consistency safeguards
+        run: python .github/scripts/apply_pr333_checkout_consistency_fix.py
+      - name: Compile changed source and tests
+        run: >-
+          python -m py_compile
+          backend/amodb/apps/platform/saas_services.py
+          backend/amodb/jobs/saas_worker.py
+          backend/amodb/apps/platform/tests/test_saas_checkout_consistency_hardening.py
+      - name: Verify checkout source invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          worker = Path('backend/amodb/jobs/saas_worker.py').read_text()
+          services = Path('backend/amodb/apps/platform/saas_services.py').read_text()
+          assert '"checkout.session.expired"' in worker
+          validation = worker.split('def _validate_pending_checkout(', 1)[1].split('\ndef ', 1)[0]
+          assert '_checkout_price(' not in validation
+          assert 'def _upsert_stripe_account_preserving_pending(' in worker
+          assert 'previous_account_status' in worker
+          assert 'checkout_pending_preserved' in worker
+          assert 'if "external_price_ref" in payload:' in services
+          assert 'if "is_active" in payload:' in services
+          enqueue = services.split('def enqueue_checkout(', 1)[1].split('\ndef ', 1)[0]
+          assert enqueue.index('existing_job =') < enqueue.index('pending_account =')
+          assert 'normalized_key = idempotency_key.strip()' in enqueue
+          print('Checkout source invariants verified')
+          PY
+      - name: Run focused checkout and provider regressions
+        working-directory: backend
+        run: |
+          set -o pipefail
+          pytest -vv --tb=long \
+            amodb/apps/platform/tests/test_saas_checkout_consistency_hardening.py \
+            amodb/apps/platform/tests/test_saas_checkout_lifecycle.py \
+            amodb/apps/platform/tests/test_saas_final_review_safeguards.py \
+            amodb/apps/platform/tests/test_saas_admin_and_webhooks.py \
+            amodb/apps/platform/tests/test_saas_verified_tenant_pipeline.py \
+            amodb/apps/platform/tests/test_saas_execution_policy.py \
+            amodb/apps/platform/tests/test_saas_side_effect_safety.py \
+            amodb/apps/platform/tests/test_saas_tenant_job_access.py \
+            2>&1 | tee /tmp/pr333-checkout-focused.log
+      - name: Run complete SaaS and realtime regression surface
+        working-directory: backend
+        run: |
+          set -o pipefail
+          pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py \
+            2>&1 | tee /tmp/pr333-checkout-full.log
+      - name: Run SaaS release contracts
+        working-directory: backend
+        run: |
+          python -m amodb.scripts.saas_control_plane_internal_check
+          python -m amodb.scripts.saas_release_cleanup_check
+      - name: Upload checkout consistency diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-checkout-consistency
+          path: |
+            /tmp/pr333-checkout-focused.log
+            /tmp/pr333-checkout-full.log
+          if-no-files-found: warn
+          retention-days: 2
+      - name: Commit validated checkout consistency safeguards
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            backend/amodb/apps/platform/saas_services.py \
+            backend/amodb/jobs/saas_worker.py \
+            backend/amodb/apps/platform/tests/test_saas_checkout_consistency_hardening.py
+          git diff --cached --check
+          git commit -m "Complete Stripe checkout consistency safeguards"
+          git push origin HEAD:agent/saas-control-plane-hardening
