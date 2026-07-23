@@ -54,12 +54,15 @@ jobs:
           --attempts 4
           --label "PR333 backend dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
-      - name: Verify release contracts
+      - name: Verify Quality release contract
         working-directory: backend
-        run: |
-          python -m amodb.scripts.quality_module_internal_check
-          python -m amodb.scripts.saas_control_plane_internal_check
-          python -m amodb.scripts.saas_release_cleanup_check
+        run: python -m amodb.scripts.quality_module_internal_check
+      - name: Verify SaaS control-plane contract
+        working-directory: backend
+        run: python -m amodb.scripts.saas_control_plane_internal_check
+      - name: Verify release-cleanup contract
+        working-directory: backend
+        run: python -m amodb.scripts.saas_release_cleanup_check
       - name: Verify Alembic graph
         working-directory: backend
         run: |
