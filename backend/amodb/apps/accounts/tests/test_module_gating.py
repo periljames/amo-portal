@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -78,9 +80,37 @@ def _create_user(db, amo_id: str) -> account_models.User:
     return user
 
 
+def _create_active_license(db, amo_id: str) -> account_models.TenantLicense:
+    now = datetime.now(timezone.utc)
+    sku = account_models.CatalogSKU(
+        code="MODULE-GATING-MONTHLY",
+        name="Module gating test plan",
+        term=account_models.BillingTerm.MONTHLY,
+        trial_days=0,
+        amount_cents=100,
+        currency="KES",
+        is_active=True,
+    )
+    db.add(sku)
+    db.flush()
+    license_row = account_models.TenantLicense(
+        amo_id=amo_id,
+        sku_id=sku.id,
+        term=account_models.BillingTerm.MONTHLY,
+        status=account_models.LicenseStatus.ACTIVE,
+        current_period_start=now,
+        current_period_end=now + timedelta(days=30),
+        is_read_only=False,
+    )
+    db.add(license_row)
+    db.commit()
+    return license_row
+
+
 def test_module_subscription_blocks_access(db_session):
     amo = _create_amo(db_session)
     user = _create_user(db_session, amo.id)
+    _create_active_license(db_session, amo.id)
 
     subscription = account_models.ModuleSubscription(
         amo_id=amo.id,
