@@ -121,19 +121,20 @@ REQUIRED_CHECKS = {
             '${PORT:-8080}',
         ],
     ),
-    "frontend_quality_root_redirect": (
+    "frontend_quality_canonical_root": (
         FRONTEND_ROOT / "src/router.tsx",
         [
             'path="/maintenance/:amoCode/quality"',
-            "const QualityRootRedirect: React.FC = () => {",
-            "quality/qms",
+            "<QmsCanonicalPage />",
+            'path="/maintenance/:amoCode/quality/*"',
         ],
     ),
-    "frontend_qms_overview_target": (
+    "frontend_qms_command_centre_target": (
         FRONTEND_ROOT / "src/components/Layout/DepartmentLayout.tsx",
         [
-            "QMS Overview",
-            "navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/qms`)",
+            'label: "Command Centre"',
+            'path: `/maintenance/${amoCode}/quality`',
+            "const qmsNavItems = useMemo<QmsNavItem[]>",
         ],
     ),
     "frontend_active_audit_workflow_contract": (
