@@ -32,6 +32,7 @@ def db_session():
             maintenance_models.AmpAircraftProgramItem.__table__,
             account_models.CatalogSKU.__table__,
             account_models.TenantLicense.__table__,
+            account_models.PaymentMethod.__table__,
             account_models.ModuleSubscription.__table__,
         ],
     )
