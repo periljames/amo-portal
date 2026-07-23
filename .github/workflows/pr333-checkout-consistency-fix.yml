@@ -43,6 +43,18 @@ jobs:
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
       - name: Apply comprehensive checkout consistency safeguards
         run: python .github/scripts/apply_pr333_checkout_consistency_fix.py
+      - name: Complete generated test model fixtures
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/amodb/apps/platform/tests/test_saas_checkout_consistency_hardening.py')
+          text = path.read_text()
+          old = 'external_price_ref="price_stripe_1", is_active=False, updated_by=None,\n'
+          new = 'external_price_ref="price_stripe_1", is_active=False, updated_by=None,\n        created_at=None, updated_at=None,\n'
+          count = text.count(old)
+          assert count == 2, count
+          path.write_text(text.replace(old, new))
+          PY
       - name: Compile changed source and tests
         run: >-
           python -m py_compile
