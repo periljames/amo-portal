@@ -32,7 +32,35 @@ def resolve_presence_state(
     return ("away", True) if state == "away" else ("online", True)
 
 
-# router_admin owns legacy workspace helpers. Replace their policy before the
+_legacy_presence_display = router_admin._presence_display_for_user
+
+
+def presence_display_for_user(*, user, presence, availability_status=None):
+    """Preserve the distinct Away label even though away users are connected."""
+    if (
+        user.is_active
+        and availability_status != "ON_LEAVE"
+        and presence.state == "away"
+        and presence.last_seen_at
+    ):
+        last_seen = presence.last_seen_at
+        return router_admin.schemas.UserPresenceDisplayRead(
+            status_label="Away",
+            last_seen_label="Away",
+            last_seen_at=last_seen,
+            last_seen_at_display=(
+                last_seen.isoformat() if hasattr(last_seen, "isoformat") else str(last_seen)
+            ),
+        )
+    return _legacy_presence_display(
+        user=user,
+        presence=presence,
+        availability_status=availability_status,
+    )
+
+
+# router_admin owns legacy workspace helpers. Replace their policies before the
 # FastAPI router is included so all account surfaces use the same semantics.
 router_admin.PRESENCE_HEARTBEAT_GRACE_SECONDS = PRESENCE_FRESH_SECONDS
 router_admin._resolve_presence_state = resolve_presence_state
+router_admin._presence_display_for_user = presence_display_for_user
