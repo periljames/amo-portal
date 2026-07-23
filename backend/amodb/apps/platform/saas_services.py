@@ -371,8 +371,14 @@ def upsert_module_price(
     row.amount_cents = amount_cents
     row.tax_rate_bps = tax_rate_bps
     row.trial_days = trial_days
-    row.external_price_ref = str(payload.get("external_price_ref") or "").strip() or None
-    row.is_active = bool(payload.get("is_active", True))
+    if "external_price_ref" in payload:
+        row.external_price_ref = str(payload.get("external_price_ref") or "").strip() or None
+    elif not price_id:
+        row.external_price_ref = None
+    if "is_active" in payload:
+        row.is_active = bool(payload.get("is_active"))
+    elif not price_id:
+        row.is_active = True
     row.updated_by = actor_user_id
     db.flush()
     db.add(
@@ -598,14 +604,30 @@ def enqueue_checkout(
     actor_user_id: str,
     idempotency_key: str,
 ) -> models.SaaSJob:
+    normalized_key = idempotency_key.strip()
+    if not normalized_key:
+        raise ValueError("idempotency_key is required")
     tenant = (
         db.query(account_models.AMO)
         .filter(account_models.AMO.id == tenant_id)
         .with_for_update()
         .first()
     )
+    if not tenant:
+        raise ValueError("Tenant or active module price not found")
+    existing_job = (
+        db.query(models.SaaSJob)
+        .filter(
+            models.SaaSJob.job_type == "STRIPE_CREATE_CHECKOUT_SESSION",
+            models.SaaSJob.tenant_scope == tenant_id,
+            models.SaaSJob.idempotency_key == normalized_key,
+        )
+        .first()
+    )
+    if existing_job is not None:
+        return existing_job
     price = db.get(models.SaaSModulePrice, module_price_id)
-    if not tenant or not price or not price.is_active:
+    if not price or not price.is_active:
         raise ValueError("Tenant or active module price not found")
     pending_account = (
         db.query(models.SaaSBillingAccount)
@@ -629,8 +651,6 @@ def enqueue_checkout(
         .first()
     )
     if active_job is not None:
-        if str(active_job.idempotency_key or "") == idempotency_key.strip():
-            return active_job
         raise ValueError("Another Stripe checkout request is already queued for this tenant")
     if not price.external_price_ref:
         raise ValueError("This module price has no external Stripe price reference")
@@ -649,13 +669,12 @@ def enqueue_checkout(
             "external_price_ref": price.external_price_ref,
             "tenant_email": tenant.contact_email,
         },
-        idempotency_key=idempotency_key,
+        idempotency_key=normalized_key,
         correlation_id=str(uuid.uuid4()),
         created_by=actor_user_id,
         max_attempts=3,
         priority=20,
     )
-
 
 def record_stripe_webhook(
     db: Session,

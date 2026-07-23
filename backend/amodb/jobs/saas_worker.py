@@ -22,6 +22,7 @@ CHECKOUT_SESSION_EVENTS = {
     "checkout.session.completed",
     "checkout.session.async_payment_succeeded",
     "checkout.session.async_payment_failed",
+    "checkout.session.expired",
 }
 TENANT_MUTATING_STRIPE_EVENTS = {
     *CHECKOUT_SESSION_EVENTS,
@@ -196,16 +197,46 @@ def _validate_pending_checkout(
         or external_price_ref != expected_price_ref
     ):
         raise ValueError("Stripe checkout metadata does not match the pending portal checkout")
-    price = _checkout_price(db, module_price_id=expected_module_price_id)
-    if (
-        price is None
-        or saas_services.normalize_module_code(str(price.module_code or ""))
-        != saas_services.normalize_module_code(module_code)
-        or str(price.external_price_ref or "") != expected_price_ref
-    ):
-        raise ValueError("Stripe checkout price does not match the portal module price")
+    # The portal-created pending record is the immutable commercial snapshot. The
+    # mutable catalogue is intentionally not re-read after Stripe created the session.
     return account, pending, module_code, module_price_id, external_price_ref
 
+def _upsert_stripe_account_preserving_pending(
+    db: Session,
+    *,
+    tenant_id: str,
+    customer_ref: str | None,
+    subscription_ref: str | None,
+    status: str,
+    event_type: str,
+    event_metadata: dict[str, Any],
+) -> tuple[models.SaaSBillingAccount, bool]:
+    existing = _stripe_billing_account(db, tenant_id=tenant_id, lock=True)
+    preserve_pending = bool(
+        existing is not None and str(existing.status or "").upper() == "CHECKOUT_PENDING"
+    )
+    if preserve_pending:
+        pending = dict(existing.metadata_json) if isinstance(existing.metadata_json, dict) else {}
+        metadata = {
+            **pending,
+            "previous_account_status": str(status or "UNKNOWN").upper(),
+            "previous_account_metadata": dict(event_metadata),
+            "last_account_event": event_type,
+        }
+        effective_status = "CHECKOUT_PENDING"
+    else:
+        metadata = dict(event_metadata)
+        effective_status = status
+    account = _upsert_billing_account(
+        db,
+        tenant_id=tenant_id,
+        provider="stripe",
+        customer_ref=customer_ref,
+        subscription_ref=subscription_ref,
+        status=effective_status,
+        metadata=metadata,
+    )
+    return account, preserve_pending
 
 def _verified_stripe_tenant(
     job: models.SaaSJob,
@@ -268,10 +299,13 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
             and payment_status in {"paid", "no_payment_required"}
         )
         failed = event_type == "checkout.session.async_payment_failed"
+        expired = event_type == "checkout.session.expired"
         if succeeded:
             checkout_status = "ACTIVE"
         elif failed:
             checkout_status = "CHECKOUT_FAILED"
+        elif expired:
+            checkout_status = "CHECKOUT_EXPIRED"
         else:
             checkout_status = "CHECKOUT_PENDING"
         lifecycle_metadata = {
@@ -283,14 +317,25 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
             "last_checkout_event": event_type,
             "payment_status": payment_status,
         }
+        account_status = checkout_status
+        account_metadata: dict[str, Any] = lifecycle_metadata
+        if failed or expired:
+            previous_status = str(pending.get("previous_account_status") or "").strip().upper()
+            previous_metadata = pending.get("previous_account_metadata")
+            if previous_status:
+                account_status = previous_status
+                account_metadata = {
+                    **(dict(previous_metadata) if isinstance(previous_metadata, dict) else {}),
+                    "last_checkout": lifecycle_metadata,
+                }
         _upsert_billing_account(
             db,
             tenant_id=tenant_id,
             provider="stripe",
             customer_ref=customer_ref,
             subscription_ref=subscription_ref,
-            status=checkout_status,
-            metadata=lifecycle_metadata,
+            status=account_status,
+            metadata=account_metadata,
         )
         if succeeded:
             _set_module_state(
@@ -314,14 +359,14 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
         subscription_state = str(
             obj.get("status") or ("canceled" if event_type.endswith("deleted") else "")
         ).lower()
-        _upsert_billing_account(
+        _account, checkout_pending_preserved = _upsert_stripe_account_preserving_pending(
             db,
             tenant_id=tenant_id,
-            provider="stripe",
             customer_ref=customer_ref,
             subscription_ref=str(obj.get("id") or subscription_ref or "") or None,
             status=subscription_state or "UNKNOWN",
-            metadata={"module_code": module_code, "stripe_status": subscription_state},
+            event_type=event_type,
+            event_metadata={"module_code": module_code, "stripe_status": subscription_state},
         )
         if module_code:
             if subscription_state in ACTIVE_SUBSCRIPTION_STATES:
@@ -340,7 +385,14 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
                 provider="stripe",
                 external_subscription_ref=str(obj.get("id") or "") or None,
             )
-        outcome.update({"tenant_id": tenant_id, "module_code": module_code, "subscription_status": subscription_state})
+        outcome.update(
+            {
+                "tenant_id": tenant_id,
+                "module_code": module_code,
+                "subscription_status": subscription_state,
+                "checkout_pending_preserved": checkout_pending_preserved,
+            }
+        )
 
     elif event_type in {"invoice.paid", "invoice.payment_failed"}:
         invoice_id = str(metadata.get("portal_invoice_id") or "").strip()
@@ -360,14 +412,14 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
                 invoice.paid_at = utcnow()
             else:
                 invoice.status = account_models.InvoiceStatus.PENDING
-        account = _upsert_billing_account(
+        account, checkout_pending_preserved = _upsert_stripe_account_preserving_pending(
             db,
             tenant_id=tenant_id,
-            provider="stripe",
             customer_ref=customer_ref,
             subscription_ref=subscription_ref,
             status="ACTIVE" if event_type == "invoice.paid" else "PAST_DUE",
-            metadata={"last_stripe_invoice": obj.get("id"), "module_code": module_code},
+            event_type=event_type,
+            event_metadata={"last_stripe_invoice": obj.get("id"), "module_code": module_code},
         )
         if module_code and event_type == "invoice.payment_failed":
             _set_module_state(
@@ -378,7 +430,14 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
                 provider="stripe",
                 external_subscription_ref=account.external_subscription_ref,
             )
-        outcome.update({"tenant_id": tenant_id, "module_code": module_code or None, "portal_invoice_id": invoice_id or None})
+        outcome.update(
+            {
+                "tenant_id": tenant_id,
+                "module_code": module_code or None,
+                "portal_invoice_id": invoice_id or None,
+                "checkout_pending_preserved": checkout_pending_preserved,
+            }
+        )
 
     else:
         outcome["ignored"] = True
@@ -429,20 +488,28 @@ def _process_checkout(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     payload = job.payload_json or {}
     tenant_id = str(job.tenant_id or "").strip()
     _lock_checkout_tenant(db, tenant_id)
-    pending_account = _stripe_billing_account(db, tenant_id=tenant_id, lock=True)
-    if pending_account is not None and str(pending_account.status or "").upper() == "CHECKOUT_PENDING":
-        pending = pending_account.metadata_json if isinstance(pending_account.metadata_json, dict) else {}
+    existing_account = _stripe_billing_account(db, tenant_id=tenant_id, lock=True)
+    if existing_account is not None and str(existing_account.status or "").upper() == "CHECKOUT_PENDING":
+        pending = existing_account.metadata_json if isinstance(existing_account.metadata_json, dict) else {}
         if str(pending.get("checkout_idempotency_key") or "") == str(job.idempotency_key or ""):
             return {
                 "provider": "stripe",
                 "session_id": pending.get("checkout_session_id"),
                 "checkout_url": pending.get("checkout_url"),
-                "customer": pending_account.external_customer_ref,
-                "subscription": pending_account.external_subscription_ref,
+                "customer": existing_account.external_customer_ref,
+                "subscription": existing_account.external_subscription_ref,
                 "reused": True,
             }
         raise ValueError("Another Stripe checkout is already pending for this tenant")
 
+    previous_account_status = (
+        str(existing_account.status or "").strip().upper() if existing_account is not None else ""
+    )
+    previous_account_metadata = (
+        dict(existing_account.metadata_json)
+        if existing_account is not None and isinstance(existing_account.metadata_json, dict)
+        else {}
+    )
     credential = _credential(db, str(payload.get("provider_credential_id") or ""))
     db.refresh(credential)
     saas_services.require_operational_provider(credential, label="Stripe")
@@ -484,15 +551,17 @@ def _process_checkout(db: Session, job: models.SaaSJob) -> dict[str, Any]:
             "checkout_url": result.get("checkout_url"),
             "checkout_job_id": job.id,
             "checkout_idempotency_key": job.idempotency_key,
+            "checkout_snapshot_created_at": utcnow().isoformat(),
             "module_code": module_code,
             "module_price_id": module_price_id,
             "external_price_ref": external_price_ref,
             "provider_credential_id": credential.id,
+            "previous_account_status": previous_account_status or None,
+            "previous_account_metadata": previous_account_metadata,
         },
     )
     db.flush()
     return result
-
 
 def process_job(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     if job.job_type == "PROVIDER_HEALTH_CHECK":
