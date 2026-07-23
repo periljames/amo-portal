@@ -139,7 +139,17 @@ jobs:
           amodb/apps/quality/tests/test_evidence_pack_exports.py
       - name: Run account regressions
         working-directory: backend
-        run: pytest -q amodb/apps/accounts/tests
+        run: |
+          set -o pipefail
+          pytest -vv --tb=long amodb/apps/accounts/tests 2>&1 | tee /tmp/pr333-account-regressions.log
+      - name: Upload account regression diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-account-regressions
+          path: /tmp/pr333-account-regressions.log
+          if-no-files-found: warn
+          retention-days: 2
       - name: Run Workforce regressions
         working-directory: backend
         run: pytest -q amodb/apps/workforce/tests
