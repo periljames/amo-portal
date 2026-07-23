@@ -68,7 +68,7 @@ jobs:
         working-directory: backend
         run: |
           set -o pipefail
-          python -m amodb.scripts.quality_module_internal_check | tee /tmp/pr333-refreshed-quality-contract.json
+          python -m amodb.scripts.quality_module_internal_check 2>&1 | tee /tmp/pr333-refreshed-quality-contract.json
       - name: Upload refreshed Quality contract report
         if: always()
         uses: actions/upload-artifact@v6
