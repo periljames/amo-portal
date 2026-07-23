@@ -30,20 +30,11 @@ def _metadata(obj: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _credential_candidates(
+def _resolved_tenant_hints(
     db: Session,
     *,
     payload: dict[str, Any],
-) -> list[models.SaaSProviderCredential]:
-    """Return only credentials allowed to authenticate this Stripe event.
-
-    Tenant hints order candidate lookup but are not trusted until signature
-    verification succeeds. When a tenant-specific Stripe credential exists, it
-    is authoritative: platform or other-tenant secrets must not authenticate
-    that tenant's endpoint. Platform fallback is used only when no scoped row
-    exists for any resolved tenant hint.
-    """
-
+) -> set[str]:
     obj = _stripe_object(payload)
     metadata = _metadata(obj)
     tenant_hints = {
@@ -70,7 +61,24 @@ def _credential_candidates(
             .all()
         )
         tenant_hints.update(str(row[0]) for row in rows if row and row[0])
+    return tenant_hints
 
+
+def _credential_candidates(
+    db: Session,
+    *,
+    payload: dict[str, Any],
+) -> list[models.SaaSProviderCredential]:
+    """Return only credentials allowed to authenticate this Stripe event.
+
+    Tenant hints order candidate lookup but are not trusted until signature
+    verification succeeds. When a tenant-specific Stripe credential exists, it
+    is authoritative: platform or other-tenant secrets must not authenticate
+    that tenant's endpoint. Platform fallback is used only when no scoped row
+    exists for any resolved tenant hint.
+    """
+
+    tenant_hints = _resolved_tenant_hints(db, payload=payload)
     if tenant_hints:
         scoped_rows = (
             db.query(models.SaaSProviderCredential)
@@ -134,13 +142,16 @@ def record_stripe_webhook(
     if matched is None:
         raise PermissionError("Invalid Stripe webhook signature")
 
-    obj = _stripe_object(payload)
-    metadata = _metadata(obj)
-    declared_tenant = str(
-        metadata.get("tenant_id") or obj.get("client_reference_id") or ""
-    ).strip()
-    if matched.tenant_id and declared_tenant and str(matched.tenant_id) != declared_tenant:
-        raise PermissionError("Stripe webhook tenant does not match the verified endpoint secret")
+    tenant_hints = _resolved_tenant_hints(db, payload=payload)
+    matched_tenant = str(matched.tenant_id or "").strip()
+    if matched_tenant:
+        if tenant_hints and matched_tenant not in tenant_hints:
+            raise PermissionError("Stripe webhook tenant does not match the verified endpoint secret")
+        verified_tenant_id = matched_tenant
+    else:
+        if len(tenant_hints) > 1:
+            raise PermissionError("Stripe webhook tenant resolution is ambiguous")
+        verified_tenant_id = next(iter(tenant_hints), "")
 
     external_id = str(payload.get("id") or "").strip()
     if not external_id:
@@ -168,11 +179,11 @@ def record_stripe_webhook(
         db,
         job_type="STRIPE_WEBHOOK",
         queue_name="billing",
-        tenant_id=(str(matched.tenant_id) if matched.tenant_id else declared_tenant or None),
+        tenant_id=verified_tenant_id or None,
         payload={
             "webhook_event_id": event.id,
             "verified_credential_id": matched.id,
-            "verified_tenant_id": str(matched.tenant_id) if matched.tenant_id else declared_tenant or None,
+            "verified_tenant_id": verified_tenant_id or None,
         },
         idempotency_key=external_id,
         correlation_id=external_id,
