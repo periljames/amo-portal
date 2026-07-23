@@ -36,6 +36,7 @@ jobs:
           --health-retries 20
     env:
       APP_ENV: test
+      PYTHONUNBUFFERED: "1"
       SECRET_KEY: alembic-legacy-upgrade-secret
       PLATFORM_SECRETS_KEY: "5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU="
       FRESH_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_alembic_fresh
