@@ -5,76 +5,248 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   release-candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 110
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_pr333_gate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_pr333_gate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      SECRET_KEY: pr333-release-candidate-secret
+      PLATFORM_SECRETS_KEY: "5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU="
+      QUALITY_SCHEMA_STRICT: "0"
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
+      LEGACY_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_legacy_probe
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: fix/rostering-unified-workforce
-          fetch-depth: 0
           show-progress: false
-      - name: Close bulk and pattern integrity bypass
-        shell: bash
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python .github/scripts/retry_transient.py
+          --attempts 4
+          --label "PR333 backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+      - name: Verify Quality release contract
+        working-directory: backend
+        run: |
+          set -o pipefail
+          python -m amodb.scripts.quality_module_internal_check | tee /tmp/pr333-quality-contract.json
+      - name: Upload Quality contract report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-quality-contract
+          path: /tmp/pr333-quality-contract.json
+          if-no-files-found: error
+          retention-days: 2
+      - name: Verify SaaS control-plane contract
+        working-directory: backend
+        run: python -m amodb.scripts.saas_control_plane_internal_check
+      - name: Verify release-cleanup contract
+        working-directory: backend
+        run: python -m amodb.scripts.saas_release_cleanup_check
+      - name: Verify Alembic graph
+        working-directory: backend
         run: |
           python - <<'PY'
-          from pathlib import Path
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
 
-          assignments_path = Path("backend/amodb/apps/rostering/assignments.py")
-          source = assignments_path.read_text(encoding="utf-8")
-          old = '''                row = _create_assignment_row(db, version=version, actor_user_id=actor_user_id, payload=create_payload, bump_parent=False)
-          '''
-          new = '''                from .services import _ensure_source_owned_state
-
-                _ensure_source_owned_state(
-                    db,
-                    amo_id=version.amo_id,
-                    user_id=create_payload.user_id,
-                    starts_at=create_payload.starts_at,
-                    ends_at=create_payload.ends_at,
-                    assignment_status=create_payload.status,
-                    assignment_source=create_payload.source,
-                    source_reference_id=create_payload.source_reference_id,
-                )
-                row = _create_assignment_row(db, version=version, actor_user_id=actor_user_id, payload=create_payload, bump_parent=False)
-          '''
-          if old not in source:
-              raise SystemExit("Bulk assignment creation insertion point not found")
-          assignments_path.write_text(source.replace(old, new), encoding="utf-8")
-
-          test_path = Path("backend/amodb/apps/rostering/tests/test_source_owned_state.py")
-          tests = test_path.read_text(encoding="utf-8")
-          import_old = '''from datetime import datetime, timedelta, timezone
-
-import pytest
-'''
-          import_new = '''from datetime import datetime, timedelta, timezone
-import inspect
-
-import pytest
-
-from amodb.apps.rostering import assignments
-'''
-          if import_old not in tests:
-              raise SystemExit("Test import insertion point not found")
-          tests = tests.replace(import_old, import_new)
-          tests += '''
-
-def test_bulk_and_pattern_generation_share_source_owned_integrity_guard():
-    source = inspect.getsource(assignments.bulk_create_assignments)
-    assert "_ensure_source_owned_state(" in source
-    assert "create_payload.user_id" in source
-    assert "create_payload.starts_at" in source
-    assert "create_payload.ends_at" in source
-'''
-          test_path.write_text(tests, encoding="utf-8")
+          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
+          heads = script.get_heads()
+          print("Alembic heads:", heads)
+          assert len(heads) == len(set(heads)), heads
+          assert script.get_revision("workforce_20260721_complete")
+          assert script.get_revision("quality_20260722_schema_integrity")
+          assert script.get_revision("saas_20260722_side_effect_safe")
           PY
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/amodb/apps/rostering/assignments.py backend/amodb/apps/rostering/tests/test_source_owned_state.py
-          git commit -m "Enforce source integrity in bulk roster generation"
-          git push origin HEAD:fix/rostering-unified-workforce
+      - name: Upgrade clean PostgreSQL schema
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Create legacy Alembic probe database
+        run: |
+          python - <<'PY'
+          import psycopg2
+
+          connection = psycopg2.connect(
+              host="127.0.0.1",
+              port=5432,
+              user="postgres",
+              password="postgres",
+              dbname="postgres",
+          )
+          connection.autocommit = True
+          with connection.cursor() as cursor:
+              cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", ("amodb_pr333_legacy_probe",))
+              if cursor.fetchone() is None:
+                  cursor.execute('CREATE DATABASE "amodb_pr333_legacy_probe"')
+          connection.close()
+          PY
+      - name: Reproduce and repair legacy overlapping Alembic heads
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.LEGACY_DATABASE_URL }}
+          DATABASE_WRITE_URL: ${{ env.LEGACY_DATABASE_URL }}
+          DATABASE_READ_URL: ${{ env.LEGACY_DATABASE_URL }}
+        run: |
+          set -o pipefail
+          python -m amodb.apps.rostering.tests.postgres_migration_probe 2>&1 | tee /tmp/pr333-alembic-legacy-overlap.log
+      - name: Upload legacy Alembic diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-alembic-legacy-overlap
+          path: /tmp/pr333-alembic-legacy-overlap.log
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Compile backend modules
+        working-directory: backend
+        run: >-
+          python -m compileall -q
+          amodb/apps/accounts
+          amodb/apps/audit
+          amodb/apps/platform
+          amodb/apps/quality
+          amodb/apps/realtime
+          amodb/apps/rostering
+          amodb/apps/training
+          amodb/apps/workforce
+          amodb/jobs
+      - name: Configure mappers and verify critical routes
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from sqlalchemy.orm import configure_mappers
+          from amodb.main import app
+          import amodb.quality_main
+
+          configure_mappers()
+          paths = {route.path for route in app.routes}
+          required = {
+              "/platform/tenant-saas/setup",
+              "/platform/tenant-saas/providers/{provider}",
+              "/platform/tenant-saas/invoices/{invoice_id}/fiscalize",
+              "/platform/saas/webhooks/stripe",
+              "/api/realtime/broker/authenticate",
+              "/api/realtime/broker/authorize",
+              "/api/chat/threads",
+          }
+          missing = required - paths
+          assert not missing, missing
+          print("All SQLAlchemy mappers and critical routes verified")
+          PY
+      - name: Run Quality regressions
+        working-directory: backend
+        run: >-
+          pytest -q
+          amodb/apps/quality/tests/test_quality_delivery_profile.py
+          amodb/apps/quality/tests/test_workflow_transitions.py
+          amodb/apps/quality/tests/test_audit_workflow_enforcement.py
+          amodb/apps/quality/tests/test_audit_events.py
+          amodb/apps/quality/tests/test_task_integrations.py
+          amodb/apps/quality/tests/test_evidence_pack_exports.py
+      - name: Run account regressions
+        working-directory: backend
+        run: |
+          set -o pipefail
+          pytest -vv --tb=long amodb/apps/accounts/tests 2>&1 | tee /tmp/pr333-account-regressions.log
+      - name: Upload account regression diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-account-regressions
+          path: /tmp/pr333-account-regressions.log
+          if-no-files-found: warn
+          retention-days: 2
+      - name: Run Workforce regressions
+        working-directory: backend
+        run: pytest -q amodb/apps/workforce/tests
+      - name: Run Rostering regressions
+        working-directory: backend
+        run: pytest -q amodb/apps/rostering/tests
+      - name: Run SaaS and realtime regressions
+        working-directory: backend
+        run: pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py
+      - name: Run safe worker smoke tests
+        working-directory: backend
+        run: |
+          python -m amodb.jobs.saas_worker_safe --once --batch-size 5
+          python -m amodb.jobs.platform_command_worker --once --batch-size 5
+      - name: Install frontend dependencies with bounded transient retries
+        working-directory: frontend
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "PR333 frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Typecheck and build production frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Run Quality and platform frontend regressions
+        working-directory: frontend
+        run: |
+          npm run test:quality
+          npm run test:platform
+      - name: Run Rostering and offline regressions
+        working-directory: frontend
+        run: npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts
+      - name: Lint integrated cleanup surfaces
+        working-directory: frontend
+        run: >-
+          npm exec -- eslint
+          src/main.tsx
+          src/components/messaging
+          src/components/offline
+          src/pages/AdminSaaSSettingsPage.tsx
+          src/pages/EmailServerSettingsPage.tsx
+          src/pages/platform
+          src/pages/rostering
+          src/services/apiClient.ts
+          src/services/crs.ts
+          src/services/fleet.ts
+          src/services/maintenance.ts
+          src/services/messaging.ts
+          src/services/messaging.test.ts
+          src/services/offlineHttp.ts
+          src/services/offlinePersistence.ts
+          src/services/platformControl.ts
+          src/services/platformControl.test.ts
+          src/services/qmsAuditHubActions.ts
+          src/services/qmsAuditHubActions.test.ts
+          src/services/queryPersister.ts
+          src/services/realtime
+          src/services/rostering.ts
+          src/services/saasSettings.ts
+          src/services/saasSettings.test.ts
+          src/services/typedApi.ts
+          src/services/workOrders.ts
