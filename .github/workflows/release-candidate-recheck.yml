@@ -1,8 +1,8 @@
-name: Release Candidate Recheck
+name: PR333 Release Candidate Gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -17,23 +17,23 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: amodb_release_recheck
+          POSTGRES_DB: amodb_pr333_gate
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d amodb_release_recheck"
+          --health-cmd "pg_isready -U postgres -d amodb_pr333_gate"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
       APP_ENV: test
       ALLOW_SQLITE_FOR_TESTS: "1"
-      SECRET_KEY: release-candidate-recheck-secret
+      SECRET_KEY: pr333-release-candidate-secret
       PLATFORM_SECRETS_KEY: "5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU="
       QUALITY_SCHEMA_STRICT: "0"
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_release_recheck
-      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_release_recheck
-      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_release_recheck
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
+      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
+      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
     steps:
       - uses: actions/checkout@v6
         with:
@@ -52,17 +52,14 @@ jobs:
         run: >-
           python .github/scripts/retry_transient.py
           --attempts 4
-          --label "release-candidate backend dependency install"
+          --label "PR333 backend dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
-      - name: Verify Quality release contract
+      - name: Verify release contracts
         working-directory: backend
-        run: python -m amodb.scripts.quality_module_internal_check
-      - name: Verify SaaS control-plane contract
-        working-directory: backend
-        run: python -m amodb.scripts.saas_control_plane_internal_check
-      - name: Verify release-cleanup contract
-        working-directory: backend
-        run: python -m amodb.scripts.saas_release_cleanup_check
+        run: |
+          python -m amodb.scripts.quality_module_internal_check
+          python -m amodb.scripts.saas_control_plane_internal_check
+          python -m amodb.scripts.saas_release_cleanup_check
       - name: Verify Alembic graph
         working-directory: backend
         run: |
@@ -119,10 +116,6 @@ jobs:
           PY
       - name: Run Quality regressions
         working-directory: backend
-        env:
-          DATABASE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_READ_URL: sqlite+pysqlite:///:memory:
         run: >-
           pytest -q
           amodb/apps/quality/tests/test_quality_delivery_profile.py
@@ -133,24 +126,12 @@ jobs:
           amodb/apps/quality/tests/test_evidence_pack_exports.py
       - name: Run account, Workforce and Rostering regressions
         working-directory: backend
-        env:
-          DATABASE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_READ_URL: sqlite+pysqlite:///:memory:
         run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests amodb/apps/rostering/tests
       - name: Run SaaS and realtime regressions
         working-directory: backend
-        env:
-          DATABASE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_READ_URL: sqlite+pysqlite:///:memory:
         run: pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py
       - name: Run safe worker smoke tests
         working-directory: backend
-        env:
-          DATABASE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
-          DATABASE_READ_URL: sqlite+pysqlite:///:memory:
         run: |
           python -m amodb.jobs.saas_worker_safe --once --batch-size 5
           python -m amodb.jobs.platform_command_worker --once --batch-size 5
@@ -159,7 +140,7 @@ jobs:
         run: >-
           python ../.github/scripts/retry_transient.py
           --attempts 4
-          --label "release-candidate frontend dependency install"
+          --label "PR333 frontend dependency install"
           -- npm ci --prefer-offline --no-audit --fund=false
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Typecheck and build production frontend
