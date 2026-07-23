@@ -9,7 +9,7 @@ import msgpack
 
 from amodb.database import WriteSessionLocal
 
-from . import broker_auth, models, realtime_auth, schemas, secure_messaging
+from . import broker_auth, models, production_messaging, realtime_auth, schemas
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class RealtimeGateway:
                 user_id=user_id,
             )
             authenticated = envelope.model_copy(update={"authToken": None})
-            secure_messaging.process_inbound_envelope(db, authenticated)
+            production_messaging.process_inbound_envelope(db, authenticated)
             db.commit()
         except Exception:
             db.rollback()
@@ -100,16 +100,36 @@ class RealtimeGateway:
             db.close()
         self.flush_pending()
 
-    def publish(self, *, topic: str, envelope: schemas.RealtimeEnvelope, qos: int = 0, retain: bool = False) -> None:
+    def publish(
+        self,
+        *,
+        topic: str,
+        envelope: schemas.RealtimeEnvelope,
+        qos: int = 0,
+        retain: bool = False,
+    ) -> None:
+        """Publish and wait for broker acknowledgement for durable QoS messages."""
+
         if not self.enabled:
             return
         safe_envelope = envelope.model_copy(update={"authToken": None})
-        payload = msgpack.packb(safe_envelope.model_dump(mode="python", exclude_none=True), use_bin_type=True)
+        payload = msgpack.packb(
+            safe_envelope.model_dump(mode="python", exclude_none=True),
+            use_bin_type=True,
+        )
         if not self._client or not self._connected:
             raise RuntimeError("Broker not connected")
         result = self._client.publish(topic, payload=payload, qos=qos, retain=retain)
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError(f"Broker publish failed: {result.rc}")
+        if qos > 0:
+            timeout = max(
+                1.0,
+                min(float(os.getenv("REALTIME_PUBLISH_ACK_TIMEOUT_SEC", "8") or "8"), 30.0),
+            )
+            result.wait_for_publish(timeout=timeout)
+            if hasattr(result, "is_published") and not result.is_published():
+                raise TimeoutError("MQTT publish acknowledgement timed out")
 
     def parse(self, payload: bytes) -> schemas.RealtimeEnvelope:
         max_bytes = max(1024, int(os.getenv("REALTIME_PAYLOAD_MAX_BYTES", "8192")))
@@ -119,42 +139,62 @@ class RealtimeGateway:
         return schemas.RealtimeEnvelope.model_validate(data)
 
     def flush_pending(self, *, limit: int = 200) -> int:
+        """Drain one locked row at a time and clear it only after PUBACK.
+
+        A database commit failure after PUBACK may deliver an event twice, which
+        is safer than dropping it. Consumers already use stable envelope IDs and
+        idempotent message identifiers to tolerate at-least-once delivery.
+        """
+
         if not self.enabled or not self._connected or not self._client:
             return 0
         if not self._flush_lock.acquire(blocking=False):
             return 0
         published = 0
-        db = WriteSessionLocal()
         try:
-            query = (
-                db.query(models.RealtimeOutbox)
-                .filter(models.RealtimeOutbox.published_at.is_(None))
-                .order_by(models.RealtimeOutbox.created_at.asc(), models.RealtimeOutbox.id.asc())
-                .limit(max(1, min(limit, 1000)))
-            )
-            if db.bind is not None and db.bind.dialect.name == "postgresql":
-                query = query.with_for_update(skip_locked=True)
-            else:
-                query = query.with_for_update()
-            rows = query.all()
-            for row in rows:
+            for _ in range(max(1, min(limit, 1000))):
+                db = WriteSessionLocal()
                 try:
-                    envelope = self.parse(row.payload_bin)
-                    self.publish(topic=row.topic, envelope=envelope, qos=1)
-                    row.published_at = datetime.now(timezone.utc)
-                    row.last_error = None
-                    published += 1
-                except Exception as exc:
-                    row.retry_count = int(row.retry_count or 0) + 1
-                    row.last_error = str(exc)[:2000]
-                    logger.warning("Realtime outbox delivery failed", extra={"outbox_id": row.id, "topic": row.topic})
+                    query = (
+                        db.query(models.RealtimeOutbox)
+                        .filter(models.RealtimeOutbox.published_at.is_(None))
+                        .order_by(
+                            models.RealtimeOutbox.created_at.asc(),
+                            models.RealtimeOutbox.id.asc(),
+                        )
+                        .limit(1)
+                    )
+                    if db.bind is not None and db.bind.dialect.name == "postgresql":
+                        query = query.with_for_update(skip_locked=True)
+                    else:
+                        query = query.with_for_update()
+                    row = query.first()
+                    if row is None:
+                        db.rollback()
+                        break
+                    try:
+                        envelope = self.parse(row.payload_bin)
+                        self.publish(topic=row.topic, envelope=envelope, qos=1)
+                        row.published_at = datetime.now(timezone.utc)
+                        row.last_error = None
+                        db.commit()
+                        published += 1
+                    except Exception as exc:
+                        row.retry_count = int(row.retry_count or 0) + 1
+                        row.last_error = str(exc)[:2000]
+                        db.commit()
+                        logger.warning(
+                            "Realtime outbox delivery failed",
+                            extra={"outbox_id": row.id, "topic": row.topic},
+                        )
+                        break
+                except Exception:
+                    db.rollback()
+                    logger.exception("Realtime outbox drain failed")
                     break
-            db.commit()
-        except Exception:
-            db.rollback()
-            logger.exception("Realtime outbox drain failed")
+                finally:
+                    db.close()
         finally:
-            db.close()
             self._flush_lock.release()
         return published
 
@@ -167,7 +207,11 @@ class RealtimeGateway:
                 if self._connected:
                     self.flush_pending()
 
-        self._drain_thread = threading.Thread(target=_drain, name="realtime-outbox-drain", daemon=True)
+        self._drain_thread = threading.Thread(
+            target=_drain,
+            name="realtime-outbox-drain",
+            daemon=True,
+        )
         self._drain_thread.start()
 
     def disconnect(self) -> None:
