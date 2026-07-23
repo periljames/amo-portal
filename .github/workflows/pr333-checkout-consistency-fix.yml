@@ -39,22 +39,10 @@ jobs:
         run: >-
           python .github/scripts/retry_transient.py
           --attempts 4
-          --label "PR333 checkout consistency dependency install"
+          --label "PR333 proactive checkout audit dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
-      - name: Apply comprehensive checkout consistency safeguards
-        run: python .github/scripts/apply_pr333_checkout_consistency_fix.py
-      - name: Complete generated test model fixtures
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('backend/amodb/apps/platform/tests/test_saas_checkout_consistency_hardening.py')
-          text = path.read_text()
-          old = 'external_price_ref="price_stripe_1", is_active=False, updated_by=None,\n'
-          new = 'external_price_ref="price_stripe_1", is_active=False, updated_by=None,\n        created_at=None, updated_at=None,\n'
-          count = text.count(old)
-          assert count == 2, count
-          path.write_text(text.replace(old, new))
-          PY
+      - name: Apply proactive checkout audit safeguards
+        run: python .github/scripts/apply_pr333_checkout_proactive_audit.py
       - name: Compile changed source and tests
         run: >-
           python -m py_compile
@@ -73,11 +61,14 @@ jobs:
           assert 'def _upsert_stripe_account_preserving_pending(' in worker
           assert 'previous_account_status' in worker
           assert 'checkout_pending_preserved' in worker
+          assert 'event_type.startswith("customer.subscription.")' in worker
+          assert 'obj.get("subscription") or ""' in worker
           assert 'if "external_price_ref" in payload:' in services
           assert 'if "is_active" in payload:' in services
           enqueue = services.split('def enqueue_checkout(', 1)[1].split('\ndef ', 1)[0]
           assert enqueue.index('existing_job =') < enqueue.index('pending_account =')
           assert 'normalized_key = idempotency_key.strip()' in enqueue
+          assert 'idempotency_key is already used for a different checkout request' in enqueue
           print('Checkout source invariants verified')
           PY
       - name: Run focused checkout and provider regressions
@@ -115,7 +106,7 @@ jobs:
             /tmp/pr333-checkout-full.log
           if-no-files-found: warn
           retention-days: 2
-      - name: Commit validated checkout consistency safeguards
+      - name: Commit validated proactive checkout safeguards
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -124,5 +115,5 @@ jobs:
             backend/amodb/jobs/saas_worker.py \
             backend/amodb/apps/platform/tests/test_saas_checkout_consistency_hardening.py
           git diff --cached --check
-          git commit -m "Complete Stripe checkout consistency safeguards"
+          git commit -m "Harden checkout idempotency and subscription references"
           git push origin HEAD:agent/saas-control-plane-hardening
