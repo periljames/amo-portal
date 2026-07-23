@@ -6,9 +6,9 @@ import { ComplianceImpact } from "./components/ComplianceImpact";
 import { MyRosterWorkspace } from "./components/MyRosterWorkspace";
 import { RosterDashboard } from "./components/RosterDashboard";
 import { RosterReports } from "./components/RosterReports";
-import { RosterSettings } from "./components/RosterSettings";
 import { RosterShell } from "./components/RosterShell";
 import { UnifiedRosterPlanner } from "./components/UnifiedRosterPlanner";
+import { UnifiedRosterSettings } from "./components/UnifiedRosterSettings";
 
 function useRosterRoot() {
   const { amoCode = "" } = useParams();
@@ -42,5 +42,5 @@ export function RosterReportsPage() {
 }
 
 export function RosterSettingsPage() {
-  return <RosterShell eyebrow="Module configuration" title="Roster and workforce setup" description="Manage periods, shift templates, work patterns, employment contracts, leave policy, rules, approvals and planner preferences." actions={<span className="wr-header-badge"><RefreshCw size={15} /> Server-controlled</span>}><RosterSettings /></RosterShell>;
+  return <RosterShell eyebrow="Module configuration" title="Roster and workforce setup" description="Manage periods, shift templates, work patterns, employment contracts, leave policy, rules, approvals and planner preferences without duplicating tenant personnel data." actions={<span className="wr-header-badge"><RefreshCw size={15} /> Source-aware</span>}><UnifiedRosterSettings /></RosterShell>;
 }
