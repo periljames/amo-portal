@@ -12,6 +12,7 @@ on:
       - "backend/amodb/jobs/platform_command_worker.py"
       - "backend/amodb/alembic/versions/**"
       - "backend/amodb/scripts/saas_control_plane_internal_check.py"
+      - "backend/amodb/scripts/saas_release_cleanup_check.py"
       - "backend/docs/platform/**"
       - "frontend/src/services/platformControl*"
       - "frontend/src/services/saasSettings*"
@@ -28,11 +29,14 @@ on:
       - "frontend/src/pages/EmailServerSettingsPage.tsx"
       - "frontend/src/pages/platform/**"
       - "frontend/src/pages/rostering/**"
+      - "frontend/src/router.tsx"
       - "frontend/package.json"
       - "frontend/package-lock.json"
       - "loadtests/**"
       - "deploy/saas/**"
+      - ".github/scripts/**"
       - ".github/workflows/saas-control-plane-ci.yml"
+      - ".github/workflows/recheck-transient-ci.yml"
   workflow_dispatch:
 
 permissions:
@@ -45,6 +49,7 @@ concurrency:
 jobs:
   backend-postgres:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -78,9 +83,16 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - run: pip install -r requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Run static SaaS contract gate
         run: python -m amodb.scripts.saas_control_plane_internal_check
+      - name: Run release cleanup contract gate
+        run: python -m amodb.scripts.saas_release_cleanup_check
       - name: Verify Alembic graph
         run: |
           python - <<'PY'
@@ -182,6 +194,7 @@ jobs:
           } 2>&1 | tee saas-workers.log
       - name: Upload backend diagnostics
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: saas-backend-diagnostics
@@ -202,6 +215,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
         with:
@@ -211,9 +225,14 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install frontend dependencies
+      - name: Install frontend dependencies with bounded transient retries
         working-directory: frontend
-        run: npm ci
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Run platform and messaging service regressions
         id: frontend_tests
         continue-on-error: true
@@ -267,6 +286,7 @@ jobs:
           node --check loadtests/k6_saas_control_plane.js 2>&1 | tee frontend/platform-k6.log
       - name: Upload frontend diagnostics
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: saas-frontend-diagnostics
@@ -287,10 +307,17 @@ jobs:
 
   deployment-config:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           show-progress: false
+      - name: Validate retry wrapper semantics
+        run: >-
+          python .github/scripts/retry_transient.py
+          --attempts 1
+          --label "retry wrapper smoke test"
+          -- python -c "print('retry wrapper ready')"
       - name: Validate compose deployment
         env:
           DATABASE_URL: postgresql+psycopg2://example:example@database.example.invalid:5432/amodb
