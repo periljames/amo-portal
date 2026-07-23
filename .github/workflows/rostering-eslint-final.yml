@@ -1,4 +1,4 @@
-name: Rostering ESLint Final
+name: Apply Final Rostering Lint Fix
 
 on:
   push:
@@ -6,27 +6,32 @@ on:
       - fix/rostering-unified-workforce
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  lint:
+  fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci --prefer-offline --no-audit --fund=false
-      - name: Capture diagnostics
-        working-directory: frontend
-        run: npm exec -- eslint src/pages/rostering src/services/rosterPeople.ts src/services/rosterCommitments.ts > rostering-eslint.log 2>&1 || true
-      - name: Upload diagnostics
-        uses: actions/upload-artifact@v6
-        with:
-          name: rostering-eslint-final
-          path: frontend/rostering-eslint.log
-          retention-days: 1
+          ref: fix/rostering-unified-workforce
+          fetch-depth: 0
+      - name: Remove obsolete React import
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/src/pages/rostering/components/UnifiedRosterSettings.tsx")
+          source = path.read_text(encoding="utf-8")
+          old = "  useEffect,\n"
+          if old not in source:
+              raise SystemExit("Obsolete useEffect import was not found")
+          path.write_text(source.replace(old, "", 1), encoding="utf-8")
+          PY
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/pages/rostering/components/UnifiedRosterSettings.tsx
+          git commit -m "Remove obsolete rostering React import"
+          git push origin HEAD:fix/rostering-unified-workforce
