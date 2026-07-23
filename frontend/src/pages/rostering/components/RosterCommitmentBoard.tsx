@@ -97,7 +97,7 @@ export function RosterCommitmentBoard() {
   });
 
   const timezoneName = query.data?.timezone_name || "UTC";
-  const items = query.data?.items || [];
+  const items = useMemo(() => query.data?.items || [], [query.data?.items]);
   const people = useMemo(() => {
     const grouped = new Map<string, { userId: string; name: string; staffCode: string; items: RosterCommitmentRead[] }>();
     items.forEach((item) => {

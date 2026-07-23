@@ -193,7 +193,7 @@ export function UnifiedRosterSettings() {
   const initialLoading = queries.every((query) => query.isPending && !query.data);
   const permissions = permissionsQuery.data?.permissions || [];
   const can = (permission: string) => permissions.includes(permission);
-  const people = peopleQuery.data?.items || [];
+  const people = useMemo(() => peopleQuery.data?.items || [], [peopleQuery.data?.items]);
   const periods = periodsQuery.data || [];
   const shifts = shiftsQuery.data || [];
   const timezoneName = periods[0]?.timezone_name || "UTC";
@@ -456,11 +456,8 @@ function PeriodsPanel({
   const [endsOn, setEndsOn] = useState(
     isoDate(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
   );
-  const [timezoneName, setTimezoneName] = useState(periods[0]?.timezone_name || "UTC");
-
-  useEffect(() => {
-    if (periods[0]?.timezone_name) setTimezoneName(periods[0].timezone_name);
-  }, [periods]);
+  const [timezoneOverride, setTimezoneOverride] = useState("");
+  const timezoneName = timezoneOverride || periods[0]?.timezone_name || "UTC";
 
   return (
     <section className="wr-panel">
@@ -487,7 +484,7 @@ function PeriodsPanel({
             <input type="date" value={endsOn} onChange={(event) => setEndsOn(event.target.value)} />
           </Field>
           <Field label="Time zone">
-            <input value={timezoneName} onChange={(event) => setTimezoneName(event.target.value)} />
+            <input value={timezoneName} onChange={(event) => setTimezoneOverride(event.target.value)} />
           </Field>
           <button
             className="wr-button wr-button--primary"
@@ -697,18 +694,18 @@ function PatternsPanel({
   busy: string | null;
   run: RunAction;
 }) {
-  const dutyShifts = shifts.filter((shift) => shift.counts_as_duty && shift.is_active);
+  const dutyShifts = useMemo(
+      () => shifts.filter((shift) => shift.counts_as_duty && shift.is_active),
+      [shifts],
+    );
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [cycle, setCycle] = useState(7);
   const [shiftId, setShiftId] = useState("");
   const [dutyDays, setDutyDays] = useState(5);
 
-  useEffect(() => {
-    if (!shiftId && dutyShifts[0]) setShiftId(dutyShifts[0].id);
-  }, [dutyShifts, shiftId]);
-
-  const selectedShift = shifts.find((shift) => shift.id === shiftId);
+  const effectiveShiftId = shiftId || dutyShifts[0]?.id || "";
+  const selectedShift = shifts.find((shift) => shift.id === effectiveShiftId);
 
   return (
     <section className="wr-panel">
@@ -747,7 +744,7 @@ function PatternsPanel({
             />
           </Field>
           <Field label="Duty shift">
-            <select value={shiftId} onChange={(event) => setShiftId(event.target.value)}>
+            <select value={effectiveShiftId} onChange={(event) => setShiftId(event.target.value)}>
               <option value="">Select shift</option>
               {dutyShifts.map((shift) => (
                 <option key={shift.id} value={shift.id}>
@@ -759,7 +756,7 @@ function PatternsPanel({
           <button
             className="wr-button wr-button--primary"
             type="button"
-            disabled={!code || !name || !shiftId || busy === "pattern"}
+            disabled={!code || !name || !effectiveShiftId || busy === "pattern"}
             onClick={() => {
               void run("pattern", () =>
                 createWorkPattern({
@@ -769,7 +766,7 @@ function PatternsPanel({
                   cycle_length_days: cycle,
                   is_active: true,
                   timezone_name: timezoneName,
-                  days: buildPatternDays(cycle, dutyDays, shiftId, selectedShift),
+                  days: buildPatternDays(cycle, dutyDays, effectiveShiftId, selectedShift),
                 }),
               );
             }}
@@ -827,13 +824,8 @@ function ContractsPanel({
   const [baseId, setBaseId] = useState("");
   const [effectiveFrom, setEffectiveFrom] = useState(isoDate(new Date()));
 
-  useEffect(() => {
-    if (!userId && people[0]) setUserId(people[0].user_id);
-  }, [people, userId]);
-
-  useEffect(() => {
-    if (!baseId && bases[0]) setBaseId(bases[0].id);
-  }, [bases, baseId]);
+  const effectiveUserId = userId || people[0]?.user_id || "";
+  const effectiveBaseId = baseId || bases[0]?.id || "";
 
   return (
     <section className="wr-panel">
@@ -848,7 +840,7 @@ function ContractsPanel({
       {canManage ? (
         <div className="wr-inline-create">
           <Field label="Person">
-            <select value={userId} onChange={(event) => setUserId(event.target.value)}>
+            <select value={effectiveUserId} onChange={(event) => setUserId(event.target.value)}>
               <option value="">Select active user</option>
               {people.map((person) => (
                 <option key={person.user_id} value={person.user_id}>
@@ -858,7 +850,7 @@ function ContractsPanel({
             </select>
           </Field>
           <Field label="Primary base">
-            <select value={baseId} onChange={(event) => setBaseId(event.target.value)}>
+            <select value={effectiveBaseId} onChange={(event) => setBaseId(event.target.value)}>
               <option value="">Select base</option>
               {bases.map((base) => (
                 <option key={base.id} value={base.id}>{base.code}</option>
@@ -875,11 +867,11 @@ function ContractsPanel({
           <button
             className="wr-button wr-button--primary"
             type="button"
-            disabled={!userId || !baseId || busy === "contract"}
+            disabled={!effectiveUserId || !effectiveBaseId || busy === "contract"}
             onClick={() => {
               void run("contract", () =>
                 createEmploymentContract({
-                  user_id: userId,
+                  user_id: effectiveUserId,
                   contract_type: "PERMANENT",
                   employment_status: "ACTIVE",
                   effective_from: effectiveFrom,
@@ -887,7 +879,7 @@ function ContractsPanel({
                   standard_weekly_minutes: 2400,
                   standard_daily_minutes: 480,
                   fte_percentage: 100,
-                  primary_base_station_id: baseId,
+                  primary_base_station_id: effectiveBaseId,
                   secondary_base_station_id: null,
                   supervisor_user_id: null,
                   cost_centre: null,

@@ -80,7 +80,7 @@ export function MyRosterWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [leaveTypeId, range.from, range.to, userId]);
+  }, [leaveTypeId, range, userId]);
 
   useEffect(() => { void load(); }, [load]);
 

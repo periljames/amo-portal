@@ -77,10 +77,10 @@ function inclusiveLocalEndDate(value: string, timezoneName: string): string {
   return localDate(new Date(instant.getTime() - 1).toISOString(), timezoneName);
 }
 
-function commitmentIcon(sourceModule: string) {
-  if (sourceModule === "TRAINING") return GraduationCap;
-  if (sourceModule === "QUALITY") return ShieldCheck;
-  return Umbrella;
+function CommitmentSourceIcon({ sourceModule }: { sourceModule: string }) {
+  if (sourceModule === "TRAINING") return <GraduationCap size={12} aria-hidden="true" />;
+  if (sourceModule === "QUALITY") return <ShieldCheck size={12} aria-hidden="true" />;
+  return <Umbrella size={12} aria-hidden="true" />;
 }
 
 function PersonCard({ person }: { person: RosterPersonRead }) {
@@ -94,13 +94,12 @@ function PersonCard({ person }: { person: RosterPersonRead }) {
 }
 
 function CommitmentCard({ commitment }: { commitment: RosterCommitmentRead }) {
-  const Icon = commitmentIcon(commitment.source_module);
   return (
     <article
       className={`wr-planner-commitment wr-planner-commitment--${commitment.source_module.toLowerCase()}${commitment.blocking ? " is-blocking" : ""}`}
       title={[commitment.title, commitment.detail, commitment.location_label, commitment.status].filter(Boolean).join(" · ")}
     >
-      <Icon size={12} aria-hidden="true" />
+      <CommitmentSourceIcon sourceModule={commitment.source_module} />
       <span><strong>{commitment.kind.replace(/_/g, " ")}</strong><small>{commitment.title}</small></span>
       {commitment.provisional ? <em>Provisional</em> : null}
     </article>

@@ -44,7 +44,7 @@ export function ComplianceImpact() {
     } finally {
       setLoading(false);
     }
-  }, [range.from, range.to]);
+  }, [range]);
 
   useEffect(() => { void load(); }, [load]);
 
