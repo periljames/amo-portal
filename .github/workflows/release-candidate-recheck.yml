@@ -10,7 +10,7 @@ permissions:
 jobs:
   release-candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 110
     services:
       postgres:
         image: postgres:16
@@ -34,6 +34,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
       DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
       DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
+      LEGACY_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_legacy_probe
     steps:
       - uses: actions/checkout@v6
         with:
@@ -91,6 +92,42 @@ jobs:
       - name: Upgrade clean PostgreSQL schema
         working-directory: backend
         run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Create legacy Alembic probe database
+        run: |
+          python - <<'PY'
+          import psycopg2
+
+          connection = psycopg2.connect(
+              host="127.0.0.1",
+              port=5432,
+              user="postgres",
+              password="postgres",
+              dbname="postgres",
+          )
+          connection.autocommit = True
+          with connection.cursor() as cursor:
+              cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", ("amodb_pr333_legacy_probe",))
+              if cursor.fetchone() is None:
+                  cursor.execute('CREATE DATABASE "amodb_pr333_legacy_probe"')
+          connection.close()
+          PY
+      - name: Reproduce and repair legacy overlapping Alembic heads
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.LEGACY_DATABASE_URL }}
+          DATABASE_WRITE_URL: ${{ env.LEGACY_DATABASE_URL }}
+          DATABASE_READ_URL: ${{ env.LEGACY_DATABASE_URL }}
+        run: |
+          set -o pipefail
+          python -m amodb.apps.rostering.tests.postgres_migration_probe 2>&1 | tee /tmp/pr333-alembic-legacy-overlap.log
+      - name: Upload legacy Alembic diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-alembic-legacy-overlap
+          path: /tmp/pr333-alembic-legacy-overlap.log
+          if-no-files-found: warn
+          retention-days: 3
       - name: Compile backend modules
         working-directory: backend
         run: >-
