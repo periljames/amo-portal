@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -9,9 +10,11 @@ from fastapi import HTTPException
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.platform import saas_services, saas_webhooks
-from amodb.apps.platform import tenant_saas_router
 from amodb.apps.realtime.gateway import RealtimeGateway
 from amodb.apps.realtime.schemas import RealtimeEnvelope, RealtimeKind
+
+
+tenant_saas_router = import_module("amodb.apps.platform.tenant_saas_router")
 
 
 def _tenant_admin(amo_id: str = "amo-1"):
