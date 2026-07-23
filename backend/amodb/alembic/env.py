@@ -9,7 +9,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from alembic.script import ScriptDirectory
-from sqlalchemy import pool, text  # kept for compatibility with typical alembic templates
+from sqlalchemy import inspect, pool, text  # kept for compatibility with typical alembic templates
 
 # ---------------------------------------------------------------------------
 # PYTHONPATH SETUP
@@ -175,6 +175,68 @@ def _ensure_alembic_version_column_width(connection) -> None:
         # preflight; normal migration execution will report real schema issues.
         return
 
+
+_LEGACY_PHASE2_ANCESTOR = "phase2_14a_20260615"
+
+
+def _repair_redundant_phase2_version_row(connection) -> None:
+    """Repair the released Workforce/Phase 2 overlap before graph traversal.
+
+    Older databases legitimately stored ``phase2_14a_20260615`` and a Workforce
+    revision as independent heads. The current graph requires Phase 2 before the
+    Workforce precreate revision, making that old Phase 2 row a redundant ancestor
+    of the recorded Workforce descendant. Alembic rejects overlapping current rows
+    before it can execute a normal migration, so the redundant marker must be
+    collapsed during online preflight.
+
+    The repair is intentionally narrow and graph-verified: it removes only the
+    known compatibility marker, only when another current revision is proven by
+    the loaded ScriptDirectory to contain that marker in its ancestry. Application
+    tables and all non-redundant version rows are untouched.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    if not inspect(connection).has_table("alembic_version"):
+        return
+
+    current_revisions = {
+        str(revision)
+        for revision in connection.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalars()
+    }
+    if _LEGACY_PHASE2_ANCESTOR not in current_revisions:
+        return
+
+    script = ScriptDirectory.from_config(config)
+    containing_revisions: list[str] = []
+    for current_revision in sorted(current_revisions - {_LEGACY_PHASE2_ANCESTOR}):
+        try:
+            ancestry = {
+                str(revision.revision)
+                for revision in script.iterate_revisions(current_revision, "base")
+            }
+        except Exception:
+            # Unknown or otherwise invalid current revisions must still be reported
+            # by Alembic; never hide them through this compatibility repair.
+            continue
+        if _LEGACY_PHASE2_ANCESTOR in ancestry:
+            containing_revisions.append(current_revision)
+
+    if not containing_revisions:
+        return
+
+    connection.execute(
+        text("DELETE FROM alembic_version WHERE version_num = :revision"),
+        {"revision": _LEGACY_PHASE2_ANCESTOR},
+    )
+    print(
+        "Alembic compatibility repair: removed redundant "
+        f"{_LEGACY_PHASE2_ANCESTOR} version row; contained by "
+        + ", ".join(containing_revisions)
+    )
+
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
@@ -184,12 +246,12 @@ def run_migrations_online() -> None:
     connectable = write_engine
 
     with connectable.connect() as connection:
-        # SQLAlchemy 2.x autobegins a transaction even for the preflight SELECT in
-        # _ensure_alembic_version_column_width(). If that implicit transaction remains
-        # open, Alembic may run/stamp revisions but the version-table updates can be
-        # rolled back when the connection is returned to the pool. Commit the preflight
-        # transaction before handing the connection to Alembic.
+        # SQLAlchemy 2.x autobegins a transaction even for preflight queries. Commit
+        # the compatibility preflight before handing the connection to Alembic so
+        # version-table repairs persist and normal migration transactions remain
+        # authoritative.
         _ensure_alembic_version_column_width(connection)
+        _repair_redundant_phase2_version_row(connection)
         if connection.in_transaction():
             connection.commit()
 
