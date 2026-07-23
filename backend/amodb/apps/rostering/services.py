@@ -22,10 +22,10 @@ from ..workforce import services as workforce_services
 from . import assignments, catalog, common, lifecycle, planning, reports
 from .assignments import (
     allocate_to_task,
-    bulk_create_assignments,
+    bulk_create_assignments as _bulk_create_assignments,
     create_assignment as _create_assignment,
     delete_assignment,
-    generate_from_patterns,
+    generate_from_patterns as _generate_from_patterns,
     link_task_assignment,
     list_assignments,
     list_task_links,
@@ -236,6 +236,74 @@ def update_assignment(db: Session, *, row, actor_user_id: str, payload):
         source_reference_id=row.source_reference_id,
     )
     return _update_assignment(db, row=row, actor_user_id=actor_user_id, payload=payload)
+
+
+def _remap_bulk_indexes(entries: list[dict], index_map: list[int]) -> list[dict]:
+    remapped: list[dict] = []
+    for entry in entries:
+        item = dict(entry)
+        filtered_index = item.get("index")
+        if isinstance(filtered_index, int) and 0 <= filtered_index < len(index_map):
+            item["index"] = index_map[filtered_index]
+        remapped.append(item)
+    return remapped
+
+
+def bulk_create_assignments(db: Session, *, version, actor_user_id: str, payload):
+    """Apply the same source-of-truth guard to bulk and pattern assignments."""
+    valid_items = []
+    index_map: list[int] = []
+    preflight_conflicts: list[dict] = []
+
+    for index, item in enumerate(payload.assignments):
+        try:
+            _ensure_source_owned_state(
+                db,
+                amo_id=version.amo_id,
+                user_id=item.user_id,
+                starts_at=item.starts_at,
+                ends_at=item.ends_at,
+                assignment_status=item.status,
+                assignment_source=item.source,
+                source_reference_id=item.source_reference_id,
+            )
+        except ValueError as exc:
+            conflict = {
+                "index": index,
+                "client_id": getattr(item, "client_id", None),
+                "reason": str(exc),
+            }
+            if payload.atomic:
+                raise ValueError(f"Bulk assignment failed at item {index}: {exc}") from exc
+            preflight_conflicts.append(conflict)
+            continue
+        valid_items.append(item)
+        index_map.append(index)
+
+    guarded_payload = payload.model_copy(update={"assignments": valid_items})
+    result = _bulk_create_assignments(
+        db,
+        version=version,
+        actor_user_id=actor_user_id,
+        payload=guarded_payload,
+    )
+    result.skipped = _remap_bulk_indexes(result.skipped, index_map)
+    result.conflicts = preflight_conflicts + _remap_bulk_indexes(result.conflicts, index_map)
+    return result
+
+
+# Pattern generation resolves this module-global function at call time. Rebind
+# it once so generated rows cannot bypass the same Workforce/Training/QMS guard.
+assignments.bulk_create_assignments = bulk_create_assignments
+
+
+def generate_from_patterns(db: Session, *, version, actor_user_id: str, payload):
+    return _generate_from_patterns(
+        db,
+        version=version,
+        actor_user_id=actor_user_id,
+        payload=payload,
+    )
 
 
 def get_shift_template(db: Session, *, amo_id: str, template_id: str):
