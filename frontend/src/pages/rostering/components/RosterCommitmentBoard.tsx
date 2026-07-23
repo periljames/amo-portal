@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { addDays, format, parseISO, startOfWeek } from "date-fns";
 import {
@@ -40,6 +40,11 @@ function localDate(value: string, timezoneName: string): string {
   return `${map.year}-${map.month}-${map.day}`;
 }
 
+function inclusiveLocalEndDate(value: string, timezoneName: string): string {
+  const instant = parseISO(value);
+  return localDate(new Date(instant.getTime() - 1).toISOString(), timezoneName);
+}
+
 function escapeCsv(value: unknown): string {
   const text = value == null ? "" : String(value);
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -73,7 +78,7 @@ function exportCommitments(items: RosterCommitmentRead[], from: string, to: stri
     item.detail,
   ]);
   const csv = [headings, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\n");
-  downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `roster-commitments-${from}-${to}.csv`);
+  downloadBlob(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }), `roster-commitments-${from}-${to}.csv`);
 }
 
 export function RosterCommitmentBoard() {
@@ -136,18 +141,18 @@ export function RosterCommitmentBoard() {
           <button type="button" className={mode === 28 ? "is-active" : ""} onClick={() => setMode(28)}>4 weeks</button>
         </div>
         <div className="wr-commitments__counts">
-          <span><GraduationCap size={14} /> {query.data?.counts.TRAINING || 0} training</span>
-          <span><Umbrella size={14} /> {(query.data?.counts.ANNUAL_LEAVE || 0) + (query.data?.counts.SICK_LEAVE || 0) + (query.data?.counts.UNAVAILABLE || 0)} absence</span>
-          <span><ShieldCheck size={14} /> {query.data?.counts.QMS_AUDIT || 0} Quality</span>
+          <span><GraduationCap size={14} /> {query.data?.counts["TRAINING"] || 0} training</span>
+          <span><Umbrella size={14} /> {(query.data?.counts["ANNUAL_LEAVE"] || 0) + (query.data?.counts["SICK_LEAVE"] || 0) + (query.data?.counts["UNAVAILABLE"] || 0) + (query.data?.counts["SUSPENDED"] || 0)} absence</span>
+          <span><ShieldCheck size={14} /> {query.data?.counts["QMS_AUDIT"] || 0} Quality</span>
         </div>
       </div>
 
       {query.error ? <div className="wr-inline-error" role="alert">Commitments could not be loaded: {errorMessage(query.error)}</div> : null}
       {query.isPending ? <div className="wr-commitments__loading"><span className="wr-spinner" /> Synchronising source modules…</div> : null}
-      {!query.isPending && !query.error && people.length === 0 ? <EmptyState title="No fixed commitments in this range" description="Scheduled training, approved leave, unavailability and assigned Quality audits will appear automatically." /> : null}
+      {!query.isPending && !query.error && people.length === 0 ? <EmptyState title="No fixed commitments in this range" description="Scheduled training, approved leave, unavailability, suspension and assigned Quality audits will appear automatically." /> : null}
 
       {people.length ? (
-        <div className={`wr-commitment-grid${mode === 28 ? " is-month" : ""}`} style={{ "--wr-commitment-days": mode } as React.CSSProperties}>
+        <div className={`wr-commitment-grid${mode === 28 ? " is-month" : ""}`} style={{ "--wr-commitment-days": mode } as CSSProperties}>
           <div className="wr-commitment-grid__corner"><CalendarClock size={15} /> Person</div>
           {days.map((day) => <div className="wr-commitment-grid__day" key={isoDate(day)}><strong>{format(day, "EEE")}</strong><span>{format(day, "dd MMM")}</span></div>)}
           {people.map((person) => (
@@ -157,8 +162,8 @@ export function RosterCommitmentBoard() {
                 const dateKey = isoDate(day);
                 const cellItems = person.items.filter((item) => {
                   const start = localDate(item.starts_at, timezoneName);
-                  const endExclusive = localDate(item.ends_at, timezoneName);
-                  return dateKey >= start && (item.all_day ? dateKey < endExclusive : dateKey <= endExclusive);
+                  const end = inclusiveLocalEndDate(item.ends_at, timezoneName);
+                  return dateKey >= start && dateKey <= end;
                 });
                 return (
                   <div className="wr-commitment-grid__cell" key={`${person.userId}:${dateKey}`}>
