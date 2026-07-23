@@ -4,18 +4,19 @@ import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user
 
-from . import models as platform_models
 from . import saas_models as models
-from . import saas_providers, saas_queue, saas_services
+from . import saas_providers, saas_services
 
 
 router = APIRouter(prefix="/tenant-saas", tags=["tenant-saas-administration"])
+ACTIVE_JOB_STATUSES = {"PENDING", "RETRY", "RUNNING"}
 
 
 def require_saas_admin(
@@ -71,6 +72,46 @@ def _job_payload(row: models.SaaSJob) -> dict[str, Any]:
     }
 
 
+def _queue_summary(db: Session, *, tenant_id: str | None) -> dict[str, Any]:
+    filters = []
+    if tenant_id:
+        filters.append(models.SaaSJob.tenant_id == tenant_id)
+    rows = (
+        db.query(
+            models.SaaSJob.status,
+            models.SaaSJob.queue_name,
+            func.count(models.SaaSJob.id),
+        )
+        .filter(*filters)
+        .group_by(models.SaaSJob.status, models.SaaSJob.queue_name)
+        .all()
+    )
+    counts: dict[str, int] = {}
+    queues: dict[str, int] = {}
+    queue_depth = 0
+    for job_status, queue_name, total in rows:
+        status_key = str(job_status)
+        count = int(total or 0)
+        counts[status_key] = counts.get(status_key, 0) + count
+        if status_key in ACTIVE_JOB_STATUSES:
+            queue_key = str(queue_name)
+            queues[queue_key] = queues.get(queue_key, 0) + count
+            queue_depth += count
+
+    oldest_query = db.query(func.min(models.SaaSJob.created_at)).filter(
+        models.SaaSJob.status.in_(ACTIVE_JOB_STATUSES),
+        *filters,
+    )
+    return {
+        "scope": "TENANT" if tenant_id else "PLATFORM",
+        "tenant_id": tenant_id,
+        "counts": counts,
+        "queues": queues,
+        "queue_depth": queue_depth,
+        "oldest_active_job_at": oldest_query.scalar(),
+    }
+
+
 def _deployment_readiness() -> list[dict[str, Any]]:
     rows = (
         ("PLATFORM_SECRETS_KEY", "Encrypted provider credential storage", True),
@@ -98,7 +139,7 @@ def _deployment_readiness() -> list[dict[str, Any]]:
 def _setup_links(tenant_id: str | None, superuser: bool) -> dict[str, Any]:
     return {
         "stripe_webhook_path": "/platform/saas/webhooks/stripe",
-        "tenant_admin_path": "/maintenance/{amoCode}/admin/integrations",
+        "tenant_admin_path": "/maintenance/{amoCode}/admin/email-settings",
         "platform_integrations_path": "/platform/integrations" if superuser else None,
         "platform_billing_path": "/platform/billing" if superuser else None,
         "scope_tenant_id": tenant_id,
@@ -185,7 +226,7 @@ def setup_summary(
         "modules": modules,
         "invoices": invoices,
         "jobs": [_job_payload(row) for row in jobs],
-        "queue": saas_queue.queue_summary(db),
+        "queue": _queue_summary(db, tenant_id=scope_tenant_id),
         "deployment_readiness": _deployment_readiness(),
         "links": _setup_links(scope_tenant_id, bool(getattr(user, "is_superuser", False))),
         "permissions": {
