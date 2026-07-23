@@ -33,7 +33,7 @@ def test_non_repeatable_jobs_have_one_attempt_and_cannot_be_manually_retried():
         saas_queue.retry_job(db, job)
 
 
-def test_uncertain_etims_outcome_moves_to_reconciliation_without_resubmission(
+def test_uncertain_etims_outcome_uses_real_invoice_fields_and_requires_reconciliation(
     monkeypatch: pytest.MonkeyPatch,
 ):
     fiscalization = SimpleNamespace(
@@ -57,14 +57,18 @@ def test_uncertain_etims_outcome_moves_to_reconciliation_without_resubmission(
     )
     invoice = SimpleNamespace(
         id="invoice-1",
-        invoice_number="INV-1",
         amo_id="amo-1",
         currency="KES",
-        subtotal_cents=10000,
-        tax_cents=1600,
-        total_cents=11600,
+        amount_cents=11600,
+        description="Quality module annual subscription",
         issued_at=None,
         due_at=None,
+        amo=SimpleNamespace(
+            name="Example AMO",
+            contact_email="billing@example.test",
+            contact_phone="+254700000000",
+            country="KE",
+        ),
     )
     job = SimpleNamespace(
         id="job-1",
@@ -89,7 +93,12 @@ def test_uncertain_etims_outcome_moves_to_reconciliation_without_resubmission(
     monkeypatch.setattr(
         saas_side_effects.saas_secrets,
         "decrypt_secret",
-        lambda value: {"api_key": "secret"},
+        lambda value: {"client_secret": "secret"},
+    )
+    monkeypatch.setattr(
+        saas_side_effects.account_services,
+        "format_invoice_number",
+        lambda value: "INV-000001",
     )
     provider = MagicMock(side_effect=TimeoutError("provider timed out"))
     monkeypatch.setattr(
@@ -101,6 +110,23 @@ def test_uncertain_etims_outcome_moves_to_reconciliation_without_resubmission(
     with pytest.raises(saas_side_effects.NonRepeatableJobError):
         saas_side_effects.process_etims_fiscalization(db, job=job)
     assert fiscalization.status == "RECONCILIATION_REQUIRED"
+    assert fiscalization.request_json == {
+        "submission_reference": "amo-portal:fiscalize:invoice-1",
+        "portal_invoice_id": "invoice-1",
+        "invoice_number": "INV-000001",
+        "issued_at": None,
+        "due_at": None,
+        "currency": "KES",
+        "total_amount_cents": 11600,
+        "description": "Quality module annual subscription",
+        "buyer": {
+            "tenant_id": "amo-1",
+            "name": "Example AMO",
+            "email": "billing@example.test",
+            "phone": "+254700000000",
+            "country": "KE",
+        },
+    }
     assert fiscalization.response_json["submission_reference"] == "amo-portal:fiscalize:invoice-1"
     assert db.commit.call_count >= 2
 
@@ -109,7 +135,7 @@ def test_uncertain_etims_outcome_moves_to_reconciliation_without_resubmission(
     assert provider.call_count == 1
 
 
-def test_ai_support_reply_is_deduplicated_by_source_job(
+def test_ai_support_reply_uses_existing_adapter_and_is_deduplicated_by_source_job(
     monkeypatch: pytest.MonkeyPatch,
 ):
     job = SimpleNamespace(
@@ -120,7 +146,7 @@ def test_ai_support_reply_is_deduplicated_by_source_job(
     credential = SimpleNamespace(
         id="credential-1",
         encrypted_secret="encrypted",
-        config_json={},
+        config_json={"model": "test-model"},
     )
     ticket = SimpleNamespace(
         id="ticket-1",
@@ -135,8 +161,9 @@ def test_ai_support_reply_is_deduplicated_by_source_job(
     def query(model):
         chain = MagicMock()
         if model is saas_models.SaaSSupportTicketMessage:
-            chain.filter.return_value.first.side_effect = lambda: existing_holder["message"]
-            chain.filter.return_value.order_by.return_value.all.return_value = []
+            filtered = chain.filter.return_value
+            filtered.first.side_effect = lambda: existing_holder["message"]
+            filtered.order_by.return_value.limit.return_value.all.return_value = []
         return chain
 
     db.query.side_effect = query
@@ -164,7 +191,7 @@ def test_ai_support_reply_is_deduplicated_by_source_job(
     )
     provider = MagicMock(
         return_value={
-            "reply": "Please retry the upload and share the correlation ID.",
+            "text": "Please retry the upload and share the correlation ID.",
             "provider": "openai",
             "model": "test-model",
             "usage": {},
@@ -172,7 +199,7 @@ def test_ai_support_reply_is_deduplicated_by_source_job(
     )
     monkeypatch.setattr(
         saas_side_effects.saas_providers,
-        "generate_openai_support_response",
+        "openai_support_response",
         provider,
     )
 
@@ -186,4 +213,5 @@ def test_ai_support_reply_is_deduplicated_by_source_job(
         "replayed": False,
     }
     assert existing_holder["message"].source_job_id == job.id
+    assert existing_holder["message"].body == "Please retry the upload and share the correlation ID."
     assert provider.call_count == 1
