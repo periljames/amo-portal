@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import socket
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -54,7 +53,14 @@ def test_dns_resolution_returns_only_validated_public_addresses(monkeypatch: pyt
     )
 
 
-def test_redirect_handler_rejects_private_network_destination():
+@pytest.mark.parametrize(
+    "destination",
+    [
+        "https://169.254.169.254/latest/meta-data",
+        "http://public.example.com/downgrade",
+    ],
+)
+def test_redirect_handler_rejects_private_or_plaintext_destination(destination: str):
     handler = saas_provider_network._SafeRedirectHandler()
     request = MagicMock()
 
@@ -65,7 +71,7 @@ def test_redirect_handler_rejects_private_network_destination():
             302,
             "Found",
             {},
-            "https://169.254.169.254/latest/meta-data",
+            destination,
         )
 
 
@@ -76,6 +82,7 @@ class FakeSMTP:
         self.args = args
         self.kwargs = kwargs
         self._host = ""
+        self.source_address = None
         self.calls: list[tuple[str, object]] = []
         self.__class__.instances.append(self)
 
@@ -139,6 +146,7 @@ def test_smtp_health_check_uses_starttls_and_login(monkeypatch: pytest.MonkeyPat
     call_names = [name for name, _ in client.calls]
     assert call_names == ["connect", "ehlo", "starttls", "ehlo", "login", "noop", "quit"]
     assert client.calls[0][1] == ("93.184.216.34", 587, "")
+    assert client._host == "smtp.example.com"
     assert client.calls[4][1] == ("mailer@example.com", "correct-password")
     assert result["transport"] == "starttls"
     assert result["authenticated"] is True
@@ -162,8 +170,32 @@ def test_smtp_health_check_uses_implicit_tls_and_login(monkeypatch: pytest.Monke
     client = FakeSMTP.instances[-1]
     call_names = [name for name, _ in client.calls]
     assert call_names == ["connect", "ehlo", "login", "noop", "quit"]
-    assert client.calls[0][1] == ("93.184.216.34", 465, "smtp.example.com")
+    assert client.calls[0][1] == ("smtp.example.com", 465, "")
+    assert callable(client._get_socket)
     assert result["transport"] == "ssl"
+
+
+def test_pinned_smtp_ssl_socket_uses_validated_ip_and_original_sni(monkeypatch: pytest.MonkeyPatch):
+    client = FakeSMTP()
+    raw_socket = object()
+    wrapped_socket = object()
+    context = MagicMock()
+    context.wrap_socket.return_value = wrapped_socket
+    create_connection = MagicMock(return_value=raw_socket)
+    monkeypatch.setattr(saas_provider_network.socket, "create_connection", create_connection)
+
+    saas_provider_network._pin_smtp_ssl_socket(
+        client,
+        hostname="smtp.example.com",
+        pinned_ip="93.184.216.34",
+        port=465,
+        context=context,
+    )
+    result = client._get_socket("smtp.example.com", 465, 8)
+
+    create_connection.assert_called_once_with(("93.184.216.34", 465), 8, None)
+    context.wrap_socket.assert_called_once_with(raw_socket, server_hostname="smtp.example.com")
+    assert result is wrapped_socket
 
 
 def test_installed_provider_health_check_uses_hardened_smtp_path(monkeypatch: pytest.MonkeyPatch):
