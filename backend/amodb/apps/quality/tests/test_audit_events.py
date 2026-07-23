@@ -55,6 +55,7 @@ def test_publish_revision_logs_audit_event(db_session):
     user = _create_user(db_session, amo_id=amo.id)
 
     doc = quality_models.QMSDocument(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         doc_type=quality_models.QMSDocType.MANUAL,
         doc_code="DOC-1",
@@ -64,6 +65,7 @@ def test_publish_revision_logs_audit_event(db_session):
     db_session.commit()
 
     rev = quality_models.QMSDocumentRevision(
+        amo_id=amo.id,
         document_id=doc.id,
         issue_no=1,
         rev_no=0,
@@ -118,6 +120,7 @@ def test_close_finding_logs_audit_event(db_session):
     db_session.commit()
 
     finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
         audit_id=audit.id,
         description="Finding",
         severity=quality_models.QMSFindingSeverity.MINOR,
@@ -156,6 +159,7 @@ def test_export_car_pdf_logs_audit_event(db_session, monkeypatch, tmp_path):
 
     car = quality_service.create_car(
         db_session,
+        amo_id=amo.id,
         program=quality_models.CARProgram.QUALITY,
         title="Test CAR",
         summary="Summary",

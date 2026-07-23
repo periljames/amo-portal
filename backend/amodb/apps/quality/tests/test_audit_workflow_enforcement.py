@@ -49,6 +49,10 @@ def _seed_audit(db_session):
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
         audit_ref="AUD-WF-1",
+        reference_family="LEGACY",
+        unit_code="WF",
+        ref_year=date.today().year % 100,
+        ref_sequence=999,
         title="Workflow Audit",
         lead_auditor_user_id=quality.id,
     )
@@ -73,8 +77,9 @@ def test_rbac_blocks_non_quality_audit_schedule_creation(db_session):
 
 
 def test_car_cannot_be_created_for_non_nc_finding(db_session):
-    _, quality, _, audit = _seed_audit(db_session)
+    amo, quality, _, audit = _seed_audit(db_session)
     finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
         audit_id=audit.id,
         description="Observation",
         finding_type=quality_models.QMSFindingType.OBSERVATION,
@@ -91,8 +96,9 @@ def test_car_cannot_be_created_for_non_nc_finding(db_session):
 
 
 def test_review_rejection_requires_reason_note(db_session):
-    _, quality, _, audit = _seed_audit(db_session)
+    amo, quality, _, audit = _seed_audit(db_session)
     finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
         audit_id=audit.id,
         description="NC",
         finding_type=quality_models.QMSFindingType.NON_CONFORMITY,
@@ -102,11 +108,12 @@ def test_review_rejection_requires_reason_note(db_session):
     db_session.add(finding)
     db_session.flush()
     car = quality_models.CorrectiveActionRequest(
+        amo_id=amo.id,
         program=quality_models.CARProgram.QUALITY,
         car_number="Q-2026-0001",
         title="NC CAR",
         summary="Summary",
-        status=quality_models.CARStatus.IN_PROGRESS,
+        status=quality_models.CARStatus.PENDING_VERIFICATION,
         invite_token="tok1",
         finding_id=finding.id,
     )
@@ -123,8 +130,9 @@ def test_review_rejection_requires_reason_note(db_session):
 
 
 def test_evidence_required_blocks_invite_submission_without_attachment(db_session):
-    _, _, _, audit = _seed_audit(db_session)
+    amo, _, _, audit = _seed_audit(db_session)
     finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
         audit_id=audit.id,
         description="NC",
         finding_type=quality_models.QMSFindingType.NON_CONFORMITY,
@@ -134,6 +142,7 @@ def test_evidence_required_blocks_invite_submission_without_attachment(db_sessio
     db_session.add(finding)
     db_session.flush()
     car = quality_models.CorrectiveActionRequest(
+        amo_id=amo.id,
         program=quality_models.CARProgram.QUALITY,
         car_number="Q-2026-0002",
         title="NC CAR",
@@ -148,7 +157,12 @@ def test_evidence_required_blocks_invite_submission_without_attachment(db_sessio
 
     payload = quality_schemas.CARInviteUpdate(root_cause_text="Human factor", capa_text="Retraining")
     with pytest.raises(HTTPException) as exc:
-        quality_router.submit_car_from_invite(invite_token="tok2", payload=payload, db=db_session)
+        quality_router.submit_car_from_invite(
+            invite_token="tok2",
+            payload=payload,
+            request=_req(),
+            db=db_session,
+        )
     assert exc.value.status_code == 400
 
 
@@ -213,6 +227,7 @@ def test_running_schedule_sends_notice_notification_and_email(db_session, monkey
     monkeypatch.setattr(notification_providers, "get_email_provider", lambda: (fake_provider, True))
 
     schedule = quality_models.QMSAuditSchedule(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         kind=quality_models.QMSAuditKind.INTERNAL,
         frequency=quality_models.QMSAuditScheduleFrequency.MONTHLY,

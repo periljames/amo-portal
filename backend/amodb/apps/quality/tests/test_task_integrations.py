@@ -87,6 +87,7 @@ def test_publish_revision_creates_ack_tasks(db_session):
     user = _create_user(db_session, amo_id=amo.id)
 
     doc = quality_models.QMSDocument(
+        amo_id=amo.id,
         domain=quality_models.QMSDomain.AMO,
         doc_type=quality_models.QMSDocType.MANUAL,
         doc_code="DOC-2",
@@ -96,6 +97,7 @@ def test_publish_revision_creates_ack_tasks(db_session):
     db_session.commit()
 
     rev = quality_models.QMSDocumentRevision(
+        amo_id=amo.id,
         document_id=doc.id,
         issue_no=1,
         rev_no=0,
@@ -108,6 +110,7 @@ def test_publish_revision_creates_ack_tasks(db_session):
     db_session.commit()
 
     dist = quality_models.QMSDocumentDistribution(
+        amo_id=amo.id,
         document_id=doc.id,
         revision_id=rev.id,
         holder_label="QA",
@@ -158,6 +161,7 @@ def test_close_finding_completes_tasks(db_session):
     db_session.commit()
 
     finding = quality_models.QMSAuditFinding(
+        amo_id=amo.id,
         audit_id=audit.id,
         description="Finding",
         severity=quality_models.QMSFindingSeverity.MINOR,
