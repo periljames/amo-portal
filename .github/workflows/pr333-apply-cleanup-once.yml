@@ -1,11 +1,9 @@
 name: Apply PR333 cleanup once
 
 on:
-  push:
-    branches:
-      - agent/saas-control-plane-hardening
-    paths:
-      - ".github/workflows/pr333-apply-cleanup-once.yml"
+  pull_request:
+    types: [opened]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -81,4 +79,4 @@ jobs:
             .github/workflows/user-management-stabilization-ci.yml
           git diff --cached --check
           git commit -m "Fix inherited offline, presence and CI regressions"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin HEAD:agent/saas-control-plane-hardening
