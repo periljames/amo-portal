@@ -1,0 +1,129 @@
+name: Alembic Legacy Upgrade Compatibility
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/amodb/alembic/**"
+      - "backend/amodb/apps/rostering/tests/postgres_migration_probe.py"
+      - ".github/workflows/alembic-legacy-upgrade-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alembic-legacy-upgrade-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_alembic_fresh
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_alembic_fresh"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: alembic-legacy-upgrade-secret
+      PLATFORM_SECRETS_KEY: "5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU="
+      FRESH_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_alembic_fresh
+      LEGACY_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_alembic_legacy
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python .github/scripts/retry_transient.py
+          --attempts 4
+          --label "Alembic compatibility dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+      - name: Compile migration environment and probe
+        run: >-
+          python -m py_compile
+          backend/amodb/alembic/env.py
+          backend/amodb/apps/rostering/tests/postgres_migration_probe.py
+      - name: Create isolated legacy probe database
+        run: |
+          python - <<'PY'
+          import psycopg2
+
+          connection = psycopg2.connect(
+              host="127.0.0.1",
+              port=5432,
+              user="postgres",
+              password="postgres",
+              dbname="postgres",
+          )
+          connection.autocommit = True
+          with connection.cursor() as cursor:
+              cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", ("amodb_alembic_legacy",))
+              if cursor.fetchone() is None:
+                  cursor.execute('CREATE DATABASE "amodb_alembic_legacy"')
+          connection.close()
+          PY
+      - name: Upgrade a clean PostgreSQL database to all heads
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.FRESH_DATABASE_URL }}
+          DATABASE_WRITE_URL: ${{ env.FRESH_DATABASE_URL }}
+          DATABASE_READ_URL: ${{ env.FRESH_DATABASE_URL }}
+        run: |
+          set -o pipefail
+          alembic -c amodb/alembic.ini upgrade heads 2>&1 | tee /tmp/alembic-fresh-upgrade.log
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          from sqlalchemy import create_engine, text
+          import os
+
+          expected = set(ScriptDirectory.from_config(Config("amodb/alembic.ini")).get_heads())
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as connection:
+              actual = set(connection.execute(text("SELECT version_num FROM alembic_version")).scalars())
+          assert actual == expected, {"expected": sorted(expected), "actual": sorted(actual)}
+          print("Clean PostgreSQL upgrade reached every Alembic head")
+          PY
+      - name: Reproduce and repair released legacy overlap
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.LEGACY_DATABASE_URL }}
+          DATABASE_WRITE_URL: ${{ env.LEGACY_DATABASE_URL }}
+          DATABASE_READ_URL: ${{ env.LEGACY_DATABASE_URL }}
+        run: |
+          set -o pipefail
+          python -m amodb.apps.rostering.tests.postgres_migration_probe 2>&1 | tee /tmp/alembic-legacy-overlap.log
+      - name: Run migration graph contracts
+        working-directory: backend
+        env:
+          ALLOW_SQLITE_FOR_TESTS: "1"
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+        run: pytest -q amodb/apps/rostering/tests/test_migration_contract.py
+      - name: Upload Alembic compatibility diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: alembic-legacy-upgrade-diagnostics
+          path: |
+            /tmp/alembic-fresh-upgrade.log
+            /tmp/alembic-legacy-overlap.log
+          if-no-files-found: warn
+          retention-days: 7
