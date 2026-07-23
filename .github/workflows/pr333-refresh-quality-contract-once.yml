@@ -1,0 +1,77 @@
+name: Refresh PR333 Quality contract once
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr333-refresh-quality-contract-once
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.actor == 'periljames'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/saas-control-plane-hardening
+          fetch-depth: 0
+          show-progress: false
+      - name: Replace obsolete Quality navigation expectations
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("backend/amodb/scripts/quality_module_internal_check.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    "frontend_quality_root_redirect": (
+                  FRONTEND_ROOT / "src/router.tsx",
+                  [
+                      'path="/maintenance/:amoCode/quality"',
+                      "const QualityRootRedirect: React.FC = () => {",
+                      "quality/qms",
+                  ],
+              ),
+              "frontend_qms_overview_target": (
+                  FRONTEND_ROOT / "src/components/Layout/DepartmentLayout.tsx",
+                  [
+                      "QMS Overview",
+                      "navigateWithSidebarClose(`/maintenance/${amoCode}/${activeDepartment}/qms`)",
+                  ],
+              ),'''
+          new = '''    "frontend_quality_canonical_root": (
+                  FRONTEND_ROOT / "src/router.tsx",
+                  [
+                      'path="/maintenance/:amoCode/quality"',
+                      "<QmsCanonicalPage />",
+                      'path="/maintenance/:amoCode/quality/*"',
+                  ],
+              ),
+              "frontend_qms_command_centre_target": (
+                  FRONTEND_ROOT / "src/components/Layout/DepartmentLayout.tsx",
+                  [
+                      'label: "Command Centre"',
+                      'path: `/maintenance/${amoCode}/quality`',
+                      "const qmsNavItems = useMemo<QmsNavItem[]>",
+                  ],
+              ),'''
+          if text.count(old) != 1:
+              raise SystemExit("Expected exactly one obsolete Quality contract block")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+      - name: Verify refreshed Quality contract
+        working-directory: backend
+        run: python -m amodb.scripts.quality_module_internal_check
+      - name: Commit validated contract refresh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/amodb/scripts/quality_module_internal_check.py
+          git diff --cached --check
+          git commit -m "Align Quality contract with canonical navigation"
+          git push origin HEAD:agent/saas-control-plane-hardening
