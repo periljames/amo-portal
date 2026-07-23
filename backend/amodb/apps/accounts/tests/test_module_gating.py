@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -81,7 +81,7 @@ def _create_user(db, amo_id: str) -> account_models.User:
 
 
 def _create_active_license(db, amo_id: str) -> account_models.TenantLicense:
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     sku = account_models.CatalogSKU(
         code="MODULE-GATING-MONTHLY",
         name="Module gating test plan",
