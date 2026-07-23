@@ -42,13 +42,16 @@ jobs:
           --label "PR333 checkout lifecycle dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
       - name: Apply checkout lifecycle safeguards
-        run: python .github/scripts/apply_pr333_checkout_lifecycle_fix.py
+        run: |
+          python .github/scripts/apply_pr333_checkout_lifecycle_fix.py
+          python .github/scripts/adapt_pr333_checkout_tests.py
       - name: Compile changed source and tests
         run: >-
           python -m py_compile
           backend/amodb/apps/platform/saas_services.py
           backend/amodb/jobs/saas_worker.py
           backend/amodb/apps/platform/tests/test_saas_checkout_lifecycle.py
+          backend/amodb/apps/platform/tests/test_saas_final_review_safeguards.py
       - name: Run checkout lifecycle regressions
         working-directory: backend
         run: |
@@ -79,7 +82,8 @@ jobs:
           git add \
             backend/amodb/apps/platform/saas_services.py \
             backend/amodb/jobs/saas_worker.py \
-            backend/amodb/apps/platform/tests/test_saas_checkout_lifecycle.py
+            backend/amodb/apps/platform/tests/test_saas_checkout_lifecycle.py \
+            backend/amodb/apps/platform/tests/test_saas_final_review_safeguards.py
           git diff --cached --check
           git commit -m "Serialize Stripe checkout lifecycle safely"
           git push origin HEAD:agent/saas-control-plane-hardening
