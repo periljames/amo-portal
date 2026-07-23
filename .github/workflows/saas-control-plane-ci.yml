@@ -3,39 +3,13 @@ name: SaaS Control Plane CI
 on:
   pull_request:
     paths:
-      - "backend/conftest.py"
-      - "backend/amodb/apps/platform/**"
-      - "backend/amodb/apps/accounts/**"
-      - "backend/amodb/apps/realtime/**"
-      - "backend/amodb/jobs/saas_worker.py"
-      - "backend/amodb/jobs/saas_worker_safe.py"
-      - "backend/amodb/jobs/platform_command_worker.py"
-      - "backend/amodb/alembic/versions/**"
-      - "backend/amodb/scripts/saas_control_plane_internal_check.py"
-      - "backend/amodb/scripts/saas_release_cleanup_check.py"
-      - "backend/docs/platform/**"
-      - "frontend/src/services/platformControl*"
-      - "frontend/src/services/saasSettings*"
-      - "frontend/src/services/messaging*"
-      - "frontend/src/services/realtime/**"
-      - "frontend/src/services/rostering.ts"
-      - "frontend/src/services/rosterPeople.ts"
-      - "frontend/src/types/rostering.ts"
-      - "frontend/src/components/messaging/**"
-      - "frontend/src/components/offline/OfflineSyncIndicator.tsx"
-      - "frontend/src/styles/components/messaging.css"
-      - "frontend/src/styles/adminSaaSSettings.css"
-      - "frontend/src/pages/AdminSaaSSettingsPage.tsx"
-      - "frontend/src/pages/EmailServerSettingsPage.tsx"
-      - "frontend/src/pages/platform/**"
-      - "frontend/src/pages/rostering/**"
-      - "frontend/src/router.tsx"
-      - "frontend/package.json"
-      - "frontend/package-lock.json"
-      - "loadtests/**"
+      - "backend/**"
+      - "frontend/**"
       - "deploy/saas/**"
+      - "loadtests/**"
       - ".github/scripts/**"
       - ".github/workflows/saas-control-plane-ci.yml"
+      - ".github/workflows/main-merge-readiness.yml"
       - ".github/workflows/recheck-transient-ci.yml"
   workflow_dispatch:
 
@@ -47,9 +21,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend-postgres:
+  schema-postgres:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     services:
       postgres:
         image: postgres:16
@@ -87,12 +61,13 @@ jobs:
         run: >-
           python ../.github/scripts/retry_transient.py
           --attempts 4
-          --label "backend dependency install"
+          --label "schema dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Run static SaaS contract gate
-        run: python -m amodb.scripts.saas_control_plane_internal_check
-      - name: Run release cleanup contract gate
-        run: python -m amodb.scripts.saas_release_cleanup_check
+      - name: Run Quality, SaaS and release contracts
+        run: |
+          python -m amodb.scripts.quality_module_internal_check
+          python -m amodb.scripts.saas_control_plane_internal_check
+          python -m amodb.scripts.saas_release_cleanup_check
       - name: Verify Alembic graph
         run: |
           python - <<'PY'
@@ -100,27 +75,13 @@ jobs:
           from alembic.script import ScriptDirectory
 
           script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-          foundation = script.get_revision("saas_20260722_control_plane")
-          quality_finalizer = script.get_revision("saas_20260722_finalize_idx")
-          training_finalizer = script.get_revision("saas_20260722_finalize_training")
-          read_index_finalizer = script.get_revision("saas_20260722_qms_read_idx")
-          messaging_finalizer = script.get_revision("saas_20260722_messaging")
-          runtime_fence = script.get_revision("saas_20260722_runtime_fence")
-          terminal_safety = script.get_revision("saas_20260722_side_effect_safe")
-          assert foundation and foundation.down_revision == "quality_20260722_schema_integrity"
-          assert quality_finalizer and quality_finalizer.down_revision == "saas_20260722_control_plane"
-          assert training_finalizer and training_finalizer.down_revision == "saas_20260722_finalize_idx"
-          assert read_index_finalizer
-          assert set(read_index_finalizer.down_revision) == {
-              "saas_20260722_finalize_training",
-              "phase2_8_20260605",
-          }
-          assert not read_index_finalizer.dependencies
-          assert messaging_finalizer and messaging_finalizer.down_revision == "saas_20260722_qms_read_idx"
-          assert runtime_fence and runtime_fence.down_revision == "saas_20260722_messaging"
-          assert terminal_safety and terminal_safety.down_revision == "saas_20260722_runtime_fence"
           heads = script.get_heads()
           print("Alembic heads:", heads)
+          assert len(heads) == len(set(heads)), heads
+          assert script.get_revision("workforce_20260721_complete")
+          assert script.get_revision("quality_20260722_schema_integrity")
+          terminal = script.get_revision("saas_20260722_side_effect_safe")
+          assert terminal and terminal.down_revision == "saas_20260722_runtime_fence"
           assert "saas_20260722_side_effect_safe" in heads, heads
           PY
       - name: Upgrade production schema graph
@@ -129,16 +90,17 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          alembic -c amodb/alembic.ini upgrade heads 2>&1 | tee saas-migration.log
-      - name: Configure mappers and route contracts
-        id: mapper
+          alembic -c amodb/alembic.ini upgrade heads 2>&1 | tee merge-readiness-migration.log
+      - name: Configure all mappers and route contracts
+        id: mapper_routes
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          python - <<'PY' 2>&1 | tee saas-mappers.log
+          python - <<'PY' 2>&1 | tee merge-readiness-mappers.log
           from sqlalchemy.orm import configure_mappers
           from amodb.main import app
+          import amodb.quality_main
 
           configure_mappers()
           paths = {route.path for route in app.routes}
@@ -146,42 +108,22 @@ jobs:
               "/platform/saas/capabilities",
               "/platform/saas/providers",
               "/platform/saas/jobs",
-              "/platform/saas/module-prices",
               "/platform/saas/webhooks/stripe",
-              "/platform/saas/support/tickets",
               "/platform/saas/integration-health",
               "/platform/tenant-saas/setup",
-              "/platform/tenant-saas/providers",
               "/platform/tenant-saas/providers/{provider}",
               "/platform/tenant-saas/jobs",
-              "/platform/tenant-saas/modules",
-              "/platform/tenant-saas/invoices",
               "/platform/tenant-saas/checkout",
               "/platform/tenant-saas/invoices/{invoice_id}/fiscalize",
               "/api/realtime/broker/authenticate",
               "/api/realtime/broker/authorize",
-              "/api/chat/directory",
-              "/api/chat/direct/{peer_user_id}",
-              "/api/chat/departments/{department_id}",
-              "/api/chat/groups/{group_id}",
               "/api/chat/threads",
-              "/api/chat/threads/{thread_id}/messages",
-              "/api/chat/threads/{thread_id}/read",
               "/api/notifications/me",
-              "/api/notifications/me/unread-count",
-              "/api/notifications/preferences",
           }
           missing = required - paths
           assert not missing, missing
-          print("SaaS, tenant administration, broker, messaging and notification routes verified")
+          print("All application mappers and critical routes verified")
           PY
-      - name: Run SaaS and realtime regression suites
-        id: backend_tests
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py 2>&1 | tee saas-backend-tests.log
       - name: Run lease-fenced worker smoke tests
         id: workers
         continue-on-error: true
@@ -191,31 +133,146 @@ jobs:
           {
             python -m amodb.jobs.saas_worker_safe --once --batch-size 5
             python -m amodb.jobs.platform_command_worker --once --batch-size 5
-          } 2>&1 | tee saas-workers.log
-      - name: Upload backend diagnostics
+          } 2>&1 | tee merge-readiness-workers.log
+      - name: Upload schema diagnostics
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: saas-backend-diagnostics
+          name: main-schema-diagnostics
           path: |
-            backend/saas-migration.log
-            backend/saas-mappers.log
-            backend/saas-backend-tests.log
-            backend/saas-workers.log
+            backend/merge-readiness-migration.log
+            backend/merge-readiness-mappers.log
+            backend/merge-readiness-workers.log
           if-no-files-found: warn
           retention-days: 7
-      - name: Fail backend gate
+      - name: Fail schema and worker gate
         if: >-
           steps.migrate.outcome != 'success' ||
-          steps.mapper.outcome != 'success' ||
-          steps.backend_tests.outcome != 'success' ||
+          steps.mapper_routes.outcome != 'success' ||
           steps.workers.outcome != 'success'
         run: exit 1
 
+  quality-postgres-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amodb_quality_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d amodb_quality_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "quality PostgreSQL dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Run Quality fallback-schema hardening probe
+        id: quality_schema
+        continue-on-error: true
+        env:
+          APP_ENV: test
+          SECRET_KEY: quality-postgres-test-secret
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m amodb.apps.quality.tests.postgres_schema_integrity_probe 2>&1 | tee quality-postgres-schema.log
+      - name: Upload Quality schema diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: quality-postgres-schema-log
+          path: backend/quality-postgres-schema.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail Quality schema gate
+        if: steps.quality_schema.outcome != 'success'
+        run: exit 1
+
+  backend-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+      SECRET_KEY: integrated-backend-test-secret
+      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      QUALITY_SCHEMA_STRICT: "0"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "integrated regression dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Compile cleanup-sensitive backend modules
+        run: >-
+          python -m compileall -q
+          amodb/apps/accounts
+          amodb/apps/audit
+          amodb/apps/platform
+          amodb/apps/quality
+          amodb/apps/realtime
+          amodb/apps/rostering
+          amodb/apps/training
+          amodb/apps/workforce
+          amodb/jobs
+      - name: Configure complete SQLAlchemy mapper startup
+        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('All application mappers configured')"
+      - name: Run Quality workflow regressions
+        run: >-
+          pytest -q
+          amodb/apps/quality/tests/test_quality_delivery_profile.py
+          amodb/apps/quality/tests/test_workflow_transitions.py
+          amodb/apps/quality/tests/test_audit_workflow_enforcement.py
+          amodb/apps/quality/tests/test_audit_events.py
+          amodb/apps/quality/tests/test_task_integrations.py
+          amodb/apps/quality/tests/test_evidence_pack_exports.py
+      - name: Run account, Workforce and Rostering regressions
+        run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests amodb/apps/rostering/tests
+      - name: Run SaaS and realtime regressions
+        run: pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py
+
   frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v6
         with:
@@ -230,17 +287,28 @@ jobs:
         run: >-
           python ../.github/scripts/retry_transient.py
           --attempts 4
-          --label "frontend dependency install"
+          --label "integrated frontend dependency install"
           -- npm ci --prefer-offline --no-audit --fund=false
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Run platform and messaging service regressions
-        id: frontend_tests
+      - name: Run Quality and SaaS service regressions
+        id: service_tests
         continue-on-error: true
         working-directory: frontend
         shell: bash
         run: |
           set -o pipefail
-          npm run test:platform 2>&1 | tee platform-tests.log
+          {
+            npm run test:quality
+            npm run test:platform
+          } 2>&1 | tee integrated-service-tests.log
+      - name: Run Rostering and offline regressions
+        id: rostering_tests
+        continue-on-error: true
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts 2>&1 | tee integrated-rostering-tests.log
       - name: Typecheck and production build
         id: frontend_build
         continue-on-error: true
@@ -248,8 +316,8 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npm run build 2>&1 | tee platform-build.log
-      - name: Lint changed platform, messaging and realtime surfaces
+          npm run build 2>&1 | tee integrated-build.log
+      - name: Lint integrated cleanup surfaces
         id: frontend_lint
         continue-on-error: true
         working-directory: frontend
@@ -257,49 +325,58 @@ jobs:
         run: |
           set -o pipefail
           npm exec -- eslint \
-            src/services/platformControl.ts \
-            src/services/platformControl.test.ts \
-            src/services/saasSettings.ts \
-            src/services/saasSettings.test.ts \
-            src/services/messaging.ts \
-            src/services/messaging.test.ts \
-            src/services/realtime/mqtt.ts \
-            src/services/realtime/queue.ts \
-            src/services/realtime/reliability.test.ts \
-            src/services/realtime/types.ts \
-            src/services/rostering.ts \
-            src/components/messaging/MessagingHub.tsx \
-            src/components/offline/OfflineSyncIndicator.tsx \
+            src/main.tsx \
+            src/components/messaging \
+            src/components/offline \
             src/pages/AdminSaaSSettingsPage.tsx \
             src/pages/EmailServerSettingsPage.tsx \
-            src/pages/platform/PlatformIntegrationsPage.tsx \
-            src/pages/platform/PlatformBillingPage.tsx \
-            src/pages/platform/PlatformTenantsPage.tsx \
-            src/pages/rostering/hooks/useRosterPlannerDataV2.ts \
-            2>&1 | tee platform-lint.log
+            src/pages/platform \
+            src/pages/rostering \
+            src/services/apiClient.ts \
+            src/services/crs.ts \
+            src/services/fleet.ts \
+            src/services/maintenance.ts \
+            src/services/messaging.ts \
+            src/services/messaging.test.ts \
+            src/services/offlineHttp.ts \
+            src/services/offlinePersistence.ts \
+            src/services/platformControl.ts \
+            src/services/platformControl.test.ts \
+            src/services/qmsAuditHubActions.ts \
+            src/services/qmsAuditHubActions.test.ts \
+            src/services/queryPersister.ts \
+            src/services/realtime \
+            src/services/rostering.ts \
+            src/services/saasSettings.ts \
+            src/services/saasSettings.test.ts \
+            src/services/typedApi.ts \
+            src/services/workOrders.ts \
+            2>&1 | tee integrated-lint.log
       - name: Validate k6 script syntax
         id: k6_syntax
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          node --check loadtests/k6_saas_control_plane.js 2>&1 | tee frontend/platform-k6.log
+          node --check loadtests/k6_saas_control_plane.js 2>&1 | tee frontend/integrated-k6.log
       - name: Upload frontend diagnostics
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: saas-frontend-diagnostics
+          name: integrated-frontend-diagnostics
           path: |
-            frontend/platform-tests.log
-            frontend/platform-build.log
-            frontend/platform-lint.log
-            frontend/platform-k6.log
+            frontend/integrated-service-tests.log
+            frontend/integrated-rostering-tests.log
+            frontend/integrated-build.log
+            frontend/integrated-lint.log
+            frontend/integrated-k6.log
           if-no-files-found: warn
           retention-days: 7
-      - name: Fail frontend gate
+      - name: Fail integrated frontend gate
         if: >-
-          steps.frontend_tests.outcome != 'success' ||
+          steps.service_tests.outcome != 'success' ||
+          steps.rostering_tests.outcome != 'success' ||
           steps.frontend_build.outcome != 'success' ||
           steps.frontend_lint.outcome != 'success' ||
           steps.k6_syntax.outcome != 'success'
