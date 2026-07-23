@@ -2,7 +2,7 @@ name: Apply PR333 cleanup once
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
   workflow_dispatch:
 
 permissions:
@@ -44,7 +44,7 @@ jobs:
             '0274283e21ec867ba6b8fb4c94d957770914ce6c61836235b8823d5437044761' /tmp/offlinePersistence.ts \
             '5541d0e198028302b4abb5e35ed7ec002cafa1246a741f96f4383e9862804ad7' /tmp/presence_policy.py \
             '0b4dc0649f408fa5ec11003fa940529d256efa6a8d563674c9472ece12fce5af' /tmp/user-management-stabilization-ci.yml \
-            '1cd297022ec5b865e088b85ef5db7616f10c5764adfbe245662d57c70c0cca02' /tmp/rosteringArchitecture.test.ts \
+            '2d4682b517f706ea7501fdcdcbbeffa2dccb444a15818f4d56b7085dea88a48b' /tmp/rosteringArchitecture.test.ts \
             | sha256sum --check --strict
           install -m 0644 /tmp/offlinePersistence.ts frontend/src/services/offlinePersistence.ts
           install -m 0644 /tmp/presence_policy.py backend/amodb/apps/accounts/presence_policy.py
