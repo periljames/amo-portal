@@ -3,7 +3,7 @@ import { RosterPlannerV2 } from "./RosterPlannerV2";
 
 export function UnifiedRosterPlanner() {
   return (
-    <div className="wr-unified-planner">
+    <div style={{ display: "grid", gap: "1rem", minWidth: 0 }}>
       <RosterCommitmentBoard />
       <RosterPlannerV2 />
     </div>
