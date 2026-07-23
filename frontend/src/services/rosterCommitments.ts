@@ -1,4 +1,4 @@
-import { apiJson, queryString } from "./typedApi";
+import { apiJson } from "./typedApi";
 
 export type RosterCommitmentRead = {
   id: string;
@@ -35,5 +35,7 @@ export function listRosterCommitments(params: {
   to: string;
   user_id?: string[];
 }): Promise<RosterCommitmentResponse> {
-  return apiJson(`/rostering/commitments${queryString(params)}`);
+  const search = new URLSearchParams({ from: params.from, to: params.to });
+  params.user_id?.forEach((userId) => search.append("user_id", userId));
+  return apiJson(`/rostering/commitments?${search.toString()}`);
 }
