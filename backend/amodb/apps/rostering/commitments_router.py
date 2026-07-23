@@ -25,15 +25,17 @@ def roster_commitments(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    can_view_team = workforce_permissions.any_permission(
+    can_view_all = workforce_permissions.has_permission(
         db,
         user=current_user,
-        permissions=[
-            workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT,
-            workforce_permissions.PermissionCode.ROSTER_VIEW_ALL,
-        ],
+        permission=workforce_permissions.PermissionCode.ROSTER_VIEW_ALL,
     )
-    if not can_view_team:
+    can_view_department = workforce_permissions.has_permission(
+        db,
+        user=current_user,
+        permission=workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT,
+    )
+    if not can_view_all and not can_view_department:
         workforce_permissions.require_permission(
             db,
             user=current_user,
@@ -42,17 +44,38 @@ def roster_commitments(
         user_id = [str(current_user.id)]
 
     amo_id = services.effective_amo_id(current_user)
-    eligible_query = db.query(workforce_models.EmploymentContract.user_id).filter(
+    eligible_query = db.query(workforce_models.EmploymentContract.user_id).join(
+        account_models.User,
+        account_models.User.id == workforce_models.EmploymentContract.user_id,
+    ).filter(
         workforce_models.EmploymentContract.amo_id == amo_id,
-        workforce_models.EmploymentContract.employment_status == workforce_models.EmploymentStatus.ACTIVE,
+        account_models.User.amo_id == amo_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+        workforce_models.EmploymentContract.employment_status
+        == workforce_models.EmploymentStatus.ACTIVE,
         workforce_models.EmploymentContract.effective_from <= to_date,
         or_(
             workforce_models.EmploymentContract.effective_to.is_(None),
             workforce_models.EmploymentContract.effective_to >= from_date,
         ),
     )
+
+    if not can_view_all and can_view_department:
+        department_id = getattr(current_user, "department_id", None)
+        if department_id:
+            eligible_query = eligible_query.filter(
+                account_models.User.department_id == department_id,
+            )
+        else:
+            eligible_query = eligible_query.filter(
+                account_models.User.id == current_user.id,
+            )
+
     if user_id:
-        eligible_query = eligible_query.filter(workforce_models.EmploymentContract.user_id.in_(user_id))
+        eligible_query = eligible_query.filter(
+            workforce_models.EmploymentContract.user_id.in_(user_id),
+        )
     eligible_user_ids = sorted({str(row[0]) for row in eligible_query.all()})
 
     try:
