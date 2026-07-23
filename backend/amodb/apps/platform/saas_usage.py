@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import services as account_services
+from amodb.database import WriteSessionLocal, close_session_safely
 from amodb.user_id import generate_user_id
 
 
@@ -120,7 +122,44 @@ def install_usage_meter_hardening(router: APIRouter) -> None:
             with application._api_usage_lock:
                 application._api_usage_pending[amo_id] = application._api_usage_pending.get(amo_id, 0) + 1
 
+        def flush_with_requeue() -> None:
+            """Persist one batch and restore it atomically after transient failure."""
+
+            with application._api_usage_lock:
+                if not application._api_usage_pending:
+                    return
+                payload_to_flush = dict(application._api_usage_pending)
+                application._api_usage_pending.clear()
+                application._api_usage_last_flush = time.monotonic()
+
+            db = WriteSessionLocal()
+            try:
+                for pending_amo_id, quantity in payload_to_flush.items():
+                    if quantity <= 0:
+                        continue
+                    account_services.record_usage(
+                        db,
+                        amo_id=pending_amo_id,
+                        meter_key=account_services.METER_KEY_API_CALLS,
+                        quantity=quantity,
+                        commit=False,
+                    )
+                db.commit()
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                with application._api_usage_lock:
+                    for pending_amo_id, quantity in payload_to_flush.items():
+                        application._api_usage_pending[pending_amo_id] = (
+                            application._api_usage_pending.get(pending_amo_id, 0) + quantity
+                        )
+            finally:
+                close_session_safely(db)
+
         application._queue_api_usage = enqueue_only
+        application._flush_api_usage_metrics = flush_with_requeue
         _STOP_EVENT.clear()
         interval = max(0.5, float(os.getenv("API_USAGE_FLUSH_INTERVAL_SEC", "5") or "5"))
 
