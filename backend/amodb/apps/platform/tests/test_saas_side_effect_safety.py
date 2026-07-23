@@ -52,6 +52,7 @@ def test_uncertain_etims_outcome_uses_real_invoice_fields_and_requires_reconcili
     credential = SimpleNamespace(
         id="credential-1",
         provider="etims_oscu",
+        status="CONFIGURED",
         encrypted_secret="encrypted",
         config_json={"certified": True},
     )
@@ -135,6 +136,69 @@ def test_uncertain_etims_outcome_uses_real_invoice_fields_and_requires_reconcili
     assert provider.call_count == 1
 
 
+
+@pytest.mark.parametrize(
+    ("processor", "job_type", "label"),
+    [
+        (saas_side_effects.process_etims_fiscalization, "ETIMS_FISCALIZE_INVOICE", "eTIMS"),
+        (saas_side_effects.process_ai_support_reply, "AI_SUPPORT_REPLY", "OpenAI"),
+    ],
+)
+def test_disabled_provider_is_rejected_again_when_worker_executes(
+    monkeypatch: pytest.MonkeyPatch,
+    processor,
+    job_type: str,
+    label: str,
+):
+    credential = SimpleNamespace(
+        id="credential-disabled",
+        provider="etims_oscu" if job_type == "ETIMS_FISCALIZE_INVOICE" else "openai",
+        status="DISABLED",
+        encrypted_secret="encrypted",
+        config_json={"certified": True},
+    )
+    job = SimpleNamespace(
+        id="job-disabled",
+        created_by="support-user",
+        idempotency_key="disabled-side-effect",
+        payload_json={
+            "credential_id": credential.id,
+            "fiscalization_id": "fiscal-disabled",
+            "ticket_id": "ticket-disabled",
+        },
+    )
+    fiscalization = SimpleNamespace(
+        id="fiscal-disabled",
+        invoice_id="invoice-disabled",
+        status="PENDING",
+    )
+    ticket = SimpleNamespace(id="ticket-disabled")
+    detail = SimpleNamespace(description="Support request", category="GENERAL")
+    db = MagicMock()
+
+    def get(model, identifier):
+        if model is saas_models.SaaSProviderCredential:
+            return credential
+        if model is saas_models.SaaSInvoiceFiscalization:
+            return fiscalization
+        if model is platform_models.PlatformSupportTicket:
+            return ticket
+        if model is saas_models.SaaSSupportTicketDetail:
+            return detail
+        if model is account_models.BillingInvoice:
+            return SimpleNamespace(id="invoice-disabled")
+        raise AssertionError((model, identifier))
+
+    db.get.side_effect = get
+    db.query.return_value.filter.return_value.first.return_value = None
+    decrypt = MagicMock()
+    monkeypatch.setattr(saas_side_effects.saas_secrets, "decrypt_secret", decrypt)
+
+    with pytest.raises(ValueError, match=f"{label} provider is disabled"):
+        processor(db, job=job)
+
+    decrypt.assert_not_called()
+
 def test_ai_support_reply_uses_existing_adapter_and_is_deduplicated_by_source_job(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -145,6 +209,7 @@ def test_ai_support_reply_uses_existing_adapter_and_is_deduplicated_by_source_jo
     )
     credential = SimpleNamespace(
         id="credential-1",
+        status="HEALTHY",
         encrypted_secret="encrypted",
         config_json={"model": "test-model"},
     )

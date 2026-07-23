@@ -21,10 +21,32 @@ MODULE_STATUSES = {"ENABLED", "DISABLED", "TRIAL", "SUSPENDED"}
 BILLING_TERMS = {"MONTHLY", "ANNUAL", "BI_ANNUAL", "ONE_TIME"}
 SUPPORT_STATUSES = {"OPEN", "PENDING", "IN_PROGRESS", "RESOLVED", "CLOSED"}
 SUPPORT_PRIORITIES = {"LOW", "NORMAL", "HIGH", "URGENT", "CRITICAL"}
+OPERATIONAL_PROVIDER_STATUSES = frozenset({"CONFIGURED", "HEALTHY"})
+ACTIVE_AI_JOB_STATUSES = frozenset({"PENDING", "RUNNING", "RETRY"})
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def require_operational_provider(credential: Any, *, label: str) -> None:
+    status = str(getattr(credential, "status", "") or "").strip().upper()
+    if credential is None or status not in OPERATIONAL_PROVIDER_STATUSES:
+        raise ValueError(f"{label} provider is disabled or not operational")
+
+
+def _ticket_ai_jobs(db: Session, *, ticket_id: str, tenant_id: str | None) -> list[models.SaaSJob]:
+    scope = tenant_id or "__platform__"
+    rows = (
+        db.query(models.SaaSJob)
+        .filter(
+            models.SaaSJob.job_type == "AI_SUPPORT_REPLY",
+            models.SaaSJob.tenant_scope == scope,
+        )
+        .order_by(models.SaaSJob.created_at.asc(), models.SaaSJob.id.asc())
+        .all()
+    )
+    return [row for row in rows if str((row.payload_json or {}).get("ticket_id") or "") == ticket_id]
 
 
 def normalize_module_code(value: str) -> str:
@@ -670,6 +692,7 @@ def enqueue_fiscalization(
     credential = get_provider_credential(db, provider=provider_code, tenant_id=invoice.amo_id)
     if not credential:
         raise ValueError("eTIMS provider is not configured")
+    require_operational_provider(credential, label="eTIMS")
     config = credential.config_json or {}
     if not bool(config.get("certified")):
         raise ValueError("Fiscalization is blocked until a KRA-tested/certified eTIMS adapter is configured")
@@ -920,13 +943,28 @@ def enqueue_ai_support_reply(
     credential = get_provider_credential(db, provider="openai", tenant_id=ticket.tenant_id)
     if not credential:
         raise ValueError("OpenAI provider is not configured")
+    require_operational_provider(credential, label="OpenAI")
+
+    prior_jobs = _ticket_ai_jobs(db, ticket_id=ticket_id, tenant_id=ticket.tenant_id)
+    for job in reversed(prior_jobs):
+        if str(job.status or "").strip().upper() in ACTIVE_AI_JOB_STATUSES:
+            return job
+
+    request_sequence = len(prior_jobs) + 1
+    request_version = int(ticket.updated_at.timestamp() * 1_000_000) if ticket.updated_at else 0
+    action_key = f"ticket:{ticket_id}:ai-reply:{request_version}:{request_sequence}"
     return saas_queue.enqueue_job(
         db,
         job_type="AI_SUPPORT_REPLY",
         queue_name="ai",
         tenant_id=ticket.tenant_id,
-        payload={"ticket_id": ticket_id, "credential_id": credential.id},
-        idempotency_key=f"ticket:{ticket_id}:{int(ticket.updated_at.timestamp()) if ticket.updated_at else 0}",
+        payload={
+            "ticket_id": ticket_id,
+            "credential_id": credential.id,
+            "request_version": request_version,
+            "request_sequence": request_sequence,
+        },
+        idempotency_key=action_key,
         correlation_id=str(uuid.uuid4()),
         created_by=actor_user_id,
         max_attempts=3,

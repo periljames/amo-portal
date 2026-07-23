@@ -9,7 +9,7 @@ from amodb.apps.accounts import services as account_services
 from amodb.apps.platform import models as platform_models
 
 from . import saas_models as models
-from . import saas_providers, saas_secrets, saas_services
+from . import saas_execution_policy, saas_providers, saas_secrets, saas_services
 
 
 class NonRepeatableJobError(RuntimeError):
@@ -49,6 +49,7 @@ def process_etims_fiscalization(
     credential = db.get(models.SaaSProviderCredential, str(payload.get("credential_id") or ""))
     if fiscalization is None or credential is None:
         raise ValueError("Fiscalization record or credential is missing")
+    saas_execution_policy.require_operational_provider(credential, label="eTIMS")
     invoice = db.get(account_models.BillingInvoice, fiscalization.invoice_id)
     if invoice is None:
         raise ValueError("Invoice is missing")
@@ -126,6 +127,7 @@ def process_ai_support_reply(
     detail = db.get(models.SaaSSupportTicketDetail, ticket_id)
     if credential is None or ticket is None or detail is None:
         raise ValueError("Support ticket or OpenAI credential is missing")
+    saas_execution_policy.require_operational_provider(credential, label="OpenAI")
 
     messages = list(
         reversed(
