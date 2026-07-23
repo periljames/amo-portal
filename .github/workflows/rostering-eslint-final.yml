@@ -1,0 +1,32 @@
+name: Rostering ESLint Final
+
+on:
+  push:
+    branches:
+      - fix/rostering-unified-workforce
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+      - name: Capture diagnostics
+        working-directory: frontend
+        run: npm exec -- eslint src/pages/rostering src/services/rosterPeople.ts src/services/rosterCommitments.ts > rostering-eslint.log 2>&1 || true
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v6
+        with:
+          name: rostering-eslint-final
+          path: frontend/rostering-eslint.log
+          retention-days: 1
