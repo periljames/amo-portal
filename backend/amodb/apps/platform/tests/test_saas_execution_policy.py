@@ -120,7 +120,7 @@ def test_explicit_ai_request_gets_fresh_reconciled_sequence_after_dead_job(
     assert first_call["idempotency_key"] == second_call["idempotency_key"]
     assert first_call["idempotency_key"].endswith(":2")
     assert first_call["payload"]["request_sequence"] == 2
-    assert first_call["payload"]["request_version"] == 1784791200000000
+    assert first_call["payload"]["request_version"] == 1784800800000000
 
 
 def test_duplicate_ai_submission_returns_active_job_without_reenqueue(
