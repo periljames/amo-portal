@@ -8,6 +8,7 @@ from . import saas_webhooks as _saas_webhooks
 from .saas_admin_links import install_tenant_admin_links
 from .saas_admin_policy import install_tenant_provider_override_policy
 from .saas_fiscalization_policy import install_fiscalization_enqueue_policy
+from .saas_provider_network import install_provider_network_hardening
 from .router import router
 
 # Replace the legacy platform-only Stripe verifier before the webhook route is
@@ -15,15 +16,17 @@ from .router import router
 # retains the platform credential only when no tenant-specific credential exists.
 _saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook
 
-# Enforce credential inheritance, terminal fiscalization and frontend-link rules
-# inside shared service/router functions before either superuser or tenant-admin
-# routes capture them.
+# Enforce credential inheritance, terminal fiscalization, frontend-link and
+# outbound network rules inside shared service/provider functions before either
+# superuser or tenant-admin routes capture them.
 install_tenant_provider_override_policy()
 install_fiscalization_enqueue_policy()
 install_tenant_admin_links()
+install_provider_network_hardening()
 
 from .saas_router import platform_saas_router, support_router, webhook_router  # noqa: E402
 from .tenant_saas_router import router as tenant_saas_router  # noqa: E402
+from .tenant_saas_job_router import router as tenant_saas_job_router  # noqa: E402
 from .saas_integration import integration_router  # noqa: E402
 from .saas_legacy_bridge import install_legacy_command_queue  # noqa: E402
 from .saas_usage import install_usage_meter_hardening  # noqa: E402
@@ -36,6 +39,7 @@ router.include_router(webhook_router)
 router.include_router(support_router)
 router.include_router(integration_router)
 router.include_router(tenant_saas_router)
+router.include_router(tenant_saas_job_router)
 
 # Existing diagnostics/maintenance endpoints keep their response contracts but
 # no longer run low/medium work inside the HTTP request.
