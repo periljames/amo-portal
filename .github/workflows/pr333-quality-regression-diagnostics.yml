@@ -2,7 +2,7 @@ name: PR333 Quality Regression Diagnostics
 
 on:
   pull_request:
-    types: [synchronize]
+    types: [opened, synchronize]
 
 permissions:
   contents: read
