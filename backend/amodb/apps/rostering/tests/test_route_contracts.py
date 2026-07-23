@@ -32,6 +32,7 @@ def test_complete_roster_lifecycle_and_planner_routes_exist():
         ("GET", "/rostering/dashboard"),
         ("GET", "/rostering/planning-board"),
         ("GET", "/rostering/my-roster"),
+        ("GET", "/rostering/commitments"),
         ("POST", "/rostering/periods/{period_id}/versions"),
         ("POST", "/rostering/versions/{version_id}/assignments/bulk"),
         ("POST", "/rostering/versions/{version_id}/generate-from-pattern"),
