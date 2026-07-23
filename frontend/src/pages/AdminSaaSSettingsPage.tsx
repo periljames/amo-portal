@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../services/auth";
+import { getApiBaseUrl } from "../services/config";
 import {
   saasSettingsApi,
   type SaaSAdminInvoice,
@@ -68,7 +69,11 @@ export default function AdminSaaSSettingsPage() {
   const { amoCode = "" } = useParams<UrlParams>();
   const currentUser = useMemo(() => getCachedUser(), []);
   const isSuperuser = Boolean(currentUser?.is_superuser);
-  const [tenantScope, setTenantScope] = useState("");
+  const initialTenantScope = useMemo(
+    () => new URLSearchParams(window.location.search).get("tenant_id") || "",
+    [],
+  );
+  const [tenantScope, setTenantScope] = useState(initialTenantScope);
   const [tab, setTab] = useState<Tab>("providers");
   const [setup, setSetup] = useState<SaaSSetupSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -152,6 +157,18 @@ export default function AdminSaaSSettingsPage() {
     const secret = Object.fromEntries(
       Object.entries(secretDraft).filter(([, value]) => value.trim() !== ""),
     );
+    if (
+      setup?.scope === "TENANT"
+      && provider.scope === "PLATFORM"
+      && provider.has_secret
+      && !clearSecret
+      && Object.keys(secret).length === 0
+    ) {
+      setError(
+        "This tenant currently inherits a platform credential. Enter tenant-specific secret values before creating an override, or leave the inherited provider unchanged.",
+      );
+      return;
+    }
     await run(
       `save:${provider.provider}`,
       () => saasSettingsApi.updateProvider(
@@ -190,11 +207,14 @@ export default function AdminSaaSSettingsPage() {
     `${invoice.invoice_number} queued for ${providerCode.toUpperCase()} fiscalization.`,
   );
 
+  const webhookUrl = useMemo(() => {
+    const path = setup?.links.stripe_webhook_path || "/platform/saas/webhooks/stripe";
+    return `${getApiBaseUrl().replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+  }, [setup?.links.stripe_webhook_path]);
+
   const copyWebhook = async () => {
-    const value = setup?.links.stripe_webhook_path;
-    if (!value) return;
-    await navigator.clipboard.writeText(value);
-    setNotice("Stripe webhook path copied.");
+    await navigator.clipboard.writeText(webhookUrl);
+    setNotice("Stripe webhook URL copied.");
   };
 
   const tenantLabel = setup?.tenant?.name || (setup?.scope === "PLATFORM" ? "Platform defaults" : amoCode);
@@ -280,7 +300,9 @@ export default function AdminSaaSSettingsPage() {
                     <Status value={provider.status} />
                   </div>
                   {setup?.scope === "TENANT" && provider.scope === "PLATFORM" ? (
-                    <div className="saas-admin__alert">This tenant currently inherits the platform default. Saving creates a tenant-specific override.</div>
+                    <div className="saas-admin__alert">
+                      This tenant currently inherits the platform default. Saving creates a tenant-specific override; if the platform default contains a secret, enter new tenant credentials before saving.
+                    </div>
                   ) : null}
                   <div className="saas-admin__secret-state">
                     <strong>{provider.has_secret ? "Encrypted secret stored" : "No secret stored"}</strong>
@@ -306,7 +328,11 @@ export default function AdminSaaSSettingsPage() {
                           autoComplete="new-password"
                           value={secretDraft[field] ?? ""}
                           onChange={(event) => setSecretDraft((current) => ({ ...current, [field]: event.target.value }))}
-                          placeholder={provider.has_secret ? "Leave blank to preserve encrypted value" : field}
+                          placeholder={provider.scope === "PLATFORM" && setup?.scope === "TENANT"
+                            ? "Required to create a tenant-specific override"
+                            : provider.has_secret
+                              ? "Leave blank to preserve encrypted value"
+                              : field}
                         />
                       </label>
                     ))}
@@ -430,9 +456,9 @@ export default function AdminSaaSSettingsPage() {
             </section>
             <section className="saas-admin__card">
               <h2>Provider callback setup</h2>
-              <p>Register this public path as the Stripe webhook destination. Tenant-scoped and platform endpoint secrets are verified server-side.</p>
-              <code>{setup?.links.stripe_webhook_path || "/platform/saas/webhooks/stripe"}</code>
-              <div className="saas-admin__actions"><button type="button" onClick={() => void copyWebhook()}>Copy webhook path</button></div>
+              <p>Register this public HTTPS URL as the Stripe webhook destination. Tenant-scoped and platform endpoint secrets are verified server-side.</p>
+              <code>{webhookUrl}</code>
+              <div className="saas-admin__actions"><button type="button" onClick={() => void copyWebhook()}>Copy webhook URL</button></div>
               <h3>Access boundaries</h3>
               <ul>
                 <li>AMO admins: own tenant credentials, health checks, modules, invoices and tenant jobs.</li>
