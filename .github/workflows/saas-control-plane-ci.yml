@@ -14,6 +14,7 @@ on:
       - "backend/amodb/scripts/saas_control_plane_internal_check.py"
       - "backend/docs/platform/**"
       - "frontend/src/services/platformControl*"
+      - "frontend/src/services/saasSettings*"
       - "frontend/src/services/messaging*"
       - "frontend/src/services/realtime/**"
       - "frontend/src/services/rostering.ts"
@@ -22,6 +23,9 @@ on:
       - "frontend/src/components/messaging/**"
       - "frontend/src/components/offline/OfflineSyncIndicator.tsx"
       - "frontend/src/styles/components/messaging.css"
+      - "frontend/src/styles/adminSaaSSettings.css"
+      - "frontend/src/pages/AdminSaaSSettingsPage.tsx"
+      - "frontend/src/pages/EmailServerSettingsPage.tsx"
       - "frontend/src/pages/platform/**"
       - "frontend/src/pages/rostering/**"
       - "frontend/package.json"
@@ -90,6 +94,7 @@ jobs:
           read_index_finalizer = script.get_revision("saas_20260722_qms_read_idx")
           messaging_finalizer = script.get_revision("saas_20260722_messaging")
           runtime_fence = script.get_revision("saas_20260722_runtime_fence")
+          terminal_safety = script.get_revision("saas_20260722_side_effect_safe")
           assert foundation and foundation.down_revision == "quality_20260722_schema_integrity"
           assert quality_finalizer and quality_finalizer.down_revision == "saas_20260722_control_plane"
           assert training_finalizer and training_finalizer.down_revision == "saas_20260722_finalize_idx"
@@ -101,9 +106,10 @@ jobs:
           assert not read_index_finalizer.dependencies
           assert messaging_finalizer and messaging_finalizer.down_revision == "saas_20260722_qms_read_idx"
           assert runtime_fence and runtime_fence.down_revision == "saas_20260722_messaging"
+          assert terminal_safety and terminal_safety.down_revision == "saas_20260722_runtime_fence"
           heads = script.get_heads()
           print("Alembic heads:", heads)
-          assert "saas_20260722_runtime_fence" in heads, heads
+          assert heads == ["saas_20260722_side_effect_safe"], heads
           PY
       - name: Upgrade production schema graph
         id: migrate
@@ -132,6 +138,14 @@ jobs:
               "/platform/saas/webhooks/stripe",
               "/platform/saas/support/tickets",
               "/platform/saas/integration-health",
+              "/platform/tenant-saas/setup",
+              "/platform/tenant-saas/providers",
+              "/platform/tenant-saas/providers/{provider}",
+              "/platform/tenant-saas/jobs",
+              "/platform/tenant-saas/modules",
+              "/platform/tenant-saas/invoices",
+              "/platform/tenant-saas/checkout",
+              "/platform/tenant-saas/invoices/{invoice_id}/fiscalize",
               "/api/realtime/broker/authenticate",
               "/api/realtime/broker/authorize",
               "/api/chat/directory",
@@ -147,7 +161,7 @@ jobs:
           }
           missing = required - paths
           assert not missing, missing
-          print("SaaS, broker, messaging and notification routes verified")
+          print("SaaS, tenant administration, broker, messaging and notification routes verified")
           PY
       - name: Run SaaS and realtime regression suites
         id: backend_tests
@@ -226,6 +240,8 @@ jobs:
           npm exec -- eslint \
             src/services/platformControl.ts \
             src/services/platformControl.test.ts \
+            src/services/saasSettings.ts \
+            src/services/saasSettings.test.ts \
             src/services/messaging.ts \
             src/services/messaging.test.ts \
             src/services/realtime/mqtt.ts \
@@ -235,6 +251,8 @@ jobs:
             src/services/rostering.ts \
             src/components/messaging/MessagingHub.tsx \
             src/components/offline/OfflineSyncIndicator.tsx \
+            src/pages/AdminSaaSSettingsPage.tsx \
+            src/pages/EmailServerSettingsPage.tsx \
             src/pages/platform/PlatformIntegrationsPage.tsx \
             src/pages/platform/PlatformBillingPage.tsx \
             src/pages/platform/PlatformTenantsPage.tsx \
