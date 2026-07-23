@@ -64,14 +64,19 @@ def _pending_checkout_account() -> SimpleNamespace:
     )
 
 
-def test_checkout_completion_rejects_non_portal_session():
+def test_checkout_completion_rejects_non_portal_session(monkeypatch: pytest.MonkeyPatch):
     event = _checkout_event("cs_external")
     account = _pending_checkout_account()
     db = MagicMock()
     db.get.return_value = event
-    query = MagicMock()
-    query.filter.return_value.first.return_value = account
-    db.query.return_value = query
+    monkeypatch.setattr(saas_worker, "_stripe_billing_account", lambda *_args, **_kwargs: account)
+    monkeypatch.setattr(
+        saas_worker,
+        "_checkout_price",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            id="price-row-1", module_code="quality", external_price_ref="price_stripe_1"
+        ),
+    )
 
     with pytest.raises(ValueError, match="does not match the pending portal checkout"):
         saas_worker._process_stripe_webhook(db, _webhook_job())
@@ -91,9 +96,8 @@ def test_checkout_completion_accepts_matching_pending_session(monkeypatch: pytes
         raise AssertionError((model, identifier))
 
     db.get.side_effect = get
-    query = MagicMock()
-    query.filter.return_value.first.return_value = account
-    db.query.return_value = query
+    monkeypatch.setattr(saas_worker, "_stripe_billing_account", lambda *_args, **_kwargs: account)
+    monkeypatch.setattr(saas_worker, "_checkout_price", lambda *_args, **_kwargs: price)
     set_module_state = MagicMock()
     monkeypatch.setattr(saas_worker, "_set_module_state", set_module_state)
     monkeypatch.setattr(saas_worker, "_upsert_billing_account", lambda *args, **kwargs: account)

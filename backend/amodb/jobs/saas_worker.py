@@ -18,8 +18,13 @@ from amodb.database import WriteSessionLocal, close_session_safely
 ACTIVE_SUBSCRIPTION_STATES = {"active", "trialing"}
 SUSPENDED_SUBSCRIPTION_STATES = {"past_due", "unpaid", "incomplete_expired", "paused"}
 DISABLED_SUBSCRIPTION_STATES = {"canceled", "cancelled"}
-TENANT_MUTATING_STRIPE_EVENTS = {
+CHECKOUT_SESSION_EVENTS = {
     "checkout.session.completed",
+    "checkout.session.async_payment_succeeded",
+    "checkout.session.async_payment_failed",
+}
+TENANT_MUTATING_STRIPE_EVENTS = {
+    *CHECKOUT_SESSION_EVENTS,
     "customer.subscription.created",
     "customer.subscription.updated",
     "customer.subscription.deleted",
@@ -123,6 +128,85 @@ def _stripe_metadata(obj: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
+def _stripe_billing_account(
+    db: Session,
+    *,
+    tenant_id: str,
+    lock: bool = False,
+) -> models.SaaSBillingAccount | None:
+    query = db.query(models.SaaSBillingAccount).filter(
+        models.SaaSBillingAccount.tenant_id == tenant_id,
+        models.SaaSBillingAccount.provider == "stripe",
+    )
+    if lock:
+        query = query.with_for_update()
+    return query.first()
+
+
+def _lock_checkout_tenant(db: Session, tenant_id: str) -> account_models.AMO:
+    tenant = (
+        db.query(account_models.AMO)
+        .filter(account_models.AMO.id == tenant_id)
+        .with_for_update()
+        .first()
+    )
+    if tenant is None:
+        raise ValueError("Checkout tenant not found")
+    return tenant
+
+
+def _checkout_price(
+    db: Session,
+    *,
+    module_price_id: str,
+    lock: bool = False,
+) -> models.SaaSModulePrice | None:
+    query = db.query(models.SaaSModulePrice).filter(models.SaaSModulePrice.id == module_price_id)
+    if lock:
+        query = query.with_for_update()
+    return query.first()
+
+
+def _validate_pending_checkout(
+    db: Session,
+    *,
+    tenant_id: str,
+    obj: dict[str, Any],
+    metadata: dict[str, Any],
+) -> tuple[models.SaaSBillingAccount, dict[str, Any], str, str, str]:
+    module_code = str(metadata.get("module_code") or "").strip()
+    session_id = str(obj.get("id") or "").strip()
+    module_price_id = str(metadata.get("module_price_id") or "").strip()
+    external_price_ref = str(metadata.get("external_price_ref") or "").strip()
+    if not module_code:
+        raise ValueError("Stripe checkout metadata is missing module_code")
+    account = _stripe_billing_account(db, tenant_id=tenant_id, lock=True)
+    pending = account.metadata_json if account and isinstance(account.metadata_json, dict) else {}
+    if account is None or str(account.status or "").upper() != "CHECKOUT_PENDING":
+        raise ValueError("Stripe checkout event has no pending portal checkout")
+    expected_session_id = str(pending.get("checkout_session_id") or "").strip()
+    expected_module_code = str(pending.get("module_code") or "").strip()
+    expected_module_price_id = str(pending.get("module_price_id") or "").strip()
+    expected_price_ref = str(pending.get("external_price_ref") or "").strip()
+    if not session_id or session_id != expected_session_id:
+        raise ValueError("Stripe checkout session does not match the pending portal checkout")
+    if (
+        module_code != expected_module_code
+        or module_price_id != expected_module_price_id
+        or external_price_ref != expected_price_ref
+    ):
+        raise ValueError("Stripe checkout metadata does not match the pending portal checkout")
+    price = _checkout_price(db, module_price_id=expected_module_price_id)
+    if (
+        price is None
+        or saas_services.normalize_module_code(str(price.module_code or ""))
+        != saas_services.normalize_module_code(module_code)
+        or str(price.external_price_ref or "") != expected_price_ref
+    ):
+        raise ValueError("Stripe checkout price does not match the portal module price")
+    return account, pending, module_code, module_price_id, external_price_ref
+
+
 def _verified_stripe_tenant(
     job: models.SaaSJob,
     *,
@@ -171,49 +255,44 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
         "verified_tenant_id": tenant_id or None,
     }
 
-    if event_type == "checkout.session.completed":
-        if not module_code:
-            raise ValueError("Stripe checkout metadata is missing module_code")
-        session_id = str(obj.get("id") or "").strip()
-        module_price_id = str(metadata.get("module_price_id") or "").strip()
-        external_price_ref = str(metadata.get("external_price_ref") or "").strip()
-        account = (
-            db.query(models.SaaSBillingAccount)
-            .filter(
-                models.SaaSBillingAccount.tenant_id == tenant_id,
-                models.SaaSBillingAccount.provider == "stripe",
-            )
-            .first()
+    if event_type in CHECKOUT_SESSION_EVENTS:
+        account, pending, module_code, module_price_id, external_price_ref = _validate_pending_checkout(
+            db,
+            tenant_id=tenant_id,
+            obj=obj,
+            metadata=metadata,
         )
-        pending = account.metadata_json if account and isinstance(account.metadata_json, dict) else {}
-        if account is None or str(account.status or "").upper() != "CHECKOUT_PENDING":
-            raise ValueError("Stripe checkout completion has no pending portal checkout")
-        expected_session_id = str(pending.get("checkout_session_id") or "").strip()
-        expected_module_code = str(pending.get("module_code") or "").strip()
-        expected_module_price_id = str(pending.get("module_price_id") or "").strip()
-        expected_price_ref = str(pending.get("external_price_ref") or "").strip()
-        if not session_id or session_id != expected_session_id:
-            raise ValueError("Stripe checkout session does not match the pending portal checkout")
-        if module_code != expected_module_code or module_price_id != expected_module_price_id or external_price_ref != expected_price_ref:
-            raise ValueError("Stripe checkout metadata does not match the pending portal checkout")
-        price = db.get(models.SaaSModulePrice, expected_module_price_id)
-        if (
-            price is None
-            or saas_services.normalize_module_code(str(price.module_code or "")) != saas_services.normalize_module_code(module_code)
-            or str(price.external_price_ref or "") != expected_price_ref
-        ):
-            raise ValueError("Stripe checkout price does not match the portal module price")
         payment_status = str(obj.get("payment_status") or "").lower()
+        succeeded = event_type == "checkout.session.async_payment_succeeded" or (
+            event_type == "checkout.session.completed"
+            and payment_status in {"paid", "no_payment_required"}
+        )
+        failed = event_type == "checkout.session.async_payment_failed"
+        if succeeded:
+            checkout_status = "ACTIVE"
+        elif failed:
+            checkout_status = "CHECKOUT_FAILED"
+        else:
+            checkout_status = "CHECKOUT_PENDING"
+        lifecycle_metadata = {
+            **pending,
+            "checkout_session_id": str(obj.get("id") or ""),
+            "module_code": module_code,
+            "module_price_id": module_price_id,
+            "external_price_ref": external_price_ref,
+            "last_checkout_event": event_type,
+            "payment_status": payment_status,
+        }
         _upsert_billing_account(
             db,
             tenant_id=tenant_id,
             provider="stripe",
             customer_ref=customer_ref,
             subscription_ref=subscription_ref,
-            status="ACTIVE" if payment_status in {"paid", "no_payment_required"} else "CHECKOUT_COMPLETED",
-            metadata={"checkout_session_id": obj.get("id"), "module_code": module_code},
+            status=checkout_status,
+            metadata=lifecycle_metadata,
         )
-        if payment_status in {"paid", "no_payment_required"}:
+        if succeeded:
             _set_module_state(
                 db,
                 tenant_id=tenant_id,
@@ -222,7 +301,14 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
                 provider="stripe",
                 external_subscription_ref=subscription_ref,
             )
-        outcome.update({"tenant_id": tenant_id, "module_code": module_code, "payment_status": payment_status})
+        outcome.update(
+            {
+                "tenant_id": tenant_id,
+                "module_code": module_code,
+                "payment_status": payment_status,
+                "checkout_status": checkout_status,
+            }
+        )
 
     elif event_type in {"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"}:
         subscription_state = str(
@@ -341,16 +427,42 @@ def _process_provider_health(db: Session, job: models.SaaSJob) -> dict[str, Any]
 
 def _process_checkout(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     payload = job.payload_json or {}
+    tenant_id = str(job.tenant_id or "").strip()
+    _lock_checkout_tenant(db, tenant_id)
+    pending_account = _stripe_billing_account(db, tenant_id=tenant_id, lock=True)
+    if pending_account is not None and str(pending_account.status or "").upper() == "CHECKOUT_PENDING":
+        pending = pending_account.metadata_json if isinstance(pending_account.metadata_json, dict) else {}
+        if str(pending.get("checkout_idempotency_key") or "") == str(job.idempotency_key or ""):
+            return {
+                "provider": "stripe",
+                "session_id": pending.get("checkout_session_id"),
+                "checkout_url": pending.get("checkout_url"),
+                "customer": pending_account.external_customer_ref,
+                "subscription": pending_account.external_subscription_ref,
+                "reused": True,
+            }
+        raise ValueError("Another Stripe checkout is already pending for this tenant")
+
     credential = _credential(db, str(payload.get("provider_credential_id") or ""))
     db.refresh(credential)
     saas_services.require_operational_provider(credential, label="Stripe")
     module_price_id = str(payload.get("module_price_id") or "").strip()
     module_code = str(payload.get("module_code") or "").strip()
     external_price_ref = str(payload.get("external_price_ref") or "").strip()
+    price = _checkout_price(db, module_price_id=module_price_id, lock=True)
+    if (
+        price is None
+        or not bool(price.is_active)
+        or saas_services.normalize_module_code(str(price.module_code or ""))
+        != saas_services.normalize_module_code(module_code)
+        or str(price.external_price_ref or "") != external_price_ref
+    ):
+        raise ValueError("Module price is no longer active or no longer matches the queued checkout")
+
     result = saas_providers.create_stripe_checkout_session(
         secret=saas_services.provider_secrets(credential),
         config=credential.config_json or {},
-        tenant_id=str(job.tenant_id),
+        tenant_id=tenant_id,
         tenant_email=payload.get("tenant_email"),
         module_code=module_code,
         module_price_id=module_price_id,
@@ -362,13 +474,16 @@ def _process_checkout(db: Session, job: models.SaaSJob) -> dict[str, Any]:
         raise ValueError("Stripe checkout did not return a session id")
     _upsert_billing_account(
         db,
-        tenant_id=str(job.tenant_id),
+        tenant_id=tenant_id,
         provider="stripe",
         customer_ref=result.get("customer"),
         subscription_ref=result.get("subscription"),
         status="CHECKOUT_PENDING",
         metadata={
             "checkout_session_id": session_id,
+            "checkout_url": result.get("checkout_url"),
+            "checkout_job_id": job.id,
+            "checkout_idempotency_key": job.idempotency_key,
             "module_code": module_code,
             "module_price_id": module_price_id,
             "external_price_ref": external_price_ref,

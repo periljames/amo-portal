@@ -598,10 +598,40 @@ def enqueue_checkout(
     actor_user_id: str,
     idempotency_key: str,
 ) -> models.SaaSJob:
-    tenant = db.get(account_models.AMO, tenant_id)
+    tenant = (
+        db.query(account_models.AMO)
+        .filter(account_models.AMO.id == tenant_id)
+        .with_for_update()
+        .first()
+    )
     price = db.get(models.SaaSModulePrice, module_price_id)
     if not tenant or not price or not price.is_active:
         raise ValueError("Tenant or active module price not found")
+    pending_account = (
+        db.query(models.SaaSBillingAccount)
+        .filter(
+            models.SaaSBillingAccount.tenant_id == tenant_id,
+            models.SaaSBillingAccount.provider == "stripe",
+            models.SaaSBillingAccount.status == "CHECKOUT_PENDING",
+        )
+        .first()
+    )
+    if pending_account is not None:
+        raise ValueError("Another Stripe checkout is already pending for this tenant")
+    active_job = (
+        db.query(models.SaaSJob)
+        .filter(
+            models.SaaSJob.job_type == "STRIPE_CREATE_CHECKOUT_SESSION",
+            models.SaaSJob.tenant_scope == tenant_id,
+            models.SaaSJob.status.in_({"PENDING", "RETRY", "RUNNING"}),
+        )
+        .order_by(models.SaaSJob.created_at.desc())
+        .first()
+    )
+    if active_job is not None:
+        if str(active_job.idempotency_key or "") == idempotency_key.strip():
+            return active_job
+        raise ValueError("Another Stripe checkout request is already queued for this tenant")
     if not price.external_price_ref:
         raise ValueError("This module price has no external Stripe price reference")
     credential = get_provider_credential(db, provider="stripe", tenant_id=tenant_id)
