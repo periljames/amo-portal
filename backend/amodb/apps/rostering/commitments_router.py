@@ -4,11 +4,13 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
+from ..workforce import models as workforce_models
 from ..workforce import permissions as workforce_permissions
 from . import commitments, services
 
@@ -39,13 +41,27 @@ def roster_commitments(
         )
         user_id = [str(current_user.id)]
 
+    amo_id = services.effective_amo_id(current_user)
+    eligible_query = db.query(workforce_models.EmploymentContract.user_id).filter(
+        workforce_models.EmploymentContract.amo_id == amo_id,
+        workforce_models.EmploymentContract.employment_status == workforce_models.EmploymentStatus.ACTIVE,
+        workforce_models.EmploymentContract.effective_from <= to_date,
+        or_(
+            workforce_models.EmploymentContract.effective_to.is_(None),
+            workforce_models.EmploymentContract.effective_to >= from_date,
+        ),
+    )
+    if user_id:
+        eligible_query = eligible_query.filter(workforce_models.EmploymentContract.user_id.in_(user_id))
+    eligible_user_ids = sorted({str(row[0]) for row in eligible_query.all()})
+
     try:
         return commitments.list_commitments(
             db,
-            amo_id=services.effective_amo_id(current_user),
+            amo_id=amo_id,
             from_date=from_date,
             to_date=to_date,
-            user_ids=user_id or None,
+            user_ids=eligible_user_ids or ["__none__"],
         )
     except ValueError as exc:
         raise HTTPException(
