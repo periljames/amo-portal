@@ -65,9 +65,20 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         'fiscalization.status = "RECONCILIATION_REQUIRED"',
         "source_job_id=job.id",
     ),
+    BACKEND_ROOT / "amodb/apps/platform/saas_admin_policy.py": (
+        "def validate_tenant_provider_override",
+        "allow_platform_fallback=False",
+        "Tenant-specific secret values are required",
+        "An enabled tenant provider cannot clear its stored secret",
+        "def install_tenant_provider_override_policy",
+        "saas_services.upsert_provider_credential = guarded_upsert_provider_credential",
+    ),
     BACKEND_ROOT / "amodb/apps/platform/saas_webhooks.py": (
+        "ACTIVE_CREDENTIAL_STATES",
         "def _credential_candidates",
         "models.SaaSBillingAccount.external_customer_ref",
+        "if scoped_rows:",
+        "A disabled or incomplete scoped row deliberately blocks platform",
         "saas_providers.verify_stripe_signature",
         '"verified_credential_id": matched.id',
         '"verified_tenant_id"',
@@ -86,6 +97,7 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
     ),
     BACKEND_ROOT / "amodb/apps/platform/__init__.py": (
         "_saas_services.record_stripe_webhook = _saas_webhooks.record_stripe_webhook",
+        "install_tenant_provider_override_policy()",
         "router.include_router(tenant_saas_router)",
     ),
     BACKEND_ROOT / "amodb/apps/platform/saas_usage.py": (
@@ -147,15 +159,21 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
     ),
     FRONTEND_ROOT / "src/pages/AdminSaaSSettingsPage.tsx": (
         "Integrations & automation setup",
+        "Tenant-specific secret values are required",
         "Save encrypted configuration",
         "Queue backend health check",
         "Durable backend pipeline",
         "Deployment-managed requirements",
+        "Copy webhook URL",
         "Global integrations",
         "Global billing",
     ),
     FRONTEND_ROOT / "src/pages/EmailServerSettingsPage.tsx": (
         'export { default } from "./AdminSaaSSettingsPage"',
+    ),
+    FRONTEND_ROOT / "src/pages/platform/PlatformTenantsPage.tsx": (
+        "Open integrations & pipeline",
+        "tenant_id=${encodeURIComponent(selected)}",
     ),
     FRONTEND_ROOT / "src/styles/adminSaaSSettings.css": (
         ".saas-admin__provider-layout",
@@ -255,6 +273,11 @@ def main() -> int:
     passed = passed and auth_order and ack_order
     checks["gateway-auth-before-dispatch"] = {"passed": auth_order}
     checks["gateway-puback-before-outbox-clear"] = {"passed": ack_order}
+
+    package_init = (BACKEND_ROOT / "amodb/apps/platform/__init__.py").read_text(encoding="utf-8")
+    policy_order = package_init.index("install_tenant_provider_override_policy()") < package_init.index("from .saas_router import")
+    passed = passed and policy_order
+    checks["tenant-provider-policy-before-route-import"] = {"passed": policy_order}
 
     compile_rows: list[dict[str, object]] = []
     compile_targets = tuple(REQUIRED) + EXTRA_COMPILE
