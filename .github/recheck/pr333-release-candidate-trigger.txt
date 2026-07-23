@@ -1,0 +1,2 @@
+PR #333 release-candidate workflow trigger.
+Created 2026-07-23 to force exact-head pull-request synchronization checks after connector-created workflow commits did not schedule runs on PR open.
