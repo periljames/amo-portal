@@ -5,10 +5,10 @@ import { CapacityBoard } from "./components/CapacityBoard";
 import { ComplianceImpact } from "./components/ComplianceImpact";
 import { MyRosterWorkspace } from "./components/MyRosterWorkspace";
 import { RosterDashboard } from "./components/RosterDashboard";
-import { RosterPlannerV2 } from "./components/RosterPlannerV2";
 import { RosterReports } from "./components/RosterReports";
 import { RosterSettings } from "./components/RosterSettings";
 import { RosterShell } from "./components/RosterShell";
+import { UnifiedRosterPlanner } from "./components/UnifiedRosterPlanner";
 
 function useRosterRoot() {
   const { amoCode = "" } = useParams();
@@ -22,7 +22,7 @@ export function RosteringDashboardPage() {
 
 export function RosterCalendarPage() {
   const root = useRosterRoot();
-  return <RosterShell eyebrow="Planner workspace" title="Duty roster planner" description="Build and amend controlled roster versions using eligible personnel, shift templates, drag-and-drop and live validation." actions={<Link className="wr-button wr-button--secondary" to={`${root}/settings`}><Settings2 size={16} /> Setup</Link>}><RosterPlannerV2 /></RosterShell>;
+  return <RosterShell eyebrow="Planner workspace" title="Duty roster planner" description="Build controlled duty versions while automatically seeing training, approved leave, unavailability and assigned Quality work from the same tenant personnel record." actions={<Link className="wr-button wr-button--secondary" to={`${root}/settings`}><Settings2 size={16} /> Setup</Link>}><UnifiedRosterPlanner /></RosterShell>;
 }
 
 export function ManpowerPlanningBoardPage() {
