@@ -35,6 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p /tmp/pr333-validation
           cat .github/maintenance/pr333/offline.*.b64 | tr -d '\r\n' | base64 --decode > /tmp/offlinePersistence.ts
           cp .github/maintenance/pr333/presence_policy.py.new /tmp/presence_policy.py
           cp .github/maintenance/pr333/user-management-stabilization-ci.yml.new /tmp/user-management-stabilization-ci.yml
@@ -50,21 +51,47 @@ jobs:
           install -m 0644 /tmp/user-management-stabilization-ci.yml .github/workflows/user-management-stabilization-ci.yml
           install -m 0644 /tmp/rosteringArchitecture.test.ts frontend/src/pages/rostering/rosteringArchitecture.test.ts
       - name: Compile inherited presence policy cleanup
-        run: python -m py_compile backend/amodb/apps/accounts/presence_policy.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m py_compile backend/amodb/apps/accounts/presence_policy.py 2>&1 | tee /tmp/pr333-validation/python-compile.log
       - name: Install frontend dependencies with bounded transient retries
         working-directory: frontend
-        run: >-
-          python ../.github/scripts/retry_transient.py
-          --attempts 4
-          --label "PR333 cleanup frontend dependency install"
-          -- npm ci --prefer-offline --no-audit --fund=false
-          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Validate production build and offline regressions
-        working-directory: frontend
+        shell: bash
         run: |
-          npm run build
-          npm exec -- eslint src/services/offlinePersistence.ts src/pages/rostering/rosteringArchitecture.test.ts
-          npm exec -- vitest run src/pages/rostering/rosteringArchitecture.test.ts
+          set -o pipefail
+          python ../.github/scripts/retry_transient.py \
+            --attempts 4 \
+            --label "PR333 cleanup frontend dependency install" \
+            -- npm ci --prefer-offline --no-audit --fund=false \
+            --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000 \
+            2>&1 | tee /tmp/pr333-validation/npm-ci.log
+      - name: Typecheck and production build
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/pr333-validation/build.log
+      - name: Lint offline cleanup
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm exec -- eslint src/services/offlinePersistence.ts src/pages/rostering/rosteringArchitecture.test.ts 2>&1 | tee /tmp/pr333-validation/eslint.log
+      - name: Run offline regressions
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm exec -- vitest run src/pages/rostering/rosteringArchitecture.test.ts 2>&1 | tee /tmp/pr333-validation/vitest.log
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-inherited-cleanup-validation
+          path: /tmp/pr333-validation
+          if-no-files-found: warn
+          retention-days: 2
       - name: Commit validated cleanup and remove staging workflow
         shell: bash
         run: |
