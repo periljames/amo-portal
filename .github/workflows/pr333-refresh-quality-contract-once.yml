@@ -66,7 +66,17 @@ jobs:
           PY
       - name: Verify refreshed Quality contract
         working-directory: backend
-        run: python -m amodb.scripts.quality_module_internal_check
+        run: |
+          set -o pipefail
+          python -m amodb.scripts.quality_module_internal_check | tee /tmp/pr333-refreshed-quality-contract.json
+      - name: Upload refreshed Quality contract report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-refreshed-quality-contract
+          path: /tmp/pr333-refreshed-quality-contract.json
+          if-no-files-found: warn
+          retention-days: 2
       - name: Commit validated contract refresh
         run: |
           git config user.name "github-actions[bot]"
