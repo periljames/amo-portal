@@ -12,6 +12,9 @@ from . import saas_models as models
 from . import saas_providers, saas_queue, saas_secrets
 
 
+ACTIVE_CREDENTIAL_STATES = {"CONFIGURED", "HEALTHY", "UNHEALTHY"}
+
+
 def _stripe_object(payload: dict[str, Any]) -> dict[str, Any]:
     value = ((payload.get("data") or {}).get("object") or {})
     return value if isinstance(value, dict) else {}
@@ -32,10 +35,13 @@ def _credential_candidates(
     *,
     payload: dict[str, Any],
 ) -> list[models.SaaSProviderCredential]:
-    """Return likely secrets first, then bounded configured fallbacks.
+    """Return only credentials allowed to authenticate this Stripe event.
 
-    Payload metadata is used only to order candidates. It is not trusted until
-    one candidate cryptographically verifies the Stripe signature.
+    Tenant hints order candidate lookup but are not trusted until signature
+    verification succeeds. When a tenant-specific Stripe credential exists, it
+    is authoritative: platform or other-tenant secrets must not authenticate
+    that tenant's endpoint. Platform fallback is used only when no scoped row
+    exists for any resolved tenant hint.
     """
 
     obj = _stripe_object(payload)
@@ -65,23 +71,40 @@ def _credential_candidates(
         )
         tenant_hints.update(str(row[0]) for row in rows if row and row[0])
 
-    query = db.query(models.SaaSProviderCredential).filter(
-        models.SaaSProviderCredential.provider == "stripe",
-        models.SaaSProviderCredential.encrypted_secret.isnot(None),
-        models.SaaSProviderCredential.status.in_(["CONFIGURED", "HEALTHY"]),
+    if tenant_hints:
+        scoped_rows = (
+            db.query(models.SaaSProviderCredential)
+            .filter(
+                models.SaaSProviderCredential.provider == "stripe",
+                models.SaaSProviderCredential.tenant_id.in_(tenant_hints),
+            )
+            .order_by(models.SaaSProviderCredential.updated_at.desc())
+            .limit(50)
+            .all()
+        )
+        if scoped_rows:
+            # A disabled or incomplete scoped row deliberately blocks platform
+            # fallback. The tenant must repair or remove that override.
+            return [
+                row
+                for row in scoped_rows
+                if row.encrypted_secret and str(row.status).upper() in ACTIVE_CREDENTIAL_STATES
+            ]
+
+    rows = (
+        db.query(models.SaaSProviderCredential)
+        .filter(
+            models.SaaSProviderCredential.provider == "stripe",
+            models.SaaSProviderCredential.encrypted_secret.isnot(None),
+            models.SaaSProviderCredential.status.in_(sorted(ACTIVE_CREDENTIAL_STATES)),
+        )
+        .order_by(models.SaaSProviderCredential.updated_at.desc())
+        .limit(5000)
+        .all()
     )
-    rows = query.order_by(models.SaaSProviderCredential.updated_at.desc()).limit(5000).all()
-    priority: list[models.SaaSProviderCredential] = []
-    fallback: list[models.SaaSProviderCredential] = []
-    platform: list[models.SaaSProviderCredential] = []
-    for row in rows:
-        if row.tenant_id and str(row.tenant_id) in tenant_hints:
-            priority.append(row)
-        elif row.tenant_id is None:
-            platform.append(row)
-        else:
-            fallback.append(row)
-    return [*priority, *platform, *fallback]
+    platform = [row for row in rows if row.tenant_id is None]
+    fallback = [row for row in rows if row.tenant_id is not None]
+    return [*platform, *fallback]
 
 
 def record_stripe_webhook(
