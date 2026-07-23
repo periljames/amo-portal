@@ -26,6 +26,7 @@ class RealtimeGateway:
         self._client = None
         self._connected = False
         self._stop = threading.Event()
+        self._drain_wakeup = threading.Event()
         self._drain_thread: threading.Thread | None = None
         self._flush_lock = threading.Lock()
 
@@ -42,6 +43,7 @@ class RealtimeGateway:
         if self._client:
             return
         self._stop.clear()
+        self._drain_wakeup.clear()
         self._client = mqtt.Client(protocol=mqtt.MQTTv311)
         username = (os.getenv("REALTIME_GATEWAY_USERNAME") or "").strip()
         password = (os.getenv("REALTIME_GATEWAY_PASSWORD") or "").strip()
@@ -65,7 +67,9 @@ class RealtimeGateway:
         self._connected = rc == 0
         if self._connected:
             client.subscribe(broker_auth.GATEWAY_SHARED_SUBSCRIPTION, qos=1)
-            self.flush_pending()
+            # Never wait for PUBACK inside Paho's network-loop callback. Wake the
+            # dedicated drain thread so the callback can continue processing I/O.
+            self._drain_wakeup.set()
         logger.info("mqtt connected", extra={"mqtt_connects": 1, "rc": rc})
 
     def _on_disconnect(self, client, userdata, rc, properties=None):
@@ -98,7 +102,9 @@ class RealtimeGateway:
             logger.exception("Failed to process authenticated realtime message", extra={"topic": topic})
         finally:
             db.close()
-        self.flush_pending()
+        # Recipient events created above are drained by a separate thread. Paho
+        # callbacks must never block waiting for their own network loop.
+        self._drain_wakeup.set()
 
     def publish(
         self,
@@ -203,7 +209,11 @@ class RealtimeGateway:
             return
 
         def _drain() -> None:
-            while not self._stop.wait(1.0):
+            while not self._stop.is_set():
+                self._drain_wakeup.wait(timeout=1.0)
+                self._drain_wakeup.clear()
+                if self._stop.is_set():
+                    break
                 if self._connected:
                     self.flush_pending()
 
@@ -219,6 +229,7 @@ class RealtimeGateway:
         self._client = None
         self._connected = False
         self._stop.set()
+        self._drain_wakeup.set()
         if self._drain_thread and self._drain_thread.is_alive():
             self._drain_thread.join(timeout=2)
         self._drain_thread = None
