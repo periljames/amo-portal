@@ -5,6 +5,7 @@ x-backend: &backend
     context: ../..
     dockerfile: backend/Dockerfile
   restart: unless-stopped
+  working_dir: /app/backend
   environment: &backend-environment
     APP_ENV: production
     SCHEMA_STRICT: "1"
