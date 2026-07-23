@@ -1,10 +1,9 @@
 name: Alembic Legacy Graph Diagnostic
 
 on:
-  pull_request:
-    paths:
-      - "backend/amodb/alembic/versions/**"
-      - ".github/workflows/alembic-legacy-graph-diagnostic.yml"
+  push:
+    branches:
+      - hotfix/alembic-legacy-head-convergence
 
 permissions:
   contents: read
