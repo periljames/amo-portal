@@ -2,6 +2,7 @@ name: Workforce PostgreSQL Hotfix
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
     paths:
       - "backend/amodb/alembic/versions/workforce_20260721_complete_rostering.py"
       - "backend/amodb/alembic/versions/workforce_20260721_precreate_tables.py"
