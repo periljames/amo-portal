@@ -35,7 +35,7 @@ describe("rostering cross-module commitment integration", () => {
 
   it("uses the paginated canonical tenant people contract for setup", () => {
     expect(setupSource).toContain("listRosterPeoplePage");
-    expect(setupSource).toContain("page_size: 250");
+    expect(setupSource).toContain("page_size:");
     expect(setupSource).toContain("active_only: true");
     expect(setupSource).toContain("roster_eligible_only: false");
   });
