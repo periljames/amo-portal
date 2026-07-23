@@ -19,7 +19,7 @@ from . import (
     presence_service,
     realtime_auth,
     schemas,
-    secure_messaging as messaging,
+    production_messaging as messaging,
     services,
 )
 
