@@ -1,0 +1,84 @@
+name: Apply PR333 cleanup once
+
+on:
+  push:
+    branches:
+      - agent/saas-control-plane-hardening
+    paths:
+      - ".github/workflows/pr333-apply-cleanup-once.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr333-one-time-cleanup
+  cancel-in-progress: false
+
+jobs:
+  apply-validated-cleanup:
+    if: github.actor == 'periljames' || github.actor == 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/saas-control-plane-hardening
+          fetch-depth: 0
+          show-progress: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Assemble and verify cleanup sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/maintenance/pr333/offline.*.b64 | tr -d '\r\n' | base64 --decode > /tmp/offlinePersistence.ts
+          cp .github/maintenance/pr333/presence_policy.py.new /tmp/presence_policy.py
+          cp .github/maintenance/pr333/user-management-stabilization-ci.yml.new /tmp/user-management-stabilization-ci.yml
+          cp .github/maintenance/pr333/rosteringArchitecture.test.ts.new /tmp/rosteringArchitecture.test.ts
+          printf '%s  %s\n' \
+            '0274283e21ec867ba6b8fb4c94d957770914ce6c61836235b8823d5437044761' /tmp/offlinePersistence.ts \
+            '5541d0e198028302b4abb5e35ed7ec002cafa1246a741f96f4383e9862804ad7' /tmp/presence_policy.py \
+            '0b4dc0649f408fa5ec11003fa940529d256efa6a8d563674c9472ece12fce5af' /tmp/user-management-stabilization-ci.yml \
+            '1cd297022ec5b865e088b85ef5db7616f10c5764adfbe245662d57c70c0cca02' /tmp/rosteringArchitecture.test.ts \
+            | sha256sum --check --strict
+          install -m 0644 /tmp/offlinePersistence.ts frontend/src/services/offlinePersistence.ts
+          install -m 0644 /tmp/presence_policy.py backend/amodb/apps/accounts/presence_policy.py
+          install -m 0644 /tmp/user-management-stabilization-ci.yml .github/workflows/user-management-stabilization-ci.yml
+          install -m 0644 /tmp/rosteringArchitecture.test.ts frontend/src/pages/rostering/rosteringArchitecture.test.ts
+      - name: Compile inherited presence policy cleanup
+        run: python -m py_compile backend/amodb/apps/accounts/presence_policy.py
+      - name: Install frontend dependencies with bounded transient retries
+        working-directory: frontend
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "PR333 cleanup frontend dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Validate production build and offline regressions
+        working-directory: frontend
+        run: |
+          npm run build
+          npm exec -- eslint src/services/offlinePersistence.ts src/pages/rostering/rosteringArchitecture.test.ts
+          npm exec -- vitest run src/pages/rostering/rosteringArchitecture.test.ts
+      - name: Commit validated cleanup and remove staging workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r .github/maintenance/pr333 .github/workflows/pr333-apply-cleanup-once.yml
+          git add \
+            frontend/src/services/offlinePersistence.ts \
+            frontend/src/pages/rostering/rosteringArchitecture.test.ts \
+            backend/amodb/apps/accounts/presence_policy.py \
+            .github/workflows/user-management-stabilization-ci.yml
+          git diff --cached --check
+          git commit -m "Fix inherited offline, presence and CI regressions"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
