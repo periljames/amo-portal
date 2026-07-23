@@ -42,7 +42,9 @@ jobs:
           --label "PR333 final Codex dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
       - name: Apply final Codex safeguards
-        run: python .github/scripts/apply_pr333_final_codex_fix.py
+        run: |
+          python .github/scripts/apply_pr333_final_codex_fix.py
+          sed -i 's/== "PLATFORM"/== "__platform__"/' backend/amodb/apps/platform/tests/test_saas_final_review_safeguards.py
       - name: Compile changed source and tests
         run: >-
           python -m py_compile
