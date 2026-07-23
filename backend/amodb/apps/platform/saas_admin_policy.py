@@ -4,16 +4,99 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from . import saas_services
+from . import saas_providers, saas_secrets, saas_services
 
 
 _INSTALLED = False
 _ORIGINAL_UPSERT: Callable[..., dict[str, Any]] | None = None
 
 
-def _nonempty_secret(payload: dict[str, Any]) -> bool:
+def _submitted_secret(payload: dict[str, Any]) -> dict[str, Any]:
     secret = payload.get("secret")
-    return isinstance(secret, dict) and any(str(value or "").strip() for value in secret.values())
+    if secret is None:
+        return {}
+    if not isinstance(secret, dict):
+        raise ValueError("secret must be an object")
+    return {key: value for key, value in secret.items() if str(value or "").strip()}
+
+
+def prepare_provider_payload(
+    db: Session,
+    *,
+    provider: str,
+    payload: dict[str, Any],
+    tenant_id: str | None,
+) -> dict[str, Any]:
+    """Validate scope inheritance and preserve write-only encrypted secrets.
+
+    Provider forms never read plaintext secrets back into the browser. A partial
+    rotation must therefore merge submitted fields with the exact scoped secret
+    on the server; replacing the encrypted mapping with only the visible fields
+    would silently delete credentials. First-time enabled configurations must
+    provide every secret field declared by the provider definition.
+    """
+
+    normalized = str(provider or "").strip().lower()
+    definition = saas_providers.PROVIDERS.get(normalized)
+    if definition is None:
+        raise ValueError("Unknown integration provider")
+
+    prepared = dict(payload)
+    enabled = bool(prepared.get("enabled", True))
+    submitted = _submitted_secret(prepared)
+    exact_row = saas_services.get_provider_credential(
+        db,
+        provider=normalized,
+        tenant_id=tenant_id,
+        allow_platform_fallback=False,
+    )
+    platform_row = None
+    if tenant_id:
+        platform_row = saas_services.get_provider_credential(
+            db,
+            provider=normalized,
+            tenant_id=None,
+            allow_platform_fallback=False,
+        )
+
+    existing_secret = (
+        saas_secrets.decrypt_secret(exact_row.encrypted_secret)
+        if exact_row and exact_row.encrypted_secret
+        else {}
+    )
+    if submitted:
+        merged_secret = {**existing_secret, **submitted}
+        prepared["secret"] = merged_secret
+    else:
+        merged_secret = existing_secret
+
+    clearing_secret = bool(prepared.get("clear_secret")) and not submitted
+    if not enabled:
+        return prepared
+
+    if clearing_secret and existing_secret:
+        raise ValueError(
+            "An enabled provider cannot clear its stored secret. Disable the provider or supply replacement credentials."
+        )
+
+    inherited_platform_secret = bool(platform_row and platform_row.encrypted_secret)
+    if tenant_id and exact_row is None and inherited_platform_secret and not submitted:
+        raise ValueError(
+            "Tenant-specific secret values are required before overriding an inherited platform credential."
+        )
+
+    missing = [
+        field
+        for field in definition.secret_fields
+        if not str(merged_secret.get(field) or "").strip()
+    ]
+    if missing:
+        raise ValueError(
+            "Enabled provider configuration is missing required secret field(s): "
+            + ", ".join(missing)
+        )
+
+    return prepared
 
 
 def validate_tenant_provider_override(
@@ -23,45 +106,12 @@ def validate_tenant_provider_override(
     payload: dict[str, Any],
     tenant_id: str | None,
 ) -> None:
-    """Prevent an enabled tenant override from silently dropping inherited secrets.
-
-    A tenant-specific credential row takes precedence over the platform default.
-    Creating or re-enabling that row without its own secret would therefore make
-    the integration appear configured while removing the credential used by the
-    inherited provider. Disabling an inherited provider is allowed and produces
-    an explicit disabled tenant override.
-    """
-
-    if not tenant_id or not bool(payload.get("enabled", True)):
-        return
-
-    normalized = str(provider or "").strip().lower()
-    tenant_row = saas_services.get_provider_credential(
+    prepare_provider_payload(
         db,
-        provider=normalized,
+        provider=provider,
+        payload=payload,
         tenant_id=tenant_id,
-        allow_platform_fallback=False,
     )
-    platform_row = saas_services.get_provider_credential(
-        db,
-        provider=normalized,
-        tenant_id=None,
-        allow_platform_fallback=False,
-    )
-
-    existing_tenant_secret = bool(tenant_row and tenant_row.encrypted_secret)
-    inherited_platform_secret = bool(platform_row and platform_row.encrypted_secret)
-    clearing_secret = bool(payload.get("clear_secret")) and not _nonempty_secret(payload)
-
-    if clearing_secret and existing_tenant_secret:
-        raise ValueError(
-            "An enabled tenant provider cannot clear its stored secret. Disable the provider or supply replacement tenant credentials."
-        )
-
-    if inherited_platform_secret and not existing_tenant_secret and not _nonempty_secret(payload):
-        raise ValueError(
-            "Tenant-specific secret values are required before overriding an inherited platform credential."
-        )
 
 
 def install_tenant_provider_override_policy() -> None:
@@ -79,7 +129,7 @@ def install_tenant_provider_override_policy() -> None:
         actor_user_id: str,
         tenant_id: str | None = None,
     ) -> dict[str, Any]:
-        validate_tenant_provider_override(
+        prepared = prepare_provider_payload(
             db,
             provider=provider,
             payload=payload,
@@ -89,7 +139,7 @@ def install_tenant_provider_override_policy() -> None:
         return _ORIGINAL_UPSERT(
             db,
             provider=provider,
-            payload=payload,
+            payload=prepared,
             actor_user_id=actor_user_id,
             tenant_id=tenant_id,
         )
