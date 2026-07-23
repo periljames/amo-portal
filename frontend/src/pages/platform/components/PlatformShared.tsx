@@ -2,17 +2,7 @@ import React from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { endSession, getCachedUser } from "../../../services/auth";
 import "../../../styles/platform-control.css";
-
-export const platformNav = [
-  ["/platform/control", "Platform Control", "PC"],
-  ["/platform/tenants", "Tenants & Institutions", "TI"],
-  ["/platform/users", "Global User Hub", "UH"],
-  ["/platform/billing", "Subscription & Billing", "BI"],
-  ["/platform/analytics", "Platform Analytics", "AN"],
-  ["/platform/security", "Security & Compliance", "SC"],
-  ["/platform/integrations", "Integrations & API", "IA"],
-  ["/platform/infrastructure", "System Infrastructure", "SI"],
-] as const;
+import { platformNav } from "./platformNavigation";
 
 export const StatusBadge: React.FC<{ value?: unknown }> = ({ value }) => {
   const text = String(value ?? "UNKNOWN");
@@ -28,7 +18,12 @@ export const StatusBadge: React.FC<{ value?: unknown }> = ({ value }) => {
   return <span className={`platform-badge ${cls}`}>{text}</span>;
 };
 
-export const MetricCard: React.FC<{ label: string; value: React.ReactNode; caption?: React.ReactNode; tone?: "blue" | "green" | "amber" | "red" | "purple" }> = ({ label, value, caption, tone = "blue" }) => (
+export const MetricCard: React.FC<{
+  label: string;
+  value: React.ReactNode;
+  caption?: React.ReactNode;
+  tone?: "blue" | "green" | "amber" | "red" | "purple";
+}> = ({ label, value, caption, tone = "blue" }) => (
   <section className={`platform-card platform-metric platform-metric--${tone}`}>
     <div className="platform-metric__shine" />
     <div className="label">{label}</div>
@@ -37,7 +32,12 @@ export const MetricCard: React.FC<{ label: string; value: React.ReactNode; capti
   </section>
 );
 
-export const PlatformShell: React.FC<{ title: string; subtitle: string; actions?: React.ReactNode; children: React.ReactNode }> = ({ title, subtitle, actions, children }) => {
+export const PlatformShell: React.FC<{
+  title: string;
+  subtitle: string;
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ title, subtitle, actions, children }) => {
   const user = getCachedUser();
   const navigate = useNavigate();
   if (!user?.is_superuser) {
@@ -104,5 +104,9 @@ export const ErrorState: React.FC<{ error: unknown; retry?: () => void }> = ({ e
     {retry ? <button className="platform-btn" onClick={retry}>Retry</button> : null}
   </div>
 );
+
 export const EmptyState: React.FC<{ label: string }> = ({ label }) => <div className="platform-empty">{label}</div>;
-export const DataTable: React.FC<{ children: React.ReactNode }> = ({ children }) => <div className="platform-table-wrap"><table className="platform-table">{children}</table></div>;
+
+export const DataTable: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="platform-table-wrap"><table className="platform-table">{children}</table></div>
+);
