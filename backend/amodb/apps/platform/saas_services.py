@@ -243,15 +243,33 @@ def enqueue_provider_health(
     tenant_id: str | None,
     actor_user_id: str,
 ) -> models.SaaSJob:
-    row = get_provider_credential(db, provider=provider, tenant_id=tenant_id)
+    normalized = (provider or "").strip().lower()
+    exact_row = get_provider_credential(
+        db,
+        provider=normalized,
+        tenant_id=tenant_id,
+        allow_platform_fallback=False,
+    ) if tenant_id else get_provider_credential(db, provider=normalized, tenant_id=None)
+    row = exact_row or get_provider_credential(db, provider=normalized, tenant_id=tenant_id)
     if not row:
         raise ValueError("Provider is not configured")
+    status = str(row.status or "").strip().upper()
+    if status == "DISABLED":
+        raise ValueError("Disabled providers cannot be health checked")
+    if status not in {"CONFIGURED", "HEALTHY", "UNHEALTHY"}:
+        raise ValueError("Provider is not configured for a health check")
+    inherited_platform_credential = bool(tenant_id and row.tenant_id is None)
     return saas_queue.enqueue_job(
         db,
         job_type="PROVIDER_HEALTH_CHECK",
         queue_name="integrations",
         tenant_id=tenant_id,
-        payload={"provider": row.provider, "credential_id": row.id},
+        payload={
+            "provider": row.provider,
+            "credential_id": row.id,
+            "mutate_credential_status": not inherited_platform_credential,
+            "credential_scope": provider_scope(row.tenant_id),
+        },
         idempotency_key=f"health:{row.id}:{utcnow().strftime('%Y%m%d%H%M')}",
         correlation_id=str(uuid.uuid4()),
         created_by=actor_user_id,

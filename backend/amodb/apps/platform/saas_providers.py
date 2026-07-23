@@ -152,6 +152,7 @@ def create_stripe_checkout_session(
     tenant_id: str,
     tenant_email: str | None,
     module_code: str,
+    module_price_id: str,
     price_ref: str,
     idempotency_key: str,
 ) -> dict[str, Any]:
@@ -160,6 +161,8 @@ def create_stripe_checkout_session(
         raise ValueError("Stripe secret_key is not configured")
     if not price_ref:
         raise ValueError("Stripe external price reference is not configured for this module price")
+    if not module_price_id:
+        raise ValueError("Portal module price id is required for Stripe checkout")
     api_base = _safe_url(str(config.get("api_base_url") or "https://api.stripe.com"))
     success_url = str(config.get("success_url") or "").strip()
     cancel_url = str(config.get("cancel_url") or "").strip()
@@ -177,8 +180,12 @@ def create_stripe_checkout_session(
         ("client_reference_id", tenant_id),
         ("metadata[tenant_id]", tenant_id),
         ("metadata[module_code]", module_code),
+        ("metadata[module_price_id]", module_price_id),
+        ("metadata[external_price_ref]", price_ref),
         ("subscription_data[metadata][tenant_id]", tenant_id),
         ("subscription_data[metadata][module_code]", module_code),
+        ("subscription_data[metadata][module_price_id]", module_price_id),
+        ("subscription_data[metadata][external_price_ref]", price_ref),
     ]
     if tenant_email:
         fields.append(("customer_email", tenant_email))

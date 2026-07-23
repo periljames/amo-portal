@@ -174,6 +174,35 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     if event_type == "checkout.session.completed":
         if not module_code:
             raise ValueError("Stripe checkout metadata is missing module_code")
+        session_id = str(obj.get("id") or "").strip()
+        module_price_id = str(metadata.get("module_price_id") or "").strip()
+        external_price_ref = str(metadata.get("external_price_ref") or "").strip()
+        account = (
+            db.query(models.SaaSBillingAccount)
+            .filter(
+                models.SaaSBillingAccount.tenant_id == tenant_id,
+                models.SaaSBillingAccount.provider == "stripe",
+            )
+            .first()
+        )
+        pending = account.metadata_json if account and isinstance(account.metadata_json, dict) else {}
+        if account is None or str(account.status or "").upper() != "CHECKOUT_PENDING":
+            raise ValueError("Stripe checkout completion has no pending portal checkout")
+        expected_session_id = str(pending.get("checkout_session_id") or "").strip()
+        expected_module_code = str(pending.get("module_code") or "").strip()
+        expected_module_price_id = str(pending.get("module_price_id") or "").strip()
+        expected_price_ref = str(pending.get("external_price_ref") or "").strip()
+        if not session_id or session_id != expected_session_id:
+            raise ValueError("Stripe checkout session does not match the pending portal checkout")
+        if module_code != expected_module_code or module_price_id != expected_module_price_id or external_price_ref != expected_price_ref:
+            raise ValueError("Stripe checkout metadata does not match the pending portal checkout")
+        price = db.get(models.SaaSModulePrice, expected_module_price_id)
+        if (
+            price is None
+            or saas_services.normalize_module_code(str(price.module_code or "")) != saas_services.normalize_module_code(module_code)
+            or str(price.external_price_ref or "") != expected_price_ref
+        ):
+            raise ValueError("Stripe checkout price does not match the portal module price")
         payment_status = str(obj.get("payment_status") or "").lower()
         _upsert_billing_account(
             db,
@@ -277,7 +306,16 @@ def _process_stripe_webhook(db: Session, job: models.SaaSJob) -> dict[str, Any]:
 
 
 def _process_provider_health(db: Session, job: models.SaaSJob) -> dict[str, Any]:
-    credential = _credential(db, str((job.payload_json or {}).get("credential_id") or ""))
+    payload = job.payload_json or {}
+    credential = _credential(db, str(payload.get("credential_id") or ""))
+    db.refresh(credential)
+    status = str(credential.status or "").strip().upper()
+    if status == "DISABLED":
+        raise ValueError("Disabled providers cannot be health checked")
+    if status not in {"CONFIGURED", "HEALTHY", "UNHEALTHY"}:
+        raise ValueError("Provider is not configured for a health check")
+    inherited_platform_credential = bool(job.tenant_id and credential.tenant_id is None)
+    mutate_status = bool(payload.get("mutate_credential_status", True)) and not inherited_platform_credential
     try:
         result = saas_providers.check_provider(
             credential.provider,
@@ -285,32 +323,43 @@ def _process_provider_health(db: Session, job: models.SaaSJob) -> dict[str, Any]
             config=credential.config_json or {},
         )
     except Exception as exc:
-        credential.status = "UNHEALTHY"
-        credential.last_checked_at = utcnow()
-        credential.last_health_detail = str(exc)[:2000]
-        credential.last_latency_ms = None
-        db.flush()
+        if mutate_status:
+            credential.status = "UNHEALTHY"
+            credential.last_checked_at = utcnow()
+            credential.last_health_detail = str(exc)[:2000]
+            credential.last_latency_ms = None
+            db.flush()
         raise
-    credential.status = "HEALTHY"
-    credential.last_checked_at = utcnow()
-    credential.last_latency_ms = int(float(result.get("latency_ms") or 0))
-    credential.last_health_detail = "Provider health check passed."
-    db.flush()
+    if mutate_status:
+        credential.status = "HEALTHY"
+        credential.last_checked_at = utcnow()
+        credential.last_latency_ms = int(float(result.get("latency_ms") or 0))
+        credential.last_health_detail = "Provider health check passed."
+        db.flush()
     return result
 
 
 def _process_checkout(db: Session, job: models.SaaSJob) -> dict[str, Any]:
     payload = job.payload_json or {}
     credential = _credential(db, str(payload.get("provider_credential_id") or ""))
+    db.refresh(credential)
+    saas_services.require_operational_provider(credential, label="Stripe")
+    module_price_id = str(payload.get("module_price_id") or "").strip()
+    module_code = str(payload.get("module_code") or "").strip()
+    external_price_ref = str(payload.get("external_price_ref") or "").strip()
     result = saas_providers.create_stripe_checkout_session(
         secret=saas_services.provider_secrets(credential),
         config=credential.config_json or {},
         tenant_id=str(job.tenant_id),
         tenant_email=payload.get("tenant_email"),
-        module_code=str(payload.get("module_code") or ""),
-        price_ref=str(payload.get("external_price_ref") or ""),
+        module_code=module_code,
+        module_price_id=module_price_id,
+        price_ref=external_price_ref,
         idempotency_key=job.idempotency_key,
     )
+    session_id = str(result.get("session_id") or "").strip()
+    if not session_id:
+        raise ValueError("Stripe checkout did not return a session id")
     _upsert_billing_account(
         db,
         tenant_id=str(job.tenant_id),
@@ -318,7 +367,13 @@ def _process_checkout(db: Session, job: models.SaaSJob) -> dict[str, Any]:
         customer_ref=result.get("customer"),
         subscription_ref=result.get("subscription"),
         status="CHECKOUT_PENDING",
-        metadata={"checkout_session_id": result.get("session_id"), "module_code": payload.get("module_code")},
+        metadata={
+            "checkout_session_id": session_id,
+            "module_code": module_code,
+            "module_price_id": module_price_id,
+            "external_price_ref": external_price_ref,
+            "provider_credential_id": credential.id,
+        },
     )
     db.flush()
     return result
