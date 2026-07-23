@@ -2,7 +2,7 @@
 """Public service facade for the complete duty-rostering domain.
 
 The implementation is split by responsibility to keep lifecycle, assignment,
-planning and reporting logic independently testable.  Import service functions
+planning and reporting logic independently testable. Import service functions
 from this module when compatibility with the original Phase 1 import path is
 required.
 """
@@ -15,8 +15,10 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models
+from ..quality import models as quality_models
 from ..training import models as training_models
 from ..workforce import models as workforce_models
+from ..workforce import services as workforce_services
 from . import assignments, catalog, common, lifecycle, planning, reports
 from .assignments import (
     allocate_to_task,
@@ -84,7 +86,7 @@ def list_shift_templates(db: Session, *, amo_id: str, include_inactive: bool = F
     """Return tenant templates while repairing the historical TRAIN semantic.
 
     Training occupies an employee's working time and must participate in duty,
-    overlap, rest and timesheet calculations.  Earlier seeds marked the default
+    overlap, rest and timesheet calculations. Earlier seeds marked the default
     TRAIN template as non-duty; reconcile it whenever templates are loaded so
     both upgraded and newly provisioned tenants receive the canonical meaning.
     """
@@ -112,7 +114,7 @@ def _ensure_source_owned_state(
     assignment_source,
     source_reference_id: Optional[str],
 ) -> None:
-    """Prevent roster-only copies of state owned by Workforce or Training."""
+    """Protect canonical Workforce, Training and Quality state at mutation time."""
     status_value = _value(assignment_status)
     source_value = _value(assignment_source)
     external_state = status_value in {"LEAVE", "TRAINING", "UNAVAILABLE"}
@@ -127,6 +129,25 @@ def _ensure_source_owned_state(
     if trusted_external_source or status_value in {"OFF", "LEAVE", "TRAINING", "UNAVAILABLE"}:
         return
 
+    final_date = (ends_at - timedelta(microseconds=1)).date()
+    start_contract = workforce_services.active_contract_for_user(
+        db,
+        amo_id=amo_id,
+        user_id=user_id,
+        on_date=starts_at.date(),
+    )
+    end_contract = workforce_services.active_contract_for_user(
+        db,
+        amo_id=amo_id,
+        user_id=user_id,
+        on_date=final_date,
+    )
+    if not start_contract or not end_contract:
+        raise ValueError(
+            "This person has no active employment contract for the selected duty period. "
+            "Inactive, suspended, terminated and out-of-contract personnel cannot be rostered."
+        )
+
     availability = db.query(workforce_models.EmployeeAvailabilityEvent.id).filter(
         workforce_models.EmployeeAvailabilityEvent.amo_id == amo_id,
         workforce_models.EmployeeAvailabilityEvent.user_id == user_id,
@@ -140,7 +161,6 @@ def _ensure_source_owned_state(
             "Resolve the Workforce source record before assigning duty."
         )
 
-    final_date = (ends_at - timedelta(microseconds=1)).date()
     training = db.query(training_models.TrainingEventParticipant.id).join(
         training_models.TrainingEvent,
         training_models.TrainingEventParticipant.event_id == training_models.TrainingEvent.id,
@@ -163,6 +183,29 @@ def _ensure_source_owned_state(
         raise ValueError(
             "This person is already scheduled for Training in the selected period. "
             "The Training commitment is shown automatically and cannot be overwritten by duty."
+        )
+
+    quality_audit = db.query(quality_models.QMSAudit.id).filter(
+        quality_models.QMSAudit.amo_id == amo_id,
+        quality_models.QMSAudit.deleted_at.is_(None),
+        quality_models.QMSAudit.status != quality_models.QMSAuditStatus.CLOSED,
+        quality_models.QMSAudit.planned_start.isnot(None),
+        quality_models.QMSAudit.planned_start <= final_date,
+        or_(
+            quality_models.QMSAudit.planned_end.is_(None),
+            quality_models.QMSAudit.planned_end >= starts_at.date(),
+        ),
+        or_(
+            quality_models.QMSAudit.lead_auditor_user_id == user_id,
+            quality_models.QMSAudit.observer_auditor_user_id == user_id,
+            quality_models.QMSAudit.assistant_auditor_user_id == user_id,
+            quality_models.QMSAudit.auditee_user_id == user_id,
+        ),
+    ).first()
+    if quality_audit:
+        raise ValueError(
+            "This person is assigned to a Quality audit in the selected period. "
+            "The QMS commitment is shown automatically and cannot be overwritten by duty."
         )
 
 
