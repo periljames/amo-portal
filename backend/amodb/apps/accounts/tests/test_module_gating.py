@@ -30,6 +30,8 @@ def db_session():
             crs_models.CRSSignoff.__table__,
             maintenance_models.AmpProgramItem.__table__,
             maintenance_models.AmpAircraftProgramItem.__table__,
+            account_models.CatalogSKU.__table__,
+            account_models.TenantLicense.__table__,
             account_models.ModuleSubscription.__table__,
         ],
     )
