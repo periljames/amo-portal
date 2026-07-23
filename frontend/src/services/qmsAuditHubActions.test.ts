@@ -1,10 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const authFailure = vi.fn();
-const beginBackgroundLoading = vi.fn();
-const endBackgroundLoading = vi.fn();
-const beginLoading = vi.fn();
-const endLoading = vi.fn();
+const {
+  authFailure,
+  beginBackgroundLoading,
+  endBackgroundLoading,
+  beginLoading,
+  endLoading,
+} = vi.hoisted(() => ({
+  authFailure: vi.fn(),
+  beginBackgroundLoading: vi.fn(),
+  endBackgroundLoading: vi.fn(),
+  beginLoading: vi.fn(),
+  endLoading: vi.fn(),
+}));
 
 vi.mock("./auth", () => ({
   getToken: () => "quality-token",
