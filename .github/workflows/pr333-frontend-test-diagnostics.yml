@@ -1,0 +1,60 @@
+name: PR333 Frontend Test Diagnostics
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr333-frontend-test-diagnostics
+  cancel-in-progress: true
+
+jobs:
+  frontend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies with bounded transient retries
+        working-directory: frontend
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "PR333 frontend diagnostic dependency install"
+          -- npm ci --prefer-offline --no-audit --fund=false
+          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
+      - name: Run Quality frontend tests
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm run test:quality 2>&1 | tee /tmp/pr333-quality-frontend.log
+      - name: Upload Quality frontend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-quality-frontend
+          path: /tmp/pr333-quality-frontend.log
+          if-no-files-found: warn
+          retention-days: 2
+      - name: Run platform frontend tests
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm run test:platform 2>&1 | tee /tmp/pr333-platform-frontend.log
+      - name: Upload platform frontend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr333-platform-frontend
+          path: /tmp/pr333-platform-frontend.log
+          if-no-files-found: warn
+          retention-days: 2
