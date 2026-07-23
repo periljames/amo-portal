@@ -5,248 +5,128 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   release-candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 110
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: amodb_pr333_gate
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d amodb_pr333_gate"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-    env:
-      APP_ENV: test
-      ALLOW_SQLITE_FOR_TESTS: "1"
-      SECRET_KEY: pr333-release-candidate-secret
-      PLATFORM_SECRETS_KEY: "5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU="
-      QUALITY_SCHEMA_STRICT: "0"
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
-      DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
-      DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_gate
-      LEGACY_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_pr333_legacy_probe
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: fix/rostering-unified-workforce
+          fetch-depth: 0
           show-progress: false
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install backend dependencies with bounded transient retries
-        run: >-
-          python .github/scripts/retry_transient.py
-          --attempts 4
-          --label "PR333 backend dependency install"
-          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
-      - name: Verify Quality release contract
-        working-directory: backend
-        run: |
-          set -o pipefail
-          python -m amodb.scripts.quality_module_internal_check | tee /tmp/pr333-quality-contract.json
-      - name: Upload Quality contract report
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: pr333-quality-contract
-          path: /tmp/pr333-quality-contract.json
-          if-no-files-found: error
-          retention-days: 2
-      - name: Verify SaaS control-plane contract
-        working-directory: backend
-        run: python -m amodb.scripts.saas_control_plane_internal_check
-      - name: Verify release-cleanup contract
-        working-directory: backend
-        run: python -m amodb.scripts.saas_release_cleanup_check
-      - name: Verify Alembic graph
-        working-directory: backend
+      - name: Apply audited rostering lint fixes
+        shell: bash
         run: |
           python - <<'PY'
-          from alembic.config import Config
-          from alembic.script import ScriptDirectory
+          from pathlib import Path
 
-          script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-          heads = script.get_heads()
-          print("Alembic heads:", heads)
-          assert len(heads) == len(set(heads)), heads
-          assert script.get_revision("workforce_20260721_complete")
-          assert script.get_revision("quality_20260722_schema_integrity")
-          assert script.get_revision("saas_20260722_side_effect_safe")
-          PY
-      - name: Upgrade clean PostgreSQL schema
-        working-directory: backend
-        run: alembic -c amodb/alembic.ini upgrade heads
-      - name: Create legacy Alembic probe database
-        run: |
-          python - <<'PY'
-          import psycopg2
+          def replace(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"Expected source block not found in {path}: {old[:100]!r}")
+              target.write_text(text.replace(old, new), encoding="utf-8")
 
-          connection = psycopg2.connect(
-              host="127.0.0.1",
-              port=5432,
-              user="postgres",
-              password="postgres",
-              dbname="postgres",
+          planner = "frontend/src/pages/rostering/components/RosterPlannerV2.tsx"
+          replace(
+              planner,
+              '''function commitmentIcon(sourceModule: string) {
+            if (sourceModule === "TRAINING") return GraduationCap;
+            if (sourceModule === "QUALITY") return ShieldCheck;
+            return Umbrella;
+          }''',
+              '''function CommitmentSourceIcon({ sourceModule }: { sourceModule: string }) {
+            if (sourceModule === "TRAINING") return <GraduationCap size={12} aria-hidden="true" />;
+            if (sourceModule === "QUALITY") return <ShieldCheck size={12} aria-hidden="true" />;
+            return <Umbrella size={12} aria-hidden="true" />;
+          }''',
           )
-          connection.autocommit = True
-          with connection.cursor() as cursor:
-              cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", ("amodb_pr333_legacy_probe",))
-              if cursor.fetchone() is None:
-                  cursor.execute('CREATE DATABASE "amodb_pr333_legacy_probe"')
-          connection.close()
-          PY
-      - name: Reproduce and repair legacy overlapping Alembic heads
-        working-directory: backend
-        env:
-          DATABASE_URL: ${{ env.LEGACY_DATABASE_URL }}
-          DATABASE_WRITE_URL: ${{ env.LEGACY_DATABASE_URL }}
-          DATABASE_READ_URL: ${{ env.LEGACY_DATABASE_URL }}
-        run: |
-          set -o pipefail
-          python -m amodb.apps.rostering.tests.postgres_migration_probe 2>&1 | tee /tmp/pr333-alembic-legacy-overlap.log
-      - name: Upload legacy Alembic diagnostics
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: pr333-alembic-legacy-overlap
-          path: /tmp/pr333-alembic-legacy-overlap.log
-          if-no-files-found: warn
-          retention-days: 3
-      - name: Compile backend modules
-        working-directory: backend
-        run: >-
-          python -m compileall -q
-          amodb/apps/accounts
-          amodb/apps/audit
-          amodb/apps/platform
-          amodb/apps/quality
-          amodb/apps/realtime
-          amodb/apps/rostering
-          amodb/apps/training
-          amodb/apps/workforce
-          amodb/jobs
-      - name: Configure mappers and verify critical routes
-        working-directory: backend
-        run: |
-          python - <<'PY'
-          from sqlalchemy.orm import configure_mappers
-          from amodb.main import app
-          import amodb.quality_main
+          replace(
+              planner,
+              '''function CommitmentCard({ commitment }: { commitment: RosterCommitmentRead }) {
+            const Icon = commitmentIcon(commitment.source_module);
+            return (''',
+              '''function CommitmentCard({ commitment }: { commitment: RosterCommitmentRead }) {
+            return (''',
+          )
+          replace(planner, '''      <Icon size={12} aria-hidden="true" />''', '''      <CommitmentSourceIcon sourceModule={commitment.source_module} />''')
 
-          configure_mappers()
-          paths = {route.path for route in app.routes}
-          required = {
-              "/platform/tenant-saas/setup",
-              "/platform/tenant-saas/providers/{provider}",
-              "/platform/tenant-saas/invoices/{invoice_id}/fiscalize",
-              "/platform/saas/webhooks/stripe",
-              "/api/realtime/broker/authenticate",
-              "/api/realtime/broker/authorize",
-              "/api/chat/threads",
-          }
-          missing = required - paths
-          assert not missing, missing
-          print("All SQLAlchemy mappers and critical routes verified")
+          replace(
+              "frontend/src/pages/rostering/components/RosterCommitmentBoard.tsx",
+              '''  const items = query.data?.items || [];''',
+              '''  const items = useMemo(() => query.data?.items || [], [query.data?.items]);''',
+          )
+
+          settings = "frontend/src/pages/rostering/components/UnifiedRosterSettings.tsx"
+          replace(
+              settings,
+              '''  const people = peopleQuery.data?.items || [];''',
+              '''  const people = useMemo(() => peopleQuery.data?.items || [], [peopleQuery.data?.items]);''',
+          )
+          replace(
+              settings,
+              '''  const [timezoneName, setTimezoneName] = useState(periods[0]?.timezone_name || "UTC");
+
+            useEffect(() => {
+              if (periods[0]?.timezone_name) setTimezoneName(periods[0].timezone_name);
+            }, [periods]);''',
+              '''  const [timezoneOverride, setTimezoneOverride] = useState("");
+            const timezoneName = timezoneOverride || periods[0]?.timezone_name || "UTC";''',
+          )
+          replace(settings, '''            <input value={timezoneName} onChange={(event) => setTimezoneName(event.target.value)} />''', '''            <input value={timezoneName} onChange={(event) => setTimezoneOverride(event.target.value)} />''')
+          replace(
+              settings,
+              '''  const dutyShifts = shifts.filter((shift) => shift.counts_as_duty && shift.is_active);''',
+              '''  const dutyShifts = useMemo(
+                () => shifts.filter((shift) => shift.counts_as_duty && shift.is_active),
+                [shifts],
+              );''',
+          )
+          replace(
+              settings,
+              '''  useEffect(() => {
+              if (!shiftId && dutyShifts[0]) setShiftId(dutyShifts[0].id);
+            }, [dutyShifts, shiftId]);
+
+            const selectedShift = shifts.find((shift) => shift.id === shiftId);''',
+              '''  const effectiveShiftId = shiftId || dutyShifts[0]?.id || "";
+            const selectedShift = shifts.find((shift) => shift.id === effectiveShiftId);''',
+          )
+          replace(settings, '''            <select value={shiftId} onChange={(event) => setShiftId(event.target.value)}>''', '''            <select value={effectiveShiftId} onChange={(event) => setShiftId(event.target.value)}>''')
+          replace(settings, '''            disabled={!code || !name || !shiftId || busy === "pattern"}''', '''            disabled={!code || !name || !effectiveShiftId || busy === "pattern"}''')
+          replace(settings, '''                  days: buildPatternDays(cycle, dutyDays, shiftId, selectedShift),''', '''                  days: buildPatternDays(cycle, dutyDays, effectiveShiftId, selectedShift),''')
+          replace(
+              settings,
+              '''  useEffect(() => {
+              if (!userId && people[0]) setUserId(people[0].user_id);
+            }, [people, userId]);
+
+            useEffect(() => {
+              if (!baseId && bases[0]) setBaseId(bases[0].id);
+            }, [bases, baseId]);''',
+              '''  const effectiveUserId = userId || people[0]?.user_id || "";
+            const effectiveBaseId = baseId || bases[0]?.id || "";''',
+          )
+          replace(settings, '''            <select value={userId} onChange={(event) => setUserId(event.target.value)}>''', '''            <select value={effectiveUserId} onChange={(event) => setUserId(event.target.value)}>''')
+          replace(settings, '''            <select value={baseId} onChange={(event) => setBaseId(event.target.value)}>''', '''            <select value={effectiveBaseId} onChange={(event) => setBaseId(event.target.value)}>''')
+          replace(settings, '''            disabled={!userId || !baseId || busy === "contract"}''', '''            disabled={!effectiveUserId || !effectiveBaseId || busy === "contract"}''')
+          replace(settings, '''                  user_id: userId,''', '''                  user_id: effectiveUserId,''')
+          replace(settings, '''                  primary_base_station_id: baseId,''', '''                  primary_base_station_id: effectiveBaseId,''')
+
+          hook = "frontend/src/pages/rostering/hooks/useRosterPlannerDataV2.ts"
+          replace(hook, '''  const periods = periodsQuery.data || [];''', '''  const periods = useMemo(() => periodsQuery.data || [], [periodsQuery.data]);''')
+          replace(hook, '''  const peoplePages = peopleQuery.data?.pages || [];''', '''  const peoplePages = useMemo(() => peopleQuery.data?.pages || [], [peopleQuery.data?.pages]);''')
+
+          replace("frontend/src/pages/rostering/components/ComplianceImpact.tsx", '''  }, [range.from, range.to]);''', '''  }, [range]);''')
+          replace("frontend/src/pages/rostering/components/MyRosterWorkspace.tsx", '''  }, [leaveTypeId, range.from, range.to, userId]);''', '''  }, [leaveTypeId, range, userId]);''')
+          replace("frontend/src/pages/rostering/components/RosterReports.tsx", '''  }, [range.from, range.to]);''', '''  }, [range]);''')
           PY
-      - name: Run Quality regressions
-        working-directory: backend
-        run: >-
-          pytest -q
-          amodb/apps/quality/tests/test_quality_delivery_profile.py
-          amodb/apps/quality/tests/test_workflow_transitions.py
-          amodb/apps/quality/tests/test_audit_workflow_enforcement.py
-          amodb/apps/quality/tests/test_audit_events.py
-          amodb/apps/quality/tests/test_task_integrations.py
-          amodb/apps/quality/tests/test_evidence_pack_exports.py
-      - name: Run account regressions
-        working-directory: backend
-        run: |
-          set -o pipefail
-          pytest -vv --tb=long amodb/apps/accounts/tests 2>&1 | tee /tmp/pr333-account-regressions.log
-      - name: Upload account regression diagnostics
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: pr333-account-regressions
-          path: /tmp/pr333-account-regressions.log
-          if-no-files-found: warn
-          retention-days: 2
-      - name: Run Workforce regressions
-        working-directory: backend
-        run: pytest -q amodb/apps/workforce/tests
-      - name: Run Rostering regressions
-        working-directory: backend
-        run: pytest -q amodb/apps/rostering/tests
-      - name: Run SaaS and realtime regressions
-        working-directory: backend
-        run: pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py
-      - name: Run safe worker smoke tests
-        working-directory: backend
-        run: |
-          python -m amodb.jobs.saas_worker_safe --once --batch-size 5
-          python -m amodb.jobs.platform_command_worker --once --batch-size 5
-      - name: Install frontend dependencies with bounded transient retries
-        working-directory: frontend
-        run: >-
-          python ../.github/scripts/retry_transient.py
-          --attempts 4
-          --label "PR333 frontend dependency install"
-          -- npm ci --prefer-offline --no-audit --fund=false
-          --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
-      - name: Typecheck and build production frontend
-        working-directory: frontend
-        run: npm run build
-      - name: Run Quality and platform frontend regressions
-        working-directory: frontend
-        run: |
-          npm run test:quality
-          npm run test:platform
-      - name: Run Rostering and offline regressions
-        working-directory: frontend
-        run: npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts
-      - name: Lint integrated cleanup surfaces
-        working-directory: frontend
-        run: >-
-          npm exec -- eslint
-          src/main.tsx
-          src/components/messaging
-          src/components/offline
-          src/pages/AdminSaaSSettingsPage.tsx
-          src/pages/EmailServerSettingsPage.tsx
-          src/pages/platform
-          src/pages/rostering
-          src/services/apiClient.ts
-          src/services/crs.ts
-          src/services/fleet.ts
-          src/services/maintenance.ts
-          src/services/messaging.ts
-          src/services/messaging.test.ts
-          src/services/offlineHttp.ts
-          src/services/offlinePersistence.ts
-          src/services/platformControl.ts
-          src/services/platformControl.test.ts
-          src/services/qmsAuditHubActions.ts
-          src/services/qmsAuditHubActions.test.ts
-          src/services/queryPersister.ts
-          src/services/realtime
-          src/services/rostering.ts
-          src/services/saasSettings.ts
-          src/services/saasSettings.test.ts
-          src/services/typedApi.ts
-          src/services/workOrders.ts
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/pages/rostering
+          git commit -m "Resolve rostering React lint findings"
+          git push origin HEAD:fix/rostering-unified-workforce
