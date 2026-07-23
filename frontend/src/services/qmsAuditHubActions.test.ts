@@ -134,10 +134,12 @@ describe("Quality audit hub API helpers", () => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
     }));
 
-    const request = qmsAddCarAction("car-4", { message: "Ping" });
+    const handledRequest = qmsAddCarAction("car-4", { message: "Ping" }).catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(45_000);
 
-    await expect(request).rejects.toThrow("Quality API request timed out after 45 seconds.");
+    await expect(handledRequest).resolves.toEqual(
+      new Error("Quality API request timed out after 45 seconds."),
+    );
     expect(endLoading).toHaveBeenCalledOnce();
   });
 });
