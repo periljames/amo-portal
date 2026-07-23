@@ -90,12 +90,6 @@ def test_stripe_webhook_uses_matching_tenant_secret(monkeypatch: pytest.MonkeyPa
         return secret == "tenant-secret"
 
     monkeypatch.setattr(saas_webhooks.saas_providers, "verify_stripe_signature", verify)
-    event = SimpleNamespace(id="stored-event")
-    monkeypatch.setattr(
-        saas_webhooks.account_models,
-        "WebhookEvent",
-        lambda **kwargs: event,
-    )
     captured: dict[str, object] = {}
 
     def enqueue(db, **kwargs):
@@ -107,6 +101,12 @@ def test_stripe_webhook_uses_matching_tenant_secret(monkeypatch: pytest.MonkeyPa
     query.filter.return_value.first.return_value = None
     db = MagicMock()
     db.query.return_value = query
+
+    def add(row):
+        if isinstance(row, account_models.WebhookEvent):
+            row.id = "stored-event"
+
+    db.add.side_effect = add
     raw = json.dumps({
         "id": "evt_tenant",
         "type": "checkout.session.completed",
