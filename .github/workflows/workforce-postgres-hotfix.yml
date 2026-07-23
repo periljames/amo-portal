@@ -7,7 +7,9 @@ on:
       - "backend/amodb/alembic/versions/workforce_20260721_precreate_tables.py"
       - "backend/amodb/apps/rostering/models.py"
       - "backend/amodb/apps/rostering/tests/postgres_migration_probe.py"
+      - ".github/scripts/**"
       - ".github/workflows/workforce-postgres-hotfix.yml"
+      - ".github/workflows/recheck-transient-ci.yml"
   workflow_dispatch:
 
 permissions:
@@ -16,6 +18,7 @@ permissions:
 jobs:
   postgres-migration:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16
@@ -42,7 +45,12 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - run: pip install -r requirements.txt
+      - name: Install backend dependencies with bounded transient retries
+        run: >-
+          python ../.github/scripts/retry_transient.py
+          --attempts 4
+          --label "workforce migration dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
       - name: Run PostgreSQL migration collision probe
         id: migrate
         continue-on-error: true
@@ -57,11 +65,12 @@ jobs:
           python -m amodb.apps.rostering.tests.postgres_migration_probe 2>&1 | tee workforce-postgres-migration.log
       - name: Upload PostgreSQL migration diagnostics
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: workforce-postgres-migration-log
           path: backend/workforce-postgres-migration.log
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
       - name: Fail when migration failed
         if: steps.migrate.outcome != 'success'
