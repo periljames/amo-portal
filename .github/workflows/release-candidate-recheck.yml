@@ -3,19 +3,14 @@ name: Release Candidate Recheck
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: release-candidate-recheck-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  schema-and-contracts:
+  release-candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 100
     services:
       postgres:
         image: postgres:16
@@ -30,13 +25,12 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-    defaults:
-      run:
-        working-directory: backend
     env:
       APP_ENV: test
+      ALLOW_SQLITE_FOR_TESTS: "1"
       SECRET_KEY: release-candidate-recheck-secret
-      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
+      PLATFORM_SECRETS_KEY: "5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU="
+      QUALITY_SCHEMA_STRICT: "0"
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_release_recheck
       DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_release_recheck
       DATABASE_READ_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_release_recheck
@@ -49,18 +43,28 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - name: Install backend dependencies with bounded transient retries
         run: >-
-          python ../.github/scripts/retry_transient.py
+          python .github/scripts/retry_transient.py
           --attempts 4
-          --label "release-recheck backend dependency install"
-          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Verify release contracts
-        run: |
-          python -m amodb.scripts.quality_module_internal_check
-          python -m amodb.scripts.saas_control_plane_internal_check
-          python -m amodb.scripts.saas_release_cleanup_check
-      - name: Verify Alembic graph and clean PostgreSQL upgrade
+          --label "release-candidate backend dependency install"
+          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+      - name: Verify Quality release contract
+        working-directory: backend
+        run: python -m amodb.scripts.quality_module_internal_check
+      - name: Verify SaaS control-plane contract
+        working-directory: backend
+        run: python -m amodb.scripts.saas_control_plane_internal_check
+      - name: Verify release-cleanup contract
+        working-directory: backend
+        run: python -m amodb.scripts.saas_release_cleanup_check
+      - name: Verify Alembic graph
+        working-directory: backend
         run: |
           python - <<'PY'
           from alembic.config import Config
@@ -74,8 +78,24 @@ jobs:
           assert script.get_revision("quality_20260722_schema_integrity")
           assert script.get_revision("saas_20260722_side_effect_safe")
           PY
-          alembic -c amodb/alembic.ini upgrade heads
+      - name: Upgrade clean PostgreSQL schema
+        working-directory: backend
+        run: alembic -c amodb/alembic.ini upgrade heads
+      - name: Compile backend modules
+        working-directory: backend
+        run: >-
+          python -m compileall -q
+          amodb/apps/accounts
+          amodb/apps/audit
+          amodb/apps/platform
+          amodb/apps/quality
+          amodb/apps/realtime
+          amodb/apps/rostering
+          amodb/apps/training
+          amodb/apps/workforce
+          amodb/jobs
       - name: Configure mappers and verify critical routes
+        working-directory: backend
         run: |
           python - <<'PY'
           from sqlalchemy.orm import configure_mappers
@@ -97,51 +117,12 @@ jobs:
           assert not missing, missing
           print("All SQLAlchemy mappers and critical routes verified")
           PY
-
-  backend-regressions:
-    runs-on: ubuntu-latest
-    timeout-minutes: 65
-    defaults:
-      run:
+      - name: Run Quality regressions
         working-directory: backend
-    env:
-      APP_ENV: test
-      ALLOW_SQLITE_FOR_TESTS: "1"
-      DATABASE_URL: sqlite+pysqlite:///:memory:
-      DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
-      SECRET_KEY: release-candidate-backend-secret
-      PLATFORM_SECRETS_KEY: 5T4IWN4Fkif7LtiH2tGLHSrAX2tyvDEh6bXCWf7cRpU=
-      QUALITY_SCHEMA_STRICT: "0"
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          show-progress: false
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - name: Install backend dependencies with bounded transient retries
-        run: >-
-          python ../.github/scripts/retry_transient.py
-          --attempts 4
-          --label "release-recheck regression dependency install"
-          -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Compile cleanup-sensitive backend modules
-        run: >-
-          python -m compileall -q
-          amodb/apps/accounts
-          amodb/apps/audit
-          amodb/apps/platform
-          amodb/apps/quality
-          amodb/apps/realtime
-          amodb/apps/rostering
-          amodb/apps/training
-          amodb/apps/workforce
-          amodb/jobs
-      - name: Configure complete application mappers
-        run: python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('All application mappers configured')"
-      - name: Run integrated backend regressions
+        env:
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_READ_URL: sqlite+pysqlite:///:memory:
         run: >-
           pytest -q
           amodb/apps/quality/tests/test_quality_delivery_profile.py
@@ -150,49 +131,50 @@ jobs:
           amodb/apps/quality/tests/test_audit_events.py
           amodb/apps/quality/tests/test_task_integrations.py
           amodb/apps/quality/tests/test_evidence_pack_exports.py
-          amodb/apps/accounts/tests
-          amodb/apps/workforce/tests
-          amodb/apps/rostering/tests
-          amodb/apps/platform/tests/test_saas_*.py
-          amodb/apps/realtime/tests/test_*.py
+      - name: Run account, Workforce and Rostering regressions
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_READ_URL: sqlite+pysqlite:///:memory:
+        run: pytest -q amodb/apps/accounts/tests amodb/apps/workforce/tests amodb/apps/rostering/tests
+      - name: Run SaaS and realtime regressions
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_READ_URL: sqlite+pysqlite:///:memory:
+        run: pytest -q amodb/apps/platform/tests/test_saas_*.py amodb/apps/realtime/tests/test_*.py
       - name: Run safe worker smoke tests
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_WRITE_URL: sqlite+pysqlite:///:memory:
+          DATABASE_READ_URL: sqlite+pysqlite:///:memory:
         run: |
           python -m amodb.jobs.saas_worker_safe --once --batch-size 5
           python -m amodb.jobs.platform_command_worker --once --batch-size 5
-
-  frontend-regressions:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          show-progress: false
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
       - name: Install frontend dependencies with bounded transient retries
+        working-directory: frontend
         run: >-
           python ../.github/scripts/retry_transient.py
           --attempts 4
-          --label "release-recheck frontend dependency install"
+          --label "release-candidate frontend dependency install"
           -- npm ci --prefer-offline --no-audit --fund=false
           --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000
       - name: Typecheck and build production frontend
+        working-directory: frontend
         run: npm run build
-      - name: Run integrated frontend regressions
+      - name: Run Quality and platform frontend regressions
+        working-directory: frontend
         run: |
           npm run test:quality
           npm run test:platform
-          npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts
+      - name: Run Rostering and offline regressions
+        working-directory: frontend
+        run: npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts
       - name: Lint integrated cleanup surfaces
+        working-directory: frontend
         run: >-
           npm exec -- eslint
           src/main.tsx
