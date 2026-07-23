@@ -11,6 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from email.message import EmailMessage
+from types import MethodType
 from typing import Any, Callable
 
 from . import saas_providers
@@ -150,7 +151,8 @@ class _SafeHTTPSHandler(urllib.request.HTTPSHandler):
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
-        safe_url(newurl, allowed_schemes=("https", "http"))
+        # Provider calls begin on HTTPS and may not downgrade to plaintext.
+        safe_url(newurl, allowed_schemes=("https",))
         return super().redirect_request(request, fp, code, msg, headers, newurl)
 
 
@@ -206,6 +208,25 @@ def _smtp_context(config: dict[str, Any]) -> ssl.SSLContext:
     return context
 
 
+def _pin_smtp_ssl_socket(
+    client: smtplib.SMTP_SSL,
+    *,
+    hostname: str,
+    pinned_ip: str,
+    port: int,
+    context: ssl.SSLContext,
+) -> None:
+    def pinned_get_socket(self, _host: str, _port: int, timeout: float):
+        sock = socket.create_connection(
+            (pinned_ip, port),
+            timeout,
+            self.source_address,
+        )
+        return context.wrap_socket(sock, server_hostname=hostname)
+
+    client._get_socket = MethodType(pinned_get_socket, client)  # type: ignore[method-assign]
+
+
 def open_smtp_client(
     *,
     secret: dict[str, Any],
@@ -220,11 +241,18 @@ def open_smtp_client(
     context = _smtp_context(config)
     if use_ssl:
         client: smtplib.SMTP = smtplib.SMTP_SSL(timeout=timeout, context=context)
-        client._host = host
-        client.connect(pinned_ip, port)
+        _pin_smtp_ssl_socket(
+            client,
+            hostname=host,
+            pinned_ip=pinned_ip,
+            port=port,
+            context=context,
+        )
+        client.connect(host, port)
     else:
         client = smtplib.SMTP(timeout=timeout)
         client.connect(pinned_ip, port)
+        # STARTTLS validates the configured hostname even though TCP is pinned.
         client._host = host
     try:
         code, _ = client.ehlo()
