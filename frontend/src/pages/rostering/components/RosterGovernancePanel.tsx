@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BadgeCheck,
-  CalendarSync,
+  CalendarDays,
   CheckCircle2,
   Clock3,
   Plus,
@@ -203,7 +203,7 @@ export function RosterGovernancePanel({
         {effectiveVersionId ? <div className="wr-governance-decision"><label><span>Decision comment</span><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Approval evidence or required changes" /></label><div className="wr-actions"><button type="button" className="wr-button wr-button--secondary" disabled={decisionMutation.isPending} onClick={() => decisionMutation.mutate({ action: "changes" })}><RotateCcw size={15} /> Request changes</button><button type="button" className="wr-button wr-button--success" disabled={decisionMutation.isPending} onClick={() => decisionMutation.mutate({ action: "approve" })}><CheckCircle2 size={15} /> Approve my scopes</button></div></div> : <EmptyState title="No roster awaiting approval" description="Validate and submit a departmental roster from the planner to generate its approval matrix." />}
       </section>
 
-      <section className="wr-panel wr-calendar-policy-note"><CalendarSync size={20} /><div><strong>Automatic personal calendar</strong><p>Published duty, Quality audits, training and aircraft work allocations are exposed through each user's secure subscription feed. Users subscribe once; their device refreshes the calendar automatically.</p></div></section>
+      <section className="wr-panel wr-calendar-policy-note"><CalendarDays size={20} /><div><strong>Automatic personal calendar</strong><p>Published duty, Quality audits, training and aircraft work allocations are exposed through each user's secure subscription feed. Users subscribe once; their device refreshes the calendar automatically.</p></div></section>
     </div>
   );
 }

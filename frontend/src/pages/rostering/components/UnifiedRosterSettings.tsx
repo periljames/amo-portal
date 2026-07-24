@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useMemo,
   useState,
   type ComponentType,
@@ -134,13 +135,42 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function useSettingsQuery<T>(name: string, queryFn: () => Promise<T>) {
+
+const TAB_SCOPED_QUERY_STALE_MS = 5 * 60_000;
+const REFERENCE_QUERY_STALE_MS = 30 * 60_000;
+
+type AdaptiveNavigator = Navigator & {
+  connection?: {
+    saveData?: boolean;
+    effectiveType?: string;
+  };
+};
+
+function constrainedConnection(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const connection = (navigator as AdaptiveNavigator).connection;
+  return Boolean(
+    connection?.saveData
+    || connection?.effectiveType === "slow-2g"
+    || connection?.effectiveType === "2g"
+  );
+}
+
+function useSettingsQuery<T>(
+  name: string,
+  queryFn: () => Promise<T>,
+  enabled: boolean,
+  staleTime = TAB_SCOPED_QUERY_STALE_MS,
+) {
   return useQuery({
     queryKey: ["rostering", "settings", name],
     queryFn,
-    staleTime: 30_000,
+    enabled,
+    staleTime,
     gcTime: 24 * 60 * 60_000,
     networkMode: "offlineFirst",
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -150,48 +180,108 @@ export function UnifiedRosterSettings() {
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const periodsQuery = useSettingsQuery("periods", () => listRosterPeriods());
-  const shiftsQuery = useSettingsQuery("shifts", () => listShiftTemplates(true));
-  const patternsQuery = useSettingsQuery("patterns", () => listWorkPatterns(true));
-  const employmentQuery = useSettingsQuery("contracts", () =>
-    listEmploymentContracts({ page_size: 200 }),
+
+  const periodsQuery = useSettingsQuery(
+    "periods",
+    () => listRosterPeriods(),
+    tab === "periods" || tab === "patterns" || tab === "governance",
   );
-  const leaveTypesQuery = useSettingsQuery("leave-types", () => listLeaveTypes(true));
-  const leaveRequestsQuery = useSettingsQuery("leave-requests", () =>
-    listLeaveRequests({ page_size: 200 }),
+  const shiftsQuery = useSettingsQuery(
+    "shifts",
+    () => listShiftTemplates(true),
+    tab === "shifts" || tab === "patterns",
+    REFERENCE_QUERY_STALE_MS,
   );
-  const timesheetsQuery = useSettingsQuery("timesheets", () =>
-    listTimesheets({ page_size: 200 }),
+  const patternsQuery = useSettingsQuery(
+    "patterns",
+    () => listWorkPatterns(true),
+    tab === "patterns",
   );
-  const rulesQuery = useSettingsQuery("rules", () => listRosterRules(true));
-  const peopleQuery = useSettingsQuery("people", () =>
-    listAllRosterPeople({
+  const employmentQuery = useSettingsQuery(
+    "contracts",
+    () => listEmploymentContracts({ page_size: 200 }),
+    tab === "contracts",
+  );
+  const leaveTypesQuery = useSettingsQuery(
+    "leave-types",
+    () => listLeaveTypes(true),
+    tab === "leave",
+    REFERENCE_QUERY_STALE_MS,
+  );
+  const leaveRequestsQuery = useSettingsQuery(
+    "leave-requests",
+    () => listLeaveRequests({ page_size: 200 }),
+    tab === "approvals",
+  );
+  const timesheetsQuery = useSettingsQuery(
+    "timesheets",
+    () => listTimesheets({ page_size: 200 }),
+    tab === "approvals",
+  );
+  const rulesQuery = useSettingsQuery(
+    "rules",
+    () => listRosterRules(true),
+    tab === "rules",
+    REFERENCE_QUERY_STALE_MS,
+  );
+  const peopleQuery = useSettingsQuery(
+    "people",
+    () => listAllRosterPeople({
       page_size: 250,
       active_only: true,
       roster_eligible_only: false,
     }),
+    tab === "contracts" || tab === "governance",
+    REFERENCE_QUERY_STALE_MS,
   );
   const permissionsQuery = useSettingsQuery(
     "permissions",
     getCurrentWorkforcePermissions,
+    true,
+    REFERENCE_QUERY_STALE_MS,
   );
-  const contractsQuery = useSettingsQuery("route-contracts", getRosterContracts);
+  const contractsQuery = useSettingsQuery(
+    "route-contracts",
+    getRosterContracts,
+    tab === "integration" || tab === "preferences",
+    REFERENCE_QUERY_STALE_MS,
+  );
 
-  const queries: QuerySnapshot[] = [
-    periodsQuery,
-    shiftsQuery,
-    patternsQuery,
-    employmentQuery,
-    leaveTypesQuery,
-    leaveRequestsQuery,
-    timesheetsQuery,
-    rulesQuery,
-    peopleQuery,
-    permissionsQuery,
-    contractsQuery,
-  ];
+  let activeQueries: QuerySnapshot[] = [permissionsQuery];
+  switch (tab) {
+    case "integration":
+      activeQueries = [permissionsQuery, contractsQuery];
+      break;
+    case "periods":
+      activeQueries = [permissionsQuery, periodsQuery];
+      break;
+    case "shifts":
+      activeQueries = [permissionsQuery, shiftsQuery];
+      break;
+    case "patterns":
+      activeQueries = [permissionsQuery, periodsQuery, shiftsQuery, patternsQuery];
+      break;
+    case "contracts":
+      activeQueries = [permissionsQuery, employmentQuery, peopleQuery];
+      break;
+    case "leave":
+      activeQueries = [permissionsQuery, leaveTypesQuery];
+      break;
+    case "rules":
+      activeQueries = [permissionsQuery, rulesQuery];
+      break;
+    case "governance":
+      activeQueries = [permissionsQuery, periodsQuery, peopleQuery];
+      break;
+    case "approvals":
+      activeQueries = [permissionsQuery, leaveRequestsQuery, timesheetsQuery];
+      break;
+    case "preferences":
+      activeQueries = [permissionsQuery, contractsQuery];
+      break;
+  }
+  const activeLoading = activeQueries.some((query) => query.isPending && !query.data);
 
-  const initialLoading = queries.every((query) => query.isPending && !query.data);
   const permissions = permissionsQuery.data?.permissions || [];
   const can = (permission: string) => permissions.includes(permission);
   const people = useMemo(() => peopleQuery.data?.items || [], [peopleQuery.data?.items]);
@@ -210,6 +300,50 @@ export function UnifiedRosterSettings() {
     return [...map.values()];
   }, [people]);
 
+  const warmTab = useCallback((nextTab: Tab) => {
+    if (constrainedConnection()) return;
+    const tasks: Array<Promise<unknown>> = [];
+    const prefetch = <T,>(
+      name: string,
+      queryFn: () => Promise<T>,
+      staleTime = TAB_SCOPED_QUERY_STALE_MS,
+    ) => {
+      tasks.push(queryClient.prefetchQuery({
+        queryKey: ["rostering", "settings", name],
+        queryFn,
+        staleTime,
+      }));
+    };
+    if (nextTab === "periods") prefetch("periods", () => listRosterPeriods());
+    if (nextTab === "shifts") {
+      prefetch("shifts", () => listShiftTemplates(true), REFERENCE_QUERY_STALE_MS);
+    }
+    if (nextTab === "patterns") {
+      prefetch("periods", () => listRosterPeriods());
+      prefetch("shifts", () => listShiftTemplates(true), REFERENCE_QUERY_STALE_MS);
+      prefetch("patterns", () => listWorkPatterns(true));
+    }
+    if (nextTab === "contracts") {
+      prefetch("contracts", () => listEmploymentContracts({ page_size: 200 }));
+    }
+    if (nextTab === "leave") {
+      prefetch("leave-types", () => listLeaveTypes(true), REFERENCE_QUERY_STALE_MS);
+    }
+    if (nextTab === "rules") {
+      prefetch("rules", () => listRosterRules(true), REFERENCE_QUERY_STALE_MS);
+    }
+    if (nextTab === "governance") prefetch("periods", () => listRosterPeriods());
+    if (nextTab === "approvals") {
+      prefetch("leave-requests", () => listLeaveRequests({ page_size: 200 }));
+      prefetch("timesheets", () => listTimesheets({ page_size: 200 }));
+    }
+    if (nextTab === "preferences" || nextTab === "integration") {
+      prefetch("route-contracts", getRosterContracts, REFERENCE_QUERY_STALE_MS);
+    }
+    void Promise.allSettled(tasks);
+  }, [queryClient]);
+
+
   const run: RunAction = async (key, action) => {
     setBusy(key);
     setActionError(null);
@@ -223,9 +357,6 @@ export function UnifiedRosterSettings() {
     }
   };
 
-  if (initialLoading) {
-    return <RosterLoading label="Loading tenant rostering setup…" />;
-  }
 
   return (
     <div className="wr-settings">
@@ -237,6 +368,7 @@ export function UnifiedRosterSettings() {
             role="tab"
             aria-selected={tab === id}
             className={tab === id ? "is-active" : ""}
+            onPointerEnter={() => warmTab(id)}
             onClick={() => setTab(id)}
           >
             <Icon size={16} /> {label}
@@ -250,14 +382,17 @@ export function UnifiedRosterSettings() {
         </div>
       ) : null}
 
-      {tab === "integration" ? (
-        <IntegrationPanel
-          people={people}
-          contractMap={contractsQuery.data || null}
-          queries={queries}
-        />
+      {activeLoading ? (
+        <RosterLoading label={`Loading ${TABS.find((item) => item.id === tab)?.label || "setup"}…`} />
       ) : null}
-      {tab === "periods" ? (
+
+      {!activeLoading && tab === "integration" ? (
+  <IntegrationPanel
+    contractMap={contractsQuery.data || null}
+    queries={[permissionsQuery, contractsQuery]}
+  />
+) : null}
+      {!activeLoading && tab === "periods" ? (
         <PeriodsPanel
           periods={periods}
           error={periodsQuery.error}
@@ -266,7 +401,7 @@ export function UnifiedRosterSettings() {
           run={run}
         />
       ) : null}
-      {tab === "shifts" ? (
+      {!activeLoading && tab === "shifts" ? (
         <ShiftsPanel
           shifts={shifts}
           error={shiftsQuery.error}
@@ -275,7 +410,7 @@ export function UnifiedRosterSettings() {
           run={run}
         />
       ) : null}
-      {tab === "patterns" ? (
+      {!activeLoading && tab === "patterns" ? (
         <PatternsPanel
           patterns={patternsQuery.data || []}
           shifts={shifts}
@@ -286,7 +421,7 @@ export function UnifiedRosterSettings() {
           run={run}
         />
       ) : null}
-      {tab === "contracts" ? (
+      {!activeLoading && tab === "contracts" ? (
         <ContractsPanel
           contracts={employmentQuery.data?.items || []}
           people={people}
@@ -297,7 +432,7 @@ export function UnifiedRosterSettings() {
           run={run}
         />
       ) : null}
-      {tab === "leave" ? (
+      {!activeLoading && tab === "leave" ? (
         <LeavePanel
           leaveTypes={leaveTypesQuery.data || []}
           error={leaveTypesQuery.error}
@@ -306,7 +441,7 @@ export function UnifiedRosterSettings() {
           run={run}
         />
       ) : null}
-      {tab === "rules" ? (
+      {!activeLoading && tab === "rules" ? (
         <RulesPanel
           rules={rulesQuery.data || []}
           error={rulesQuery.error}
@@ -315,7 +450,7 @@ export function UnifiedRosterSettings() {
           run={run}
         />
       ) : null}
-      {tab === "governance" ? (
+      {!activeLoading && tab === "governance" ? (
     <RosterGovernancePanel
     people={people}
     periods={periods}
@@ -324,7 +459,7 @@ export function UnifiedRosterSettings() {
     canManageAuthorities={can("roster.manage_approval_authorities")}
     />
     ) : null}
-      {tab === "approvals" ? (
+      {!activeLoading && tab === "approvals" ? (
         <ApprovalsPanel
           requests={leaveRequestsQuery.data?.items || []}
           timesheets={timesheetsQuery.data?.items || []}
@@ -337,7 +472,7 @@ export function UnifiedRosterSettings() {
           run={run}
         />
       ) : null}
-      {tab === "preferences" ? (
+      {!activeLoading && tab === "preferences" ? (
         <PreferencesPanel
           contractMap={contractsQuery.data || null}
           error={contractsQuery.error || permissionsQuery.error}
@@ -349,12 +484,11 @@ export function UnifiedRosterSettings() {
   );
 }
 
+
 function IntegrationPanel({
-  people,
   contractMap,
   queries,
 }: {
-  people: RosterPersonRead[];
   contractMap: RosterContractResponse | null;
   queries: QuerySnapshot[];
 }) {
@@ -368,55 +502,32 @@ function IntegrationPanel({
           <span className="wr-eyebrow">Canonical data contract</span>
           <h2>Tenant workforce integration</h2>
         </div>
-        <StatusPill
-          value={failures ? "DEGRADED" : loading ? "SYNCING" : "CONNECTED"}
-        />
+        <StatusPill value={failures ? "DEGRADED" : loading ? "SYNCING" : "CONNECTED"} />
       </div>
 
       <div className="wr-card-grid">
         <article className="wr-setup-card">
-          <div>
-            <UsersRound size={18} />
-            <strong>{people.length}</strong>
-          </div>
-          <h3>Active tenant users loaded</h3>
-          <p>
-            Canonical key: <code>{contractMap?.canonical_personnel_key || "accounts.users.id"}</code>
-          </p>
+          <div><UsersRound size={18} /><strong>On demand</strong></div>
+          <h3>Tenant personnel</h3>
+          <p>Canonical key: <code>{contractMap?.canonical_personnel_key || "accounts.users.id"}</code></p>
           <small>
-            Inactive and system accounts are excluded. Planner eligibility additionally
-            requires an active employment contract.
+            The complete tenant personnel dataset loads only when Contracts or Roster
+            approval is opened. Planner eligibility remains independently paginated.
           </small>
         </article>
 
         <article className="wr-setup-card">
-          <div>
-            <BadgeCheck size={18} />
-            <strong>{contractMap?.phase || "workforce-integrated"}</strong>
-          </div>
+          <div><BadgeCheck size={18} /><strong>{contractMap?.phase || "workforce-integrated"}</strong></div>
           <h3>Source ownership</h3>
-          <p>
-            Leave remains in Workforce, training in Training, audits in Quality and duty
-            in Rostering.
-          </p>
-          <small>
-            The planner projects source records instead of creating duplicate employee
-            states.
-          </small>
+          <p>Leave remains in Workforce, training in Training, audits in Quality and duty in Rostering.</p>
+          <small>The planner projects source records instead of creating duplicate employee states.</small>
         </article>
 
         <article className="wr-setup-card">
-          <div>
-            <ShieldCheck size={18} />
-            <strong>{failures}</strong>
-          </div>
+          <div><ShieldCheck size={18} /><strong>{failures}</strong></div>
           <h3>Unavailable data sources</h3>
-          <p>
-            {failures
-              ? "One or more sections are temporarily unavailable; usable sections remain open."
-              : "All setup data sources responded."}
-          </p>
-          <small>The setup page no longer fails as one all-or-nothing request.</small>
+          <p>{failures ? "The integration contract is temporarily unavailable; setup tabs remain isolated." : "The initial integration sources responded."}</p>
+          <small>Inactive tabs make no API requests until opened.</small>
         </article>
       </div>
 
@@ -424,19 +535,13 @@ function IntegrationPanel({
         <div className="wr-data-list">
           {Object.entries(contractMap.source_modules).map(([name, source]) => (
             <article className="wr-data-row" key={name}>
-              <div>
-                <strong>{name.replace(/_/g, " ")}</strong>
-                <small>{source}</small>
-              </div>
+              <div><strong>{name.replace(/_/g, " ")}</strong><small>{source}</small></div>
               <StatusPill value="SOURCE OF TRUTH" />
             </article>
           ))}
         </div>
       ) : (
-        <SectionFailure
-          title="Integration contract"
-          error={queries.find((query) => query.error)?.error}
-        />
+        <SectionFailure title="Integration contract" error={queries.find((query) => query.error)?.error} />
       )}
     </section>
   );

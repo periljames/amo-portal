@@ -4,7 +4,7 @@ import { addDays, format, parseISO } from "date-fns";
 import {
   CalendarCheck2,
   CalendarPlus,
-  CalendarSync,
+  CalendarDays,
   CheckCircle2,
   Clock3,
   Copy,
@@ -316,7 +316,7 @@ export function MyRosterWorkspace() {
 
       {calendarSubscription ? (
         <section className="wr-panel wr-calendar-subscription">
-          <CalendarSync size={22} />
+          <CalendarDays size={22} />
           <div>
             <span className="wr-eyebrow">One-time device setup</span>
             <h2>Automatic personal operations calendar</h2>
