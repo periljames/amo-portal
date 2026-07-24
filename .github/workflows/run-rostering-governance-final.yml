@@ -40,7 +40,7 @@ jobs:
           end = script.find('# Planner displays departmental approval progress.', start)
           if start < 0 or end < 0:
               raise SystemExit('My Roster patch block was not found')
-          replacement = textwrap.dedent('''
+          replacement = textwrap.dedent("""
           # My Roster one-time subscription setup against the current component.
           my_roster = "frontend/src/pages/rostering/components/MyRosterWorkspace.tsx"
           my_text = read(my_roster)
@@ -113,7 +113,7 @@ jobs:
           my_text = my_text.replace(panel_marker, calendar_panel + '\\n' + panel_marker, 1)
           write(my_roster, my_text)
 
-          ''')
+          """)
           path.write_text(script[:start] + replacement + script[end:], encoding='utf-8')
           PY
       - name: Apply full-stack governance source
