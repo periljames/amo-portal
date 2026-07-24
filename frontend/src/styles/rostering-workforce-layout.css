@@ -3,12 +3,21 @@
    the available width and height efficiently. */
 
 @supports selector(:has(*)) {
-  .app-shell--v2:has(.wr-page) {
+  .app-shell:has(.wr-page) {
     --sidebar-width: clamp(204px, 12.5vw, 226px);
+    --wr-page-viewport-offset: 58px;
     gap: 8px;
   }
 
-  .app-shell--v2:has(.wr-page) .app-shell__topbar {
+  /* Production can run the legacy shell when VITE_UI_SHELL_V2 is omitted.
+     Apply the same fluid contract to that DOM structure explicitly. */
+  .app-shell:not(.app-shell--v2):has(.wr-page) {
+    --wr-page-viewport-offset: 98px;
+    padding: 8px;
+  }
+
+  .app-shell:has(.wr-page) .app-shell__topbar {
+    width: 100%;
     min-height: 58px;
     padding: 7px 12px;
   }
@@ -18,6 +27,18 @@
     scrollbar-gutter: stable;
   }
 
+  .app-shell:not(.app-shell--v2):has(.wr-page) .app-shell__main {
+    align-items: stretch;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .app-shell:not(.app-shell--v2):has(.wr-page) .app-shell__main-inner {
+    width: 100%;
+    max-width: none;
+    gap: 0;
+  }
+
   .app-shell__content:has(> .wr-page) {
     max-width: none;
     min-height: calc(100dvh - 58px);
@@ -25,7 +46,8 @@
     margin: 0;
   }
 
-  .app-shell__content:has(> .wr-page) > .app-shell__footer {
+  .app-shell__content:has(> .wr-page) > .app-shell__footer,
+  .app-shell:not(.app-shell--v2):has(.wr-page) .app-shell__footer {
     display: none;
   }
 }
@@ -33,7 +55,7 @@
 .wr-page {
   width: 100%;
   min-width: 0;
-  min-height: calc(100dvh - 58px);
+  min-height: calc(100dvh - var(--wr-page-viewport-offset, 58px));
   padding: clamp(8px, .75vw, 12px) clamp(9px, .85vw, 14px) 14px;
 }
 
@@ -180,7 +202,7 @@
 
 @media (min-width: 2200px) {
   @supports selector(:has(*)) {
-    .app-shell--v2:has(.wr-page) { --sidebar-width: 216px; }
+    .app-shell:has(.wr-page) { --sidebar-width: 216px; }
   }
 
   .wr-page { padding-inline: 16px; }
@@ -204,7 +226,7 @@
 
 @media (max-width: 760px) {
   .wr-page {
-    min-height: 100dvh;
+    min-height: calc(100dvh - var(--wr-page-viewport-offset, 58px));
     padding: 8px;
   }
 
