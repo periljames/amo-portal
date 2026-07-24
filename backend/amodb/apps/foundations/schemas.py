@@ -2,10 +2,24 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, model_validator
 
 from .models import BaseAssignmentKind, BaseStationType
+
+
+def _validate_timezone(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    try:
+        ZoneInfo(normalized)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("time_zone must be a valid IANA timezone, for example Africa/Nairobi") from exc
+    return normalized
 
 
 class BaseStationBase(BaseModel):
@@ -17,6 +31,11 @@ class BaseStationBase(BaseModel):
     time_zone: Optional[str] = Field(None, max_length=64)
     description: Optional[str] = None
     is_active: bool = True
+
+    @model_validator(mode="after")
+    def validate_timezone(self):
+        self.time_zone = _validate_timezone(self.time_zone)
+        return self
 
 
 class BaseStationCreate(BaseStationBase):
@@ -33,6 +52,14 @@ class BaseStationUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     aliases: Optional[List[str]] = None
+    expected_updated_at: Optional[datetime] = None
+    reason: Optional[str] = Field(None, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_timezone(self):
+        if "time_zone" in self.model_fields_set:
+            self.time_zone = _validate_timezone(self.time_zone)
+        return self
 
 
 class BaseStationAliasRead(BaseModel):
@@ -60,6 +87,19 @@ class BaseStationRead(BaseStationBase):
         from_attributes = True
 
 
+class BaseDependencyRead(BaseModel):
+    dependency_type: str
+    count: int
+    detail: str
+    blocking: bool = True
+
+
+class BaseStationImpactRead(BaseModel):
+    base_station_id: str
+    can_deactivate: bool
+    dependencies: List[BaseDependencyRead] = Field(default_factory=list)
+
+
 class UserBaseAssignmentCreate(BaseModel):
     user_id: str
     base_station_id: str
@@ -73,6 +113,12 @@ class UserBaseAssignmentCreate(BaseModel):
     def validate_dates(self):
         if self.effective_to and self.effective_to < self.effective_from:
             raise ValueError("effective_to must be on or after effective_from")
+        if self.assignment_kind in {
+            BaseAssignmentKind.TEMPORARY,
+            BaseAssignmentKind.RELIEF,
+            BaseAssignmentKind.TRAINING,
+        } and self.effective_to is None:
+            raise ValueError("Temporary, relief and training deployments require an end date")
         return self
 
 
@@ -83,6 +129,13 @@ class UserBaseAssignmentUpdate(BaseModel):
     effective_to: Optional[date] = None
     is_primary: Optional[bool] = None
     note: Optional[str] = None
+    expected_updated_at: Optional[datetime] = None
+    reason: Optional[str] = Field(None, max_length=1000)
+
+
+class UserBaseAssignmentCancel(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+    expected_updated_at: Optional[datetime] = None
 
 
 class UserBaseAssignmentRead(BaseModel):
@@ -102,6 +155,15 @@ class UserBaseAssignmentRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UserBaseAssignmentPage(BaseModel):
+    items: List[UserBaseAssignmentRead] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    has_more: bool
 
 
 class AvailabilityStatus(str):

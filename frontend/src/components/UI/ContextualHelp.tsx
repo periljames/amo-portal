@@ -1,7 +1,7 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { HelpCircle, X } from "lucide-react";
 
-import { getCachedUser, getContext } from "../../services/auth";
+import { acknowledgeGuidance, guidanceAcknowledged } from "../../services/contextualGuidance";
 import "./contextual-help.css";
 
 type Props = {
@@ -16,13 +16,14 @@ type Props = {
   className?: string;
 };
 
-function storageKey(topic: string, version: number): string {
-  const user = getCachedUser();
-  const context = getContext();
-  const userId = user?.id || "anonymous";
-  const tenantId = user?.amo_id || context.amoCode || context.amoSlug || "tenant";
-  return `amo_portal_help_seen:${tenantId}:${userId}:${topic}:v${version}`;
-}
+const FOCUSABLE = [
+  "button:not([disabled])",
+  "a[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 export function ContextualHelp({
   topic,
@@ -36,55 +37,88 @@ export function ContextualHelp({
   className = "",
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [checked, setChecked] = useState(false);
   const titleId = useId();
+  const dialogRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
-  const key = useMemo(() => storageKey(topic, version), [topic, version]);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (!autoOpen || typeof window === "undefined") return;
-    try {
-      if (!window.localStorage.getItem(key)) setOpen(true);
-    } catch {
-      // Hardened browsers may block storage; help remains manually available.
+    let active = true;
+    if (!autoOpen) {
+      setChecked(true);
+      return () => { active = false; };
     }
-  }, [autoOpen, key]);
+    void guidanceAcknowledged(topic, version).then((acknowledged) => {
+      if (!active) return;
+      setChecked(true);
+      if (!acknowledged) setOpen(true);
+    });
+    return () => { active = false; };
+  }, [autoOpen, topic, version]);
 
   useEffect(() => {
     if (!open) return;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     closeRef.current?.focus();
+
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) || []);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
+
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      const target = previousFocusRef.current || triggerRef.current;
+      globalThis.setTimeout(() => target?.focus(), 0);
+    };
   }, [open]);
 
-  const dismiss = () => {
-    try {
-      window.localStorage.setItem(key, new Date().toISOString());
-    } catch {
-      // Best effort only.
-    }
+  const acknowledge = async () => {
     setOpen(false);
+    await acknowledgeGuidance(topic, version);
   };
 
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         className={`portal-help-trigger ${className}`.trim()}
         aria-label={triggerLabel}
         title={triggerLabel}
         onClick={() => setOpen(true)}
+        data-guidance-checked={checked ? "true" : "false"}
       >
         <HelpCircle size={17} aria-hidden="true" />
       </button>
 
       {open ? (
         <div className="portal-help-backdrop" role="presentation" onMouseDown={(event) => {
-          if (event.currentTarget === event.target) dismiss();
+          if (event.currentTarget === event.target) setOpen(false);
         }}>
           <section
+            ref={dialogRef}
             className="portal-help-dialog"
             role="dialog"
             aria-modal="true"
@@ -99,8 +133,8 @@ export function ContextualHelp({
                 ref={closeRef}
                 type="button"
                 className="portal-help-dialog__close"
-                onClick={dismiss}
-                aria-label="Close help"
+                onClick={() => setOpen(false)}
+                aria-label="Close help without acknowledging"
               >
                 <X size={19} aria-hidden="true" />
               </button>
@@ -111,7 +145,7 @@ export function ContextualHelp({
             </div>
             <footer className="portal-help-dialog__footer">
               {actions}
-              <button type="button" className="portal-help-button portal-help-button--primary" onClick={dismiss}>Got it</button>
+              <button type="button" className="portal-help-button portal-help-button--primary" onClick={() => void acknowledge()}>Got it</button>
             </footer>
           </section>
         </div>

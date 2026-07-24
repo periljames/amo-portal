@@ -17,6 +17,7 @@ type Props = {
   items: PrerequisiteItem[];
   onClose: () => void;
   continueLabel?: string;
+  allowReadOnly?: boolean;
 };
 
 export function PrerequisiteDialog({
@@ -26,6 +27,7 @@ export function PrerequisiteDialog({
   items,
   onClose,
   continueLabel = "Continue in read-only mode",
+  allowReadOnly = true,
 }: Props) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement | null>(null);
@@ -34,11 +36,11 @@ export function PrerequisiteDialog({
     if (!open) return;
     closeRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && allowReadOnly) onClose();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open]);
+  }, [allowReadOnly, onClose, open]);
 
   if (!open) return null;
 
@@ -50,9 +52,11 @@ export function PrerequisiteDialog({
             <span className="portal-help-dialog__eyebrow">Setup required</span>
             <h2 id={titleId}>{title}</h2>
           </div>
-          <button ref={closeRef} type="button" className="portal-help-dialog__close" onClick={onClose} aria-label="Close setup guidance">
-            <X size={19} aria-hidden="true" />
-          </button>
+          {allowReadOnly ? (
+            <button ref={closeRef} type="button" className="portal-help-dialog__close" onClick={onClose} aria-label="Close setup guidance">
+              <X size={19} aria-hidden="true" />
+            </button>
+          ) : null}
         </header>
         <div className="portal-help-dialog__body">
           <p>{description}</p>
@@ -69,9 +73,11 @@ export function PrerequisiteDialog({
             ))}
           </div>
         </div>
-        <footer className="portal-help-dialog__footer">
-          <button type="button" className="portal-help-button portal-help-button--secondary" onClick={onClose}>{continueLabel}</button>
-        </footer>
+        {allowReadOnly ? (
+          <footer className="portal-help-dialog__footer">
+            <button ref={closeRef} type="button" className="portal-help-button portal-help-button--secondary" onClick={onClose}>{continueLabel}</button>
+          </footer>
+        ) : null}
       </section>
     </div>
   );

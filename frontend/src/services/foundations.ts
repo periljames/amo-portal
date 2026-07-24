@@ -1,10 +1,11 @@
 // src/services/foundations.ts
-import { apiGet, apiPost, apiPut } from "./crs";
+import { apiDelete, apiGet, apiPost, apiPut } from "./crs";
 import { authHeaders } from "./auth";
 import type {
   AvailabilityCreate,
   AvailabilityRead,
   BaseStationCreate,
+  BaseStationImpactRead,
   BaseStationRead,
   BaseStationUpdate,
   FoundationContracts,
@@ -42,6 +43,12 @@ export function createBaseStation(payload: BaseStationCreate): Promise<BaseStati
   return apiPost<BaseStationRead>("/foundations/base-stations", payload, { headers: authHeaders() });
 }
 
+export function getBaseStationImpact(baseStationId: string): Promise<BaseStationImpactRead> {
+  return apiGet<BaseStationImpactRead>(`/foundations/base-stations/${encodeURIComponent(baseStationId)}/impact`, {
+    headers: authHeaders(),
+  });
+}
+
 export function updateBaseStation(baseStationId: string, payload: BaseStationUpdate): Promise<BaseStationRead> {
   return apiPut<BaseStationRead>(`/foundations/base-stations/${encodeURIComponent(baseStationId)}`, payload, { headers: authHeaders() });
 }
@@ -65,6 +72,17 @@ export function updateUserBaseAssignment(
   payload: UserBaseAssignmentUpdate,
 ): Promise<UserBaseAssignmentRead> {
   return apiPut<UserBaseAssignmentRead>(
+    `/foundations/user-base-assignments/${encodeURIComponent(assignmentId)}`,
+    payload,
+    { headers: authHeaders() },
+  );
+}
+
+export function cancelUserBaseAssignment(
+  assignmentId: string,
+  payload: { reason: string; expected_updated_at?: string | null },
+): Promise<void> {
+  return apiDelete<void>(
     `/foundations/user-base-assignments/${encodeURIComponent(assignmentId)}`,
     payload,
     { headers: authHeaders() },
