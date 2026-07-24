@@ -10,12 +10,14 @@ import {
   Download,
   FilePenLine,
   LoaderCircle,
+  Lock,
   RotateCcw,
   Save,
   X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import { getCachedUser } from "../../services/auth";
 import {
   qmsDownloadAuditChecklist,
   qmsResolveAudit,
@@ -46,6 +48,8 @@ type EditorState = {
   audit: QMSAuditOut;
   blob: Blob;
   filename: string;
+  canSave: boolean;
+  readOnlyReason: string | null;
 };
 
 function checklistFilename(fileRef?: string | null): string {
@@ -55,6 +59,18 @@ function checklistFilename(fileRef?: string | null): string {
     .replace(/^[a-f0-9]{32,64}[_-]+/i, "")
     .replace(/[^A-Za-z0-9._-]+/g, "_");
   return cleaned.toLowerCase().endsWith(".pdf") ? cleaned : `${cleaned || "audit-checklist"}.pdf`;
+}
+
+function checklistEditAccess(audit: QMSAuditOut): { allowed: boolean; reason: string | null } {
+  const user = getCachedUser();
+  if (!user) return { allowed: false, reason: "Sign in before editing this controlled checklist." };
+  if (audit.status === "CLOSED") return { allowed: false, reason: "This audit is closed. The checklist is retained as a read-only record." };
+  if (audit.report_file_ref) return { allowed: false, reason: "The audit report has been issued. The committed checklist is now read-only." };
+  if (user.is_superuser || user.is_amo_admin) return { allowed: true, reason: null };
+  if ([audit.lead_auditor_user_id, audit.observer_auditor_user_id, audit.assistant_auditor_user_id].includes(user.id)) {
+    return { allowed: true, reason: null };
+  }
+  return { allowed: false, reason: "Only the assigned audit team or an AMO administrator may edit the controlled checklist." };
 }
 
 function copyPdfBytes(bytes: Uint8Array): ArrayBuffer {
@@ -151,8 +167,10 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
       const filename = checklistFilename(audit.checklist_file_ref);
       const appearsPdf = blob.type.toLowerCase().includes("pdf") || filename.toLowerCase().endsWith(".pdf");
       if (!appearsPdf) throw new Error("The committed checklist is not a PDF. Use the portal checklist rows or replace it with a PDF form.");
-      setEditor({ audit, blob, filename });
+      const access = checklistEditAccess(audit);
+      setEditor({ audit, blob, filename, canSave: access.allowed, readOnlyReason: access.reason });
       setDirty(false);
+      if (access.reason) setNotice(access.reason);
     } catch (openError) {
       setError(openError instanceof Error ? openError.message : "The checklist PDF could not be opened.");
     } finally {
@@ -183,7 +201,7 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
   };
 
   const saveToPortal = async () => {
-    if (!editor || !pdf || saving || fieldCount === 0) return;
+    if (!editor || !editor.canSave || !pdf || saving || fieldCount === 0) return;
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -191,7 +209,14 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
       const bytes = await pdf.saveDocument();
       const file = new File([copyPdfBytes(bytes)], editor.filename, { type: "application/pdf" });
       const updated = await qmsUploadAuditChecklist(editor.audit.id, file);
-      setEditor({ audit: updated, blob: file, filename: checklistFilename(updated.checklist_file_ref || editor.filename) });
+      const access = checklistEditAccess(updated);
+      setEditor({
+        audit: updated,
+        blob: file,
+        filename: checklistFilename(updated.checklist_file_ref || editor.filename),
+        canSave: access.allowed,
+        readOnlyReason: access.reason,
+      });
       setDirty(false);
       setNotice("Filled checklist saved to the audit workspace.");
       await Promise.all([
@@ -244,9 +269,9 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
                 <button type="button" onClick={() => void downloadWorkingCopy()} disabled={!pdf || saving}>
                   <Download size={16} /> Download copy
                 </button>
-                <button type="button" className="is-primary" onClick={() => void saveToPortal()} disabled={!pdf || saving || fieldCount === 0 || !dirty}>
-                  {saving ? <LoaderCircle className="is-spinning" size={16} /> : <Save size={16} />}
-                  {saving ? "Saving…" : "Save to portal"}
+                <button type="button" className="is-primary" onClick={() => void saveToPortal()} disabled={!editor.canSave || !pdf || saving || fieldCount === 0 || !dirty}>
+                  {saving ? <LoaderCircle className="is-spinning" size={16} /> : editor.canSave ? <Save size={16} /> : <Lock size={16} />}
+                  {saving ? "Saving…" : editor.canSave ? "Save to portal" : "Read only"}
                 </button>
                 <button type="button" className="is-icon" onClick={() => closeEditor()} aria-label="Close PDF form editor">
                   <X size={19} />
@@ -268,10 +293,16 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
               </div>
               <div className="quality-pdf-form-status">
                 {fieldCount === null ? <span>Inspecting form…</span> : <span>{fieldCount} interactive field{fieldCount === 1 ? "" : "s"}</span>}
-                {dirty ? <strong>Unsaved changes</strong> : <strong className="is-saved">Saved</strong>}
+                {editor.canSave ? (dirty ? <strong>Unsaved changes</strong> : <strong className="is-saved">Saved</strong>) : <strong className="is-read-only">Read only</strong>}
               </div>
             </div>
 
+            {editor.readOnlyReason ? (
+              <div className="quality-pdf-form-alert is-warning">
+                <Lock size={18} />
+                <span>{editor.readOnlyReason}</span>
+              </div>
+            ) : null}
             {hasJavaScript ? (
               <div className="quality-pdf-form-alert is-warning">
                 <AlertTriangle size={18} />
@@ -285,13 +316,13 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
               </div>
             ) : null}
             {error ? <div className="quality-pdf-form-alert is-error" role="alert"><AlertTriangle size={18} /><span>{error}</span></div> : null}
-            {notice ? <div className="quality-pdf-form-alert is-notice"><CheckCircle2 size={18} /><span>{notice}</span></div> : null}
+            {notice && notice !== editor.readOnlyReason ? <div className="quality-pdf-form-alert is-notice"><CheckCircle2 size={18} /><span>{notice}</span></div> : null}
 
             <div
-              className="quality-pdf-form-viewport"
+              className={`quality-pdf-form-viewport${editor.canSave ? "" : " is-read-only"}`}
               ref={viewportRef}
-              onInputCapture={() => setDirty(true)}
-              onChangeCapture={() => setDirty(true)}
+              onInputCapture={() => { if (editor.canSave) setDirty(true); }}
+              onChangeCapture={() => { if (editor.canSave) setDirty(true); }}
             >
               <Document
                 file={editor.blob}
