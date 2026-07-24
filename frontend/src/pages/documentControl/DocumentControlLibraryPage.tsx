@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, FilePlus2, Search, ShieldAlert } from "lucide-react";
+import { BookOpen, FilePlus2, Search, ShieldAlert, UploadCloud, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import {
+  getDocumentControlDashboard,
   listDocumentControlDocuments,
   type DocumentLibraryItem,
   type DocumentLibraryResponse,
 } from "../../services/documentControl";
+import { updateDocumentMetadata } from "../../services/documentControlReports";
+import {
+  previewPublicationUpload,
+  uploadPublicationRevision,
+  type PublicationUploadPreview,
+} from "../../services/publications";
 import DocumentControlShell, {
   DocumentControlEmpty,
   DocumentControlError,
@@ -22,6 +29,45 @@ function statusKind(document: DocumentLibraryItem): "success" | "warning" | "dan
   return "neutral";
 }
 
+function fileStem(filename: string): string {
+  return filename.replace(/\.(docx|pdf)$/i, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function fallbackCode(filename: string): string {
+  return filename.replace(/\.(docx|pdf)$/i, "").toUpperCase().replace(/[^A-Z0-9]+/g, "/").replace(/^\/+|\/+$/g, "").slice(0, 48);
+}
+
+function genericOutlineTitle(value?: string | null): boolean {
+  const text = String(value || "").trim();
+  return !text || /^(chapter|section|part|appendix|annex)\b/i.test(text) || /front\s+matter/i.test(text) || /^table\s+of\s+contents$/i.test(text);
+}
+
+type IntakeState = {
+  file: File | null;
+  preview: PublicationUploadPreview | null;
+  code: string;
+  title: string;
+  manualType: string;
+  ownerRole: string;
+  issue: string;
+  revision: string;
+  effectiveDate: string;
+  changeNote: string;
+};
+
+const EMPTY_INTAKE: IntakeState = {
+  file: null,
+  preview: null,
+  code: "",
+  title: "",
+  manualType: "GENERAL",
+  ownerRole: "DOCUMENT_CONTROL",
+  issue: "00",
+  revision: "00",
+  effectiveDate: "",
+  changeNote: "",
+};
+
 export default function DocumentControlLibraryPage() {
   const navigate = useNavigate();
   const { tenant, basePath, readerBasePath } = useDocumentControlRoute();
@@ -30,17 +76,27 @@ export default function DocumentControlLibraryPage() {
   const [classFilter, setClassFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [canControl, setCanControl] = useState(false);
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const [intake, setIntake] = useState<IntakeState>(EMPTY_INTAKE);
+  const [intakeBusy, setIntakeBusy] = useState(false);
+  const [intakeError, setIntakeError] = useState("");
 
   const load = useCallback(async () => {
     if (!tenant) return;
     setLoading(true);
     setError("");
     try {
-      setResponse(await listDocumentControlDocuments(tenant, {
-        q: query.trim() || undefined,
-        documentClass: classFilter || undefined,
-        perPage: 100,
-      }));
+      const [library, dashboard] = await Promise.all([
+        listDocumentControlDocuments(tenant, {
+          q: query.trim() || undefined,
+          documentClass: classFilter || undefined,
+          perPage: 100,
+        }),
+        getDocumentControlDashboard(tenant),
+      ]);
+      setResponse(library);
+      setCanControl(Boolean(dashboard.capabilities.control));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The document library could not be loaded.");
     } finally {
@@ -54,7 +110,6 @@ export default function DocumentControlLibraryPage() {
   }, [load, query]);
 
   const documents = response?.items || [];
-  const canControl = useMemo(() => documents.some((row) => row.read_target.kind === "UNCONTROLLED" || Boolean(row.workflow)), [documents]);
 
   const openPrimary = (document: DocumentLibraryItem) => {
     if (document.read_target.revision_id) {
@@ -64,12 +119,73 @@ export default function DocumentControlLibraryPage() {
     navigate(`${basePath}/library/${document.id}`);
   };
 
+  const inspectFile = async (file: File | null) => {
+    if (!file) return;
+    setIntakeBusy(true);
+    setIntakeError("");
+    try {
+      const preview = await previewPublicationUpload(tenant, file);
+      const detectedTitle = preview.metadata.title || preview.heading;
+      setIntake({
+        file,
+        preview,
+        code: preview.metadata.part_number || fallbackCode(file.name),
+        title: genericOutlineTitle(detectedTitle) ? fileStem(file.name) : String(detectedTitle),
+        manualType: preview.metadata.manual_type || "GENERAL",
+        ownerRole: "DOCUMENT_CONTROL",
+        issue: preview.metadata.issue_number || "00",
+        revision: preview.metadata.revision_number || "00",
+        effectiveDate: preview.metadata.effective_date || "",
+        changeNote: "",
+      });
+    } catch (caught) {
+      setIntakeError(caught instanceof Error ? caught.message : "The source could not be inspected.");
+    } finally {
+      setIntakeBusy(false);
+    }
+  };
+
+  const submitIntake = async () => {
+    if (!intake.file || !intake.code.trim() || !intake.title.trim() || !intake.revision.trim()) return;
+    setIntakeBusy(true);
+    setIntakeError("");
+    try {
+      const result = await uploadPublicationRevision(tenant, {
+        code: intake.code.trim(),
+        title: intake.title.trim(),
+        rev_number: intake.revision.trim(),
+        issue_number: intake.issue.trim(),
+        effective_date: intake.effectiveDate || undefined,
+        manual_type: intake.manualType.trim() || "GENERAL",
+        owner_role: intake.ownerRole.trim() || "DOCUMENT_CONTROL",
+        change_log: intake.changeNote.trim() || undefined,
+        file: intake.file,
+      });
+      // The legacy parser can promote the first outline chapter to the title.
+      // Reassert the reviewed intake metadata against the canonical manual row.
+      await updateDocumentMetadata(tenant, result.manual_id, {
+        code: intake.code.trim(),
+        title: intake.title.trim(),
+        manual_type: intake.manualType.trim() || "GENERAL",
+        owner_role: intake.ownerRole.trim() || "DOCUMENT_CONTROL",
+      });
+      setIntakeOpen(false);
+      setIntake(EMPTY_INTAKE);
+      await load();
+      navigate(`${readerBasePath}/${result.manual_id}/rev/${result.revision_id}/read`);
+    } catch (caught) {
+      setIntakeError(caught instanceof Error ? caught.message : "The controlled source could not be uploaded.");
+    } finally {
+      setIntakeBusy(false);
+    }
+  };
+
   return (
     <DocumentControlShell
       title="Library"
       subtitle="One searchable register for internal manuals, external technical data, and controlled records. The primary action always opens the permitted revision directly."
       canControl={canControl}
-      actions={canControl ? <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(`/maintenance/${tenant}/publications?upload=1`)}><FilePlus2 size={15} /> Register or upload</button> : undefined}
+      actions={canControl ? <button type="button" className="dc-button dc-button--primary" onClick={() => setIntakeOpen(true)}><FilePlus2 size={15} /> Register or upload</button> : undefined}
     >
       <div className="dc-toolbar">
         <label className="dc-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search code, title, category, or status" /></label>
@@ -122,8 +238,31 @@ export default function DocumentControlLibraryPage() {
           icon={query || classFilter ? Search : ShieldAlert}
           title={query || classFilter ? "No document matches the current search" : "No document has been registered"}
           message={query || classFilter ? "Clear the search or select another document class." : "A Document Control user must upload or register the first document before staff can read it."}
-          action={(query || classFilter) ? <button type="button" className="dc-button" onClick={() => { setQuery(""); setClassFilter(""); }}>Clear filters</button> : undefined}
+          action={(query || classFilter) ? <button type="button" className="dc-button" onClick={() => { setQuery(""); setClassFilter(""); }}>Clear filters</button> : canControl ? <button type="button" className="dc-button dc-button--primary" onClick={() => setIntakeOpen(true)}>Register first document</button> : undefined}
         />
+      ) : null}
+
+      {intakeOpen ? (
+        <div className="publications-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !intakeBusy) setIntakeOpen(false); }}>
+          <section className="publications-upload-dialog" role="dialog" aria-modal="true" aria-label="Register controlled document">
+            <header><div><h2>Register controlled document</h2><p>Inspect a PDF or DOCX, confirm its identity, then create an uncontrolled revision for governance.</p></div><button type="button" onClick={() => setIntakeOpen(false)} disabled={intakeBusy} aria-label="Close"><X size={18} /></button></header>
+            <div className="publications-file-picker"><UploadCloud size={22} /><div><strong>Choose a PDF or DOCX source</strong><span>The original file remains the authoritative visual source.</span></div><input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => void inspectFile(event.target.files?.[0] || null)} /></div>
+            {intakeBusy && !intake.preview ? <DocumentControlLoading label="Inspecting document structure and metadata…" /> : null}
+            {intake.file ? <div className="dc-form">
+              <label><span>Document code</span><input value={intake.code} onChange={(event) => setIntake({ ...intake, code: event.target.value })} required /></label>
+              <label><span>Document type</span><input value={intake.manualType} onChange={(event) => setIntake({ ...intake, manualType: event.target.value })} required /></label>
+              <label className="wide"><span>Document title</span><input value={intake.title} onChange={(event) => setIntake({ ...intake, title: event.target.value })} required /></label>
+              <label><span>Issue</span><input value={intake.issue} onChange={(event) => setIntake({ ...intake, issue: event.target.value })} /></label>
+              <label><span>Revision</span><input value={intake.revision} onChange={(event) => setIntake({ ...intake, revision: event.target.value })} required /></label>
+              <label><span>Owner</span><input value={intake.ownerRole} onChange={(event) => setIntake({ ...intake, ownerRole: event.target.value })} /></label>
+              <label><span>Proposed effective date</span><input type="date" value={intake.effectiveDate} onChange={(event) => setIntake({ ...intake, effectiveDate: event.target.value })} /></label>
+              <label className="wide"><span>Intake or change note</span><textarea value={intake.changeNote} onChange={(event) => setIntake({ ...intake, changeNote: event.target.value })} /></label>
+              {intake.preview ? <label className="wide"><span>Detected structure</span><div className="dc-callout">{intake.preview.source_type} · {intake.preview.page_count || "—"} pages · {intake.preview.outline.length} outline entries · {intake.preview.paragraph_count} extracted paragraphs</div></label> : null}
+              {intakeError ? <div className="dc-form__error">{intakeError}</div> : null}
+            </div> : intakeError ? <div className="dc-error">{intakeError}</div> : null}
+            <footer><span>{intake.file?.name || "No source selected"}</span><div><button type="button" onClick={() => setIntakeOpen(false)} disabled={intakeBusy}>Cancel</button><button type="button" className="primary" onClick={() => void submitIntake()} disabled={intakeBusy || !intake.file || !intake.code.trim() || !intake.title.trim() || !intake.revision.trim()}><UploadCloud size={16} /> {intakeBusy ? "Uploading…" : "Register revision"}</button></div></footer>
+          </section>
+        </div>
       ) : null}
     </DocumentControlShell>
   );
