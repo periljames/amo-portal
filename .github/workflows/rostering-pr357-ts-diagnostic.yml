@@ -1,47 +1,98 @@
-name: PR357 TypeScript Diagnostic
+name: PR357 Fix and Validate
 
 on:
   push:
     branches:
       - agent/rostering-pr357-ts-diagnostic
-  pull_request:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  fix:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: agent/rostering-planner-operational-workflow
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Apply effective-base and service compatibility fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/amodb/apps/rostering/assignments.py')
+          text = path.read_text(encoding='utf-8')
+
+          text = text.replace(
+              'from datetime import datetime, time, timedelta, timezone\n',
+              'from datetime import date, datetime, time, timedelta, timezone\n',
+              1,
+          )
+          text = text.replace(
+              'from sqlalchemy.orm import Session, selectinload\n\nfrom ..foundations import services as foundation_services\n',
+              'from sqlalchemy import or_\nfrom sqlalchemy.orm import Session, selectinload\n\nfrom ..foundations import models as foundation_models\n',
+              1,
+          )
+
+          marker = '''def _validate_assignment_payload(\n'''
+          helper = '''_BASE_ASSIGNMENT_PRIORITY = {\n    foundation_models.BaseAssignmentKind.TEMPORARY: 50,\n    foundation_models.BaseAssignmentKind.RELIEF: 40,\n    foundation_models.BaseAssignmentKind.TRAINING: 30,\n    foundation_models.BaseAssignmentKind.OTHER: 20,\n    foundation_models.BaseAssignmentKind.HOME_BASE: 10,\n}\n\n\ndef _effective_base_assignment(\n    db: Session,\n    *,\n    amo_id: str,\n    user_id: str,\n    on_date: date,\n) -> Optional[foundation_models.UserBaseAssignment]:\n    rows = (\n        db.query(foundation_models.UserBaseAssignment)\n        .join(\n            foundation_models.BaseStation,\n            foundation_models.BaseStation.id == foundation_models.UserBaseAssignment.base_station_id,\n        )\n        .filter(\n            foundation_models.UserBaseAssignment.amo_id == amo_id,\n            foundation_models.UserBaseAssignment.user_id == user_id,\n            foundation_models.UserBaseAssignment.effective_from <= on_date,\n            or_(\n                foundation_models.UserBaseAssignment.effective_to.is_(None),\n                foundation_models.UserBaseAssignment.effective_to >= on_date,\n            ),\n            foundation_models.BaseStation.amo_id == amo_id,\n            foundation_models.BaseStation.is_active.is_(True),\n        )\n        .all()\n    )\n    primary = [row for row in rows if row.is_primary]\n    candidates = primary or rows\n    return max(\n        candidates,\n        key=lambda row: (\n            _BASE_ASSIGNMENT_PRIORITY.get(row.assignment_kind, 0),\n            row.effective_from,\n            row.created_at or datetime.min.replace(tzinfo=UTC),\n            row.id,\n        ),\n        default=None,\n    )\n\n\ndef _resolve_assignment_base(\n    db: Session,\n    *,\n    version: models.RosterVersion,\n    user_id: str,\n    starts_at: datetime,\n    explicit_base_station_id: Optional[str],\n    require_resolved: bool = False,\n):\n    local_start_date = _local_start_date(version, starts_at)\n    base_station_id = explicit_base_station_id\n    if not base_station_id:\n        effective_placement = _effective_base_assignment(\n            db,\n            amo_id=version.amo_id,\n            user_id=user_id,\n            on_date=local_start_date,\n        )\n        contract = workforce_services.active_contract_for_user(\n            db,\n            amo_id=version.amo_id,\n            user_id=user_id,\n            on_date=local_start_date,\n        )\n        base_station_id = (\n            getattr(effective_placement, 'base_station_id', None)\n            or getattr(contract, 'primary_base_station_id', None)\n        )\n\n    base = common.require_base(\n        db,\n        amo_id=version.amo_id,\n        base_station_id=base_station_id,\n    )\n    if base is not None and not base.is_active:\n        raise ValueError('Inactive base stations cannot receive new roster duty.')\n    if base is None and require_resolved:\n        raise ValueError(\n            'No effective active base is available for this person on the duty date. '\n            'Create or correct the personnel deployment before clearing the duty-base override.'\n        )\n    return base\n\n\n'''
+          if helper not in text:
+              assert marker in text, 'assignment validation marker not found'
+              text = text.replace(marker, helper + marker, 1)
+
+          old_create = '''    local_start_date = _local_start_date(version, payload.starts_at)\n    contract = workforce_services.active_contract_for_user(db, amo_id=version.amo_id, user_id=user.id, on_date=local_start_date)\n    effective_placement = foundation_services.effective_base_assignment(\n        db,\n        amo_id=version.amo_id,\n        user_id=user.id,\n        on_date=local_start_date,\n    )\n    base_station_id = (\n        payload.base_station_id\n        or getattr(effective_placement, "base_station_id", None)\n        or getattr(contract, "primary_base_station_id", None)\n    )\n    base = common.require_base(db, amo_id=version.amo_id, base_station_id=base_station_id)\n'''
+          new_create = '''    base = _resolve_assignment_base(\n        db,\n        version=version,\n        user_id=user.id,\n        starts_at=payload.starts_at,\n        explicit_base_station_id=payload.base_station_id,\n    )\n'''
+          assert old_create in text, 'create-time effective-base block not found'
+          text = text.replace(old_create, new_create, 1)
+
+          old_update = '''    for key, value in common.dump(payload, exclude_unset=True).items():\n        if key == "expected_state_revision":\n            continue\n        setattr(row, key, value)\n    if row.ends_at <= row.starts_at:\n        raise ValueError("Assignment end must be after start")\n    if "department_id" in fields:\n        common.require_department(db, amo_id=row.amo_id, department_id=row.department_id)\n    if "base_station_id" in fields:\n        common.require_base(db, amo_id=row.amo_id, base_station_id=row.base_station_id)\n'''
+          new_update = '''    for key, value in common.dump(payload, exclude_unset=True).items():\n        if key in {"expected_state_revision", "base_station_id"}:\n            continue\n        setattr(row, key, value)\n    if row.ends_at <= row.starts_at:\n        raise ValueError("Assignment end must be after start")\n    if "department_id" in fields:\n        common.require_department(db, amo_id=row.amo_id, department_id=row.department_id)\n    if "base_station_id" in fields:\n        resolved_base = _resolve_assignment_base(\n            db,\n            version=version,\n            user_id=row.user_id,\n            starts_at=row.starts_at,\n            explicit_base_station_id=payload.base_station_id,\n            require_resolved=True,\n        )\n        row.base_station_id = resolved_base.id\n'''
+          assert old_update in text, 'update-time base block not found'
+          text = text.replace(old_update, new_update, 1)
+          path.write_text(text, encoding='utf-8')
+
+          test_path = Path('backend/tests/test_roster_effective_base_default.py')
+          test_text = test_path.read_text(encoding='utf-8')
+          test_text = test_text.replace(
+              '    source = assignments._validate_assignment_payload.__code__.co_names\n    assert "effective_base_assignment" in source\n',
+              '    source = assignments._validate_assignment_payload.__code__.co_names\n    assert "_resolve_assignment_base" in source\n\n\ndef test_clearing_duty_base_override_resolves_effective_base_before_update():\n    source = assignments.update_assignment.__code__.co_names\n    assert "_resolve_assignment_base" in source\n',
+          )
+          test_path.write_text(test_text, encoding='utf-8')
+
+          service_path = Path('frontend/src/services/rosterBases.ts')
+          service_path.write_text(
+              'import { listBaseStations } from "./foundations";\n'
+              'import type { BaseStationRead } from "../types/foundations";\n\n'
+              'export function listRosterBaseStations(includeInactive = false): Promise<BaseStationRead[]> {\n'
+              '  return listBaseStations({ include_inactive: includeInactive });\n'
+              '}\n',
+              encoding='utf-8',
+          )
+          PY
+      - name: Compile changed backend modules
+        run: python -m py_compile backend/amodb/apps/rostering/assignments.py backend/tests/test_roster_effective_base_default.py
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
-      - name: Capture TypeScript build output
-        id: build
+      - name: Build frontend
         working-directory: frontend
+        run: npm run build
+      - name: Commit reviewed fixes
         shell: bash
         run: |
-          set +e
-          npm run build > ../pr357-typescript-diagnostic.log 2>&1
-          status=$?
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-      - name: Upload diagnostic log
-        uses: actions/upload-artifact@v6
-        with:
-          name: pr357-typescript-diagnostic
-          path: pr357-typescript-diagnostic.log
-          if-no-files-found: error
-          retention-days: 2
-      - name: Enforce build result
-        if: steps.build.outputs.status != '0'
-        run: exit 1
+          git config user.name "amo-portal-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend/amodb/apps/rostering/assignments.py \
+                  backend/tests/test_roster_effective_base_default.py \
+                  frontend/src/services/rosterBases.ts
+          git diff --cached --check
+          git commit -m "Fix effective roster base resolution and frontend service"
+          git push origin HEAD:agent/rostering-planner-operational-workflow
