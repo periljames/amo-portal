@@ -6,6 +6,7 @@ from typing import Any, Optional, Sequence
 
 from sqlalchemy.orm import Session, selectinload
 
+from ..foundations import services as foundation_services
 from ..work import models as work_models
 from ..workforce import calculations as workforce_calculations
 from ..workforce import services as workforce_services
@@ -49,6 +50,12 @@ def _assignment_snapshot(row: models.RosterAssignment) -> dict[str, Any]:
     }
 
 
+def _local_start_date(version: models.RosterVersion, starts_at: datetime):
+    zone = workforce_calculations.get_zone(version.period.timezone_name or "UTC")
+    aware = starts_at if starts_at.tzinfo is not None else starts_at.replace(tzinfo=UTC)
+    return aware.astimezone(zone).date()
+
+
 def _validate_assignment_payload(
     db: Session,
     *,
@@ -59,8 +66,19 @@ def _validate_assignment_payload(
     user = common.require_user(db, amo_id=version.amo_id, user_id=payload.user_id, active_only=True)
     department_id = payload.department_id or user.department_id
     department = common.require_department(db, amo_id=version.amo_id, department_id=department_id)
-    contract = workforce_services.active_contract_for_user(db, amo_id=version.amo_id, user_id=user.id, on_date=payload.starts_at.date())
-    base_station_id = payload.base_station_id or getattr(contract, "primary_base_station_id", None)
+    local_start_date = _local_start_date(version, payload.starts_at)
+    contract = workforce_services.active_contract_for_user(db, amo_id=version.amo_id, user_id=user.id, on_date=local_start_date)
+    effective_placement = foundation_services.effective_base_assignment(
+        db,
+        amo_id=version.amo_id,
+        user_id=user.id,
+        on_date=local_start_date,
+    )
+    base_station_id = (
+        payload.base_station_id
+        or getattr(effective_placement, "base_station_id", None)
+        or getattr(contract, "primary_base_station_id", None)
+    )
     base = common.require_base(db, amo_id=version.amo_id, base_station_id=base_station_id)
     shift = common.require_shift_template(db, amo_id=version.amo_id, shift_template_id=payload.shift_template_id)
     if payload.ends_at <= payload.starts_at:
