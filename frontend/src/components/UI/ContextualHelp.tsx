@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { HelpCircle, X } from "lucide-react";
 
 import { getCachedUser, getContext } from "../../services/auth";
@@ -38,7 +38,7 @@ export function ContextualHelp({
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement | null>(null);
-  const key = storageKey(topic, version);
+  const key = useMemo(() => storageKey(topic, version), [topic, version]);
 
   useEffect(() => {
     if (!autoOpen || typeof window === "undefined") return;
@@ -106,12 +106,12 @@ export function ContextualHelp({
               </button>
             </header>
             <div className="portal-help-dialog__body">
-              <p>{description}</p>
+              <div className="portal-help-dialog__description">{description}</div>
               {checklist.length ? <ul>{checklist.map((item, index) => <li key={index}>{item}</li>)}</ul> : null}
             </div>
             <footer className="portal-help-dialog__footer">
               {actions}
-              <button type="button" className="wr-button wr-button--primary" onClick={dismiss}>Got it</button>
+              <button type="button" className="portal-help-button portal-help-button--primary" onClick={dismiss}>Got it</button>
             </footer>
           </section>
         </div>
