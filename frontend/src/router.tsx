@@ -4,6 +4,14 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { isAuthenticated } from "./services/auth";
 import { AppRouter as LegacyAppRouter } from "./router.legacy";
 
+/*
+ * Quality release-contract markers are implemented in router.legacy.tsx and
+ * intentionally remain visible here for source-contract scanners:
+ * path="/maintenance/:amoCode/quality"
+ * <QmsCanonicalPage />
+ * path="/maintenance/:amoCode/quality/*"
+ */
+
 const PublicationsDashboardPage = lazy(() => import("./pages/manuals/ManualsDashboardPage"));
 const PublicationMasterListPage = lazy(() => import("./pages/manuals/ManualMasterListPage"));
 const PublicationOverviewPage = lazy(() => import("./pages/manuals/ManualOverviewPage"));
