@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from pathlib import PurePosixPath
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from .schemas import QMSAuditOut
 
@@ -17,6 +18,22 @@ AuditStageState = Literal[
     "COMPLETE",
     "LOCKED",
 ]
+
+
+def _safe_legacy_document_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = str(value).replace("\\", "/")
+    name = PurePosixPath(normalized).name.strip()
+    return name or None
+
+
+class QualityAuditSafeOut(QMSAuditOut):
+    """Compatibility audit DTO that never serializes private storage paths."""
+
+    @field_serializer("checklist_file_ref", "report_file_ref")
+    def serialize_document_ref(self, value: str | None) -> str | None:
+        return _safe_legacy_document_name(value)
 
 
 class QualityAuditStageActionOut(BaseModel):
@@ -63,7 +80,7 @@ class QualityAuditWorkflowV2Out(BaseModel):
 
 
 class QualityAuditWorkspaceV2Out(BaseModel):
-    audit: QMSAuditOut
+    audit: QualityAuditSafeOut
     workflow: QualityAuditWorkflowV2Out
 
 
@@ -178,7 +195,7 @@ class QualityAuditReadinessOut(BaseModel):
 
 
 class QualityAuditWarRoomContextOut(BaseModel):
-    audit: QMSAuditOut
+    audit: QualityAuditSafeOut
     workflow: QualityAuditWorkflowV2Out
     readiness: QualityAuditReadinessOut
     previous_audits: list[QualityAuditPreviousAuditOut] = Field(default_factory=list)
