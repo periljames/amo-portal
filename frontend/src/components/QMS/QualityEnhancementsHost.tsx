@@ -1,0 +1,89 @@
+import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { RefreshCcw, ShieldAlert } from "lucide-react";
+import "../../styles/quality-checklist-pdf-form-editor.css";
+
+const QualityChecklistPdfFormEditorHost = lazy(
+  () => import("./QualityChecklistPdfFormEditorHost"),
+);
+
+type AuditRoute = {
+  amoCode: string;
+  auditKey: string;
+  activeTab: string;
+};
+
+function useAuditRoute(): AuditRoute | null {
+  const location = useLocation();
+  return useMemo(() => {
+    const match = location.pathname.match(/^\/maintenance\/([^/]+)\/quality\/audits\/([^/]+)/i);
+    if (!match) return null;
+    return {
+      amoCode: decodeURIComponent(match[1]),
+      auditKey: decodeURIComponent(match[2]),
+      activeTab: new URLSearchParams(location.search).get("tab") || "war-room",
+    };
+  }, [location.pathname, location.search]);
+}
+
+const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
+  const queryClient = useQueryClient();
+  const [cacheRevision, setCacheRevision] = useState(0);
+  const queryKey = useMemo(() => ["qms-audit-context", route.auditKey] as const, [route.auditKey]);
+
+  useEffect(() => queryClient.getQueryCache().subscribe(() => {
+    setCacheRevision((current) => current + 1);
+  }), [queryClient]);
+
+  const state = queryClient.getQueryState(queryKey);
+  const data = queryClient.getQueryData<{ degraded?: boolean }>(queryKey);
+  const degraded = data?.degraded === true || state?.status === "error";
+  void cacheRevision;
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("quality-workflow-is-degraded", degraded);
+    return () => document.documentElement.classList.remove("quality-workflow-is-degraded");
+  }, [degraded]);
+
+  if (!degraded) return null;
+
+  return (
+    <div className="quality-workflow-integrity-blocker" role="alertdialog" aria-modal="true" aria-label="Audit workflow unavailable">
+      <section>
+        <ShieldAlert size={28} />
+        <div>
+          <p>Authoritative workflow unavailable</p>
+          <h2>Audit progress has been placed in safe read-only mode.</h2>
+          <span>
+            The portal could not verify stage completion, CAR state, evidence gates or closeout readiness from the backend.
+            It will not use locally invented completion values or permit workflow advancement.
+          </span>
+        </div>
+        <div className="quality-workflow-integrity-blocker__actions">
+          <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey })}>
+            <RefreshCcw size={17} /> Retry workflow
+          </button>
+          <a href={`/maintenance/${encodeURIComponent(route.amoCode)}/quality/audits/register`}>Open audit register</a>
+        </div>
+      </section>
+    </div>
+  );
+};
+
+const QualityEnhancementsHost: React.FC = () => {
+  const route = useAuditRoute();
+  if (!route) return null;
+
+  if (route.activeTab === "checklist") {
+    return (
+      <Suspense fallback={null}>
+        <QualityChecklistPdfFormEditorHost />
+      </Suspense>
+    );
+  }
+
+  return <WorkflowIntegrityGuard route={route} />;
+};
+
+export default QualityEnhancementsHost;
