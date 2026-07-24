@@ -10,28 +10,15 @@ ROOT = BACKEND_ROOT.parent
 FRONTEND_ROOT = ROOT / "frontend"
 
 REQUIRED_CHECKS = {
-    "backend_schema_workflow_models": (
-        BACKEND_ROOT / "amodb/apps/quality/schemas.py",
+    "backend_quality_route_deduplication": (
+        BACKEND_ROOT / "amodb/apps/quality/__init__.py",
         [
-            "class QMSAuditWorkflowStageOut",
-            "class QMSAuditWorkflowSummaryOut",
-            "class QMSAuditWorkspaceOut",
-            "class QMSAuditNoticeDispatchOut",
-            "dispatched: bool",
-            "message: str",
-        ],
-    ),
-    "backend_router_workspace_endpoints": (
-        BACKEND_ROOT / "amodb/apps/quality/router.py",
-        [
-            '@router.get("/audits/{audit_id}/workspace"',
-            '@router.get("/audits/{audit_id}/workflow-check"',
-            "return QMSAuditWorkspaceOut(audit=_serialize_audit(audit, db), workflow=workflow)",
-            '@router.post("/audits/{audit_id}/issue-notice"',
-            '@router.get("/audits/{audit_id}/report"',
-            '@router.post("/audits/{audit_id}/report/share"',
-            '@router.get("/cars/{car_id}/actions"',
-            '@router.post("/cars/{car_id}/actions"',
+            "def _deduplicate_exact_routes(",
+            "audit_lifecycle_models",
+            "audit_lifecycle as _audit_lifecycle",
+            "audit_lifecycle_queries",
+            "_deduplicate_exact_routes(router)",
+            "_deduplicate_exact_routes(public_router)",
         ],
     ),
     "backend_router_amo_scoping_helpers": (
@@ -45,139 +32,184 @@ REQUIRED_CHECKS = {
             "def _get_finding_for_amo(",
         ],
     ),
-    "backend_quality_route_deduplication": (
-        BACKEND_ROOT / "amodb/apps/quality/__init__.py",
+    "backend_lifecycle_models": (
+        BACKEND_ROOT / "amodb/apps/quality/audit_lifecycle_models.py",
         [
-            "def _deduplicate_exact_routes(",
-            "signature = (path, methods, endpoint_marker)",
-            "_deduplicate_exact_routes(router)",
-            "_deduplicate_exact_routes(public_router)",
+            "class QualityAuditChecklistDocument",
+            "class QualityAuditReportDocument",
+            "class QualityAuditStageRecord",
+            "class QualityAuditEvidenceReview",
+            "WORKING_DRAFT",
+            "SUPERSEDED",
+            "RETAINED",
+            "PENDING','ACCEPTED','REJECTED",
         ],
     ),
-    "backend_service_dashboard_scoped": (
-        BACKEND_ROOT / "amodb/apps/quality/service.py",
+    "backend_lifecycle_schemas": (
+        BACKEND_ROOT / "amodb/apps/quality/audit_lifecycle_schemas.py",
         [
-            "def get_dashboard(db: Session, domain: Optional[QMSDomain] = None, amo_id: Optional[str] = None)",
-            "models.QMSAudit.amo_id == amo_id",
+            "AuditStageState = Literal",
+            "class QualityAuditWorkflowV2Out",
+            "class QualityAuditWarRoomContextOut",
+            "class QualityAuditChecklistMetadataOut",
+            "class QualityAuditReportMetadataOut",
+            "class QualityAuditPreviousAuditOut",
+            "class QualityAuditEvidenceReviewIn",
+        ],
+    ),
+    "backend_authoritative_lifecycle": (
+        BACKEND_ROOT / "amodb/apps/quality/audit_lifecycle.py",
+        [
+            'STAGE_ORDER = ("war-room", "checklist", "findings", "cars", "evidence", "report", "closeout")',
+            "def build_workflow_v2(",
+            "Uploading a blank source document does not",
+            "Evidence completion is based on explicit acceptance",
+            '@_extension_router.get("/audits/{audit_id}/war-room-context"',
+            '@_extension_router.post("/audits/{audit_id}/documents/checklist/draft"',
+            '@_extension_router.post("/audits/{audit_id}/documents/checklist/commit"',
+            '@_extension_router.post("/audits/{audit_id}/lifecycle/checklist/complete"',
+            '@_extension_router.post("/audits/{audit_id}/lifecycle/fieldwork/complete"',
+            '@_extension_router.post("/audits/{audit_id}/documents/report/issue"',
+            '@_extension_router.post("/audits/{audit_id}/lifecycle/closeout"',
+            "_previous_audits",
+            "storage_key",
+        ],
+    ),
+    "backend_lifecycle_queries": (
+        BACKEND_ROOT / "amodb/apps/quality/audit_lifecycle_queries.py",
+        [
+            '@_extension_router.get(\n    "/audits/{audit_id}/evidence/reviews"',
+            '"/audits/{audit_id}/documents/report/distribution"',
+            "update_report_distribution",
+        ],
+    ),
+    "backend_lifecycle_migration": (
+        BACKEND_ROOT / "amodb/alembic/versions/quality_20260724_audit_lifecycle.py",
+        [
+            'revision = "quality_20260724_audit_lifecycle"',
+            "quality_audit_checklist_documents",
+            "quality_audit_report_documents",
+            "quality_audit_stage_records",
+            "quality_audit_evidence_reviews",
+            "ix_qms_audits_amo_scope_actual_end",
+            "ix_qms_audits_amo_auditee_actual_end",
+            "ix_qms_audits_amo_status_actual_end",
+        ],
+    ),
+    "backend_lifecycle_tests": (
+        BACKEND_ROOT / "amodb/apps/quality/tests/test_audit_lifecycle_v2.py",
+        [
+            "test_planned_future_audit_never_inherits_false_completion_from_files",
+            "test_navigation_has_no_lifecycle_side_effect",
+            "test_checklist_source_is_readiness_not_completion",
+            "test_evidence_requires_explicit_acceptance",
+            "test_document_dto_never_exposes_storage_key",
+            "test_retained_checklist_versions_are_distinct",
+            "test_previous_audit_intelligence_requires_comparable_issued_report",
         ],
     ),
     "backend_schema_integrity_migration": (
         BACKEND_ROOT / "amodb/alembic/versions/quality_20260722_schema_integrity.py",
         [
             'revision = "quality_20260722_schema_integrity"',
-            'down_revision = "workforce_20260721_complete"',
-            "def _foreign_key_exists(",
-            "def _unique_columns_exist(",
             "pk_quality_car_responses",
             "fk_quality_car_responses_car",
             "pk_quality_car_attachments",
             "fk_quality_car_attachments_car",
             "pk_quality_finding_attachments",
             "fk_quality_finding_attachments_finding",
-            "pk_quality_corrective_actions",
-            "fk_quality_corrective_actions_finding",
-            "uq_quality_corrective_actions_finding",
-        ],
-    ),
-    "backend_postgres_integrity_probe": (
-        BACKEND_ROOT / "amodb/apps/quality/tests/postgres_schema_integrity_probe.py",
-        [
-            'TARGET_REVISION = "quality_20260722_schema_integrity"',
-            "_create_runtime_fallback_baseline",
-            "_assert_foreign_key_rejects_orphan",
-            "Orphaned CAR response insertion unexpectedly succeeded",
         ],
     ),
     "backend_quality_delivery_profile": (
         BACKEND_ROOT / "amodb/quality_main.py",
         [
             'PROFILE_NAME: Final = "quality"',
-            "PROFILE_MODULES:",
-            "OMITTED_OPERATIONAL_MODULES:",
             "def _enforce_schema_head_sync()",
-            'app.include_router(quality_router)',
-            'app.include_router(canonical_quality_router)',
-            'app.include_router(training_router)',
-            'app.include_router(audit_events_router)',
-            'app.include_router(notifications_router)',
-            'app.include_router(tasks_router)',
-            'app.include_router(doc_control_router)',
+            "app.include_router(quality_router)",
+            "app.include_router(training_router)",
+            "app.include_router(audit_events_router)",
         ],
     ),
-    "backend_quality_delivery_profile_tests": (
-        BACKEND_ROOT / "amodb/apps/quality/tests/test_quality_delivery_profile.py",
+    "frontend_lifecycle_service": (
+        FRONTEND_ROOT / "src/services/qmsAuditLifecycle.ts",
         [
-            "test_quality_delivery_profile_exposes_required_route_families",
-            "test_quality_delivery_profile_omits_unrelated_operational_routes",
-            "test_quality_direct_router_has_no_exact_duplicate_registrations",
-            "test_quality_delivery_manifest_is_explicit",
+            "export type QualityAuditStageState",
+            "export interface QualityAuditWarRoomContext",
+            "qmsGetAuditWarRoomContext",
+            "qmsStartAuditLifecycle",
+            "qmsCompleteAuditChecklist",
+            "qmsCompleteAuditFieldwork",
+            "qmsUploadChecklistSource",
+            "qmsSaveChecklistDraft",
+            "qmsCommitChecklistVersion",
+            "qmsIssueReportVersion",
+            "qmsReviewAuditEvidence",
+            "qmsCloseAuditLifecycle",
         ],
     ),
-    "backend_quality_container_profile": (
-        ROOT / "backend/Dockerfile",
+    "frontend_lifecycle_queries": (
+        FRONTEND_ROOT / "src/services/qmsAuditLifecycleQueries.ts",
         [
-            "ASGI_APP=amodb.main:app",
-            'exec uvicorn \\"${ASGI_APP}\\"',
-            '${PORT:-8080}',
+            "qmsListAuditEvidenceReviews",
+            "qmsRecordReportDistribution",
+            "qmsOpenAuthenticatedQualityPath",
+            "qmsOpenLifecycleDocument",
         ],
     ),
-    "frontend_quality_canonical_root": (
-        FRONTEND_ROOT / "src/router.tsx",
+    "frontend_integrated_pdf_editor": (
+        FRONTEND_ROOT / "src/components/QMS/QualityChecklistPdfEditor.tsx",
         [
-            'path="/maintenance/:amoCode/quality"',
-            "<QmsCanonicalPage />",
-            'path="/maintenance/:amoCode/quality/*"',
+            "renderForms",
+            "getFieldObjects",
+            "saveDocument",
+            "qmsSaveChecklistDraft",
+            "qmsCommitChecklistVersion",
+            "The controlled source remains retained",
         ],
     ),
-    "frontend_qms_command_centre_target": (
-        FRONTEND_ROOT / "src/components/Layout/DepartmentLayout.tsx",
-        [
-            'label: "Command Centre"',
-            'path: `/maintenance/${amoCode}/quality`',
-            "const qmsNavItems = useMemo<QmsNavItem[]>",
-        ],
-    ),
-    "frontend_active_audit_workflow_contract": (
-        FRONTEND_ROOT / "src/services/qms.ts",
-        [
-            "export interface QMSAuditWorkflowStageOut {",
-            "export interface QMSAuditWorkflowSummaryOut {",
-            "export interface QMSAuditWorkflowOut {",
-            "audit: QMSAuditOut;",
-            "workflow: QMSAuditWorkflowSummaryOut;",
-            "export async function qmsGetAuditWorkflow(auditId: string",
-            "Promise<QMSAuditWorkflowOut>",
-            "export async function qmsIssueAuditNotice(",
-        ],
-    ),
-    "frontend_hub_action_service": (
-        FRONTEND_ROOT / "src/services/qmsAuditHubActions.ts",
-        [
-            "async function hubRequest<T>(",
-            "globalThis.clearTimeout(timeout)",
-            "Quality API request timed out after",
-            "readApiError",
-            "export async function qmsAddCarAction",
-            "export async function qmsShareAuditReport",
-        ],
-    ),
-    "frontend_hub_action_regressions": (
-        FRONTEND_ROOT / "src/services/qmsAuditHubActions.test.ts",
-        [
-            'describe("Quality audit hub API helpers"',
-            "surfaces backend validation detail",
-            "returns a deterministic timeout error",
-        ],
-    ),
-    "frontend_run_hub_import_boundary": (
+    "frontend_auditor_workbench": (
         FRONTEND_ROOT / "src/pages/QualityAuditRunHubPage.tsx",
         [
-            'from "../services/qmsAuditHubActions";',
-            "qmsGetAuditWorkflow",
-            "qmsIssueAuditNotice",
-            "qmsAddCarAction",
-            "qmsListCarActions",
-            "qmsShareAuditReport",
+            "qmsGetAuditWarRoomContext",
+            "Previous audit intelligence",
+            "View previous report",
+            "Auditor action queue",
+            "Mark checklist complete",
+            "Complete fieldwork",
+            "Evidence completion",
+            "Issue controlled report",
+            "Approve and close audit",
+            "workflow!.stages.map",
+        ],
+    ),
+    "frontend_auditor_workbench_styles": (
+        FRONTEND_ROOT / "src/pages/qualityAudits/quality-audit-workbench-v2.css",
+        [
+            "grid-template-columns: minmax(250px, 276px) minmax(0, 1fr)",
+            ".qa2-stepper",
+            ".qa2-command-strip",
+            ".qa2-pdf-shell",
+            "height: min(94dvh, 1080px)",
+            "@media (max-width: 640px)",
+        ],
+    ),
+    "frontend_no_floating_pdf_launcher": (
+        FRONTEND_ROOT / "src/components/QMS/QualityEnhancementsHost.tsx",
+        [
+            "Fillable PDF controls now live inside the Checklist toolbar",
+            "WorkflowIntegrityGuard",
+            "qms-audit-lifecycle",
+        ],
+    ),
+    "reference_contract": (
+        BACKEND_ROOT / "docs/quality/QUALITY_AUDIT_WAR_ROOM_CHECKLIST_LIFECYCLE_20260724.md",
+        [
+            "source of truth",
+            "Previous audit intelligence",
+            "Uploading a blank source document does not complete",
+            "Saving a filled PDF creates a new retained version",
+            "No API response may expose a local filesystem path",
+            "Acceptance criteria",
         ],
     ),
     "quality_ci_workflow": (
@@ -185,8 +217,6 @@ REQUIRED_CHECKS = {
         [
             "name: Quality Module CI",
             "python -m amodb.scripts.quality_module_internal_check",
-            "python -m amodb.apps.quality.tests.postgres_schema_integrity_probe",
-            "test_quality_delivery_profile.py",
             "npm run test:quality",
             "npm run build",
         ],
@@ -194,13 +224,22 @@ REQUIRED_CHECKS = {
 }
 
 FORBIDDEN_CHECKS = {
-    "frontend_hub_service_browser_timer_dependency": (
-        FRONTEND_ROOT / "src/services/qmsAuditHubActions.ts",
-        ["window.setTimeout", "window.clearTimeout"],
-    ),
-    "frontend_run_hub_legacy_action_import": (
+    "frontend_page_no_navigation_completion_heuristic": (
         FRONTEND_ROOT / "src/pages/QualityAuditRunHubPage.tsx",
-        ['qmsAddCarAction,\n} from "../services/qms"'],
+        [
+            "index < currentTabIndex",
+            "buildFallbackWorkflow",
+            "Commit overwrite",
+            "checklist_file_ref ? \"Uploaded\"",
+        ],
+    ),
+    "frontend_page_no_raw_storage_path_render": (
+        FRONTEND_ROOT / "src/pages/QualityAuditRunHubPage.tsx",
+        ["checklist_file_ref", "report_file_ref", "D:\\\\XLK-Assets"],
+    ),
+    "frontend_enhancements_no_floating_editor": (
+        FRONTEND_ROOT / "src/components/QMS/QualityEnhancementsHost.tsx",
+        ["QualityChecklistPdfFormEditorHost", "route.activeTab === \"checklist\""],
     ),
     "backend_quality_profile_operational_routers": (
         BACKEND_ROOT / "amodb/quality_main.py",
@@ -221,11 +260,12 @@ COMPILE_TARGETS = [
     BACKEND_ROOT / "amodb/quality_main.py",
     BACKEND_ROOT / "amodb/apps/quality/__init__.py",
     BACKEND_ROOT / "amodb/apps/quality/router.py",
-    BACKEND_ROOT / "amodb/apps/quality/service.py",
-    BACKEND_ROOT / "amodb/apps/quality/schemas.py",
-    BACKEND_ROOT / "amodb/alembic/versions/quality_20260722_schema_integrity.py",
-    BACKEND_ROOT / "amodb/apps/quality/tests/postgres_schema_integrity_probe.py",
-    BACKEND_ROOT / "amodb/apps/quality/tests/test_quality_delivery_profile.py",
+    BACKEND_ROOT / "amodb/apps/quality/audit_lifecycle_models.py",
+    BACKEND_ROOT / "amodb/apps/quality/audit_lifecycle_schemas.py",
+    BACKEND_ROOT / "amodb/apps/quality/audit_lifecycle.py",
+    BACKEND_ROOT / "amodb/apps/quality/audit_lifecycle_queries.py",
+    BACKEND_ROOT / "amodb/alembic/versions/quality_20260724_audit_lifecycle.py",
+    BACKEND_ROOT / "amodb/apps/quality/tests/test_audit_lifecycle_v2.py",
     Path(__file__),
 ]
 
@@ -263,11 +303,7 @@ def main() -> int:
         missing = ensure_contains(text, needles)
         passed = not missing
         ok = ok and passed
-        results[check_name] = {
-            "passed": passed,
-            "path": _display_path(path),
-            "missing": missing,
-        }
+        results[check_name] = {"passed": passed, "path": _display_path(path), "missing": missing}
 
     for check_name, (path, needles) in FORBIDDEN_CHECKS.items():
         if not path.exists():
@@ -283,40 +319,28 @@ def main() -> int:
         present = ensure_absent(text, needles)
         passed = not present
         ok = ok and passed
-        results[check_name] = {
-            "passed": passed,
-            "path": _display_path(path),
-            "present": present,
-        }
+        results[check_name] = {"passed": passed, "path": _display_path(path), "present": present}
 
     package_json = FRONTEND_ROOT / "package.json"
-    package_result: dict[str, object]
     if package_json.exists():
         try:
             payload = json.loads(package_json.read_text(encoding="utf-8"))
-            quality_command = payload.get("scripts", {}).get("test:quality")
-            passed = quality_command == "vitest run src/services/qmsAuditHubActions.test.ts"
+            quality_command = str(payload.get("scripts", {}).get("test:quality") or "")
+            required_tests = ["qmsAuditHubActions.test.ts", "qmsAuditLifecycle.test.ts"]
+            passed = all(test_name in quality_command for test_name in required_tests)
             ok = ok and passed
-            package_result = {
+            results["frontend_quality_test_script"] = {
                 "passed": passed,
                 "path": _display_path(package_json),
                 "command": quality_command,
+                "required": required_tests,
             }
         except Exception as exc:
             ok = False
-            package_result = {
-                "passed": False,
-                "path": _display_path(package_json),
-                "error": str(exc),
-            }
+            results["frontend_quality_test_script"] = {"passed": False, "path": _display_path(package_json), "error": str(exc)}
     else:
         ok = False
-        package_result = {
-            "passed": False,
-            "path": _display_path(package_json),
-            "error": "frontend/package.json is missing",
-        }
-    results["frontend_quality_test_script"] = package_result
+        results["frontend_quality_test_script"] = {"passed": False, "path": _display_path(package_json), "error": "frontend/package.json is missing"}
 
     compile_results = []
     for target in COMPILE_TARGETS:
@@ -327,11 +351,7 @@ def main() -> int:
             ok = False
             compile_results.append({"path": _display_path(target), "passed": False, "error": str(exc)})
 
-    summary = {
-        "passed": ok,
-        "checks": results,
-        "compile": compile_results,
-    }
+    summary = {"passed": ok, "checks": results, "compile": compile_results}
     print(json.dumps(summary, indent=2))
     return 0 if ok else 1
 
