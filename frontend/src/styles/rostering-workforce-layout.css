@@ -1,2 +1,218 @@
-/* Rostering workspace sizing overrides. */
-.wr-page { width: 100%; }
+/* Rostering-specific shell and viewport sizing.
+   Keep the shared portal shell unchanged while operational roster views use
+   the available width and height efficiently. */
+
+@supports selector(:has(*)) {
+  .app-shell--v2:has(.wr-page) {
+    --sidebar-width: clamp(204px, 12.5vw, 226px);
+    gap: 8px;
+  }
+
+  .app-shell--v2:has(.wr-page) .app-shell__topbar {
+    min-height: 58px;
+    padding: 7px 12px;
+  }
+
+  .app-shell--v2:has(.wr-page) .app-shell__scroll {
+    padding-right: 0;
+    scrollbar-gutter: stable;
+  }
+
+  .app-shell__content:has(> .wr-page) {
+    max-width: none;
+    min-height: calc(100dvh - 58px);
+    padding: 0;
+    margin: 0;
+  }
+
+  .app-shell__content:has(> .wr-page) > .app-shell__footer {
+    display: none;
+  }
+}
+
+.wr-page {
+  width: 100%;
+  min-width: 0;
+  min-height: calc(100dvh - 58px);
+  padding: clamp(8px, .75vw, 12px) clamp(9px, .85vw, 14px) 14px;
+}
+
+.wr-header,
+.wr-tabs,
+.wr-context,
+.wr-main {
+  width: 100%;
+  max-width: none;
+}
+
+.wr-header {
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 7px;
+}
+
+.wr-header__copy {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(260px, 1fr);
+  grid-template-areas:
+    "eyebrow eyebrow"
+    "title description";
+  align-items: end;
+  column-gap: 18px;
+  row-gap: 2px;
+  flex: 1;
+}
+
+.wr-header__copy > .wr-eyebrow { grid-area: eyebrow; }
+.wr-header__copy > h1 { grid-area: title; white-space: nowrap; }
+.wr-header__copy > p { grid-area: description; padding-bottom: 2px; }
+
+.wr-header h1 {
+  margin: 0;
+  font-size: clamp(1.42rem, 1.55vw, 1.9rem);
+  line-height: 1;
+}
+
+.wr-header p {
+  max-width: none;
+  font-size: clamp(.78rem, .72vw, .88rem);
+  line-height: 1.32;
+}
+
+.wr-header__actions { flex: 0 0 auto; }
+
+.wr-tabs {
+  min-height: 40px;
+  margin-bottom: 8px;
+  padding: 3px;
+  border-radius: 11px;
+  box-shadow: 0 5px 18px color-mix(in srgb, #020617 8%, transparent);
+}
+
+.wr-tab {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: .78rem;
+}
+
+.wr-main { min-height: 0; }
+.wr-panel { padding: clamp(11px, .85vw, 15px); }
+
+.wr-metric-grid {
+  gap: 7px;
+  margin-bottom: 9px;
+}
+
+.wr-metric {
+  min-height: 76px;
+  padding: 10px 11px;
+  border-radius: 11px;
+}
+
+.wr-dashboard,
+.wr-capacity,
+.wr-self-service,
+.wr-compliance,
+.wr-reports,
+.wr-settings {
+  gap: 9px;
+}
+
+.wr-dashboard-grid,
+.wr-two-column,
+.wr-two-column--wide,
+.wr-planner-layout {
+  gap: 9px;
+}
+
+.wr-planner-body {
+  min-height: clamp(560px, calc(100dvh - 184px), 920px);
+}
+
+.wr-issue-rail {
+  top: 50px;
+  max-height: calc(100dvh - 70px);
+}
+
+.wr-issue-list { max-height: calc(100dvh - 156px); }
+
+@media (min-width: 1680px) {
+  .wr-dashboard {
+    grid-template-columns: minmax(0, 1.55fr) minmax(350px, .45fr);
+    align-items: start;
+  }
+
+  .wr-dashboard > .wr-metric-grid { grid-column: 1 / -1; }
+
+  .wr-dashboard > .wr-dashboard-grid {
+    grid-column: 1;
+    grid-row: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wr-dashboard > .wr-panel:last-child {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: stretch;
+  }
+
+  .wr-dashboard > .wr-panel:last-child .wr-period-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .wr-dashboard > .wr-panel:last-child .wr-period-row__name,
+  .wr-dashboard > .wr-panel:last-child .wr-period-row__version {
+    grid-column: 1 / -1;
+  }
+
+  .wr-dashboard > .wr-panel:last-child .wr-period-row > a { display: none; }
+
+  .wr-planner-layout {
+    grid-template-columns: minmax(0, 1fr) clamp(270px, 16vw, 315px);
+  }
+
+  .wr-planner-body {
+    grid-template-columns: clamp(205px, 13vw, 238px) minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 2200px) {
+  @supports selector(:has(*)) {
+    .app-shell--v2:has(.wr-page) { --sidebar-width: 216px; }
+  }
+
+  .wr-page { padding-inline: 16px; }
+  .wr-metric-grid { grid-template-columns: repeat(6, minmax(160px, 1fr)); }
+  .wr-dashboard { grid-template-columns: minmax(0, 1.7fr) minmax(390px, .3fr); }
+  .wr-card-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+}
+
+@media (max-width: 1280px) {
+  .wr-header__copy { display: block; }
+
+  .wr-header__copy > h1 {
+    margin: 2px 0 3px;
+    white-space: normal;
+  }
+
+  .wr-planner-body {
+    min-height: clamp(520px, calc(100dvh - 210px), 820px);
+  }
+}
+
+@media (max-width: 760px) {
+  .wr-page {
+    min-height: 100dvh;
+    padding: 8px;
+  }
+
+  .wr-header {
+    align-items: start;
+    margin-bottom: 8px;
+  }
+
+  .wr-header h1 { font-size: 1.35rem; }
+  .wr-tabs { position: sticky; top: 0; }
+}
