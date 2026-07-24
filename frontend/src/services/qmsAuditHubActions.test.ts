@@ -145,7 +145,7 @@ describe("Quality audit hub API helpers", () => {
   });
 });
 
-describe("Quality checklist and public CAR UI contracts", () => {
+describe("Quality checklist, workflow integrity and public CAR UI contracts", () => {
   const checklistEditorSource = readFileSync(
     new URL("../components/QMS/QualityChecklistPdfFormEditorHost.tsx", import.meta.url),
     "utf8",
@@ -166,10 +166,20 @@ describe("Quality checklist and public CAR UI contracts", () => {
     expect(checklistEditorSource).toContain("getFieldObjects()");
   });
 
-  it("protects unsaved checklist changes", () => {
+  it("protects unsaved and controlled checklist states", () => {
     expect(checklistEditorSource).toContain("Discard the unsaved PDF form changes?");
     expect(checklistEditorSource).toContain("setDirty(true)");
+    expect(checklistEditorSource).toContain("The audit report has been issued");
+    expect(checklistEditorSource).toContain("Only the assigned audit team or an AMO administrator");
     expect(checklistEditorSource).toContain("Save to portal");
+  });
+
+  it("fails closed when the authoritative audit workflow is unavailable", () => {
+    expect(checklistEditorSource).toContain("data?.degraded === true");
+    expect(checklistEditorSource).toContain("Authoritative workflow unavailable");
+    expect(checklistEditorSource).toContain("It will not use locally invented completion values");
+    expect(checklistEditorSource).toContain("quality-workflow-is-degraded");
+    expect(checklistEditorCss).toContain(".quality-workflow-integrity-blocker");
   });
 
   it("keeps the PDF editor and public CAR workflow usable at normal browser zoom", () => {
