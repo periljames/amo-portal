@@ -23,50 +23,28 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          workflow = Path('.github/workflows/apply-rostering-governance.yml').read_text(encoding='utf-8')
-          workflow = workflow.replace(
-              '''class RosterRuleBase(StrictModel):
-              code: str''',
-              '''class RosterRuleBase(RosterSchema):
-              code: str = Field(min_length=1, max_length=64)''',
-          ).replace(
-              '''class RosterRuleBase(StrictModel):
-              rule_set_id: Optional[str] = None
-              code: str''',
-              '''class RosterRuleBase(RosterSchema):
-              rule_set_id: Optional[str] = None
-              code: str = Field(min_length=1, max_length=64)''',
-          ).replace(
-              '''class RosterLifecycleRequest(StrictModel):
-              expected_state_revision: Optional[int] = None
-              idempotency_key: Optional[str] = Field(default=None, max_length=128)
-              comment: Optional[str] = Field(default=None, max_length=2000)''',
-              '''class RosterLifecycleRequest(RosterSchema):
-              expected_state_revision: Optional[int] = Field(default=None, ge=1)
-              idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128)
-              comment: Optional[str] = None''',
-          ).replace(
-              '''class RosterLifecycleRequest(StrictModel):
-              expected_state_revision: Optional[int] = None
-              idempotency_key: Optional[str] = Field(default=None, max_length=128)
-              comment: Optional[str] = Field(default=None, max_length=2000)
-              department_id: Optional[str] = None
-              base_station_id: Optional[str] = None''',
-              '''class RosterLifecycleRequest(RosterSchema):
-              expected_state_revision: Optional[int] = Field(default=None, ge=1)
-              idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128)
-              comment: Optional[str] = None
-              department_id: Optional[str] = None
-              base_station_id: Optional[str] = None''',
-          ).replace(
-              'marker = "class RosterRuleBase(StrictModel):"',
-              'marker = "class RosterRuleBase(RosterSchema):"',
-          )
-          source = workflow.splitlines()
+          source = Path('.github/workflows/apply-rostering-governance.yml').read_text(encoding='utf-8').splitlines()
           start = source.index("          python - <<'PY'") + 1
           end = source.index("          PY", start)
-          extracted = [line[10:] if line.startswith('          ') else line for line in source[start:end]]
-          Path('/tmp/apply_rostering_governance.py').write_text('\n'.join(extracted) + '\n', encoding='utf-8')
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[start:end]) + '\n'
+          script = script.replace('StrictModel', 'RosterSchema')
+          script = script.replace(
+              "              code: str'''.replace",
+              "              code: str = Field(min_length=1, max_length=64)'''.replace",
+          )
+          script = script.replace(
+              'expected_state_revision: Optional[int] = None',
+              'expected_state_revision: Optional[int] = Field(default=None, ge=1)',
+          )
+          script = script.replace(
+              'idempotency_key: Optional[str] = Field(default=None, max_length=128)',
+              'idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128)',
+          )
+          script = script.replace(
+              'comment: Optional[str] = Field(default=None, max_length=2000)',
+              'comment: Optional[str] = None',
+          )
+          Path('/tmp/apply_rostering_governance.py').write_text(script, encoding='utf-8')
           PY
       - name: Apply audited full-stack governance patch
         shell: bash
