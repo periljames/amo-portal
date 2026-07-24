@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -141,5 +142,40 @@ describe("Quality audit hub API helpers", () => {
       new Error("Quality API request timed out after 45 seconds."),
     );
     expect(endLoading).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Quality checklist and public CAR UI contracts", () => {
+  const checklistEditorSource = readFileSync(
+    new URL("../components/QMS/QualityChecklistPdfFormEditorHost.tsx", import.meta.url),
+    "utf8",
+  );
+  const checklistEditorCss = readFileSync(
+    new URL("../styles/quality-checklist-pdf-form-editor.css", import.meta.url),
+    "utf8",
+  );
+  const inviteCss = readFileSync(
+    new URL("../styles/car-invite-responsive.css", import.meta.url),
+    "utf8",
+  );
+
+  it("renders AcroForm controls and saves PDF.js annotation storage to the portal", () => {
+    expect(checklistEditorSource).toContain("renderForms");
+    expect(checklistEditorSource).toContain("saveDocument()");
+    expect(checklistEditorSource).toContain("qmsUploadAuditChecklist");
+    expect(checklistEditorSource).toContain("getFieldObjects()");
+  });
+
+  it("protects unsaved checklist changes", () => {
+    expect(checklistEditorSource).toContain("Discard the unsaved PDF form changes?");
+    expect(checklistEditorSource).toContain("setDirty(true)");
+    expect(checklistEditorSource).toContain("Save to portal");
+  });
+
+  it("keeps the PDF editor and public CAR workflow usable at normal browser zoom", () => {
+    expect(checklistEditorCss).toContain("height: min(94dvh, 1080px)");
+    expect(inviteCss).toContain(".car-invite-stage:not(.is-active)");
+    expect(inviteCss).toContain("max-height: none");
+    expect(inviteCss).toContain(":has(.car-invite-badge--success)");
   });
 });
