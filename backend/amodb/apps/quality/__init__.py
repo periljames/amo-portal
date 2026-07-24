@@ -7,8 +7,9 @@ from fastapi import APIRouter
 from .router import router, public_router  # noqa: F401
 
 # Focused extensions are loaded only after the compatibility router is complete.
-# The module prepends its enriched token route to the same public_router object,
-# so both the full portal and bounded Quality entrypoint receive it automatically.
+# They replace narrowly scoped read routes on the same exported router objects,
+# so both the full portal and bounded Quality entrypoint receive the corrections.
+from . import audit_workflow_contract as _audit_workflow_contract  # noqa: F401,E402
 from . import public_invite_extensions as _public_invite_extensions  # noqa: F401,E402
 
 
