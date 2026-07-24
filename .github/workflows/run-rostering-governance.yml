@@ -23,7 +23,46 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          source = Path('.github/workflows/apply-rostering-governance.yml').read_text(encoding='utf-8').splitlines()
+          workflow = Path('.github/workflows/apply-rostering-governance.yml').read_text(encoding='utf-8')
+          workflow = workflow.replace(
+              '''class RosterRuleBase(StrictModel):
+              code: str''',
+              '''class RosterRuleBase(RosterSchema):
+              code: str = Field(min_length=1, max_length=64)''',
+          ).replace(
+              '''class RosterRuleBase(StrictModel):
+              rule_set_id: Optional[str] = None
+              code: str''',
+              '''class RosterRuleBase(RosterSchema):
+              rule_set_id: Optional[str] = None
+              code: str = Field(min_length=1, max_length=64)''',
+          ).replace(
+              '''class RosterLifecycleRequest(StrictModel):
+              expected_state_revision: Optional[int] = None
+              idempotency_key: Optional[str] = Field(default=None, max_length=128)
+              comment: Optional[str] = Field(default=None, max_length=2000)''',
+              '''class RosterLifecycleRequest(RosterSchema):
+              expected_state_revision: Optional[int] = Field(default=None, ge=1)
+              idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128)
+              comment: Optional[str] = None''',
+          ).replace(
+              '''class RosterLifecycleRequest(StrictModel):
+              expected_state_revision: Optional[int] = None
+              idempotency_key: Optional[str] = Field(default=None, max_length=128)
+              comment: Optional[str] = Field(default=None, max_length=2000)
+              department_id: Optional[str] = None
+              base_station_id: Optional[str] = None''',
+              '''class RosterLifecycleRequest(RosterSchema):
+              expected_state_revision: Optional[int] = Field(default=None, ge=1)
+              idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128)
+              comment: Optional[str] = None
+              department_id: Optional[str] = None
+              base_station_id: Optional[str] = None''',
+          ).replace(
+              'marker = "class RosterRuleBase(StrictModel):"',
+              'marker = "class RosterRuleBase(RosterSchema):"',
+          )
+          source = workflow.splitlines()
           start = source.index("          python - <<'PY'") + 1
           end = source.index("          PY", start)
           extracted = [line[10:] if line.startswith('          ') else line for line in source[start:end]]
