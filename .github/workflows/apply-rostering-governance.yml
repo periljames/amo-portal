@@ -1,0 +1,1342 @@
+name: Apply Rostering Governance Integration
+
+on:
+  push:
+    branches:
+      - fix/rostering-unified-workforce
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/rostering-unified-workforce
+          fetch-depth: 0
+      - name: Integrate governance, rules and calendar feed
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def read(path: str) -> str:
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              text = read(path)
+              if old not in text:
+                  raise SystemExit(f"Expected block not found in {path}: {old[:120]!r}")
+              write(path, text.replace(old, new, count))
+
+          def between(path: str, start: str, end: str, replacement: str) -> None:
+              text = read(path)
+              left = text.find(start)
+              if left < 0:
+                  raise SystemExit(f"Start marker not found in {path}: {start!r}")
+              right = text.find(end, left)
+              if right < 0:
+                  raise SystemExit(f"End marker not found in {path}: {end!r}")
+              write(path, text[:left] + replacement + text[right:])
+
+          # ------------------------------------------------------------------
+          # ORM models
+          # ------------------------------------------------------------------
+          models = "backend/amodb/apps/rostering/models.py"
+          replace(
+              models,
+              '''class RosterRuleType(str, Enum):
+              MIN_REST_HOURS = "MIN_REST_HOURS"
+              MAX_DUTY_HOURS_DAY = "MAX_DUTY_HOURS_DAY"'''.replace("              ", "    "),
+              '''class RosterRuleType(str, Enum):
+              MIN_REST_HOURS = "MIN_REST_HOURS"
+              MAX_ASSIGNMENT_DURATION = "MAX_ASSIGNMENT_DURATION"
+              MAX_DUTY_HOURS_DAY = "MAX_DUTY_HOURS_DAY"'''.replace("              ", "    "),
+          )
+          replace(
+              models,
+              '''    MAX_CONSECUTIVE_DAYS = "MAX_CONSECUTIVE_DAYS"
+              REQUIRED_DAYS_OFF = "REQUIRED_DAYS_OFF"'''.replace("              ", "    "),
+              '''    MAX_CONSECUTIVE_DAYS = "MAX_CONSECUTIVE_DAYS"
+              MAX_CONSECUTIVE_NIGHTS = "MAX_CONSECUTIVE_NIGHTS"
+              REQUIRED_DAYS_OFF = "REQUIRED_DAYS_OFF"'''.replace("              ", "    "),
+          )
+          replace(
+              models,
+              '''class RosterExceptionDecision(str, Enum):''',
+              '''class RosterApprovalAuthorityLevel(str, Enum):
+              BASE_MANAGER = "BASE_MANAGER"
+              DEPARTMENT_HEAD = "DEPARTMENT_HEAD"
+              DELEGATE = "DELEGATE"
+
+
+          class RosterDepartmentApprovalStatus(str, Enum):
+              PENDING = "PENDING"
+              APPROVED = "APPROVED"
+              CHANGES_REQUESTED = "CHANGES_REQUESTED"
+
+
+          class RosterExceptionDecision(str, Enum):'''.replace("          ", ""),
+          )
+          replace(
+              models,
+              '''    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+              code = Column(String(64), nullable=False)
+              name = Column(String(255), nullable=False)'''.replace("              ", "    "),
+              '''    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+              rule_set_id = Column(String(36), ForeignKey("roster_rule_sets.id", ondelete="SET NULL"), nullable=True, index=True)
+              code = Column(String(64), nullable=False)
+              name = Column(String(255), nullable=False)'''.replace("              ", "    "),
+          )
+          append_models = r'''
+
+class RosterRuleSet(Base):
+    __tablename__ = "roster_rule_sets"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "code", name="uq_roster_rule_set_amo_code"),
+        Index("ix_roster_rule_sets_amo_active", "amo_id", "is_active"),
+        CheckConstraint("effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from", name="ck_roster_rule_set_dates"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    code = Column(String(64), nullable=False)
+    name = Column(String(255), nullable=False)
+    version_label = Column(String(128), nullable=True)
+    regulatory_basis = Column(Text, nullable=True)
+    manual_reference = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    priority = Column(Integer, nullable=False, default=100)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class RosterApprovalAuthority(Base):
+    __tablename__ = "roster_approval_authorities"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "user_id", "authority_level", "department_id", "base_station_id", name="uq_roster_approval_authority_scope"),
+        Index("ix_roster_approval_authority_scope", "amo_id", "base_station_id", "department_id", "is_active"),
+        Index("ix_roster_approval_authority_user", "amo_id", "user_id", "is_active"),
+        CheckConstraint("effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from", name="ck_roster_approval_authority_dates"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    authority_level = Column(SAEnum(RosterApprovalAuthorityLevel, name="roster_approval_authority_level_enum", native_enum=False), nullable=False, index=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True, index=True)
+    base_station_id = Column(String(36), ForeignKey("base_stations.id", ondelete="CASCADE"), nullable=True, index=True)
+    can_approve = Column(Boolean, nullable=False, default=True)
+    can_publish = Column(Boolean, nullable=False, default=False)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    reason = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+    department = relationship("Department", lazy="joined")
+    base_station = relationship("BaseStation", lazy="joined")
+
+
+class RosterDepartmentApproval(Base):
+    __tablename__ = "roster_department_approvals"
+    __table_args__ = (
+        UniqueConstraint("version_id", "department_id", "base_station_id", name="uq_roster_department_approval_scope"),
+        Index("ix_roster_department_approval_version_status", "version_id", "status"),
+        Index("ix_roster_department_approval_assignee", "amo_id", "assigned_approver_user_id", "status"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_id = Column(String(36), ForeignKey("roster_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
+    base_station_id = Column(String(36), ForeignKey("base_stations.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_approver_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(SAEnum(RosterDepartmentApprovalStatus, name="roster_department_approval_status_enum", native_enum=False), nullable=False, default=RosterDepartmentApprovalStatus.PENDING, index=True)
+    decided_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decision_comment = Column(Text, nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    assigned_approver = relationship("User", foreign_keys=[assigned_approver_user_id], lazy="joined")
+    decided_by = relationship("User", foreign_keys=[decided_by_user_id], lazy="joined")
+    department = relationship("Department", lazy="joined")
+    base_station = relationship("BaseStation", lazy="joined")
+'''
+          text = read(models)
+          if "class RosterRuleSet(Base):" not in text:
+              write(models, text.rstrip() + append_models + "\n")
+
+          # ------------------------------------------------------------------
+          # Pydantic schemas
+          # ------------------------------------------------------------------
+          schemas = "backend/amodb/apps/rostering/schemas.py"
+          replace(
+              schemas,
+              '''class RosterRuleBase(StrictModel):
+              code: str'''.replace("              ", "    "),
+              '''class RosterRuleBase(StrictModel):
+              rule_set_id: Optional[str] = None
+              code: str'''.replace("              ", "    "),
+          )
+          replace(
+              schemas,
+              '''class RosterLifecycleRequest(StrictModel):
+              expected_state_revision: Optional[int] = None
+              idempotency_key: Optional[str] = Field(default=None, max_length=128)
+              comment: Optional[str] = Field(default=None, max_length=2000)'''.replace("              ", "    "),
+              '''class RosterLifecycleRequest(StrictModel):
+              expected_state_revision: Optional[int] = None
+              idempotency_key: Optional[str] = Field(default=None, max_length=128)
+              comment: Optional[str] = Field(default=None, max_length=2000)
+              department_id: Optional[str] = None
+              base_station_id: Optional[str] = None'''.replace("              ", "    "),
+          )
+          replace(
+              schemas,
+              '''    acknowledgement_count: int = 0
+              can_edit: bool = False'''.replace("              ", "    "),
+              '''    acknowledgement_count: int = 0
+              approval_required_count: int = 0
+              approval_approved_count: int = 0
+              approval_pending_count: int = 0
+              can_edit: bool = False'''.replace("              ", "    "),
+          )
+          insert_schema = r'''
+
+class RosterRuleSetBase(StrictModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=255)
+    version_label: Optional[str] = Field(default=None, max_length=128)
+    regulatory_basis: Optional[str] = None
+    manual_reference: Optional[str] = None
+    description: Optional[str] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    priority: int = 100
+    is_active: bool = True
+
+
+class RosterRuleSetCreate(RosterRuleSetBase):
+    pass
+
+
+class RosterRuleSetUpdate(StrictModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    version_label: Optional[str] = Field(default=None, max_length=128)
+    regulatory_basis: Optional[str] = None
+    manual_reference: Optional[str] = None
+    description: Optional[str] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class RosterRuleSetRead(RosterRuleSetBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    amo_id: str
+    created_by_user_id: Optional[str] = None
+    updated_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RosterApprovalAuthorityBase(StrictModel):
+    user_id: str
+    authority_level: models.RosterApprovalAuthorityLevel
+    department_id: Optional[str] = None
+    base_station_id: Optional[str] = None
+    can_approve: bool = True
+    can_publish: bool = False
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    reason: Optional[str] = Field(default=None, max_length=2000)
+    is_active: bool = True
+
+
+class RosterApprovalAuthorityCreate(RosterApprovalAuthorityBase):
+    pass
+
+
+class RosterApprovalAuthorityUpdate(StrictModel):
+    can_approve: Optional[bool] = None
+    can_publish: Optional[bool] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    reason: Optional[str] = Field(default=None, max_length=2000)
+    is_active: Optional[bool] = None
+
+
+class RosterApprovalAuthorityRead(RosterApprovalAuthorityBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    amo_id: str
+    created_by_user_id: Optional[str] = None
+    updated_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RosterDepartmentApprovalRead(StrictModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    amo_id: str
+    version_id: str
+    department_id: Optional[str] = None
+    base_station_id: Optional[str] = None
+    assigned_approver_user_id: Optional[str] = None
+    status: models.RosterDepartmentApprovalStatus
+    decided_by_user_id: Optional[str] = None
+    decision_comment: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RosterApprovalMatrixResponse(StrictModel):
+    version_id: Optional[str] = None
+    required_count: int = 0
+    approved_count: int = 0
+    pending_count: int = 0
+    changes_requested_count: int = 0
+    items: list[RosterDepartmentApprovalRead] = Field(default_factory=list)
+
+
+class RosterCalendarSubscriptionRead(StrictModel):
+    https_url: str
+    webcal_url: str
+    feed_path: str
+    refresh_interval_minutes: int = 60
+    includes: list[str] = Field(default_factory=list)
+'''
+          text = read(schemas)
+          marker = "class RosterRuleBase(StrictModel):"
+          if "class RosterRuleSetBase" not in text:
+              write(schemas, text.replace(marker, insert_schema + "\n\n" + marker, 1))
+
+          # ------------------------------------------------------------------
+          # Workforce permissions: planners draft, scoped authorities approve,
+          # Base Managers publish.
+          # ------------------------------------------------------------------
+          permissions = "backend/amodb/apps/workforce/permissions.py"
+          replace(
+              permissions,
+              '    ROSTER_MANAGE_RULES = "roster.manage_rules"\n',
+              '    ROSTER_MANAGE_RULES = "roster.manage_rules"\n    ROSTER_MANAGE_APPROVAL_AUTHORITIES = "roster.manage_approval_authorities"\n',
+          )
+          between(
+              permissions,
+              "SUPERVISOR = EMPLOYEE | {",
+              "\n\nQUALITY = EMPLOYEE | {",
+              '''SUPERVISOR = EMPLOYEE | {
+              PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
+              PermissionCode.ROSTER_CREATE.value,
+              PermissionCode.ROSTER_EDIT.value,
+              PermissionCode.ROSTER_DELETE_DRAFT_ASSIGNMENT.value,
+              PermissionCode.ROSTER_VALIDATE.value,
+              PermissionCode.ROSTER_SUBMIT.value,
+              PermissionCode.ROSTER_ALLOCATE_WORK.value,
+              PermissionCode.LEAVE_REVIEW.value,
+              PermissionCode.ATTENDANCE_MANAGE.value,
+              PermissionCode.TIMESHEET_APPROVE.value,
+              PermissionCode.OVERTIME_APPROVE.value,
+          }
+
+          DEPARTMENT_HEAD = SUPERVISOR | {
+              PermissionCode.ROSTER_APPROVE.value,
+              PermissionCode.ROSTER_AMEND_PUBLISHED.value,
+          }
+
+          BASE_MANAGER = DEPARTMENT_HEAD | {
+              PermissionCode.ROSTER_VIEW_ALL.value,
+              PermissionCode.ROSTER_PUBLISH.value,
+              PermissionCode.ROSTER_MANAGE_APPROVAL_AUTHORITIES.value,
+          }
+          '''.replace("          ", ""),
+          )
+          between(
+              permissions,
+              "QUALITY = EMPLOYEE | {",
+              "\n\nHR = EMPLOYEE | {",
+              '''QUALITY = EMPLOYEE | {
+              PermissionCode.ROSTER_VIEW_ALL.value,
+              PermissionCode.ROSTER_VALIDATE.value,
+              PermissionCode.ROSTER_OVERRIDE_WARNING.value,
+              PermissionCode.ROSTER_OVERRIDE_BLOCKER.value,
+              PermissionCode.ROSTER_MANAGE_RULES.value,
+          }
+          '''.replace("          ", ""),
+          )
+          between(
+              permissions,
+              "HR = EMPLOYEE | {",
+              "\n\nPAYROLL = EMPLOYEE | {",
+              '''HR = EMPLOYEE | {
+              PermissionCode.ROSTER_VIEW_ALL.value,
+              PermissionCode.ROSTER_VALIDATE.value,
+              PermissionCode.ROSTER_AMEND_PUBLISHED.value,
+              PermissionCode.LEAVE_REVIEW.value,
+              PermissionCode.LEAVE_APPROVE.value,
+              PermissionCode.LEAVE_MANAGE_BALANCES.value,
+              PermissionCode.ATTENDANCE_MANAGE.value,
+              PermissionCode.ATTENDANCE_APPROVE.value,
+              PermissionCode.TIMESHEET_APPROVE.value,
+              PermissionCode.OVERTIME_APPROVE.value,
+              PermissionCode.WORKFORCE_MANAGE_CONTRACTS.value,
+              PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
+          }
+          '''.replace("          ", ""),
+          )
+          replace(
+              permissions,
+              '''    "PRODUCTION_ENGINEER": SUPERVISOR,
+              "DEPARTMENT_SUPERVISOR": SUPERVISOR,'''.replace("              ", "    "),
+              '''    "PRODUCTION_ENGINEER": SUPERVISOR,
+              "DEPARTMENT_SUPERVISOR": SUPERVISOR,
+              "DEPARTMENT_HEAD": DEPARTMENT_HEAD,
+              "BASE_MANAGER": BASE_MANAGER,
+              "LINE_MANAGER": DEPARTMENT_HEAD,'''.replace("              ", "    "),
+          )
+          replace(
+              permissions,
+              '''    if "supervisor" in title or "shift lead" in title:
+              return "DEPARTMENT_SUPERVISOR"
+              return None'''.replace("              ", "    "),
+              '''    if "base manager" in title:
+              return "BASE_MANAGER"
+              if "department head" in title or title.startswith("head of ") or "department manager" in title or "line manager" in title:
+              return "DEPARTMENT_HEAD"
+              if "supervisor" in title or "shift lead" in title:
+              return "DEPARTMENT_SUPERVISOR"
+              return None'''.replace("              ", "    "),
+          )
+
+          # ------------------------------------------------------------------
+          # Rule defaults and evaluators
+          # ------------------------------------------------------------------
+          validation = "backend/amodb/apps/rostering/validation.py"
+          new_seed = r'''def seed_default_rules(db: Session, *, amo_id: str, actor_user_id: Optional[str] = None) -> None:
+    from . import governance
+
+    rule_set = governance.seed_default_rule_set(db, amo_id=amo_id, actor_user_id=actor_user_id)
+    defaults: list[dict[str, Any]] = [
+        {"code": "OVERLAPPING_ASSIGNMENTS", "name": "No overlapping assignments", "rule_type": models.RosterRuleType.OVERLAP, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {}, "allow_override": False, "display_order": 10, "is_active": True},
+        {"code": "MINIMUM_REST_8H", "name": "Minimum rest between duties", "rule_type": models.RosterRuleType.MIN_REST_HOURS, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {"minimum_minutes": 480}, "allow_override": True, "display_order": 20, "is_active": True},
+        {"code": "MAX_SHIFT_LENGTH_12H", "name": "Maximum single shift length", "rule_type": models.RosterRuleType.MAX_ASSIGNMENT_DURATION, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {"maximum_minutes": 720}, "allow_override": True, "display_order": 25, "is_active": True},
+        {"code": "MAX_DUTY_DAY_12H", "name": "Maximum duty in a local day", "rule_type": models.RosterRuleType.MAX_DUTY_HOURS_DAY, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {"maximum_minutes": 720}, "allow_override": True, "display_order": 30, "is_active": True},
+        {"code": "MAX_NORMAL_DUTY_7D_52H", "name": "Normal duty limit in seven rolling days", "rule_type": models.RosterRuleType.MAX_DUTY_HOURS_ROLLING, "severity": models.RosterValidationSeverity.WARNING, "parameters_json": {"window_days": 7, "maximum_minutes": 3120}, "allow_override": True, "display_order": 40, "is_active": True},
+        {"code": "MAX_DUTY_14D_116H", "name": "Normal and overtime cap in fourteen rolling days", "rule_type": models.RosterRuleType.MAX_DUTY_HOURS_ROLLING, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {"window_days": 14, "maximum_minutes": 6960}, "allow_override": True, "display_order": 42, "is_active": True},
+        {"code": "MAX_CONSECUTIVE_DUTY_DAYS_6", "name": "Maximum consecutive duty days", "rule_type": models.RosterRuleType.MAX_CONSECUTIVE_DAYS, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {"maximum_days": 6}, "allow_override": True, "display_order": 50, "is_active": True},
+        {"code": "REST_DAY_24H_IN_7D", "name": "Twenty-four consecutive hours free from duty in seven days", "rule_type": models.RosterRuleType.REQUIRED_DAYS_OFF, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {"window_days": 7, "minimum_continuous_minutes": 1440}, "allow_override": True, "display_order": 55, "is_active": True},
+        {"code": "MAX_CONSECUTIVE_NIGHTS_MOPM", "name": "Maximum consecutive night shifts", "rule_type": models.RosterRuleType.MAX_CONSECUTIVE_NIGHTS, "severity": models.RosterValidationSeverity.WARNING, "parameters_json": {"maximum_nights": 0}, "allow_override": True, "display_order": 58, "is_active": False},
+        {"code": "CONTRACT_ELIGIBILITY", "name": "Active employment contract and shift eligibility", "rule_type": models.RosterRuleType.CONTRACT_ELIGIBILITY, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {}, "allow_override": False, "display_order": 60, "is_active": True},
+        {"code": "AVAILABILITY_CONFLICT", "name": "Approved leave and unavailability block duty", "rule_type": models.RosterRuleType.AVAILABILITY_CONFLICT, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {}, "allow_override": False, "display_order": 70, "is_active": True},
+        {"code": "TRAINING_VALIDITY", "name": "Mandatory training must remain valid", "rule_type": models.RosterRuleType.TRAINING_VALIDITY, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {"warning_days": 30}, "allow_override": False, "display_order": 80, "is_active": True},
+        {"code": "LICENCE_VALIDITY", "name": "Maintenance licence must remain valid", "rule_type": models.RosterRuleType.LICENCE_VALIDITY, "severity": models.RosterValidationSeverity.BLOCKER, "parameters_json": {"warning_days": 30}, "allow_override": False, "display_order": 90, "is_active": True},
+        {"code": "REQUIRED_CERTIFYING_COVERAGE", "name": "Certifying coverage for productive duty", "rule_type": models.RosterRuleType.REQUIRED_CERTIFYING_COVERAGE, "severity": models.RosterValidationSeverity.WARNING, "parameters_json": {"minimum_headcount": 1, "bucket_minutes": 720}, "allow_override": True, "display_order": 100, "is_active": True},
+    ]
+    existing = {row.code: row for row in db.query(models.RosterRule).filter(models.RosterRule.amo_id == amo_id).all()}
+    for definition in defaults:
+        row = existing.get(definition["code"])
+        if row:
+            if not row.rule_set_id:
+                row.rule_set_id = rule_set.id
+                db.add(row)
+            continue
+        db.add(models.RosterRule(
+            amo_id=amo_id,
+            rule_set_id=rule_set.id,
+            scope=models.RosterRuleScope.AMO,
+            created_by_user_id=actor_user_id,
+            updated_by_user_id=actor_user_id,
+            **definition,
+        ))
+    db.flush()
+
+
+'''
+          between(validation, "def seed_default_rules", "def active_rules", new_seed)
+          replace(
+              validation,
+              '''    return applicable[0]
+
+
+def _assignment_minutes''',
+              '''    return applicable[0]
+
+
+def find_rules(rules: Sequence[models.RosterRule], rule_type: models.RosterRuleType, assignment: Optional[models.RosterAssignment] = None) -> list[models.RosterRule]:
+              matching = [row for row in rules if row.rule_type == rule_type and rule_applies(row, assignment)]
+              if not matching:
+              return []
+              rank = {
+              models.RosterRuleScope.AMO: 0,
+              models.RosterRuleScope.DEPARTMENT: 1,
+              models.RosterRuleScope.BASE: 2,
+              models.RosterRuleScope.SHIFT_TEMPLATE: 3,
+              models.RosterRuleScope.USER: 4,
+              }
+              by_code: dict[str, models.RosterRule] = {}
+              for row in matching:
+              current = by_code.get(row.code)
+              if current is None or rank.get(row.scope, 0) > rank.get(current.scope, 0):
+              by_code[row.code] = row
+              return sorted(by_code.values(), key=lambda row: (row.display_order, row.code, row.id))
+
+
+def _assignment_minutes'''.replace("              ", "    "),
+          )
+          new_duty = r'''def _duty_limit_findings(assignments: Sequence[models.RosterAssignment], rules: Sequence[models.RosterRule], timezone_name: str) -> list[FindingSpec]:
+    findings: list[FindingSpec] = []
+    by_user: dict[str, list[models.RosterAssignment]] = defaultdict(list)
+    for row in assignments:
+        if _is_productive(row):
+            by_user[row.user_id].append(row)
+    zone = workforce_calculations.get_zone(timezone_name)
+
+    for user_id, rows in by_user.items():
+        rows.sort(key=lambda item: (item.starts_at, item.ends_at, item.id))
+        daily: dict[date, list[models.RosterAssignment]] = defaultdict(list)
+        for row in rows:
+            work_day = workforce_calculations.ensure_aware(row.starts_at).astimezone(zone).date()
+            daily[work_day].append(row)
+            duration_rule = find_rule(rules, models.RosterRuleType.MAX_ASSIGNMENT_DURATION, row)
+            if duration_rule:
+                maximum = int(_rule_parameters(duration_rule).get("maximum_minutes", 0))
+                actual = workforce_calculations.duration_minutes(row.starts_at, row.ends_at)
+                if maximum and actual > maximum:
+                    findings.append(FindingSpec(
+                        source=models.RosterValidationSource.RULE,
+                        severity=duration_rule.severity,
+                        code=duration_rule.code,
+                        message=f"This shift is {actual} minutes; the configured maximum shift length is {maximum} minutes.",
+                        assignment_id=row.id,
+                        user_id=user_id,
+                        rule_id=duration_rule.id,
+                        details={"shift_minutes": actual, "maximum_minutes": maximum},
+                        overridable=duration_rule.allow_override,
+                        sort_order=35,
+                    ))
+
+        for work_day, day_rows in sorted(daily.items()):
+            rule = find_rule(rules, models.RosterRuleType.MAX_DUTY_HOURS_DAY, day_rows[0])
+            if rule:
+                maximum = int(_rule_parameters(rule).get("maximum_minutes", 0))
+                total = sum(_assignment_minutes(item) for item in day_rows)
+                if maximum and total > maximum:
+                    findings.append(FindingSpec(
+                        source=models.RosterValidationSource.RULE,
+                        severity=rule.severity,
+                        code=rule.code,
+                        message=f"Planned duty on {work_day.isoformat()} is {total} minutes; maximum is {maximum} minutes.",
+                        assignment_id=day_rows[-1].id,
+                        user_id=user_id,
+                        rule_id=rule.id,
+                        details={"work_date": work_day.isoformat(), "planned_minutes": total, "maximum_minutes": maximum, "assignment_ids": [item.id for item in day_rows]},
+                        overridable=rule.allow_override,
+                        sort_order=40,
+                    ))
+
+        for rolling_rule in find_rules(rules, models.RosterRuleType.MAX_DUTY_HOURS_ROLLING, rows[0] if rows else None):
+            parameters = _rule_parameters(rolling_rule)
+            window_days = max(int(parameters.get("window_days", 7)), 1)
+            maximum = int(parameters.get("maximum_minutes", 0))
+            for anchor in sorted(daily):
+                window_end = anchor + timedelta(days=window_days - 1)
+                window_rows = [item for day_value, items in daily.items() if anchor <= day_value <= window_end for item in items]
+                total = sum(_assignment_minutes(item) for item in window_rows)
+                if maximum and total > maximum:
+                    findings.append(FindingSpec(
+                        source=models.RosterValidationSource.RULE,
+                        severity=rolling_rule.severity,
+                        code=rolling_rule.code,
+                        message=f"Rolling {window_days}-day duty is {total} minutes; maximum is {maximum} minutes.",
+                        assignment_id=window_rows[-1].id if window_rows else None,
+                        user_id=user_id,
+                        rule_id=rolling_rule.id,
+                        details={"window_start": anchor.isoformat(), "window_end": window_end.isoformat(), "planned_minutes": total, "maximum_minutes": maximum},
+                        overridable=rolling_rule.allow_override,
+                        sort_order=45,
+                    ))
+                    break
+
+        consecutive_rule = find_rule(rules, models.RosterRuleType.MAX_CONSECUTIVE_DAYS, rows[0] if rows else None)
+        if consecutive_rule and daily:
+            maximum_days = max(int(_rule_parameters(consecutive_rule).get("maximum_days", 0)), 0)
+            streak_start: Optional[date] = None
+            previous_day: Optional[date] = None
+            streak = 0
+            for work_day in sorted(daily):
+                if previous_day is not None and work_day == previous_day + timedelta(days=1):
+                    streak += 1
+                else:
+                    streak_start = work_day
+                    streak = 1
+                previous_day = work_day
+                if maximum_days and streak > maximum_days:
+                    last_assignment = sorted(daily[work_day], key=lambda item: (item.starts_at, item.id))[-1]
+                    findings.append(FindingSpec(
+                        source=models.RosterValidationSource.RULE,
+                        severity=consecutive_rule.severity,
+                        code=consecutive_rule.code,
+                        message=f"Duty is planned for {streak} consecutive days; maximum is {maximum_days} days.",
+                        assignment_id=last_assignment.id,
+                        user_id=user_id,
+                        rule_id=consecutive_rule.id,
+                        details={"streak_start": streak_start.isoformat() if streak_start else None, "streak_end": work_day.isoformat(), "consecutive_days": streak, "maximum_days": maximum_days},
+                        overridable=consecutive_rule.allow_override,
+                        sort_order=50,
+                    ))
+                    break
+
+        night_rule = find_rule(rules, models.RosterRuleType.MAX_CONSECUTIVE_NIGHTS, rows[0] if rows else None)
+        maximum_nights = int(_rule_parameters(night_rule).get("maximum_nights", 0)) if night_rule else 0
+        if night_rule and maximum_nights > 0:
+            night_dates = sorted({
+                workforce_calculations.ensure_aware(row.starts_at).astimezone(zone).date()
+                for row in rows
+                if getattr(getattr(row, "shift_template", None), "kind", None) == models.ShiftTemplateKind.NIGHT
+            })
+            streak = 0
+            previous_day = None
+            for work_day in night_dates:
+                streak = streak + 1 if previous_day and work_day == previous_day + timedelta(days=1) else 1
+                previous_day = work_day
+                if streak > maximum_nights:
+                    findings.append(FindingSpec(
+                        source=models.RosterValidationSource.RULE,
+                        severity=night_rule.severity,
+                        code=night_rule.code,
+                        message=f"Night duty is planned for {streak} consecutive nights; maximum is {maximum_nights}.",
+                        user_id=user_id,
+                        rule_id=night_rule.id,
+                        details={"streak_end": work_day.isoformat(), "consecutive_nights": streak, "maximum_nights": maximum_nights},
+                        overridable=night_rule.allow_override,
+                        sort_order=52,
+                    ))
+                    break
+
+        day_off_rule = find_rule(rules, models.RosterRuleType.REQUIRED_DAYS_OFF, rows[0] if rows else None)
+        if day_off_rule and rows:
+            params = _rule_parameters(day_off_rule)
+            window_days = max(int(params.get("window_days", 7)), 1)
+            required_gap = max(int(params.get("minimum_continuous_minutes", 1440)), 1)
+            first_day = workforce_calculations.ensure_aware(rows[0].starts_at).astimezone(zone).date()
+            last_day = workforce_calculations.ensure_aware(rows[-1].ends_at).astimezone(zone).date()
+            anchor = first_day
+            while anchor + timedelta(days=window_days - 1) <= last_day:
+                window_start = datetime.combine(anchor, time.min, tzinfo=zone).astimezone(UTC)
+                window_end = datetime.combine(anchor + timedelta(days=window_days), time.min, tzinfo=zone).astimezone(UTC)
+                intervals = sorted(
+                    [(max(row.starts_at, window_start), min(row.ends_at, window_end)) for row in rows if row.starts_at < window_end and row.ends_at > window_start],
+                    key=lambda value: value[0],
+                )
+                cursor = window_start
+                longest_gap = 0
+                for start_at, end_at in intervals:
+                    if start_at > cursor:
+                        longest_gap = max(longest_gap, workforce_calculations.duration_minutes(cursor, start_at))
+                    cursor = max(cursor, end_at)
+                if cursor < window_end:
+                    longest_gap = max(longest_gap, workforce_calculations.duration_minutes(cursor, window_end))
+                if longest_gap < required_gap:
+                    findings.append(FindingSpec(
+                        source=models.RosterValidationSource.RULE,
+                        severity=day_off_rule.severity,
+                        code=day_off_rule.code,
+                        message=f"No continuous {required_gap / 60:g}-hour duty-free period exists in the {window_days}-day window starting {anchor.isoformat()}.",
+                        assignment_id=intervals[-1][1].isoformat() if False else rows[-1].id,
+                        user_id=user_id,
+                        rule_id=day_off_rule.id,
+                        details={"window_start": anchor.isoformat(), "window_days": window_days, "longest_rest_minutes": longest_gap, "required_rest_minutes": required_gap},
+                        overridable=day_off_rule.allow_override,
+                        sort_order=54,
+                    ))
+                    break
+                anchor += timedelta(days=1)
+    return findings
+
+
+'''
+          between(validation, "def _duty_limit_findings", "def _contract_findings", new_duty)
+
+          # ------------------------------------------------------------------
+          # Catalog links rules to the controlled rule set.
+          # ------------------------------------------------------------------
+          catalog = "backend/amodb/apps/rostering/catalog.py"
+          replace(catalog, "from . import common, models, schemas, validation", "from . import common, governance, models, schemas, validation")
+          replace(
+              catalog,
+              '''def create_rule(db: Session, *, amo_id: str, actor_user_id: str, payload: schemas.RosterRuleCreate) -> models.RosterRule:
+              common.require_department'''.replace("              ", "    "),
+              '''def create_rule(db: Session, *, amo_id: str, actor_user_id: str, payload: schemas.RosterRuleCreate) -> models.RosterRule:
+              common.require_department'''.replace("              ", "    "),
+          )
+          replace(
+              catalog,
+              '''    row = models.RosterRule(amo_id=amo_id, **common.dump(payload), created_by_user_id=actor_user_id, updated_by_user_id=actor_user_id)''',
+              '''    values = common.dump(payload)
+              if not values.get("rule_set_id"):
+              values["rule_set_id"] = governance.seed_default_rule_set(db, amo_id=amo_id, actor_user_id=actor_user_id).id
+              row = models.RosterRule(amo_id=amo_id, **values, created_by_user_id=actor_user_id, updated_by_user_id=actor_user_id)'''.replace("              ", "    "),
+          )
+
+          # ------------------------------------------------------------------
+          # Lifecycle integrates scoped approvals and publish authority.
+          # ------------------------------------------------------------------
+          lifecycle = "backend/amodb/apps/rostering/lifecycle.py"
+          replace(lifecycle, "from . import common, models, schemas, validation", "from . import calendar_feed, common, governance, models, schemas, validation")
+          replace(
+              lifecycle,
+              '''    version.status = models.RosterVersionStatus.SUBMITTED
+              version.submitted_by_user_id = actor_user_id'''.replace("              ", "    "),
+              '''    governance.prepare_approval_cycle(db, version=version, actor_user_id=actor_user_id)
+              version.status = models.RosterVersionStatus.SUBMITTED
+              version.submitted_by_user_id = actor_user_id'''.replace("              ", "    "),
+          )
+          new_approve = r'''def approve_version(
+    db: Session,
+    *,
+    version: models.RosterVersion,
+    actor_user_id: str,
+    payload: schemas.RosterLifecycleRequest,
+) -> models.RosterVersion:
+    actor = db.query(account_models.User).filter(
+        account_models.User.amo_id == version.amo_id,
+        account_models.User.id == actor_user_id,
+        account_models.User.is_active.is_(True),
+    ).first()
+    if not actor:
+        raise ValueError("Roster approver is not an active tenant user")
+    result = validate_version(db, version=version, actor_user_id=actor_user_id)
+    if result.blocker_count:
+        raise ValueError("Roster version has unresolved blocker findings and cannot be approved")
+    _rows, complete = governance.approve_scopes(db, version=version, actor=actor, payload=payload)
+    if complete:
+        version.status = models.RosterVersionStatus.APPROVED
+        version.approved_by_user_id = actor_user_id
+        version.approved_at = common.utcnow()
+    common.bump_version(version)
+    db.add(version)
+    db.flush()
+    common.audit(
+        db,
+        amo_id=version.amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="RosterVersion",
+        entity_id=version.id,
+        action="approve_scope" if not complete else "approve_complete",
+        after={"status": common.enum_value(version.status), "comment": payload.comment, "state_revision": version.state_revision},
+        critical=True,
+    )
+    return version
+
+
+'''
+          between(lifecycle, "def approve_version", "def _publication_url", new_approve)
+          replace(
+              lifecycle,
+              '''    if actor_user_id == version.created_by_user_id:
+              raise ValueError("The roster creator cannot publish the same version")'''.replace("              ", "    "),
+              '''    if actor_user_id == version.created_by_user_id:
+              raise ValueError("The roster creator cannot publish the same version")
+              actor = db.query(account_models.User).filter(
+              account_models.User.amo_id == version.amo_id,
+              account_models.User.id == actor_user_id,
+              account_models.User.is_active.is_(True),
+              ).first()
+              if not actor:
+              raise ValueError("Roster publisher is not an active tenant user")
+              governance.require_publish_authority(db, version=version, actor=actor)'''.replace("              ", "    "),
+          )
+          replace(
+              lifecycle,
+              '''                "route": route,
+              "user_id": user_id,'''.replace("              ", "                "),
+              '''                "route": route,
+              "calendar_feed_path": f"/rostering/calendar/feed/{calendar_feed.calendar_token(amo_id=version.amo_id, user_id=user_id)}.ics",
+              "user_id": user_id,'''.replace("              ", "                "),
+          )
+
+          # ------------------------------------------------------------------
+          # Common serializer exposes approval progress and scoped actions.
+          # ------------------------------------------------------------------
+          common_path = "backend/amodb/apps/rostering/common.py"
+          replace(
+              common_path,
+              '''    permissions = set()
+              if current_user is not None and db is not None:
+              permissions = set(workforce_permissions.permissions_for_user(db, user=current_user))
+              return schemas.RosterVersionRead('''.replace("              ", "    "),
+              '''    permissions = set()
+              approval_required = approval_approved = approval_pending = 0
+              scoped_can_approve = False
+              scoped_can_publish = False
+              if current_user is not None and db is not None:
+              permissions = set(workforce_permissions.permissions_for_user(db, user=current_user))
+              from . import governance
+              approvals = governance.approval_rows(db, version_id=row.id)
+              approval_required = len(approvals)
+              approval_approved = sum(item.status == models.RosterDepartmentApprovalStatus.APPROVED for item in approvals)
+              approval_pending = sum(item.status != models.RosterDepartmentApprovalStatus.APPROVED for item in approvals)
+              scoped_can_approve = any(
+              item.status != models.RosterDepartmentApprovalStatus.APPROVED
+              and governance.can_approve_scope(db, user=current_user, department_id=item.department_id, base_station_id=item.base_station_id)
+              for item in approvals
+              )
+              scoped_can_publish = bool(approvals) and all(
+              item.status == models.RosterDepartmentApprovalStatus.APPROVED
+              and governance.can_publish_scope(db, user=current_user, department_id=item.department_id, base_station_id=item.base_station_id)
+              for item in approvals
+              )
+              return schemas.RosterVersionRead('''.replace("              ", "    "),
+          )
+          replace(
+              common_path,
+              '''        acknowledgement_count=0,
+              can_edit=row.status == models.RosterVersionStatus.DRAFT and workforce_permissions.PermissionCode.ROSTER_EDIT.value in permissions,
+              can_submit=row.status == models.RosterVersionStatus.DRAFT and blockers == 0 and workforce_permissions.PermissionCode.ROSTER_SUBMIT.value in permissions,
+              can_approve=row.status == models.RosterVersionStatus.SUBMITTED and workforce_permissions.PermissionCode.ROSTER_APPROVE.value in permissions,
+              can_publish=row.status == models.RosterVersionStatus.APPROVED and blockers == 0 and workforce_permissions.PermissionCode.ROSTER_PUBLISH.value in permissions,'''.replace("              ", "        "),
+              '''        acknowledgement_count=0,
+              approval_required_count=approval_required,
+              approval_approved_count=approval_approved,
+              approval_pending_count=approval_pending,
+              can_edit=row.status == models.RosterVersionStatus.DRAFT and workforce_permissions.PermissionCode.ROSTER_EDIT.value in permissions,
+              can_submit=row.status == models.RosterVersionStatus.DRAFT and blockers == 0 and workforce_permissions.PermissionCode.ROSTER_SUBMIT.value in permissions,
+              can_approve=row.status == models.RosterVersionStatus.SUBMITTED and scoped_can_approve,
+              can_publish=row.status == models.RosterVersionStatus.APPROVED and blockers == 0 and scoped_can_publish,'''.replace("              ", "        "),
+          )
+
+          # ------------------------------------------------------------------
+          # Public service facade
+          # ------------------------------------------------------------------
+          services = "backend/amodb/apps/rostering/services.py"
+          replace(services, "from . import assignments, catalog, common, lifecycle, planning, reports", "from . import assignments, catalog, common, governance, lifecycle, planning, reports")
+          replace(
+              services,
+              '''    publish_version,
+              revoke_exception,'''.replace("              ", "    "),
+              '''    publish_version,
+              revoke_exception,'''.replace("              ", "    "),
+          )
+          insert_services = r'''
+
+list_rule_sets = governance.list_rule_sets
+create_rule_set = governance.create_rule_set
+update_rule_set = governance.update_rule_set
+list_approval_authorities = governance.list_authorities
+create_approval_authority = governance.create_authority
+update_approval_authority = governance.update_authority
+approval_matrix = governance.approval_matrix
+request_roster_changes = governance.request_changes
+'''
+          text = read(services)
+          if "list_rule_sets = governance.list_rule_sets" not in text:
+              write(services, text.replace("\n\n__all__ =", insert_services + "\n\n__all__ =", 1))
+
+          # ------------------------------------------------------------------
+          # API routes
+          # ------------------------------------------------------------------
+          router = "backend/amodb/apps/rostering/router.py"
+          replace(router, "from fastapi import APIRouter, Depends, HTTPException, Query, Response, status", "from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status")
+          replace(router, "from . import exports, models, schemas, services", "from . import calendar_feed, exports, governance, models, schemas, services")
+          route_block = r'''
+
+@router.get("/calendar/subscription", response_model=schemas.RosterCalendarSubscriptionRead)
+def personal_roster_calendar_subscription(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VIEW_OWN)
+    token = calendar_feed.calendar_token(amo_id=_amo(current_user), user_id=current_user.id)
+    feed_path = f"/rostering/calendar/feed/{token}.ics"
+    https_url = str(request.base_url).rstrip("/") + feed_path
+    webcal_url = "webcal://" + https_url.split("://", 1)[-1]
+    return schemas.RosterCalendarSubscriptionRead(
+        https_url=https_url,
+        webcal_url=webcal_url,
+        feed_path=feed_path,
+        refresh_interval_minutes=60,
+        includes=["PUBLISHED_DUTY", "TRAINING", "QMS_AUDITS", "MAINTENANCE_TASKS", "AIRCRAFT_ALLOCATIONS"],
+    )
+
+
+@router.get("/calendar/feed/{token}.ics", name="personal_roster_calendar_feed")
+def personal_roster_calendar_feed(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    try:
+        amo_id, user_id = calendar_feed.decode_calendar_token(token)
+        content = calendar_feed.personal_calendar(db, amo_id=amo_id, user_id=user_id)
+    except (ValueError, RuntimeError) as exc:
+        raise _error(str(exc), error_code="ROSTER_CALENDAR_TOKEN_INVALID", status_code=404) from exc
+    return PlainTextResponse(
+        content,
+        media_type="text/calendar",
+        headers={"Cache-Control": "private, max-age=300", "Content-Disposition": "inline; filename=amo-portal-calendar.ics"},
+    )
+
+
+@router.get("/rule-sets", response_model=list[schemas.RosterRuleSetRead])
+def list_roster_rule_sets(
+    include_inactive: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VALIDATE)
+    rows = governance.list_rule_sets(db, amo_id=_amo(current_user), include_inactive=include_inactive)
+    db.commit()
+    return rows
+
+
+@router.post("/rule-sets", response_model=schemas.RosterRuleSetRead, status_code=status.HTTP_201_CREATED)
+def create_roster_rule_set(
+    payload: schemas.RosterRuleSetCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_RULES)
+    return _commit(db, governance.create_rule_set(db, amo_id=_amo(current_user), actor_user_id=current_user.id, payload=payload))
+
+
+@router.patch("/rule-sets/{rule_set_id}", response_model=schemas.RosterRuleSetRead)
+def patch_roster_rule_set(
+    rule_set_id: str,
+    payload: schemas.RosterRuleSetUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_RULES)
+    row = db.query(models.RosterRuleSet).filter(models.RosterRuleSet.amo_id == _amo(current_user), models.RosterRuleSet.id == rule_set_id).first()
+    if not row:
+        raise _error("Roster rule set not found", error_code="ROSTER_RULE_SET_NOT_FOUND", status_code=404)
+    return _commit(db, governance.update_rule_set(db, row=row, actor_user_id=current_user.id, payload=payload))
+
+
+@router.get("/approval-authorities", response_model=list[schemas.RosterApprovalAuthorityRead])
+def list_roster_approval_authorities(
+    include_inactive: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT)
+    return governance.list_authorities(db, amo_id=_amo(current_user), include_inactive=include_inactive)
+
+
+@router.post("/approval-authorities", response_model=schemas.RosterApprovalAuthorityRead, status_code=status.HTTP_201_CREATED)
+def create_roster_approval_authority(
+    payload: schemas.RosterApprovalAuthorityCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_APPROVAL_AUTHORITIES)
+    try:
+        return _commit(db, governance.create_authority(db, amo_id=_amo(current_user), actor_user_id=current_user.id, payload=payload))
+    except ValueError as exc:
+        db.rollback()
+        raise _translate(exc, default_code="ROSTER_APPROVAL_AUTHORITY_INVALID") from exc
+
+
+@router.patch("/approval-authorities/{authority_id}", response_model=schemas.RosterApprovalAuthorityRead)
+def patch_roster_approval_authority(
+    authority_id: str,
+    payload: schemas.RosterApprovalAuthorityUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_APPROVAL_AUTHORITIES)
+    row = db.query(models.RosterApprovalAuthority).filter(models.RosterApprovalAuthority.amo_id == _amo(current_user), models.RosterApprovalAuthority.id == authority_id).first()
+    if not row:
+        raise _error("Roster approval authority not found", error_code="ROSTER_APPROVAL_AUTHORITY_NOT_FOUND", status_code=404)
+    return _commit(db, governance.update_authority(db, row=row, actor_user_id=current_user.id, payload=payload))
+
+
+@router.get("/approval-matrix", response_model=schemas.RosterApprovalMatrixResponse)
+def roster_approval_matrix(
+    version_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    if not services.can_view_roster(db, user=current_user):
+        raise _error("Roster access denied", error_code="ROSTER_ACCESS_DENIED", status_code=403)
+    return governance.approval_matrix(db, amo_id=_amo(current_user), version_id=version_id)
+'''
+          text = read(router)
+          marker = "# ---------------------------------------------------------------------------\n# Dashboard and read models"
+          if "def personal_roster_calendar_subscription" not in text:
+              write(router, text.replace(marker, route_block + "\n\n" + marker, 1))
+          replace(
+              router,
+              '''    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_APPROVE)
+              version = _version_or_404'''.replace("              ", "    "),
+              '''    version = _version_or_404'''.replace("              ", "    "),
+          )
+          replace(
+              router,
+              '''    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_PUBLISH)
+              version = _version_or_404'''.replace("              ", "    "),
+              '''    version = _version_or_404'''.replace("              ", "    "),
+          )
+          request_changes_route = r'''
+
+@router.post("/versions/{version_id}/request-changes", response_model=schemas.RosterVersionRead)
+def request_roster_version_changes(
+    version_id: str,
+    payload: schemas.RosterLifecycleRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    version = _version_or_404(db, amo_id=_amo(current_user), version_id=version_id, lock=True)
+    try:
+        governance.request_changes(db, version=version, actor=current_user, payload=payload)
+        _commit(db, version)
+        return services.serialize_version(_version_or_404(db, amo_id=_amo(current_user), version_id=version.id), current_user=current_user, db=db)
+    except (ValueError, RuntimeError) as exc:
+        db.rollback()
+        raise _translate(exc, default_code="ROSTER_CHANGE_REQUEST_FAILED") from exc
+'''
+          text = read(router)
+          marker = '@router.post("/versions/{version_id}/publish"'
+          if "def request_roster_version_changes" not in text:
+              write(router, text.replace(marker, request_changes_route + "\n\n" + marker, 1))
+
+          # Calendar feed loading: avoid string loader paths under SQLAlchemy 2.x.
+          feed = "backend/amodb/apps/rostering/calendar_feed.py"
+          text = read(feed)
+          old_loader = '''        selectinload(models.RosterAssignment.task_links)
+              .selectinload(models.RosterTaskAssignmentLink.task_assignment)
+              .selectinload("task")
+              .selectinload("work_order")
+              .selectinload("aircraft"),'''.replace("              ", "        ")
+          if old_loader in text:
+              text = text.replace(old_loader, "        selectinload(models.RosterAssignment.task_links),")
+          write(feed, text)
+
+          # ------------------------------------------------------------------
+          # Frontend contracts and services
+          # ------------------------------------------------------------------
+          types = "frontend/src/types/rostering.ts"
+          replace(types, 'export type RosterRuleType = "MIN_REST_HOURS" | ', 'export type RosterRuleType = "MIN_REST_HOURS" | "MAX_ASSIGNMENT_DURATION" | ')
+          replace(types, '"MAX_CONSECUTIVE_DAYS" | "REQUIRED_DAYS_OFF"', '"MAX_CONSECUTIVE_DAYS" | "MAX_CONSECUTIVE_NIGHTS" | "REQUIRED_DAYS_OFF"')
+          replace(types, 'export type RosterRuleScope = "AMO" | "DEPARTMENT" | "BASE" | "SHIFT_TEMPLATE" | "USER";\n', 'export type RosterRuleScope = "AMO" | "DEPARTMENT" | "BASE" | "SHIFT_TEMPLATE" | "USER";\nexport type RosterApprovalAuthorityLevel = "BASE_MANAGER" | "DEPARTMENT_HEAD" | "DELEGATE";\nexport type RosterDepartmentApprovalStatus = "PENDING" | "APPROVED" | "CHANGES_REQUESTED";\n')
+          replace(types, '  acknowledgement_count: number;\n  can_edit: boolean;', '  acknowledgement_count: number;\n  approval_required_count: number;\n  approval_approved_count: number;\n  approval_pending_count: number;\n  can_edit: boolean;')
+          replace(types, 'export type RosterRuleRead = {\n  id: string;', 'export type RosterRuleRead = {\n  id: string;\n  rule_set_id?: string | null;')
+          extra_types = r'''
+
+export type RosterRuleSetRead = {
+  id: string;
+  amo_id: string;
+  code: string;
+  name: string;
+  version_label?: string | null;
+  regulatory_basis?: string | null;
+  manual_reference?: string | null;
+  description?: string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  priority: number;
+  is_active: boolean;
+  created_by_user_id?: string | null;
+  updated_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RosterApprovalAuthorityRead = {
+  id: string;
+  amo_id: string;
+  user_id: string;
+  authority_level: RosterApprovalAuthorityLevel;
+  department_id?: string | null;
+  base_station_id?: string | null;
+  can_approve: boolean;
+  can_publish: boolean;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  reason?: string | null;
+  is_active: boolean;
+  created_by_user_id?: string | null;
+  updated_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RosterApprovalAuthorityCreate = Omit<RosterApprovalAuthorityRead, "id" | "amo_id" | "created_by_user_id" | "updated_by_user_id" | "created_at" | "updated_at">;
+
+export type RosterDepartmentApprovalRead = {
+  id: string;
+  amo_id: string;
+  version_id: string;
+  department_id?: string | null;
+  base_station_id?: string | null;
+  assigned_approver_user_id?: string | null;
+  status: RosterDepartmentApprovalStatus;
+  decided_by_user_id?: string | null;
+  decision_comment?: string | null;
+  decided_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RosterApprovalMatrixResponse = {
+  version_id?: string | null;
+  required_count: number;
+  approved_count: number;
+  pending_count: number;
+  changes_requested_count: number;
+  items: RosterDepartmentApprovalRead[];
+};
+
+export type RosterCalendarSubscriptionRead = {
+  https_url: string;
+  webcal_url: string;
+  feed_path: string;
+  refresh_interval_minutes: number;
+  includes: string[];
+};
+'''
+          text = read(types)
+          if "export type RosterRuleSetRead" not in text:
+              write(types, text.rstrip() + extra_types + "\n")
+
+          roster_service = "frontend/src/services/rostering.ts"
+          replace(
+              roster_service,
+              '''type LifecycleRequest = {
+              expected_state_revision?: number | null;
+              idempotency_key?: string | null;
+              comment?: string | null;
+          };'''.replace("              ", "  "),
+              '''type LifecycleRequest = {
+              expected_state_revision?: number | null;
+              idempotency_key?: string | null;
+              comment?: string | null;
+              department_id?: string | null;
+              base_station_id?: string | null;
+          };'''.replace("              ", "  "),
+          )
+          extra_services = r'''
+
+export function requestRosterChanges(versionId: string, payload: LifecycleRequest): Promise<Roster.RosterVersionRead> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/request-changes`, { method: "POST", body: jsonBody(payload) });
+}
+
+export function listRosterRuleSets(includeInactive = false): Promise<Roster.RosterRuleSetRead[]> {
+  return apiJson(`/rostering/rule-sets${queryString({ include_inactive: includeInactive })}`, { offline: { cacheTtlMs: 15 * 60_000 } });
+}
+
+export function listRosterApprovalAuthorities(includeInactive = false): Promise<Roster.RosterApprovalAuthorityRead[]> {
+  return apiJson(`/rostering/approval-authorities${queryString({ include_inactive: includeInactive })}`, { offline: { cacheTtlMs: 5 * 60_000 } });
+}
+
+export function createRosterApprovalAuthority(payload: Roster.RosterApprovalAuthorityCreate): Promise<Roster.RosterApprovalAuthorityRead> {
+  return apiJson("/rostering/approval-authorities", { method: "POST", body: jsonBody(payload) });
+}
+
+export function getRosterApprovalMatrix(versionId?: string | null): Promise<Roster.RosterApprovalMatrixResponse> {
+  return apiJson(`/rostering/approval-matrix${queryString({ version_id: versionId || null })}`, { offline: { cacheTtlMs: 30_000 } });
+}
+
+export function getRosterCalendarSubscription(): Promise<Roster.RosterCalendarSubscriptionRead> {
+  return apiJson("/rostering/calendar/subscription", { offline: { cacheTtlMs: 60 * 60_000 } });
+}
+'''
+          text = read(roster_service)
+          if "export function requestRosterChanges" not in text:
+              write(roster_service, text.rstrip() + extra_services + "\n")
+
+          # Load every active tenant-user page in Setup.
+          people_service = "frontend/src/services/rosterPeople.ts"
+          extra_people = r'''
+
+export async function listAllRosterPeople(filters: Omit<RosterPeoplePageFilters, "page"> = {}): Promise<RosterPeoplePage> {
+  const pageSize = Math.min(Math.max(filters.page_size || 250, 25), 250);
+  const first = await listRosterPeoplePage({ ...filters, page: 1, page_size: pageSize });
+  if (!first.has_more) return first;
+  const pages = await Promise.all(Array.from({ length: first.pages - 1 }, (_, index) => listRosterPeoplePage({ ...filters, page: index + 2, page_size: pageSize })));
+  return { ...first, items: [first, ...pages].flatMap((page) => page.items), page: 1, page_size: pageSize, has_more: false };
+}
+'''
+          text = read(people_service)
+          if "export async function listAllRosterPeople" not in text:
+              write(people_service, text.rstrip() + extra_people + "\n")
+
+          # Setup tab integration.
+          settings = "frontend/src/pages/rostering/components/UnifiedRosterSettings.tsx"
+          replace(settings, '  listRosterPeoplePage,\n', '  listAllRosterPeople,\n')
+          replace(settings, 'import { EmptyState, RosterLoading, StatusPill } from "./RosterShell";', 'import { EmptyState, RosterLoading, StatusPill } from "./RosterShell";\nimport { RosterGovernancePanel } from "./RosterGovernancePanel";')
+          replace(settings, '  | "rules"\n  | "approvals"', '  | "rules"\n  | "governance"\n  | "approvals"')
+          replace(settings, '  { id: "rules", label: "Rules", icon: ShieldCheck },\n  { id: "approvals"', '  { id: "rules", label: "Rules", icon: ShieldCheck },\n  { id: "governance", label: "Roster approval", icon: BadgeCheck },\n  { id: "approvals"')
+          replace(
+              settings,
+              '''  const peopleQuery = useSettingsQuery("people", () =>
+              listRosterPeoplePage({
+              page: 1,
+              page_size: 200,
+              active_only: true,
+              roster_eligible_only: false,
+              }),
+              );'''.replace("              ", "    "),
+              '''  const peopleQuery = useSettingsQuery("people", () =>
+              listAllRosterPeople({
+              page_size: 250,
+              active_only: true,
+              roster_eligible_only: false,
+              }),
+              );'''.replace("              ", "    "),
+          )
+          governance_render = '''      {tab === "governance" ? (
+              <RosterGovernancePanel
+              people={people}
+              periods={periods}
+              bases={bases}
+              canManageRules={can("roster.manage_rules")}
+              canManageAuthorities={can("roster.manage_approval_authorities")}
+              />
+              ) : null}
+          '''.replace("              ", "      ")
+          text = read(settings)
+          marker = '      {tab === "approvals" ? ('
+          if 'tab === "governance"' not in text:
+              write(settings, text.replace(marker, governance_render + marker, 1))
+          # Add clean parameter entry to existing Rules tab.
+          replace(settings, '  const [severity, setSeverity] = useState<RosterRuleRead["severity"]>("WARNING");', '  const [severity, setSeverity] = useState<RosterRuleRead["severity"]>("WARNING");\n  const [limit, setLimit] = useState(8);')
+          replace(settings, '    "MIN_REST_HOURS",\n    "MAX_DUTY_HOURS_DAY",', '    "MIN_REST_HOURS",\n    "MAX_ASSIGNMENT_DURATION",\n    "MAX_DUTY_HOURS_DAY",')
+          replace(settings, '    "MAX_CONSECUTIVE_DAYS",\n    "MIN_COVERAGE",', '    "MAX_CONSECUTIVE_DAYS",\n    "MAX_CONSECUTIVE_NIGHTS",\n    "REQUIRED_DAYS_OFF",\n    "MIN_COVERAGE",')
+          replace(
+              settings,
+              '''          <Field label="Severity">
+              <select'''.replace("              ", "          "),
+              '''          <Field label="Limit">
+              <input type="number" min={0} step={0.5} value={limit} onChange={(event) => setLimit(Number(event.target.value))} />
+              </Field>
+              <Field label="Severity">
+              <select'''.replace("              ", "          "),
+          )
+          replace(
+              settings,
+              '''                  parameters_json: {},''',
+              '''                  parameters_json: type === "MAX_CONSECUTIVE_DAYS" ? { maximum_days: limit } : type === "MAX_CONSECUTIVE_NIGHTS" ? { maximum_nights: limit } : type === "REQUIRED_DAYS_OFF" ? { window_days: 7, minimum_continuous_minutes: limit * 60 } : type === "MAX_DUTY_HOURS_ROLLING" ? { window_days: 7, maximum_minutes: limit * 60 } : type.startsWith("MAX_") ? { maximum_minutes: limit * 60 } : type === "MIN_REST_HOURS" ? { minimum_minutes: limit * 60 } : {},''',
+              1,
+          )
+
+          # My Roster one-time subscription setup.
+          my_roster = "frontend/src/pages/rostering/components/MyRosterWorkspace.tsx"
+          replace(my_roster, '  CalendarPlus,\n', '  CalendarPlus,\n  CalendarSync,\n  Copy,\n')
+          replace(my_roster, 'import { acknowledgeRosterVersion, exportMyRosterCalendar, getMyRoster } from "../../../services/rostering";', 'import { acknowledgeRosterVersion, exportMyRosterCalendar, getMyRoster, getRosterCalendarSubscription } from "../../../services/rostering";')
+          replace(my_roster, 'import type { MyRosterResponse } from "../../../types/rostering";', 'import type { MyRosterResponse, RosterCalendarSubscriptionRead } from "../../../types/rostering";')
+          replace(my_roster, '  const [roster, setRoster] = useState<MyRosterResponse | null>(null);', '  const [roster, setRoster] = useState<MyRosterResponse | null>(null);\n  const [calendarSubscription, setCalendarSubscription] = useState<RosterCalendarSubscriptionRead | null>(null);')
+          replace(
+              my_roster,
+              '''      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage] = await Promise.all([''',
+              '''      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage, subscription] = await Promise.all([''',
+          )
+          replace(
+              my_roster,
+              '''        listTimesheets({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
+              ]);'''.replace("              ", "        "),
+              '''        listTimesheets({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
+              getRosterCalendarSubscription(),
+              ]);'''.replace("              ", "        "),
+          )
+          replace(my_roster, '      setTimesheets(timesheetPage.items);', '      setTimesheets(timesheetPage.items);\n      setCalendarSubscription(subscription);')
+          calendar_panel = r'''
+
+      {calendarSubscription ? (
+        <section className="wr-panel wr-calendar-subscription">
+          <CalendarSync size={22} />
+          <div>
+            <span className="wr-eyebrow">One-time device setup</span>
+            <h2>Automatic personal operations calendar</h2>
+            <p>Subscribe once to receive published duty, training, Quality audits and aircraft work allocations. Calendar applications refresh this feed automatically.</p>
+            <small>Refresh target: every {calendarSubscription.refresh_interval_minutes} minutes · {calendarSubscription.includes.map((value) => value.replace(/_/g, " ").toLowerCase()).join(" · ")}</small>
+          </div>
+          <div className="wr-actions">
+            <button type="button" className="wr-button wr-button--secondary" onClick={() => void navigator.clipboard.writeText(calendarSubscription.https_url)}><Copy size={15} /> Copy feed URL</button>
+            <a className="wr-button wr-button--primary" href={calendarSubscription.webcal_url}><CalendarPlus size={15} /> Subscribe on this device</a>
+          </div>
+        </section>
+      ) : null}
+'''
+          text = read(my_roster)
+          marker = '      <section className="wr-metric-grid">'
+          end_marker = '      </section>\n\n      {leaveOpen ? ('
+          if "wr-calendar-subscription" not in text:
+              location = text.find(end_marker, text.find(marker))
+              if location < 0:
+                  raise SystemExit("My roster metric section marker not found")
+              write(my_roster, text[:location + len('      </section>')] + calendar_panel + text[location + len('      </section>'):])
+
+          # Planner displays departmental approval progress.
+          planner = "frontend/src/pages/rostering/components/RosterPlannerV2.tsx"
+          replace(
+              planner,
+              '<span>Source commitments inline</span>',
+              '<span>Source commitments inline</span>{data.selectedVersion?.approval_required_count ? <span>{data.selectedVersion.approval_approved_count}/{data.selectedVersion.approval_required_count} department approvals</span> : null}',
+          )
+
+          # Styles
+          css = "frontend/src/styles/rostering-unified.css"
+          styles = r'''
+
+/* Rostering governance and calendar subscription */
+.wr-governance-stack { display: grid; gap: 1rem; }
+.wr-panel-intro { max-width: 78ch; margin: -.25rem 0 1rem; color: var(--text-muted); }
+.wr-rule-set-banner { display: grid; gap: .75rem; margin-bottom: 1rem; }
+.wr-rule-set-banner article { border: 1px solid var(--border-subtle); border-radius: .75rem; padding: .9rem 1rem; background: var(--surface-muted); }
+.wr-rule-set-banner article > div { display: flex; justify-content: space-between; gap: .75rem; }
+.wr-rule-set-banner p { margin: .35rem 0 0; color: var(--text-muted); }
+.wr-compliance-rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; }
+.wr-compliance-rule-grid article { min-height: 112px; border: 1px solid var(--border-subtle); border-radius: .75rem; padding: .85rem; display: grid; align-content: start; gap: .35rem; }
+.wr-compliance-rule-grid article > div { display: flex; align-items: center; gap: .45rem; }
+.wr-compliance-rule-grid article > span { font-size: 1.05rem; font-weight: 700; }
+.wr-compliance-rule-grid article small { color: var(--text-muted); }
+.wr-compliance-rule-grid article.is-inactive { opacity: .62; border-style: dashed; }
+.wr-inline-create--governance { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); align-items: end; }
+.wr-checkbox-field { display: flex !important; flex-direction: row !important; align-items: center; gap: .45rem; padding-bottom: .7rem; }
+.wr-checkbox-field input { width: auto; }
+.wr-governance-decision { margin-top: 1rem; display: flex; gap: 1rem; align-items: end; justify-content: space-between; flex-wrap: wrap; }
+.wr-governance-decision label { flex: 1 1 360px; }
+.wr-calendar-policy-note, .wr-calendar-subscription { display: flex; align-items: flex-start; gap: .9rem; }
+.wr-calendar-policy-note p, .wr-calendar-subscription p { margin: .25rem 0; color: var(--text-muted); }
+.wr-calendar-subscription > div:nth-child(2) { flex: 1; }
+.wr-calendar-subscription .wr-actions { align-self: center; }
+.wr-calendar-subscription a { text-decoration: none; }
+@media (max-width: 760px) { .wr-calendar-subscription { flex-direction: column; } .wr-calendar-subscription .wr-actions { width: 100%; align-self: stretch; } }
+'''
+          text = read(css)
+          if "/* Rostering governance and calendar subscription */" not in text:
+              write(css, text.rstrip() + styles + "\n")
+
+          # Remove this one-use workflow from the resulting branch.
+          Path(".github/workflows/apply-rostering-governance.yml").unlink()
+          PY
+          python -m compileall -q backend/amodb/apps/rostering backend/amodb/apps/workforce backend/amodb/alembic/versions/rostering_20260724_governance.py
+          git diff --check
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend frontend .github/workflows/apply-rostering-governance.yml
+          git commit -m "Add departmental roster governance and calendar subscriptions"
+          git push origin HEAD:fix/rostering-unified-workforce
