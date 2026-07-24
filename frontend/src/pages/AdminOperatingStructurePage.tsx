@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import { ContextualHelp } from "../components/UI/ContextualHelp";
+import { getCachedUser } from "../services/auth";
 import {
   createBaseStation,
   createUserBaseAssignment,
@@ -25,26 +26,24 @@ import "../styles/admin-operating-structure.css";
 type Tab = "bases" | "deployments";
 
 const BASE_TYPES: BaseStationType[] = [
-  "MAIN_BASE",
-  "LINE_STATION",
-  "OUTSTATION",
-  "WORKSHOP",
-  "HANGAR",
-  "TRAINING_SITE",
-  "OTHER",
+  "MAIN_BASE", "LINE_STATION", "OUTSTATION", "WORKSHOP", "HANGAR", "TRAINING_SITE", "OTHER",
 ];
-
 const ASSIGNMENT_KINDS: BaseAssignmentKind[] = ["HOME_BASE", "TEMPORARY", "RELIEF", "TRAINING", "OTHER"];
+const DEPLOYMENT_ROLES = new Set(["QUALITY_MANAGER", "PLANNING_ENGINEER", "PRODUCTION_ENGINEER"]);
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error || "The request could not be completed.");
+function errorMessage(error: unknown): string {
+  if (error && typeof error === "object") {
+    const candidate = error as { message?: string; response?: { data?: { detail?: string } } };
+    return candidate.response?.data?.detail || candidate.message || "The request could not be completed.";
+  }
+  return String(error || "The request could not be completed.");
 }
 
-const emptyBaseForm: BaseStationCreate = {
+const EMPTY_BASE: BaseStationCreate = {
   code: "",
   name: "",
   base_type: "LINE_STATION",
@@ -58,7 +57,12 @@ const emptyBaseForm: BaseStationCreate = {
 
 export default function AdminOperatingStructurePage() {
   const { amoCode = "UNKNOWN" } = useParams();
-  const [tab, setTab] = useState<Tab>("bases");
+  const currentUser = useMemo(() => getCachedUser(), []);
+  const role = String(currentUser?.role || "");
+  const canManageBaseMaster = Boolean(currentUser?.is_superuser || currentUser?.is_amo_admin);
+  const canManageDeployments = canManageBaseMaster || DEPLOYMENT_ROLES.has(role);
+
+  const [tab, setTab] = useState<Tab>(canManageBaseMaster ? "bases" : "deployments");
   const [bases, setBases] = useState<BaseStationRead[]>([]);
   const [people, setPeople] = useState<RosterPersonRead[]>([]);
   const [assignments, setAssignments] = useState<UserBaseAssignmentRead[]>([]);
@@ -67,9 +71,8 @@ export default function AdminOperatingStructurePage() {
   const [error, setError] = useState<string | null>(null);
 
   const [editingBaseId, setEditingBaseId] = useState<string | null>(null);
-  const [baseForm, setBaseForm] = useState<BaseStationCreate>(emptyBaseForm);
+  const [baseForm, setBaseForm] = useState<BaseStationCreate>(EMPTY_BASE);
   const [aliasText, setAliasText] = useState("");
-
   const [deploymentForm, setDeploymentForm] = useState({
     user_id: "",
     base_station_id: "",
@@ -92,7 +95,7 @@ export default function AdminOperatingStructurePage() {
       setPeople(nextPeople.items);
       setAssignments(nextAssignments);
     } catch (cause) {
-      setError(message(cause));
+      setError(errorMessage(cause));
     } finally {
       setLoading(false);
     }
@@ -105,11 +108,12 @@ export default function AdminOperatingStructurePage() {
 
   const resetBase = () => {
     setEditingBaseId(null);
-    setBaseForm(emptyBaseForm);
+    setBaseForm(EMPTY_BASE);
     setAliasText("");
   };
 
   const editBase = (base: BaseStationRead) => {
+    if (!canManageBaseMaster) return;
     setEditingBaseId(base.id);
     setBaseForm({
       code: base.code,
@@ -127,7 +131,7 @@ export default function AdminOperatingStructurePage() {
   };
 
   const saveBase = async () => {
-    if (!baseForm.code.trim() || !baseForm.name.trim()) return;
+    if (!canManageBaseMaster || !baseForm.code.trim() || !baseForm.name.trim()) return;
     setBusy("base");
     setError(null);
     const payload: BaseStationCreate = {
@@ -146,27 +150,28 @@ export default function AdminOperatingStructurePage() {
       resetBase();
       await load();
     } catch (cause) {
-      setError(message(cause));
+      setError(errorMessage(cause));
     } finally {
       setBusy(null);
     }
   };
 
   const toggleBase = async (base: BaseStationRead) => {
+    if (!canManageBaseMaster) return;
     setBusy(`base:${base.id}`);
     setError(null);
     try {
       await updateBaseStation(base.id, { is_active: !base.is_active });
       await load();
     } catch (cause) {
-      setError(message(cause));
+      setError(errorMessage(cause));
     } finally {
       setBusy(null);
     }
   };
 
   const createDeployment = async () => {
-    if (!deploymentForm.user_id || !deploymentForm.base_station_id || !deploymentForm.effective_from) return;
+    if (!canManageDeployments || !deploymentForm.user_id || !deploymentForm.base_station_id || !deploymentForm.effective_from) return;
     setBusy("deployment");
     setError(null);
     try {
@@ -182,43 +187,44 @@ export default function AdminOperatingStructurePage() {
       setDeploymentForm((current) => ({ ...current, effective_from: todayIso(), effective_to: "", note: "" }));
       await load();
     } catch (cause) {
-      setError(message(cause));
+      setError(errorMessage(cause));
     } finally {
       setBusy(null);
     }
   };
 
   const endDeployment = async (assignment: UserBaseAssignmentRead) => {
+    if (!canManageDeployments) return;
     setBusy(`deployment:${assignment.id}`);
     setError(null);
     try {
       await updateUserBaseAssignment(assignment.id, { effective_to: todayIso() });
       await load();
     } catch (cause) {
-      setError(message(cause));
+      setError(errorMessage(cause));
     } finally {
       setBusy(null);
     }
   };
 
   return (
-    <DepartmentLayout amoCode={amoCode} activeDepartment="admin-operating-structure">
+    <DepartmentLayout amoCode={amoCode} activeDepartment={canManageBaseMaster ? "admin-assets" : "rostering"}>
       <div className="operating-structure">
         <header className="operating-structure__header">
           <div>
             <h1>Operating structure</h1>
-            <p>Manage the canonical bases and effective-dated personnel deployments used across the entire portal.</p>
+            <p>One canonical base master and dated personnel deployments for the entire tenant.</p>
           </div>
           <div className="operating-structure__actions">
             <ContextualHelp
               topic="admin-operating-structure"
               version={1}
               title="One base master for every module"
-              description="Create each physical base, station, hangar or workshop once. Rostering, Planning, Production, Quality, Training and Stores consume these same records. Temporary personnel movement is recorded as a dated deployment instead of overwriting the employee's home base."
+              description="Administrators create each physical base, station, hangar or workshop once. Rostering, Planning, Production, Quality, Training and Stores consume those same records. A short transfer is recorded as a dated deployment instead of overwriting the employee's permanent home base."
               checklist={[
-                "Use HOME BASE for the durable personnel station.",
-                "Use TEMPORARY or RELIEF for short operational transfers.",
-                "End a deployment when the employee returns; do not create a duplicate user or base.",
+                "HOME BASE is the durable personnel station.",
+                "TEMPORARY, RELIEF and TRAINING overlay the home base for exact dates.",
+                "End a deployment when the employee returns; never duplicate the person or station.",
               ]}
             />
             <button className="btn btn-secondary" type="button" onClick={() => void load()} disabled={loading}>
@@ -227,27 +233,31 @@ export default function AdminOperatingStructurePage() {
           </div>
         </header>
 
+        {!canManageBaseMaster && !canManageDeployments ? (
+          <div className="operating-structure__error" role="alert">Your role cannot change operating structure or personnel deployments. Ask an AMO administrator to complete this setup.</div>
+        ) : null}
+
         <div className="operating-structure__tabs" role="tablist" aria-label="Operating structure sections">
-          <button type="button" role="tab" aria-selected={tab === "bases"} className={tab === "bases" ? "is-active" : ""} onClick={() => setTab("bases")}>
-            <Building2 size={16} /> Bases and stations
-          </button>
-          <button type="button" role="tab" aria-selected={tab === "deployments"} className={tab === "deployments" ? "is-active" : ""} onClick={() => setTab("deployments")}>
-            <UserRoundCheck size={16} /> Personnel deployments
-          </button>
+          {canManageBaseMaster ? (
+            <button type="button" role="tab" aria-selected={tab === "bases"} className={tab === "bases" ? "is-active" : ""} onClick={() => setTab("bases")}>
+              <Building2 size={16} /> Bases and stations
+            </button>
+          ) : null}
+          {canManageDeployments ? (
+            <button type="button" role="tab" aria-selected={tab === "deployments"} className={tab === "deployments" ? "is-active" : ""} onClick={() => setTab("deployments")}>
+              <UserRoundCheck size={16} /> Personnel deployments
+            </button>
+          ) : null}
         </div>
 
         {error ? <div className="operating-structure__error" role="alert">{error}</div> : null}
 
-        {tab === "bases" ? (
+        {tab === "bases" && canManageBaseMaster ? (
           <section className="operating-structure__panel">
             <div className="operating-structure__section-head">
-              <div>
-                <h2>{editingBaseId ? "Edit base" : "Add base"}</h2>
-                <p>Codes are tenant-wide identifiers and must not be duplicated in individual modules.</p>
-              </div>
+              <div><h2>{editingBaseId ? "Edit base" : "Add base"}</h2><p>These records are tenant-wide; operational modules must not create their own base lists.</p></div>
               {editingBaseId ? <button className="btn btn-secondary" type="button" onClick={resetBase}>Cancel edit</button> : null}
             </div>
-
             <div className="operating-structure__form">
               <label>Code<input value={baseForm.code} onChange={(event) => setBaseForm((current) => ({ ...current, code: event.target.value }))} placeholder="WIL" /></label>
               <label>Name<input value={baseForm.name} onChange={(event) => setBaseForm((current) => ({ ...current, name: event.target.value }))} placeholder="Wilson Airport" /></label>
@@ -257,41 +267,25 @@ export default function AdminOperatingStructurePage() {
               <label>IATA<input value={baseForm.iata_code || ""} onChange={(event) => setBaseForm((current) => ({ ...current, iata_code: event.target.value }))} /></label>
               <label className="operating-structure__span-2">Aliases<input value={aliasText} onChange={(event) => setAliasText(event.target.value)} placeholder="WILSON, HKNW" /></label>
               <label className="operating-structure__span-4">Description<textarea rows={2} value={baseForm.description || ""} onChange={(event) => setBaseForm((current) => ({ ...current, description: event.target.value }))} /></label>
-              <div className="operating-structure__span-4 operating-structure__actions">
-                <span />
-                <button className="btn btn-primary" type="button" onClick={() => void saveBase()} disabled={!baseForm.code.trim() || !baseForm.name.trim() || busy === "base"}>
-                  <Plus size={16} /> {editingBaseId ? "Save base" : "Create base"}
-                </button>
-              </div>
+              <div className="operating-structure__span-4 operating-structure__actions"><span /><button className="btn btn-primary" type="button" onClick={() => void saveBase()} disabled={!baseForm.code.trim() || !baseForm.name.trim() || busy === "base"}><Plus size={16} /> {editingBaseId ? "Save base" : "Create base"}</button></div>
             </div>
-
             {loading && !bases.length ? <div className="operating-structure__empty">Loading bases…</div> : null}
             {!loading && !bases.length ? <div className="operating-structure__empty">No bases exist. Create the first operating location above.</div> : null}
             <div className="operating-structure__grid">
               {bases.map((base) => (
                 <article className="operating-structure__card" key={base.id}>
-                  <header>
-                    <div><strong>{base.code} · {base.name}</strong><small>{base.base_type.replace(/_/g, " ")} · {base.time_zone || "No time zone"}</small></div>
-                    <span className={`operating-structure__status${base.is_active ? "" : " is-inactive"}`}>{base.is_active ? "ACTIVE" : "INACTIVE"}</span>
-                  </header>
+                  <header><div><strong>{base.code} · {base.name}</strong><small>{base.base_type.replace(/_/g, " ")} · {base.time_zone || "No time zone"}</small></div><span className={`operating-structure__status${base.is_active ? "" : " is-inactive"}`}>{base.is_active ? "ACTIVE" : "INACTIVE"}</span></header>
                   <small>{[base.icao_code, base.iata_code, base.aliases.map((alias) => alias.alias).join(", ")].filter(Boolean).join(" · ") || "No external codes or aliases"}</small>
-                  <div className="operating-structure__actions">
-                    <button className="btn btn-secondary" type="button" onClick={() => editBase(base)}><Pencil size={15} /> Edit</button>
-                    <button className="btn btn-secondary" type="button" disabled={busy === `base:${base.id}`} onClick={() => void toggleBase(base)}>{base.is_active ? "Deactivate" : "Reactivate"}</button>
-                  </div>
+                  <div className="operating-structure__actions"><button className="btn btn-secondary" type="button" onClick={() => editBase(base)}><Pencil size={15} /> Edit</button><button className="btn btn-secondary" type="button" disabled={busy === `base:${base.id}`} onClick={() => void toggleBase(base)}>{base.is_active ? "Deactivate" : "Reactivate"}</button></div>
                 </article>
               ))}
             </div>
           </section>
-        ) : (
-          <section className="operating-structure__panel">
-            <div className="operating-structure__section-head">
-              <div>
-                <h2>Personnel base deployments</h2>
-                <p>Keep the home base intact and overlay temporary, relief or training movement for an exact date range.</p>
-              </div>
-            </div>
+        ) : null}
 
+        {tab === "deployments" && canManageDeployments ? (
+          <section className="operating-structure__panel">
+            <div className="operating-structure__section-head"><div><h2>Personnel base deployments</h2><p>Keep the home base intact and overlay temporary, relief or training movement for an exact date range.</p></div></div>
             <div className="operating-structure__form">
               <label className="operating-structure__span-2">Person<select value={deploymentForm.user_id} onChange={(event) => setDeploymentForm((current) => ({ ...current, user_id: event.target.value }))}><option value="">Select person</option>{people.map((person) => <option key={person.user_id} value={person.user_id}>{person.staff_code} · {person.full_name}</option>)}</select></label>
               <label>Base<select value={deploymentForm.base_station_id} onChange={(event) => setDeploymentForm((current) => ({ ...current, base_station_id: event.target.value }))}><option value="">Select base</option>{activeBases.map((base) => <option key={base.id} value={base.id}>{base.code} · {base.name}</option>)}</select></label>
@@ -299,14 +293,8 @@ export default function AdminOperatingStructurePage() {
               <label>Starts<input type="date" value={deploymentForm.effective_from} onChange={(event) => setDeploymentForm((current) => ({ ...current, effective_from: event.target.value }))} /></label>
               <label>Ends<input type="date" value={deploymentForm.effective_to} onChange={(event) => setDeploymentForm((current) => ({ ...current, effective_to: event.target.value }))} /></label>
               <label className="operating-structure__span-2">Reason / note<input value={deploymentForm.note} onChange={(event) => setDeploymentForm((current) => ({ ...current, note: event.target.value }))} placeholder="Relief coverage for end-of-month check" /></label>
-              <div className="operating-structure__span-4 operating-structure__actions">
-                <small>Home-base assignments may overlap a dated temporary deployment. Two temporary primary deployments may not overlap.</small>
-                <button className="btn btn-primary" type="button" onClick={() => void createDeployment()} disabled={!deploymentForm.user_id || !deploymentForm.base_station_id || !deploymentForm.effective_from || busy === "deployment"}>
-                  <CalendarRange size={16} /> Create deployment
-                </button>
-              </div>
+              <div className="operating-structure__span-4 operating-structure__actions"><small>A home base may overlap one dated temporary deployment. Two primary temporary deployments may not overlap.</small><button className="btn btn-primary" type="button" onClick={() => void createDeployment()} disabled={!deploymentForm.user_id || !deploymentForm.base_station_id || !deploymentForm.effective_from || busy === "deployment"}><CalendarRange size={16} /> Create deployment</button></div>
             </div>
-
             {!assignments.length && !loading ? <div className="operating-structure__empty">No personnel base assignments exist.</div> : null}
             <div className="operating-structure__grid">
               {assignments.map((assignment) => {
@@ -314,10 +302,7 @@ export default function AdminOperatingStructurePage() {
                 const ended = Boolean(assignment.effective_to && assignment.effective_to < todayIso());
                 return (
                   <article className="operating-structure__deployment" key={assignment.id}>
-                    <header>
-                      <div><strong>{person?.full_name || assignment.user_id}</strong><small>{person?.staff_code || "No staff code"} · {assignment.base_station?.code || assignment.base_station_id}</small></div>
-                      <span className={`operating-structure__status${ended ? " is-inactive" : ""}`}>{assignment.assignment_kind.replace(/_/g, " ")}</span>
-                    </header>
+                    <header><div><strong>{person?.full_name || assignment.user_id}</strong><small>{person?.staff_code || "No staff code"} · {assignment.base_station?.code || assignment.base_station_id}</small></div><span className={`operating-structure__status${ended ? " is-inactive" : ""}`}>{assignment.assignment_kind.replace(/_/g, " ")}</span></header>
                     <small>{assignment.effective_from} → {assignment.effective_to || "Open ended"}</small>
                     {assignment.note ? <small>{assignment.note}</small> : null}
                     {!ended && assignment.assignment_kind !== "HOME_BASE" ? <div className="operating-structure__actions"><span /><button className="btn btn-secondary" type="button" disabled={busy === `deployment:${assignment.id}`} onClick={() => void endDeployment(assignment)}>End today</button></div> : null}
@@ -326,7 +311,7 @@ export default function AdminOperatingStructurePage() {
               })}
             </div>
           </section>
-        )}
+        ) : null}
       </div>
     </DepartmentLayout>
   );
