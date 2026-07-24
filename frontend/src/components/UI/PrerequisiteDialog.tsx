@@ -16,6 +16,7 @@ type Props = {
   description?: string;
   items: PrerequisiteItem[];
   onClose: () => void;
+  continueLabel?: string;
 };
 
 export function PrerequisiteDialog({
@@ -24,6 +25,7 @@ export function PrerequisiteDialog({
   description = "This page depends on the following tenant configuration.",
   items,
   onClose,
+  continueLabel = "Continue in read-only mode",
 }: Props) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement | null>(null);
@@ -68,7 +70,7 @@ export function PrerequisiteDialog({
           </div>
         </div>
         <footer className="portal-help-dialog__footer">
-          <button type="button" className="wr-button wr-button--secondary" onClick={onClose}>Continue in read-only mode</button>
+          <button type="button" className="portal-help-button portal-help-button--secondary" onClick={onClose}>{continueLabel}</button>
         </footer>
       </section>
     </div>
