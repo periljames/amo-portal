@@ -10,7 +10,6 @@ import {
   RefreshCw,
   UsersRound,
 } from "lucide-react";
-import { motion } from "framer-motion";
 
 import { getRosterDashboard } from "../../../services/rostering";
 import { errorMessage, monthBounds } from "../rosterUi";
@@ -101,13 +100,13 @@ export function RosterDashboard() {
           ) : (
             <div className="wr-finding-table">
               {data.top_findings.map((finding) => (
-                <motion.article key={finding.id} layout className="wr-finding-row">
+                <article key={finding.id} className="wr-finding-row">
                   <StatusPill value={finding.severity} />
                   <div>
                     <strong>{finding.code.replace(/_/g, " ")}</strong>
                     <p>{finding.message}</p>
                   </div>
-                </motion.article>
+                </article>
               ))}
             </div>
           )}

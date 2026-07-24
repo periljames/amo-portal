@@ -10,6 +10,7 @@ function readSource(relativePath: string): string {
 
 const plannerHookSource = readSource("./hooks/useRosterPlannerDataV2.ts");
 const rosterShellSource = readSource("./components/RosterShell.tsx");
+const rosterLayoutSource = readSource("../../styles/rostering-workforce-layout.css");
 const rosterPeopleSource = readSource("../../services/rosterPeople.ts");
 const workOrdersSource = readSource("../../services/workOrders.ts");
 const fleetSource = readSource("../../services/fleet.ts");
@@ -26,6 +27,20 @@ describe("rostering architecture regressions", () => {
     expect(rosterShellSource).toContain("<DepartmentLayout");
     expect(rosterShellSource).toContain('activeDepartment="rostering"');
     expect(rosterShellSource).toContain("</DepartmentLayout>");
+  });
+
+  it("uses a fluid viewport contract in both production shell modes", () => {
+    expect(rosterShellSource).toContain('rostering-workforce-layout.css');
+    expect(rosterLayoutSource).toContain('.app-shell__content:has(> .wr-page)');
+    expect(rosterLayoutSource).toContain('.app-shell:not(.app-shell--v2):has(.wr-page)');
+    expect(rosterLayoutSource).toContain('.app-shell__main-inner');
+    expect(rosterLayoutSource).toContain('max-width: none');
+    expect(rosterLayoutSource).toContain('--sidebar-width: clamp(204px, 12.5vw, 226px)');
+    expect(rosterLayoutSource).toContain('--wr-page-viewport-offset: 98px');
+    expect(rosterLayoutSource).toContain('min-height: calc(100dvh - var(--wr-page-viewport-offset, 58px))');
+    expect(rosterLayoutSource).not.toContain('min-height: 100dvh;');
+    expect(rosterLayoutSource).toContain('@media (min-width: 1680px)');
+    expect(rosterLayoutSource).toContain('.wr-dashboard > .wr-panel:last-child');
   });
 
   it("uses stable query resources instead of a recursive load-all effect", () => {
