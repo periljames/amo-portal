@@ -1,17 +1,12 @@
-import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw, ShieldAlert } from "lucide-react";
 import "../../styles/quality-checklist-pdf-form-editor.css";
 
-const QualityChecklistPdfFormEditorHost = lazy(
-  () => import("./QualityChecklistPdfFormEditorHost"),
-);
-
 type AuditRoute = {
   amoCode: string;
   auditKey: string;
-  activeTab: string;
 };
 
 function useAuditRoute(): AuditRoute | null {
@@ -22,9 +17,8 @@ function useAuditRoute(): AuditRoute | null {
     return {
       amoCode: decodeURIComponent(match[1]),
       auditKey: decodeURIComponent(match[2]),
-      activeTab: new URLSearchParams(location.search).get("tab") || "war-room",
     };
-  }, [location.pathname, location.search]);
+  }, [location.pathname]);
 }
 
 const CarInviteResponsiveStyleLoader: React.FC = () => {
@@ -39,9 +33,6 @@ const CarInviteResponsiveStyleLoader: React.FC = () => {
       void import("../../styles/car-invite-responsive.css");
     };
 
-    // The route component imports the legacy CAR stylesheet. Wait until its
-    // workspace is mounted before loading the focused overrides, guaranteeing
-    // that source order cannot restore the cramped 50%-zoom layout.
     if (document.querySelector(".auth-layout--car-invite")) {
       loadOverrides();
     } else {
@@ -62,15 +53,19 @@ const CarInviteResponsiveStyleLoader: React.FC = () => {
 const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
   const queryClient = useQueryClient();
   const [cacheRevision, setCacheRevision] = useState(0);
-  const queryKey = useMemo(() => ["qms-audit-context", route.auditKey] as const, [route.auditKey]);
+  const lifecycleQueries = useMemo(() => [
+    ["qms-audit-resolve-v2", route.auditKey] as const,
+    ["qms-audit-lifecycle"] as const,
+  ], [route.auditKey]);
 
   useEffect(() => queryClient.getQueryCache().subscribe(() => {
     setCacheRevision((current) => current + 1);
   }), [queryClient]);
 
-  const state = queryClient.getQueryState(queryKey);
-  const data = queryClient.getQueryData<{ degraded?: boolean }>(queryKey);
-  const degraded = data?.degraded === true || state?.status === "error";
+  const resolveState = queryClient.getQueryState(lifecycleQueries[0]);
+  const lifecycleStates = queryClient.getQueryCache().findAll({ queryKey: lifecycleQueries[1] });
+  const lifecycleFailed = lifecycleStates.some((query) => query.state.status === "error");
+  const degraded = resolveState?.status === "error" || lifecycleFailed;
   void cacheRevision;
 
   useEffect(() => {
@@ -88,13 +83,13 @@ const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
           <p>Authoritative workflow unavailable</p>
           <h2>Audit progress has been placed in safe read-only mode.</h2>
           <span>
-            The portal could not verify stage completion, CAR state, evidence gates or closeout readiness from the backend.
+            The portal could not verify lifecycle state, CAR issuance, evidence review or closeout readiness from the backend.
             It will not use locally invented completion values or permit workflow advancement.
           </span>
         </div>
         <div className="quality-workflow-integrity-blocker__actions">
-          <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey })}>
-            <RefreshCcw size={17} /> Retry workflow
+          <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey: ["qms-audit-lifecycle"] })}>
+            <RefreshCcw size={17} /> Retry lifecycle
           </button>
           <a href={`/maintenance/${encodeURIComponent(route.amoCode)}/quality/audits/register`}>Open audit register</a>
         </div>
@@ -112,14 +107,8 @@ const QualityEnhancementsHost: React.FC = () => {
   }
   if (!route) return null;
 
-  if (route.activeTab === "checklist") {
-    return (
-      <Suspense fallback={null}>
-        <QualityChecklistPdfFormEditorHost />
-      </Suspense>
-    );
-  }
-
+  // Fillable PDF controls now live inside the Checklist toolbar. The global host
+  // only protects the page when the authoritative lifecycle query fails.
   return <WorkflowIntegrityGuard route={route} />;
 };
 
