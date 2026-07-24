@@ -4,9 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from amodb.apps.doc_control import workspace_service as service
 from amodb.apps.doc_control.domain_models import DocumentWorkflowInstance
+from amodb.apps.doc_control.workspace_access import enforce_workspace_access
 from amodb.apps.manuals import models as manual_models
 
 
@@ -18,6 +20,23 @@ def _user(role: str, *, superuser: bool = False, amo_admin: bool = False):
         is_amo_admin=amo_admin,
         is_active=True,
         is_system_account=False,
+    )
+
+
+def _request(method: str, path: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "raw_path": path.encode(),
+            "root_path": "",
+            "scheme": "https",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+            "server": ("testserver", 443),
+        }
     )
 
 
@@ -50,6 +69,54 @@ def test_document_approval_roles_are_narrower_than_general_control_roles() -> No
     assert service.is_approver(_user("QUALITY_INSPECTOR")) is True
     assert service.is_approver(_user("AUDITOR")) is False
     assert service.is_approver(_user("TECHNICIAN", amo_admin=True)) is True
+
+
+def test_normal_user_can_use_library_and_reader_originated_change_request() -> None:
+    normal_user = _user("TECHNICIAN")
+    enforce_workspace_access(
+        _request("GET", "/doc-control/workspace/t/safarilink/documents"),
+        normal_user,
+    )
+    enforce_workspace_access(
+        _request(
+            "GET",
+            "/doc-control/workspace/t/safarilink/documents/manual-1/read-target",
+        ),
+        normal_user,
+    )
+    enforce_workspace_access(
+        _request("POST", "/doc-control/workspace/t/safarilink/change-requests"),
+        normal_user,
+    )
+    enforce_workspace_access(
+        _request(
+            "POST",
+            "/doc-control/workspace/t/safarilink/distribution-campaigns/campaign-1/acknowledge",
+        ),
+        normal_user,
+    )
+
+
+def test_normal_user_cannot_enumerate_controller_worklists() -> None:
+    normal_user = _user("TECHNICIAN")
+    for path in (
+        "/doc-control/workspace/t/safarilink/workflows",
+        "/doc-control/workspace/t/safarilink/authority-submissions",
+        "/doc-control/workspace/t/safarilink/temporary-revisions",
+        "/doc-control/workspace/t/safarilink/distribution-campaigns",
+        "/doc-control/workspace/t/safarilink/controlled-copies",
+        "/doc-control/workspace/t/safarilink/reports/master-register",
+    ):
+        with pytest.raises(HTTPException) as caught:
+            enforce_workspace_access(_request("GET", path), normal_user)
+        assert caught.value.status_code == 403
+
+
+def test_controller_can_enter_governance_worklists() -> None:
+    enforce_workspace_access(
+        _request("GET", "/doc-control/workspace/t/safarilink/workflows"),
+        _user("QUALITY_MANAGER"),
+    )
 
 
 def test_workflow_rejects_invalid_transition_and_lists_allowed_actions() -> None:
