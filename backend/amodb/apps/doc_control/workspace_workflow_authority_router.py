@@ -43,6 +43,26 @@ def _matching_submission(
     return None
 
 
+def _normalise_system_managed_readiness(
+    workflow: dm.DocumentWorkflowInstance,
+    payload: schemas.WorkflowTransitionRequest,
+) -> schemas.WorkflowTransitionRequest:
+    """Drop an unchanged distribution value echoed by older frontend clients.
+
+    Distribution readiness is established by campaign issuance, not by workflow
+    form input. Existing clients may send the current read-only value back with
+    every transition. Treating an unchanged value as a manual mutation would make
+    all later workflow actions fail once the system had marked distribution ready.
+    A changed value is retained and rejected by the release-guard router.
+    """
+    if (
+        payload.distribution_readiness_status is not None
+        and payload.distribution_readiness_status == workflow.distribution_readiness_status
+    ):
+        return payload.model_copy(update={"distribution_readiness_status": None})
+    return payload
+
+
 @router.post(
     "/t/{tenant_slug}/workflows/{workflow_id}/transition",
     include_in_schema=False,
@@ -66,6 +86,8 @@ def transition_workflow_with_authority_alignment(
     )
     if not workflow:
         raise HTTPException(status_code=404, detail="Document workflow not found")
+
+    payload = _normalise_system_managed_readiness(workflow, payload)
 
     if payload.action == "MARK_AUTHORITY_SUBMITTED":
         if not _matching_submission(
