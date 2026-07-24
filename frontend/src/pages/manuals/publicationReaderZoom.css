@@ -1,0 +1,19 @@
+.publication-native-pdf {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.publication-native-pdf__pages {
+  min-width: max-content;
+}
+
+.publication-native-pdf__page {
+  width: var(--publication-native-page-width);
+  max-width: none;
+}
+
+@media (max-width: 760px) {
+  .publication-native-pdf__pages {
+    min-width: 100%;
+  }
+}
