@@ -103,7 +103,7 @@ jobs:
           for revision_id in script.get_heads():
               revision = script.get_revision(revision_id)
               print(revision_id, "down=", revision.down_revision, "depends_on=", revision.dependencies, "path=", revision.path)
-          for revision_id in ("rostering_20260724_governance", "a1b2c3d4e5f6", "document_control_20260724_domain", "document_control_20260724_scope_fk"):
+          for revision_id in ("rostering_20260724_governance", "a1b2c3d4e5f6", "document_control_20260724_domain", "document_control_20260724_scope_fk", "document_control_20260724_distribution_integrity"):
               try:
                   revision = script.get_revision(revision_id)
               except Exception as exc:
@@ -147,11 +147,12 @@ jobs:
           from amodb.main import app
 
           configure_mappers()
-          paths = {
-              route.path
+          workspace_routes = [
+              route
               for route in app.routes
               if getattr(route, "path", "").startswith("/doc-control/workspace/")
-          }
+          ]
+          paths = {route.path for route in workspace_routes}
           required = {
               "/doc-control/workspace/t/{tenant_slug}/dashboard",
               "/doc-control/workspace/t/{tenant_slug}/documents",
@@ -164,7 +165,22 @@ jobs:
           missing = required - paths
           if missing:
               raise SystemExit(f"Missing Document Control routes: {sorted(missing)}")
-          print(f"Verified {len(paths)} Document Control workspace paths")
+
+          expected_first_modules = {
+              "/doc-control/workspace/t/{tenant_slug}/dashboard": "amodb.apps.doc_control.workspace_dashboard_router",
+              "/doc-control/workspace/t/{tenant_slug}/documents": "amodb.apps.doc_control.workspace_library_router",
+              "/doc-control/workspace/t/{tenant_slug}/documents/{manual_id}": "amodb.apps.doc_control.workspace_record_router",
+          }
+          for path, expected_module in expected_first_modules.items():
+              matching = [route for route in workspace_routes if route.path == path]
+              if not matching:
+                  raise SystemExit(f"Missing route precedence target: {path}")
+              endpoint_module = getattr(matching[0].endpoint, "__module__", "")
+              if endpoint_module != expected_module:
+                  raise SystemExit(
+                      f"Unsafe route precedence for {path}: {endpoint_module!r}; expected {expected_module!r}"
+                  )
+          print(f"Verified {len(paths)} Document Control workspace paths and reader-safe route precedence")
           PY
 
       - name: Run Document Control domain invariants
