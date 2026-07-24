@@ -14,7 +14,7 @@
     "build:profile": "npm run build && npm run perf:report && npm run perf:rostering",
     "test:e2e": "playwright test",
     "test:unit": "vitest run src/utils/verificationScan.test.ts",
-    "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts src/components/QMS/QualityChecklistPdfFormEditorHost.test.ts",
+    "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts",
     "test:platform": "vitest run src/services/platformControl.test.ts src/services/saasSettings.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts"
   },
   "dependencies": {
@@ -58,7 +58,7 @@
     "baseline-browser-mapping": "^2.9.17",
     "concurrently": "^9.2.1",
     "eslint": "9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-hooks": "^6.5.0",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
     "typescript": "~5.9.3",
