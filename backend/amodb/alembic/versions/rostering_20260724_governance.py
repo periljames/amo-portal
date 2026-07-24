@@ -15,6 +15,34 @@ branch_labels = None
 depends_on = None
 
 
+def _column_names(table_name: str) -> set[str]:
+    return {
+        str(column["name"])
+        for column in sa.inspect(op.get_bind()).get_columns(table_name)
+    }
+
+
+def _index_names(table_name: str) -> set[str]:
+    return {
+        str(index["name"])
+        for index in sa.inspect(op.get_bind()).get_indexes(table_name)
+        if index.get("name")
+    }
+
+
+def _foreign_key_signatures(
+    table_name: str,
+) -> set[tuple[tuple[str, ...], str, tuple[str, ...]]]:
+    return {
+        (
+            tuple(str(column) for column in (foreign_key.get("constrained_columns") or ())),
+            str(foreign_key.get("referred_table") or ""),
+            tuple(str(column) for column in (foreign_key.get("referred_columns") or ())),
+        )
+        for foreign_key in sa.inspect(op.get_bind()).get_foreign_keys(table_name)
+    }
+
+
 def upgrade() -> None:
     op.create_table(
         "roster_rule_sets",
@@ -34,25 +62,50 @@ def upgrade() -> None:
         sa.Column("updated_by_user_id", sa.String(length=36), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from", name="ck_roster_rule_set_dates"),
+        sa.CheckConstraint(
+            "effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from",
+            name="ck_roster_rule_set_dates",
+        ),
         sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["updated_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("amo_id", "code", name="uq_roster_rule_set_amo_code"),
     )
-    op.create_index("ix_roster_rule_sets_amo_active", "roster_rule_sets", ["amo_id", "is_active"], unique=False)
-
-    op.add_column("roster_rules", sa.Column("rule_set_id", sa.String(length=36), nullable=True))
-    op.create_foreign_key(
-        "fk_roster_rules_rule_set",
-        "roster_rules",
+    op.create_index(
+        "ix_roster_rule_sets_amo_active",
         "roster_rule_sets",
-        ["rule_set_id"],
-        ["id"],
-        ondelete="SET NULL",
+        ["amo_id", "is_active"],
+        unique=False,
     )
-    op.create_index("ix_roster_rules_rule_set", "roster_rules", ["rule_set_id"], unique=False)
+
+    # The historical Workforce precreate migration reads current ORM metadata to
+    # repair incomplete installations. On a clean replay it can therefore create
+    # this future column before this owning migration runs. Reuse that column and
+    # add only the relationship/index that could not exist before roster_rule_sets.
+    if "rule_set_id" not in _column_names("roster_rules"):
+        op.add_column(
+            "roster_rules",
+            sa.Column("rule_set_id", sa.String(length=36), nullable=True),
+        )
+
+    rule_set_fk = (("rule_set_id",), "roster_rule_sets", ("id",))
+    if rule_set_fk not in _foreign_key_signatures("roster_rules"):
+        op.create_foreign_key(
+            "fk_roster_rules_rule_set",
+            "roster_rules",
+            "roster_rule_sets",
+            ["rule_set_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+    if "ix_roster_rules_rule_set" not in _index_names("roster_rules"):
+        op.create_index(
+            "ix_roster_rules_rule_set",
+            "roster_rules",
+            ["rule_set_id"],
+            unique=False,
+        )
 
     op.create_table(
         "roster_approval_authorities",
@@ -72,7 +125,10 @@ def upgrade() -> None:
         sa.Column("updated_by_user_id", sa.String(length=36), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from", name="ck_roster_approval_authority_dates"),
+        sa.CheckConstraint(
+            "effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from",
+            name="ck_roster_approval_authority_dates",
+        ),
         sa.ForeignKeyConstraint(["amo_id"], ["amos.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["department_id"], ["departments.id"], ondelete="CASCADE"),
@@ -80,10 +136,27 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["updated_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("amo_id", "user_id", "authority_level", "department_id", "base_station_id", name="uq_roster_approval_authority_scope"),
+        sa.UniqueConstraint(
+            "amo_id",
+            "user_id",
+            "authority_level",
+            "department_id",
+            "base_station_id",
+            name="uq_roster_approval_authority_scope",
+        ),
     )
-    op.create_index("ix_roster_approval_authority_scope", "roster_approval_authorities", ["amo_id", "base_station_id", "department_id", "is_active"], unique=False)
-    op.create_index("ix_roster_approval_authority_user", "roster_approval_authorities", ["amo_id", "user_id", "is_active"], unique=False)
+    op.create_index(
+        "ix_roster_approval_authority_scope",
+        "roster_approval_authorities",
+        ["amo_id", "base_station_id", "department_id", "is_active"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_roster_approval_authority_user",
+        "roster_approval_authorities",
+        ["amo_id", "user_id", "is_active"],
+        unique=False,
+    )
 
     op.create_table(
         "roster_department_approvals",
@@ -106,10 +179,25 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["assigned_approver_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["decided_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("version_id", "department_id", "base_station_id", name="uq_roster_department_approval_scope"),
+        sa.UniqueConstraint(
+            "version_id",
+            "department_id",
+            "base_station_id",
+            name="uq_roster_department_approval_scope",
+        ),
     )
-    op.create_index("ix_roster_department_approval_version_status", "roster_department_approvals", ["version_id", "status"], unique=False)
-    op.create_index("ix_roster_department_approval_assignee", "roster_department_approvals", ["amo_id", "assigned_approver_user_id", "status"], unique=False)
+    op.create_index(
+        "ix_roster_department_approval_version_status",
+        "roster_department_approvals",
+        ["version_id", "status"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_roster_department_approval_assignee",
+        "roster_department_approvals",
+        ["amo_id", "assigned_approver_user_id", "status"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:
