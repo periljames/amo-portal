@@ -52,6 +52,7 @@ from amodb.apps.reliability import models as reliability_models  # noqa: F401, E
 from amodb.apps.inventory import models as inventory_models  # noqa: F401, E402
 from amodb.apps.finance import models as finance_models  # noqa: F401, E402
 import amodb.apps.realtime.models as realtime_models  # noqa: F401, E402
+from amodb.apps.doc_control import domain_models as document_control_domain_models  # noqa: F401, E402
 
 # Target metadata for 'autogenerate'
 target_metadata = Base.metadata
@@ -237,12 +238,95 @@ def _repair_redundant_phase2_version_row(connection) -> None:
     )
 
 
+def _revision_parents(script: ScriptDirectory, revision_id: str) -> tuple[str, ...]:
+    """Return graph parents without asking Alembic to iterate the malformed graph."""
+    try:
+        revision = script.get_revision(revision_id)
+    except Exception:
+        return ()
+    if revision is None:
+        return ()
+    raw_parents: list[str] = []
+    down_revision = revision.down_revision
+    if isinstance(down_revision, str):
+        raw_parents.append(down_revision)
+    elif down_revision:
+        raw_parents.extend(str(item) for item in down_revision)
+    dependencies = revision.dependencies
+    if isinstance(dependencies, str):
+        raw_parents.append(dependencies)
+    elif dependencies:
+        raw_parents.extend(str(item) for item in dependencies)
+    return tuple(dict.fromkeys(raw_parents))
+
+
+def _is_graph_ancestor(script: ScriptDirectory, ancestor: str, descendant: str) -> bool:
+    if ancestor == descendant:
+        return True
+    pending = [descendant]
+    visited: set[str] = set()
+    while pending:
+        revision_id = pending.pop()
+        if revision_id in visited:
+            continue
+        visited.add(revision_id)
+        parents = _revision_parents(script, revision_id)
+        if ancestor in parents:
+            return True
+        pending.extend(parent for parent in parents if parent not in visited)
+    return False
+
+
+def _install_redundant_head_delete_compatibility() -> None:
+    """Handle released overlapping merge ancestry during clean traversal.
+
+    Several historical merge migrations share already-consumed ancestors. On a
+    clean multi-head upgrade Alembic can therefore request deletion of a version
+    marker that a prior branch transition has already replaced. Alembic's internal
+    ``HeadMaintainer`` raises ``KeyError`` before it reaches SQL, even though the
+    requested marker is provably redundant and absent.
+
+    The compatibility hook is deliberately fail-closed. It skips a missing marker
+    only when the loaded migration graph proves that marker is an ancestor of at
+    least one head currently maintained by Alembic. Unknown or unrelated missing
+    markers still use Alembic's original method and fail normally. Final-head tests
+    remain authoritative after the traversal.
+    """
+    from alembic.runtime.migration import HeadMaintainer
+
+    if getattr(HeadMaintainer, "_amo_redundant_delete_compatibility", False):
+        return
+
+    script = ScriptDirectory.from_config(config)
+    original_delete_version = HeadMaintainer._delete_version
+
+    def _delete_version_compat(self, version: str) -> None:
+        if version not in self.heads:
+            containing_heads = sorted(
+                str(head)
+                for head in self.heads
+                if _is_graph_ancestor(script, str(version), str(head))
+            )
+            if containing_heads:
+                print(
+                    "Alembic compatibility repair: skipped redundant clean-schema "
+                    f"version deletion for {version}; already contained by "
+                    + ", ".join(containing_heads)
+                )
+                return
+        original_delete_version(self, version)
+
+    HeadMaintainer._delete_version = _delete_version_compat
+    HeadMaintainer._amo_redundant_delete_compatibility = True
+
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
     Here we use the same write_engine as the application.
     """
     _assert_no_duplicate_revisions()
+    _install_redundant_head_delete_compatibility()
     connectable = write_engine
 
     with connectable.connect() as connection:
