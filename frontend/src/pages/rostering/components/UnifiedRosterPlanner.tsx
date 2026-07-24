@@ -13,6 +13,8 @@ const REFERENCE_STALE_MS = 15 * 60_000;
 export function UnifiedRosterPlanner() {
   const { amoCode = "UNKNOWN" } = useParams();
   const root = `/maintenance/${encodeURIComponent(amoCode)}`;
+  const plannerRoute = `${root}/rostering/calendar`;
+  const returnTo = encodeURIComponent(plannerRoute);
   const [prerequisiteDismissed, setPrerequisiteDismissed] = useState(false);
 
   const basesQuery = useQuery({
@@ -45,7 +47,7 @@ export function UnifiedRosterPlanner() {
         id: "bases",
         title: "Create at least one operating base",
         detail: "Duty cannot be assigned safely until an administrator creates the tenant's canonical bases and stations.",
-        action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/admin/amo-assets?section=operating-structure`}>Open operating structure</Link>,
+        action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/admin/amo-assets?section=operating-structure&returnTo=${returnTo}`}>Open operating structure</Link>,
       });
     }
     if (shiftsQuery.isSuccess && shiftsQuery.data.length === 0) {
@@ -53,7 +55,7 @@ export function UnifiedRosterPlanner() {
         id: "shifts",
         title: "Create shift templates",
         detail: "Define reusable day, night, standby and off-duty windows before placing personnel on the roster.",
-        action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/rostering/settings?tab=shifts`}>Create shifts</Link>,
+        action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/rostering/settings?tab=shifts&returnTo=${returnTo}`}>Create shifts</Link>,
       });
     }
     if (periodsQuery.isSuccess && periodsQuery.data.length === 0) {
@@ -61,11 +63,11 @@ export function UnifiedRosterPlanner() {
         id: "periods",
         title: "Create a planning period",
         detail: "The planner needs a dated period and a draft version before assignments can be created.",
-        action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/rostering/settings?tab=periods`}>Create period</Link>,
+        action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/rostering/settings?tab=periods&returnTo=${returnTo}`}>Create period</Link>,
       });
     }
     return items;
-  }, [basesQuery.data, basesQuery.isSuccess, periodsQuery.data, periodsQuery.isSuccess, root, shiftsQuery.data, shiftsQuery.isSuccess]);
+  }, [basesQuery.data, basesQuery.isSuccess, periodsQuery.data, periodsQuery.isSuccess, returnTo, root, shiftsQuery.data, shiftsQuery.isSuccess]);
 
   const prerequisiteOpen = prerequisitesResolved && prerequisiteItems.length > 0 && !prerequisiteDismissed;
 
@@ -99,6 +101,7 @@ export function UnifiedRosterPlanner() {
       <PrerequisiteDialog
         open={prerequisiteOpen}
         items={prerequisiteItems}
+        allowReadOnly={false}
         onClose={() => setPrerequisiteDismissed(true)}
       />
     </div>
