@@ -78,15 +78,17 @@ The canonical router applies tenant context and Quality permissions. The direct 
 
 ## 4. End-to-end process flow
 
-The audited workflow is represented as seven explicit stages. The audit workspace and workflow-check endpoint intentionally return the same `{ audit, workflow }` contract so the frontend has one authoritative progress model.
+The audited workflow is represented as seven explicit stages. The audit workspace and workflow-check endpoint intentionally return the same `{ audit, workflow }` contract so the frontend has one authoritative progress model. The frontend must not manufacture a completion percentage or mark stages complete when that backend contract is unavailable.
 
 1. **War room / planning** — audit type, scope, criteria, dates, auditee, lead auditor and supporting auditors are assigned. Internal audit identity and schedule fields are locked after creation where required.
-2. **Checklist** — a controlled checklist file is uploaded or portal checklist rows are created, assigned and completed.
-3. **Fieldwork and findings** — actual fieldwork dates, objective evidence, observations and non-conformities are recorded. Finding references are unique within an audit.
-4. **CAR/CAPA** — each required non-conformity receives a linked CAR. Root cause, containment, corrective action, preventive action, due dates, evidence and review decisions are tracked.
-5. **Evidence** — checklist, report, finding attachments and CAR attachments form the evidence set. Evidence integrity includes file metadata and hashes where available.
-6. **Report** — the issued audit report is uploaded, downloaded through an access-controlled endpoint, tracked against its due date and distributed to selected recipient groups with audit-log entries.
-7. **Closeout and archive** — audit closure is blocked until required report/checklist or CAR acceptance/evidence conditions are satisfied. Retention and archive packages preserve the closure record.
+2. **Checklist** — a controlled checklist file is uploaded or portal checklist rows are created, assigned and completed. Fillable AcroForm PDFs may be completed and saved inside the portal by an authorized audit-team member or AMO administrator before report issuance.
+3. **Fieldwork and findings** — actual fieldwork dates, objective evidence, observations and non-conformities are recorded. Finding references are unique within an audit. Fieldwork is formally completed before the report stage is treated as complete.
+4. **Report** — the issued audit report is uploaded, downloaded through access-controlled endpoints, tracked against its due date and distributed to selected recipient groups with audit-log entries. Issuance locks ordinary finding and checklist editing.
+5. **CAR/CAPA** — each required non-conformity receives a linked CAR after the report establishes the issued finding record. Root cause, containment, corrective action, preventive action, due dates, evidence and review decisions are tracked.
+6. **Evidence** — checklist, report, finding attachments and CAR attachments form the evidence set. Required CAR evidence must be attached and verified; file metadata and hashes are retained where available.
+7. **Closeout and archive** — audit closure is blocked until required checklist/report, CAR acceptance and evidence-verification conditions are satisfied. Retention and archive packages preserve the closure record.
+
+This sequence matches the audit-run workspace: `war-room → checklist → findings → report → cars → evidence → closeout`. Business rules that require CAR follow-up after an issued report do not permit report issuance to close the audit or bypass CAR/evidence gates.
 
 ### State integrity rules
 
@@ -97,6 +99,9 @@ The audited workflow is represented as seven explicit stages. The audit workspac
 - CAR acceptance closes the linked finding and related tasks through the centralized state synchronizer.
 - Audit closure with no NC findings requires both checklist and report.
 - Audit closure with NC findings requires issued CARs, accepted root cause/CAPA and verified evidence.
+- The CAR stage cannot be complete while an NC lacks a valid CAR or any CAR remains open.
+- The Evidence stage cannot be complete merely because one file exists; its required sources and verification gates must pass.
+- If workflow calculation fails, the audit workspace is placed in explicit read-only degraded mode until the authoritative backend response is restored.
 
 ## 5. Planning and calendar mapping
 
@@ -149,16 +154,22 @@ The existing frontend remains the delivery UI. A Quality-only client is controll
 - `/maintenance/:amoCode/quality` redirects to the Quality QMS overview.
 - Quality schedule, audit workspace, findings, CAR, evidence, report, document and calendar pages use the same tenant context.
 - The audit run hub consumes the active `{ audit, workflow }` contract and uses the dedicated `qmsAuditHubActions` service boundary for CAR action history and report sharing.
+- Workflow endpoint failure must produce an explicit read-only integrity blocker, not a fabricated local workflow.
+- The public CAR invitation page must be usable at 100% browser zoom, present one guided stage at a time and retain one primary page scroll.
+- Closed CAR invitations expose an immutable submitted record and history without active overdue or edit treatment.
+- A token-scoped public audit-report download is exposed only when the CAR is linked to an audit with an issued report stored in the approved Quality report directory; downloads are audit-logged.
+- Fillable AcroForm checklist PDFs render through the existing PDF.js stack and are saved back through the authenticated checklist upload route. Non-form PDFs remain view-only source documents.
 - Requests have deterministic read/write timeouts, session-expiry handling, parsed backend error details and guaranteed loading-state cleanup.
 - Production build and targeted regression tests are release gates.
 
-No broad visual redesign is part of this stability pass. Existing Quality layouts remain intact. Frontend changes are limited to unstable service behavior and test coverage.
+Visual changes remain bounded to the Quality audit workspace and CAR invitation experience. They must remove unusable zoom dependence, dead controls, contradictory status treatment and unsafe technical-path display without changing unrelated portal modules.
 
 ## 8. Report and evidence outputs
 
 The module supports the following controlled outputs:
 
 - audit report upload and authorized download;
+- token-scoped report download for the auditee CAR workspace where an issued report is available;
 - report distribution to accountable manager, Quality manager, department heads, audited department, shop personnel and facility personnel;
 - audit evidence ZIP pack;
 - CAR PDF form and CAR evidence pack;
@@ -167,7 +178,7 @@ The module supports the following controlled outputs:
 - document revision, distribution and custody records;
 - audit-event history for material state changes and exports.
 
-File storage references must point to an approved persistent storage location. Local ephemeral container paths are not acceptable for production retention. Backup, replication, access control and restore tests are deployment responsibilities.
+File storage references must point to an approved persistent storage location. Local ephemeral container paths are not acceptable for production retention. Backup, replication, access control and restore tests are deployment responsibilities. Filesystem paths must never be displayed to portal users.
 
 ## 9. Database integrity repair
 
@@ -207,11 +218,13 @@ The Quality profile is releasable only when all of the following pass:
 3. Full SQLAlchemy mapper configuration passes for both the main portal and bounded Quality entrypoint.
 4. Quality workflow, enforcement, audit event, task integration, export and delivery-profile tests pass.
 5. PostgreSQL degraded-schema migration probe passes.
-6. Frontend Quality service regression tests pass.
+6. Frontend Quality service and workflow-integrity regression tests pass.
 7. TypeScript production build passes.
 8. Changed Quality service files pass ESLint.
-9. Deployment storage, SMTP/notification delivery, backup and restore are verified in the target environment.
-10. Client-specific ISO clause mapping, procedures, responsibilities, records and certification claims receive Quality/legal review.
+9. Public CAR invitation route uniqueness, report-path confinement and normal-zoom layout tests pass.
+10. A fillable PDF is edited, saved, downloaded and verified to retain field values.
+11. Deployment storage, SMTP/notification delivery, backup and restore are verified in the target environment.
+12. Client-specific ISO clause mapping, procedures, responsibilities, records and certification claims receive Quality/legal review.
 
 CI workflow: `.github/workflows/quality-module-ci.yml`.
 
@@ -219,5 +232,7 @@ CI workflow: `.github/workflows/quality-module-ci.yml`.
 
 - The bounded profile limits the exposed API surface; it does not split the monorepo or Alembic history into an independent package.
 - Existing frontend assets are still built as one portal bundle, while entitlements determine which modules the client sees.
+- Browser PDF editing supports standard AcroForm controls. XFA-only forms and embedded PDF JavaScript can behave differently from desktop PDF applications and must be verified before stage commitment.
+- A public CAR invitation token authorizes access to the linked CAR workspace and, where present, its issued audit report. Token handling, revocation and distribution therefore remain security-sensitive operational controls.
 - The current published ISO baseline and the upcoming 2026 edition must be tracked separately. The clause map must be revised after the final 2026 standard is published.
 - Software test success proves the implemented contracts tested by CI. It does not prove client process conformity or ISO certification.
