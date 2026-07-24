@@ -23,6 +23,7 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/global.css";
 import "./styles/qms.css";
+import "./styles/car-invite-responsive.css";
 import "./styles/components/app-shell.css";
 import "./styles/components/page-header.css";
 import "./styles/components/section-card.css";
@@ -40,8 +41,8 @@ import "./styles/rostering.css";
 import "./styles/theme-contract.css";
 import "./styles/theme-module-repairs.css";
 
-const QualityChecklistPdfFormEditorHost = React.lazy(
-  () => import("./components/QMS/QualityChecklistPdfFormEditorHost"),
+const QualityEnhancementsHost = React.lazy(
+  () => import("./components/QMS/QualityEnhancementsHost"),
 );
 
 const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -203,7 +204,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         <BrowserRouter>
           <App />
           <React.Suspense fallback={null}>
-            <QualityChecklistPdfFormEditorHost />
+            <QualityEnhancementsHost />
           </React.Suspense>
         </BrowserRouter>
         <OfflineSyncIndicator />
