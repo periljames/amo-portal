@@ -77,6 +77,24 @@ jobs:
           write(lifecycle, calendar_text.replace(old_calendar_context, new_calendar_context, 1))
           ''')
           script = script[:calendar_start] + direct_calendar_patch + script[calendar_end:]
+
+          common_start = script.find('replace(\n    common_path,\n    \'\'\'    permissions = set()')
+          common_end_marker = '\n\n# ------------------------------------------------------------------\n# Public service facade'
+          common_end = script.find(common_end_marker, common_start)
+          if common_start < 0 or common_end < 0:
+              raise SystemExit('Version serializer patch calls were not found')
+          direct_common_patch = textwrap.dedent('''
+          common_text = read(common_path)
+          old_permission_block = '    permissions = set()\\n    if current_user is not None and db is not None:\\n        permissions = set(workforce_permissions.permissions_for_user(db, user=current_user))\\n    return schemas.RosterVersionRead('
+          new_permission_block = '    permissions = set()\\n    approval_required = approval_approved = approval_pending = 0\\n    scoped_can_approve = False\\n    scoped_can_publish = False\\n    if current_user is not None and db is not None:\\n        permissions = set(workforce_permissions.permissions_for_user(db, user=current_user))\\n        from . import governance\\n        approvals = governance.approval_rows(db, version_id=row.id)\\n        approval_required = len(approvals)\\n        approval_approved = sum(item.status == models.RosterDepartmentApprovalStatus.APPROVED for item in approvals)\\n        approval_pending = sum(item.status != models.RosterDepartmentApprovalStatus.APPROVED for item in approvals)\\n        scoped_can_approve = any(\\n            item.status != models.RosterDepartmentApprovalStatus.APPROVED\\n            and governance.can_approve_scope(db, user=current_user, department_id=item.department_id, base_station_id=item.base_station_id)\\n            for item in approvals\\n        )\\n        scoped_can_publish = bool(approvals) and all(\\n            item.status == models.RosterDepartmentApprovalStatus.APPROVED\\n            and governance.can_publish_scope(db, user=current_user, department_id=item.department_id, base_station_id=item.base_station_id)\\n            for item in approvals\\n        )\\n    return schemas.RosterVersionRead('
+          old_action_block = '        acknowledgement_count=0,\\n        can_edit=row.status == models.RosterVersionStatus.DRAFT and workforce_permissions.PermissionCode.ROSTER_EDIT.value in permissions,\\n        can_submit=row.status == models.RosterVersionStatus.DRAFT and blockers == 0 and workforce_permissions.PermissionCode.ROSTER_SUBMIT.value in permissions,\\n        can_approve=row.status == models.RosterVersionStatus.SUBMITTED and workforce_permissions.PermissionCode.ROSTER_APPROVE.value in permissions,\\n        can_publish=row.status == models.RosterVersionStatus.APPROVED and blockers == 0 and workforce_permissions.PermissionCode.ROSTER_PUBLISH.value in permissions,'
+          new_action_block = '        acknowledgement_count=0,\\n        approval_required_count=approval_required,\\n        approval_approved_count=approval_approved,\\n        approval_pending_count=approval_pending,\\n        can_edit=row.status == models.RosterVersionStatus.DRAFT and workforce_permissions.PermissionCode.ROSTER_EDIT.value in permissions,\\n        can_submit=row.status == models.RosterVersionStatus.DRAFT and blockers == 0 and workforce_permissions.PermissionCode.ROSTER_SUBMIT.value in permissions,\\n        can_approve=row.status == models.RosterVersionStatus.SUBMITTED and scoped_can_approve,\\n        can_publish=row.status == models.RosterVersionStatus.APPROVED and blockers == 0 and scoped_can_publish,'
+          if old_permission_block not in common_text or old_action_block not in common_text:
+              raise SystemExit('Current version serializer blocks were not found')
+          common_text = common_text.replace(old_permission_block, new_permission_block, 1).replace(old_action_block, new_action_block, 1)
+          write(common_path, common_text)
+          ''')
+          script = script[:common_start] + direct_common_patch + script[common_end:]
           Path('/tmp/apply_rostering_governance.py').write_text(script, encoding='utf-8')
           PY
       - name: Apply audited full-stack governance patch
