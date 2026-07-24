@@ -19,7 +19,7 @@ from .workspace_router import (
     _integration_payload,
     create_integration_link as _create_integration_link,
 )
-from .workspace_service import audit, require_control_user, resolve_tenant, utcnow
+from .workspace_service import audit, require_control_user, resolve_tenant
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Integrations"])
@@ -208,8 +208,10 @@ def refresh_integration_link(db: Session, tenant, link: dm.DocumentIntegrationLi
         metadata=dict(link.metadata_json or {}),
     )
     link.status_snapshot = verification["status_snapshot"]
+    # verified_at is persisted inside metadata_json. DocumentIntegrationLink has no
+    # mapped updated_at column, so assigning one dynamically would create a false
+    # appearance of durable state without writing it to PostgreSQL.
     link.metadata_json = {**dict(link.metadata_json or {}), **verification}
-    link.updated_at = utcnow()
     return verification
 
 
