@@ -14,4 +14,9 @@ def test_assignment_local_date_uses_roster_period_timezone():
 
 def test_assignment_validation_uses_effective_dated_base_before_contract_fallback():
     source = assignments._validate_assignment_payload.__code__.co_names
-    assert "effective_base_assignment" in source
+    assert "_resolve_assignment_base" in source
+
+
+def test_clearing_duty_base_override_resolves_effective_base_before_update():
+    source = assignments.update_assignment.__code__.co_names
+    assert "_resolve_assignment_base" in source
