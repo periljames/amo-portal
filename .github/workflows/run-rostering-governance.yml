@@ -59,6 +59,20 @@ jobs:
           write(lifecycle, publish_text.replace(old_publish_guard, new_publish_guard, 1))
           '''.replace('          ', '')
           script = script[:publish_start] + direct_publish_patch + script[publish_end + 3:]
+
+          calendar_start = script.find('replace(\n    lifecycle,\n    \'\'\'                "route": route,')
+          calendar_end_marker = '\n\n# ------------------------------------------------------------------\n# Common serializer exposes approval progress'
+          calendar_end = script.find(calendar_end_marker, calendar_start)
+          if calendar_start < 0 or calendar_end < 0:
+              raise SystemExit('Publication calendar context patch call was not found')
+          direct_calendar_patch = '''calendar_text = read(lifecycle)
+          old_calendar_context = '                "route": route,\\n                "user_id": user_id,'
+          new_calendar_context = '                "route": route,\\n                "calendar_feed_path": f"/rostering/calendar/feed/{calendar_feed.calendar_token(amo_id=version.amo_id, user_id=user_id)}.ics",\\n                "user_id": user_id,'
+          if old_calendar_context not in calendar_text:
+              raise SystemExit('Current publication notification context was not found')
+          write(lifecycle, calendar_text.replace(old_calendar_context, new_calendar_context, 1))
+          '''.replace('          ', '')
+          script = script[:calendar_start] + direct_calendar_patch + script[calendar_end:]
           Path('/tmp/apply_rostering_governance.py').write_text(script, encoding='utf-8')
           PY
       - name: Apply audited full-stack governance patch
