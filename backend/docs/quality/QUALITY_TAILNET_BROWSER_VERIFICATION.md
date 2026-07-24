@@ -23,7 +23,7 @@ $env:E2E_AMO_ADMIN_PASSWORD = "<secret>"
 $env:E2E_QUALITY_AUDIT_PATH = "/maintenance/safarilink/quality/audits/<test-audit-reference>"
 $env:E2E_CAR_INVITE_URL = "https://james.tail05da5e.ts.net/car-invite?token=<test-token>"
 
-npx playwright test tests/e2e/quality-tailnet-live.spec.ts --project=chromium
+npx playwright test tests/e2e/quality-tailnet-live.spec.ts
 ```
 
 The read-only checks verify:
@@ -43,7 +43,7 @@ Only on a disposable audit with a committed AcroForm PDF:
 $env:E2E_EXPECT_FILLABLE_PDF = "1"
 $env:E2E_ALLOW_QUALITY_MUTATION = "1"
 
-npx playwright test tests/e2e/quality-tailnet-live.spec.ts --project=chromium --grep "fillable checklist"
+npx playwright test tests/e2e/quality-tailnet-live.spec.ts --grep "fillable checklist"
 ```
 
 The test opens the portal PDF editor, fills the first available AcroForm control and saves the updated PDF through the authenticated checklist endpoint. After the run, manually download the saved checklist once and confirm that the entered value is retained before accepting the implementation.
