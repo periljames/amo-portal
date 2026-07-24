@@ -62,7 +62,7 @@ REQUIRED_CHECKS = {
         [
             'STAGE_ORDER = ("war-room", "checklist", "findings", "cars", "evidence", "report", "closeout")',
             "def build_workflow_v2(",
-            "Uploading a blank source document does not",
+            "A source document is readiness only",
             "Evidence completion is based on explicit acceptance",
             '@_extension_router.get("/audits/{audit_id}/war-room-context"',
             '@_extension_router.post("/audits/{audit_id}/documents/checklist/draft"',
@@ -176,7 +176,7 @@ REQUIRED_CHECKS = {
             "Auditor action queue",
             "Mark checklist complete",
             "Complete fieldwork",
-            "Evidence completion",
+            "Evidence inventory",
             "Issue controlled report",
             "Approve and close audit",
             "workflow!.stages.map",
@@ -209,7 +209,7 @@ REQUIRED_CHECKS = {
             "Uploading a blank source document does not complete",
             "Saving a filled PDF creates a new retained version",
             "No API response may expose a local filesystem path",
-            "Acceptance criteria",
+            "acceptance criteria",
         ],
     ),
     "quality_ci_workflow": (
