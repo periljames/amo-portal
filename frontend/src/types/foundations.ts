@@ -42,7 +42,23 @@ export interface BaseStationCreate {
   aliases?: string[];
 }
 
-export type BaseStationUpdate = Partial<BaseStationCreate>;
+export type BaseStationUpdate = Partial<BaseStationCreate> & {
+  expected_updated_at?: string | null;
+  reason?: string | null;
+};
+
+export interface BaseDependencyRead {
+  dependency_type: string;
+  count: number;
+  detail: string;
+  blocking: boolean;
+}
+
+export interface BaseStationImpactRead {
+  base_station_id: string;
+  can_deactivate: boolean;
+  dependencies: BaseDependencyRead[];
+}
 
 export interface UserBaseAssignmentCreate {
   user_id: string;
@@ -54,7 +70,10 @@ export interface UserBaseAssignmentCreate {
   note?: string | null;
 }
 
-export type UserBaseAssignmentUpdate = Partial<Omit<UserBaseAssignmentCreate, "user_id">>;
+export type UserBaseAssignmentUpdate = Partial<Omit<UserBaseAssignmentCreate, "user_id">> & {
+  expected_updated_at?: string | null;
+  reason?: string | null;
+};
 
 export interface UserBaseAssignmentRead extends Required<Omit<UserBaseAssignmentCreate, "effective_to" | "note">> {
   id: string;
