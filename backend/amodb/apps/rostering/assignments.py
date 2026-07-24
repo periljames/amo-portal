@@ -1,11 +1,13 @@
 # backend/amodb/apps/rostering/assignments.py
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional, Sequence
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
+from ..foundations import models as foundation_models
 from ..work import models as work_models
 from ..workforce import calculations as workforce_calculations
 from ..workforce import services as workforce_services
@@ -49,6 +51,105 @@ def _assignment_snapshot(row: models.RosterAssignment) -> dict[str, Any]:
     }
 
 
+def _local_start_date(version: models.RosterVersion, starts_at: datetime):
+    zone = workforce_calculations.get_zone(version.period.timezone_name or "UTC")
+    aware = starts_at if starts_at.tzinfo is not None else starts_at.replace(tzinfo=UTC)
+    return aware.astimezone(zone).date()
+
+
+_BASE_ASSIGNMENT_PRIORITY = {
+    foundation_models.BaseAssignmentKind.TEMPORARY: 50,
+    foundation_models.BaseAssignmentKind.RELIEF: 40,
+    foundation_models.BaseAssignmentKind.TRAINING: 30,
+    foundation_models.BaseAssignmentKind.OTHER: 20,
+    foundation_models.BaseAssignmentKind.HOME_BASE: 10,
+}
+
+
+def _effective_base_assignment(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    on_date: date,
+) -> Optional[foundation_models.UserBaseAssignment]:
+    rows = (
+        db.query(foundation_models.UserBaseAssignment)
+        .join(
+            foundation_models.BaseStation,
+            foundation_models.BaseStation.id == foundation_models.UserBaseAssignment.base_station_id,
+        )
+        .filter(
+            foundation_models.UserBaseAssignment.amo_id == amo_id,
+            foundation_models.UserBaseAssignment.user_id == user_id,
+            foundation_models.UserBaseAssignment.effective_from <= on_date,
+            or_(
+                foundation_models.UserBaseAssignment.effective_to.is_(None),
+                foundation_models.UserBaseAssignment.effective_to >= on_date,
+            ),
+            foundation_models.BaseStation.amo_id == amo_id,
+            foundation_models.BaseStation.is_active.is_(True),
+        )
+        .all()
+    )
+    primary = [row for row in rows if row.is_primary]
+    candidates = primary or rows
+    return max(
+        candidates,
+        key=lambda row: (
+            _BASE_ASSIGNMENT_PRIORITY.get(row.assignment_kind, 0),
+            row.effective_from,
+            row.created_at or datetime.min.replace(tzinfo=UTC),
+            row.id,
+        ),
+        default=None,
+    )
+
+
+def _resolve_assignment_base(
+    db: Session,
+    *,
+    version: models.RosterVersion,
+    user_id: str,
+    starts_at: datetime,
+    explicit_base_station_id: Optional[str],
+    require_resolved: bool = False,
+):
+    local_start_date = _local_start_date(version, starts_at)
+    base_station_id = explicit_base_station_id
+    if not base_station_id:
+        effective_placement = _effective_base_assignment(
+            db,
+            amo_id=version.amo_id,
+            user_id=user_id,
+            on_date=local_start_date,
+        )
+        contract = workforce_services.active_contract_for_user(
+            db,
+            amo_id=version.amo_id,
+            user_id=user_id,
+            on_date=local_start_date,
+        )
+        base_station_id = (
+            getattr(effective_placement, 'base_station_id', None)
+            or getattr(contract, 'primary_base_station_id', None)
+        )
+
+    base = common.require_base(
+        db,
+        amo_id=version.amo_id,
+        base_station_id=base_station_id,
+    )
+    if base is not None and not base.is_active:
+        raise ValueError('Inactive base stations cannot receive new roster duty.')
+    if base is None and require_resolved:
+        raise ValueError(
+            'No effective active base is available for this person on the duty date. '
+            'Create or correct the personnel deployment before clearing the duty-base override.'
+        )
+    return base
+
+
 def _validate_assignment_payload(
     db: Session,
     *,
@@ -59,9 +160,13 @@ def _validate_assignment_payload(
     user = common.require_user(db, amo_id=version.amo_id, user_id=payload.user_id, active_only=True)
     department_id = payload.department_id or user.department_id
     department = common.require_department(db, amo_id=version.amo_id, department_id=department_id)
-    contract = workforce_services.active_contract_for_user(db, amo_id=version.amo_id, user_id=user.id, on_date=payload.starts_at.date())
-    base_station_id = payload.base_station_id or getattr(contract, "primary_base_station_id", None)
-    base = common.require_base(db, amo_id=version.amo_id, base_station_id=base_station_id)
+    base = _resolve_assignment_base(
+        db,
+        version=version,
+        user_id=user.id,
+        starts_at=payload.starts_at,
+        explicit_base_station_id=payload.base_station_id,
+    )
     shift = common.require_shift_template(db, amo_id=version.amo_id, shift_template_id=payload.shift_template_id)
     if payload.ends_at <= payload.starts_at:
         raise ValueError("Assignment end must be after start")
@@ -153,7 +258,7 @@ def update_assignment(
     before = _assignment_snapshot(row)
     fields = common.model_fields_set(payload)
     for key, value in common.dump(payload, exclude_unset=True).items():
-        if key == "expected_state_revision":
+        if key in {"expected_state_revision", "base_station_id"}:
             continue
         setattr(row, key, value)
     if row.ends_at <= row.starts_at:
@@ -161,7 +266,15 @@ def update_assignment(
     if "department_id" in fields:
         common.require_department(db, amo_id=row.amo_id, department_id=row.department_id)
     if "base_station_id" in fields:
-        common.require_base(db, amo_id=row.amo_id, base_station_id=row.base_station_id)
+        resolved_base = _resolve_assignment_base(
+            db,
+            version=version,
+            user_id=row.user_id,
+            starts_at=row.starts_at,
+            explicit_base_station_id=payload.base_station_id,
+            require_resolved=True,
+        )
+        row.base_station_id = resolved_base.id
     if "shift_template_id" in fields:
         common.require_shift_template(db, amo_id=row.amo_id, shift_template_id=row.shift_template_id)
     if "planned_minutes" not in fields:
