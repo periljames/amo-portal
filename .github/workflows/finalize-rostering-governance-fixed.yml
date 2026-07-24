@@ -1,0 +1,152 @@
+name: Commit Fixed Rostering Governance Source
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/rostering-unified-workforce
+          fetch-depth: 0
+          show-progress: false
+      - name: Reproduce governance source transformation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          lines = Path('.github/workflows/run-rostering-governance-final.yml').read_text(encoding='utf-8').splitlines()
+
+          def extract(name: str, target: str) -> None:
+              marker = f'      - name: {name}'
+              start = lines.index(marker)
+              run_line = next(index for index in range(start, len(lines)) if lines[index].strip() == 'run: |')
+              end = next((index for index in range(run_line + 1, len(lines)) if lines[index].startswith('      - name: ')), len(lines))
+              body = [line[10:] if line.startswith('          ') else line for line in lines[run_line + 1:end]]
+              Path(target).write_text('\n'.join(body) + '\n', encoding='utf-8')
+
+          extract('Build normalized governance patch', '/tmp/build-governance.sh')
+          extract('Apply full-stack governance source', '/tmp/apply-governance.sh')
+          PY
+          bash /tmp/build-governance.sh
+          bash /tmp/apply-governance.sh
+      - name: Repair generated source blocks
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          catalog = Path('backend/amodb/apps/rostering/catalog.py')
+          catalog_text = catalog.read_text(encoding='utf-8')
+          catalog_text, count = re.subn(
+              r'    if not values\.get\("rule_set_id"\):\n    values\["rule_set_id"\] = governance\.seed_default_rule_set\(db, amo_id=amo_id, actor_user_id=actor_user_id\)\.id',
+              '    if not values.get("rule_set_id"):\n        values["rule_set_id"] = governance.seed_default_rule_set(db, amo_id=amo_id, actor_user_id=actor_user_id).id',
+              catalog_text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit('Malformed catalog rule-set block was not found')
+          catalog.write_text(catalog_text, encoding='utf-8')
+
+          validation = Path('backend/amodb/apps/rostering/validation.py')
+          validation_text = validation.read_text(encoding='utf-8')
+          start = validation_text.find('def find_rules(')
+          end = validation_text.find('def _assignment_minutes', start)
+          if start < 0 or end < 0:
+              raise SystemExit('Generated find_rules block was not found')
+          find_rules = '''def find_rules(
+              rules: Sequence[models.RosterRule],
+              rule_type: models.RosterRuleType,
+              assignment: Optional[models.RosterAssignment] = None,
+          ) -> list[models.RosterRule]:
+              matching = [
+              row
+              for row in rules
+              if row.rule_type == rule_type and rule_applies(row, assignment)
+              ]
+              if not matching:
+              return []
+              rank = {
+              models.RosterRuleScope.AMO: 0,
+              models.RosterRuleScope.DEPARTMENT: 1,
+              models.RosterRuleScope.BASE: 2,
+              models.RosterRuleScope.SHIFT_TEMPLATE: 3,
+              models.RosterRuleScope.USER: 4,
+              }
+              by_code: dict[str, models.RosterRule] = {}
+              for row in matching:
+              current = by_code.get(row.code)
+              if current is None or rank.get(row.scope, 0) > rank.get(current.scope, 0):
+              by_code[row.code] = row
+              return sorted(
+              by_code.values(),
+              key=lambda row: (row.display_order, row.code, row.id),
+              )
+
+
+          '''.replace('          ', '')
+          validation.write_text(validation_text[:start] + find_rules + validation_text[end:], encoding='utf-8')
+
+          changed_roots = [Path('backend'), Path('frontend')]
+          for root in changed_roots:
+              for path in root.rglob('*'):
+              if not path.is_file() or path.suffix not in {'.py', '.ts', '.tsx', '.css', '.yml', '.yaml'}:
+              continue
+              text = path.read_text(encoding='utf-8')
+              normalized = '\n'.join(line.rstrip() for line in text.splitlines()).rstrip() + '\n'
+              if normalized != text:
+              path.write_text(normalized, encoding='utf-8')
+          PY
+      - name: Capture fixed-source validation
+        shell: bash
+        run: |
+          compile_status=0
+          diff_status=0
+          python -m compileall backend/amodb/apps/rostering backend/amodb/apps/workforce backend/amodb/alembic/versions/rostering_20260724_governance.py > /tmp/rostering-governance-fixed.log 2>&1 || compile_status=$?
+          {
+            echo "compile_status=$compile_status"
+            echo '== diff check =='
+            git diff --check || diff_status=$?
+            echo "diff_status=$diff_status"
+            echo '== changed files =='
+            git status --short
+          } >> /tmp/rostering-governance-fixed.log 2>&1
+          status=0
+          if [ "$compile_status" -ne 0 ] || [ "$diff_status" -ne 0 ]; then status=1; fi
+          echo "$status" > /tmp/rostering-governance-fixed.exit-code
+          cat /tmp/rostering-governance-fixed.log
+          exit 0
+      - name: Upload fixed-source diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rostering-governance-fixed-diagnostics
+          path: |
+            /tmp/rostering-governance-fixed.log
+            /tmp/rostering-governance-fixed.exit-code
+          retention-days: 1
+      - name: Commit validated governance implementation
+        shell: bash
+        run: |
+          test "$(cat /tmp/rostering-governance-fixed.exit-code)" = "0"
+          rm -f \
+            .github/workflows/apply-rostering-governance.yml \
+            .github/workflows/run-rostering-governance.yml \
+            .github/workflows/run-rostering-governance-final.yml \
+            .github/workflows/finalize-rostering-governance-debug.yml \
+            .github/workflows/finalize-rostering-governance-fixed.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend frontend .github/workflows
+          git commit -m "Add departmental roster governance and calendar subscriptions"
+          git push origin HEAD:fix/rostering-unified-workforce
