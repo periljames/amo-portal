@@ -88,6 +88,7 @@ jobs:
           assert script.get_revision("workforce_20260721_complete")
           assert script.get_revision("quality_20260722_schema_integrity")
           assert script.get_revision("saas_20260722_side_effect_safe")
+          assert script.get_revision("rostering_20260724_governance")
           PY
       - name: Upgrade clean PostgreSQL schema
         working-directory: backend
@@ -159,6 +160,10 @@ jobs:
               "/api/realtime/broker/authenticate",
               "/api/realtime/broker/authorize",
               "/api/chat/threads",
+              "/rostering/rule-sets",
+              "/rostering/approval-authorities",
+              "/rostering/approval-matrix",
+              "/rostering/calendar/subscription",
           }
           missing = required - paths
           assert not missing, missing
@@ -212,6 +217,11 @@ jobs:
       - name: Typecheck and build production frontend
         working-directory: frontend
         run: npm run build
+      - name: Enforce production bundle and lazy-route budgets
+        working-directory: frontend
+        run: |
+          npm run perf:report
+          npm run perf:rostering
       - name: Run Quality and platform frontend regressions
         working-directory: frontend
         run: |
@@ -250,3 +260,36 @@ jobs:
           src/services/saasSettings.test.ts
           src/services/typedApi.ts
           src/services/workOrders.ts
+      - name: Install Chromium for constrained-network measurement
+        working-directory: frontend
+        run: npm exec -- playwright install --with-deps chromium
+      - name: Measure cold and warm synthetic 2G rostering waterfall
+        working-directory: frontend
+        shell: bash
+        run: |
+          npm exec -- vite preview --host 127.0.0.1 --port 4173 > /tmp/rostering-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:4173/perf-shell.html >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              cat /tmp/rostering-preview.log
+              exit 1
+            fi
+            sleep 1
+          done
+          npm run perf:rostering:browser
+      - name: Upload frontend performance evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rostering-performance-evidence
+          path: |
+            frontend/dist/perf-report.json
+            frontend/dist/rostering-perf-report.json
+            frontend/dist/rostering-network-waterfall.json
+            /tmp/rostering-preview.log
+          if-no-files-found: warn
+          retention-days: 14
