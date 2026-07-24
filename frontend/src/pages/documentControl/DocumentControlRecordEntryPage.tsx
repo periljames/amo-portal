@@ -46,10 +46,10 @@ export default function DocumentControlRecordEntryPage() {
   useEffect(() => { void load(); }, [load]);
 
   if (loading) {
-    return <DocumentControlShell title="Opening document" canControl={false}><DocumentControlLoading label="Resolving your permitted revision…" /></DocumentControlShell>;
+    return <DocumentControlShell title="Opening document" subtitle="Resolving the immutable revision available to your role." canControl={false}><DocumentControlLoading label="Resolving your permitted revision…" /></DocumentControlShell>;
   }
   if (error) {
-    return <DocumentControlShell title="Document unavailable" canControl={false}><DocumentControlError message={error} retry={() => void load()} /></DocumentControlShell>;
+    return <DocumentControlShell title="Document unavailable" subtitle="The portal could not resolve a readable revision for this record." canControl={false}><DocumentControlError message={error} retry={() => void load()} /></DocumentControlShell>;
   }
   if (dashboard?.capabilities.control) return <DocumentControlRecordPage />;
   if (target?.revision_id) {
