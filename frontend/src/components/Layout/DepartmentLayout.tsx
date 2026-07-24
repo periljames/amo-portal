@@ -18,36 +18,55 @@ type Props = {
   showPollingErrorBanner?: boolean;
 };
 
-function applyPublicationsNavigationLabel(isPublicationsRoute: boolean): void {
-  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label="Manuals"], button[title="Manuals"]'));
+function textOf(button: HTMLButtonElement): string {
+  return String(
+    button.getAttribute("aria-label") ||
+    button.getAttribute("title") ||
+    button.querySelector<HTMLElement>(".sidebar__item-label")?.textContent ||
+    button.textContent ||
+    "",
+  ).trim().toLowerCase();
+}
+
+function applyDocumentControlNavigation(isDocumentControlDomain: boolean): void {
+  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
   for (const button of buttons) {
-    if (button.getAttribute("aria-label") !== "Publications") button.setAttribute("aria-label", "Publications");
-    if (button.getAttribute("title") !== "Publications") button.setAttribute("title", "Publications");
-    const label = button.querySelector<HTMLElement>(".sidebar__item-label");
-    if (label && label.textContent !== "Publications") label.textContent = "Publications";
-    button.classList.toggle("sidebar__item--active", isPublicationsRoute);
+    const label = textOf(button);
+    if (label === "manuals" || label === "publications") {
+      button.hidden = true;
+      button.setAttribute("aria-hidden", "true");
+      button.tabIndex = -1;
+      const container = button.closest<HTMLElement>("li, .sidebar__item-wrapper");
+      if (container) container.hidden = true;
+      continue;
+    }
+    if (label === "document control") {
+      button.hidden = false;
+      button.removeAttribute("aria-hidden");
+      button.classList.toggle("sidebar__item--active", isDocumentControlDomain);
+      button.setAttribute("aria-current", isDocumentControlDomain ? "page" : "false");
+    }
   }
 }
 
 /**
  * Shared shell compatibility bridge.
  *
- * The full shell remains isolated in DepartmentLayout.legacy.tsx so concurrent
- * module work is not rebased through a 2,000+ line layout file. This wrapper
- * upgrades the historical Manuals navigation affordance to Publications and
- * keeps its active state correct on the canonical route.
+ * Publications is now the Library workspace inside Document Control. The
+ * historical reader URLs remain valid, but the shell exposes only one domain
+ * entry and keeps it active while a publication is being read.
  */
 const DepartmentLayout: React.FC<Props> = (props) => {
   const location = useLocation();
-  const isPublicationsRoute = location.pathname.includes("/publications");
+  const isDocumentControlDomain = location.pathname.includes("/document-control") || location.pathname.includes("/publications");
 
   useEffect(() => {
-    const apply = () => applyPublicationsNavigationLabel(isPublicationsRoute);
+    const apply = () => applyDocumentControlNavigation(isDocumentControlDomain);
     apply();
     const observer = new MutationObserver(apply);
     observer.observe(document.body, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [isPublicationsRoute]);
+  }, [isDocumentControlDomain]);
 
   return <LegacyDepartmentLayout {...props} />;
 };
