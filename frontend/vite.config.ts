@@ -7,7 +7,6 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 const truthyValues = new Set(['1', 'true', 'yes', 'on'])
 
-
 const resolveAllowedHosts = (env: Record<string, string>): true | string[] => {
   const configured = env.VITE_ALLOWED_HOSTS
     ?.split(',')
@@ -76,7 +75,9 @@ export default defineConfig(({ mode }) => {
       proxy,
     },
     build: {
+      manifest: true,
       sourcemap: false,
+      reportCompressedSize: true,
       rollupOptions: {
         output: {
           manualChunks(id) {
