@@ -46,6 +46,19 @@ jobs:
           write(permissions, role_text.replace(old_role, new_role, 1))
           '''.replace('          ', '')
           script = script[:role_start] + direct_role_patch + script[role_end:]
+
+          publish_start = script.find('replace(\n    lifecycle,\n    \'\'\'    if actor_user_id == version.created_by_user_id:')
+          publish_end = script.find('\n)\nreplace(\n    lifecycle,\n    \'\'\'                "route": route,', publish_start)
+          if publish_start < 0 or publish_end < 0:
+              raise SystemExit('Publish authority patch call was not found')
+          direct_publish_patch = '''publish_text = read(lifecycle)
+          old_publish_guard = '    if actor_user_id == version.created_by_user_id:\\n        raise ValueError("The roster creator cannot publish the same version")'
+          new_publish_guard = '    if actor_user_id == version.created_by_user_id:\\n        raise ValueError("The roster creator cannot publish the same version")\\n    actor = db.query(account_models.User).filter(\\n        account_models.User.amo_id == version.amo_id,\\n        account_models.User.id == actor_user_id,\\n        account_models.User.is_active.is_(True),\\n    ).first()\\n    if not actor:\\n        raise ValueError("Roster publisher is not an active tenant user")\\n    governance.require_publish_authority(db, version=version, actor=actor)'
+          if old_publish_guard not in publish_text:
+              raise SystemExit('Current publish creator guard was not found')
+          write(lifecycle, publish_text.replace(old_publish_guard, new_publish_guard, 1))
+          '''.replace('          ', '')
+          script = script[:publish_start] + direct_publish_patch + script[publish_end + 3:]
           Path('/tmp/apply_rostering_governance.py').write_text(script, encoding='utf-8')
           PY
       - name: Apply audited full-stack governance patch
