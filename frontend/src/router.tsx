@@ -1,7 +1,12 @@
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
-import { isAuthenticated } from "./services/auth";
+import {
+  fetchOnboardingStatus,
+  getCachedOnboardingStatus,
+  isAuthenticated,
+  type OnboardingStatus,
+} from "./services/auth";
 import { AppRouter as LegacyAppRouter } from "./router.legacy";
 
 /*
@@ -38,6 +43,12 @@ function canonicaliseManualsPath(pathname: string): string {
   return parts.join("/") || "/";
 }
 
+function workspaceSlugFromPath(pathname: string): string {
+  const parts = pathname.split("/").filter(Boolean);
+  if ((parts[0] === "maintenance" || parts[0] === "t") && parts[1]) return parts[1];
+  return "system";
+}
+
 function publicationsRootFromPath(pathname: string): string {
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] === "maintenance" && parts[1]) return `/maintenance/${parts[1]}/publications`;
@@ -45,13 +56,63 @@ function publicationsRootFromPath(pathname: string): string {
   return "/login";
 }
 
+/**
+ * Applies the same authentication and mandatory-onboarding contract used by the
+ * rest of the portal. Canonical Publications routes must not create a shortcut
+ * around workspace setup merely because they are composed outside the legacy
+ * route table.
+ */
 function PublicationsRequireAuth({ children }: GuardProps) {
   const location = useLocation();
-  if (isAuthenticated()) return children;
-  const parts = location.pathname.split("/").filter(Boolean);
-  const amoCode = parts[0] === "maintenance" ? parts[1] : "";
-  const loginPath = amoCode ? `/maintenance/${amoCode}/login` : "/login";
-  return <Navigate to={loginPath} replace state={{ from: location.pathname + location.search }} />;
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(
+    getCachedOnboardingStatus(),
+  );
+  const [onboardingChecked, setOnboardingChecked] = useState(
+    Boolean(getCachedOnboardingStatus()),
+  );
+  const isAuthed = isAuthenticated();
+  const isOnboardingRoute = location.pathname.includes("/onboarding");
+
+  useEffect(() => {
+    if (!isAuthed || onboardingChecked) return;
+    let active = true;
+    fetchOnboardingStatus()
+      .then((status) => {
+        if (!active) return;
+        setOnboardingStatus(status);
+        setOnboardingChecked(true);
+      })
+      .catch(() => {
+        if (active) setOnboardingChecked(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAuthed, onboardingChecked]);
+
+  if (!isAuthed) {
+    const parts = location.pathname.split("/").filter(Boolean);
+    const amoCode = parts[0] === "maintenance" ? parts[1] : "";
+    const loginPath = amoCode ? `/maintenance/${amoCode}/login` : "/login";
+    return <Navigate to={loginPath} replace state={{ from: location.pathname + location.search }} />;
+  }
+
+  if (!onboardingChecked && !isOnboardingRoute) {
+    return (
+      <div className="page-loading" role="status" aria-live="polite">
+        <div className="page-loading__card">
+          <div className="page-loading__spinner" />
+          <div className="page-loading__label">Preparing workspace…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (onboardingStatus && !onboardingStatus.is_complete && !isOnboardingRoute) {
+    return <Navigate to={`/maintenance/${workspaceSlugFromPath(location.pathname)}/onboarding/setup`} replace />;
+  }
+
+  return children;
 }
 
 function PublicationsNotFoundRedirect() {
