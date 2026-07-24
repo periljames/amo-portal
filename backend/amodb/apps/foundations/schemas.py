@@ -157,6 +157,15 @@ class UserBaseAssignmentRead(BaseModel):
         from_attributes = True
 
 
+class UserBaseAssignmentPage(BaseModel):
+    items: List[UserBaseAssignmentRead] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    has_more: bool
+
+
 class AvailabilityStatus(str):
     pass
 
