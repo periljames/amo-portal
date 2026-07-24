@@ -34,13 +34,15 @@ import {
   type PublicationAcknowledgement,
   type PublicationReaderMetadata,
 } from "../../services/publications";
+import PublicationPdfLayoutViewer from "./PublicationPdfLayoutViewer";
 import { useManualRouteContext } from "./context";
 import "./manualReader.css";
 import "./publicationReaderGovernance.css";
+import "./publicationReaderLayout.css";
 
 type ReaderTab = "detail" | "history" | "citations" | "subsidiary";
 type NavigationTab = "toc" | "search";
-type ViewMode = "html" | "pdf";
+type ViewMode = "layout" | "text";
 
 type ReaderSection = ManualReadPayload["sections"][number] & {
   page_start?: number | null;
@@ -64,6 +66,11 @@ type ExtendedReadPayload = Omit<ManualReadPayload, "sections"> & {
   };
 };
 
+type PdfNavigationRequest = {
+  page: number;
+  token: number;
+};
+
 const TAB_VALUES = new Set<ReaderTab>(["detail", "history", "citations", "subsidiary"]);
 const ACKNOWLEDGEMENT_TEXT = "I acknowledge that I have read and understood this controlled publication revision.";
 
@@ -82,6 +89,19 @@ function publicationCitation(metadata: PublicationReaderMetadata): string {
   const issue = metadata.issue_number ? `Issue ${metadata.issue_number}` : "Issue not recorded";
   const revision = metadata.revision_number ? `Revision ${metadata.revision_number}` : "Revision not recorded";
   return `${metadata.code} — ${metadata.title}, ${issue}, ${revision}${metadata.date ? `, effective ${formatDate(metadata.date)}` : ""}.`;
+}
+
+function sectionForPage(sections: ReaderSection[], pageNumber: number): ReaderSection | null {
+  let resolved: ReaderSection | null = null;
+  for (const section of sections) {
+    const start = Number(section.page_start || 0);
+    const end = Number(section.page_end || start || 0);
+    if (!start) continue;
+    if (pageNumber >= start && (!end || pageNumber <= end)) resolved = section;
+    if (start <= pageNumber) resolved = section;
+    if (start > pageNumber) break;
+  }
+  return resolved;
 }
 
 function ReaderStatus({ message }: { message: string }) {
@@ -110,9 +130,12 @@ export default function PublicationsReaderPage() {
   const [activeSection, setActiveSection] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("html");
+  const [viewMode, setViewMode] = useState<ViewMode>("text");
   const [pdfUrl, setPdfUrl] = useState("");
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState("");
+  const [pdfNavigationRequest, setPdfNavigationRequest] = useState<PdfNavigationRequest | null>(null);
+  const [currentPdfPage, setCurrentPdfPage] = useState(1);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -121,6 +144,10 @@ export default function PublicationsReaderPage() {
   const requestedTab = searchParams.get("tab") as ReaderTab | null;
   const activeTab: ReaderTab = requestedTab && TAB_VALUES.has(requestedTab) ? requestedTab : "detail";
   const isPublished = Boolean(metadata?.is_published && !payload?.not_published);
+  const sourceIsPdf = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase() === "PDF";
+  const sections = payload?.sections || [];
+  const textAvailable = sections.length > 0 && !metadata?.image_only;
+  const layoutAvailable = Boolean(metadata?.rendered_pdf_url);
 
   useEffect(() => {
     if (!tenant || !manualId || !revId) {
@@ -146,7 +173,9 @@ export default function PublicationsReaderPage() {
         setAcknowledgement(acknowledgementPayload);
         const firstAnchor = readPayload.sections[0]?.anchor_slug || "";
         setActiveSection(firstAnchor);
-        setViewMode(readerMetadata.reader_mode === "pdf" ? "pdf" : "html");
+        const uploadedAsPdf = String(readerMetadata.source_type || readPayload.revision?.source_type || "").toUpperCase() === "PDF";
+        setViewMode(uploadedAsPdf || readerMetadata.image_only ? "layout" : "text");
+        setCurrentPdfPage(1);
         const savedKey = `amo-publication-saved:${tenant}:${manualId}:${revId}`;
         setSaved(window.localStorage.getItem(savedKey) === "1");
       })
@@ -163,16 +192,19 @@ export default function PublicationsReaderPage() {
   }, [tenant, manualId, revId]);
 
   useEffect(() => {
-    if (viewMode !== "pdf" || !metadata?.rendered_pdf_url) {
+    if (activeTab !== "detail" || viewMode !== "layout" || !metadata?.rendered_pdf_url) {
       setPdfUrl((current) => {
         if (current) URL.revokeObjectURL(current);
         return "";
       });
+      setPdfLoading(false);
+      setPdfError("");
       return;
     }
     let active = true;
     let objectUrl = "";
     setPdfLoading(true);
+    setPdfError("");
     fetchPublicationBlob(metadata.rendered_pdf_url)
       .then(({ blob }) => {
         if (!active) return;
@@ -180,7 +212,7 @@ export default function PublicationsReaderPage() {
         setPdfUrl(objectUrl);
       })
       .catch((caught: unknown) => {
-        if (active) setError(caught instanceof Error ? caught.message : "The PDF could not be opened.");
+        if (active) setPdfError(caught instanceof Error ? caught.message : "The PDF could not be opened.");
       })
       .finally(() => {
         if (active) setPdfLoading(false);
@@ -189,7 +221,7 @@ export default function PublicationsReaderPage() {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [viewMode, metadata?.rendered_pdf_url]);
+  }, [activeTab, metadata?.rendered_pdf_url, viewMode]);
 
   const blocksBySection = useMemo(() => {
     const grouped: Record<string, ExtendedReadPayload["blocks"]> = {};
@@ -203,14 +235,14 @@ export default function PublicationsReaderPage() {
   const searchHits = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [] as ReaderSection[];
-    return (payload?.sections || []).filter((section) => {
+    return sections.filter((section) => {
       if (section.heading.toLowerCase().includes(needle)) return true;
       return (blocksBySection[section.id] || []).some((block) => block.text.toLowerCase().includes(needle));
     });
-  }, [blocksBySection, payload?.sections, query]);
+  }, [blocksBySection, query, sections]);
 
   useEffect(() => {
-    if (viewMode !== "html" || activeTab !== "detail") return;
+    if (viewMode !== "text" || activeTab !== "detail") return;
     const observer = new IntersectionObserver(
       (entries) => {
         const visible = entries
@@ -222,15 +254,31 @@ export default function PublicationsReaderPage() {
     );
     Object.values(sectionRefs.current).forEach((element) => element && observer.observe(element));
     return () => observer.disconnect();
-  }, [activeTab, payload?.sections, viewMode]);
+  }, [activeTab, sections, viewMode]);
 
   const openSection = (section: ReaderSection) => {
-    setViewMode("html");
     setActiveSection(section.anchor_slug);
     setMobileNavigationOpen(false);
+    const pageNumber = Number(section.page_start || 0);
+    if (viewMode === "layout" && pageNumber > 0) {
+      setPdfNavigationRequest({ page: pageNumber, token: Date.now() });
+      return;
+    }
+    if (!textAvailable && pageNumber > 0) {
+      setViewMode("layout");
+      setPdfNavigationRequest({ page: pageNumber, token: Date.now() });
+      return;
+    }
+    setViewMode("text");
     window.requestAnimationFrame(() => {
       document.getElementById(safeAnchor(section.anchor_slug))?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+  };
+
+  const onPdfPageChange = (pageNumber: number) => {
+    setCurrentPdfPage(pageNumber);
+    const section = sectionForPage(sections, pageNumber);
+    if (section) setActiveSection(section.anchor_slug);
   };
 
   const setTab = (tab: ReaderTab) => {
@@ -319,7 +367,6 @@ export default function PublicationsReaderPage() {
     });
   };
 
-  const sections = payload?.sections || [];
   const hiddenByCollapsedParent = (index: number): boolean => {
     const level = sections[index]?.level || 1;
     for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
@@ -330,6 +377,15 @@ export default function PublicationsReaderPage() {
       }
     }
     return false;
+  };
+
+  const scrollToTop = () => {
+    const appScroller = document.querySelector<HTMLElement>(".app-shell__scroll");
+    if (appScroller) {
+      appScroller.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const navigation = (
@@ -391,6 +447,13 @@ export default function PublicationsReaderPage() {
     </aside>
   );
 
+  const activeSectionLabel = activeSection
+    ? sections.find((section) => section.anchor_slug === activeSection || safeAnchor(section.anchor_slug) === activeSection)?.heading || activeSection
+    : "Document detail";
+  const contextLabel = viewMode === "layout" ? `${activeSectionLabel} · page ${currentPdfPage}` : activeSectionLabel;
+  const layoutLabel = sourceIsPdf ? "Original layout" : "PDF proof";
+  const textLabel = sourceIsPdf ? "Accessible text" : "Readable document";
+
   const content = (
     <div className="publication-reader-page">
       {loading ? <ReaderStatus message="Preparing publication reader…" /> : null}
@@ -442,10 +505,10 @@ export default function PublicationsReaderPage() {
           <div className="publication-floating-header">
             <button type="button" onClick={() => setMobileNavigationOpen(true)} aria-label="Open document navigation"><Menu size={17} /></button>
             <strong>{metadata.title}</strong>
-            <span>{activeSection ? sections.find((section) => section.anchor_slug === activeSection)?.heading || activeSection : "Document detail"}</span>
+            <span>{contextLabel}</span>
             <div>
-              <button type="button" className={viewMode === "html" ? "active" : ""} disabled={!sections.length} onClick={() => setViewMode("html")}>Readable text</button>
-              <button type="button" className={viewMode === "pdf" ? "active" : ""} onClick={() => setViewMode("pdf")}>PDF view</button>
+              <button type="button" className={viewMode === "layout" ? "active" : ""} disabled={!layoutAvailable} onClick={() => setViewMode("layout")}>{layoutLabel}</button>
+              <button type="button" className={viewMode === "text" ? "active" : ""} disabled={!textAvailable} onClick={() => setViewMode("text")}>{textLabel}</button>
             </div>
           </div>
 
@@ -490,13 +553,27 @@ export default function PublicationsReaderPage() {
                 {navigation}
                 <main className="publication-document-canvas" id="publication-document-content">
                   {metadata.image_only ? (
-                    <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF contains no dependable text layer. The reader has switched to the PDF view instead of presenting inaccurate OCR text.</span></div>
+                    <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF contains no dependable text layer. The original-layout reader remains available and preserves every page, table, figure, signature, and approval mark.</span></div>
                   ) : null}
-                  {viewMode === "pdf" ? (
-                    <div className="publication-pdf-viewer">
-                      {pdfLoading ? <ReaderStatus message="Loading PDF viewer…" /> : null}
-                      {pdfUrl ? <iframe title={`${metadata.title} PDF`} src={pdfUrl} /> : null}
-                    </div>
+                  {viewMode === "layout" ? (
+                    <>
+                      {pdfLoading ? <ReaderStatus message="Preparing original document layout…" /> : null}
+                      {pdfError ? (
+                        <div className="publication-reader-error" role="alert">
+                          <TriangleAlert size={20} />
+                          <div><strong>Original layout could not be opened</strong><p>{pdfError}</p></div>
+                          <button type="button" onClick={() => setViewMode(textAvailable ? "text" : "layout")}>Use text view</button>
+                        </div>
+                      ) : null}
+                      {!pdfLoading && !pdfError && pdfUrl ? (
+                        <PublicationPdfLayoutViewer
+                          fileUrl={pdfUrl}
+                          title={metadata.title}
+                          navigationRequest={pdfNavigationRequest}
+                          onPageChange={onPdfPageChange}
+                        />
+                      ) : null}
+                    </>
                   ) : (
                     <article className="publication-html-document">
                       <header>
@@ -519,7 +596,7 @@ export default function PublicationsReaderPage() {
                           {!(blocksBySection[section.id] || []).length ? <p className="publication-empty-section">No searchable text was extracted for this section.</p> : null}
                         </section>
                       )) : (
-                        <div className="publication-empty-reader"><h2>No readable text is available</h2><p>Open the PDF view to read this publication.</p></div>
+                        <div className="publication-empty-reader"><h2>No readable text is available</h2><p>Use the original-layout reader to read this publication.</p></div>
                       )}
                     </article>
                   )}
@@ -560,7 +637,7 @@ export default function PublicationsReaderPage() {
             </section>
           ) : null}
 
-          <button type="button" className="publication-to-top" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>To the top</button>
+          <button type="button" className="publication-to-top" onClick={scrollToTop}>To the top</button>
           {mobileNavigationOpen ? <button type="button" className="publication-navigation-backdrop" onClick={() => setMobileNavigationOpen(false)} aria-label="Close navigation overlay" /> : null}
         </>
       ) : null}
