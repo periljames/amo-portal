@@ -422,24 +422,3 @@ export async function qmsReviewAuditEvidence(
     },
   });
 }
-
-export async function qmsDownloadLifecycleDocument(document: QualityAuditDocument): Promise<void> {
-  const token = getToken();
-  const response = await fetch(absoluteQualityUrl(document.download_url), {
-    method: "GET",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    credentials: "include",
-  });
-  if (response.status === 401) {
-    handleAuthFailure("expired");
-    throw new Error("Session expired. Please sign in again.");
-  }
-  if (!response.ok) throw new Error(await readError(response) || "Controlled document could not be downloaded.");
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = document.filename;
-  anchor.click();
-  globalThis.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-}
