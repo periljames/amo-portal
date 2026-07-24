@@ -1,4 +1,5 @@
 import type { PropsWithChildren, ReactNode } from "react";
+
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { useManualRouteContext } from "./context";
 
@@ -12,9 +13,10 @@ export default function ManualsPageLayout({ title, subtitle, actions, children }
   const { amoCode, department } = useManualRouteContext();
 
   const content = (
-    <div className="manuals-page-shell">
+    <div className="manuals-page-shell publications-page-shell">
       <div className="manuals-page-shell__header">
         <div>
+          <p style={{ margin: "0 0 0.25rem", fontSize: "0.66rem", fontWeight: 750, letterSpacing: "0.07em", textTransform: "uppercase", opacity: 0.66 }}>Controlled Publications</p>
           <h1 className="manuals-page-shell__title">{title}</h1>
           {subtitle ? <p className="manuals-page-shell__subtitle">{subtitle}</p> : null}
         </div>
@@ -27,7 +29,7 @@ export default function ManualsPageLayout({ title, subtitle, actions, children }
   if (!amoCode) return content;
 
   return (
-    <DepartmentLayout amoCode={amoCode} activeDepartment={department || "quality"}>
+    <DepartmentLayout amoCode={amoCode} activeDepartment={department || "document-control"}>
       {content}
     </DepartmentLayout>
   );

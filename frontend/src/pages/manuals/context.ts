@@ -1,6 +1,6 @@
 import { useParams } from "react-router-dom";
 
-type ManualRouteParams = {
+type PublicationRouteParams = {
   tenantSlug?: string;
   amoCode?: string;
   department?: string;
@@ -13,11 +13,12 @@ type ManualRouteParams = {
   figureId?: string;
 };
 
-export function resolveManualRouteContext(params: ManualRouteParams) {
+export function resolveManualRouteContext(params: PublicationRouteParams) {
   const { tenantSlug, amoCode, department, manualId, docId, revId, chapterId, sectionId, subSectionId, figureId } = params;
   const tenant = tenantSlug || amoCode || "";
   const effectiveManualId = manualId || docId;
-  const basePath = amoCode ? `/maintenance/${amoCode}/manuals` : `/t/${tenant}/manuals`;
+  const basePath = amoCode ? `/maintenance/${amoCode}/publications` : `/t/${tenant}/publications`;
+  const legacyBasePath = amoCode ? `/maintenance/${amoCode}/manuals` : `/t/${tenant}/manuals`;
   return {
     tenant,
     amoCode,
@@ -29,6 +30,7 @@ export function resolveManualRouteContext(params: ManualRouteParams) {
     subSectionId,
     figureId,
     basePath,
+    legacyBasePath,
   };
 }
 
