@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { ContextualHelp } from "../../../components/UI/ContextualHelp";
 import { PrerequisiteDialog, type PrerequisiteItem } from "../../../components/UI/PrerequisiteDialog";
-import { listBaseStations } from "../../../services/foundations";
+import { listRosterBaseStations } from "../../../services/rosterBases";
 import { listRosterPeriods, listShiftTemplates } from "../../../services/rostering";
 import { RosterPlannerV2 } from "./RosterPlannerV2";
 
@@ -17,7 +17,7 @@ export function UnifiedRosterPlanner() {
 
   const basesQuery = useQuery({
     queryKey: ["foundations", "base-stations", "active"],
-    queryFn: () => listBaseStations(),
+    queryFn: () => listRosterBaseStations(),
     staleTime: REFERENCE_STALE_MS,
     gcTime: 24 * 60 * 60_000,
     networkMode: "offlineFirst",
