@@ -1,0 +1,115 @@
+.portal-help-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--border-color, #d6deea);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text-muted, #53627a);
+  cursor: pointer;
+}
+
+.portal-help-trigger:hover,
+.portal-help-trigger:focus-visible {
+  color: var(--primary, #1f5eff);
+  border-color: currentColor;
+  outline: none;
+}
+
+.portal-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 46%);
+  backdrop-filter: blur(3px);
+}
+
+.portal-help-dialog {
+  width: min(36rem, 100%);
+  max-height: min(42rem, calc(100vh - 2rem));
+  overflow: auto;
+  border: 1px solid var(--border-color, #d6deea);
+  border-radius: 1rem;
+  background: var(--surface, #fff);
+  color: var(--text-primary, #172033);
+  box-shadow: 0 24px 70px rgb(15 23 42 / 22%);
+}
+
+.portal-help-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.25rem 0.75rem;
+}
+
+.portal-help-dialog__header h2 {
+  margin: 0.25rem 0 0;
+  font-size: 1.2rem;
+}
+
+.portal-help-dialog__eyebrow {
+  display: block;
+  color: var(--primary, #1f5eff);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portal-help-dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.portal-help-dialog__body {
+  padding: 0 1.25rem 1rem;
+  color: var(--text-muted, #53627a);
+  line-height: 1.55;
+}
+
+.portal-help-dialog__body p {
+  margin: 0 0 0.8rem;
+}
+
+.portal-help-dialog__body ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.portal-help-dialog__footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding: 0.9rem 1.25rem 1.25rem;
+  border-top: 1px solid var(--border-color, #e4e9f1);
+}
+
+.portal-help-dialog__footer > :first-child {
+  margin-right: auto;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .portal-help-dialog {
+    animation: portal-help-enter 150ms ease-out;
+  }
+}
+
+@keyframes portal-help-enter {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
