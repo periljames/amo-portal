@@ -1,0 +1,148 @@
+name: Finalize Rostering Governance Integration
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/rostering-unified-workforce
+          fetch-depth: 0
+          show-progress: false
+      - name: Build normalized governance patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/run-rostering-governance.yml').read_text(encoding='utf-8').splitlines()
+          start = source.index("          python - <<'PY'") + 1
+          end = source.index("          PY", start)
+          extractor = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[start:end]) + '\n'
+          Path('/tmp/build_governance_patch.py').write_text(extractor, encoding='utf-8')
+          PY
+          python /tmp/build_governance_patch.py
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          path = Path('/tmp/apply_rostering_governance.py')
+          script = path.read_text(encoding='utf-8')
+          start = script.find('# My Roster one-time subscription setup.')
+          end = script.find('# Planner displays departmental approval progress.', start)
+          if start < 0 or end < 0:
+              raise SystemExit('My Roster patch block was not found')
+          replacement = textwrap.dedent('''
+          # My Roster one-time subscription setup against the current component.
+          my_roster = "frontend/src/pages/rostering/components/MyRosterWorkspace.tsx"
+          my_text = read(my_roster)
+          my_text = my_text.replace(
+              '  CalendarPlus,\\n',
+              '  CalendarPlus,\\n  CalendarSync,\\n  Copy,\\n',
+              1,
+          )
+          my_text = my_text.replace(
+              'import { acknowledgeRosterVersion, exportMyRosterCalendar, getMyRoster } from "../../../services/rostering";',
+              'import { acknowledgeRosterVersion, exportMyRosterCalendar, getMyRoster, getRosterCalendarSubscription } from "../../../services/rostering";',
+              1,
+          )
+          my_text = my_text.replace(
+              'import type { MyRosterResponse } from "../../../types/rostering";',
+              'import type { MyRosterResponse, RosterCalendarSubscriptionRead } from "../../../types/rostering";',
+              1,
+          )
+          my_text = my_text.replace(
+              '  const [roster, setRoster] = useState<MyRosterResponse | null>(null);',
+              '  const [roster, setRoster] = useState<MyRosterResponse | null>(null);\\n  const [calendarSubscription, setCalendarSubscription] = useState<RosterCalendarSubscriptionRead | null>(null);',
+              1,
+          )
+          old_load = '''      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage] = await Promise.all([
+              getMyRoster(range),
+              listLeaveTypes(false),
+              listLeaveBalances({ user_id: userId || null, leave_year: new Date().getFullYear() }),
+              listLeaveRequests({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
+              getAttendanceSummary({ user_id: userId || null, from: range.from, to: range.to }),
+              listTimesheets({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
+              ]);'''.replace('              ', '        ')
+          new_load = '''      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage, subscription] = await Promise.all([
+              getMyRoster(range),
+              listLeaveTypes(false),
+              listLeaveBalances({ user_id: userId || null, leave_year: new Date().getFullYear() }),
+              listLeaveRequests({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
+              getAttendanceSummary({ user_id: userId || null, from: range.from, to: range.to }),
+              listTimesheets({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
+              getRosterCalendarSubscription(),
+              ]);'''.replace('              ', '        ')
+          if old_load not in my_text:
+              raise SystemExit('Current My Roster load block was not found')
+          my_text = my_text.replace(old_load, new_load, 1)
+          my_text = my_text.replace(
+              '      setTimesheets(timesheetPage.items);',
+              '      setTimesheets(timesheetPage.items);\\n      setCalendarSubscription(subscription);',
+              1,
+          )
+          calendar_panel = r'''
+
+              {calendarSubscription ? (
+              <section className="wr-panel wr-calendar-subscription">
+              <CalendarSync size={22} />
+              <div>
+              <span className="wr-eyebrow">One-time device setup</span>
+              <h2>Automatic personal operations calendar</h2>
+              <p>Subscribe once to receive published duty, training, Quality audits and aircraft work allocations. Calendar applications refresh this feed automatically.</p>
+              <small>Refresh target: every {calendarSubscription.refresh_interval_minutes} minutes · {calendarSubscription.includes.map((value) => value.replace(/_/g, " ").toLowerCase()).join(" · ")}</small>
+              </div>
+              <div className="wr-actions">
+              <button type="button" className="wr-button wr-button--secondary" onClick={() => void navigator.clipboard.writeText(calendarSubscription.https_url)}><Copy size={15} /> Copy feed URL</button>
+              <a className="wr-button wr-button--primary" href={calendarSubscription.webcal_url}><CalendarPlus size={15} /> Subscribe on this device</a>
+              </div>
+              </section>
+              ) : null}
+          '''.replace('              ', '      ')
+          panel_marker = '      {leaveOpen ? ('
+          if panel_marker not in my_text:
+              raise SystemExit('My Roster leave panel marker was not found')
+          my_text = my_text.replace(panel_marker, calendar_panel + '\\n' + panel_marker, 1)
+          write(my_roster, my_text)
+
+          ''')
+          path.write_text(script[:start] + replacement + script[end:], encoding='utf-8')
+          PY
+      - name: Apply full-stack governance source
+        shell: bash
+        run: |
+          set +e
+          python /tmp/apply_rostering_governance.py > /tmp/rostering-governance-final.log 2>&1
+          status=$?
+          cat /tmp/rostering-governance-final.log
+          echo "$status" > /tmp/rostering-governance-final.exit-code
+          exit "$status"
+      - name: Upload integration diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rostering-governance-final-diagnostics
+          path: |
+            /tmp/rostering-governance-final.log
+            /tmp/rostering-governance-final.exit-code
+          retention-days: 1
+      - name: Validate and publish branch commit
+        shell: bash
+        run: |
+          python -m compileall -q backend/amodb/apps/rostering backend/amodb/apps/workforce backend/amodb/alembic/versions/rostering_20260724_governance.py
+          git diff --check
+          rm -f .github/workflows/apply-rostering-governance.yml .github/workflows/run-rostering-governance.yml .github/workflows/run-rostering-governance-final.yml
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend frontend .github/workflows
+          git commit -m "Add departmental roster governance and calendar subscriptions"
+          git push origin HEAD:fix/rostering-unified-workforce
