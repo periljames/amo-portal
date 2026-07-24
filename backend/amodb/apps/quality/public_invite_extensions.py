@@ -22,7 +22,7 @@ from amodb.apps.audit import services as audit_services
 from amodb.database import get_db
 
 from . import models
-from .router import _car_invite_payload, public_router
+from .router import AUDIT_REPORT_DIR, _car_invite_payload, public_router
 from .schemas import CARInviteOut
 
 
@@ -60,6 +60,18 @@ def _safe_report_filename(audit: models.QMSAudit, file_path: Path) -> str:
     return f"{audit_ref}_issued-audit-report{suffix}"
 
 
+def _approved_report_path(value: object) -> Optional[Path]:
+    if not value:
+        return None
+    report_root = AUDIT_REPORT_DIR.resolve()
+    candidate = Path(str(value)).resolve()
+    try:
+        candidate.relative_to(report_root)
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
 @_extension_router.get("/cars/invite/{invite_token}", response_model=CARInviteWithAuditReportOut)
 def get_car_invite_with_report(
     invite_token: str,
@@ -69,11 +81,10 @@ def get_car_invite_with_report(
     car = _car_for_token(db, invite_token)
     payload = _car_invite_payload(car, request=request, db=db)
     audit = _audit_for_car(car)
-    report_ref = getattr(audit, "report_file_ref", None) if audit is not None else None
-    if report_ref and Path(report_ref).is_file():
-        payload["audit_report_download_url"] = f"/quality/cars/invite/{car.invite_token}/audit-report"
-    else:
-        payload["audit_report_download_url"] = None
+    report_path = _approved_report_path(getattr(audit, "report_file_ref", None) if audit is not None else None)
+    payload["audit_report_download_url"] = (
+        f"/quality/cars/invite/{car.invite_token}/audit-report" if report_path is not None else None
+    )
     return payload
 
 
@@ -88,8 +99,8 @@ def download_invited_audit_report(
     if audit is None or not getattr(audit, "report_file_ref", None):
         raise HTTPException(status_code=404, detail="The issued audit report is not available for this CAR invitation.")
 
-    report_path = Path(str(audit.report_file_ref)).resolve()
-    if not report_path.is_file():
+    report_path = _approved_report_path(audit.report_file_ref)
+    if report_path is None:
         raise HTTPException(status_code=404, detail="The issued audit report file is unavailable.")
 
     audit_services.log_event(
