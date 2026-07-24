@@ -214,13 +214,19 @@ def main() -> None:
     assert script.get_revision(TARGET_REVISION) is not None
     assert script.get_revision("quality_20260724_audit_lifecycle") is not None
 
-    heads = script.get_heads()
-    expected_heads = {"quality_20260724_audit_lifecycle"}
-    if set(heads) != expected_heads:
-        raise RuntimeError(f"Unexpected Alembic heads: {heads}; expected {sorted(expected_heads)}")
-    # Quality audit lifecycle deliberately descends the Rostering governance
-    # revision. Verify the Rostering head remains in the ancestry rather than
-    # treating the newer Quality revision as an overlap.
+    heads = set(script.get_heads())
+    required_heads = {"quality_20260724_audit_lifecycle"}
+    missing_heads = required_heads - heads
+    if missing_heads:
+        raise RuntimeError(
+            f"Required Alembic heads are missing: {sorted(missing_heads)}; "
+            f"available heads: {sorted(heads)}"
+        )
+    # This probe exercises the Workforce/Rostering lineage. Other independent
+    # legacy heads may coexist and are handled by `alembic upgrade heads`.
+    # Quality audit lifecycle descends Rostering governance, so the old
+    # Rostering revision must remain in the ancestry and not as a separate head.
+    assert "rostering_20260724_governance" not in heads
     assert script.get_revision("rostering_20260724_governance") is not None
 
     _load_metadata()
