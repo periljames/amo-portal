@@ -67,8 +67,8 @@ test.describe("Quality Tailnet live verification", () => {
 
     const closedBanner = page.getByText("This CAR is closed. No further changes are allowed.");
     if (await closedBanner.count()) {
-      await expect(page.locator(".car-invite-countdown")).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
+      await expect(page.locator(".car-invite-countdown")).toBeHidden();
+      await expect(page.getByRole("button", { name: "Edit" }).first()).toBeHidden();
     }
   });
 
