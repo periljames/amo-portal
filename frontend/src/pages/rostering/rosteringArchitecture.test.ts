@@ -29,11 +29,16 @@ describe("rostering architecture regressions", () => {
     expect(rosterShellSource).toContain("</DepartmentLayout>");
   });
 
-  it("uses a fluid viewport contract without changing unrelated portal modules", () => {
+  it("uses a fluid viewport contract in both production shell modes", () => {
     expect(rosterShellSource).toContain('rostering-workforce-layout.css');
     expect(rosterLayoutSource).toContain('.app-shell__content:has(> .wr-page)');
+    expect(rosterLayoutSource).toContain('.app-shell:not(.app-shell--v2):has(.wr-page)');
+    expect(rosterLayoutSource).toContain('.app-shell__main-inner');
     expect(rosterLayoutSource).toContain('max-width: none');
     expect(rosterLayoutSource).toContain('--sidebar-width: clamp(204px, 12.5vw, 226px)');
+    expect(rosterLayoutSource).toContain('--wr-page-viewport-offset: 98px');
+    expect(rosterLayoutSource).toContain('min-height: calc(100dvh - var(--wr-page-viewport-offset, 58px))');
+    expect(rosterLayoutSource).not.toContain('min-height: 100dvh;');
     expect(rosterLayoutSource).toContain('@media (min-width: 1680px)');
     expect(rosterLayoutSource).toContain('.wr-dashboard > .wr-panel:last-child');
   });
