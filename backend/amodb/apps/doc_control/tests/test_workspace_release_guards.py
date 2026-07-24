@@ -10,6 +10,10 @@ from amodb.apps.doc_control import workspace_workflow_router as guards
 from amodb.apps.doc_control.domain_models import DocumentWorkflowInstance
 
 
+def _tenant():
+    return SimpleNamespace(id="tenant-1", amo_id="amo-1")
+
+
 def _workflow() -> DocumentWorkflowInstance:
     return DocumentWorkflowInstance(
         id="workflow-1",
@@ -50,6 +54,7 @@ def test_distribution_readiness_cannot_be_marked_ready_manually() -> None:
     with pytest.raises(HTTPException) as caught:
         guards._validate_readiness_change(
             None,
+            tenant=_tenant(),
             workflow=_workflow(),
             payload=_payload(distribution_readiness_status="READY"),
             current_user=_approver(),
@@ -63,6 +68,7 @@ def test_training_ready_requires_resolved_training_link(monkeypatch) -> None:
     with pytest.raises(HTTPException) as caught:
         guards._validate_readiness_change(
             None,
+            tenant=_tenant(),
             workflow=_workflow(),
             payload=_payload(training_readiness_status="READY"),
             current_user=_approver(),
@@ -75,6 +81,7 @@ def test_training_ready_accepts_resolved_training_link(monkeypatch) -> None:
     monkeypatch.setattr(guards, "_resolved_integration_exists", lambda *args, **kwargs: True)
     guards._validate_readiness_change(
         None,
+        tenant=_tenant(),
         workflow=_workflow(),
         payload=_payload(training_readiness_status="READY"),
         current_user=_approver(),
@@ -85,6 +92,7 @@ def test_waiver_requires_reason_and_evidence() -> None:
     with pytest.raises(HTTPException) as caught:
         guards._validate_readiness_change(
             None,
+            tenant=_tenant(),
             workflow=_workflow(),
             payload=_payload(training_readiness_status="WAIVED"),
             current_user=_approver(),
@@ -96,6 +104,7 @@ def test_waiver_requires_reason_and_evidence() -> None:
 def test_waiver_with_reason_and_evidence_is_allowed() -> None:
     guards._validate_readiness_change(
         None,
+        tenant=_tenant(),
         workflow=_workflow(),
         payload=_payload(
             training_readiness_status="WAIVED",
