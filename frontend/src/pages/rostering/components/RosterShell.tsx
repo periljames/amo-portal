@@ -12,6 +12,7 @@ import {
 
 import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
 import "../../../styles/rostering-workforce.css";
+import "../../../styles/rostering-workforce-layout.css";
 
 type Props = {
   title: string;
