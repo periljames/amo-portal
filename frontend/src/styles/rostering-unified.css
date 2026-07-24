@@ -1,0 +1,292 @@
+.wr-commitments {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wr-commitments__heading {
+  align-items: flex-start;
+}
+
+.wr-commitments__heading p {
+  margin: 0.3rem 0 0;
+  max-width: 72ch;
+  color: var(--wr-text-muted, var(--text-muted));
+  font-size: 0.82rem;
+}
+
+.wr-commitments__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.68rem 0.75rem;
+  border: 1px solid var(--wr-border, var(--border-subtle));
+  border-radius: 0.78rem;
+  background: color-mix(in srgb, var(--wr-surface, var(--surface-1)) 92%, transparent);
+}
+
+.wr-commitments__counts {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.wr-commitments__counts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  min-height: 1.9rem;
+  padding: 0.3rem 0.52rem;
+  border: 1px solid var(--wr-border, var(--border-subtle));
+  border-radius: 999px;
+  color: var(--wr-text-muted, var(--text-muted));
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.wr-commitments__loading {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 3rem;
+  color: var(--wr-text-muted, var(--text-muted));
+  font-size: 0.82rem;
+}
+
+.wr-commitment-grid {
+  --wr-commitment-person: 13rem;
+  display: grid;
+  grid-template-columns: var(--wr-commitment-person) repeat(var(--wr-commitment-days), minmax(7.5rem, 1fr));
+  min-width: calc(var(--wr-commitment-person) + var(--wr-commitment-days) * 7.5rem);
+  border: 1px solid var(--wr-border, var(--border-subtle));
+  border-radius: 0.82rem;
+  overflow: auto;
+  background: var(--wr-surface, var(--surface-1));
+}
+
+.wr-commitment-grid.is-month {
+  grid-template-columns: var(--wr-commitment-person) repeat(var(--wr-commitment-days), minmax(5.4rem, 1fr));
+  min-width: calc(var(--wr-commitment-person) + var(--wr-commitment-days) * 5.4rem);
+}
+
+.wr-commitment-grid__corner,
+.wr-commitment-grid__day {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-height: 3rem;
+  padding: 0.5rem 0.58rem;
+  border-right: 1px solid var(--wr-border, var(--border-subtle));
+  border-bottom: 1px solid var(--wr-border, var(--border-subtle));
+  background: var(--wr-surface-raised, var(--surface-2));
+}
+
+.wr-commitment-grid__corner {
+  left: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  font-size: 0.74rem;
+  font-weight: 750;
+}
+
+.wr-commitment-grid__day {
+  display: grid;
+  place-content: center;
+  gap: 0.08rem;
+  text-align: center;
+}
+
+.wr-commitment-grid__day strong {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wr-commitment-grid__day span {
+  color: var(--wr-text-muted, var(--text-muted));
+  font-size: 0.68rem;
+}
+
+.wr-commitment-grid__row {
+  display: contents;
+}
+
+.wr-commitment-grid__person,
+.wr-commitment-grid__cell {
+  min-height: 4.3rem;
+  padding: 0.42rem;
+  border-right: 1px solid var(--wr-border, var(--border-subtle));
+  border-bottom: 1px solid var(--wr-border, var(--border-subtle));
+}
+
+.wr-commitment-grid__person {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: grid;
+  align-content: center;
+  gap: 0.12rem;
+  background: var(--wr-surface, var(--surface-1));
+}
+
+.wr-commitment-grid__person strong {
+  overflow: hidden;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-commitment-grid__person span {
+  color: var(--wr-text-muted, var(--text-muted));
+  font-size: 0.68rem;
+}
+
+.wr-commitment-grid__cell {
+  display: grid;
+  align-content: start;
+  gap: 0.28rem;
+  background: color-mix(in srgb, var(--wr-surface, var(--surface-1)) 97%, transparent);
+}
+
+.wr-commitment {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.28rem;
+  min-width: 0;
+  padding: 0.34rem 0.4rem;
+  border: 1px solid var(--wr-border, var(--border-subtle));
+  border-left-width: 3px;
+  border-radius: 0.48rem;
+  background: var(--wr-surface-raised, var(--surface-2));
+}
+
+.wr-commitment--training { border-left-color: #8b5cf6; }
+.wr-commitment--quality { border-left-color: #22c55e; }
+.wr-commitment--workforce { border-left-color: #f59e0b; }
+
+.wr-commitment > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.wr-commitment strong,
+.wr-commitment small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-commitment strong {
+  font-size: 0.62rem;
+  letter-spacing: 0.025em;
+}
+
+.wr-commitment small {
+  color: var(--wr-text-muted, var(--text-muted));
+  font-size: 0.62rem;
+}
+
+.wr-commitment .wr-pill {
+  display: none;
+}
+
+.wr-drop-cell.is-source-blocked {
+  background: color-mix(in srgb, var(--wr-surface, var(--surface-1)) 92%, #f59e0b 8%);
+}
+
+.wr-planner-commitment {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.28rem 0.34rem;
+  border: 1px dashed var(--wr-border, var(--border-subtle));
+  border-left-width: 3px;
+  border-radius: 0.42rem;
+  background: color-mix(in srgb, var(--wr-surface-raised, var(--surface-2)) 94%, transparent);
+  cursor: help;
+}
+
+.wr-planner-commitment--training { border-left-color: #8b5cf6; }
+.wr-planner-commitment--quality { border-left-color: #22c55e; }
+.wr-planner-commitment--workforce { border-left-color: #f59e0b; }
+
+.wr-planner-commitment.is-blocking {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #f59e0b 24%, transparent);
+}
+
+.wr-planner-commitment > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.05rem;
+}
+
+.wr-planner-commitment strong,
+.wr-planner-commitment small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-planner-commitment strong {
+  font-size: 0.58rem;
+  line-height: 1.15;
+  text-transform: uppercase;
+  letter-spacing: 0.035em;
+}
+
+.wr-planner-commitment small {
+  color: var(--wr-text-muted, var(--text-muted));
+  font-size: 0.58rem;
+  line-height: 1.2;
+}
+
+.wr-planner-commitment em {
+  grid-column: 2;
+  color: var(--wr-text-muted, var(--text-muted));
+  font-size: 0.54rem;
+  font-style: normal;
+}
+
+@media (max-width: 900px) {
+  .wr-commitments__counts {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .wr-commitment-grid {
+    --wr-commitment-person: 10rem;
+  }
+}
+
+/* Rostering governance and calendar subscription */
+.wr-governance-stack { display: grid; gap: 1rem; }
+.wr-panel-intro { max-width: 78ch; margin: -.25rem 0 1rem; color: var(--text-muted); }
+.wr-rule-set-banner { display: grid; gap: .75rem; margin-bottom: 1rem; }
+.wr-rule-set-banner article { border: 1px solid var(--border-subtle); border-radius: .75rem; padding: .9rem 1rem; background: var(--surface-muted); }
+.wr-rule-set-banner article > div { display: flex; justify-content: space-between; gap: .75rem; }
+.wr-rule-set-banner p { margin: .35rem 0 0; color: var(--text-muted); }
+.wr-compliance-rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; }
+.wr-compliance-rule-grid article { min-height: 112px; border: 1px solid var(--border-subtle); border-radius: .75rem; padding: .85rem; display: grid; align-content: start; gap: .35rem; }
+.wr-compliance-rule-grid article > div { display: flex; align-items: center; gap: .45rem; }
+.wr-compliance-rule-grid article > span { font-size: 1.05rem; font-weight: 700; }
+.wr-compliance-rule-grid article small { color: var(--text-muted); }
+.wr-compliance-rule-grid article.is-inactive { opacity: .62; border-style: dashed; }
+.wr-inline-create--governance { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); align-items: end; }
+.wr-checkbox-field { display: flex !important; flex-direction: row !important; align-items: center; gap: .45rem; padding-bottom: .7rem; }
+.wr-checkbox-field input { width: auto; }
+.wr-governance-decision { margin-top: 1rem; display: flex; gap: 1rem; align-items: end; justify-content: space-between; flex-wrap: wrap; }
+.wr-governance-decision label { flex: 1 1 360px; }
+.wr-calendar-policy-note, .wr-calendar-subscription { display: flex; align-items: flex-start; gap: .9rem; }
+.wr-calendar-policy-note p, .wr-calendar-subscription p { margin: .25rem 0; color: var(--text-muted); }
+.wr-calendar-subscription > div:nth-child(2) { flex: 1; }
+.wr-calendar-subscription .wr-actions { align-self: center; }
+.wr-calendar-subscription a { text-decoration: none; }
+@media (max-width: 760px) { .wr-calendar-subscription { flex-direction: column; } .wr-calendar-subscription .wr-actions { width: 100%; align-self: stretch; } }

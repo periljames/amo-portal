@@ -317,8 +317,26 @@ def serialize_version(
     warnings = sum(1 for item in findings if item.severity == models.RosterValidationSeverity.WARNING and not item.resolved)
     overridden = sum(1 for item in findings if item.resolved and item.overridden_at is not None)
     permissions = set()
+    approval_required = approval_approved = approval_pending = 0
+    scoped_can_approve = False
+    scoped_can_publish = False
     if current_user is not None and db is not None:
         permissions = set(workforce_permissions.permissions_for_user(db, user=current_user))
+        from . import governance
+        approvals = governance.approval_rows(db, version_id=row.id)
+        approval_required = len(approvals)
+        approval_approved = sum(item.status == models.RosterDepartmentApprovalStatus.APPROVED for item in approvals)
+        approval_pending = sum(item.status != models.RosterDepartmentApprovalStatus.APPROVED for item in approvals)
+        scoped_can_approve = any(
+            item.status != models.RosterDepartmentApprovalStatus.APPROVED
+            and governance.can_approve_scope(db, user=current_user, department_id=item.department_id, base_station_id=item.base_station_id)
+            for item in approvals
+        )
+        scoped_can_publish = bool(approvals) and all(
+            item.status == models.RosterDepartmentApprovalStatus.APPROVED
+            and governance.can_publish_scope(db, user=current_user, department_id=item.department_id, base_station_id=item.base_station_id)
+            for item in approvals
+        )
     return schemas.RosterVersionRead(
         id=row.id,
         amo_id=row.amo_id,
@@ -349,10 +367,13 @@ def serialize_version(
         warning_count=warnings,
         overridden_count=overridden,
         acknowledgement_count=0,
+        approval_required_count=approval_required,
+        approval_approved_count=approval_approved,
+        approval_pending_count=approval_pending,
         can_edit=row.status == models.RosterVersionStatus.DRAFT and workforce_permissions.PermissionCode.ROSTER_EDIT.value in permissions,
         can_submit=row.status == models.RosterVersionStatus.DRAFT and blockers == 0 and workforce_permissions.PermissionCode.ROSTER_SUBMIT.value in permissions,
-        can_approve=row.status == models.RosterVersionStatus.SUBMITTED and workforce_permissions.PermissionCode.ROSTER_APPROVE.value in permissions,
-        can_publish=row.status == models.RosterVersionStatus.APPROVED and blockers == 0 and workforce_permissions.PermissionCode.ROSTER_PUBLISH.value in permissions,
+        can_approve=row.status == models.RosterVersionStatus.SUBMITTED and scoped_can_approve,
+        can_publish=row.status == models.RosterVersionStatus.APPROVED and blockers == 0 and scoped_can_publish,
     )
 
 

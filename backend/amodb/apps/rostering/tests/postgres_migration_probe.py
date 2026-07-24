@@ -208,7 +208,7 @@ def _verify_redundant_phase2_overlap_repair(engine: sa.Engine) -> None:
 
     script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
     expected_heads = set(script.get_heads())
-    assert "saas_20260722_side_effect_safe" in expected_heads
+    assert "rostering_20260724_governance" in expected_heads
 
     # Reproduce the exact `upgrade heads` overlap at a fully-stamped installation:
     # all legitimate heads plus the now-redundant historical Phase 2 marker.

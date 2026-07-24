@@ -5,8 +5,10 @@ export type RosterAssignmentStatus = "DUTY" | "STANDBY" | "TRAINING" | "OFF" | "
 export type RosterAssignmentSource = "MANUAL" | "PATTERN" | "IMPORT" | "LEAVE" | "TRAINING" | "SYSTEM";
 export type RosterValidationSeverity = "INFO" | "WARNING" | "BLOCKER";
 export type RosterValidationSource = "ROSTER" | "IDENTITY" | "CONTRACT" | "BASE" | "AVAILABILITY" | "TRAINING" | "AUTHORISATION" | "WORKLOAD" | "ATTENDANCE" | "RULE";
-export type RosterRuleType = "MIN_REST_HOURS" | "MAX_DUTY_HOURS_DAY" | "MAX_DUTY_HOURS_ROLLING" | "MAX_CONSECUTIVE_DAYS" | "REQUIRED_DAYS_OFF" | "MIN_COVERAGE" | "REQUIRED_CERTIFYING_COVERAGE" | "REQUIRED_AUTHORISATION" | "TRAINING_VALIDITY" | "LICENCE_VALIDITY" | "CONTRACT_ELIGIBILITY" | "AVAILABILITY_CONFLICT" | "OVERLAP" | "CUSTOM";
+export type RosterRuleType = "MIN_REST_HOURS" | "MAX_ASSIGNMENT_DURATION" | "MAX_DUTY_HOURS_DAY" | "MAX_DUTY_HOURS_ROLLING" | "MAX_CONSECUTIVE_DAYS" | "MAX_CONSECUTIVE_NIGHTS" | "REQUIRED_DAYS_OFF" | "MIN_COVERAGE" | "REQUIRED_CERTIFYING_COVERAGE" | "REQUIRED_AUTHORISATION" | "TRAINING_VALIDITY" | "LICENCE_VALIDITY" | "CONTRACT_ELIGIBILITY" | "AVAILABILITY_CONFLICT" | "OVERLAP" | "CUSTOM";
 export type RosterRuleScope = "AMO" | "DEPARTMENT" | "BASE" | "SHIFT_TEMPLATE" | "USER";
+export type RosterApprovalAuthorityLevel = "BASE_MANAGER" | "DEPARTMENT_HEAD" | "DELEGATE";
+export type RosterDepartmentApprovalStatus = "PENDING" | "APPROVED" | "CHANGES_REQUESTED";
 export type RosterExceptionDecision = "ACCEPT_WARNING" | "OVERRIDE_BLOCKER" | "REVOKE";
 export type RosterAmendmentType = "CORRECTION" | "LEAVE" | "SICKNESS" | "TRAINING" | "OPERATIONAL" | "COVERAGE" | "OTHER";
 
@@ -84,6 +86,9 @@ export type RosterVersionRead = {
   warning_count: number;
   overridden_count: number;
   acknowledgement_count: number;
+  approval_required_count: number;
+  approval_approved_count: number;
+  approval_pending_count: number;
   can_edit: boolean;
   can_submit: boolean;
   can_approve: boolean;
@@ -206,6 +211,7 @@ export type RosterValidationResult = {
 
 export type RosterRuleRead = {
   id: string;
+  rule_set_id?: string | null;
   amo_id: string;
   code: string;
   name: string;
@@ -463,4 +469,76 @@ export type RosterContractResponse = {
   phase: string;
   permissions: string[];
   capabilities: Record<string, boolean>;
+};
+
+export type RosterRuleSetRead = {
+  id: string;
+  amo_id: string;
+  code: string;
+  name: string;
+  version_label?: string | null;
+  regulatory_basis?: string | null;
+  manual_reference?: string | null;
+  description?: string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  priority: number;
+  is_active: boolean;
+  created_by_user_id?: string | null;
+  updated_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RosterApprovalAuthorityRead = {
+  id: string;
+  amo_id: string;
+  user_id: string;
+  authority_level: RosterApprovalAuthorityLevel;
+  department_id?: string | null;
+  base_station_id?: string | null;
+  can_approve: boolean;
+  can_publish: boolean;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  reason?: string | null;
+  is_active: boolean;
+  created_by_user_id?: string | null;
+  updated_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RosterApprovalAuthorityCreate = Omit<RosterApprovalAuthorityRead, "id" | "amo_id" | "created_by_user_id" | "updated_by_user_id" | "created_at" | "updated_at">;
+
+export type RosterDepartmentApprovalRead = {
+  id: string;
+  amo_id: string;
+  version_id: string;
+  department_id?: string | null;
+  base_station_id?: string | null;
+  assigned_approver_user_id?: string | null;
+  status: RosterDepartmentApprovalStatus;
+  decided_by_user_id?: string | null;
+  decision_comment?: string | null;
+  decided_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RosterApprovalMatrixResponse = {
+  version_id?: string | null;
+  required_count: number;
+  approved_count: number;
+  pending_count: number;
+  changes_requested_count: number;
+  items: RosterDepartmentApprovalRead[];
+};
+
+export type RosterCalendarSubscriptionRead = {
+  https_url: string;
+  webcal_url: string;
+  feed_path: string;
+  refresh_interval_minutes: number;
+  includes: string[];
 };

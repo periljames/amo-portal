@@ -1,35 +1,18 @@
-"""Precreate workforce-integrated rostering tables safely.
-
-Revision ID: workforce_20260721_precreate
-Revises: qual_20260705_merge_heads, phase2_14a_20260615
-Create Date: 2026-07-22
-
-This predecessor isolates table creation from ORM-driven automatic index
-creation. PostgreSQL relation names are schema-global, so indexes and backing
-indexes of named unique constraints are created only after checking the whole
-current schema. The revision explicitly converges the core rostering branch
-before Workforce schema creation, then restores every deferred ORM foreign key
-after all Workforce tables are available.
-"""
 from __future__ import annotations
 
 from hashlib import sha1
 from importlib import import_module
-from typing import Any
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect, text
-
+from sqlalchemy import inspect
 
 revision = "workforce_20260721_precreate"
 down_revision = ("qual_20260705_merge_heads", "phase2_14a_20260615")
 branch_labels = None
 depends_on = None
 
-POSTGRES_IDENTIFIER_LIMIT = 63
-
-NEW_TABLES = [
+NEW_TABLES = (
     "roster_rules",
     "roster_rule_exceptions",
     "roster_demand_requirements",
@@ -55,11 +38,19 @@ NEW_TABLES = [
     "training_event_time_windows",
     "roster_planner_preferences",
     "workforce_notification_preferences",
-]
+)
+
+# This historical precreate revision deliberately reads current ORM metadata so it
+# can repair incomplete legacy installations. Newer migrations can therefore add
+# relationships to these tables that did not exist when this revision shipped.
+# Such foreign keys must be created by their owning later migration, not treated
+# as a failure while replaying this older revision on a clean database.
+FUTURE_MANAGED_FOREIGN_KEYS = {
+    ("roster_rules", ("rule_set_id",), "roster_rule_sets", ("id",)),
+}
 
 
-def _application_metadata() -> sa.MetaData:
-    """Load application metadata only during an actual migration run."""
+def _load_metadata() -> sa.MetaData:
     from amodb.database import Base
 
     for module_name in (
@@ -74,169 +65,96 @@ def _application_metadata() -> sa.MetaData:
     return Base.metadata
 
 
-def _relation_owner(bind, relation_name: str) -> dict[str, Any] | None:
-    """Return the schema relation kind and owning table, when one exists."""
-    if bind.dialect.name == "postgresql":
-        row = bind.execute(
-            text(
-                """
-                SELECT relation.relkind AS kind, owner.relname AS table_name
-                FROM pg_class AS relation
-                JOIN pg_namespace AS namespace
-                  ON namespace.oid = relation.relnamespace
-                LEFT JOIN pg_index AS index_record
-                  ON index_record.indexrelid = relation.oid
-                LEFT JOIN pg_class AS owner
-                  ON owner.oid = index_record.indrelid
-                WHERE namespace.nspname = current_schema()
-                  AND relation.relname = :relation_name
-                LIMIT 1
-                """
-            ),
-            {"relation_name": relation_name},
-        ).mappings().first()
-        return dict(row) if row else None
-
-    if bind.dialect.name == "sqlite":
-        row = bind.execute(
-            text(
-                "SELECT type AS kind, tbl_name AS table_name "
-                "FROM sqlite_master WHERE name = :relation_name LIMIT 1"
-            ),
-            {"relation_name": relation_name},
-        ).mappings().first()
-        return dict(row) if row else None
-
-    inspector = inspect(bind)
-    if relation_name in set(inspector.get_table_names()):
-        return {"kind": "table", "table_name": relation_name}
-    for table_name in inspector.get_table_names():
-        for index in inspector.get_indexes(table_name):
-            if index.get("name") == relation_name:
-                return {"kind": "index", "table_name": table_name}
-    return None
+def _application_metadata() -> sa.MetaData:
+    return _load_metadata()
 
 
-def _fallback_relation_name(desired_name: str, table_name: str, attempt: int) -> str:
-    suffix = f"__{table_name}" if attempt == 1 else f"__{table_name}_{attempt}"
-    available = max(1, POSTGRES_IDENTIFIER_LIMIT - len(suffix))
-    return f"{desired_name[:available]}{suffix}"
+def _bounded_identifier(value: str, *, max_length: int = 63) -> str:
+    if len(value) <= max_length:
+        return value
+    digest = sha1(value.encode("utf-8")).hexdigest()[:8]
+    return f"{value[: max_length - len(digest) - 1]}_{digest}"
 
 
-def _available_relation_name(bind, desired_name: str, table_name: str) -> str:
-    if _relation_owner(bind, desired_name) is None:
-        return desired_name
-
-    attempt = 1
-    while True:
-        fallback = _fallback_relation_name(desired_name, table_name, attempt)
-        if _relation_owner(bind, fallback) is None:
-            return fallback
-        attempt += 1
+def _bounded_constraint_name(value: str) -> str:
+    return _bounded_identifier(value)
 
 
 def _available_index_name(bind, desired_name: str, table_name: str) -> str | None:
-    owner = _relation_owner(bind, desired_name)
-    if owner is None:
-        return desired_name
-    if owner.get("table_name") == table_name and owner.get("kind") in {"i", "I", "index"}:
-        return None
-
-    attempt = 1
-    while True:
-        fallback = _fallback_relation_name(desired_name, table_name, attempt)
-        owner = _relation_owner(bind, fallback)
-        if owner is None:
-            return fallback
-        if owner.get("table_name") == table_name and owner.get("kind") in {"i", "I", "index"}:
-            return None
-        attempt += 1
-
-
-def _available_foreign_keys(bind, table: sa.Table) -> list[sa.ForeignKeyConstraint]:
-    """Return FKs whose remote table can be resolved at table-create time."""
     inspector = inspect(bind)
-    available_tables = set(inspector.get_table_names())
-    included: list[sa.ForeignKeyConstraint] = []
-    for constraint in table.foreign_key_constraints:
-        remote_table = constraint.referred_table.name
-        if remote_table == table.name or remote_table in available_tables:
-            included.append(constraint)
-    return included
-
-
-def _create_table_with_safe_unique_names(bind, table: sa.Table) -> None:
-    renamed: list[tuple[sa.UniqueConstraint, str]] = []
-    for constraint in table.constraints:
-        if not isinstance(constraint, sa.UniqueConstraint) or not constraint.name:
-            continue
-        desired_name = str(constraint.name)
-        actual_name = _available_relation_name(bind, desired_name, table.name)
-        if actual_name != desired_name:
-            renamed.append((constraint, desired_name))
-            constraint.name = actual_name
-
-    try:
-        bind.execute(
-            sa.schema.CreateTable(
-                table,
-                include_foreign_key_constraints=_available_foreign_keys(bind, table),
-            )
-        )
-    finally:
-        for constraint, original_name in renamed:
-            constraint.name = original_name
+    existing = {
+        str(row["name"])
+        for existing_table in inspector.get_table_names()
+        for row in inspector.get_indexes(existing_table)
+        if row.get("name")
+    }
+    if desired_name not in existing:
+        return desired_name
+    if desired_name in {
+        str(row["name"])
+        for row in inspector.get_indexes(table_name)
+        if row.get("name")
+    }:
+        return None
+    return _bounded_identifier(f"{desired_name}__{table_name}")
 
 
 def _create_tables_without_indexes(bind, metadata: sa.MetaData) -> None:
     inspector = inspect(bind)
+    existing_tables = set(inspector.get_table_names())
+
     for table_name in NEW_TABLES:
-        table = metadata.tables.get(table_name)
-        if table is None:
-            raise RuntimeError(f"Migration metadata table missing: {table_name}")
-        if not inspector.has_table(table_name):
-            _create_table_with_safe_unique_names(bind, table)
-            inspector = inspect(bind)
+        table = metadata.tables[table_name]
+        if table_name in existing_tables:
+            continue
+
+        # PostgreSQL uses the same schema-level relation namespace for indexes and
+        # UNIQUE-constraint backing indexes. Temporarily omit UNIQUE constraints
+        # from CREATE TABLE so a legacy collision can be resolved with the same
+        # bounded, table-specific naming policy used for normal indexes below.
+        unique_constraints = [
+            constraint
+            for constraint in list(table.constraints)
+            if isinstance(constraint, sa.UniqueConstraint)
+        ]
+        for constraint in unique_constraints:
+            table.constraints.remove(constraint)
+        try:
+            bind.execute(sa.schema.CreateTable(table, include_foreign_key_constraints=[]))
+        finally:
+            for constraint in unique_constraints:
+                table.append_constraint(constraint)
+        existing_tables.add(table_name)
 
 
 def _fk_signature(
-    local_columns: list[str] | tuple[str, ...],
+    local_columns: list[str],
     remote_table: str,
-    remote_columns: list[str] | tuple[str, ...],
+    remote_columns: list[str],
 ) -> tuple[tuple[str, ...], str, tuple[str, ...]]:
-    return tuple(local_columns), remote_table, tuple(remote_columns)
+    return (tuple(local_columns), remote_table, tuple(remote_columns))
 
 
-def _existing_fk_signatures(bind, table_name: str) -> set[tuple[tuple[str, ...], str, tuple[str, ...]]]:
-    inspector = inspect(bind)
-    if not inspector.has_table(table_name):
-        return set()
+def _existing_fk_signatures(
+    bind,
+    table_name: str,
+) -> set[tuple[tuple[str, ...], str, tuple[str, ...]]]:
     return {
         _fk_signature(
-            tuple(str(column) for column in (foreign_key.get("constrained_columns") or ())),
+            [str(column) for column in (foreign_key.get("constrained_columns") or ())],
             str(foreign_key.get("referred_table") or ""),
-            tuple(str(column) for column in (foreign_key.get("referred_columns") or ())),
+            [str(column) for column in (foreign_key.get("referred_columns") or ())],
         )
-        for foreign_key in inspector.get_foreign_keys(table_name)
+        for foreign_key in inspect(bind).get_foreign_keys(table_name)
     }
 
 
 def _existing_fk_names(bind, table_name: str) -> set[str]:
-    inspector = inspect(bind)
-    if not inspector.has_table(table_name):
-        return set()
     return {
         str(foreign_key["name"])
-        for foreign_key in inspector.get_foreign_keys(table_name)
+        for foreign_key in inspect(bind).get_foreign_keys(table_name)
         if foreign_key.get("name")
     }
-
-
-def _bounded_constraint_name(raw_name: str) -> str:
-    if len(raw_name) <= POSTGRES_IDENTIFIER_LIMIT:
-        return raw_name
-    digest = sha1(raw_name.encode("utf-8")).hexdigest()[:8]
-    return f"{raw_name[:POSTGRES_IDENTIFIER_LIMIT - 9]}_{digest}"
 
 
 def _constraint_name(
@@ -245,8 +163,9 @@ def _constraint_name(
     local_columns: list[str],
     remote_table: str,
 ) -> str:
-    if constraint.name:
-        return _bounded_constraint_name(str(constraint.name))
+    explicit = str(constraint.name or "").strip()
+    if explicit:
+        return _bounded_constraint_name(explicit)
     return _bounded_constraint_name(
         f"fk_{table_name}_{'_'.join(local_columns)}_{remote_table}"
     )
@@ -282,6 +201,14 @@ def _restore_deferred_foreign_keys(bind, metadata: sa.MetaData) -> None:
             if signature in existing_signatures:
                 continue
             if remote_table not in available_tables:
+                future_signature = (
+                    table_name,
+                    tuple(local_columns),
+                    remote_table,
+                    tuple(remote_columns),
+                )
+                if future_signature in FUTURE_MANAGED_FOREIGN_KEYS:
+                    continue
                 unresolved.append(
                     f"{table_name}({','.join(local_columns)}) -> "
                     f"{remote_table}({','.join(remote_columns)})"
@@ -323,6 +250,30 @@ def _restore_deferred_foreign_keys(bind, metadata: sa.MetaData) -> None:
         )
 
 
+def _create_unique_constraints_safely(bind, metadata: sa.MetaData) -> None:
+    for table_name in NEW_TABLES:
+        table = metadata.tables[table_name]
+        constraints = sorted(
+            (
+                constraint
+                for constraint in table.constraints
+                if isinstance(constraint, sa.UniqueConstraint)
+            ),
+            key=lambda item: str(item.name or ""),
+        )
+        for constraint in constraints:
+            columns = [str(column.name) for column in constraint.columns]
+            if not columns:
+                raise RuntimeError(f"Unique constraint without columns on {table_name}")
+            desired_name = str(constraint.name or "").strip() or _bounded_identifier(
+                f"uq_{table_name}_{'_'.join(columns)}"
+            )
+            actual_name = _available_index_name(bind, desired_name, table_name)
+            if actual_name is None:
+                continue
+            op.create_index(actual_name, table_name, columns, unique=True)
+
+
 def _create_indexes_safely(bind, metadata: sa.MetaData) -> None:
     for table_name in NEW_TABLES:
         table = metadata.tables[table_name]
@@ -344,6 +295,7 @@ def upgrade() -> None:
     metadata = _application_metadata()
     _create_tables_without_indexes(bind, metadata)
     _restore_deferred_foreign_keys(bind, metadata)
+    _create_unique_constraints_safely(bind, metadata)
     _create_indexes_safely(bind, metadata)
 
 

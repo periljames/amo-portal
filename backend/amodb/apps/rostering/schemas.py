@@ -187,7 +187,118 @@ class RosterAssignmentRead(RosterSchema):
     authorisation_state: Optional[str] = None
 
 
+
+
+class RosterRuleSetBase(RosterSchema):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=255)
+    version_label: Optional[str] = Field(default=None, max_length=128)
+    regulatory_basis: Optional[str] = None
+    manual_reference: Optional[str] = None
+    description: Optional[str] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    priority: int = 100
+    is_active: bool = True
+
+
+class RosterRuleSetCreate(RosterRuleSetBase):
+    pass
+
+
+class RosterRuleSetUpdate(RosterSchema):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    version_label: Optional[str] = Field(default=None, max_length=128)
+    regulatory_basis: Optional[str] = None
+    manual_reference: Optional[str] = None
+    description: Optional[str] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class RosterRuleSetRead(RosterRuleSetBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    amo_id: str
+    created_by_user_id: Optional[str] = None
+    updated_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RosterApprovalAuthorityBase(RosterSchema):
+    user_id: str
+    authority_level: models.RosterApprovalAuthorityLevel
+    department_id: Optional[str] = None
+    base_station_id: Optional[str] = None
+    can_approve: bool = True
+    can_publish: bool = False
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    reason: Optional[str] = Field(default=None, max_length=2000)
+    is_active: bool = True
+
+
+class RosterApprovalAuthorityCreate(RosterApprovalAuthorityBase):
+    pass
+
+
+class RosterApprovalAuthorityUpdate(RosterSchema):
+    can_approve: Optional[bool] = None
+    can_publish: Optional[bool] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    reason: Optional[str] = Field(default=None, max_length=2000)
+    is_active: Optional[bool] = None
+
+
+class RosterApprovalAuthorityRead(RosterApprovalAuthorityBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    amo_id: str
+    created_by_user_id: Optional[str] = None
+    updated_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RosterDepartmentApprovalRead(RosterSchema):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    amo_id: str
+    version_id: str
+    department_id: Optional[str] = None
+    base_station_id: Optional[str] = None
+    assigned_approver_user_id: Optional[str] = None
+    status: models.RosterDepartmentApprovalStatus
+    decided_by_user_id: Optional[str] = None
+    decision_comment: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RosterApprovalMatrixResponse(RosterSchema):
+    version_id: Optional[str] = None
+    required_count: int = 0
+    approved_count: int = 0
+    pending_count: int = 0
+    changes_requested_count: int = 0
+    items: list[RosterDepartmentApprovalRead] = Field(default_factory=list)
+
+
+class RosterCalendarSubscriptionRead(RosterSchema):
+    https_url: str
+    webcal_url: str
+    feed_path: str
+    refresh_interval_minutes: int = 60
+    includes: list[str] = Field(default_factory=list)
+
+
 class RosterRuleBase(RosterSchema):
+    rule_set_id: Optional[str] = None
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
@@ -296,6 +407,9 @@ class RosterVersionRead(RosterSchema):
     warning_count: int = 0
     overridden_count: int = 0
     acknowledgement_count: int = 0
+    approval_required_count: int = 0
+    approval_approved_count: int = 0
+    approval_pending_count: int = 0
     can_edit: bool = False
     can_submit: bool = False
     can_approve: bool = False
@@ -355,6 +469,8 @@ class RosterLifecycleRequest(RosterSchema):
     expected_state_revision: Optional[int] = Field(default=None, ge=1)
     idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128)
     comment: Optional[str] = None
+    department_id: Optional[str] = None
+    base_station_id: Optional[str] = None
 
 
 class RosterAcknowledgeRequest(RosterSchema):

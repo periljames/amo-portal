@@ -3,16 +3,18 @@
 
 `amodb.main` historically imports `amodb.apps.rostering.router.router`.  The
 package initializer replaces that submodule export with this aggregate, which
-preserves the existing bootstrap import while mounting both canonical sibling
-prefixes: `/rostering` and `/workforce`.
+preserves the existing bootstrap import while mounting the canonical sibling
+prefixes `/rostering` and `/workforce`.
 """
 from fastapi import APIRouter
 
 from . import router as rostering_route_module
+from .commitments_router import router as commitments_router
 from ..workforce.router_entry import router as workforce_router
 
 router = APIRouter()
 router.include_router(rostering_route_module.router)
+router.include_router(commitments_router)
 router.include_router(workforce_router)
 
 __all__ = ["router"]

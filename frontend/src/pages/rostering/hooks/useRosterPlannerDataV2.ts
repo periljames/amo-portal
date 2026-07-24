@@ -346,10 +346,10 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     networkMode: "offlineFirst",
   });
 
-  const periods = periodsQuery.data || [];
+  const periods = useMemo(() => periodsQuery.data || [], [periodsQuery.data]);
   const selectedPeriod = periods.find((row) => row.id === selectedPeriodId);
   const versions = selectedPeriod?.versions || [];
-  const peoplePages = peopleQuery.data?.pages || [];
+  const peoplePages = useMemo(() => peopleQuery.data?.pages || [], [peopleQuery.data?.pages]);
   const people = useMemo(
     () => peoplePages.flatMap((page) => page.items),
     [peoplePages],

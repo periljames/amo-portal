@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
 from ..workforce import calculations as workforce_calculations
-from . import common, models, schemas, validation
+from . import common, governance, models, schemas, validation
 
 
 def seed_default_shift_templates(db: Session, *, amo_id: str, actor_user_id: Optional[str] = None) -> None:
@@ -230,7 +230,10 @@ def create_rule(db: Session, *, amo_id: str, actor_user_id: str, payload: schema
     common.require_shift_template(db, amo_id=amo_id, shift_template_id=payload.shift_template_id)
     if payload.user_id:
         common.require_user(db, amo_id=amo_id, user_id=payload.user_id, active_only=False)
-    row = models.RosterRule(amo_id=amo_id, **common.dump(payload), created_by_user_id=actor_user_id, updated_by_user_id=actor_user_id)
+    values = common.dump(payload)
+    if not values.get("rule_set_id"):
+        values["rule_set_id"] = governance.seed_default_rule_set(db, amo_id=amo_id, actor_user_id=actor_user_id).id
+    row = models.RosterRule(amo_id=amo_id, **values, created_by_user_id=actor_user_id, updated_by_user_id=actor_user_id)
     row.code = row.code.strip().upper()
     row.name = row.name.strip()
     db.add(row)

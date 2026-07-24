@@ -20,6 +20,8 @@ type LifecycleRequest = {
   expected_state_revision?: number | null;
   idempotency_key?: string | null;
   comment?: string | null;
+  department_id?: string | null;
+  base_station_id?: string | null;
 };
 
 type DeleteAssignmentRequest = {
@@ -335,4 +337,28 @@ export function allocateRosterAssignmentToTask(
     method: "POST",
     body: jsonBody(payload),
   });
+}
+
+export function requestRosterChanges(versionId: string, payload: LifecycleRequest): Promise<Roster.RosterVersionRead> {
+  return apiJson(`/rostering/versions/${encodeURIComponent(versionId)}/request-changes`, { method: "POST", body: jsonBody(payload) });
+}
+
+export function listRosterRuleSets(includeInactive = false): Promise<Roster.RosterRuleSetRead[]> {
+  return apiJson(`/rostering/rule-sets${queryString({ include_inactive: includeInactive })}`, { offline: { cacheTtlMs: 15 * 60_000 } });
+}
+
+export function listRosterApprovalAuthorities(includeInactive = false): Promise<Roster.RosterApprovalAuthorityRead[]> {
+  return apiJson(`/rostering/approval-authorities${queryString({ include_inactive: includeInactive })}`, { offline: { cacheTtlMs: 5 * 60_000 } });
+}
+
+export function createRosterApprovalAuthority(payload: Roster.RosterApprovalAuthorityCreate): Promise<Roster.RosterApprovalAuthorityRead> {
+  return apiJson("/rostering/approval-authorities", { method: "POST", body: jsonBody(payload) });
+}
+
+export function getRosterApprovalMatrix(versionId?: string | null): Promise<Roster.RosterApprovalMatrixResponse> {
+  return apiJson(`/rostering/approval-matrix${queryString({ version_id: versionId || null })}`, { offline: { cacheTtlMs: 30_000 } });
+}
+
+export function getRosterCalendarSubscription(): Promise<Roster.RosterCalendarSubscriptionRead> {
+  return apiJson("/rostering/calendar/subscription", { offline: { cacheTtlMs: 60 * 60_000 } });
 }

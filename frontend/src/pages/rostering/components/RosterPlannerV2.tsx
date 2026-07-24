@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState, type CSSProperties, type DragEvent, type KeyboardEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { addDays, format, parseISO } from "date-fns";
 import {
   AlertTriangle,
@@ -7,6 +8,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Filter,
+  GraduationCap,
   GripVertical,
   LockKeyhole,
   Plus,
@@ -16,11 +18,18 @@ import {
   Send,
   ShieldCheck,
   Trash2,
+  Umbrella,
   UsersRound,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
+import { isOfflineQueuedError } from "../../../services/offlineHttp";
+import {
+  listRosterCommitments,
+  type RosterCommitmentRead,
+} from "../../../services/rosterCommitments";
+import type { RosterPersonRead } from "../../../services/rosterPeople";
 import {
   approveRosterVersion,
   createRosterAssignment,
@@ -30,13 +39,11 @@ import {
   updateRosterAssignment,
   validateRosterVersion,
 } from "../../../services/rostering";
-import { isOfflineQueuedError } from "../../../services/offlineHttp";
-import type { RosterPersonRead } from "../../../services/rosterPeople";
 import type { RosterAssignmentRead, RosterValidationFindingRead, ShiftTemplateRead } from "../../../types/rostering";
 import { errorMessage, formatDay, isoDate, newIdempotencyKey } from "../rosterUi";
 import { formatInZone, moveIntervalToZonedDay, templateWindowInZone } from "../timezone";
-import { EmptyState, RosterError, RosterLoading, StatusPill } from "./RosterShell";
 import { useRosterPlannerDataV2 } from "../hooks/useRosterPlannerDataV2";
+import { EmptyState, RosterError, RosterLoading, StatusPill } from "./RosterShell";
 
 type DragPayload = { type: "person"; userId: string } | { type: "assignment"; assignmentId: string };
 
@@ -54,6 +61,28 @@ function getDrag(event: DragEvent<HTMLElement>): DragPayload | null {
   }
 }
 
+function localDate(value: string, timezoneName: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezoneName,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(parseISO(value));
+  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function inclusiveLocalEndDate(value: string, timezoneName: string): string {
+  const instant = parseISO(value);
+  return localDate(new Date(instant.getTime() - 1).toISOString(), timezoneName);
+}
+
+function CommitmentSourceIcon({ sourceModule }: { sourceModule: string }) {
+  if (sourceModule === "TRAINING") return <GraduationCap size={12} aria-hidden="true" />;
+  if (sourceModule === "QUALITY") return <ShieldCheck size={12} aria-hidden="true" />;
+  return <Umbrella size={12} aria-hidden="true" />;
+}
+
 function PersonCard({ person }: { person: RosterPersonRead }) {
   return (
     <button type="button" className="wr-person" draggable onDragStart={(event) => setDrag(event, { type: "person", userId: person.user_id })}>
@@ -61,6 +90,19 @@ function PersonCard({ person }: { person: RosterPersonRead }) {
       <span className="wr-person__identity"><strong>{person.full_name}</strong><small>{person.staff_code} · {person.position_title || person.role.replace(/_/g, " ")}</small></span>
       <span className="wr-person__signals"><i className={person.has_active_contract ? "is-good" : "is-danger"} /><i className={person.active_authorisation_count ? "is-good" : "is-warning"} /></span>
     </button>
+  );
+}
+
+function CommitmentCard({ commitment }: { commitment: RosterCommitmentRead }) {
+  return (
+    <article
+      className={`wr-planner-commitment wr-planner-commitment--${commitment.source_module.toLowerCase()}${commitment.blocking ? " is-blocking" : ""}`}
+      title={[commitment.title, commitment.detail, commitment.location_label, commitment.status].filter(Boolean).join(" · ")}
+    >
+      <CommitmentSourceIcon sourceModule={commitment.source_module} />
+      <span><strong>{commitment.kind.replace(/_/g, " ")}</strong><small>{commitment.title}</small></span>
+      {commitment.provisional ? <em>Provisional</em> : null}
+    </article>
   );
 }
 
@@ -210,16 +252,48 @@ export function RosterPlannerV2() {
   const people = data.people;
   const byId = useMemo(() => new Map(data.assignments.map((assignment) => [assignment.id, assignment])), [data.assignments]);
 
+  const commitmentsQuery = useQuery({
+    queryKey: ["rostering", "planner", "commitments", data.week.from, data.week.to],
+    queryFn: () => listRosterCommitments({ from: data.week.from, to: data.week.to }),
+    staleTime: 30_000,
+    gcTime: 24 * 60 * 60_000,
+    networkMode: "offlineFirst",
+  });
+
+  const commitmentsByCell = useMemo(() => {
+    const map = new Map<string, RosterCommitmentRead[]>();
+    for (const commitment of commitmentsQuery.data?.items || []) {
+      const start = localDate(commitment.starts_at, timezoneName);
+      const end = inclusiveLocalEndDate(commitment.ends_at, timezoneName);
+      for (const day of data.week.days) {
+        const dayKey = isoDate(day);
+        if (dayKey < start || dayKey > end) continue;
+        const key = `${commitment.user_id}:${dayKey}`;
+        map.set(key, [...(map.get(key) || []), commitment]);
+      }
+    }
+    return map;
+  }, [commitmentsQuery.data?.items, data.week.days, timezoneName]);
+
   const assignmentsFor = useCallback((userId: string, day: Date) => data.assignments.filter((assignment) => {
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezoneName, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(parseISO(assignment.starts_at));
-    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-    return assignment.user_id === userId && `${values.year}-${values.month}-${values.day}` === isoDate(day);
+    return assignment.user_id === userId && localDate(assignment.starts_at, timezoneName) === isoDate(day);
   }), [data.assignments, timezoneName]);
+
+  const blockingCommitmentsFor = useCallback((userId: string, day: Date) => (
+    commitmentsByCell.get(`${userId}:${isoDate(day)}`)?.filter((commitment) => commitment.blocking) || []
+  ), [commitmentsByCell]);
 
   const replace = (row: RosterAssignmentRead) => data.setAssignments((current) => current.map((item) => item.id === row.id ? row : item));
 
+  const preventBlockedAssignment = (person: RosterPersonRead, day: Date): boolean => {
+    const conflicts = blockingCommitmentsFor(person.user_id, day);
+    if (!conflicts.length) return false;
+    setError(`${person.full_name} already has a source-owned ${conflicts[0].kind.replace(/_/g, " ").toLowerCase()} commitment on ${format(day, "dd MMM yyyy")}. Resolve or reschedule it in ${conflicts[0].source_module.toLowerCase()} before adding duty.`);
+    return true;
+  };
+
   const create = async (person: RosterPersonRead, day: Date) => {
-    if (!data.selectedVersion || !selectedTemplate || !editable) return;
+    if (!data.selectedVersion || !selectedTemplate || !editable || preventBlockedAssignment(person, day)) return;
     setBusy(`create:${person.user_id}:${isoDate(day)}`); setError(null); setNotice(null);
     const dutyWindow = templateWindowInZone(day, selectedTemplate.default_start_time || "08:00", selectedTemplate.default_end_time || "17:00", timezoneName);
     const status = selectedTemplate.kind === "STANDBY" ? "STANDBY" : selectedTemplate.kind === "TRAINING" ? "TRAINING" : selectedTemplate.kind === "OFF" ? "OFF" : selectedTemplate.kind === "LEAVE" ? "LEAVE" : "DUTY";
@@ -280,6 +354,8 @@ export function RosterPlannerV2() {
 
   const move = async (assignment: RosterAssignmentRead, day: Date) => {
     if (!editable || assignment.locked_after_publish || assignment.id.startsWith("offline-")) return;
+    const person = people.find((row) => row.user_id === assignment.user_id);
+    if (person && preventBlockedAssignment(person, day)) return;
     const previous = assignment;
     const moved = moveIntervalToZonedDay(assignment.starts_at, assignment.ends_at, day, timezoneName);
     replace({ ...assignment, ...moved, state_revision: assignment.state_revision + 1 });
@@ -313,8 +389,12 @@ export function RosterPlannerV2() {
       if (action === "submit") await submitRosterVersion(version.id, { expected_state_revision: version.state_revision, comment: "Submitted from planner" });
       if (action === "approve") await approveRosterVersion(version.id, { expected_state_revision: version.state_revision, comment: "Approved from planner" });
       if (action === "publish") await publishRosterVersion(version.id, { expected_state_revision: version.state_revision, idempotency_key: newIdempotencyKey("publish"), comment: "Published from planner" });
-      await data.refresh();
+      await Promise.all([data.refresh(), commitmentsQuery.refetch()]);
     } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(null); }
+  };
+
+  const refreshAll = async () => {
+    await Promise.all([data.refresh(), commitmentsQuery.refetch()]);
   };
 
   if (data.loading) return <RosterLoading label="Loading roster planner…" />;
@@ -330,9 +410,10 @@ export function RosterPlannerV2() {
             <label className="wr-compact-field"><span>Version</span><select value={data.selectedVersionId} onChange={(event) => data.setSelectedVersionId(event.target.value)}><option value="">Select version</option>{[...data.versions].sort((a, b) => b.version_no - a.version_no).map((row) => <option key={row.id} value={row.id}>v{row.version_no} · {row.status}</option>)}</select></label>
             <label className="wr-compact-field"><span>Template</span><select value={selectedTemplate?.id || ""} onChange={(event) => setTemplateId(event.target.value)} disabled={!editable}>{data.templates.map((row) => <option key={row.id} value={row.id}>{row.code} · {row.label}</option>)}</select></label>
           </div>
-          <button type="button" className="wr-icon-button" onClick={() => void data.refresh()}><RefreshCw size={17} className={data.refreshing ? "is-spinning" : ""} /></button>
+          <button type="button" className="wr-icon-button" onClick={() => void refreshAll()}><RefreshCw size={17} className={data.refreshing || commitmentsQuery.isFetching ? "is-spinning" : ""} /></button>
         </div>
-        <div className="wr-workflow-bar"><div className="wr-workflow-state"><StatusPill value={data.selectedVersion?.status || "NO VERSION"} /><span>{timezoneName}</span>{data.selectedVersion ? <span>Revision {data.selectedVersion.state_revision}</span> : null}</div><div className="wr-actions"><button type="button" className="wr-button wr-button--secondary" onClick={() => lifecycle("validate")} disabled={!data.selectedVersion || Boolean(busy)}><ShieldCheck size={16} /> Validate</button>{data.selectedVersion?.can_submit ? <button type="button" className="wr-button wr-button--primary" onClick={() => lifecycle("submit")} disabled={Boolean(busy)}><Send size={16} /> Submit</button> : null}{data.selectedVersion?.can_approve ? <button type="button" className="wr-button wr-button--primary" onClick={() => lifecycle("approve")} disabled={Boolean(busy)}><ClipboardCheck size={16} /> Approve</button> : null}{data.selectedVersion?.can_publish ? <button type="button" className="wr-button wr-button--success" onClick={() => lifecycle("publish")} disabled={Boolean(busy)}><CheckCircle2 size={16} /> Publish</button> : null}</div></div>
+        <div className="wr-workflow-bar"><div className="wr-workflow-state"><StatusPill value={data.selectedVersion?.status || "NO VERSION"} /><span>{timezoneName}</span>{data.selectedVersion ? <span>Revision {data.selectedVersion.state_revision}</span> : null}<span>Source commitments inline</span>{data.selectedVersion?.approval_required_count ? <span>{data.selectedVersion.approval_approved_count}/{data.selectedVersion.approval_required_count} department approvals</span> : null}</div><div className="wr-actions"><button type="button" className="wr-button wr-button--secondary" onClick={() => lifecycle("validate")} disabled={!data.selectedVersion || Boolean(busy)}><ShieldCheck size={16} /> Validate</button>{data.selectedVersion?.can_submit ? <button type="button" className="wr-button wr-button--primary" onClick={() => lifecycle("submit")} disabled={Boolean(busy)}><Send size={16} /> Submit</button> : null}{data.selectedVersion?.can_approve ? <button type="button" className="wr-button wr-button--primary" onClick={() => lifecycle("approve")} disabled={Boolean(busy)}><ClipboardCheck size={16} /> Approve</button> : null}{data.selectedVersion?.can_publish ? <button type="button" className="wr-button wr-button--success" onClick={() => lifecycle("publish")} disabled={Boolean(busy)}><CheckCircle2 size={16} /> Publish</button> : null}</div></div>
+        {commitmentsQuery.error ? <div className="wr-inline-warning"><AlertTriangle size={16} /> Training, leave or Quality commitments could not be synchronised: {errorMessage(commitmentsQuery.error)}</div> : null}
         {notice ? <div className="wr-inline-warning"><RefreshCw size={16} /> {notice}</div> : null}
         {error ? <div className="wr-inline-error"><AlertTriangle size={16} /> {error}</div> : null}
         {!data.selectedVersion ? <EmptyState title="No roster version selected" description="Create or select a draft version before assigning duty." /> : <div className="wr-planner-body">
@@ -347,7 +428,7 @@ export function RosterPlannerV2() {
               {data.peopleHasMore ? <button type="button" className="wr-button wr-button--secondary wr-people-load-more" onClick={() => void data.loadMorePeople()} disabled={data.peopleLoadingMore}>{data.peopleLoadingMore ? <RefreshCw size={15} className="is-spinning" /> : <Plus size={15} />} Load next 100</button> : null}
             </div>
           </aside>
-          <div className="wr-grid-scroll" tabIndex={0}><div className="wr-roster-grid" style={{ "--wr-days": data.week.days.length } as CSSProperties}><div className="wr-grid-corner">Personnel</div>{data.week.days.map((day) => <div key={isoDate(day)} className={`wr-day-header${isoDate(day) === isoDate(new Date()) ? " is-today" : ""}`}><strong>{formatDay(day)}</strong><small>{format(day, "yyyy")}</small></div>)}{people.map((person) => <div className="wr-grid-row" key={person.user_id}><div className="wr-grid-person"><strong>{person.full_name}</strong><small>{person.staff_code} · {person.primary_base_code || "No base"}</small></div>{data.week.days.map((day) => { const key = `${person.user_id}:${isoDate(day)}`; const rows = assignmentsFor(person.user_id, day); return <div key={key} className={`wr-drop-cell${dropTarget === key ? " is-drop-target" : ""}`} onDragOver={(event) => { if (editable) { event.preventDefault(); setDropTarget(key); } }} onDragLeave={() => setDropTarget((value) => value === key ? null : value)} onDrop={(event) => void drop(event, person.user_id, day)} onDoubleClick={() => void create(person, day)}>{rows.map((assignment) => <AssignmentCard key={assignment.id} assignment={assignment} timezoneName={timezoneName} selected={selectedId === assignment.id} onSelect={() => setSelectedId(assignment.id)} onMove={(days) => void move(assignment, addDays(day, days))} />)}{rows.length === 0 && editable ? <button type="button" className="wr-cell-add" onClick={() => void create(person, day)} disabled={busy === `create:${person.user_id}:${isoDate(day)}`}><Plus size={14} /> Assign</button> : null}</div>; })}</div>)}</div></div>
+          <div className="wr-grid-scroll" tabIndex={0}><div className="wr-roster-grid" style={{ "--wr-days": data.week.days.length } as CSSProperties}><div className="wr-grid-corner">Personnel</div>{data.week.days.map((day) => <div key={isoDate(day)} className={`wr-day-header${isoDate(day) === isoDate(new Date()) ? " is-today" : ""}`}><strong>{formatDay(day)}</strong><small>{format(day, "yyyy")}</small></div>)}{people.map((person) => <div className="wr-grid-row" key={person.user_id}><div className="wr-grid-person"><strong>{person.full_name}</strong><small>{person.staff_code} · {person.primary_base_code || "No base"}</small></div>{data.week.days.map((day) => { const key = `${person.user_id}:${isoDate(day)}`; const rows = assignmentsFor(person.user_id, day); const commitments = commitmentsByCell.get(key) || []; const blocking = commitments.some((commitment) => commitment.blocking); return <div key={key} className={`wr-drop-cell${dropTarget === key ? " is-drop-target" : ""}${blocking ? " is-source-blocked" : ""}`} onDragOver={(event) => { if (editable && !blocking) { event.preventDefault(); setDropTarget(key); } }} onDragLeave={() => setDropTarget((value) => value === key ? null : value)} onDrop={(event) => void drop(event, person.user_id, day)} onDoubleClick={() => { if (!blocking) void create(person, day); }}>{commitments.map((commitment) => <CommitmentCard key={commitment.id} commitment={commitment} />)}{rows.map((assignment) => <AssignmentCard key={assignment.id} assignment={assignment} timezoneName={timezoneName} selected={selectedId === assignment.id} onSelect={() => setSelectedId(assignment.id)} onMove={(days) => void move(assignment, addDays(day, days))} />)}{rows.length === 0 && commitments.length === 0 && editable ? <button type="button" className="wr-cell-add" onClick={() => void create(person, day)} disabled={busy === `create:${person.user_id}:${isoDate(day)}`}><Plus size={14} /> Assign</button> : null}</div>; })}</div>)}</div></div>
         </div>}
       </section>
       <FindingRail findings={data.findings} onFocus={setSelectedId} />
