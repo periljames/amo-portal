@@ -7,13 +7,16 @@ not by Rostering or another operational workspace.
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from typing import Iterable, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
+from ..audit import services as audit_services
 from ..quality import models as quality_models
 from . import models, schemas
 
@@ -30,6 +33,77 @@ def canonical_user_id(value: object) -> str:
 
 def normalize_base_code(value: str) -> str:
     return "".join(str(value or "").strip().upper().split())
+
+
+def _iso(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _assert_expected_updated_at(row: object, expected: Optional[datetime], *, entity: str) -> None:
+    if expected is None:
+        return
+    actual = getattr(row, "updated_at", None)
+    if _iso(actual) != _iso(expected):
+        raise RuntimeError(f"{entity}_REVISION_CONFLICT:{_iso(actual) or ''}")
+
+
+def _audit(
+    db: Session,
+    *,
+    amo_id: str,
+    actor_user_id: Optional[str],
+    entity_type: str,
+    entity_id: str,
+    action: str,
+    before: Optional[dict] = None,
+    after: Optional[dict] = None,
+    reason: Optional[str] = None,
+    critical: bool = False,
+) -> None:
+    audit_services.log_event(
+        db,
+        amo_id=amo_id,
+        actor_user_id=actor_user_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action=action,
+        before=before,
+        after=after,
+        metadata={"module": "foundations", "reason": reason},
+        critical=critical,
+    )
+
+
+def _base_snapshot(row: models.BaseStation) -> dict:
+    return {
+        "code": row.code,
+        "name": row.name,
+        "icao_code": row.icao_code,
+        "iata_code": row.iata_code,
+        "base_type": str(getattr(row.base_type, "value", row.base_type)),
+        "time_zone": row.time_zone,
+        "description": row.description,
+        "is_active": row.is_active,
+        "aliases": sorted(alias.alias for alias in (row.aliases or [])),
+        "updated_at": _iso(row.updated_at),
+    }
+
+
+def _assignment_snapshot(row: models.UserBaseAssignment) -> dict:
+    return {
+        "user_id": row.user_id,
+        "base_station_id": row.base_station_id,
+        "assignment_kind": str(getattr(row.assignment_kind, "value", row.assignment_kind)),
+        "effective_from": row.effective_from.isoformat(),
+        "effective_to": row.effective_to.isoformat() if row.effective_to else None,
+        "is_primary": row.is_primary,
+        "note": row.note,
+        "updated_at": _iso(row.updated_at),
+    }
 
 
 def list_base_stations(db: Session, *, amo_id: str, include_inactive: bool = False) -> list[models.BaseStation]:
@@ -62,6 +136,17 @@ def create_base_station(
     db.add(item)
     db.flush()
     replace_base_aliases(db, amo_id=amo_id, base_station=item, aliases=payload.aliases, source_module="foundations")
+    db.flush()
+    _audit(
+        db,
+        amo_id=amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="BaseStation",
+        entity_id=item.id,
+        action="create",
+        after=_base_snapshot(item),
+        critical=True,
+    )
     return item
 
 
@@ -73,27 +158,43 @@ def update_base_station(
     actor_user_id: Optional[str],
     payload: schemas.BaseStationUpdate,
 ) -> models.BaseStation:
-    if payload.code is not None:
-        base_station.code = normalize_base_code(payload.code)
-    if payload.name is not None:
-        base_station.name = payload.name.strip()
-    if payload.icao_code is not None:
-        base_station.icao_code = normalize_base_code(payload.icao_code) if payload.icao_code else None
-    if payload.iata_code is not None:
-        base_station.iata_code = normalize_base_code(payload.iata_code) if payload.iata_code else None
-    if payload.base_type is not None:
-        base_station.base_type = payload.base_type
-    if payload.time_zone is not None:
-        base_station.time_zone = payload.time_zone
-    if payload.description is not None:
-        base_station.description = payload.description
-    if payload.is_active is not None:
-        base_station.is_active = payload.is_active
+    _assert_expected_updated_at(base_station, payload.expected_updated_at, entity="BASE_STATION")
+    before = _base_snapshot(base_station)
+    values = payload.model_dump(exclude_unset=True)
+    values.pop("expected_updated_at", None)
+    reason = values.pop("reason", None)
+    if "code" in values and values["code"] is not None:
+        base_station.code = normalize_base_code(values.pop("code"))
+    if "name" in values and values["name"] is not None:
+        base_station.name = str(values.pop("name")).strip()
+    if "icao_code" in values:
+        value = values.pop("icao_code")
+        base_station.icao_code = normalize_base_code(value) if value else None
+    if "iata_code" in values:
+        value = values.pop("iata_code")
+        base_station.iata_code = normalize_base_code(value) if value else None
+    aliases = values.pop("aliases", None) if "aliases" in values else None
+    for key, value in values.items():
+        setattr(base_station, key, value)
     base_station.updated_by_user_id = actor_user_id
     db.add(base_station)
     db.flush()
-    if payload.aliases is not None:
-        replace_base_aliases(db, amo_id=amo_id, base_station=base_station, aliases=payload.aliases, source_module="foundations")
+    if aliases is not None:
+        replace_base_aliases(db, amo_id=amo_id, base_station=base_station, aliases=aliases, source_module="foundations")
+        db.flush()
+    action = "deactivate" if before["is_active"] and not base_station.is_active else "reactivate" if not before["is_active"] and base_station.is_active else "update"
+    _audit(
+        db,
+        amo_id=amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="BaseStation",
+        entity_id=base_station.id,
+        action=action,
+        before=before,
+        after=_base_snapshot(base_station),
+        reason=reason,
+        critical=action in {"deactivate", "reactivate"},
+    )
     return base_station
 
 
@@ -105,7 +206,10 @@ def replace_base_aliases(
     aliases: Iterable[str],
     source_module: Optional[str],
 ) -> None:
-    existing = db.query(models.BaseStationAlias).filter(models.BaseStationAlias.base_station_id == base_station.id).all()
+    existing = db.query(models.BaseStationAlias).filter(
+        models.BaseStationAlias.amo_id == amo_id,
+        models.BaseStationAlias.base_station_id == base_station.id,
+    ).all()
     for row in existing:
         db.delete(row)
     seen: set[str] = set()
@@ -115,6 +219,45 @@ def replace_base_aliases(
             continue
         seen.add(normalized)
         db.add(models.BaseStationAlias(amo_id=amo_id, base_station_id=base_station.id, alias=normalized, source_module=source_module))
+
+
+def _safe_count(db: Session, sql: str, params: dict) -> int:
+    try:
+        return int(db.execute(sa.text(sql), params).scalar() or 0)
+    except Exception:
+        return 0
+
+
+def base_station_dependency_impact(db: Session, *, amo_id: str, base_station_id: str) -> schemas.BaseStationImpactRead:
+    today = date.today()
+    params = {"amo_id": amo_id, "base_station_id": base_station_id, "today": today}
+    definitions = [
+        (
+            "ACTIVE_OR_FUTURE_DEPLOYMENTS",
+            "SELECT COUNT(*) FROM user_base_assignments WHERE amo_id=:amo_id AND base_station_id=:base_station_id AND (effective_to IS NULL OR effective_to >= :today)",
+            "Active or future personnel base deployments must be moved or ended.",
+        ),
+        (
+            "ACTIVE_EMPLOYMENT_CONTRACTS",
+            "SELECT COUNT(*) FROM employment_contracts WHERE amo_id=:amo_id AND (primary_base_station_id=:base_station_id OR secondary_base_station_id=:base_station_id) AND employment_status='ACTIVE' AND (effective_to IS NULL OR effective_to >= :today)",
+            "Active employment contracts still reference this base.",
+        ),
+        (
+            "CURRENT_OR_FUTURE_ROSTER_ASSIGNMENTS",
+            "SELECT COUNT(*) FROM roster_assignments ra JOIN roster_versions rv ON rv.id=ra.version_id JOIN roster_periods rp ON rp.id=rv.period_id WHERE ra.amo_id=:amo_id AND ra.base_station_id=:base_station_id AND ra.deleted_at IS NULL AND rp.ends_on >= :today",
+            "Draft, submitted, approved or published roster assignments still use this base.",
+        ),
+    ]
+    dependencies: list[schemas.BaseDependencyRead] = []
+    for dependency_type, sql, detail in definitions:
+        count = _safe_count(db, sql, params)
+        if count:
+            dependencies.append(schemas.BaseDependencyRead(dependency_type=dependency_type, count=count, detail=detail, blocking=True))
+    return schemas.BaseStationImpactRead(
+        base_station_id=base_station_id,
+        can_deactivate=not any(item.blocking and item.count > 0 for item in dependencies),
+        dependencies=dependencies,
+    )
 
 
 def list_user_base_assignments(
@@ -163,6 +306,12 @@ def _validate_assignment_window(
 ) -> None:
     if effective_to and effective_to < effective_from:
         raise ValueError("effective_to must be on or after effective_from")
+    if assignment_kind in {
+        models.BaseAssignmentKind.TEMPORARY,
+        models.BaseAssignmentKind.RELIEF,
+        models.BaseAssignmentKind.TRAINING,
+    } and effective_to is None:
+        raise ValueError("Temporary, relief and training deployments require an end date")
     if not is_primary:
         return
 
@@ -187,8 +336,9 @@ def _validate_assignment_window(
         q = q.filter(models.UserBaseAssignment.assignment_kind != models.BaseAssignmentKind.HOME_BASE)
         conflict_message = "Another temporary, relief or training deployment already covers part of this date range."
 
-    if q.first():
-        raise ValueError(conflict_message)
+    conflict = q.first()
+    if conflict:
+        raise ValueError(f"{conflict_message} Conflict {conflict.id}: {conflict.effective_from} to {conflict.effective_to or 'open ended'}.")
 
 
 def _require_assignment_entities(
@@ -201,10 +351,12 @@ def _require_assignment_entities(
     user = db.query(account_models.User).filter(
         account_models.User.id == user_id,
         account_models.User.amo_id == amo_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.deactivated_at.is_(None),
         account_models.User.is_system_account.is_(False),
     ).first()
     if not user:
-        raise ValueError("User not found in tenant scope.")
+        raise ValueError("Only an active human user in this tenant may receive a base deployment.")
     base = db.query(models.BaseStation).filter(
         models.BaseStation.id == base_station_id,
         models.BaseStation.amo_id == amo_id,
@@ -251,6 +403,17 @@ def create_user_base_assignment(
     )
     db.add(item)
     db.flush()
+    _audit(
+        db,
+        amo_id=amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="UserBaseAssignment",
+        entity_id=item.id,
+        action="create",
+        after=_assignment_snapshot(item),
+        reason=payload.note,
+        critical=True,
+    )
     return item
 
 
@@ -259,9 +422,14 @@ def update_user_base_assignment(
     *,
     amo_id: str,
     assignment: models.UserBaseAssignment,
+    actor_user_id: Optional[str],
     payload: schemas.UserBaseAssignmentUpdate,
 ) -> models.UserBaseAssignment:
+    _assert_expected_updated_at(assignment, payload.expected_updated_at, entity="USER_BASE_ASSIGNMENT")
+    before = _assignment_snapshot(assignment)
     values = payload.model_dump(exclude_unset=True)
+    values.pop("expected_updated_at", None)
+    reason = values.pop("reason", None)
     base_station_id = str(values.get("base_station_id") or assignment.base_station_id)
     if "base_station_id" in values:
         _require_assignment_entities(
@@ -290,7 +458,47 @@ def update_user_base_assignment(
         setattr(assignment, key, value)
     db.add(assignment)
     db.flush()
+    _audit(
+        db,
+        amo_id=amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="UserBaseAssignment",
+        entity_id=assignment.id,
+        action="update",
+        before=before,
+        after=_assignment_snapshot(assignment),
+        reason=reason,
+        critical=True,
+    )
     return assignment
+
+
+def cancel_future_user_base_assignment(
+    db: Session,
+    *,
+    amo_id: str,
+    assignment: models.UserBaseAssignment,
+    actor_user_id: Optional[str],
+    payload: schemas.UserBaseAssignmentCancel,
+) -> None:
+    _assert_expected_updated_at(assignment, payload.expected_updated_at, entity="USER_BASE_ASSIGNMENT")
+    if assignment.effective_from <= date.today():
+        raise ValueError("Only a future deployment can be cancelled. End an active deployment with an effective end date instead.")
+    before = _assignment_snapshot(assignment)
+    db.delete(assignment)
+    db.flush()
+    _audit(
+        db,
+        amo_id=amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="UserBaseAssignment",
+        entity_id=assignment.id,
+        action="cancel",
+        before=before,
+        after=None,
+        reason=payload.reason,
+        critical=True,
+    )
 
 
 def effective_base_assignment(
@@ -337,9 +545,14 @@ def create_availability(
     actor_user_id: Optional[str],
     payload: schemas.AvailabilityCreate,
 ) -> quality_models.UserAvailability:
-    user = db.query(account_models.User).filter(account_models.User.id == payload.user_id, account_models.User.amo_id == amo_id).first()
+    user = db.query(account_models.User).filter(
+        account_models.User.id == payload.user_id,
+        account_models.User.amo_id == amo_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    ).first()
     if not user:
-        raise ValueError("User not found in tenant scope.")
+        raise ValueError("Active user not found in tenant scope.")
     row = quality_models.UserAvailability(
         amo_id=amo_id,
         user_id=user.id,
@@ -422,8 +635,8 @@ def foundation_contracts() -> schemas.FoundationContracts:
         },
         service_contracts={
             "identity_health": "GET /foundations/personnel/identity-health",
-            "base_stations": "GET/POST /foundations/base-stations; PUT /foundations/base-stations/{base_station_id}",
-            "user_base_assignments": "GET/POST /foundations/user-base-assignments; PUT /foundations/user-base-assignments/{assignment_id}",
+            "base_stations": "GET/POST /foundations/base-stations; GET /foundations/base-stations/{id}/impact; PUT /foundations/base-stations/{id}",
+            "user_base_assignments": "GET/POST /foundations/user-base-assignments; PUT/DELETE /foundations/user-base-assignments/{id}",
             "availability": "GET/POST /foundations/availability",
         },
         canonical_frontend_routes={
