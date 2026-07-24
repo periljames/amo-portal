@@ -44,6 +44,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re
+          import textwrap
 
           catalog = Path('backend/amodb/apps/rostering/catalog.py')
           catalog_text = catalog.read_text(encoding='utf-8')
@@ -63,48 +64,48 @@ jobs:
           end = validation_text.find('def _assignment_minutes', start)
           if start < 0 or end < 0:
               raise SystemExit('Generated find_rules block was not found')
-          find_rules = '''def find_rules(
+          find_rules = textwrap.dedent('''
+          def find_rules(
               rules: Sequence[models.RosterRule],
               rule_type: models.RosterRuleType,
               assignment: Optional[models.RosterAssignment] = None,
           ) -> list[models.RosterRule]:
               matching = [
-              row
-              for row in rules
-              if row.rule_type == rule_type and rule_applies(row, assignment)
+                  row
+                  for row in rules
+                  if row.rule_type == rule_type and rule_applies(row, assignment)
               ]
               if not matching:
-              return []
+                  return []
               rank = {
-              models.RosterRuleScope.AMO: 0,
-              models.RosterRuleScope.DEPARTMENT: 1,
-              models.RosterRuleScope.BASE: 2,
-              models.RosterRuleScope.SHIFT_TEMPLATE: 3,
-              models.RosterRuleScope.USER: 4,
+                  models.RosterRuleScope.AMO: 0,
+                  models.RosterRuleScope.DEPARTMENT: 1,
+                  models.RosterRuleScope.BASE: 2,
+                  models.RosterRuleScope.SHIFT_TEMPLATE: 3,
+                  models.RosterRuleScope.USER: 4,
               }
               by_code: dict[str, models.RosterRule] = {}
               for row in matching:
-              current = by_code.get(row.code)
-              if current is None or rank.get(row.scope, 0) > rank.get(current.scope, 0):
-              by_code[row.code] = row
+                  current = by_code.get(row.code)
+                  if current is None or rank.get(row.scope, 0) > rank.get(current.scope, 0):
+                      by_code[row.code] = row
               return sorted(
-              by_code.values(),
-              key=lambda row: (row.display_order, row.code, row.id),
+                  by_code.values(),
+                  key=lambda row: (row.display_order, row.code, row.id),
               )
 
 
-          '''.replace('          ', '')
+          ''').lstrip()
           validation.write_text(validation_text[:start] + find_rules + validation_text[end:], encoding='utf-8')
 
-          changed_roots = [Path('backend'), Path('frontend')]
-          for root in changed_roots:
+          for root in (Path('backend'), Path('frontend')):
               for path in root.rglob('*'):
-              if not path.is_file() or path.suffix not in {'.py', '.ts', '.tsx', '.css', '.yml', '.yaml'}:
-              continue
-              text = path.read_text(encoding='utf-8')
-              normalized = '\n'.join(line.rstrip() for line in text.splitlines()).rstrip() + '\n'
-              if normalized != text:
-              path.write_text(normalized, encoding='utf-8')
+                  if not path.is_file() or path.suffix not in {'.py', '.ts', '.tsx', '.css', '.yml', '.yaml'}:
+                      continue
+                  text = path.read_text(encoding='utf-8')
+                  normalized = '\n'.join(line.rstrip() for line in text.splitlines()).rstrip() + '\n'
+                  if normalized != text:
+                      path.write_text(normalized, encoding='utf-8')
           PY
       - name: Capture fixed-source validation
         shell: bash
@@ -143,7 +144,8 @@ jobs:
             .github/workflows/run-rostering-governance.yml \
             .github/workflows/run-rostering-governance-final.yml \
             .github/workflows/finalize-rostering-governance-debug.yml \
-            .github/workflows/finalize-rostering-governance-fixed.yml
+            .github/workflows/finalize-rostering-governance-fixed.yml \
+            .github/workflows/debug-rostering-governance-repair.yml
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
