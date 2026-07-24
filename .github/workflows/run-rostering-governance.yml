@@ -121,6 +121,12 @@ jobs:
                   raise SystemExit('Current Setup people query was not found')
               write(settings, settings_text.replace(old_people_query, new_people_query, 1))
               ''') + script[people_query_end:]
+
+          legacy_rules_start = script.find('# Add clean parameter entry to existing Rules tab.')
+          legacy_rules_end = script.find('# My Roster one-time subscription setup.', legacy_rules_start)
+          if legacy_rules_start < 0 or legacy_rules_end < 0:
+              raise SystemExit('Legacy Rules tab patch block was not found')
+          script = script[:legacy_rules_start] + script[legacy_rules_end:]
           Path('/tmp/apply_rostering_governance.py').write_text(script, encoding='utf-8')
           PY
       - name: Apply audited full-stack governance patch
