@@ -368,14 +368,39 @@ jobs:
           PY
       - name: Validate optimized frontend
         working-directory: frontend
+        shell: bash
         run: |
-          npm ci --prefer-offline --no-audit --fund=false
-          npm run build
-          npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts
-          npm exec -- eslint src/pages/rostering src/services/rostering.ts
+          set +e
+          {
+            npm ci --prefer-offline --no-audit --fund=false
+            install_status=$?
+            echo "install_status=$install_status"
+            if [ "$install_status" -eq 0 ]; then npm run build; build_status=$?; else build_status=1; fi
+            echo "build_status=$build_status"
+            if [ "$build_status" -eq 0 ]; then npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts; test_status=$?; else test_status=1; fi
+            echo "test_status=$test_status"
+            if [ "$test_status" -eq 0 ]; then npm exec -- eslint src/pages/rostering src/services/rostering.ts; lint_status=$?; else lint_status=1; fi
+            echo "lint_status=$lint_status"
+          } > /tmp/rostering-load-optimization-validation.log 2>&1
+          status=0
+          if [ "$install_status" -ne 0 ] || [ "$build_status" -ne 0 ] || [ "$test_status" -ne 0 ] || [ "$lint_status" -ne 0 ]; then status=1; fi
+          echo "$status" > /tmp/rostering-load-optimization-validation.exit-code
+          cat /tmp/rostering-load-optimization-validation.log
+          exit 0
+      - name: Upload optimization diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rostering-load-optimization-diagnostics
+          path: |
+            /tmp/rostering-load-optimization-validation.log
+            /tmp/rostering-load-optimization-validation.exit-code
+            frontend/src/pages/rostering/components/UnifiedRosterSettings.tsx
+          retention-days: 1
       - name: Commit optimized setup loading
         shell: bash
         run: |
+          test "$(cat /tmp/rostering-load-optimization-validation.exit-code)" = "0"
           rm -f .github/workflows/apply-rostering-load-optimizations.yml
           git diff --check
           git config user.name "github-actions[bot]"
