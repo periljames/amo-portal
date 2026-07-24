@@ -154,6 +154,10 @@ describe("Quality checklist, workflow integrity and public CAR UI contracts", ()
     new URL("../components/QMS/QualityEnhancementsHost.tsx", import.meta.url),
     "utf8",
   );
+  const routeGateSource = readFileSync(
+    new URL("../components/QMS/QualityEnhancementsRouteGate.tsx", import.meta.url),
+    "utf8",
+  );
   const mainSource = readFileSync(new URL("../main.tsx", import.meta.url), "utf8");
   const checklistEditorCss = readFileSync(
     new URL("../styles/quality-checklist-pdf-form-editor.css", import.meta.url),
@@ -188,8 +192,11 @@ describe("Quality checklist, workflow integrity and public CAR UI contracts", ()
   });
 
   it("does not load PDF.js into unrelated portal workspaces", () => {
-    expect(mainSource).toContain("QualityEnhancementsHost");
+    expect(mainSource).toContain("QualityEnhancementsRouteGate");
     expect(mainSource).not.toContain("QualityChecklistPdfFormEditorHost");
+    expect(routeGateSource).toContain('import("./QualityEnhancementsHost")');
+    expect(routeGateSource).toContain("/car-invite");
+    expect(routeGateSource).toContain("quality");
     expect(enhancementsHostSource).toContain('route.activeTab === "checklist"');
     expect(enhancementsHostSource).toContain('import("./QualityChecklistPdfFormEditorHost")');
   });
