@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from amodb.apps.doc_control.workspace_workflow_authority_router import _matching_submission
+from amodb.apps.doc_control import workspace_schemas as schemas
+from amodb.apps.doc_control.workspace_workflow_authority_router import (
+    _matching_submission,
+    _normalise_system_managed_readiness,
+)
 
 
 class _Query:
@@ -67,3 +71,25 @@ def test_approved_workflow_requires_evidence_and_response_reference() -> None:
         revision_id="revision-1",
         approved=True,
     ) is row
+
+
+def test_unchanged_system_distribution_state_is_not_treated_as_manual_override() -> None:
+    workflow = SimpleNamespace(distribution_readiness_status="READY")
+    payload = schemas.WorkflowTransitionRequest(
+        action="PUBLISH",
+        expected_version=4,
+        distribution_readiness_status="READY",
+    )
+    normalised = _normalise_system_managed_readiness(workflow, payload)
+    assert normalised.distribution_readiness_status is None
+
+
+def test_changed_distribution_state_is_left_for_guard_rejection() -> None:
+    workflow = SimpleNamespace(distribution_readiness_status="NOT_REQUIRED")
+    payload = schemas.WorkflowTransitionRequest(
+        action="PUBLISH",
+        expected_version=4,
+        distribution_readiness_status="READY",
+    )
+    normalised = _normalise_system_managed_readiness(workflow, payload)
+    assert normalised.distribution_readiness_status == "READY"
