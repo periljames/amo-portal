@@ -100,15 +100,27 @@ jobs:
           service_end = script.find('\nextra_services = r\'\'\'', service_start)
           if service_start < 0 or service_end < 0:
               raise SystemExit('Frontend lifecycle request patch call was not found')
-          direct_service_patch = textwrap.dedent('''
+          script = script[:service_start] + textwrap.dedent('''
               service_text = read(roster_service)
               old_lifecycle_type = 'type LifecycleRequest = {\\n  expected_state_revision?: number | null;\\n  idempotency_key?: string | null;\\n  comment?: string | null;\\n};'
               new_lifecycle_type = 'type LifecycleRequest = {\\n  expected_state_revision?: number | null;\\n  idempotency_key?: string | null;\\n  comment?: string | null;\\n  department_id?: string | null;\\n  base_station_id?: string | null;\\n};'
               if old_lifecycle_type not in service_text:
                   raise SystemExit('Current frontend LifecycleRequest type was not found')
               write(roster_service, service_text.replace(old_lifecycle_type, new_lifecycle_type, 1))
-              ''')
-          script = script[:service_start] + direct_service_patch + script[service_end:]
+              ''') + script[service_end:]
+
+          people_query_start = script.find('replace(\n    settings,\n    \'\'\'  const peopleQuery = useSettingsQuery("people"')
+          people_query_end = script.find('\ngovernance_render =', people_query_start)
+          if people_query_start < 0 or people_query_end < 0:
+              raise SystemExit('Setup tenant people query patch call was not found')
+          script = script[:people_query_start] + textwrap.dedent('''
+              settings_text = read(settings)
+              old_people_query = '  const peopleQuery = useSettingsQuery("people", () =>\\n    listRosterPeoplePage({\\n      page: 1,\\n      page_size: 200,\\n      active_only: true,\\n      roster_eligible_only: false,\\n    }),\\n  );'
+              new_people_query = '  const peopleQuery = useSettingsQuery("people", () =>\\n    listAllRosterPeople({\\n      page_size: 250,\\n      active_only: true,\\n      roster_eligible_only: false,\\n    }),\\n  );'
+              if old_people_query not in settings_text:
+                  raise SystemExit('Current Setup people query was not found')
+              write(settings, settings_text.replace(old_people_query, new_people_query, 1))
+              ''') + script[people_query_end:]
           Path('/tmp/apply_rostering_governance.py').write_text(script, encoding='utf-8')
           PY
       - name: Apply audited full-stack governance patch
