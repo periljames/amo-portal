@@ -24,31 +24,7 @@ _ALLOWED_EVENTS: dict[str, set[str]] = {
 }
 
 
-@router.post(
-    "/t/{tenant_slug}/controlled-copies/{copy_id}/events",
-    include_in_schema=False,
-)
-def create_guarded_copy_event(
-    tenant_slug: str,
-    copy_id: str,
-    payload: schemas.ControlledCopyEventCreate,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
-):
-    require_control_user(current_user)
-    tenant = resolve_tenant(db, tenant_slug, current_user)
-    row = (
-        db.query(dm.DocumentControlledCopy)
-        .filter(
-            dm.DocumentControlledCopy.tenant_id == tenant.amo_id,
-            dm.DocumentControlledCopy.id == copy_id,
-        )
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="Controlled copy not found")
-
+def validate_copy_event(row: dm.DocumentControlledCopy, payload: schemas.ControlledCopyEventCreate) -> None:
     event_type = payload.event_type
     allowed = _ALLOWED_EVENTS.get(row.status, set())
     if event_type not in allowed:
@@ -79,8 +55,6 @@ def create_guarded_copy_event(
                 status_code=422,
                 detail="A transfer requires a new active tenant holder or a new controlled location",
             )
-        if payload.to_holder_user_id:
-            active_tenant_users(db, tenant, [payload.to_holder_user_id])
         if (
             payload.to_holder_user_id == row.holder_user_id
             and str(payload.to_location or "").strip() == str(row.location_text or "").strip()
@@ -92,6 +66,36 @@ def create_guarded_copy_event(
             raise HTTPException(status_code=422, detail="A location change requires the new controlled location")
         if new_location == str(row.location_text or "").strip():
             raise HTTPException(status_code=409, detail="The controlled copy is already at that location")
+
+
+@router.post(
+    "/t/{tenant_slug}/controlled-copies/{copy_id}/events",
+    include_in_schema=False,
+)
+def create_guarded_copy_event(
+    tenant_slug: str,
+    copy_id: str,
+    payload: schemas.ControlledCopyEventCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    row = (
+        db.query(dm.DocumentControlledCopy)
+        .filter(
+            dm.DocumentControlledCopy.tenant_id == tenant.amo_id,
+            dm.DocumentControlledCopy.id == copy_id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Controlled copy not found")
+
+    validate_copy_event(row, payload)
+    if payload.event_type == "TRANSFER" and payload.to_holder_user_id:
+        active_tenant_users(db, tenant, [payload.to_holder_user_id])
 
     return _create_copy_event(
         tenant_slug=tenant_slug,
