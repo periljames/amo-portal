@@ -11,8 +11,10 @@ import {
   FilePenLine,
   LoaderCircle,
   Lock,
+  RefreshCcw,
   RotateCcw,
   Save,
+  ShieldAlert,
   X,
   ZoomIn,
   ZoomOut,
@@ -52,6 +54,12 @@ type EditorState = {
   readOnlyReason: string | null;
 };
 
+type AuditRoute = {
+  amoCode: string;
+  auditKey: string;
+  activeTab: string;
+};
+
 function checklistFilename(fileRef?: string | null): string {
   const raw = (fileRef || "audit-checklist.pdf").trim();
   const basename = raw.split(/[\\/]+/).filter(Boolean).pop() || "audit-checklist.pdf";
@@ -88,6 +96,50 @@ function downloadBytes(bytes: Uint8Array, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
+const QualityAuditWorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
+  const queryClient = useQueryClient();
+  const [cacheRevision, setCacheRevision] = useState(0);
+  const queryKey = useMemo(() => ["qms-audit-context", route.auditKey] as const, [route.auditKey]);
+
+  useEffect(() => queryClient.getQueryCache().subscribe(() => {
+    setCacheRevision((current) => current + 1);
+  }), [queryClient]);
+
+  const state = queryClient.getQueryState(queryKey);
+  const data = queryClient.getQueryData<{ degraded?: boolean }>(queryKey);
+  const degraded = data?.degraded === true || state?.status === "error";
+  void cacheRevision;
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("quality-workflow-is-degraded", degraded);
+    return () => document.documentElement.classList.remove("quality-workflow-is-degraded");
+  }, [degraded]);
+
+  if (!degraded) return null;
+
+  return (
+    <div className="quality-workflow-integrity-blocker" role="alertdialog" aria-modal="true" aria-label="Audit workflow unavailable">
+      <section>
+        <ShieldAlert size={28} />
+        <div>
+          <p>Authoritative workflow unavailable</p>
+          <h2>Audit progress has been placed in safe read-only mode.</h2>
+          <span>
+            The portal could not verify stage completion, CAR state, evidence gates or closeout readiness from the backend.
+            It will not use locally invented completion values or permit workflow advancement.
+          </span>
+        </div>
+        <div className="quality-workflow-integrity-blocker__actions">
+          <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey })}>
+            <RefreshCcw size={17} /> Retry workflow
+          </button>
+          <a href={`/maintenance/${encodeURIComponent(route.amoCode)}/quality/audits/register`}>Open audit register</a>
+        </div>
+      </section>
+    </div>
+  );
+};
+
 const QualityChecklistPdfFormEditorHost: React.FC = () => {
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -106,15 +158,16 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const route = useMemo(() => {
+  const route = useMemo<AuditRoute | null>(() => {
     const match = location.pathname.match(/^\/maintenance\/([^/]+)\/quality\/audits\/([^/]+)/i);
-    const tab = new URLSearchParams(location.search).get("tab");
-    if (!match || tab !== "checklist") return null;
+    if (!match) return null;
     return {
       amoCode: decodeURIComponent(match[1]),
       auditKey: decodeURIComponent(match[2]),
+      activeTab: new URLSearchParams(location.search).get("tab") || "war-room",
     };
   }, [location.pathname, location.search]);
+  const checklistTab = route?.activeTab === "checklist";
 
   const closeEditor = useCallback((force = false) => {
     if (!force && dirty && !window.confirm("Discard the unsaved PDF form changes?")) return;
@@ -131,9 +184,9 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
   }, [dirty]);
 
   useEffect(() => {
-    if (route) return;
+    if (route && checklistTab) return;
     closeEditor(true);
-  }, [route, closeEditor]);
+  }, [route, checklistTab, closeEditor]);
 
   useEffect(() => {
     if (!editor || !viewportRef.current) return;
@@ -155,7 +208,7 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
   }, [editor, closeEditor]);
 
   const openEditor = async () => {
-    if (!route || loading) return;
+    if (!route || !checklistTab || loading) return;
     setLoading(true);
     setError(null);
     setNotice(null);
@@ -248,13 +301,17 @@ const QualityChecklistPdfFormEditorHost: React.FC = () => {
 
   return (
     <>
-      <div className="quality-pdf-form-launcher" role="region" aria-label="Checklist PDF form tools">
-        <button type="button" onClick={() => void openEditor()} disabled={loading}>
-          {loading ? <LoaderCircle className="is-spinning" size={17} /> : <FilePenLine size={17} />}
-          <span>{loading ? "Opening PDF…" : "Fill PDF form"}</span>
-        </button>
-        {error && !editor ? <p role="alert">{error}</p> : null}
-      </div>
+      <QualityAuditWorkflowIntegrityGuard route={route} />
+
+      {checklistTab ? (
+        <div className="quality-pdf-form-launcher" role="region" aria-label="Checklist PDF form tools">
+          <button type="button" onClick={() => void openEditor()} disabled={loading}>
+            {loading ? <LoaderCircle className="is-spinning" size={17} /> : <FilePenLine size={17} />}
+            <span>{loading ? "Opening PDF…" : "Fill PDF form"}</span>
+          </button>
+          {error && !editor ? <p role="alert">{error}</p> : null}
+        </div>
+      ) : null}
 
       {editor ? (
         <div className="quality-pdf-form-modal" role="dialog" aria-modal="true" aria-label="Fillable audit checklist PDF editor">
