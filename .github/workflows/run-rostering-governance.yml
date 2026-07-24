@@ -44,24 +44,29 @@ jobs:
               'comment: Optional[str] = Field(default=None, max_length=2000)',
               'comment: Optional[str] = None',
           )
-          helper_old = '''def replace(path: str, old: str, new: str, count: int = 1) -> None:
-              text = read(path)
-              if old not in text:
-              raise SystemExit(f"Expected block not found in {path}: {old[:120]!r}")
-              write(path, text.replace(old, new, count))
-          '''.replace('              ', '    ')
-          helper_new = '''def replace(path: str, old: str, new: str, count: int = 1) -> None:
-              text = read(path)
-              if path.endswith("workforce/permissions.py") and 'if "supervisor" in title' in old:
-              old = '    if "supervisor" in title or "shift lead" in title:\n        return "DEPARTMENT_SUPERVISOR"\n    return None'
-              new = '    if "base manager" in title:\n        return "BASE_MANAGER"\n    if "department head" in title or title.startswith("head of ") or "department manager" in title or "line manager" in title:\n        return "DEPARTMENT_HEAD"\n    if "supervisor" in title or "shift lead" in title:\n        return "DEPARTMENT_SUPERVISOR"\n    return None'
-              if old not in text:
-              raise SystemExit(f"Expected block not found in {path}: {old[:120]!r}")
-              write(path, text.replace(old, new, count))
-          '''.replace('              ', '    ')
-          if helper_old not in script:
-              raise SystemExit('Governance script helper block was not found')
-          script = script.replace(helper_old, helper_new, 1)
+          malformed_old = '''\'\'\'    if "supervisor" in title or "shift lead" in title:
+              return "DEPARTMENT_SUPERVISOR"
+              return None\'\'\'.replace("              ", "    ")'''
+          corrected_old = '''\'\'\'    if "supervisor" in title or "shift lead" in title:
+        return "DEPARTMENT_SUPERVISOR"
+    return None\'\'\''''
+          malformed_new = '''\'\'\'    if "base manager" in title:
+              return "BASE_MANAGER"
+              if "department head" in title or title.startswith("head of ") or "department manager" in title or "line manager" in title:
+              return "DEPARTMENT_HEAD"
+              if "supervisor" in title or "shift lead" in title:
+              return "DEPARTMENT_SUPERVISOR"
+              return None\'\'\'.replace("              ", "    ")'''
+          corrected_new = '''\'\'\'    if "base manager" in title:
+        return "BASE_MANAGER"
+    if "department head" in title or title.startswith("head of ") or "department manager" in title or "line manager" in title:
+        return "DEPARTMENT_HEAD"
+    if "supervisor" in title or "shift lead" in title:
+        return "DEPARTMENT_SUPERVISOR"
+    return None\'\'\''''
+          if malformed_old not in script or malformed_new not in script:
+              raise SystemExit('Role mapping literals were not found in the governance patch')
+          script = script.replace(malformed_old, corrected_old, 1).replace(malformed_new, corrected_new, 1)
           Path('/tmp/apply_rostering_governance.py').write_text(script, encoding='utf-8')
           PY
       - name: Apply audited full-stack governance patch
