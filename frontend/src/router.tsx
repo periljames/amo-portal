@@ -112,3 +112,5 @@ export const AppRouter: React.FC = () => {
 
   return <LegacyAppRouter />;
 };
+
+export default AppRouter;
