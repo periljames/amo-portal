@@ -40,6 +40,10 @@ import "./styles/rostering.css";
 import "./styles/theme-contract.css";
 import "./styles/theme-module-repairs.css";
 
+const QualityChecklistPdfFormEditorHost = React.lazy(
+  () => import("./components/QMS/QualityChecklistPdfFormEditorHost"),
+);
+
 const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const ACTIVE_AMO_STORAGE_KEYS = new Set(["amodb_active_amo_id", "amodb_admin_active_amo_id"]);
 const SENSITIVE_QUERY_MARKERS = [
@@ -198,6 +202,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <RealtimeProvider>
         <BrowserRouter>
           <App />
+          <React.Suspense fallback={null}>
+            <QualityChecklistPdfFormEditorHost />
+          </React.Suspense>
         </BrowserRouter>
         <OfflineSyncIndicator />
       </RealtimeProvider>
