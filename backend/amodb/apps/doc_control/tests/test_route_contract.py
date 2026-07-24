@@ -9,6 +9,7 @@ def test_document_control_override_routes_are_registered_first() -> None:
         "/doc-control/workspace/t/{tenant_slug}/documents": "amodb.apps.doc_control.workspace_library_router",
         "/doc-control/workspace/t/{tenant_slug}/documents/{manual_id}": "amodb.apps.doc_control.workspace_record_router",
         "/doc-control/workspace/t/{tenant_slug}/integration-links": "amodb.apps.doc_control.workspace_integration_router",
+        "/doc-control/workspace/t/{tenant_slug}/controlled-copies/{copy_id}/events": "amodb.apps.doc_control.workspace_copy_router",
         "/doc-control/workspace/t/{tenant_slug}/temporary-revisions/{tr_id}/transition": "amodb.apps.doc_control.workspace_tr_router",
         "/doc-control/workspace/t/{tenant_slug}/workflows/{workflow_id}/transition": "amodb.apps.doc_control.workspace_workflow_router",
     }
