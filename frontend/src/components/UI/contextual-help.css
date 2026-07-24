@@ -15,7 +15,8 @@
 .portal-help-trigger:focus-visible {
   color: var(--primary, #1f5eff);
   border-color: currentColor;
-  outline: none;
+  outline: 2px solid color-mix(in srgb, currentColor 24%, transparent);
+  outline-offset: 2px;
 }
 
 .portal-help-backdrop {
@@ -75,14 +76,26 @@
   cursor: pointer;
 }
 
+.portal-help-dialog__close:hover,
+.portal-help-dialog__close:focus-visible {
+  background: var(--surface-muted, #f1f5f9);
+  outline: none;
+}
+
 .portal-help-dialog__body {
   padding: 0 1.25rem 1rem;
   color: var(--text-muted, #53627a);
   line-height: 1.55;
 }
 
+.portal-help-dialog__description > :first-child,
 .portal-help-dialog__body p {
-  margin: 0 0 0.8rem;
+  margin-top: 0;
+}
+
+.portal-help-dialog__description > :last-child,
+.portal-help-dialog__body p {
+  margin-bottom: 0.8rem;
 }
 
 .portal-help-dialog__body ul {
@@ -101,6 +114,39 @@
 
 .portal-help-dialog__footer > :first-child {
   margin-right: auto;
+}
+
+.portal-help-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.portal-help-button--primary {
+  background: var(--primary, #1f5eff);
+  color: #fff;
+}
+
+.portal-help-button--secondary {
+  border-color: var(--border-color, #d6deea);
+  background: var(--surface, #fff);
+  color: var(--text-primary, #172033);
+}
+
+.portal-help-button:hover,
+.portal-help-button:focus-visible {
+  filter: brightness(0.97);
+  outline: 2px solid color-mix(in srgb, var(--primary, #1f5eff) 24%, transparent);
+  outline-offset: 2px;
 }
 
 .portal-prerequisite-list {
