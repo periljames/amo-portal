@@ -1,11 +1,15 @@
+import { getCachedUser, getContext } from "./auth";
 import { getPlannerPreferences, updatePlannerPreferences } from "./workforce";
 
 const ROOT_KEY = "_contextual_guidance";
-
 type GuidanceMap = Record<string, Record<string, string>>;
 
 function localKey(topic: string, version: number): string {
-  return `amo_portal_help_seen:${topic}:v${version}`;
+  const user = getCachedUser();
+  const context = getContext();
+  const tenantId = user?.amo_id || context.amoCode || context.amoSlug || "tenant";
+  const userId = user?.id || "anonymous";
+  return `amo_portal_help_seen:${tenantId}:${userId}:${topic}:v${version}`;
 }
 
 function parseGuidance(filters: Record<string, unknown> | null | undefined): GuidanceMap {
