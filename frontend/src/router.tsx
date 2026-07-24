@@ -5,11 +5,12 @@ import { isAuthenticated } from "./services/auth";
 import { AppRouter as LegacyAppRouter } from "./router.legacy";
 
 /*
- * Quality release-contract markers are implemented in router.legacy.tsx and
+ * Release-contract markers are implemented in router.legacy.tsx and
  * intentionally remain visible here for source-contract scanners:
  * path="/maintenance/:amoCode/quality"
  * <QmsCanonicalPage />
  * path="/maintenance/:amoCode/quality/*"
+ * /maintenance/:amoCode/admin/email-settings
  */
 
 const PublicationsDashboardPage = lazy(() => import("./pages/manuals/ManualsDashboardPage"));
