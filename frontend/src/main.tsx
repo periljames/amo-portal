@@ -1,12 +1,11 @@
 // src/main.tsx
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, useLocation } from "react-router-dom";
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import "@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css";
 import App from "./App";
-import QualityEnhancementsHost from "./components/QMS/QualityEnhancementsHost";
 import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { clearApiResponseCache } from "./services/apiClient";
@@ -40,6 +39,22 @@ import "./styles/rostering.css";
 // Theme adapters must load after all module CSS so literal legacy colours cannot win.
 import "./styles/theme-contract.css";
 import "./styles/theme-module-repairs.css";
+
+const QualityEnhancementsHost = React.lazy(
+  () => import("./components/QMS/QualityEnhancementsHost"),
+);
+
+const QualityEnhancementsRouteGate: React.FC = () => {
+  const location = useLocation();
+  const relevant = /^\/car-invite\/?$/i.test(location.pathname)
+    || /^\/maintenance\/[^/]+\/quality\/audits\/[^/]+/i.test(location.pathname);
+  if (!relevant) return null;
+  return (
+    <React.Suspense fallback={null}>
+      <QualityEnhancementsHost />
+    </React.Suspense>
+  );
+};
 
 const QUERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const ACTIVE_AMO_STORAGE_KEYS = new Set(["amodb_active_amo_id", "amodb_admin_active_amo_id"]);
@@ -199,7 +214,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <RealtimeProvider>
         <BrowserRouter>
           <App />
-          <QualityEnhancementsHost />
+          <QualityEnhancementsRouteGate />
         </BrowserRouter>
         <OfflineSyncIndicator />
       </RealtimeProvider>
