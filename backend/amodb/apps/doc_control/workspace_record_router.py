@@ -9,7 +9,16 @@ from amodb.database import get_db
 from amodb.security import get_current_active_user
 
 from .workspace_router import get_document_detail as _get_full_document_detail
-from .workspace_service import is_control_user, resolve_tenant
+from .workspace_service import (
+    get_manual,
+    get_profile,
+    is_control_user,
+    readable_revision,
+    require_manual_access,
+    resolve_tenant,
+    serialize_manual,
+    serialize_revision,
+)
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Record"])
@@ -78,45 +87,26 @@ def _controller_history(
     ]
 
 
-@router.get("/t/{tenant_slug}/documents/{manual_id}", include_in_schema=False)
-def get_role_appropriate_document_detail(
+def _reader_detail(
+    db: Session,
+    *,
     tenant_slug: str,
     manual_id: str,
-    db: Session = Depends(get_db),
-    current_user: account_models.User = Depends(get_current_active_user),
-):
-    """Return the unified record without exposing controller work to readers.
-
-    The full record remains available to Document Control personnel. Ordinary
-    readers receive only the document identity and the revision they are allowed
-    to open; internal change, approval, authority, distribution, custody,
-    integration, access-scope, and audit payloads are removed server-side.
-    """
-    detail = _get_full_document_detail(
-        tenant_slug=tenant_slug,
-        manual_id=manual_id,
-        db=db,
-        current_user=current_user,
-    )
-    if is_control_user(current_user):
-        tenant = resolve_tenant(db, tenant_slug, current_user)
-        detail["history"] = _controller_history(db, tenant.id, detail)
-        return detail
-
-    document = dict(detail.get("document") or {})
-    profile = document.get("profile")
-    if isinstance(profile, dict):
-        profile["access_scope"] = {}
-        profile["metadata"] = {}
-    target_revision_id = (document.get("read_target") or {}).get("revision_id")
-    permitted_revisions = [
-        revision
-        for revision in list(detail.get("revisions") or [])
-        if revision.get("id") == target_revision_id
-    ]
+    current_user: account_models.User,
+) -> dict:
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    manual = get_manual(db, tenant, manual_id)
+    profile = get_profile(db, tenant, manual.id)
+    require_manual_access(current_user, profile)
+    target, target_kind = readable_revision(db, manual, current_user)
+    document = serialize_manual(manual, profile, target, target_kind, target)
+    profile_payload = document.get("profile")
+    if isinstance(profile_payload, dict):
+        profile_payload["access_scope"] = {}
+        profile_payload["metadata"] = {}
     return {
         "document": document,
-        "revisions": permitted_revisions,
+        "revisions": [serialize_revision(target)] if target else [],
         "changes": [],
         "workflows": [],
         "authority_submissions": [],
@@ -130,3 +120,30 @@ def get_role_appropriate_document_detail(
         "history": [],
         "capabilities": {"control": False},
     }
+
+
+@router.get("/t/{tenant_slug}/documents/{manual_id}", include_in_schema=False)
+def get_role_appropriate_document_detail(
+    tenant_slug: str,
+    manual_id: str,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Return controller governance or a minimal reader-safe document projection."""
+    if not is_control_user(current_user):
+        return _reader_detail(
+            db,
+            tenant_slug=tenant_slug,
+            manual_id=manual_id,
+            current_user=current_user,
+        )
+
+    detail = _get_full_document_detail(
+        tenant_slug=tenant_slug,
+        manual_id=manual_id,
+        db=db,
+        current_user=current_user,
+    )
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    detail["history"] = _controller_history(db, tenant.id, detail)
+    return detail
