@@ -72,6 +72,7 @@ jobs:
           assert len(heads) == len(set(heads)), heads
           assert script.get_revision("workforce_20260721_complete")
           assert script.get_revision("quality_20260722_schema_integrity")
+          assert script.get_revision("quality_20260724_audit_lifecycle")
           assert script.get_revision("saas_20260722_side_effect_safe")
           PY
       - name: Upgrade clean PostgreSQL schema to every head
@@ -102,6 +103,10 @@ jobs:
               "/api/realtime/broker/authenticate",
               "/api/realtime/broker/authorize",
               "/api/chat/threads",
+              "/quality/audits/{audit_id}/war-room-context",
+              "/quality/audits/{audit_id}/documents/checklist/draft",
+              "/quality/audits/{audit_id}/documents/report/issue",
+              "/quality/audits/{audit_id}/lifecycle/closeout",
           }
           missing = required - paths
           assert not missing, missing
@@ -171,6 +176,7 @@ jobs:
           amodb/apps/quality/tests/test_quality_delivery_profile.py
           amodb/apps/quality/tests/test_workflow_transitions.py
           amodb/apps/quality/tests/test_audit_workflow_enforcement.py
+          amodb/apps/quality/tests/test_audit_lifecycle_v2.py
           amodb/apps/quality/tests/test_audit_events.py
           amodb/apps/quality/tests/test_task_integrations.py
           amodb/apps/quality/tests/test_evidence_pack_exports.py
@@ -219,8 +225,11 @@ jobs:
           src/main.tsx
           src/components/messaging
           src/components/offline
+          src/components/QMS/QualityChecklistPdfEditor.tsx
+          src/components/QMS/QualityEnhancementsHost.tsx
           src/pages/AdminSaaSSettingsPage.tsx
           src/pages/EmailServerSettingsPage.tsx
+          src/pages/QualityAuditRunHubPage.tsx
           src/pages/platform
           src/pages/rostering
           src/services/apiClient.ts
@@ -235,6 +244,9 @@ jobs:
           src/services/platformControl.test.ts
           src/services/qmsAuditHubActions.ts
           src/services/qmsAuditHubActions.test.ts
+          src/services/qmsAuditLifecycle.ts
+          src/services/qmsAuditLifecycle.test.ts
+          src/services/qmsAuditLifecycleQueries.ts
           src/services/queryPersister.ts
           src/services/realtime
           src/services/rostering.ts
