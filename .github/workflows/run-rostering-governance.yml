@@ -17,7 +17,7 @@ jobs:
           ref: fix/rostering-unified-workforce
           fetch-depth: 0
           show-progress: false
-      - name: Apply audited full-stack governance patch
+      - name: Extract audited governance patch
         shell: bash
         run: |
           python - <<'PY'
@@ -26,12 +26,30 @@ jobs:
           source = Path('.github/workflows/apply-rostering-governance.yml').read_text(encoding='utf-8').splitlines()
           start = source.index("          python - <<'PY'") + 1
           end = source.index("          PY", start)
-          extracted = []
-          for line in source[start:end]:
-              extracted.append(line[10:] if line.startswith('          ') else line)
+          extracted = [line[10:] if line.startswith('          ') else line for line in source[start:end]]
           Path('/tmp/apply_rostering_governance.py').write_text('\n'.join(extracted) + '\n', encoding='utf-8')
           PY
-          python /tmp/apply_rostering_governance.py
+      - name: Apply audited full-stack governance patch
+        shell: bash
+        run: |
+          set +e
+          python /tmp/apply_rostering_governance.py > /tmp/rostering-governance-apply.log 2>&1
+          status=$?
+          cat /tmp/rostering-governance-apply.log
+          echo "$status" > /tmp/rostering-governance-apply.exit-code
+          exit "$status"
+      - name: Upload patch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rostering-governance-apply-diagnostics
+          path: |
+            /tmp/rostering-governance-apply.log
+            /tmp/rostering-governance-apply.exit-code
+          retention-days: 1
+      - name: Validate and commit integrated source
+        shell: bash
+        run: |
           python -m compileall -q backend/amodb/apps/rostering backend/amodb/apps/workforce backend/amodb/alembic/versions/rostering_20260724_governance.py
           git diff --check
           rm -f .github/workflows/run-rostering-governance.yml
