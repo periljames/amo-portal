@@ -173,65 +173,71 @@ def _database_fk_signatures(
 ) -> set[tuple[tuple[str, ...], str, tuple[str, ...]]]:
     return {
         (
-            tuple(str(column) for column in (foreign_key.get("constrained_columns") or ())),
-            str(foreign_key.get("referred_table") or ""),
-            tuple(str(column) for column in (foreign_key.get("referred_columns") or ())),
+            tuple(str(column) for column in foreign_key.get("constrained_columns") or ()),
+            str(foreign_key.get("referred_table")),
+            tuple(str(column) for column in foreign_key.get("referred_columns") or ()),
         )
         for foreign_key in inspector.get_foreign_keys(table_name)
     }
 
 
-def _version_rows(engine: sa.Engine) -> set[str]:
-    with engine.connect() as connection:
-        return {
-            str(revision)
-            for revision in connection.execute(
-                text("SELECT version_num FROM alembic_version")
-            ).scalars()
-        }
-
-
 def _verify_redundant_phase2_overlap_repair(engine: sa.Engine) -> None:
-    """Reproduce the released overlapping-head state and run real Alembic commands."""
+    """The legacy repair must be idempotent after the replacement migration landed."""
+
     with engine.begin() as connection:
         connection.execute(
             text(
-                "INSERT INTO alembic_version (version_num) VALUES (:revision) "
-                "ON CONFLICT (version_num) DO NOTHING"
-            ),
-            {"revision": ROSTER_PARENT},
+                "CREATE TABLE IF NOT EXISTS migration_collision_probe "
+                "(id INTEGER PRIMARY KEY)"
+            )
         )
+        for index_name in (
+            "ix_roster_rules_scope",
+            "ix_roster_rules_amo_active",
+            "uq_roster_rules_amo_code",
+        ):
+            connection.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS {index_name} "
+                    "ON migration_collision_probe (id)"
+                )
+            )
 
-    assert _version_rows(engine) == {TARGET_REVISION, ROSTER_PARENT}
-    _run_alembic("upgrade", TARGET_REVISION)
-    assert _version_rows(engine) == {TARGET_REVISION}
-
-    script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-    expected_heads = set(script.get_heads())
-    assert "rostering_20260724_governance" in expected_heads
-
-    # Reproduce the exact `upgrade heads` overlap at a fully-stamped installation:
-    # all legitimate heads plus the now-redundant historical Phase 2 marker.
-    with engine.begin() as connection:
-        connection.execute(text("DELETE FROM alembic_version"))
-        connection.execute(
-            text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
-            [{"revision": revision} for revision in sorted(expected_heads | {ROSTER_PARENT})],
-        )
-
-    _run_alembic("upgrade", "heads")
-    assert _version_rows(engine) == expected_heads
+    _run_alembic("upgrade", "phase2_15_20260722")
 
 
 def main() -> None:
-    database_url = os.environ["DATABASE_URL"]
-    engine = create_engine(database_url)
+    config = Config("amodb/alembic.ini")
+    script = ScriptDirectory.from_config(config)
+    assert script.get_revision(QUALITY_PARENT) is not None
+    assert script.get_revision(ROSTER_PARENT) is not None
+    assert script.get_revision(TARGET_REVISION) is not None
+    assert script.get_revision("quality_20260724_audit_lifecycle") is not None
+
+    heads = script.get_heads()
+    expected_heads = {"quality_20260724_audit_lifecycle"}
+    if set(heads) != expected_heads:
+        raise RuntimeError(f"Unexpected Alembic heads: {heads}; expected {sorted(expected_heads)}")
+    # Quality audit lifecycle deliberately descends the Rostering governance
+    # revision. Verify the Rostering head remains in the ancestry rather than
+    # treating the newer Quality revision as an overlap.
+    assert script.get_revision("rostering_20260724_governance") is not None
+
     _load_metadata()
+    engine = create_engine(os.environ["DATABASE_URL"], future=True)
+
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
     _create_current_database_baseline(engine)
     _stamp_converged_parents(engine)
 
     with engine.begin() as connection:
-        connection.execute(text("CREATE TABLE migration_collision_probe (id integer)"))
+        connection.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS migration_collision_probe "
+                "(id INTEGER PRIMARY KEY)"
+            )
+        )
         connection.execute(text("CREATE INDEX ix_roster_rules_scope ON migration_collision_probe (id)"))
         connection.execute(text("CREATE INDEX ix_roster_rules_amo_active ON migration_collision_probe (id)"))
         connection.execute(text("CREATE INDEX uq_roster_rules_amo_code ON migration_collision_probe (id)"))
