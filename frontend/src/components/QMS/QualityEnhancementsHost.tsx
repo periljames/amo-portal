@@ -27,6 +27,16 @@ function useAuditRoute(): AuditRoute | null {
   }, [location.pathname, location.search]);
 }
 
+const CarInviteResponsiveStyleLoader: React.FC = () => {
+  useEffect(() => {
+    // The public CAR page owns its legacy base stylesheet. Load the focused
+    // responsive overrides after the route has mounted so source order cannot
+    // restore the cramped 50%-zoom layout.
+    void import("../../styles/car-invite-responsive.css");
+  }, []);
+  return null;
+};
+
 const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
   const queryClient = useQueryClient();
   const [cacheRevision, setCacheRevision] = useState(0);
@@ -72,7 +82,12 @@ const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
 };
 
 const QualityEnhancementsHost: React.FC = () => {
+  const location = useLocation();
   const route = useAuditRoute();
+
+  if (/^\/car-invite\/?$/i.test(location.pathname)) {
+    return <CarInviteResponsiveStyleLoader />;
+  }
   if (!route) return null;
 
   if (route.activeTab === "checklist") {
