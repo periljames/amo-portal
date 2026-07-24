@@ -19,11 +19,19 @@ def _effective_amo_id(user: account_models.User) -> str:
     return getattr(user, "effective_amo_id", None) or user.amo_id
 
 
-def _can_manage_foundations(user: account_models.User) -> bool:
-    if getattr(user, "is_system_account", False):
-        return False
-    if getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False):
+def _is_tenant_admin(user: account_models.User) -> bool:
+    return bool(
+        user
+        and not getattr(user, "is_system_account", False)
+        and (getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False))
+    )
+
+
+def _can_manage_deployments(user: account_models.User) -> bool:
+    if _is_tenant_admin(user):
         return True
+    if not user or getattr(user, "is_system_account", False):
+        return False
     return user.role in {
         account_models.AccountRole.QUALITY_MANAGER,
         account_models.AccountRole.PLANNING_ENGINEER,
@@ -31,9 +39,20 @@ def _can_manage_foundations(user: account_models.User) -> bool:
     }
 
 
-def _require_foundation_manager(user: account_models.User) -> None:
-    if not _can_manage_foundations(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges for shared foundation changes")
+def _require_base_master_admin(user: account_models.User) -> None:
+    if not _is_tenant_admin(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an AMO administrator may create or change canonical bases and stations.",
+        )
+
+
+def _require_deployment_manager(user: account_models.User) -> None:
+    if not _can_manage_deployments(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient privileges to manage effective-dated personnel base deployments.",
+        )
 
 
 @router.get("/contracts", response_model=schemas.FoundationContracts)
@@ -64,7 +83,7 @@ def create_base_station(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_foundation_manager(current_user)
+    _require_base_master_admin(current_user)
     try:
         item = services.create_base_station(db, amo_id=_effective_amo_id(current_user), actor_user_id=current_user.id, payload=payload)
         db.commit()
@@ -82,7 +101,7 @@ def update_base_station(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_foundation_manager(current_user)
+    _require_base_master_admin(current_user)
     amo_id = _effective_amo_id(current_user)
     item = db.query(models.BaseStation).filter(models.BaseStation.id == base_station_id, models.BaseStation.amo_id == amo_id).first()
     if not item:
@@ -120,7 +139,7 @@ def create_user_base_assignment(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_foundation_manager(current_user)
+    _require_deployment_manager(current_user)
     try:
         item = services.create_user_base_assignment(db, amo_id=_effective_amo_id(current_user), actor_user_id=current_user.id, payload=payload)
         db.commit()
@@ -140,7 +159,7 @@ def update_user_base_assignment(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_foundation_manager(current_user)
+    _require_deployment_manager(current_user)
     amo_id = _effective_amo_id(current_user)
     item = db.query(models.UserBaseAssignment).filter(
         models.UserBaseAssignment.id == assignment_id,
@@ -176,7 +195,7 @@ def create_availability(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_foundation_manager(current_user)
+    _require_deployment_manager(current_user)
     try:
         item = services.create_availability(db, amo_id=_effective_amo_id(current_user), actor_user_id=current_user.id, payload=payload)
         db.commit()
