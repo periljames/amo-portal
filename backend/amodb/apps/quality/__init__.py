@@ -6,6 +6,13 @@ from fastapi import APIRouter
 # Primary Quality API exports.
 from .router import router, public_router  # noqa: F401
 
+# Focused extensions are loaded only after the compatibility router is complete.
+# They replace narrowly scoped routes on the same exported router objects, so
+# both the full portal and bounded Quality entrypoint receive the corrections.
+from . import audit_file_controls as _audit_file_controls  # noqa: F401,E402
+from . import audit_workflow_contract as _audit_workflow_contract  # noqa: F401,E402
+from . import public_invite_extensions as _public_invite_extensions  # noqa: F401,E402
+
 
 def _deduplicate_exact_routes(api_router: APIRouter) -> None:
     """Remove duplicate decorators that register the same endpoint twice.

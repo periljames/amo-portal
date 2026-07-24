@@ -1,0 +1,232 @@
+/* Public CAR response: keep the guided workflow usable at 100% browser zoom. */
+.auth-layout--car-invite {
+  padding: 10px;
+}
+
+.auth-layout--car-invite .auth-layout__card {
+  width: min(1480px, calc(100vw - 20px));
+  padding: 12px 14px;
+  border-radius: 16px;
+}
+
+.auth-layout--car-invite .auth-layout__brand {
+  margin-bottom: 8px;
+}
+
+.auth-layout--car-invite .auth-layout__header {
+  margin-bottom: 10px;
+}
+
+.car-invite-workbench {
+  gap: 8px;
+}
+
+.car-invite-toolbar {
+  min-height: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.car-invite-toolbar__stats > span {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.car-invite-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 310px);
+  gap: 10px;
+}
+
+.car-invite-stack,
+.car-invite-side {
+  gap: 9px;
+}
+
+.car-invite-card {
+  padding: 12px;
+  border-radius: 13px;
+}
+
+.car-invite-card__head {
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 210px);
+  gap: 10px;
+  padding-bottom: 9px;
+}
+
+.car-invite-countdown {
+  min-height: 48px;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.car-invite-finding {
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.3fr);
+  gap: 10px;
+  margin: 10px 0 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.car-invite-finding h3 {
+  font-size: clamp(1rem, 1.1vw, 1.25rem);
+}
+
+.car-invite-form {
+  margin-top: 8px;
+}
+
+.car-invite-flow-shell {
+  grid-template-columns: minmax(138px, 164px) minmax(0, 1fr);
+  gap: 9px;
+}
+
+.car-invite-stage-rail {
+  gap: 5px;
+  top: 10px;
+}
+
+.car-invite-stage-rail__step {
+  min-height: 38px;
+  border-radius: 9px;
+  padding: 6px 8px;
+}
+
+.car-invite-stage-stack {
+  gap: 7px;
+}
+
+/* The old implementation expanded every unlocked stage and forced users to zoom
+   out to see the workflow. The rail already provides navigation, so display one
+   working stage at a time and keep the rest out of the reading flow. */
+.car-invite-stage:not(.is-active) {
+  display: none;
+}
+
+.car-invite-stage {
+  border-radius: 11px;
+}
+
+.car-invite-stage__head {
+  gap: 9px;
+  padding: 9px 11px;
+}
+
+.car-invite-stage__body {
+  gap: 9px;
+  padding: 11px;
+}
+
+.car-invite-stage__index {
+  width: 27px;
+  height: 27px;
+}
+
+.car-invite-input,
+.car-invite-textarea,
+.car-invite-token-add input {
+  min-height: 36px;
+  padding: 7px 9px;
+}
+
+.car-invite-textarea {
+  min-height: 96px;
+}
+
+.car-invite-panel {
+  border-radius: 11px;
+}
+
+.car-invite-panel summary {
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+/* Keep one page scroll. Nested sidebar scrolling made the history difficult to
+   reach and caused the page to feel permanently zoomed out. */
+.car-invite-side {
+  top: 10px;
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.car-invite-history {
+  max-height: 330px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* A closed CAR is not overdue work. Hide the active deadline treatment and all
+   disabled editing affordances while retaining the immutable response record. */
+.car-invite-card:has(.car-invite-badge--success) .car-invite-countdown,
+.car-invite-card:has(.car-invite-readonly) .car-invite-stage__head .car-invite-btn:disabled,
+.car-invite-card:has(.car-invite-readonly) .car-invite-stage__actions .car-invite-btn:disabled,
+.car-invite-card:has(.car-invite-readonly) .car-invite-toolbar-inline button:disabled {
+  display: none;
+}
+
+.car-invite-card:has(.car-invite-badge--success) .car-invite-card__head {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.car-invite-card:has(.car-invite-readonly) .car-invite-stage-rail__step:disabled {
+  opacity: 0.82;
+}
+
+@media (max-width: 1180px) {
+  .auth-layout--car-invite .auth-layout__card {
+    width: min(1040px, calc(100vw - 18px));
+  }
+
+  .car-invite-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .car-invite-side {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .car-invite-side > details:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .auth-layout--car-invite {
+    padding: 0;
+  }
+
+  .auth-layout--car-invite .auth-layout__card {
+    width: 100vw;
+    padding: 9px;
+    border-radius: 0;
+  }
+
+  .car-invite-toolbar,
+  .car-invite-card__head,
+  .car-invite-finding,
+  .car-invite-flow-shell,
+  .car-invite-side {
+    grid-template-columns: 1fr;
+  }
+
+  .car-invite-stage-rail {
+    position: static;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .car-invite-stage-rail__step {
+    grid-template-columns: auto 1fr;
+  }
+
+  .car-invite-side > details:last-child {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .car-invite-stage-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

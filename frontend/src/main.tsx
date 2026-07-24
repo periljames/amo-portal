@@ -6,6 +6,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import "@tinymomentum/liquid-glass-react/dist/components/LiquidGlassBase.css";
 import App from "./App";
+import QualityEnhancementsRouteGate from "./components/QMS/QualityEnhancementsRouteGate";
 import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { clearApiResponseCache } from "./services/apiClient";
@@ -198,6 +199,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <RealtimeProvider>
         <BrowserRouter>
           <App />
+          <QualityEnhancementsRouteGate />
         </BrowserRouter>
         <OfflineSyncIndicator />
       </RealtimeProvider>
