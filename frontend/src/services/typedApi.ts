@@ -18,32 +18,109 @@ function buildHeaders(extra?: HeadersInit): Headers {
   return headers;
 }
 
-async function parseError(response: Response): Promise<StructuredApiError> {
-  let raw: unknown;
+async function responseBody(response: Response): Promise<{ raw: unknown; text: string }> {
+  const text = await response.text().catch(() => "");
+  if (!text.trim()) return { raw: "", text: "" };
   try {
-    raw = await response.json();
+    return { raw: JSON.parse(text) as unknown, text };
   } catch {
-    raw = await response.text().catch(() => "");
+    return { raw: text, text };
   }
-  const wrapped = raw && typeof raw === "object" && "detail" in raw ? (raw as { detail?: unknown }).detail : raw;
-  const payload = wrapped && typeof wrapped === "object" ? wrapped as Record<string, unknown> : {};
+}
+
+function structuredError(
+  message: string,
+  options: {
+    status: number;
+    errorCode: string;
+    retryable?: boolean;
+    raw?: unknown;
+    fieldErrors?: Record<string, string | string[]>;
+    conflicts?: Array<Record<string, unknown>>;
+  },
+): StructuredApiError {
+  const error = new Error(message) as StructuredApiError;
+  error.status = options.status;
+  error.errorCode = options.errorCode;
+  error.fieldErrors = options.fieldErrors || {};
+  error.conflicts = options.conflicts || [];
+  error.retryable = options.retryable === true;
+  error.raw = options.raw;
+  return error;
+}
+
+async function parseError(response: Response): Promise<StructuredApiError> {
+  const { raw } = await responseBody(response);
+  const wrapped = raw && typeof raw === "object" && "detail" in raw
+    ? (raw as { detail?: unknown }).detail
+    : raw;
+  const payload = wrapped && typeof wrapped === "object"
+    ? wrapped as Record<string, unknown>
+    : {};
   const message = typeof payload.detail === "string"
     ? payload.detail
     : typeof raw === "string" && raw.trim()
       ? raw
       : `${response.status} ${response.statusText}`;
-  const error = new Error(message) as StructuredApiError;
-  error.status = response.status;
-  error.errorCode = typeof payload.error_code === "string" ? payload.error_code : "API_REQUEST_FAILED";
-  error.fieldErrors = payload.field_errors && typeof payload.field_errors === "object"
-    ? payload.field_errors as Record<string, string | string[]>
-    : {};
-  error.conflicts = Array.isArray(payload.conflicts)
-    ? payload.conflicts.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-    : [];
-  error.retryable = payload.retryable === true;
-  error.raw = raw;
-  return error;
+
+  return structuredError(message, {
+    status: response.status,
+    errorCode: typeof payload.error_code === "string"
+      ? payload.error_code
+      : "API_REQUEST_FAILED",
+    fieldErrors: payload.field_errors && typeof payload.field_errors === "object"
+      ? payload.field_errors as Record<string, string | string[]>
+      : {},
+    conflicts: Array.isArray(payload.conflicts)
+      ? payload.conflicts.filter(
+          (item): item is Record<string, unknown> => !!item && typeof item === "object",
+        )
+      : [],
+    retryable: payload.retryable === true,
+    raw,
+  });
+}
+
+async function parseJson<T>(path: string, response: Response): Promise<T> {
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  const { raw, text } = await responseBody(response);
+  const preview = text.replace(/\s+/g, " ").trim().slice(0, 180);
+  const looksLikeHtml = /^(?:<!doctype|<html|<head|<body)/i.test(preview);
+
+  if (looksLikeHtml) {
+    throw structuredError(
+      `API route ${path} returned the portal HTML document instead of JSON. The reverse proxy is not forwarding this API route to the backend.`,
+      {
+        status: 502,
+        errorCode: "API_ROUTE_RETURNED_HTML",
+        retryable: true,
+        raw: preview,
+      },
+    );
+  }
+
+  if (!contentType.includes("application/json") && !contentType.includes("+json")) {
+    throw structuredError(
+      `API route ${path} returned ${contentType || "an unknown content type"} instead of JSON.`,
+      {
+        status: 502,
+        errorCode: "API_RESPONSE_NOT_JSON",
+        retryable: true,
+        raw: preview,
+      },
+    );
+  }
+
+  if (typeof raw === "string") {
+    throw structuredError(`API route ${path} returned invalid JSON.`, {
+      status: 502,
+      errorCode: "API_RESPONSE_INVALID_JSON",
+      retryable: true,
+      raw: preview,
+    });
+  }
+
+  return raw as T;
 }
 
 export async function apiJson<T>(
@@ -61,7 +138,7 @@ export async function apiJson<T>(
   });
   if (!response.ok) throw await parseError(response);
   if (response.status === 204) return undefined as T;
-  return await response.json() as T;
+  return await parseJson<T>(path, response);
 }
 
 export async function apiBlob(
