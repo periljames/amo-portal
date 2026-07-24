@@ -29,10 +29,32 @@ function useAuditRoute(): AuditRoute | null {
 
 const CarInviteResponsiveStyleLoader: React.FC = () => {
   useEffect(() => {
-    // The public CAR page owns its legacy base stylesheet. Load the focused
-    // responsive overrides after the route has mounted so source order cannot
-    // restore the cramped 50%-zoom layout.
-    void import("../../styles/car-invite-responsive.css");
+    let cancelled = false;
+    let observer: MutationObserver | null = null;
+
+    const loadOverrides = () => {
+      if (cancelled) return;
+      observer?.disconnect();
+      observer = null;
+      void import("../../styles/car-invite-responsive.css");
+    };
+
+    // The route component imports the legacy CAR stylesheet. Wait until its
+    // workspace is mounted before loading the focused overrides, guaranteeing
+    // that source order cannot restore the cramped 50%-zoom layout.
+    if (document.querySelector(".auth-layout--car-invite")) {
+      loadOverrides();
+    } else {
+      observer = new MutationObserver(() => {
+        if (document.querySelector(".auth-layout--car-invite")) loadOverrides();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    return () => {
+      cancelled = true;
+      observer?.disconnect();
+    };
   }, []);
   return null;
 };
