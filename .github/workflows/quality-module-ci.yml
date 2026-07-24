@@ -24,6 +24,7 @@ on:
       - "frontend/src/services/qms.ts"
       - "frontend/src/services/qmsAuditHubActions.ts"
       - "frontend/src/services/qmsAuditHubActions.test.ts"
+      - "frontend/src/services/qmsAuditLifecycle*.ts"
       - "frontend/src/router.tsx"
       - "frontend/package.json"
       - "frontend/package-lock.json"
@@ -61,7 +62,7 @@ jobs:
           --attempts 4
           --label "quality backend dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
-      - name: Verify Alembic graph and Quality revision
+      - name: Verify Alembic graph and Quality revisions
         env:
           DATABASE_URL: ""
           DATABASE_WRITE_URL: ""
@@ -74,9 +75,12 @@ jobs:
           heads = script.get_heads()
           print("Alembic heads:", heads)
           assert len(heads) == len(set(heads)), heads
-          revision = script.get_revision("quality_20260722_schema_integrity")
-          assert revision is not None
-          assert revision.down_revision == "workforce_20260721_complete"
+          integrity = script.get_revision("quality_20260722_schema_integrity")
+          assert integrity is not None
+          assert integrity.down_revision == "workforce_20260721_complete"
+          lifecycle = script.get_revision("quality_20260724_audit_lifecycle")
+          assert lifecycle is not None
+          assert lifecycle.down_revision == "rostering_20260724_governance"
           PY
       - name: Run Quality backend and frontend contract check
         run: python -m amodb.scripts.quality_module_internal_check
@@ -86,6 +90,7 @@ jobs:
           amodb/quality_main.py
           amodb/apps/quality
           amodb/alembic/versions/quality_20260722_schema_integrity.py
+          amodb/alembic/versions/quality_20260724_audit_lifecycle.py
       - name: Configure full and bounded Quality SQLAlchemy mappers
         env:
           APP_ENV: test
@@ -108,6 +113,7 @@ jobs:
           amodb/apps/quality/tests/test_quality_delivery_profile.py
           amodb/apps/quality/tests/test_workflow_transitions.py
           amodb/apps/quality/tests/test_audit_workflow_enforcement.py
+          amodb/apps/quality/tests/test_audit_lifecycle_v2.py
           amodb/apps/quality/tests/test_audit_events.py
           amodb/apps/quality/tests/test_task_integrations.py
           amodb/apps/quality/tests/test_evidence_pack_exports.py
@@ -147,6 +153,13 @@ jobs:
           --attempts 4
           --label "quality PostgreSQL dependency install"
           -- pip install --disable-pip-version-check --retries 5 --timeout 60 -r requirements.txt
+      - name: Upgrade complete PostgreSQL schema
+        env:
+          APP_ENV: test
+          SECRET_KEY: quality-postgres-test-secret
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+          DATABASE_WRITE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/amodb_quality_test
+        run: alembic -c amodb/alembic.ini upgrade heads
       - name: Run Quality fallback-schema hardening probe
         id: quality_schema
         continue-on-error: true
@@ -201,5 +214,11 @@ jobs:
       - name: Lint changed Quality service boundary
         run: >-
           npm exec -- eslint
+          src/components/QMS/QualityChecklistPdfEditor.tsx
+          src/components/QMS/QualityEnhancementsHost.tsx
+          src/pages/QualityAuditRunHubPage.tsx
           src/services/qmsAuditHubActions.ts
           src/services/qmsAuditHubActions.test.ts
+          src/services/qmsAuditLifecycle.ts
+          src/services/qmsAuditLifecycle.test.ts
+          src/services/qmsAuditLifecycleQueries.ts
