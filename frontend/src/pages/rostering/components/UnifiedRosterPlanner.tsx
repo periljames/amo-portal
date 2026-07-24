@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
@@ -13,8 +13,7 @@ const REFERENCE_STALE_MS = 15 * 60_000;
 export function UnifiedRosterPlanner() {
   const { amoCode = "UNKNOWN" } = useParams();
   const root = `/maintenance/${encodeURIComponent(amoCode)}`;
-  const [prerequisiteOpen, setPrerequisiteOpen] = useState(false);
-  const prerequisiteShown = useRef(false);
+  const [prerequisiteDismissed, setPrerequisiteDismissed] = useState(false);
 
   const basesQuery = useQuery({
     queryKey: ["foundations", "base-stations", "active"],
@@ -68,11 +67,7 @@ export function UnifiedRosterPlanner() {
     return items;
   }, [basesQuery.data, basesQuery.isSuccess, periodsQuery.data, periodsQuery.isSuccess, root, shiftsQuery.data, shiftsQuery.isSuccess]);
 
-  useEffect(() => {
-    if (!prerequisitesResolved || prerequisiteItems.length === 0 || prerequisiteShown.current) return;
-    prerequisiteShown.current = true;
-    setPrerequisiteOpen(true);
-  }, [prerequisiteItems.length, prerequisitesResolved]);
+  const prerequisiteOpen = prerequisitesResolved && prerequisiteItems.length > 0 && !prerequisiteDismissed;
 
   return (
     <div style={{ display: "grid", gap: "0.5rem", minWidth: 0 }}>
@@ -104,7 +99,7 @@ export function UnifiedRosterPlanner() {
       <PrerequisiteDialog
         open={prerequisiteOpen}
         items={prerequisiteItems}
-        onClose={() => setPrerequisiteOpen(false)}
+        onClose={() => setPrerequisiteDismissed(true)}
       />
     </div>
   );
