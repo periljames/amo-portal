@@ -28,6 +28,7 @@ class PermissionCode(str, Enum):
     ROSTER_OVERRIDE_WARNING = "roster.override_warning"
     ROSTER_OVERRIDE_BLOCKER = "roster.override_blocker"
     ROSTER_MANAGE_RULES = "roster.manage_rules"
+    ROSTER_MANAGE_APPROVAL_AUTHORITIES = "roster.manage_approval_authorities"
     ROSTER_MANAGE_SHIFT_TEMPLATES = "roster.manage_shift_templates"
     ROSTER_MANAGE_PATTERNS = "roster.manage_patterns"
     ROSTER_ALLOCATE_WORK = "roster.allocate_work"
@@ -77,9 +78,6 @@ SUPERVISOR = EMPLOYEE | {
     PermissionCode.ROSTER_DELETE_DRAFT_ASSIGNMENT.value,
     PermissionCode.ROSTER_VALIDATE.value,
     PermissionCode.ROSTER_SUBMIT.value,
-    PermissionCode.ROSTER_APPROVE.value,
-    PermissionCode.ROSTER_PUBLISH.value,
-    PermissionCode.ROSTER_AMEND_PUBLISHED.value,
     PermissionCode.ROSTER_ALLOCATE_WORK.value,
     PermissionCode.LEAVE_REVIEW.value,
     PermissionCode.ATTENDANCE_MANAGE.value,
@@ -87,21 +85,30 @@ SUPERVISOR = EMPLOYEE | {
     PermissionCode.OVERTIME_APPROVE.value,
 }
 
+DEPARTMENT_HEAD = SUPERVISOR | {
+    PermissionCode.ROSTER_APPROVE.value,
+    PermissionCode.ROSTER_AMEND_PUBLISHED.value,
+}
+
+BASE_MANAGER = DEPARTMENT_HEAD | {
+    PermissionCode.ROSTER_VIEW_ALL.value,
+    PermissionCode.ROSTER_PUBLISH.value,
+    PermissionCode.ROSTER_MANAGE_APPROVAL_AUTHORITIES.value,
+}
+
+
 QUALITY = EMPLOYEE | {
     PermissionCode.ROSTER_VIEW_ALL.value,
     PermissionCode.ROSTER_VALIDATE.value,
-    PermissionCode.ROSTER_APPROVE.value,
-    PermissionCode.ROSTER_PUBLISH.value,
     PermissionCode.ROSTER_OVERRIDE_WARNING.value,
     PermissionCode.ROSTER_OVERRIDE_BLOCKER.value,
     PermissionCode.ROSTER_MANAGE_RULES.value,
 }
 
+
 HR = EMPLOYEE | {
     PermissionCode.ROSTER_VIEW_ALL.value,
     PermissionCode.ROSTER_VALIDATE.value,
-    PermissionCode.ROSTER_APPROVE.value,
-    PermissionCode.ROSTER_PUBLISH.value,
     PermissionCode.ROSTER_AMEND_PUBLISHED.value,
     PermissionCode.LEAVE_REVIEW.value,
     PermissionCode.LEAVE_APPROVE.value,
@@ -113,6 +120,7 @@ HR = EMPLOYEE | {
     PermissionCode.WORKFORCE_MANAGE_CONTRACTS.value,
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
+
 
 PAYROLL = EMPLOYEE | {
     PermissionCode.TIMESHEET_APPROVE.value,
@@ -128,6 +136,9 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "ROSTER_PLANNER": PLANNER,
     "PRODUCTION_ENGINEER": SUPERVISOR,
     "DEPARTMENT_SUPERVISOR": SUPERVISOR,
+    "DEPARTMENT_HEAD": DEPARTMENT_HEAD,
+    "BASE_MANAGER": BASE_MANAGER,
+    "LINE_MANAGER": DEPARTMENT_HEAD,
     "QUALITY_MANAGER": QUALITY,
     "QUALITY_INSPECTOR": QUALITY - {PermissionCode.ROSTER_PUBLISH.value, PermissionCode.ROSTER_OVERRIDE_BLOCKER.value},
     "AUDITOR": {PermissionCode.ROSTER_VIEW_ALL.value, PermissionCode.ROSTER_VALIDATE.value},
@@ -168,6 +179,10 @@ def _derived_role(user: account_models.User) -> Optional[str]:
         return "PAYROLL_OFFICER"
     if "roster" in title or "duty planner" in title:
         return "ROSTER_PLANNER"
+    if "base manager" in title:
+        return "BASE_MANAGER"
+    if "department head" in title or title.startswith("head of ") or "department manager" in title or "line manager" in title:
+        return "DEPARTMENT_HEAD"
     if "supervisor" in title or "shift lead" in title:
         return "DEPARTMENT_SUPERVISOR"
     return None

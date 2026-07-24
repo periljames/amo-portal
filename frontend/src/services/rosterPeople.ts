@@ -92,3 +92,11 @@ export async function listRosterPeoplePage(filters: RosterPeoplePageFilters = {}
     has_more: false,
   };
 }
+
+export async function listAllRosterPeople(filters: Omit<RosterPeoplePageFilters, "page"> = {}): Promise<RosterPeoplePage> {
+  const pageSize = Math.min(Math.max(filters.page_size || 250, 25), 250);
+  const first = await listRosterPeoplePage({ ...filters, page: 1, page_size: pageSize });
+  if (!first.has_more) return first;
+  const pages = await Promise.all(Array.from({ length: first.pages - 1 }, (_, index) => listRosterPeoplePage({ ...filters, page: index + 2, page_size: pageSize })));
+  return { ...first, items: [first, ...pages].flatMap((page) => page.items), page: 1, page_size: pageSize, has_more: false };
+}

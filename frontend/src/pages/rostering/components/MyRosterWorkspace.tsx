@@ -3,6 +3,8 @@ import { addDays, format, parseISO } from "date-fns";
 import {
   CalendarCheck2,
   CalendarPlus,
+  CalendarSync,
+  Copy,
   CheckCircle2,
   Clock3,
   Download,
@@ -15,7 +17,7 @@ import {
 } from "lucide-react";
 
 import { getCachedUser } from "../../../services/auth";
-import { acknowledgeRosterVersion, exportMyRosterCalendar, getMyRoster } from "../../../services/rostering";
+import { acknowledgeRosterVersion, exportMyRosterCalendar, getMyRoster, getRosterCalendarSubscription } from "../../../services/rostering";
 import {
   createAttendanceEvent,
   createLeaveRequest,
@@ -26,7 +28,7 @@ import {
   listTimesheets,
   submitLeaveRequest,
 } from "../../../services/workforce";
-import type { MyRosterResponse } from "../../../types/rostering";
+import type { MyRosterResponse, RosterCalendarSubscriptionRead } from "../../../types/rostering";
 import type { AttendanceSummaryRead, LeaveBalanceRead, LeaveRequestRead, LeaveTypeRead, TimesheetRead } from "../../../types/workforce";
 import { errorMessage, formatDateTime, hoursLabel, isoDate, newIdempotencyKey } from "../rosterUi";
 import { EmptyState, MetricCard, RosterError, RosterLoading, StatusPill } from "./RosterShell";
@@ -42,6 +44,7 @@ export function MyRosterWorkspace() {
   const userId = String((user as { id?: string } | null)?.id || "");
   const [range, setRange] = useState(initialRange);
   const [roster, setRoster] = useState<MyRosterResponse | null>(null);
+  const [calendarSubscription, setCalendarSubscription] = useState<RosterCalendarSubscriptionRead | null>(null);
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeRead[]>([]);
   const [balances, setBalances] = useState<LeaveBalanceRead[]>([]);
   const [requests, setRequests] = useState<LeaveRequestRead[]>([]);
@@ -60,13 +63,14 @@ export function MyRosterWorkspace() {
     setLoading(true);
     setError(null);
     try {
-      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage] = await Promise.all([
+      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage, subscription] = await Promise.all([
         getMyRoster(range),
         listLeaveTypes(false),
         listLeaveBalances({ user_id: userId || null, leave_year: new Date().getFullYear() }),
         listLeaveRequests({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
         getAttendanceSummary({ user_id: userId || null, from: range.from, to: range.to }),
         listTimesheets({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
+        getRosterCalendarSubscription(),
       ]);
       setRoster(rosterData);
       setLeaveTypes(types);
@@ -74,6 +78,7 @@ export function MyRosterWorkspace() {
       setRequests(requestPage.items);
       setAttendance(attendanceData);
       setTimesheets(timesheetPage.items);
+      setCalendarSubscription(subscription);
       if (!leaveTypeId && types[0]) setLeaveTypeId(types[0].id);
     } catch (reason) {
       setError(errorMessage(reason));
@@ -167,6 +172,24 @@ export function MyRosterWorkspace() {
         <MetricCard label="Leave available" value={hoursLabel(availableLeave)} detail={`${balances.length} leave balances`} tone="neutral" />
         <MetricCard label="Acknowledgements" value={roster.acknowledgement_required_version_ids.length} detail="Published rosters outstanding" tone={roster.acknowledgement_required_version_ids.length ? "warning" : "good"} />
       </section>
+
+
+
+    {calendarSubscription ? (
+    <section className="wr-panel wr-calendar-subscription">
+    <CalendarSync size={22} />
+    <div>
+    <span className="wr-eyebrow">One-time device setup</span>
+    <h2>Automatic personal operations calendar</h2>
+    <p>Subscribe once to receive published duty, training, Quality audits and aircraft work allocations. Calendar applications refresh this feed automatically.</p>
+    <small>Refresh target: every {calendarSubscription.refresh_interval_minutes} minutes · {calendarSubscription.includes.map((value) => value.replace(/_/g, " ").toLowerCase()).join(" · ")}</small>
+    </div>
+    <div className="wr-actions">
+    <button type="button" className="wr-button wr-button--secondary" onClick={() => void navigator.clipboard.writeText(calendarSubscription.https_url)}><Copy size={15} /> Copy feed URL</button>
+    <a className="wr-button wr-button--primary" href={calendarSubscription.webcal_url}><CalendarPlus size={15} /> Subscribe on this device</a>
+    </div>
+    </section>
+    ) : null}
 
       {leaveOpen ? (
         <section className="wr-panel wr-panel--form">

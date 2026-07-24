@@ -33,7 +33,7 @@ import {
   listShiftTemplates,
 } from "../../../services/rostering";
 import {
-  listRosterPeoplePage,
+  listAllRosterPeople,
   type RosterPersonRead,
 } from "../../../services/rosterPeople";
 import {
@@ -71,6 +71,7 @@ import type {
 } from "../../../types/workforce";
 import { errorMessage, isoDate, newIdempotencyKey } from "../rosterUi";
 import { EmptyState, RosterLoading, StatusPill } from "./RosterShell";
+import { RosterGovernancePanel } from "./RosterGovernancePanel";
 
 type Tab =
   | "integration"
@@ -80,6 +81,7 @@ type Tab =
   | "contracts"
   | "leave"
   | "rules"
+  | "governance"
   | "approvals"
   | "preferences";
 
@@ -109,6 +111,7 @@ const TABS: TabSpec[] = [
   { id: "contracts", label: "Contracts", icon: BriefcaseBusiness },
   { id: "leave", label: "Leave", icon: UserCog },
   { id: "rules", label: "Rules", icon: ShieldCheck },
+  { id: "governance", label: "Roster approval", icon: BadgeCheck },
   { id: "approvals", label: "Approvals", icon: CheckCircle2 },
   { id: "preferences", label: "Preferences", icon: Settings2 },
 ];
@@ -162,9 +165,8 @@ export function UnifiedRosterSettings() {
   );
   const rulesQuery = useSettingsQuery("rules", () => listRosterRules(true));
   const peopleQuery = useSettingsQuery("people", () =>
-    listRosterPeoplePage({
-      page: 1,
-      page_size: 200,
+    listAllRosterPeople({
+      page_size: 250,
       active_only: true,
       roster_eligible_only: false,
     }),
@@ -313,6 +315,15 @@ export function UnifiedRosterSettings() {
           run={run}
         />
       ) : null}
+      {tab === "governance" ? (
+    <RosterGovernancePanel
+    people={people}
+    periods={periods}
+    bases={bases}
+    canManageRules={can("roster.manage_rules")}
+    canManageAuthorities={can("roster.manage_approval_authorities")}
+    />
+    ) : null}
       {tab === "approvals" ? (
         <ApprovalsPanel
           requests={leaveRequestsQuery.data?.items || []}

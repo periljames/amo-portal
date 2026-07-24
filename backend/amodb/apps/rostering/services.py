@@ -19,7 +19,7 @@ from ..quality import models as quality_models
 from ..training import models as training_models
 from ..workforce import models as workforce_models
 from ..workforce import services as workforce_services
-from . import assignments, catalog, common, lifecycle, planning, reports
+from . import assignments, catalog, common, governance, lifecycle, planning, reports
 from .assignments import (
     allocate_to_task,
     bulk_create_assignments as _bulk_create_assignments,
@@ -360,6 +360,16 @@ def published_version_for_date(db: Session, *, amo_id: str, on_date: date):
         models.RosterPeriod.starts_on <= on_date,
         models.RosterPeriod.ends_on >= on_date,
     ).order_by(models.RosterVersion.published_at.desc(), models.RosterVersion.version_no.desc()).first()
+
+
+list_rule_sets = governance.list_rule_sets
+create_rule_set = governance.create_rule_set
+update_rule_set = governance.update_rule_set
+list_approval_authorities = governance.list_authorities
+create_approval_authority = governance.create_authority
+update_approval_authority = governance.update_authority
+approval_matrix = governance.approval_matrix
+request_roster_changes = governance.request_changes
 
 
 __all__ = [name for name in globals() if not name.startswith("_")]

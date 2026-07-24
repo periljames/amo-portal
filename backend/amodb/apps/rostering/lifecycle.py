@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
-from . import common, models, schemas, validation
+from . import calendar_feed, common, governance, models, schemas, validation
 
 
 def validate_version(
@@ -49,6 +49,7 @@ def submit_version(
     result = validate_version(db, version=version, actor_user_id=actor_user_id)
     if result.blocker_count:
         raise ValueError("Roster version has unresolved blocker findings and cannot be submitted")
+    governance.prepare_approval_cycle(db, version=version, actor_user_id=actor_user_id)
     version.status = models.RosterVersionStatus.SUBMITTED
     version.submitted_by_user_id = actor_user_id
     version.submitted_at = common.utcnow()
@@ -66,21 +67,34 @@ def approve_version(
     actor_user_id: str,
     payload: schemas.RosterLifecycleRequest,
 ) -> models.RosterVersion:
-    if version.status != models.RosterVersionStatus.SUBMITTED:
-        raise ValueError("Only submitted roster versions can be approved")
-    common.check_version_revision(version, payload.expected_state_revision)
-    if actor_user_id in {version.created_by_user_id, version.submitted_by_user_id}:
-        raise ValueError("The roster creator or submitter cannot approve the same version")
+    actor = db.query(account_models.User).filter(
+        account_models.User.amo_id == version.amo_id,
+        account_models.User.id == actor_user_id,
+        account_models.User.is_active.is_(True),
+    ).first()
+    if not actor:
+        raise ValueError("Roster approver is not an active tenant user")
     result = validate_version(db, version=version, actor_user_id=actor_user_id)
     if result.blocker_count:
         raise ValueError("Roster version has unresolved blocker findings and cannot be approved")
-    version.status = models.RosterVersionStatus.APPROVED
-    version.approved_by_user_id = actor_user_id
-    version.approved_at = common.utcnow()
+    _rows, complete = governance.approve_scopes(db, version=version, actor=actor, payload=payload)
+    if complete:
+        version.status = models.RosterVersionStatus.APPROVED
+        version.approved_by_user_id = actor_user_id
+        version.approved_at = common.utcnow()
     common.bump_version(version)
     db.add(version)
     db.flush()
-    common.audit(db, amo_id=version.amo_id, actor_user_id=actor_user_id, entity_type="RosterVersion", entity_id=version.id, action="approve", after={"status": common.enum_value(version.status), "comment": payload.comment, "state_revision": version.state_revision}, critical=True)
+    common.audit(
+        db,
+        amo_id=version.amo_id,
+        actor_user_id=actor_user_id,
+        entity_type="RosterVersion",
+        entity_id=version.id,
+        action="approve_scope" if not complete else "approve_complete",
+        after={"status": common.enum_value(version.status), "comment": payload.comment, "state_revision": version.state_revision},
+        critical=True,
+    )
     return version
 
 
@@ -104,6 +118,14 @@ def publish_version(
     common.check_version_revision(version, payload.expected_state_revision)
     if actor_user_id == version.created_by_user_id:
         raise ValueError("The roster creator cannot publish the same version")
+    actor = db.query(account_models.User).filter(
+        account_models.User.amo_id == version.amo_id,
+        account_models.User.id == actor_user_id,
+        account_models.User.is_active.is_(True),
+    ).first()
+    if not actor:
+        raise ValueError("Roster publisher is not an active tenant user")
+    governance.require_publish_authority(db, version=version, actor=actor)
     operation_key = payload.idempotency_key or f"publish:{version.id}:{version.state_revision}"
     request_hash = common.canonical_hash({"version_id": version.id, "state_revision": version.state_revision, "comment": payload.comment})
     receipt = common.command_receipt(db, amo_id=version.amo_id, idempotency_key=operation_key, operation="PUBLISH", request_hash=request_hash)
@@ -182,6 +204,7 @@ def publish_version(
                 "version_no": version.version_no,
                 "published_at": version.published_at.isoformat(),
                 "route": route,
+                "calendar_feed_path": f"/rostering/calendar/feed/{calendar_feed.calendar_token(amo_id=version.amo_id, user_id=user_id)}.ics",
                 "user_id": user_id,
             },
             correlation_id=f"{operation_key}:{user_id}",

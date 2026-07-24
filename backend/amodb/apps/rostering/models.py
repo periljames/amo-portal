@@ -104,9 +104,11 @@ class RosterValidationSource(str, Enum):
 
 class RosterRuleType(str, Enum):
     MIN_REST_HOURS = "MIN_REST_HOURS"
+    MAX_ASSIGNMENT_DURATION = "MAX_ASSIGNMENT_DURATION"
     MAX_DUTY_HOURS_DAY = "MAX_DUTY_HOURS_DAY"
     MAX_DUTY_HOURS_ROLLING = "MAX_DUTY_HOURS_ROLLING"
     MAX_CONSECUTIVE_DAYS = "MAX_CONSECUTIVE_DAYS"
+    MAX_CONSECUTIVE_NIGHTS = "MAX_CONSECUTIVE_NIGHTS"
     REQUIRED_DAYS_OFF = "REQUIRED_DAYS_OFF"
     MIN_COVERAGE = "MIN_COVERAGE"
     REQUIRED_CERTIFYING_COVERAGE = "REQUIRED_CERTIFYING_COVERAGE"
@@ -125,6 +127,18 @@ class RosterRuleScope(str, Enum):
     BASE = "BASE"
     SHIFT_TEMPLATE = "SHIFT_TEMPLATE"
     USER = "USER"
+
+
+class RosterApprovalAuthorityLevel(str, Enum):
+    BASE_MANAGER = "BASE_MANAGER"
+    DEPARTMENT_HEAD = "DEPARTMENT_HEAD"
+    DELEGATE = "DELEGATE"
+
+
+class RosterDepartmentApprovalStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED"
 
 
 class RosterExceptionDecision(str, Enum):
@@ -302,6 +316,7 @@ class RosterRule(Base):
 
     id = Column(String(36), primary_key=True, default=generate_user_id)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    rule_set_id = Column(String(36), ForeignKey("roster_rule_sets.id", ondelete="SET NULL"), nullable=True, index=True)
     code = Column(String(64), nullable=False)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
@@ -470,3 +485,86 @@ class RosterCommandReceipt(Base):
     request_hash = Column(String(128), nullable=False)
     response_json = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+class RosterRuleSet(Base):
+    __tablename__ = "roster_rule_sets"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "code", name="uq_roster_rule_set_amo_code"),
+        Index("ix_roster_rule_sets_amo_active", "amo_id", "is_active"),
+        CheckConstraint("effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from", name="ck_roster_rule_set_dates"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    code = Column(String(64), nullable=False)
+    name = Column(String(255), nullable=False)
+    version_label = Column(String(128), nullable=True)
+    regulatory_basis = Column(Text, nullable=True)
+    manual_reference = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    priority = Column(Integer, nullable=False, default=100)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class RosterApprovalAuthority(Base):
+    __tablename__ = "roster_approval_authorities"
+    __table_args__ = (
+        UniqueConstraint("amo_id", "user_id", "authority_level", "department_id", "base_station_id", name="uq_roster_approval_authority_scope"),
+        Index("ix_roster_approval_authority_scope", "amo_id", "base_station_id", "department_id", "is_active"),
+        Index("ix_roster_approval_authority_user", "amo_id", "user_id", "is_active"),
+        CheckConstraint("effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from", name="ck_roster_approval_authority_dates"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    authority_level = Column(SAEnum(RosterApprovalAuthorityLevel, name="roster_approval_authority_level_enum", native_enum=False), nullable=False, index=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="CASCADE"), nullable=True, index=True)
+    base_station_id = Column(String(36), ForeignKey("base_stations.id", ondelete="CASCADE"), nullable=True, index=True)
+    can_approve = Column(Boolean, nullable=False, default=True)
+    can_publish = Column(Boolean, nullable=False, default=False)
+    effective_from = Column(Date, nullable=True)
+    effective_to = Column(Date, nullable=True)
+    reason = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+    department = relationship("Department", lazy="joined")
+    base_station = relationship("BaseStation", lazy="joined")
+
+
+class RosterDepartmentApproval(Base):
+    __tablename__ = "roster_department_approvals"
+    __table_args__ = (
+        UniqueConstraint("version_id", "department_id", "base_station_id", name="uq_roster_department_approval_scope"),
+        Index("ix_roster_department_approval_version_status", "version_id", "status"),
+        Index("ix_roster_department_approval_assignee", "amo_id", "assigned_approver_user_id", "status"),
+    )
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_id = Column(String(36), ForeignKey("roster_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(String(36), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
+    base_station_id = Column(String(36), ForeignKey("base_stations.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_approver_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(SAEnum(RosterDepartmentApprovalStatus, name="roster_department_approval_status_enum", native_enum=False), nullable=False, default=RosterDepartmentApprovalStatus.PENDING, index=True)
+    decided_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decision_comment = Column(Text, nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    assigned_approver = relationship("User", foreign_keys=[assigned_approver_user_id], lazy="joined")
+    decided_by = relationship("User", foreign_keys=[decided_by_user_id], lazy="joined")
+    department = relationship("Department", lazy="joined")
+    base_station = relationship("BaseStation", lazy="joined")

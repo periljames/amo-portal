@@ -5,7 +5,7 @@ from datetime import date, datetime
 from io import BytesIO
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,7 +14,7 @@ from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..workforce import permissions as workforce_permissions
-from . import exports, models, schemas, services
+from . import calendar_feed, exports, governance, models, schemas, services
 
 router = APIRouter(prefix="/rostering", tags=["rostering"])
 
@@ -118,6 +118,130 @@ def roster_contracts(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     return services.roster_contracts(db, current_user=current_user)
+
+
+
+
+@router.get("/calendar/subscription", response_model=schemas.RosterCalendarSubscriptionRead)
+def personal_roster_calendar_subscription(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VIEW_OWN)
+    token = calendar_feed.calendar_token(amo_id=_amo(current_user), user_id=current_user.id)
+    feed_path = f"/rostering/calendar/feed/{token}.ics"
+    https_url = str(request.base_url).rstrip("/") + feed_path
+    webcal_url = "webcal://" + https_url.split("://", 1)[-1]
+    return schemas.RosterCalendarSubscriptionRead(
+        https_url=https_url,
+        webcal_url=webcal_url,
+        feed_path=feed_path,
+        refresh_interval_minutes=60,
+        includes=["PUBLISHED_DUTY", "TRAINING", "QMS_AUDITS", "MAINTENANCE_TASKS", "AIRCRAFT_ALLOCATIONS"],
+    )
+
+
+@router.get("/calendar/feed/{token}.ics", name="personal_roster_calendar_feed")
+def personal_roster_calendar_feed(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    try:
+        amo_id, user_id = calendar_feed.decode_calendar_token(token)
+        content = calendar_feed.personal_calendar(db, amo_id=amo_id, user_id=user_id)
+    except (ValueError, RuntimeError) as exc:
+        raise _error(str(exc), error_code="ROSTER_CALENDAR_TOKEN_INVALID", status_code=404) from exc
+    return PlainTextResponse(
+        content,
+        media_type="text/calendar",
+        headers={"Cache-Control": "private, max-age=300", "Content-Disposition": "inline; filename=amo-portal-calendar.ics"},
+    )
+
+
+@router.get("/rule-sets", response_model=list[schemas.RosterRuleSetRead])
+def list_roster_rule_sets(
+    include_inactive: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VALIDATE)
+    rows = governance.list_rule_sets(db, amo_id=_amo(current_user), include_inactive=include_inactive)
+    db.commit()
+    return rows
+
+
+@router.post("/rule-sets", response_model=schemas.RosterRuleSetRead, status_code=status.HTTP_201_CREATED)
+def create_roster_rule_set(
+    payload: schemas.RosterRuleSetCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_RULES)
+    return _commit(db, governance.create_rule_set(db, amo_id=_amo(current_user), actor_user_id=current_user.id, payload=payload))
+
+
+@router.patch("/rule-sets/{rule_set_id}", response_model=schemas.RosterRuleSetRead)
+def patch_roster_rule_set(
+    rule_set_id: str,
+    payload: schemas.RosterRuleSetUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_RULES)
+    row = db.query(models.RosterRuleSet).filter(models.RosterRuleSet.amo_id == _amo(current_user), models.RosterRuleSet.id == rule_set_id).first()
+    if not row:
+        raise _error("Roster rule set not found", error_code="ROSTER_RULE_SET_NOT_FOUND", status_code=404)
+    return _commit(db, governance.update_rule_set(db, row=row, actor_user_id=current_user.id, payload=payload))
+
+
+@router.get("/approval-authorities", response_model=list[schemas.RosterApprovalAuthorityRead])
+def list_roster_approval_authorities(
+    include_inactive: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_VIEW_DEPARTMENT)
+    return governance.list_authorities(db, amo_id=_amo(current_user), include_inactive=include_inactive)
+
+
+@router.post("/approval-authorities", response_model=schemas.RosterApprovalAuthorityRead, status_code=status.HTTP_201_CREATED)
+def create_roster_approval_authority(
+    payload: schemas.RosterApprovalAuthorityCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_APPROVAL_AUTHORITIES)
+    try:
+        return _commit(db, governance.create_authority(db, amo_id=_amo(current_user), actor_user_id=current_user.id, payload=payload))
+    except ValueError as exc:
+        db.rollback()
+        raise _translate(exc, default_code="ROSTER_APPROVAL_AUTHORITY_INVALID") from exc
+
+
+@router.patch("/approval-authorities/{authority_id}", response_model=schemas.RosterApprovalAuthorityRead)
+def patch_roster_approval_authority(
+    authority_id: str,
+    payload: schemas.RosterApprovalAuthorityUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_APPROVAL_AUTHORITIES)
+    row = db.query(models.RosterApprovalAuthority).filter(models.RosterApprovalAuthority.amo_id == _amo(current_user), models.RosterApprovalAuthority.id == authority_id).first()
+    if not row:
+        raise _error("Roster approval authority not found", error_code="ROSTER_APPROVAL_AUTHORITY_NOT_FOUND", status_code=404)
+    return _commit(db, governance.update_authority(db, row=row, actor_user_id=current_user.id, payload=payload))
+
+
+@router.get("/approval-matrix", response_model=schemas.RosterApprovalMatrixResponse)
+def roster_approval_matrix(
+    version_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    if not services.can_view_roster(db, user=current_user):
+        raise _error("Roster access denied", error_code="ROSTER_ACCESS_DENIED", status_code=403)
+    return governance.approval_matrix(db, amo_id=_amo(current_user), version_id=version_id)
 
 
 # ---------------------------------------------------------------------------
@@ -555,7 +679,6 @@ def approve_roster_version(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_APPROVE)
     version = _version_or_404(db, amo_id=_amo(current_user), version_id=version_id, lock=True)
     try:
         services.approve_version(db, version=version, actor_user_id=current_user.id, payload=payload)
@@ -566,6 +689,25 @@ def approve_roster_version(
         raise _translate(exc, default_code="ROSTER_APPROVAL_FAILED") from exc
 
 
+
+
+@router.post("/versions/{version_id}/request-changes", response_model=schemas.RosterVersionRead)
+def request_roster_version_changes(
+    version_id: str,
+    payload: schemas.RosterLifecycleRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    version = _version_or_404(db, amo_id=_amo(current_user), version_id=version_id, lock=True)
+    try:
+        governance.request_changes(db, version=version, actor=current_user, payload=payload)
+        _commit(db, version)
+        return services.serialize_version(_version_or_404(db, amo_id=_amo(current_user), version_id=version.id), current_user=current_user, db=db)
+    except (ValueError, RuntimeError) as exc:
+        db.rollback()
+        raise _translate(exc, default_code="ROSTER_CHANGE_REQUEST_FAILED") from exc
+
+
 @router.post("/versions/{version_id}/publish", response_model=schemas.RosterVersionRead)
 def publish_roster_version(
     version_id: str,
@@ -573,7 +715,6 @@ def publish_roster_version(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_PUBLISH)
     version = _version_or_404(db, amo_id=_amo(current_user), version_id=version_id, lock=True)
     try:
         services.publish_version(db, version=version, actor_user_id=current_user.id, payload=payload)
