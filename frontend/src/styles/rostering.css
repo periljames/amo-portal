@@ -44,5 +44,18 @@
 .roster-contract-grid div { padding: .8rem; border-radius: 16px; background: #f8fafc; display: grid; gap: .25rem; }
 .roster-contract-grid span { color: #64748b; text-transform: capitalize; }
 .roster-list { display: grid; gap: .55rem; padding-left: 1.1rem; }
+
+@supports (content-visibility: auto) {
+  .wr-data-row,
+  .wr-schedule-row,
+  .wr-setup-card,
+  .wr-issue,
+  .wr-event-list > div,
+  .wr-balance-grid > article {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 72px;
+  }
+}
+
 @keyframes roster-spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) { .roster-split { grid-template-columns: 1fr; } }
