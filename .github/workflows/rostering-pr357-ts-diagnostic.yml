@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/rostering-pr357-ts-diagnostic
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
