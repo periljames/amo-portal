@@ -10,9 +10,9 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
+from .workspace_integration_router import refresh_integration_link
 from .workspace_router import transition_workflow as _transition_workflow
 from .workspace_service import (
-    get_profile,
     is_approver,
     require_approver,
     resolve_tenant,
@@ -24,32 +24,68 @@ _OPEN_CHANGE_STATUSES = {"OPEN", "ASSESSING", "ACCEPTED", "IMPLEMENTING"}
 _RESOLVED_LINK_STATUSES = {"CLOSED", "RESOLVED", "READY", "COMPLETED", "WAIVED", "NOT_REQUIRED"}
 
 
+def _module_links(
+    db: Session,
+    *,
+    workflow: dm.DocumentWorkflowInstance,
+    modules: set[str] | None = None,
+) -> list[dm.DocumentIntegrationLink]:
+    query = db.query(dm.DocumentIntegrationLink).filter(
+        dm.DocumentIntegrationLink.tenant_id == workflow.tenant_id,
+        dm.DocumentIntegrationLink.workflow_id == workflow.id,
+    )
+    rows = query.all()
+    if modules is None:
+        return rows
+    normalized = {value.upper() for value in modules}
+    return [row for row in rows if str(row.source_module or "").upper() in normalized]
+
+
+def _refresh_links(
+    db: Session,
+    *,
+    tenant,
+    links: list[dm.DocumentIntegrationLink],
+) -> list[dict[str, str]]:
+    failures: list[dict[str, str]] = []
+    for link in links:
+        try:
+            refresh_integration_link(db, tenant, link)
+        except HTTPException as exc:
+            failures.append(
+                {
+                    "code": "INTEGRATION_SOURCE_UNAVAILABLE",
+                    "message": (
+                        f"{link.source_module} {link.entity_type} {link.entity_id} "
+                        f"could not be verified: {exc.detail}"
+                    ),
+                }
+            )
+    return failures
+
+
 def _resolved_integration_exists(
     db: Session,
     *,
-    tenant_id: str,
-    workflow_id: str,
+    tenant,
+    workflow: dm.DocumentWorkflowInstance,
     modules: set[str],
 ) -> bool:
-    normalized_modules = {value.upper() for value in modules}
-    rows = (
-        db.query(dm.DocumentIntegrationLink)
-        .filter(
-            dm.DocumentIntegrationLink.tenant_id == tenant_id,
-            dm.DocumentIntegrationLink.workflow_id == workflow_id,
-        )
-        .all()
-    )
+    links = _module_links(db, workflow=workflow, modules=modules)
+    if not links:
+        return False
+    if _refresh_links(db, tenant=tenant, links=links):
+        return False
     return any(
-        str(row.source_module or "").upper() in normalized_modules
-        and str(row.status_snapshot or "").upper() in _RESOLVED_LINK_STATUSES
-        for row in rows
+        str(row.status_snapshot or "").upper() in _RESOLVED_LINK_STATUSES
+        for row in links
     )
 
 
 def _validate_readiness_change(
     db: Session,
     *,
+    tenant,
     workflow: dm.DocumentWorkflowInstance,
     payload: schemas.WorkflowTransitionRequest,
     current_user: account_models.User,
@@ -77,29 +113,29 @@ def _validate_readiness_change(
 
     if proposed["training"] == "READY" and not _resolved_integration_exists(
         db,
-        tenant_id=workflow.tenant_id,
-        workflow_id=workflow.id,
+        tenant=tenant,
+        workflow=workflow,
         modules={"TRAINING", "TRAINING_AND_COMPETENCE"},
     ):
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "TRAINING_LINK_NOT_READY",
-                "message": "A resolved Training integration link is required before training readiness can be marked ready.",
+                "message": "A live, resolved Training integration link is required before training readiness can be marked ready.",
             },
         )
 
     if proposed["qms"] == "READY" and not _resolved_integration_exists(
         db,
-        tenant_id=workflow.tenant_id,
-        workflow_id=workflow.id,
+        tenant=tenant,
+        workflow=workflow,
         modules={"QMS", "QUALITY", "QUALITY_AND_COMPLIANCE"},
     ):
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "QMS_LINK_NOT_READY",
-                "message": "A resolved QMS integration link is required before QMS readiness can be marked ready.",
+                "message": "A live, resolved QMS integration link is required before QMS readiness can be marked ready.",
             },
         )
 
@@ -117,6 +153,7 @@ def _validate_readiness_change(
 def _publication_blockers(
     db: Session,
     *,
+    tenant,
     workflow: dm.DocumentWorkflowInstance,
 ) -> list[dict[str, str]]:
     blockers: list[dict[str, str]] = []
@@ -138,6 +175,20 @@ def _publication_blockers(
                 "message": f"{int(open_changes)} unresolved change request(s) remain open.",
             }
         )
+
+    integration_links = _module_links(db, workflow=workflow)
+    blockers.extend(_refresh_links(db, tenant=tenant, links=integration_links))
+    for link in integration_links:
+        if link.blocking and str(link.status_snapshot or "").upper() not in _RESOLVED_LINK_STATUSES:
+            blockers.append(
+                {
+                    "code": "INTEGRATION_BLOCKER",
+                    "message": (
+                        f"{link.source_module} {link.entity_type} {link.entity_id} "
+                        f"is still {link.status_snapshot or 'UNVERIFIED'}."
+                    ),
+                }
+            )
 
     if workflow.requires_authority:
         approved_authority = (
@@ -242,6 +293,7 @@ def transition_workflow_with_release_guards(
 
     _validate_readiness_change(
         db,
+        tenant=tenant,
         workflow=workflow,
         payload=payload,
         current_user=current_user,
@@ -255,7 +307,7 @@ def transition_workflow_with_release_guards(
 
     if payload.action == "PUBLISH":
         require_approver(current_user)
-        blockers = _publication_blockers(db, workflow=workflow)
+        blockers = _publication_blockers(db, tenant=tenant, workflow=workflow)
         if blockers:
             raise HTTPException(
                 status_code=409,
