@@ -11,6 +11,7 @@ import type {
   PersonnelIdentityHealth,
   UserBaseAssignmentCreate,
   UserBaseAssignmentRead,
+  UserBaseAssignmentUpdate,
 } from "../types/foundations";
 
 function toQuery(params: Record<string, string | number | boolean | null | undefined>): string {
@@ -45,8 +46,29 @@ export function updateBaseStation(baseStationId: string, payload: BaseStationUpd
   return apiPut<BaseStationRead>(`/foundations/base-stations/${encodeURIComponent(baseStationId)}`, payload, { headers: authHeaders() });
 }
 
+export function listUserBaseAssignments(params?: {
+  user_id?: string;
+  active_on?: string;
+  include_expired?: boolean;
+}): Promise<UserBaseAssignmentRead[]> {
+  return apiGet<UserBaseAssignmentRead[]>(`/foundations/user-base-assignments${toQuery(params ?? {})}`, {
+    headers: authHeaders(),
+  });
+}
+
 export function createUserBaseAssignment(payload: UserBaseAssignmentCreate): Promise<UserBaseAssignmentRead> {
   return apiPost<UserBaseAssignmentRead>("/foundations/user-base-assignments", payload, { headers: authHeaders() });
+}
+
+export function updateUserBaseAssignment(
+  assignmentId: string,
+  payload: UserBaseAssignmentUpdate,
+): Promise<UserBaseAssignmentRead> {
+  return apiPut<UserBaseAssignmentRead>(
+    `/foundations/user-base-assignments/${encodeURIComponent(assignmentId)}`,
+    payload,
+    { headers: authHeaders() },
+  );
 }
 
 export function listAvailability(params?: { user_id?: string; active_at?: string }): Promise<AvailabilityRead[]> {

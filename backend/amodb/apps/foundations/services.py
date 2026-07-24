@@ -1,16 +1,16 @@
-# backend/amodb/apps/foundations/services.py
-"""Shared Phase 0 foundation services.
+"""Shared foundation services.
 
-This module deliberately centralises cross-module reads/writes that several
-future modules, especially Duty Rostering, must share. The canonical personnel
-identifier is always ``accounts.users.id``.
+This module centralises cross-module records that must be consumed by several
+operational modules. Personnel identity always resolves to ``accounts.users.id``.
+Canonical base records and effective-dated personnel deployments are owned here,
+not by Rostering or another operational workspace.
 """
-
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Iterable, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
@@ -117,6 +117,105 @@ def replace_base_aliases(
         db.add(models.BaseStationAlias(amo_id=amo_id, base_station_id=base_station.id, alias=normalized, source_module=source_module))
 
 
+def list_user_base_assignments(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: Optional[str] = None,
+    active_on: Optional[date] = None,
+    include_expired: bool = True,
+) -> list[models.UserBaseAssignment]:
+    q = (
+        db.query(models.UserBaseAssignment)
+        .options(selectinload(models.UserBaseAssignment.base_station))
+        .filter(models.UserBaseAssignment.amo_id == amo_id)
+    )
+    if user_id:
+        q = q.filter(models.UserBaseAssignment.user_id == user_id)
+    if active_on:
+        q = q.filter(
+            models.UserBaseAssignment.effective_from <= active_on,
+            or_(
+                models.UserBaseAssignment.effective_to.is_(None),
+                models.UserBaseAssignment.effective_to >= active_on,
+            ),
+        )
+    elif not include_expired:
+        today = date.today()
+        q = q.filter(or_(models.UserBaseAssignment.effective_to.is_(None), models.UserBaseAssignment.effective_to >= today))
+    return q.order_by(
+        models.UserBaseAssignment.user_id.asc(),
+        models.UserBaseAssignment.effective_from.desc(),
+        models.UserBaseAssignment.created_at.desc(),
+    ).all()
+
+
+def _validate_assignment_window(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    assignment_kind: models.BaseAssignmentKind,
+    effective_from: date,
+    effective_to: Optional[date],
+    is_primary: bool,
+    exclude_id: Optional[str] = None,
+) -> None:
+    if effective_to and effective_to < effective_from:
+        raise ValueError("effective_to must be on or after effective_from")
+    if not is_primary:
+        return
+
+    window_end = effective_to or date.max
+    q = db.query(models.UserBaseAssignment).filter(
+        models.UserBaseAssignment.amo_id == amo_id,
+        models.UserBaseAssignment.user_id == user_id,
+        models.UserBaseAssignment.is_primary.is_(True),
+        models.UserBaseAssignment.effective_from <= window_end,
+        or_(
+            models.UserBaseAssignment.effective_to.is_(None),
+            models.UserBaseAssignment.effective_to >= effective_from,
+        ),
+    )
+    if exclude_id:
+        q = q.filter(models.UserBaseAssignment.id != exclude_id)
+
+    if assignment_kind == models.BaseAssignmentKind.HOME_BASE:
+        q = q.filter(models.UserBaseAssignment.assignment_kind == models.BaseAssignmentKind.HOME_BASE)
+        conflict_message = "A primary home-base assignment already covers part of this date range. End or amend it first."
+    else:
+        q = q.filter(models.UserBaseAssignment.assignment_kind != models.BaseAssignmentKind.HOME_BASE)
+        conflict_message = "Another temporary, relief or training deployment already covers part of this date range."
+
+    if q.first():
+        raise ValueError(conflict_message)
+
+
+def _require_assignment_entities(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    base_station_id: str,
+) -> tuple[account_models.User, models.BaseStation]:
+    user = db.query(account_models.User).filter(
+        account_models.User.id == user_id,
+        account_models.User.amo_id == amo_id,
+        account_models.User.is_system_account.is_(False),
+    ).first()
+    if not user:
+        raise ValueError("User not found in tenant scope.")
+    base = db.query(models.BaseStation).filter(
+        models.BaseStation.id == base_station_id,
+        models.BaseStation.amo_id == amo_id,
+    ).first()
+    if not base:
+        raise ValueError("Base station not found in tenant scope.")
+    if not base.is_active:
+        raise ValueError("Inactive base stations cannot receive new personnel deployments.")
+    return user, base
+
+
 def create_user_base_assignment(
     db: Session,
     *,
@@ -124,12 +223,21 @@ def create_user_base_assignment(
     actor_user_id: Optional[str],
     payload: schemas.UserBaseAssignmentCreate,
 ) -> models.UserBaseAssignment:
-    user = db.query(account_models.User).filter(account_models.User.id == payload.user_id, account_models.User.amo_id == amo_id).first()
-    if not user:
-        raise ValueError("User not found in tenant scope.")
-    base = db.query(models.BaseStation).filter(models.BaseStation.id == payload.base_station_id, models.BaseStation.amo_id == amo_id).first()
-    if not base:
-        raise ValueError("Base station not found in tenant scope.")
+    user, base = _require_assignment_entities(
+        db,
+        amo_id=amo_id,
+        user_id=payload.user_id,
+        base_station_id=payload.base_station_id,
+    )
+    _validate_assignment_window(
+        db,
+        amo_id=amo_id,
+        user_id=user.id,
+        assignment_kind=payload.assignment_kind,
+        effective_from=payload.effective_from,
+        effective_to=payload.effective_to,
+        is_primary=payload.is_primary,
+    )
     item = models.UserBaseAssignment(
         amo_id=amo_id,
         user_id=user.id,
@@ -144,6 +252,64 @@ def create_user_base_assignment(
     db.add(item)
     db.flush()
     return item
+
+
+def update_user_base_assignment(
+    db: Session,
+    *,
+    amo_id: str,
+    assignment: models.UserBaseAssignment,
+    payload: schemas.UserBaseAssignmentUpdate,
+) -> models.UserBaseAssignment:
+    values = payload.model_dump(exclude_unset=True)
+    base_station_id = str(values.get("base_station_id") or assignment.base_station_id)
+    if "base_station_id" in values:
+        _require_assignment_entities(
+            db,
+            amo_id=amo_id,
+            user_id=assignment.user_id,
+            base_station_id=base_station_id,
+        )
+
+    assignment_kind = values.get("assignment_kind", assignment.assignment_kind)
+    effective_from = values.get("effective_from", assignment.effective_from)
+    effective_to = values.get("effective_to", assignment.effective_to)
+    is_primary = values.get("is_primary", assignment.is_primary)
+    _validate_assignment_window(
+        db,
+        amo_id=amo_id,
+        user_id=assignment.user_id,
+        assignment_kind=assignment_kind,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        is_primary=is_primary,
+        exclude_id=assignment.id,
+    )
+
+    for key, value in values.items():
+        setattr(assignment, key, value)
+    db.add(assignment)
+    db.flush()
+    return assignment
+
+
+def effective_base_assignment(
+    db: Session,
+    *,
+    amo_id: str,
+    user_id: str,
+    on_date: date,
+) -> Optional[models.UserBaseAssignment]:
+    rows = list_user_base_assignments(db, amo_id=amo_id, user_id=user_id, active_on=on_date)
+    priority = {
+        models.BaseAssignmentKind.TEMPORARY: 50,
+        models.BaseAssignmentKind.RELIEF: 40,
+        models.BaseAssignmentKind.TRAINING: 30,
+        models.BaseAssignmentKind.OTHER: 20,
+        models.BaseAssignmentKind.HOME_BASE: 10,
+    }
+    primary = [row for row in rows if row.is_primary]
+    return max(primary or rows, key=lambda row: (priority.get(row.assignment_kind, 0), row.effective_from, row.created_at), default=None)
 
 
 def list_availability(
@@ -247,19 +413,21 @@ def foundation_contracts() -> schemas.FoundationContracts:
             "licences_authorisations": "accounts.user_authorisations and accounts.authorisation_types",
             "training_due_and_currency": "training requirements, records, events, participants, and deferrals",
             "base_station_master": "foundations.base_stations",
+            "personnel_base_deployments": "foundations.user_base_assignments",
             "availability_windows": "shared availability service, backed by user_availability during Phase 0",
             "work_orders_task_cards_assignments": "work module",
             "aircraft_master": "fleet module",
-            "future_roster_assignments": "rostering module",
-            "future_attendance_punches": "attendance integration under rostering/foundations contract",
+            "roster_assignments": "rostering module",
+            "attendance_punches": "workforce attendance integration",
         },
         service_contracts={
             "identity_health": "GET /foundations/personnel/identity-health",
             "base_stations": "GET/POST /foundations/base-stations; PUT /foundations/base-stations/{base_station_id}",
-            "user_base_assignments": "POST /foundations/user-base-assignments",
+            "user_base_assignments": "GET/POST /foundations/user-base-assignments; PUT /foundations/user-base-assignments/{assignment_id}",
             "availability": "GET/POST /foundations/availability",
         },
         canonical_frontend_routes={
+            "admin_operating_structure": "/maintenance/:amoCode/admin/operating-structure",
             "admin_user_detail": "/maintenance/:amoCode/admin/users/:userId",
             "qms_training_person": "/maintenance/:amoCode/qms/training-competence/people/:userId",
             "planning_work_packages": "/maintenance/:amoCode/planning/work-packages",
@@ -267,6 +435,6 @@ def foundation_contracts() -> schemas.FoundationContracts:
             "production_control_board": "/maintenance/:amoCode/production/control-board",
             "maintenance_work_order_detail": "/maintenance/:amoCode/maintenance/work-orders/:woId",
             "technical_records_packs": "/maintenance/:amoCode/production/records/packs",
-            "future_rostering_root": "/maintenance/:amoCode/rostering",
+            "rostering_root": "/maintenance/:amoCode/rostering",
         },
     )

@@ -1,7 +1,6 @@
-# backend/amodb/apps/foundations/router.py
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,11 +19,19 @@ def _effective_amo_id(user: account_models.User) -> str:
     return getattr(user, "effective_amo_id", None) or user.amo_id
 
 
-def _can_manage_foundations(user: account_models.User) -> bool:
-    if getattr(user, "is_system_account", False):
-        return False
-    if getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False):
+def _is_tenant_admin(user: account_models.User) -> bool:
+    return bool(
+        user
+        and not getattr(user, "is_system_account", False)
+        and (getattr(user, "is_superuser", False) or getattr(user, "is_amo_admin", False))
+    )
+
+
+def _can_manage_deployments(user: account_models.User) -> bool:
+    if _is_tenant_admin(user):
         return True
+    if not user or getattr(user, "is_system_account", False):
+        return False
     return user.role in {
         account_models.AccountRole.QUALITY_MANAGER,
         account_models.AccountRole.PLANNING_ENGINEER,
@@ -32,9 +39,20 @@ def _can_manage_foundations(user: account_models.User) -> bool:
     }
 
 
-def _require_foundation_manager(user: account_models.User) -> None:
-    if not _can_manage_foundations(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient privileges for shared foundation changes")
+def _require_base_master_admin(user: account_models.User) -> None:
+    if not _is_tenant_admin(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an AMO administrator may create or change canonical bases and stations.",
+        )
+
+
+def _require_deployment_manager(user: account_models.User) -> None:
+    if not _can_manage_deployments(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient privileges to manage effective-dated personnel base deployments.",
+        )
 
 
 @router.get("/contracts", response_model=schemas.FoundationContracts)
@@ -65,7 +83,7 @@ def create_base_station(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_foundation_manager(current_user)
+    _require_base_master_admin(current_user)
     try:
         item = services.create_base_station(db, amo_id=_effective_amo_id(current_user), actor_user_id=current_user.id, payload=payload)
         db.commit()
@@ -83,7 +101,7 @@ def update_base_station(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_foundation_manager(current_user)
+    _require_base_master_admin(current_user)
     amo_id = _effective_amo_id(current_user)
     item = db.query(models.BaseStation).filter(models.BaseStation.id == base_station_id, models.BaseStation.amo_id == amo_id).first()
     if not item:
@@ -98,13 +116,30 @@ def update_base_station(
         raise HTTPException(status_code=409, detail="Base station code or alias already exists for this AMO") from exc
 
 
+@router.get("/user-base-assignments", response_model=List[schemas.UserBaseAssignmentRead])
+def list_user_base_assignments(
+    user_id: Optional[str] = Query(default=None),
+    active_on: Optional[date] = Query(default=None),
+    include_expired: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    return services.list_user_base_assignments(
+        db,
+        amo_id=_effective_amo_id(current_user),
+        user_id=user_id,
+        active_on=active_on,
+        include_expired=include_expired,
+    )
+
+
 @router.post("/user-base-assignments", response_model=schemas.UserBaseAssignmentRead, status_code=status.HTTP_201_CREATED)
 def create_user_base_assignment(
     payload: schemas.UserBaseAssignmentCreate,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_foundation_manager(current_user)
+    _require_deployment_manager(current_user)
     try:
         item = services.create_user_base_assignment(db, amo_id=_effective_amo_id(current_user), actor_user_id=current_user.id, payload=payload)
         db.commit()
@@ -112,7 +147,36 @@ def create_user_base_assignment(
         return item
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        detail = str(exc)
+        conflict = "already covers" in detail or "Another temporary" in detail
+        raise HTTPException(status_code=409 if conflict else 400, detail=detail) from exc
+
+
+@router.put("/user-base-assignments/{assignment_id}", response_model=schemas.UserBaseAssignmentRead)
+def update_user_base_assignment(
+    assignment_id: str,
+    payload: schemas.UserBaseAssignmentUpdate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _require_deployment_manager(current_user)
+    amo_id = _effective_amo_id(current_user)
+    item = db.query(models.UserBaseAssignment).filter(
+        models.UserBaseAssignment.id == assignment_id,
+        models.UserBaseAssignment.amo_id == amo_id,
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Base assignment not found")
+    try:
+        item = services.update_user_base_assignment(db, amo_id=amo_id, assignment=item, payload=payload)
+        db.commit()
+        db.refresh(item)
+        return item
+    except ValueError as exc:
+        db.rollback()
+        detail = str(exc)
+        conflict = "already covers" in detail or "Another temporary" in detail
+        raise HTTPException(status_code=409 if conflict else 400, detail=detail) from exc
 
 
 @router.get("/availability", response_model=List[schemas.AvailabilityRead])
@@ -131,7 +195,7 @@ def create_availability(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
-    _require_foundation_manager(current_user)
+    _require_deployment_manager(current_user)
     try:
         item = services.create_availability(db, amo_id=_effective_amo_id(current_user), actor_user_id=current_user.id, payload=payload)
         db.commit()
