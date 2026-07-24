@@ -73,6 +73,15 @@ def _source_type(revision: models.ManualRevision) -> str:
     return getattr(source_type, "value", str(source_type or "")).upper()
 
 
+def _status_value(revision: models.ManualRevision) -> str:
+    status = getattr(revision, "status_enum", None)
+    return getattr(status, "value", str(status or "")).upper()
+
+
+def _is_published(revision: models.ManualRevision) -> bool:
+    return _status_value(revision) == "PUBLISHED"
+
+
 def _source_path(revision: models.ManualRevision) -> Path | None:
     raw = str(getattr(revision, "source_storage_path", "") or "").strip()
     if not raw:
@@ -102,16 +111,21 @@ def _pdf_safe(value: str | None) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
+def _fitz_module():
+    try:
+        import fitz  # type: ignore
+    except Exception as exc:  # pragma: no cover - deployment dependency guard
+        raise HTTPException(status_code=500, detail="PDF renderer is unavailable") from exc
+    return fitz
+
+
 class _PublicationPdfFlow:
-    def __init__(self, title: str, revision_label: str):
-        try:
-            import fitz  # type: ignore
-        except Exception as exc:  # pragma: no cover - deployment dependency guard
-            raise HTTPException(status_code=500, detail="PDF renderer is unavailable") from exc
-        self.fitz = fitz
-        self.document = fitz.open()
+    def __init__(self, title: str, revision_label: str, *, controlled: bool):
+        self.fitz = _fitz_module()
+        self.document = self.fitz.open()
         self.title = _pdf_safe(title)
         self.revision_label = _pdf_safe(revision_label)
+        self.controlled = controlled
         self.page = None
         self.y = _TOP_Y
         self._new_page()
@@ -136,6 +150,16 @@ class _PublicationPdfFlow:
             (_A4_WIDTH - _MARGIN_X, 40),
             width=0.6,
         )
+        if not self.controlled:
+            self.page.insert_textbox(
+                self.fitz.Rect(_MARGIN_X, 43, _A4_WIDTH - _MARGIN_X, 61),
+                "UNCONTROLLED DRAFT - NOT FOR OPERATIONAL USE",
+                fontsize=9.5,
+                fontname="hebo",
+                color=(0.75, 0.08, 0.08),
+                align=1,
+                overlay=True,
+            )
 
     def _ensure_space(self, required: float) -> None:
         if self.y + required > _BOTTOM_Y:
@@ -181,11 +205,17 @@ class _PublicationPdfFlow:
                 (_A4_WIDTH - _MARGIN_X, _A4_HEIGHT - 40),
                 width=0.4,
             )
+            footer = (
+                "Controlled publication - verify current revision in the AMO Portal before use."
+                if self.controlled
+                else "UNCONTROLLED DRAFT - not approved for operational use or controlled distribution."
+            )
             page.insert_text(
                 (_MARGIN_X, _A4_HEIGHT - 24),
-                "Controlled publication - verify current revision in the AMO Portal before use.",
+                footer,
                 fontsize=7.5,
-                fontname="helv",
+                fontname="hebo" if not self.controlled else "helv",
+                color=(0.75, 0.08, 0.08) if not self.controlled else (0, 0, 0),
             )
             page.insert_text(
                 (_A4_WIDTH - 102, _A4_HEIGHT - 24),
@@ -193,15 +223,27 @@ class _PublicationPdfFlow:
                 fontsize=7.5,
                 fontname="helv",
             )
+            if not self.controlled:
+                page.insert_textbox(
+                    self.fitz.Rect(70, (_A4_HEIGHT / 2) - 24, _A4_WIDTH - 70, (_A4_HEIGHT / 2) + 24),
+                    "UNCONTROLLED DRAFT",
+                    fontsize=28,
+                    fontname="hebo",
+                    color=(0.82, 0.18, 0.18),
+                    align=1,
+                    overlay=True,
+                )
         payload = self.document.tobytes(garbage=4, deflate=True)
         self.document.close()
         return payload
 
 
 def _render_revision_pdf(db: Session, manual: models.Manual, revision: models.ManualRevision) -> bytes:
+    controlled = _is_published(revision)
     flow = _PublicationPdfFlow(
         manual.title or manual.code or "Publication",
         f"Issue {revision.issue_number or '-'} | Rev {revision.rev_number or '-'}",
+        controlled=controlled,
     )
     flow.write(manual.title or manual.code or "Publication", size=19, bold=True)
     flow.write(manual.code, size=11, bold=True)
@@ -210,7 +252,7 @@ def _render_revision_pdf(db: Session, manual: models.Manual, revision: models.Ma
     flow.write(f"Revision: {revision.rev_number or '-'}", size=9.5)
     if revision.effective_date:
         flow.write(f"Effective date: {revision.effective_date.isoformat()}", size=9.5)
-    flow.write(f"Status: {getattr(revision.status_enum, 'value', revision.status_enum)}", size=9.5)
+    flow.write(f"Status: {_status_value(revision)}", size=9.5)
     flow.spacer(14)
 
     sections = _revision_sections(db, revision.id)
@@ -237,10 +279,52 @@ def _render_revision_pdf(db: Session, manual: models.Manual, revision: models.Ma
     return flow.finish()
 
 
+def _watermark_uncontrolled_source(source_path: Path) -> bytes:
+    fitz = _fitz_module()
+    try:
+        document = fitz.open(str(source_path))
+        for page in document:
+            page.insert_textbox(
+                fitz.Rect(24, 18, page.rect.width - 24, 46),
+                "UNCONTROLLED DRAFT - NOT FOR OPERATIONAL USE",
+                fontsize=10,
+                fontname="hebo",
+                color=(0.78, 0.08, 0.08),
+                align=1,
+                overlay=True,
+            )
+            page.insert_textbox(
+                fitz.Rect(44, (page.rect.height / 2) - 24, page.rect.width - 44, (page.rect.height / 2) + 24),
+                "UNCONTROLLED DRAFT",
+                fontsize=28,
+                fontname="hebo",
+                color=(0.82, 0.18, 0.18),
+                align=1,
+                overlay=True,
+            )
+            page.insert_textbox(
+                fitz.Rect(24, page.rect.height - 38, page.rect.width - 24, page.rect.height - 16),
+                "Unapproved copy. Verify publication status in the AMO Portal before use.",
+                fontsize=8,
+                fontname="hebo",
+                color=(0.78, 0.08, 0.08),
+                align=1,
+                overlay=True,
+            )
+        payload = document.tobytes(garbage=4, deflate=True)
+        document.close()
+        return payload
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Unable to mark the draft PDF as uncontrolled") from exc
+
+
 def _download_filename(manual: models.Manual, revision: models.ManualRevision) -> str:
     code = re.sub(r"[^A-Za-z0-9._-]+", "_", manual.code or "publication").strip("_") or "publication"
     revision_label = re.sub(r"[^A-Za-z0-9._-]+", "_", revision.rev_number or "current").strip("_") or "current"
-    return f"{code}_Rev_{revision_label}.pdf"
+    suffix = "" if _is_published(revision) else "_UNCONTROLLED"
+    return f"{code}_Rev_{revision_label}{suffix}.pdf"
 
 
 def _is_image_only_pdf(revision: models.ManualRevision, text_char_count: int) -> bool:
@@ -264,9 +348,10 @@ def reader_metadata(
     source_size = source_path.stat().st_size if source_path else 0
     source_type = _source_type(revision)
     image_only = _is_image_only_pdf(revision, text_char_count)
+    is_published = _is_published(revision)
 
     if source_type == "PDF" and source_path:
-        rendered_size = source_size
+        rendered_size = source_size if is_published else len(_watermark_uncontrolled_source(source_path))
     else:
         rendered_size = len(_render_revision_pdf(db, manual, revision))
 
@@ -286,6 +371,9 @@ def reader_metadata(
         "language": "English",
         "issue_number": revision.issue_number,
         "revision_number": revision.rev_number,
+        "status": _status_value(revision),
+        "is_published": is_published,
+        "control_label": "Controlled publication" if is_published else "Uncontrolled draft",
         "source_type": source_type or None,
         "source_filename": revision.source_filename,
         "source_size_bytes": source_size,
@@ -303,6 +391,46 @@ def reader_metadata(
     }
 
 
+@router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/acknowledgement")
+def publication_acknowledgement(
+    tenant_slug: str,
+    manual_id: str,
+    rev_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    _tenant, _manual, revision = _load_publication(db, tenant_slug, manual_id, rev_id)
+    actor_id = getattr(current_user, "id", None)
+    acknowledgement = (
+        db.query(models.Acknowledgement)
+        .filter(
+            models.Acknowledgement.revision_id == revision.id,
+            models.Acknowledgement.holder_user_id == actor_id,
+        )
+        .first()
+    )
+    if not acknowledgement:
+        return {
+            "required": False,
+            "pending": False,
+            "status": None,
+            "due_at": None,
+            "acknowledged_at": None,
+            "acknowledgement_text": None,
+        }
+
+    raw_status = getattr(acknowledgement, "status_enum", None)
+    status = getattr(raw_status, "value", str(raw_status or "")).upper()
+    return {
+        "required": True,
+        "pending": status != "ACKNOWLEDGED",
+        "status": status,
+        "due_at": acknowledgement.due_at.isoformat() if acknowledgement.due_at else None,
+        "acknowledged_at": acknowledgement.acknowledged_at.isoformat() if acknowledgement.acknowledged_at else None,
+        "acknowledgement_text": acknowledgement.acknowledgement_text,
+    }
+
+
 @router.get("/t/{tenant_slug}/{manual_id}/rev/{rev_id}/rendered.pdf")
 def rendered_publication_pdf(
     tenant_slug: str,
@@ -313,21 +441,28 @@ def rendered_publication_pdf(
     _tenant, manual, revision = _load_publication(db, tenant_slug, manual_id, rev_id)
     filename = _download_filename(manual, revision)
     source_path = _source_path(revision)
-    if _source_type(revision) == "PDF" and source_path:
+    is_published = _is_published(revision)
+    cache_control = "private, max-age=60" if is_published else "private, no-store"
+
+    if _source_type(revision) == "PDF" and source_path and is_published:
         return FileResponse(
             path=str(source_path),
             media_type="application/pdf",
             filename=filename,
-            headers={"Cache-Control": "private, max-age=60"},
+            headers={"Cache-Control": cache_control},
         )
 
-    payload = _render_revision_pdf(db, manual, revision)
+    if _source_type(revision) == "PDF" and source_path:
+        payload = _watermark_uncontrolled_source(source_path)
+    else:
+        payload = _render_revision_pdf(db, manual, revision)
+
     return StreamingResponse(
         BytesIO(payload),
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Content-Length": str(len(payload)),
-            "Cache-Control": "private, max-age=60",
+            "Cache-Control": cache_control,
         },
     )
