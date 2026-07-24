@@ -102,15 +102,12 @@ def _available_index_name(bind, desired_name: str, table_name: str) -> str | Non
 def _create_tables_without_indexes(bind, metadata: sa.MetaData) -> None:
     inspector = inspect(bind)
     existing_tables = set(inspector.get_table_names())
-    deferred_constraints: set[sa.ForeignKeyConstraint] = set()
 
     for table_name in NEW_TABLES:
         table = metadata.tables[table_name]
         if table_name in existing_tables:
             continue
-        for constraint in table.foreign_key_constraints:
-            deferred_constraints.add(constraint)
-        table.create(bind, checkfirst=True, include_foreign_key_constraints=[])
+        bind.execute(sa.schema.CreateTable(table, include_foreign_key_constraints=[]))
         existing_tables.add(table_name)
 
 
