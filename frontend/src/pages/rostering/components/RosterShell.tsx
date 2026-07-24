@@ -9,7 +9,6 @@ import {
   Settings2,
   UsersRound,
 } from "lucide-react";
-import { motion, useReducedMotion } from "framer-motion";
 
 import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
 import "../../../styles/rostering-workforce.css";
@@ -35,7 +34,6 @@ const NAV = [
 
 export function RosterShell({ title, eyebrow, description, actions, children, context }: Props) {
   const { amoCode = "UNKNOWN" } = useParams();
-  const reduceMotion = useReducedMotion();
   const root = `/maintenance/${encodeURIComponent(amoCode)}/rostering`;
 
   return (
@@ -65,14 +63,7 @@ export function RosterShell({ title, eyebrow, description, actions, children, co
 
         {context ? <div className="wr-context">{context}</div> : null}
 
-        <motion.main
-          className="wr-main"
-          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
-        >
-          {children}
-        </motion.main>
+        <main className="wr-main wr-main--enter">{children}</main>
       </div>
     </DepartmentLayout>
   );
