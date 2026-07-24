@@ -1,0 +1,350 @@
+.publications-overview-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 1rem;
+  border-block: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  background: color-mix(in srgb, var(--paper) 98%, transparent);
+}
+
+.publications-overview-strip > div {
+  min-width: 0;
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.8rem 1rem;
+  border-right: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.publications-overview-strip > div:last-child { border-right: 0; }
+.publications-overview-strip strong { font-size: 1.25rem; line-height: 1; }
+.publications-overview-strip span { color: color-mix(in srgb, var(--ink) 65%, transparent); font-size: 0.72rem; }
+
+.publications-featured,
+.publications-register {
+  margin-bottom: 1rem;
+}
+
+.publications-section-heading,
+.publications-register__toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.65rem;
+}
+
+.publications-section-heading h2,
+.publications-register__toolbar h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.publications-section-heading p,
+.publications-register__toolbar p {
+  margin: 0.2rem 0 0;
+  color: color-mix(in srgb, var(--ink) 62%, transparent);
+  font-size: 0.72rem;
+}
+
+.publications-featured-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.publications-featured-grid button {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  border-radius: 0.55rem;
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.publications-featured-grid button:hover {
+  border-color: color-mix(in srgb, var(--tenant-accent) 48%, transparent);
+  background: color-mix(in srgb, var(--tenant-accent) 6%, var(--paper));
+}
+
+.publications-featured-grid span { min-width: 0; display: grid; gap: 0.12rem; }
+.publications-featured-grid strong,
+.publications-featured-grid small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.publications-featured-grid strong { font-size: 0.78rem; }
+.publications-featured-grid small { color: color-mix(in srgb, var(--ink) 62%, transparent); font-size: 0.68rem; }
+.publications-featured-grid em { color: color-mix(in srgb, var(--ink) 58%, transparent); font-size: 0.64rem; font-style: normal; }
+
+.publications-register__search {
+  min-width: min(100%, 20rem);
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  border-radius: 0.45rem;
+  background: var(--paper);
+}
+
+.publications-register__search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+}
+
+.publications-table-wrap {
+  width: 100%;
+  overflow: auto;
+  border-block: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.publications-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  background: var(--paper);
+}
+
+.publications-table th,
+.publications-table td {
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+  text-align: left;
+  vertical-align: middle;
+  font-size: 0.72rem;
+}
+
+.publications-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--paper) 95%, var(--ink) 5%);
+  color: color-mix(in srgb, var(--ink) 72%, transparent);
+  font-size: 0.66rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.publications-table td > span,
+.publications-table td > small { display: block; }
+.publications-table td > small { margin-top: 0.14rem; color: color-mix(in srgb, var(--ink) 58%, transparent); font-size: 0.64rem; }
+
+.publications-status {
+  width: fit-content;
+  max-width: 13rem;
+  padding: 0.18rem 0.42rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.publications-status.status-published { background: color-mix(in srgb, #16803d 14%, transparent); color: color-mix(in srgb, #16803d 82%, var(--ink)); }
+.publications-status.status-draft { background: color-mix(in srgb, #c07808 13%, transparent); color: color-mix(in srgb, #9d6100 84%, var(--ink)); }
+
+.publications-open-button,
+.manuals-primary-btn {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  padding: 0.38rem 0.62rem;
+  border: 1px solid color-mix(in srgb, var(--tenant-accent) 55%, transparent);
+  border-radius: 0.42rem;
+  background: var(--paper);
+  color: color-mix(in srgb, var(--tenant-accent) 82%, var(--ink));
+  font-size: 0.7rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.manuals-primary-btn {
+  background: var(--tenant-accent);
+  color: #fff;
+}
+
+.publications-upload-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(7, 12, 22, 0.58);
+  backdrop-filter: blur(3px);
+}
+
+.publications-upload-dialog {
+  width: min(1120px, 100%);
+  max-height: min(92vh, 980px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  border-radius: 0.7rem;
+  background: var(--paper);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.publications-upload-dialog > header,
+.publications-upload-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.publications-upload-dialog > footer {
+  border-top: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+  border-bottom: 0;
+}
+
+.publications-upload-dialog h2 { margin: 0; font-size: 1.05rem; }
+.publications-upload-dialog header p { margin: 0.2rem 0 0; color: color-mix(in srgb, var(--ink) 62%, transparent); font-size: 0.7rem; }
+.publications-upload-dialog header > button,
+.publications-upload-item__head button {
+  min-height: 32px;
+  min-width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.publications-file-picker {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.8rem 1rem;
+  padding: 0.75rem;
+  border: 1px dashed color-mix(in srgb, var(--tenant-accent) 54%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--tenant-accent) 5%, var(--paper));
+}
+
+.publications-file-picker > div { display: grid; gap: 0.14rem; }
+.publications-file-picker strong { font-size: 0.76rem; }
+.publications-file-picker span { color: color-mix(in srgb, var(--ink) 60%, transparent); font-size: 0.66rem; }
+.publications-file-picker input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+.publications-upload-queue {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 1rem 1rem;
+}
+
+.publications-upload-item {
+  margin-bottom: 0.7rem;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--tenant-accent) 54%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--paper) 98%, transparent);
+}
+
+.publications-upload-item.status-done { border-left-color: #16803d; }
+.publications-upload-item.status-error { border-left-color: #c62828; }
+.publications-upload-item.status-uploading,
+.publications-upload-item.status-previewing { border-left-color: #c07808; }
+
+.publications-upload-item__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.publications-upload-item__head > div { min-width: 0; display: grid; gap: 0.16rem; }
+.publications-upload-item__head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.77rem; }
+.publications-upload-item__head span { color: color-mix(in srgb, var(--ink) 60%, transparent); font-size: 0.64rem; text-transform: capitalize; }
+
+.publications-upload-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.publications-upload-fields label { min-width: 0; display: grid; gap: 0.24rem; }
+.publications-upload-fields label.wide { grid-column: span 2; }
+.publications-upload-fields label span { color: color-mix(in srgb, var(--ink) 68%, transparent); font-size: 0.62rem; font-weight: 650; }
+.publications-upload-fields input,
+.publications-upload-fields textarea {
+  width: 100%;
+  min-height: 34px;
+  box-sizing: border-box;
+  padding: 0.38rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  border-radius: 0.36rem;
+  background: var(--paper);
+  color: inherit;
+  font-size: 0.7rem;
+}
+
+.publications-upload-item details { margin-top: 0.6rem; font-size: 0.68rem; }
+.publications-upload-item summary { color: color-mix(in srgb, var(--tenant-accent) 80%, var(--ink)); cursor: pointer; }
+.publications-upload-item ol { max-height: 160px; overflow: auto; margin: 0.45rem 0 0; padding-left: 1.35rem; }
+.publications-upload-item li { margin-bottom: 0.18rem; }
+.publications-image-only-note,
+.publications-upload-error { margin: 0 0 0.55rem; padding: 0.42rem 0.5rem; border-radius: 0.35rem; font-size: 0.67rem; }
+.publications-image-only-note { background: color-mix(in srgb, #c07808 10%, var(--paper)); color: color-mix(in srgb, #9d6100 82%, var(--ink)); }
+.publications-upload-error { background: color-mix(in srgb, #c62828 8%, var(--paper)); color: color-mix(in srgb, #c62828 82%, var(--ink)); }
+.publications-upload-empty { padding: 2rem; color: color-mix(in srgb, var(--ink) 58%, transparent); text-align: center; font-size: 0.74rem; }
+
+.publications-upload-dialog footer > span { min-height: 1rem; color: color-mix(in srgb, var(--ink) 65%, transparent); font-size: 0.7rem; }
+.publications-upload-dialog footer > div { display: flex; gap: 0.45rem; }
+.publications-upload-dialog footer button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  border-radius: 0.42rem;
+  background: var(--paper);
+  color: inherit;
+  font-size: 0.7rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+.publications-upload-dialog footer button.primary { border-color: var(--tenant-accent); background: var(--tenant-accent); color: #fff; }
+.publications-upload-dialog footer button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+@media (max-width: 920px) {
+  .publications-overview-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .publications-overview-strip > div:nth-child(2) { border-right: 0; }
+  .publications-overview-strip > div:nth-child(-n+2) { border-bottom: 1px solid color-mix(in srgb, var(--ink) 12%, transparent); }
+  .publications-featured-grid { grid-template-columns: 1fr; }
+  .publications-upload-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .publications-section-heading,
+  .publications-register__toolbar { align-items: stretch; flex-direction: column; }
+  .publications-register__search { width: 100%; }
+  .publications-upload-backdrop { padding: 0; }
+  .publications-upload-dialog { width: 100%; max-height: 100vh; height: 100vh; border-radius: 0; }
+  .publications-upload-fields { grid-template-columns: 1fr; }
+  .publications-upload-fields label.wide { grid-column: auto; }
+  .publications-upload-dialog > footer { align-items: stretch; flex-direction: column; }
+  .publications-upload-dialog footer > div { display: grid; grid-template-columns: 1fr 1fr; }
+}

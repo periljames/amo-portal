@@ -33,7 +33,9 @@ export const canonicalModuleRoutes = {
   maintenanceWorkOrderDetail: "/maintenance/:amoCode/maintenance/work-orders/:woId",
   technicalRecordsDashboard: "/maintenance/:amoCode/production/records",
   technicalRecordsPacks: "/maintenance/:amoCode/production/records/packs",
-  manualsRoot: "/maintenance/:amoCode/manuals",
+  publicationsRoot: "/maintenance/:amoCode/publications",
+  /** @deprecated Use publicationsRoot. Historical URLs are redirected at the application router. */
+  manualsRoot: "/maintenance/:amoCode/publications",
   foundationsContractsApi: "/foundations/contracts",
   foundationsBaseStationsApi: "/foundations/base-stations",
   rosteringRoot: "/maintenance/:amoCode/rostering",
@@ -64,6 +66,9 @@ export const buildCanonicalRoute = {
   maintenanceWorkOrders: ({ amoCode }: AmoRouteParams) => `/maintenance/${encodeSegment(amoCode)}/maintenance/work-orders`,
   maintenanceWorkOrderDetail: ({ amoCode, woId }: WorkOrderRouteParams) => `/maintenance/${encodeSegment(amoCode)}/maintenance/work-orders/${encodeSegment(woId)}`,
   technicalRecordsPacks: ({ amoCode }: AmoRouteParams) => `/maintenance/${encodeSegment(amoCode)}/production/records/packs`,
+  publicationsRoot: ({ amoCode }: AmoRouteParams) => `/maintenance/${encodeSegment(amoCode)}/publications`,
+  /** @deprecated Use publicationsRoot. */
+  manualsRoot: ({ amoCode }: AmoRouteParams) => `/maintenance/${encodeSegment(amoCode)}/publications`,
   rosteringRoot: ({ amoCode }: AmoRouteParams) => `/maintenance/${encodeSegment(amoCode)}/rostering`,
   rosteringDashboard: ({ amoCode }: AmoRouteParams) => `/maintenance/${encodeSegment(amoCode)}/rostering/dashboard`,
   rosteringCalendar: ({ amoCode }: AmoRouteParams) => `/maintenance/${encodeSegment(amoCode)}/rostering/calendar`,
