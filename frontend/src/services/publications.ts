@@ -53,6 +53,9 @@ export type PublicationReaderMetadata = {
   language: string;
   issue_number?: string | null;
   revision_number?: string | null;
+  status: string;
+  is_published: boolean;
+  control_label: string;
   source_type?: string | null;
   source_filename?: string | null;
   source_size_bytes: number;
@@ -67,6 +70,15 @@ export type PublicationReaderMetadata = {
   citation_current: number;
   citation_total: number;
   subsidiary_count: number;
+};
+
+export type PublicationAcknowledgement = {
+  required: boolean;
+  pending: boolean;
+  status?: string | null;
+  due_at?: string | null;
+  acknowledged_at?: string | null;
+  acknowledgement_text?: string | null;
 };
 
 function extensionOf(file: File): "docx" | "pdf" {
@@ -136,6 +148,16 @@ export async function getPublicationReaderMetadata(
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-metadata`;
   const response = await authenticatedFetch(path);
   return response.json() as Promise<PublicationReaderMetadata>;
+}
+
+export async function getPublicationAcknowledgement(
+  tenantSlug: string,
+  manualId: string,
+  revisionId: string,
+): Promise<PublicationAcknowledgement> {
+  const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/acknowledgement`;
+  const response = await authenticatedFetch(path);
+  return response.json() as Promise<PublicationAcknowledgement>;
 }
 
 export async function fetchPublicationBlob(path: string): Promise<{ blob: Blob; size: number; filename?: string }> {
