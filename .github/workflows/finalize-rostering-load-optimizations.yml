@@ -1,0 +1,72 @@
+name: Finalize Rostering Load Optimizations
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/rostering-unified-workforce
+          fetch-depth: 0
+          show-progress: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply demand-driven Setup source
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/apply-rostering-load-optimizations.yml').read_text(encoding='utf-8').splitlines()
+          start = source.index("          python - <<'PY'") + 1
+          end = source.index("          PY", start)
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[start:end]) + '\n'
+          Path('/tmp/apply-setup-optimization.py').write_text(script, encoding='utf-8')
+          PY
+          python /tmp/apply-setup-optimization.py
+      - name: Normalize supported calendar icons
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          for raw_path in (
+              'frontend/src/pages/rostering/components/MyRosterWorkspace.tsx',
+              'frontend/src/pages/rostering/components/RosterGovernancePanel.tsx',
+          ):
+              path = Path(raw_path)
+              text = path.read_text(encoding='utf-8')
+              if 'CalendarSync' not in text:
+                  continue
+              path.write_text(text.replace('CalendarSync', 'CalendarDays'), encoding='utf-8')
+          PY
+      - name: Validate production frontend and rostering regressions
+        working-directory: frontend
+        run: |
+          npm ci --prefer-offline --no-audit --fund=false
+          npm run build
+          npm exec -- vitest run src/pages/rostering src/services/offlineHttp.test.ts
+          npm exec -- eslint src/pages/rostering src/services/rostering.ts
+      - name: Commit optimized source
+        shell: bash
+        run: |
+          rm -f \
+            .github/workflows/apply-rostering-load-optimizations.yml \
+            .github/workflows/finalize-rostering-load-optimizations.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend .github/workflows
+          git commit -m "Optimize rostering for constrained networks"
+          git push origin HEAD:fix/rostering-unified-workforce
