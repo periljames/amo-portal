@@ -6,7 +6,7 @@
  * the existing AeroDoc document-reader cache behaviour.
  */
 
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const DOCUMENT_CACHE = `aerodoc-hybrid-dms-${VERSION}`;
@@ -25,13 +25,17 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   const active = new Set([SHELL_CACHE, ASSET_CACHE, DOCUMENT_CACHE]);
   event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(
-        keys
-          .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)) && !active.has(key))
-          .map((key) => caches.delete(key)),
-      ))
-      .then(() => self.clients.claim()),
+    Promise.all([
+      caches.keys()
+        .then((keys) => Promise.all(
+          keys
+            .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)) && !active.has(key))
+            .map((key) => caches.delete(key)),
+        )),
+      self.registration.navigationPreload
+        ? self.registration.navigationPreload.enable()
+        : Promise.resolve(),
+    ]).then(() => self.clients.claim()),
   );
 });
 
@@ -67,10 +71,11 @@ function isStaticAsset(request, url) {
   return /\.(?:js|css|woff2?|ttf|png|jpe?g|svg|webp|ico)$/i.test(url.pathname);
 }
 
-async function networkFirstNavigation(request) {
+async function networkFirstNavigation(request, preloadResponsePromise) {
   const cache = await caches.open(SHELL_CACHE);
   try {
-    const response = await fetch(request);
+    const preloaded = preloadResponsePromise ? await preloadResponsePromise : null;
+    const response = preloaded || await fetch(request);
     if (response.ok) await cache.put("/", response.clone());
     return response;
   } catch {
@@ -107,7 +112,7 @@ self.addEventListener("fetch", (event) => {
   if (isApiRequest(url) && !isAeroDocRequest(url)) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirstNavigation(request));
+    event.respondWith(networkFirstNavigation(request, event.preloadResponse));
     return;
   }
   if (isAeroDocRequest(url)) {
