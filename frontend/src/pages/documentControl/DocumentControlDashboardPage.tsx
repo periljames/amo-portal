@@ -78,7 +78,7 @@ export default function DocumentControlDashboardPage() {
       title={canControl ? "Control Desk" : "Document Library"}
       subtitle={canControl
         ? "Live document governance, approvals, authority actions, distribution, reviews, copy custody, and technical-data currency."
-        : "Find the current permitted revision, continue reading, and complete assigned acknowledgements."}
+        : "Open the current permitted issue directly. Drafts and governance work remain restricted to authorized Document Control personnel."}
       canControl={canControl}
       actions={<button type="button" className="dc-button dc-button--primary" onClick={() => navigate(`${basePath}/library`)}><BookOpen size={15} /> Open library</button>}
     >
@@ -86,16 +86,23 @@ export default function DocumentControlDashboardPage() {
       {error ? <DocumentControlError message={error} retry={() => void load()} /> : null}
       {!loading && !error && dashboard ? (
         <>
-          <section className="dc-metrics" aria-label="Document Control status">
-            <div className="dc-metric"><strong>{dashboard.metrics.document_records}</strong><span>Document records</span></div>
-            <div className="dc-metric dc-metric--success"><strong>{dashboard.metrics.effective_publications}</strong><span>Effective publications</span></div>
-            <div className={metricClass(dashboard.metrics.draft_revisions)}><strong>{dashboard.metrics.draft_revisions}</strong><span>Draft and review revisions</span></div>
-            <div className={metricClass(dashboard.metrics.active_workflows)}><strong>{dashboard.metrics.active_workflows}</strong><span>Active revision workflows</span></div>
-            <div className={metricClass(dashboard.metrics.authority_pending)}><strong>{dashboard.metrics.authority_pending}</strong><span>Authority submissions pending</span></div>
-            <div className={metricClass(dashboard.metrics.overdue_acknowledgements, true)}><strong>{dashboard.metrics.overdue_acknowledgements}</strong><span>Overdue acknowledgements</span></div>
-            <div className={metricClass(dashboard.metrics.temporary_revisions_expiring_30_days, true)}><strong>{dashboard.metrics.temporary_revisions_expiring_30_days}</strong><span>TRs expiring within 30 days</span></div>
-            <div className={metricClass(dashboard.metrics.reviews_due_60_days)}><strong>{dashboard.metrics.reviews_due_60_days}</strong><span>Reviews due within 60 days</span></div>
-          </section>
+          {canControl ? (
+            <section className="dc-metrics" aria-label="Document Control status">
+              <div className="dc-metric"><strong>{dashboard.metrics.document_records}</strong><span>Document records</span></div>
+              <div className="dc-metric dc-metric--success"><strong>{dashboard.metrics.effective_publications}</strong><span>Effective publications</span></div>
+              <div className={metricClass(dashboard.metrics.draft_revisions)}><strong>{dashboard.metrics.draft_revisions}</strong><span>Draft and review revisions</span></div>
+              <div className={metricClass(dashboard.metrics.active_workflows)}><strong>{dashboard.metrics.active_workflows}</strong><span>Active revision workflows</span></div>
+              <div className={metricClass(dashboard.metrics.authority_pending)}><strong>{dashboard.metrics.authority_pending}</strong><span>Authority submissions pending</span></div>
+              <div className={metricClass(dashboard.metrics.overdue_acknowledgements, true)}><strong>{dashboard.metrics.overdue_acknowledgements}</strong><span>Overdue acknowledgements</span></div>
+              <div className={metricClass(dashboard.metrics.temporary_revisions_expiring_30_days, true)}><strong>{dashboard.metrics.temporary_revisions_expiring_30_days}</strong><span>TRs expiring within 30 days</span></div>
+              <div className={metricClass(dashboard.metrics.reviews_due_60_days)}><strong>{dashboard.metrics.reviews_due_60_days}</strong><span>Reviews due within 60 days</span></div>
+            </section>
+          ) : (
+            <section className="dc-metrics dc-metrics--reader" aria-label="Document library status">
+              <div className="dc-metric dc-metric--success"><strong>{dashboard.metrics.effective_publications}</strong><span>Effective publications</span></div>
+              <div className="dc-metric"><strong>{dashboard.metrics.document_records}</strong><span>Library records</span></div>
+            </section>
+          )}
 
           {canControl ? (
             <DocumentControlSection title="Operational workspaces" description="Each workspace is backed by tenant data. Counts are not inferred from static examples.">
@@ -114,7 +121,7 @@ export default function DocumentControlDashboardPage() {
             </DocumentControlSection>
           ) : null}
 
-          <DocumentControlSection title="Available documents" description="A draft is readable only to authorized controllers and reviewers and remains visibly uncontrolled." actions={<button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library`)}>View all</button>}>
+          <DocumentControlSection title={canControl ? "Available documents" : "Current publications"} description={canControl ? "A draft is readable only to authorized controllers and reviewers and remains visibly uncontrolled." : "Select a row to open the current effective issue in the controlled reader."} actions={<button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library`)}>View all</button>}>
             {documents.length ? (
               <div className="dc-table-wrap" style={{ border: 0, borderRadius: 0 }}>
                 <table className="dc-table">
@@ -130,11 +137,11 @@ export default function DocumentControlDashboardPage() {
                   ))}</tbody>
                 </table>
               </div>
-            ) : <DocumentControlEmpty icon={AlertTriangle} title="No document record exists" message="A controller must upload or register a document before it can be governed or read." />}
+            ) : <DocumentControlEmpty icon={AlertTriangle} title="No document is available" message={canControl ? "Upload or register a document before it can be governed or read." : "No effective publication is currently assigned to your access scope."} />}
           </DocumentControlSection>
 
           {canControl ? (
-            <DocumentControlSection title="Recent controlled activity" description="Append-only domain audit events for the active tenant.">
+            <DocumentControlSection title="Recent controlled activity" description="Append-only controlled actions for the active tenant.">
               {dashboard.recent_activity.length ? (
                 <div className="dc-timeline">{dashboard.recent_activity.map((activity) => (
                   <article key={activity.id}><div><strong>{activity.action.replaceAll("_", " ")}</strong><p>{activity.entity_type} · {activity.entity_id}</p></div><time>{activity.at ? new Date(activity.at).toLocaleString() : "—"}</time></article>
