@@ -39,6 +39,13 @@ async function authenticatedFetch(path: string, init: RequestInit = {}): Promise
   return response;
 }
 
+async function openBlobResponse(response: Response): Promise<void> {
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 export async function qmsListAuditEvidenceReviews(auditId: string): Promise<QualityAuditEvidenceReview[]> {
   const response = await authenticatedFetch(`/quality/audits/${encodeURIComponent(auditId)}/evidence/reviews`);
   return await response.json() as QualityAuditEvidenceReview[];
@@ -60,12 +67,12 @@ export async function qmsRecordReportDistribution(
   return await response.json() as QualityAuditReportMetadata;
 }
 
+export async function qmsOpenAuthenticatedQualityPath(path: string): Promise<void> {
+  await openBlobResponse(await authenticatedFetch(path, { method: "GET", cache: "no-store" }));
+}
+
 export async function qmsOpenLifecycleDocument(record: QualityAuditDocument): Promise<void> {
-  const response = await authenticatedFetch(record.download_url, { method: "GET", cache: "no-store" });
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  window.open(url, "_blank", "noopener,noreferrer");
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  await qmsOpenAuthenticatedQualityPath(record.download_url);
 }
 
 export async function qmsDownloadLifecycleDocumentFile(record: QualityAuditDocument): Promise<void> {
