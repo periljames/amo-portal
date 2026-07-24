@@ -193,6 +193,11 @@
   color: #166534;
 }
 
+.quality-pdf-form-status strong.is-read-only {
+  background: rgba(226, 232, 240, 0.88);
+  color: #334155;
+}
+
 .quality-pdf-form-alert {
   display: flex;
   align-items: flex-start;
@@ -244,6 +249,18 @@
 
 .quality-pdf-form-viewport .annotationLayer {
   pointer-events: auto;
+}
+
+.quality-pdf-form-viewport.is-read-only .annotationLayer {
+  pointer-events: none;
+}
+
+.quality-pdf-form-viewport.is-read-only .annotationLayer input,
+.quality-pdf-form-viewport.is-read-only .annotationLayer textarea,
+.quality-pdf-form-viewport.is-read-only .annotationLayer select,
+.quality-pdf-form-viewport.is-read-only .annotationLayer button {
+  opacity: 0.82;
+  cursor: not-allowed;
 }
 
 .quality-pdf-form-viewport .annotationLayer input,
