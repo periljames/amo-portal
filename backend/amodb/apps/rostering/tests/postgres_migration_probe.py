@@ -43,6 +43,7 @@ NEW_TABLES = {
 QUALITY_PARENT = "qual_20260705_merge_heads"
 ROSTER_PARENT = "phase2_14a_20260615"
 TARGET_REVISION = "workforce_20260721_complete"
+ROSTER_GOVERNANCE_REVISION = "rostering_20260724_governance"
 
 
 def _load_metadata() -> None:
@@ -191,6 +192,14 @@ def _version_rows(engine: sa.Engine) -> set[str]:
         }
 
 
+def _head_contains_revision(script: ScriptDirectory, head: str, revision: str) -> bool:
+    """Return true when a current head contains the required released revision."""
+    return any(
+        str(item.revision) == revision
+        for item in script.iterate_revisions(head, "base")
+    )
+
+
 def _verify_redundant_phase2_overlap_repair(engine: sa.Engine) -> None:
     """Reproduce the released overlapping-head state and run real Alembic commands."""
     with engine.begin() as connection:
@@ -208,7 +217,11 @@ def _verify_redundant_phase2_overlap_repair(engine: sa.Engine) -> None:
 
     script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
     expected_heads = set(script.get_heads())
-    assert "rostering_20260724_governance" in expected_heads
+    assert script.get_revision(ROSTER_GOVERNANCE_REVISION) is not None
+    assert any(
+        _head_contains_revision(script, head, ROSTER_GOVERNANCE_REVISION)
+        for head in expected_heads
+    ), expected_heads
 
     # Reproduce the exact `upgrade heads` overlap at a fully-stamped installation:
     # all legitimate heads plus the now-redundant historical Phase 2 marker.
