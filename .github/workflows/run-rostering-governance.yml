@@ -28,42 +28,14 @@ jobs:
           end = source.index("          PY", start)
           script = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[start:end]) + '\n'
           script = script.replace('StrictModel', 'RosterSchema')
-          script = script.replace(
-              "              code: str'''.replace",
-              "              code: str = Field(min_length=1, max_length=64)'''.replace",
-          )
-          script = script.replace(
-              'expected_state_revision: Optional[int] = None',
-              'expected_state_revision: Optional[int] = Field(default=None, ge=1)',
-          )
-          script = script.replace(
-              'idempotency_key: Optional[str] = Field(default=None, max_length=128)',
-              'idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128)',
-          )
-          script = script.replace(
-              'comment: Optional[str] = Field(default=None, max_length=2000)',
-              'comment: Optional[str] = None',
-          )
-          malformed_old = '''\'\'\'    if "supervisor" in title or "shift lead" in title:
-              return "DEPARTMENT_SUPERVISOR"
-              return None\'\'\'.replace("              ", "    ")'''
-          corrected_old = '''\'\'\'    if "supervisor" in title or "shift lead" in title:
-        return "DEPARTMENT_SUPERVISOR"
-    return None\'\'\''''
-          malformed_new = '''\'\'\'    if "base manager" in title:
-              return "BASE_MANAGER"
-              if "department head" in title or title.startswith("head of ") or "department manager" in title or "line manager" in title:
-              return "DEPARTMENT_HEAD"
-              if "supervisor" in title or "shift lead" in title:
-              return "DEPARTMENT_SUPERVISOR"
-              return None\'\'\'.replace("              ", "    ")'''
-          corrected_new = '''\'\'\'    if "base manager" in title:
-        return "BASE_MANAGER"
-    if "department head" in title or title.startswith("head of ") or "department manager" in title or "line manager" in title:
-        return "DEPARTMENT_HEAD"
-    if "supervisor" in title or "shift lead" in title:
-        return "DEPARTMENT_SUPERVISOR"
-    return None\'\'\''''
+          script = script.replace("              code: str'''.replace", "              code: str = Field(min_length=1, max_length=64)'''.replace")
+          script = script.replace('expected_state_revision: Optional[int] = None', 'expected_state_revision: Optional[int] = Field(default=None, ge=1)')
+          script = script.replace('idempotency_key: Optional[str] = Field(default=None, max_length=128)', 'idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128)')
+          script = script.replace('comment: Optional[str] = Field(default=None, max_length=2000)', 'comment: Optional[str] = None')
+          malformed_old = "'''    if \"supervisor\" in title or \"shift lead\" in title:\n              return \"DEPARTMENT_SUPERVISOR\"\n              return None'''.replace(\"              \", \"    \")"
+          corrected_old = "'''    if \"supervisor\" in title or \"shift lead\" in title:\n        return \"DEPARTMENT_SUPERVISOR\"\n    return None'''"
+          malformed_new = "'''    if \"base manager\" in title:\n              return \"BASE_MANAGER\"\n              if \"department head\" in title or title.startswith(\"head of \") or \"department manager\" in title or \"line manager\" in title:\n              return \"DEPARTMENT_HEAD\"\n              if \"supervisor\" in title or \"shift lead\" in title:\n              return \"DEPARTMENT_SUPERVISOR\"\n              return None'''.replace(\"              \", \"    \")"
+          corrected_new = "'''    if \"base manager\" in title:\n        return \"BASE_MANAGER\"\n    if \"department head\" in title or title.startswith(\"head of \") or \"department manager\" in title or \"line manager\" in title:\n        return \"DEPARTMENT_HEAD\"\n    if \"supervisor\" in title or \"shift lead\" in title:\n        return \"DEPARTMENT_SUPERVISOR\"\n    return None'''"
           if malformed_old not in script or malformed_new not in script:
               raise SystemExit('Role mapping literals were not found in the governance patch')
           script = script.replace(malformed_old, corrected_old, 1).replace(malformed_new, corrected_new, 1)
