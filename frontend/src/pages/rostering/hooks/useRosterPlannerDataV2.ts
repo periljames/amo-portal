@@ -41,10 +41,20 @@ import type {
 } from "../../../types/rostering";
 import { errorMessage, weekBounds } from "../rosterUi";
 
+export type PlannerSourceErrors = {
+  periods: string | null;
+  people: string | null;
+  templates: string | null;
+  contracts: string | null;
+  workspace: string | null;
+  findings: string | null;
+};
+
 export type PlannerDataV2 = {
   loading: boolean;
   refreshing: boolean;
   error: string | null;
+  sourceErrors: PlannerSourceErrors;
   anchor: Date;
   setAnchor: (date: Date) => void;
   week: ReturnType<typeof weekBounds>;
@@ -71,6 +81,7 @@ export type PlannerDataV2 = {
   templates: ShiftTemplateRead[];
   contracts: RosterContractResponse | null;
   refresh: () => Promise<void>;
+  retrySource: (source: keyof PlannerSourceErrors) => Promise<void>;
   moveWeek: (direction: -1 | 1) => void;
 };
 
@@ -78,6 +89,7 @@ type VersionWorkspace = {
   version: RosterVersionRead;
   assignments: RosterAssignmentRead[];
   findings: RosterValidationFindingRead[];
+  findingsError: string | null;
 };
 
 const PERIOD_STALE_MS = 2 * 60_000;
@@ -85,6 +97,7 @@ const REFERENCE_STALE_MS = 15 * 60_000;
 const WORKSPACE_STALE_MS = 45_000;
 const ROSTER_GC_MS = 7 * 24 * 60 * 60_000;
 const PEOPLE_PAGE_SIZE = 100;
+const REQUEST_TIMEOUT_MS = 20_000;
 const PENDING_OUTBOX_STATUSES = new Set(["queued", "syncing", "conflict", "failed"]);
 const ASSIGNMENT_PATCH_FIELDS = [
   "department_id",
@@ -122,13 +135,36 @@ function useDebouncedValue(value: string, delayMs: number): string {
   return debounced;
 }
 
+async function withTimeout<T>(label: string, request: Promise<T>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<T>((_resolve, reject) => {
+        timer = globalThis.setTimeout(() => reject(new Error(`${label} did not respond within ${Math.round(timeoutMs / 1000)} seconds.`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) globalThis.clearTimeout(timer);
+  }
+}
+
 async function loadVersionWorkspace(versionId: string): Promise<VersionWorkspace> {
-  const [version, assignments, findings] = await Promise.all([
-    getRosterVersion(versionId),
-    listRosterAssignments(versionId),
-    listRosterFindings(versionId, true),
+  const [versionResult, assignmentsResult, findingsResult] = await Promise.allSettled([
+    withTimeout("Roster version", getRosterVersion(versionId)),
+    withTimeout("Roster assignments", listRosterAssignments(versionId)),
+    withTimeout("Roster findings", listRosterFindings(versionId, true)),
   ]);
-  return { version, assignments, findings };
+
+  if (versionResult.status === "rejected") throw versionResult.reason;
+  if (assignmentsResult.status === "rejected") throw assignmentsResult.reason;
+
+  return {
+    version: versionResult.value,
+    assignments: assignmentsResult.value,
+    findings: findingsResult.status === "fulfilled" ? findingsResult.value : [],
+    findingsError: findingsResult.status === "rejected" ? errorMessage(findingsResult.reason) : null,
+  };
 }
 
 function parseOutboxBody(entry: OfflineOutboxEntry): Record<string, unknown> {
@@ -222,20 +258,12 @@ function applyPendingPatch(
   entry: OfflineOutboxEntry,
   body: Record<string, unknown>,
 ): RosterAssignmentRead {
-  const base = previous && previous.state_revision > current.state_revision
-    ? previous
-    : current;
+  const base = previous && previous.state_revision > current.state_revision ? previous : current;
   const patched: Record<string, unknown> = { ...base };
-
   for (const field of ASSIGNMENT_PATCH_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(body, field)) {
-      patched[field] = body[field];
-    }
+    if (Object.prototype.hasOwnProperty.call(body, field)) patched[field] = body[field];
   }
-
-  const expectedRevision = typeof body.expected_state_revision === "number"
-    ? body.expected_state_revision
-    : current.state_revision;
+  const expectedRevision = typeof body.expected_state_revision === "number" ? body.expected_state_revision : current.state_revision;
   patched.state_revision = Math.max(current.state_revision + 1, expectedRevision + 1);
   patched.updated_at = new Date(entry.updatedAt).toISOString();
   return patched as unknown as RosterAssignmentRead;
@@ -257,30 +285,23 @@ function mergePendingRosterOutbox(
     .forEach((entry) => {
       const path = entry.path.split("?", 1)[0];
       const body = parseOutboxBody(entry);
-
       if (entry.method === "POST" && path === createPath) {
         const sourceReference = stringValue(body.source_reference_id) || entry.idempotencyKey;
         if (assignments.some((row) => row.source_reference_id === sourceReference)) return;
-        const restored = previousAssignments.find((row) => (
-          row.id === `offline-${entry.id}` || row.source_reference_id === sourceReference
-        )) || pendingCreateRow(workspace, versionId, entry, body);
+        const restored = previousAssignments.find((row) => row.id === `offline-${entry.id}` || row.source_reference_id === sourceReference)
+          || pendingCreateRow(workspace, versionId, entry, body);
         if (restored) assignments.push(restored);
         return;
       }
-
       const assignmentId = entry.entityId || assignmentIdFromPath(path);
       if (!assignmentId) return;
-
       if (entry.method === "DELETE") {
         assignments = assignments.filter((row) => row.id !== assignmentId);
         return;
       }
-
       if (entry.method === "PATCH") {
         const previousRow = previousAssignments.find((row) => row.id === assignmentId);
-        assignments = assignments.map((row) => (
-          row.id === assignmentId ? applyPendingPatch(row, previousRow, entry, body) : row
-        ));
+        assignments = assignments.map((row) => row.id === assignmentId ? applyPendingPatch(row, previousRow, entry, body) : row);
       }
     });
 
@@ -300,60 +321,55 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
 
   const periodsQuery = useQuery({
     queryKey: periodsKey(week.from, week.to),
-    queryFn: () => listRosterPeriods({ from: week.from, to: week.to }),
+    queryFn: () => withTimeout("Roster periods", listRosterPeriods({ from: week.from, to: week.to })),
     staleTime: PERIOD_STALE_MS,
     gcTime: ROSTER_GC_MS,
     placeholderData: keepPreviousData,
     networkMode: "offlineFirst",
+    retry: 1,
   });
 
   const peopleQuery = useInfiniteQuery({
-    queryKey: [
-      "rostering",
-      "planner",
-      "eligible-people",
-      debouncedPeopleSearch,
-      peopleDepartmentId,
-    ],
-    queryFn: ({ pageParam }) => listRosterPeoplePage({
+    queryKey: ["rostering", "planner", "eligible-people", debouncedPeopleSearch, peopleDepartmentId],
+    queryFn: ({ pageParam }) => withTimeout("Eligible personnel", listRosterPeoplePage({
       page: pageParam,
       page_size: PEOPLE_PAGE_SIZE,
       search: debouncedPeopleSearch || null,
       department_id: peopleDepartmentId || null,
       active_only: true,
       roster_eligible_only: true,
-    }),
+    })),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.page + 1 : undefined,
     staleTime: REFERENCE_STALE_MS,
     gcTime: ROSTER_GC_MS,
     networkMode: "offlineFirst",
+    retry: 1,
   });
 
   const templatesQuery = useQuery({
     queryKey: ["rostering", "planner", "shift-templates", "active"],
-    queryFn: () => listShiftTemplates(false),
+    queryFn: () => withTimeout("Shift templates", listShiftTemplates(false)),
     staleTime: REFERENCE_STALE_MS,
     gcTime: ROSTER_GC_MS,
     networkMode: "offlineFirst",
+    retry: 1,
   });
 
   const contractsQuery = useQuery({
     queryKey: ["rostering", "planner", "contracts"],
-    queryFn: getRosterContracts,
+    queryFn: () => withTimeout("Roster capability contract", getRosterContracts()),
     staleTime: REFERENCE_STALE_MS,
     gcTime: ROSTER_GC_MS,
     networkMode: "offlineFirst",
+    retry: 1,
   });
 
   const periods = useMemo(() => periodsQuery.data || [], [periodsQuery.data]);
   const selectedPeriod = periods.find((row) => row.id === selectedPeriodId);
   const versions = selectedPeriod?.versions || [];
   const peoplePages = useMemo(() => peopleQuery.data?.pages || [], [peopleQuery.data?.pages]);
-  const people = useMemo(
-    () => peoplePages.flatMap((page) => page.items),
-    [peoplePages],
-  );
+  const people = useMemo(() => peoplePages.flatMap((page) => page.items), [peoplePages]);
   const peopleTotal = peoplePages[0]?.total || 0;
   const peopleDepartments = peoplePages[0]?.departments || [];
 
@@ -363,9 +379,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
       return;
     }
     const current = periods.find((row) => row.id === selectedPeriodId);
-    const next = current
-      || periods.find((row) => row.starts_on <= week.to && row.ends_on >= week.from)
-      || periods[0];
+    const next = current || periods.find((row) => row.starts_on <= week.to && row.ends_on >= week.from) || periods[0];
     if (next && next.id !== selectedPeriodId) setSelectedPeriodId(next.id);
   }, [periods, selectedPeriodId, week.from, week.to]);
 
@@ -393,6 +407,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     staleTime: WORKSPACE_STALE_MS,
     gcTime: ROSTER_GC_MS,
     networkMode: "offlineFirst",
+    retry: 1,
   });
 
   const assignments = workspaceQuery.data?.assignments || [];
@@ -411,10 +426,11 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
       const adjacent = weekBounds(addWeeks(anchor, direction));
       void queryClient.prefetchQuery({
         queryKey: periodsKey(adjacent.from, adjacent.to),
-        queryFn: () => listRosterPeriods({ from: adjacent.from, to: adjacent.to }),
+        queryFn: () => withTimeout("Adjacent roster periods", listRosterPeriods({ from: adjacent.from, to: adjacent.to })),
         staleTime: PERIOD_STALE_MS,
         gcTime: ROSTER_GC_MS,
         networkMode: "offlineFirst",
+        retry: 0,
       });
     }
   }, [anchor, queryClient]);
@@ -434,43 +450,38 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     }
   }, [contractsQuery, peopleQuery, periodsQuery, selectedVersionId, templatesQuery, workspaceQuery]);
 
+  const retrySource = useCallback(async (source: keyof PlannerSourceErrors) => {
+    if (source === "periods") await periodsQuery.refetch();
+    if (source === "people") await peopleQuery.refetch();
+    if (source === "templates") await templatesQuery.refetch();
+    if (source === "contracts") await contractsQuery.refetch();
+    if ((source === "workspace" || source === "findings") && selectedVersionId) await workspaceQuery.refetch();
+  }, [contractsQuery, peopleQuery, periodsQuery, selectedVersionId, templatesQuery, workspaceQuery]);
+
   const loadMorePeople = useCallback(async () => {
     if (!peopleQuery.hasNextPage || peopleQuery.isFetchingNextPage) return;
     await peopleQuery.fetchNextPage();
   }, [peopleQuery]);
 
-  const firstError = [
-    periodsQuery.error,
-    peopleQuery.error,
-    templatesQuery.error,
-    contractsQuery.error,
-    workspaceQuery.error,
-  ].find(Boolean);
+  const sourceErrors: PlannerSourceErrors = {
+    periods: periodsQuery.error ? errorMessage(periodsQuery.error) : null,
+    people: peopleQuery.error ? errorMessage(peopleQuery.error) : null,
+    templates: templatesQuery.error ? errorMessage(templatesQuery.error) : null,
+    contracts: contractsQuery.error ? errorMessage(contractsQuery.error) : null,
+    workspace: workspaceQuery.error ? errorMessage(workspaceQuery.error) : null,
+    findings: workspaceQuery.data?.findingsError || null,
+  };
 
-  const referenceDataMissing = !periodsQuery.data
-    || !peopleQuery.data
-    || !templatesQuery.data
-    || !contractsQuery.data;
-  const versionDataMissing = Boolean(selectedVersionId) && !workspaceQuery.data;
-  const loading = (referenceDataMissing || versionDataMissing) && (
-    periodsQuery.isPending
-    || peopleQuery.isPending
-    || templatesQuery.isPending
-    || contractsQuery.isPending
-    || workspaceQuery.isPending
-  );
-  const refreshing = manualRefreshing || (
-    periodsQuery.isFetching
-    || peopleQuery.isFetching
-    || templatesQuery.isFetching
-    || contractsQuery.isFetching
-    || workspaceQuery.isFetching
-  );
+  const loading = (!periodsQuery.data && periodsQuery.isPending)
+    || (Boolean(selectedVersionId) && !workspaceQuery.data && workspaceQuery.isPending);
+  const refreshing = manualRefreshing || periodsQuery.isFetching || workspaceQuery.isFetching;
+  const blockingError = sourceErrors.periods || sourceErrors.workspace;
 
   return {
     loading,
     refreshing,
-    error: firstError ? errorMessage(firstError) : null,
+    error: blockingError,
+    sourceErrors,
     anchor,
     setAnchor,
     week,
@@ -480,9 +491,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     versions,
     selectedVersionId,
     setSelectedVersionId,
-    selectedVersion: workspaceQuery.data?.version
-      || versions.find((row) => row.id === selectedVersionId)
-      || null,
+    selectedVersion: workspaceQuery.data?.version || versions.find((row) => row.id === selectedVersionId) || null,
     assignments,
     setAssignments,
     findings: workspaceQuery.data?.findings || [],
@@ -499,6 +508,7 @@ export function useRosterPlannerDataV2(): PlannerDataV2 {
     templates: templatesQuery.data || [],
     contracts: contractsQuery.data || null,
     refresh,
+    retrySource,
     moveWeek: (direction) => setAnchor((value) => addWeeks(value, direction)),
   };
 }
