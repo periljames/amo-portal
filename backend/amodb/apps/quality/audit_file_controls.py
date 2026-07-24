@@ -109,6 +109,16 @@ def _approved_existing_checklist_path(value: object) -> Path | None:
     return candidate
 
 
+def _safe_unlink(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        # The new controlled record is already committed. A stale prior file is
+        # an operational cleanup issue and must not turn a successful save into a
+        # false 500 response. Storage maintenance can remove it later.
+        return
+
+
 _extension_router = APIRouter(
     prefix="/quality",
     tags=["Quality / QMS"],
@@ -185,15 +195,15 @@ def upload_controlled_audit_checklist(
         db.refresh(audit)
     except HTTPException:
         db.rollback()
-        target_path.unlink(missing_ok=True)
+        _safe_unlink(target_path)
         raise
     except Exception as exc:
         db.rollback()
-        target_path.unlink(missing_ok=True)
+        _safe_unlink(target_path)
         raise HTTPException(status_code=500, detail="Checklist upload could not be saved.") from exc
 
     if previous_path and previous_path != target_path:
-        previous_path.unlink(missing_ok=True)
+        _safe_unlink(previous_path)
     return _serialize_audit(audit, db)
 
 
