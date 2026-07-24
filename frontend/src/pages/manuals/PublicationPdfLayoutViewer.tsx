@@ -148,7 +148,6 @@ export default function PublicationPdfLayoutViewer({
       <Document
         file={fileUrl}
         loading={<div className="publication-native-pdf__loading">Preparing the original document layout…</div>}
-        noData={<div className="publication-native-pdf__loading">No PDF document is available.</div>}
         onLoadSuccess={(document) => {
           setPageCount(document.numPages);
           setCurrentPage(1);
