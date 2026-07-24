@@ -46,6 +46,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v6
         with:
@@ -56,11 +58,69 @@ jobs:
       - name: Install backend dependencies
         run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
 
+      - name: Record main migration baseline
+        shell: bash
+        run: |
+          set +e
+          createdb -h 127.0.0.1 -U amodb amodb_document_control_main_baseline
+          git worktree add --detach /tmp/amo-main origin/main
+          (
+            cd /tmp/amo-main
+            DATABASE_WRITE_URL=postgresql+psycopg2://amodb:amodb@127.0.0.1:5432/amodb_document_control_main_baseline \
+            DATABASE_READ_URL=postgresql+psycopg2://amodb:amodb@127.0.0.1:5432/amodb_document_control_main_baseline \
+            DATABASE_URL=postgresql+psycopg2://amodb:amodb@127.0.0.1:5432/amodb_document_control_main_baseline \
+            PYTHONPATH=backend \
+            alembic -c backend/amodb/alembic.ini upgrade heads
+          ) > /tmp/document-control-main-baseline.log 2>&1
+          echo "main_baseline_exit=$?" >> /tmp/document-control-main-baseline.log
+          exit 0
+        env:
+          PGPASSWORD: amodb
+
       - name: Verify Alembic graph
         shell: bash
         run: |
           set -o pipefail
           alembic -c backend/amodb/alembic.ini heads 2>&1 | tee /tmp/document-control-alembic-heads.log
+
+      - name: Record Alembic ancestry diagnostics
+        shell: bash
+        run: |
+          python - <<'PY' > /tmp/document-control-alembic-graph.log 2>&1
+          from pathlib import Path
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          config = Config("backend/amodb/alembic.ini")
+          script = ScriptDirectory.from_config(config)
+          print("heads=", script.get_heads())
+          print("bases=", script.get_bases())
+          print("migration_files=")
+          for path in sorted(Path("backend/amodb/alembic/versions").glob("*.py")):
+              print(path.name)
+          print("head_nodes=")
+          for revision_id in script.get_heads():
+              revision = script.get_revision(revision_id)
+              print(revision_id, "down=", revision.down_revision, "depends_on=", revision.dependencies, "path=", revision.path)
+          for revision_id in ("rostering_20260724_governance", "a1b2c3d4e5f6", "document_control_20260724_domain"):
+              try:
+                  revision = script.get_revision(revision_id)
+              except Exception as exc:
+                  print("lookup_failed", revision_id, repr(exc))
+              else:
+                  print("target", revision_id, "down=", revision.down_revision, "depends_on=", revision.dependencies, "path=", revision.path)
+          print("references_to_a1b2c3d4e5f6=")
+          revision_map = getattr(script.revision_map, "_revision_map", {})
+          for revision_id, revision in revision_map.items():
+              if not isinstance(revision_id, str) or revision is None:
+                  continue
+              parents = revision.down_revision
+              if isinstance(parents, str):
+                  parents = (parents,)
+              if "a1b2c3d4e5f6" in tuple(parents or ()):
+                  print(revision_id, revision.path)
+          PY
+          cat /tmp/document-control-alembic-graph.log
 
       - name: Upgrade clean PostgreSQL schema
         shell: bash
@@ -142,7 +202,9 @@ jobs:
         with:
           name: document-control-domain-diagnostics
           path: |
+            /tmp/document-control-main-baseline.log
             /tmp/document-control-alembic-heads.log
+            /tmp/document-control-alembic-graph.log
             /tmp/document-control-alembic-upgrade.log
             /tmp/document-control-backend-compile.log
             /tmp/document-control-backend-contract.log
