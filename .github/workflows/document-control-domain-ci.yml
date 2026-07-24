@@ -5,6 +5,7 @@ on:
     paths:
       - "backend/amodb/apps/doc_control/**"
       - "backend/amodb/apps/manuals/**"
+      - "backend/amodb/apps/rostering/tests/postgres_migration_probe.py"
       - "backend/amodb/alembic/**"
       - "backend/docs/document_control/**"
       - "frontend/src/pages/documentControl/**"
@@ -102,7 +103,7 @@ jobs:
           for revision_id in script.get_heads():
               revision = script.get_revision(revision_id)
               print(revision_id, "down=", revision.down_revision, "depends_on=", revision.dependencies, "path=", revision.path)
-          for revision_id in ("rostering_20260724_governance", "a1b2c3d4e5f6", "document_control_20260724_domain"):
+          for revision_id in ("rostering_20260724_governance", "a1b2c3d4e5f6", "document_control_20260724_domain", "document_control_20260724_scope_fk"):
               try:
                   revision = script.get_revision(revision_id)
               except Exception as exc:
@@ -166,6 +167,13 @@ jobs:
           print(f"Verified {len(paths)} Document Control workspace paths")
           PY
 
+      - name: Run Document Control domain invariants
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q amodb/apps/doc_control/tests 2>&1 | tee /tmp/document-control-backend-tests.log
+
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -208,6 +216,7 @@ jobs:
             /tmp/document-control-alembic-upgrade.log
             /tmp/document-control-backend-compile.log
             /tmp/document-control-backend-contract.log
+            /tmp/document-control-backend-tests.log
             /tmp/document-control-frontend-build.log
           if-no-files-found: warn
           retention-days: 5
