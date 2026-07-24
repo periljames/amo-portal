@@ -1,50 +1,29 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
-import PageHeader from "../components/shared/PageHeader";
-import SectionCard from "../components/shared/SectionCard";
-import DataTableShell from "../components/shared/DataTableShell";
-import { getCachedUser, getContext, normalizeDepartmentCode } from "../services/auth";
-import DepartmentLayout from "../components/Layout/DepartmentLayout";
-import { decodeAmoCertFromUrl } from "../utils/amo";
-import { getMasterList, listManuals, subscribeManualsUpdated, type ManualSummary } from "../services/manuals";
+import { Link, useParams } from "react-router-dom";
+import { getMasterList, listManuals, type ManualSummary } from "../services/manuals";
+import { useManualRouteContext } from "./manuals/context";
 
 type DocRecord = {
-  id: string;
+  docId: string;
   title: string;
   type: string;
   issue: string;
   revision: string;
   effectiveDate: string;
-  owner: string;
-  status: "In force" | "Review due" | "Superseded";
-  regulated: boolean;
-  restricted: boolean;
+  status: string;
+  regulated: string;
+  restricted: string;
+  ownerDepartment: string;
 };
 
-
-type ManualMasterRow = {
-  manual_id?: string;
-  code?: string;
-  title?: string;
-  manual_type?: string;
-  issue_number?: string;
-  rev_number?: string;
-  effective_date?: string;
-  owner_role?: string;
-  status?: string;
-  pending_ack_count?: number;
-};
-const seededControlledLibrary: DocRecord[] = [
-  { id: "AMO-QM-001", title: "Quality Manual", type: "Manual", issue: "7", revision: "2", effectiveDate: "2026-01-11", owner: "Document Control", status: "In force", regulated: true, restricted: false },
-  { id: "AMO-OP-005", title: "Maintenance Procedures", type: "Procedure", issue: "14", revision: "1", effectiveDate: "2025-12-02", owner: "Production", status: "In force", regulated: true, restricted: true },
-  { id: "AMO-SAF-003", title: "Safety & HF Handbook", type: "Handbook", issue: "4", revision: "0", effectiveDate: "2025-10-20", owner: "Safety", status: "Review due", regulated: false, restricted: false },
-  { id: "AMO-TRN-002", title: "Competence Matrix", type: "Register", issue: "5", revision: "4", effectiveDate: "2025-07-16", owner: "HR & Training", status: "Superseded", regulated: false, restricted: true },
-];
-
-const draftQueue = [
-  { draftId: "DR-2201", title: "MOE section 1.7 amendment", originator: "Chief Inspector", step: "Internal technical review", due: "2026-03-12", priority: "High" },
-  { draftId: "DR-2204", title: "Stores receiving checklist", originator: "Stores Lead", step: "QA validation", due: "2026-03-16", priority: "Medium" },
-  { draftId: "DR-2206", title: "Engine run-up precautions", originator: "Safety Manager", step: "Accountable Manager approval", due: "2026-03-19", priority: "High" },
+const tiles = [
+  ["Pending internal approvals", "/doc-control/drafts?status=Review"],
+  ["Pending authority approval", "/doc-control/library?regulated=true&authority=Pending"],
+  ["TRs in force", "/doc-control/tr?status=InForce"],
+  ["TRs expiring in 30 days", "/doc-control/tr?expiring=30d"],
+  ["Manuals due for review in 60 days", "/doc-control/reviews?due=60d"],
+  ["Outstanding acknowledgements", "/doc-control/distribution?ack=pending"],
+  ["Recently published revisions", "/doc-control/revisions/recent?window=30d"],
 ];
 
 const distributionEvents = [
@@ -381,13 +360,89 @@ export const DocControlArchivePage: React.FC = () => (
   </DocControlShell>
 );
 
-export const DocControlReviewsPage: React.FC = () => (
-  <DocControlShell title="Periodic Review Planner" subtitle="Prevent stale manuals by planning review cycles with accountable owners.">
-    <DataTableShell title="Review horizon (next 90 days)">
-      <div className="table-wrapper"><table className="table table-row--compact"><thead><tr><th>Document</th><th>Current revision</th><th>Owner</th><th>Next review due</th><th>Status</th></tr></thead><tbody><tr><td>AMO-QM-001</td><td>Rev 2</td><td>Quality Manager</td><td>2026-04-01</td><td>On track</td></tr><tr><td>AMO-SAF-003</td><td>Rev 0</td><td>Safety Manager</td><td>2026-03-18</td><td>At risk</td></tr><tr><td>AMO-OP-005</td><td>Rev 1</td><td>Head of Production</td><td>2026-03-22</td><td>In progress</td></tr></tbody></table></div>
-    </DataTableShell>
-  </DocControlShell>
-);
+export const DocControlLibraryPage: React.FC = () => {
+  const { tenant } = useManualRouteContext();
+  const [manuals, setManuals] = useState<ManualSummary[]>([]);
+  const [masterRows, setMasterRows] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!tenant) return;
+    listManuals(tenant).then(setManuals).catch(() => setManuals([]));
+    getMasterList(tenant).then(setMasterRows).catch(() => setMasterRows([]));
+  }, [tenant]);
+
+  const libraryRows = useMemo<DocRecord[]>(() => {
+    const manualRows: DocRecord[] = manuals.map((m) => ({
+      docId: m.code || m.id,
+      title: m.title || "Untitled",
+      type: m.manual_type || "GENERAL",
+      issue: "-",
+      revision: "-",
+      effectiveDate: "-",
+      status: m.status || "UNKNOWN",
+      regulated: "-",
+      restricted: "-",
+      ownerDepartment: "Document Control",
+    }));
+
+    const masterOnlyRows: DocRecord[] =
+      manuals.length === 0
+        ? masterRows.map((r: any) => ({
+            docId: r.code || r.manual_id || "-",
+            title: r.title || "Untitled",
+            type: "MANUAL",
+            issue: "-",
+            revision: r.current_revision || "-",
+            effectiveDate: "-",
+            status: r.current_status || "UNKNOWN",
+            regulated: "-",
+            restricted: "-",
+            ownerDepartment: "Document Control",
+          }))
+        : [];
+
+    const out = [...manualRows, ...masterOnlyRows];
+    const seen = new Set<string>();
+    return out.filter((row) => {
+      const key = `${row.docId}::${row.title}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [manuals, masterRows]);
+
+  return (
+    <section className="page doc-control-page">
+      <h1>Controlled Library</h1>
+      <table>
+        <thead>
+          <tr>
+            <th>Doc ID</th><th>Title</th><th>Type</th><th>Issue</th><th>Revision</th><th>Effective date</th><th>Status</th><th>Regulated</th><th>Restricted</th><th>Owner department</th>
+          </tr>
+        </thead>
+        <tbody>
+          {libraryRows.map((row) => (
+            <tr key={`${row.docId}-${row.title}`}>
+              <td>{row.docId}</td>
+              <td>{row.title}</td>
+              <td>{row.type}</td>
+              <td>{row.issue}</td>
+              <td>{row.revision}</td>
+              <td>{row.effectiveDate}</td>
+              <td>{row.status}</td>
+              <td>{row.regulated}</td>
+              <td>{row.restricted}</td>
+              <td>{row.ownerDepartment}</td>
+            </tr>
+          ))}
+          {libraryRows.length === 0 ? (
+            <tr><td colSpan={10}>No library records available.</td></tr>
+          ) : null}
+        </tbody>
+      </table>
+    </section>
+  );
+};
 
 export const DocControlRegistersPage: React.FC = () => (
   <DocControlShell title="Registers and Master Lists" subtitle="Single source of truth for document inventory, distribution matrices, LEP snapshots, and authority submissions.">
