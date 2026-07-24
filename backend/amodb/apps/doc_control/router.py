@@ -13,6 +13,7 @@ from .workspace_record_router import router as workspace_record_router
 from .workspace_reports_router import router as workspace_reports_router
 from .workspace_router import router as workspace_router
 from .workspace_tr_router import router as workspace_tr_router
+from .workspace_workflow_authority_router import router as workspace_workflow_authority_router
 from .workspace_workflow_router import router as workspace_workflow_router
 
 
@@ -43,6 +44,11 @@ router.include_router(
 )
 router.include_router(
     workspace_tr_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    workspace_workflow_authority_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
