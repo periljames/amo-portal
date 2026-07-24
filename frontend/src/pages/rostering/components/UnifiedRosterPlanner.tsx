@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { HelpCircle, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
 import { PrerequisiteDialog, type PrerequisiteItem } from "../../../components/UI/PrerequisiteDialog";
@@ -13,6 +13,16 @@ import { RosterPlannerV2 } from "./RosterPlannerV2";
 const REFERENCE_STALE_MS = 15 * 60_000;
 const HELP_TOPIC = "rostering-source-commitments";
 const HELP_VERSION = 1;
+
+function HelpGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9.8 9.1a2.35 2.35 0 0 1 4.55.8c0 1.7-2.35 1.95-2.35 3.55" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="12" cy="17" r="1" fill="currentColor" />
+    </svg>
+  );
+}
 
 function PlannerCommitmentHelp({ autoOpen, settingsRoute }: { autoOpen: boolean; settingsRoute: string }) {
   const [open, setOpen] = useState(false);
@@ -51,15 +61,8 @@ function PlannerCommitmentHelp({ autoOpen, settingsRoute }: { autoOpen: boolean;
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="portal-help-trigger"
-        aria-label="Explain roster commitments"
-        title="Explain roster commitments"
-        onClick={() => setOpen(true)}
-      >
-        <HelpCircle size={17} aria-hidden="true" />
+      <button ref={triggerRef} type="button" className="portal-help-trigger" aria-label="Explain roster commitments" title="Explain roster commitments" onClick={() => setOpen(true)}>
+        <HelpGlyph />
       </button>
       {open ? (
         <div className="portal-help-backdrop" role="presentation" onMouseDown={(event) => {
@@ -122,28 +125,13 @@ export function UnifiedRosterPlanner() {
   const prerequisiteItems = useMemo<PrerequisiteItem[]>(() => {
     const items: PrerequisiteItem[] = [];
     if (basesQuery.isSuccess && basesQuery.data.length === 0) {
-      items.push({
-        id: "bases",
-        title: "Create at least one operating base",
-        detail: "Duty cannot be assigned safely until an administrator creates the tenant's canonical bases and stations.",
-        action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/admin/amo-assets?section=operating-structure&returnTo=${returnTo}`}>Open operating structure</Link>,
-      });
+      items.push({ id: "bases", title: "Create at least one operating base", detail: "Duty cannot be assigned safely until an administrator creates the tenant's canonical bases and stations.", action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/admin/amo-assets?section=operating-structure&returnTo=${returnTo}`}>Open operating structure</Link> });
     }
     if (shiftsQuery.isSuccess && shiftsQuery.data.length === 0) {
-      items.push({
-        id: "shifts",
-        title: "Create shift templates",
-        detail: "Define reusable day, night, standby and off-duty windows before placing personnel on the roster.",
-        action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/rostering/settings?tab=shifts&returnTo=${returnTo}`}>Create shifts</Link>,
-      });
+      items.push({ id: "shifts", title: "Create shift templates", detail: "Define reusable day, night, standby and off-duty windows before placing personnel on the roster.", action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/rostering/settings?tab=shifts&returnTo=${returnTo}`}>Create shifts</Link> });
     }
     if (periodsQuery.isSuccess && periodsQuery.data.length === 0) {
-      items.push({
-        id: "periods",
-        title: "Create a planning period",
-        detail: "The planner needs a dated period and a draft version before assignments can be created.",
-        action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/rostering/settings?tab=periods&returnTo=${returnTo}`}>Create period</Link>,
-      });
+      items.push({ id: "periods", title: "Create a planning period", detail: "The planner needs a dated period and a draft version before assignments can be created.", action: <Link className="portal-help-button portal-help-button--primary" to={`${root}/rostering/settings?tab=periods&returnTo=${returnTo}`}>Create period</Link> });
     }
     return items;
   }, [basesQuery.data, basesQuery.isSuccess, periodsQuery.data, periodsQuery.isSuccess, returnTo, root, shiftsQuery.data, shiftsQuery.isSuccess]);
@@ -155,21 +143,9 @@ export function UnifiedRosterPlanner() {
       <div style={{ display: "flex", justifyContent: "flex-end", minHeight: "2rem" }}>
         <PlannerCommitmentHelp autoOpen={prerequisitesResolved && prerequisiteItems.length === 0} settingsRoute={`${root}/rostering/settings`} />
       </div>
-
-      {(basesQuery.error || shiftsQuery.error || periodsQuery.error) ? (
-        <div className="wr-inline-warning" role="status">
-          Some setup checks could not be completed. The planner remains available; retry the affected setup source instead of waiting on this page indefinitely.
-        </div>
-      ) : null}
-
+      {(basesQuery.error || shiftsQuery.error || periodsQuery.error) ? <div className="wr-inline-warning" role="status">Some setup checks could not be completed. The planner remains available; retry the affected setup source instead of waiting on this page indefinitely.</div> : null}
       <RosterPlannerV2 />
-
-      <PrerequisiteDialog
-        open={prerequisiteOpen}
-        items={prerequisiteItems}
-        allowReadOnly={false}
-        onClose={() => setPrerequisiteDismissed(true)}
-      />
+      <PrerequisiteDialog open={prerequisiteOpen} items={prerequisiteItems} allowReadOnly={false} onClose={() => setPrerequisiteDismissed(true)} />
     </div>
   );
 }
