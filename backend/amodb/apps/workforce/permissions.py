@@ -14,6 +14,10 @@ from . import models
 
 
 class PermissionCode(str, Enum):
+    ORGANISATION_BASES_VIEW = "organisation.bases.view"
+    ORGANISATION_BASES_MANAGE = "organisation.bases.manage"
+    WORKFORCE_DEPLOYMENTS_VIEW = "workforce.deployments.view"
+    WORKFORCE_DEPLOYMENTS_MANAGE = "workforce.deployments.manage"
     ROSTER_VIEW_OWN = "roster.view_own"
     ROSTER_VIEW_DEPARTMENT = "roster.view_department"
     ROSTER_VIEW_ALL = "roster.view_all"
@@ -51,6 +55,7 @@ class PermissionCode(str, Enum):
 ALL_PERMISSIONS = {code.value for code in PermissionCode}
 
 EMPLOYEE = {
+    PermissionCode.ORGANISATION_BASES_VIEW.value,
     PermissionCode.ROSTER_VIEW_OWN.value,
     PermissionCode.LEAVE_REQUEST.value,
     PermissionCode.ATTENDANCE_VIEW_OWN.value,
@@ -59,6 +64,8 @@ EMPLOYEE = {
 }
 
 PLANNER = EMPLOYEE | {
+    PermissionCode.WORKFORCE_DEPLOYMENTS_VIEW.value,
+    PermissionCode.WORKFORCE_DEPLOYMENTS_MANAGE.value,
     PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
     PermissionCode.ROSTER_VIEW_ALL.value,
     PermissionCode.ROSTER_CREATE.value,
@@ -72,6 +79,8 @@ PLANNER = EMPLOYEE | {
 }
 
 SUPERVISOR = EMPLOYEE | {
+    PermissionCode.WORKFORCE_DEPLOYMENTS_VIEW.value,
+    PermissionCode.WORKFORCE_DEPLOYMENTS_MANAGE.value,
     PermissionCode.ROSTER_VIEW_DEPARTMENT.value,
     PermissionCode.ROSTER_CREATE.value,
     PermissionCode.ROSTER_EDIT.value,
@@ -96,8 +105,8 @@ BASE_MANAGER = DEPARTMENT_HEAD | {
     PermissionCode.ROSTER_MANAGE_APPROVAL_AUTHORITIES.value,
 }
 
-
 QUALITY = EMPLOYEE | {
+    PermissionCode.WORKFORCE_DEPLOYMENTS_VIEW.value,
     PermissionCode.ROSTER_VIEW_ALL.value,
     PermissionCode.ROSTER_VALIDATE.value,
     PermissionCode.ROSTER_OVERRIDE_WARNING.value,
@@ -105,8 +114,9 @@ QUALITY = EMPLOYEE | {
     PermissionCode.ROSTER_MANAGE_RULES.value,
 }
 
-
 HR = EMPLOYEE | {
+    PermissionCode.WORKFORCE_DEPLOYMENTS_VIEW.value,
+    PermissionCode.WORKFORCE_DEPLOYMENTS_MANAGE.value,
     PermissionCode.ROSTER_VIEW_ALL.value,
     PermissionCode.ROSTER_VALIDATE.value,
     PermissionCode.ROSTER_AMEND_PUBLISHED.value,
@@ -121,13 +131,11 @@ HR = EMPLOYEE | {
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
 
-
 PAYROLL = EMPLOYEE | {
     PermissionCode.TIMESHEET_APPROVE.value,
     PermissionCode.PAYROLL_EXPORT.value,
     PermissionCode.WORKFORCE_VIEW_SENSITIVE.value,
 }
-
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "SUPERUSER": ALL_PERMISSIONS,
@@ -141,21 +149,26 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "LINE_MANAGER": DEPARTMENT_HEAD,
     "QUALITY_MANAGER": QUALITY,
     "QUALITY_INSPECTOR": QUALITY - {PermissionCode.ROSTER_PUBLISH.value, PermissionCode.ROSTER_OVERRIDE_BLOCKER.value},
-    "AUDITOR": {PermissionCode.ROSTER_VIEW_ALL.value, PermissionCode.ROSTER_VALIDATE.value},
+    "AUDITOR": {
+        PermissionCode.ORGANISATION_BASES_VIEW.value,
+        PermissionCode.WORKFORCE_DEPLOYMENTS_VIEW.value,
+        PermissionCode.ROSTER_VIEW_ALL.value,
+        PermissionCode.ROSTER_VALIDATE.value,
+    },
     "HR_OFFICER": HR - {PermissionCode.ROSTER_PUBLISH.value, PermissionCode.PAYROLL_EXPORT.value},
     "HR_MANAGER": HR | {PermissionCode.PAYROLL_EXPORT.value},
     "PAYROLL_OFFICER": PAYROLL,
     "CERTIFYING_ENGINEER": EMPLOYEE,
     "CERTIFYING_TECHNICIAN": EMPLOYEE,
     "TECHNICIAN": EMPLOYEE,
-    "SAFETY_MANAGER": EMPLOYEE | {PermissionCode.ROSTER_VIEW_ALL.value, PermissionCode.ROSTER_VALIDATE.value},
+    "SAFETY_MANAGER": EMPLOYEE | {PermissionCode.WORKFORCE_DEPLOYMENTS_VIEW.value, PermissionCode.ROSTER_VIEW_ALL.value, PermissionCode.ROSTER_VALIDATE.value},
     "STORES": EMPLOYEE,
     "STORES_MANAGER": EMPLOYEE,
     "STOREKEEPER": EMPLOYEE,
     "PROCUREMENT_OFFICER": EMPLOYEE,
     "FINANCE_MANAGER": PAYROLL,
     "ACCOUNTS_OFFICER": PAYROLL,
-    "VIEW_ONLY": {PermissionCode.ROSTER_VIEW_OWN.value},
+    "VIEW_ONLY": {PermissionCode.ORGANISATION_BASES_VIEW.value, PermissionCode.ROSTER_VIEW_OWN.value},
 }
 
 
@@ -164,13 +177,7 @@ def _role_value(user: account_models.User) -> str:
 
 
 def _derived_role(user: account_models.User) -> Optional[str]:
-    """Support HR/planner titles without mutating the legacy AccountRole enum.
-
-    Explicit permission grants remain authoritative.  This compatibility layer
-    lets existing user management records participate immediately and can be
-    removed after AccountRole is migrated to database-backed roles.
-    """
-
+    """Support HR/planner titles without mutating the legacy AccountRole enum."""
     title = str(getattr(user, "position_title", "") or "").lower()
     department = str(getattr(getattr(user, "department", None), "code", "") or "").lower()
     if "human resource" in title or title.startswith("hr ") or department in {"hr", "human-resources", "human_resources"}:
@@ -275,7 +282,7 @@ def require_permission(
                 "detail": "You do not have permission to perform this workforce action.",
                 "error_code": "WORKFORCE_PERMISSION_DENIED",
                 "field_errors": {},
-                "conflicts": [{"permission": code}],
+                "conflicts": [{"permission": code, "department_id": department_id, "base_station_id": base_station_id}],
                 "retryable": False,
             },
         )
