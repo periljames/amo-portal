@@ -64,23 +64,8 @@ jobs:
               '  const [roster, setRoster] = useState<MyRosterResponse | null>(null);\\n  const [calendarSubscription, setCalendarSubscription] = useState<RosterCalendarSubscriptionRead | null>(null);',
               1,
           )
-          old_load = '''      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage] = await Promise.all([
-              getMyRoster(range),
-              listLeaveTypes(false),
-              listLeaveBalances({ user_id: userId || null, leave_year: new Date().getFullYear() }),
-              listLeaveRequests({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
-              getAttendanceSummary({ user_id: userId || null, from: range.from, to: range.to }),
-              listTimesheets({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
-              ]);'''.replace('              ', '        ')
-          new_load = '''      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage, subscription] = await Promise.all([
-              getMyRoster(range),
-              listLeaveTypes(false),
-              listLeaveBalances({ user_id: userId || null, leave_year: new Date().getFullYear() }),
-              listLeaveRequests({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
-              getAttendanceSummary({ user_id: userId || null, from: range.from, to: range.to }),
-              listTimesheets({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),
-              getRosterCalendarSubscription(),
-              ]);'''.replace('              ', '        ')
+          old_load = '      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage] = await Promise.all([\\n        getMyRoster(range),\\n        listLeaveTypes(false),\\n        listLeaveBalances({ user_id: userId || null, leave_year: new Date().getFullYear() }),\\n        listLeaveRequests({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),\\n        getAttendanceSummary({ user_id: userId || null, from: range.from, to: range.to }),\\n        listTimesheets({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),\\n      ]);'
+          new_load = '      const [rosterData, types, balanceRows, requestPage, attendanceData, timesheetPage, subscription] = await Promise.all([\\n        getMyRoster(range),\\n        listLeaveTypes(false),\\n        listLeaveBalances({ user_id: userId || null, leave_year: new Date().getFullYear() }),\\n        listLeaveRequests({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),\\n        getAttendanceSummary({ user_id: userId || null, from: range.from, to: range.to }),\\n        listTimesheets({ user_id: userId || null, from: range.from, to: range.to, page_size: 100 }),\\n        getRosterCalendarSubscription(),\\n      ]);'
           if old_load not in my_text:
               raise SystemExit('Current My Roster load block was not found')
           my_text = my_text.replace(old_load, new_load, 1)
