@@ -1,0 +1,87 @@
+name: Validate Final Rostering Governance Source
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/rostering-unified-workforce
+          fetch-depth: 0
+          show-progress: false
+      - name: Reproduce successful source transformation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          lines = Path('.github/workflows/run-rostering-governance-final.yml').read_text(encoding='utf-8').splitlines()
+
+          def extract(name: str, target: str) -> None:
+              marker = f'      - name: {name}'
+              start = lines.index(marker)
+              run_line = next(index for index in range(start, len(lines)) if lines[index].strip() == 'run: |')
+              end = next((index for index in range(run_line + 1, len(lines)) if lines[index].startswith('      - name: ')), len(lines))
+              body = [line[10:] if line.startswith('          ') else line for line in lines[run_line + 1:end]]
+              Path(target).write_text('\n'.join(body) + '\n', encoding='utf-8')
+
+          extract('Build normalized governance patch', '/tmp/build-governance.sh')
+          extract('Apply full-stack governance source', '/tmp/apply-governance.sh')
+          PY
+          bash /tmp/build-governance.sh
+          bash /tmp/apply-governance.sh
+      - name: Capture post-application validation
+        shell: bash
+        run: |
+          set +e
+          {
+            echo '== compileall =='
+            python -m compileall backend/amodb/apps/rostering backend/amodb/apps/workforce backend/amodb/alembic/versions/rostering_20260724_governance.py
+            compile_status=$?
+            echo "compile_status=$compile_status"
+            echo '== git diff check =='
+            git diff --check
+            diff_status=$?
+            echo "diff_status=$diff_status"
+            echo '== changed files =='
+            git status --short
+            if [ "$compile_status" -ne 0 ] || [ "$diff_status" -ne 0 ]; then
+              exit 1
+            fi
+          } > /tmp/rostering-governance-validation.log 2>&1
+          status=$?
+          cat /tmp/rostering-governance-validation.log
+          echo "$status" > /tmp/rostering-governance-validation.exit-code
+          exit 0
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rostering-governance-validation-diagnostics
+          path: |
+            /tmp/rostering-governance-validation.log
+            /tmp/rostering-governance-validation.exit-code
+          retention-days: 1
+      - name: Commit validated governance source
+        shell: bash
+        run: |
+          test "$(cat /tmp/rostering-governance-validation.exit-code)" = "0"
+          rm -f \
+            .github/workflows/apply-rostering-governance.yml \
+            .github/workflows/run-rostering-governance.yml \
+            .github/workflows/run-rostering-governance-final.yml \
+            .github/workflows/finalize-rostering-governance-debug.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend frontend .github/workflows
+          git commit -m "Add departmental roster governance and calendar subscriptions"
+          git push origin HEAD:fix/rostering-unified-workforce
