@@ -33,10 +33,12 @@ describe("rostering cross-module commitment integration", () => {
     expect(plannerSource).toContain("Resolve or reschedule it in");
   });
 
-  it("uses the paginated canonical tenant people contract for setup", () => {
-    expect(setupSource).toContain("listRosterPeoplePage");
-    expect(setupSource).toContain("page_size:");
+  it("defers the complete canonical tenant people contract to dependent setup tabs", () => {
+    expect(setupSource).toContain("listAllRosterPeople");
+    expect(setupSource).toContain('tab === "contracts" || tab === "governance"');
+    expect(setupSource).toContain("page_size: 250");
     expect(setupSource).toContain("active_only: true");
     expect(setupSource).toContain("roster_eligible_only: false");
+    expect(setupSource).toContain("Inactive tabs make no API requests until opened.");
   });
 });
