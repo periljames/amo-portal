@@ -27,333 +27,344 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
           import textwrap
 
           path = Path("frontend/src/pages/rostering/components/UnifiedRosterSettings.tsx")
           text = path.read_text(encoding="utf-8")
           if "TAB_SCOPED_QUERY_STALE_MS" in text:
               print("Setup loading optimization already applied")
-          else:
-              text = text.replace(
-                  'import {\n  useMemo,\n  useState,',
-                  'import {\n  useCallback,\n  useMemo,\n  useState,',
-                  1,
-              )
+              raise SystemExit(0)
 
-              helper_start = text.index("function useSettingsQuery<T>")
-              helper_end = text.index("export function UnifiedRosterSettings", helper_start)
-              helper = textwrap.dedent('''
-              const TAB_SCOPED_QUERY_STALE_MS = 5 * 60_000;
-              const REFERENCE_QUERY_STALE_MS = 30 * 60_000;
+          text = text.replace(
+              "import {\n  useMemo,",
+              "import {\n  useCallback,\n  useMemo,",
+              1,
+          )
 
-              type AdaptiveNavigator = Navigator & {
-                connection?: {
-                  saveData?: boolean;
-                  effectiveType?: string;
-                };
-              };
+          helper_start = text.find("function useSettingsQuery<T>")
+          helper_end = text.find("export function UnifiedRosterSettings", helper_start)
+          if helper_start < 0 or helper_end < 0:
+              raise SystemExit("Settings query helper markers were not found")
+          helper = textwrap.dedent('''
+          const TAB_SCOPED_QUERY_STALE_MS = 5 * 60_000;
+          const REFERENCE_QUERY_STALE_MS = 30 * 60_000;
 
-              function constrainedConnection(): boolean {
-                if (typeof navigator === "undefined") return false;
-                const connection = (navigator as AdaptiveNavigator).connection;
-                return Boolean(
-                  connection?.saveData
-                  || connection?.effectiveType === "slow-2g"
-                  || connection?.effectiveType === "2g"
-                );
-              }
+          type AdaptiveNavigator = Navigator & {
+            connection?: {
+              saveData?: boolean;
+              effectiveType?: string;
+            };
+          };
 
-              function useSettingsQuery<T>(
-                name: string,
-                queryFn: () => Promise<T>,
-                enabled: boolean,
-                staleTime = TAB_SCOPED_QUERY_STALE_MS,
-              ) {
-                return useQuery({
-                  queryKey: ["rostering", "settings", name],
-                  queryFn,
-                  enabled,
-                  staleTime,
-                  gcTime: 24 * 60 * 60_000,
-                  networkMode: "offlineFirst",
-                  refetchOnMount: false,
-                  refetchOnWindowFocus: false,
-                });
-              }
+          function constrainedConnection(): boolean {
+            if (typeof navigator === "undefined") return false;
+            const connection = (navigator as AdaptiveNavigator).connection;
+            return Boolean(
+              connection?.saveData
+              || connection?.effectiveType === "slow-2g"
+              || connection?.effectiveType === "2g"
+            );
+          }
 
-              ''')
-              text = text[:helper_start] + helper + text[helper_end:]
+          function useSettingsQuery<T>(
+            name: string,
+            queryFn: () => Promise<T>,
+            enabled: boolean,
+            staleTime = TAB_SCOPED_QUERY_STALE_MS,
+          ) {
+            return useQuery({
+              queryKey: ["rostering", "settings", name],
+              queryFn,
+              enabled,
+              staleTime,
+              gcTime: 24 * 60 * 60_000,
+              networkMode: "offlineFirst",
+              refetchOnMount: false,
+              refetchOnWindowFocus: false,
+            });
+          }
 
-              query_start = text.index("  const periodsQuery =")
-              query_end = text.index("  const permissions =", query_start)
-              query_block = textwrap.dedent('''
-                const periodsQuery = useSettingsQuery(
-                  "periods",
-                  () => listRosterPeriods(),
-                  tab === "periods" || tab === "patterns" || tab === "governance",
-                );
-                const shiftsQuery = useSettingsQuery(
-                  "shifts",
-                  () => listShiftTemplates(true),
-                  tab === "shifts" || tab === "patterns",
-                  REFERENCE_QUERY_STALE_MS,
-                );
-                const patternsQuery = useSettingsQuery(
-                  "patterns",
-                  () => listWorkPatterns(true),
-                  tab === "patterns",
-                );
-                const employmentQuery = useSettingsQuery(
-                  "contracts",
-                  () => listEmploymentContracts({ page_size: 200 }),
-                  tab === "contracts",
-                );
-                const leaveTypesQuery = useSettingsQuery(
-                  "leave-types",
-                  () => listLeaveTypes(true),
-                  tab === "leave",
-                  REFERENCE_QUERY_STALE_MS,
-                );
-                const leaveRequestsQuery = useSettingsQuery(
-                  "leave-requests",
-                  () => listLeaveRequests({ page_size: 200 }),
-                  tab === "approvals",
-                );
-                const timesheetsQuery = useSettingsQuery(
-                  "timesheets",
-                  () => listTimesheets({ page_size: 200 }),
-                  tab === "approvals",
-                );
-                const rulesQuery = useSettingsQuery(
-                  "rules",
-                  () => listRosterRules(true),
-                  tab === "rules",
-                  REFERENCE_QUERY_STALE_MS,
-                );
-                const peopleQuery = useSettingsQuery(
-                  "people",
-                  () => listAllRosterPeople({
-                    page_size: 250,
-                    active_only: true,
-                    roster_eligible_only: false,
-                  }),
-                  tab === "contracts" || tab === "governance",
-                  REFERENCE_QUERY_STALE_MS,
-                );
-                const permissionsQuery = useSettingsQuery(
-                  "permissions",
-                  getCurrentWorkforcePermissions,
-                  true,
-                  REFERENCE_QUERY_STALE_MS,
-                );
-                const contractsQuery = useSettingsQuery(
-                  "route-contracts",
-                  getRosterContracts,
-                  tab === "integration" || tab === "preferences",
-                  REFERENCE_QUERY_STALE_MS,
-                );
+          ''')
+          text = text[:helper_start] + helper + text[helper_end:]
 
-                let activeQueries: QuerySnapshot[];
-                switch (tab) {
-                  case "integration":
-                    activeQueries = [permissionsQuery, contractsQuery];
-                    break;
-                  case "periods":
-                    activeQueries = [permissionsQuery, periodsQuery];
-                    break;
-                  case "shifts":
-                    activeQueries = [permissionsQuery, shiftsQuery];
-                    break;
-                  case "patterns":
-                    activeQueries = [permissionsQuery, periodsQuery, shiftsQuery, patternsQuery];
-                    break;
-                  case "contracts":
-                    activeQueries = [permissionsQuery, employmentQuery, peopleQuery];
-                    break;
-                  case "leave":
-                    activeQueries = [permissionsQuery, leaveTypesQuery];
-                    break;
-                  case "rules":
-                    activeQueries = [permissionsQuery, rulesQuery];
-                    break;
-                  case "governance":
-                    activeQueries = [permissionsQuery, periodsQuery, peopleQuery];
-                    break;
-                  case "approvals":
-                    activeQueries = [permissionsQuery, leaveRequestsQuery, timesheetsQuery];
-                    break;
-                  case "preferences":
-                    activeQueries = [permissionsQuery, contractsQuery];
-                    break;
-                }
-                const activeLoading = activeQueries.some((query) => query.isPending && !query.data);
-              ''')
-              text = text[:query_start] + query_block + text[query_end:]
+          query_start = text.find("  const periodsQuery =")
+          query_end = text.find("  const permissions =", query_start)
+          if query_start < 0 or query_end < 0:
+              raise SystemExit("Setup query graph markers were not found")
+          query_block = textwrap.indent(textwrap.dedent('''
+          const periodsQuery = useSettingsQuery(
+            "periods",
+            () => listRosterPeriods(),
+            tab === "periods" || tab === "patterns" || tab === "governance",
+          );
+          const shiftsQuery = useSettingsQuery(
+            "shifts",
+            () => listShiftTemplates(true),
+            tab === "shifts" || tab === "patterns",
+            REFERENCE_QUERY_STALE_MS,
+          );
+          const patternsQuery = useSettingsQuery(
+            "patterns",
+            () => listWorkPatterns(true),
+            tab === "patterns",
+          );
+          const employmentQuery = useSettingsQuery(
+            "contracts",
+            () => listEmploymentContracts({ page_size: 200 }),
+            tab === "contracts",
+          );
+          const leaveTypesQuery = useSettingsQuery(
+            "leave-types",
+            () => listLeaveTypes(true),
+            tab === "leave",
+            REFERENCE_QUERY_STALE_MS,
+          );
+          const leaveRequestsQuery = useSettingsQuery(
+            "leave-requests",
+            () => listLeaveRequests({ page_size: 200 }),
+            tab === "approvals",
+          );
+          const timesheetsQuery = useSettingsQuery(
+            "timesheets",
+            () => listTimesheets({ page_size: 200 }),
+            tab === "approvals",
+          );
+          const rulesQuery = useSettingsQuery(
+            "rules",
+            () => listRosterRules(true),
+            tab === "rules",
+            REFERENCE_QUERY_STALE_MS,
+          );
+          const peopleQuery = useSettingsQuery(
+            "people",
+            () => listAllRosterPeople({
+              page_size: 250,
+              active_only: true,
+              roster_eligible_only: false,
+            }),
+            tab === "contracts" || tab === "governance",
+            REFERENCE_QUERY_STALE_MS,
+          );
+          const permissionsQuery = useSettingsQuery(
+            "permissions",
+            getCurrentWorkforcePermissions,
+            true,
+            REFERENCE_QUERY_STALE_MS,
+          );
+          const contractsQuery = useSettingsQuery(
+            "route-contracts",
+            getRosterContracts,
+            tab === "integration" || tab === "preferences",
+            REFERENCE_QUERY_STALE_MS,
+          );
 
-              early_loading = '''  if (initialLoading) {
-                return <RosterLoading label="Loading tenant rostering setup…" />;
-              }
+          let activeQueries: QuerySnapshot[] = [permissionsQuery];
+          switch (tab) {
+            case "integration":
+              activeQueries = [permissionsQuery, contractsQuery];
+              break;
+            case "periods":
+              activeQueries = [permissionsQuery, periodsQuery];
+              break;
+            case "shifts":
+              activeQueries = [permissionsQuery, shiftsQuery];
+              break;
+            case "patterns":
+              activeQueries = [permissionsQuery, periodsQuery, shiftsQuery, patternsQuery];
+              break;
+            case "contracts":
+              activeQueries = [permissionsQuery, employmentQuery, peopleQuery];
+              break;
+            case "leave":
+              activeQueries = [permissionsQuery, leaveTypesQuery];
+              break;
+            case "rules":
+              activeQueries = [permissionsQuery, rulesQuery];
+              break;
+            case "governance":
+              activeQueries = [permissionsQuery, periodsQuery, peopleQuery];
+              break;
+            case "approvals":
+              activeQueries = [permissionsQuery, leaveRequestsQuery, timesheetsQuery];
+              break;
+            case "preferences":
+              activeQueries = [permissionsQuery, contractsQuery];
+              break;
+          }
+          const activeLoading = activeQueries.some((query) => query.isPending && !query.data);
+          '''), "  ") + "\n"
+          text = text[:query_start] + query_block + text[query_end:]
 
-              '''.replace("              ", "")
-              text = text.replace(early_loading, "", 1)
+          text, removed = re.subn(
+              r'\n  if \(initialLoading\) \{\n    return <RosterLoading label="Loading tenant rostering setup…" />;\n  \}\n',
+              "\n",
+              text,
+              count=1,
+          )
+          if removed != 1:
+              raise SystemExit("Initial all-query loading gate was not found")
 
-              bases_marker = "  }, [people]);\n"
-              bases_pos = text.index(bases_marker) + len(bases_marker)
-              warm_tab = textwrap.dedent('''
+          bases_anchor = "  const bases = useMemo(() => {"
+          bases_start = text.find(bases_anchor)
+          bases_end = text.find("  }, [people]);", bases_start)
+          if bases_start < 0 or bases_end < 0:
+              raise SystemExit("Base selector memo markers were not found")
+          bases_end += len("  }, [people]);")
+          warm_tab = textwrap.indent(textwrap.dedent('''
 
-                const warmTab = useCallback((nextTab: Tab) => {
-                  if (constrainedConnection()) return;
-                  const tasks: Array<Promise<unknown>> = [];
-                  const prefetch = <T,>(name: string, queryFn: () => Promise<T>, staleTime = TAB_SCOPED_QUERY_STALE_MS) => {
-                    tasks.push(queryClient.prefetchQuery({
-                      queryKey: ["rostering", "settings", name],
-                      queryFn,
-                      staleTime,
-                    }));
-                  };
-                  if (nextTab === "periods") prefetch("periods", () => listRosterPeriods());
-                  if (nextTab === "shifts") prefetch("shifts", () => listShiftTemplates(true), REFERENCE_QUERY_STALE_MS);
-                  if (nextTab === "patterns") {
-                    prefetch("periods", () => listRosterPeriods());
-                    prefetch("shifts", () => listShiftTemplates(true), REFERENCE_QUERY_STALE_MS);
-                    prefetch("patterns", () => listWorkPatterns(true));
-                  }
-                  if (nextTab === "contracts") prefetch("contracts", () => listEmploymentContracts({ page_size: 200 }));
-                  if (nextTab === "leave") prefetch("leave-types", () => listLeaveTypes(true), REFERENCE_QUERY_STALE_MS);
-                  if (nextTab === "rules") prefetch("rules", () => listRosterRules(true), REFERENCE_QUERY_STALE_MS);
-                  if (nextTab === "governance") prefetch("periods", () => listRosterPeriods());
-                  if (nextTab === "approvals") {
-                    prefetch("leave-requests", () => listLeaveRequests({ page_size: 200 }));
-                    prefetch("timesheets", () => listTimesheets({ page_size: 200 }));
-                  }
-                  if (nextTab === "preferences" || nextTab === "integration") {
-                    prefetch("route-contracts", getRosterContracts, REFERENCE_QUERY_STALE_MS);
-                  }
-                  void Promise.allSettled(tasks);
-                }, [queryClient]);
-              ''')
-              text = text[:bases_pos] + warm_tab + text[bases_pos:]
+          const warmTab = useCallback((nextTab: Tab) => {
+            if (constrainedConnection()) return;
+            const tasks: Array<Promise<unknown>> = [];
+            const prefetch = <T,>(
+              name: string,
+              queryFn: () => Promise<T>,
+              staleTime = TAB_SCOPED_QUERY_STALE_MS,
+            ) => {
+              tasks.push(queryClient.prefetchQuery({
+                queryKey: ["rostering", "settings", name],
+                queryFn,
+                staleTime,
+              }));
+            };
+            if (nextTab === "periods") prefetch("periods", () => listRosterPeriods());
+            if (nextTab === "shifts") {
+              prefetch("shifts", () => listShiftTemplates(true), REFERENCE_QUERY_STALE_MS);
+            }
+            if (nextTab === "patterns") {
+              prefetch("periods", () => listRosterPeriods());
+              prefetch("shifts", () => listShiftTemplates(true), REFERENCE_QUERY_STALE_MS);
+              prefetch("patterns", () => listWorkPatterns(true));
+            }
+            if (nextTab === "contracts") {
+              prefetch("contracts", () => listEmploymentContracts({ page_size: 200 }));
+            }
+            if (nextTab === "leave") {
+              prefetch("leave-types", () => listLeaveTypes(true), REFERENCE_QUERY_STALE_MS);
+            }
+            if (nextTab === "rules") {
+              prefetch("rules", () => listRosterRules(true), REFERENCE_QUERY_STALE_MS);
+            }
+            if (nextTab === "governance") prefetch("periods", () => listRosterPeriods());
+            if (nextTab === "approvals") {
+              prefetch("leave-requests", () => listLeaveRequests({ page_size: 200 }));
+              prefetch("timesheets", () => listTimesheets({ page_size: 200 }));
+            }
+            if (nextTab === "preferences" || nextTab === "integration") {
+              prefetch("route-contracts", getRosterContracts, REFERENCE_QUERY_STALE_MS);
+            }
+            void Promise.allSettled(tasks);
+          }, [queryClient]);
+          '''), "  ")
+          text = text[:bases_end] + warm_tab + text[bases_end:]
 
-              text = text.replace(
-                  '            onClick={() => setTab(id)}\n',
-                  '            onPointerEnter={() => warmTab(id)}\n            onClick={() => setTab(id)}\n',
-                  1,
-              )
+          text = text.replace(
+              '            onClick={() => setTab(id)}',
+              '            onPointerEnter={() => warmTab(id)}\n            onClick={() => setTab(id)}',
+              1,
+          )
 
-              text = text.replace(
-                  '''        <IntegrationPanel
-                  people={people}
-                  contractMap={contractsQuery.data || null}
-                  queries={queries}
-                />'''.replace("                ", "          "),
-                  '''        <IntegrationPanel
-                  contractMap={contractsQuery.data || null}
-                  queries={[permissionsQuery, contractsQuery]}
-                />'''.replace("                ", "          "),
-                  1,
-              )
+          integration_pattern = re.compile(
+              r'      \{tab === "integration" \? \(\s*<IntegrationPanel[\s\S]*?/>\s*\) : null\}',
+          )
+          replacement = '''      {!activeLoading && tab === "integration" ? (
+            <IntegrationPanel
+              contractMap={contractsQuery.data || null}
+              queries={[permissionsQuery, contractsQuery]}
+            />
+          ) : null}'''
+          text, count = integration_pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit("Integration panel render block was not found")
 
-              for tab_name in (
-                  "integration", "periods", "shifts", "patterns", "contracts",
-                  "leave", "rules", "governance", "approvals", "preferences",
-              ):
-                  text = text.replace(
-                      f'{{tab === "{tab_name}" ? (',
-                      f'{{!activeLoading && tab === "{tab_name}" ? (',
-                      1,
-                  )
+          for tab_name in (
+              "periods", "shifts", "patterns", "contracts", "leave",
+              "rules", "governance", "approvals", "preferences",
+          ):
+              old = f'{{tab === "{tab_name}" ? ('
+              if old not in text:
+                  raise SystemExit(f"Render block for {tab_name} was not found")
+              text = text.replace(old, f'{{!activeLoading && tab === "{tab_name}" ? (', 1)
 
-              action_marker = '''      {actionError ? (
-                <div className="wr-inline-error" role="alert">
-                  {actionError}
+          first_panel = '      {!activeLoading && tab === "integration" ? ('
+          if first_panel not in text:
+              raise SystemExit("First optimized panel marker was not found")
+          text = text.replace(
+              first_panel,
+              '      {activeLoading ? (\n        <RosterLoading label={`Loading ${TABS.find((item) => item.id === tab)?.label || "setup"}…`} />\n      ) : null}\n\n' + first_panel,
+              1,
+          )
+
+          integration_start = text.find("function IntegrationPanel(")
+          integration_end = text.find("function PeriodsPanel", integration_start)
+          if integration_start < 0 or integration_end < 0:
+              raise SystemExit("Integration component markers were not found")
+          integration = textwrap.dedent('''
+          function IntegrationPanel({
+            contractMap,
+            queries,
+          }: {
+            contractMap: RosterContractResponse | null;
+            queries: QuerySnapshot[];
+          }) {
+            const failures = queries.filter((query) => query.error).length;
+            const loading = queries.filter((query) => query.isFetching).length;
+
+            return (
+              <section className="wr-panel">
+                <div className="wr-section-heading">
+                  <div>
+                    <span className="wr-eyebrow">Canonical data contract</span>
+                    <h2>Tenant workforce integration</h2>
+                  </div>
+                  <StatusPill value={failures ? "DEGRADED" : loading ? "SYNCING" : "CONNECTED"} />
                 </div>
-              ) : null}
-              '''.replace("              ", "      ")
-              if action_marker not in text:
-                  raise SystemExit("Action error marker not found")
-              text = text.replace(
-                  action_marker,
-                  action_marker + '\n      {activeLoading ? <RosterLoading label={`Loading ${TABS.find((item) => item.id === tab)?.label || "setup"}…`} /> : null}\n',
-                  1,
-              )
 
-              integration_start = text.index("function IntegrationPanel(")
-              integration_end = text.index("function PeriodsPanel", integration_start)
-              integration = textwrap.dedent('''
-              function IntegrationPanel({
-                contractMap,
-                queries,
-              }: {
-                contractMap: RosterContractResponse | null;
-                queries: QuerySnapshot[];
-              }) {
-                const failures = queries.filter((query) => query.error).length;
-                const loading = queries.filter((query) => query.isFetching).length;
+                <div className="wr-card-grid">
+                  <article className="wr-setup-card">
+                    <div><UsersRound size={18} /><strong>On demand</strong></div>
+                    <h3>Tenant personnel</h3>
+                    <p>Canonical key: <code>{contractMap?.canonical_personnel_key || "accounts.users.id"}</code></p>
+                    <small>
+                      The complete tenant personnel dataset loads only when Contracts or Roster
+                      approval is opened. Planner eligibility remains independently paginated.
+                    </small>
+                  </article>
 
-                return (
-                  <section className="wr-panel">
-                    <div className="wr-section-heading">
-                      <div>
-                        <span className="wr-eyebrow">Canonical data contract</span>
-                        <h2>Tenant workforce integration</h2>
-                      </div>
-                      <StatusPill value={failures ? "DEGRADED" : loading ? "SYNCING" : "CONNECTED"} />
-                    </div>
+                  <article className="wr-setup-card">
+                    <div><BadgeCheck size={18} /><strong>{contractMap?.phase || "workforce-integrated"}</strong></div>
+                    <h3>Source ownership</h3>
+                    <p>Leave remains in Workforce, training in Training, audits in Quality and duty in Rostering.</p>
+                    <small>The planner projects source records instead of creating duplicate employee states.</small>
+                  </article>
 
-                    <div className="wr-card-grid">
-                      <article className="wr-setup-card">
-                        <div>
-                          <UsersRound size={18} />
-                          <strong>On demand</strong>
-                        </div>
-                        <h3>Tenant personnel</h3>
-                        <p>Canonical key: <code>{contractMap?.canonical_personnel_key || "accounts.users.id"}</code></p>
-                        <small>
-                          The complete tenant personnel dataset is loaded only when Contracts or
-                          Roster approval is opened. Planner eligibility remains independently paginated.
-                        </small>
+                  <article className="wr-setup-card">
+                    <div><ShieldCheck size={18} /><strong>{failures}</strong></div>
+                    <h3>Unavailable data sources</h3>
+                    <p>{failures ? "The integration contract is temporarily unavailable; setup tabs remain isolated." : "The initial integration sources responded."}</p>
+                    <small>Inactive tabs make no API requests until opened.</small>
+                  </article>
+                </div>
+
+                {contractMap ? (
+                  <div className="wr-data-list">
+                    {Object.entries(contractMap.source_modules).map(([name, source]) => (
+                      <article className="wr-data-row" key={name}>
+                        <div><strong>{name.replace(/_/g, " ")}</strong><small>{source}</small></div>
+                        <StatusPill value="SOURCE OF TRUTH" />
                       </article>
+                    ))}
+                  </div>
+                ) : (
+                  <SectionFailure title="Integration contract" error={queries.find((query) => query.error)?.error} />
+                )}
+              </section>
+            );
+          }
 
-                      <article className="wr-setup-card">
-                        <div>
-                          <BadgeCheck size={18} />
-                          <strong>{contractMap?.phase || "workforce-integrated"}</strong>
-                        </div>
-                        <h3>Source ownership</h3>
-                        <p>Leave remains in Workforce, training in Training, audits in Quality and duty in Rostering.</p>
-                        <small>The planner projects source records instead of creating duplicate employee states.</small>
-                      </article>
-
-                      <article className="wr-setup-card">
-                        <div>
-                          <ShieldCheck size={18} />
-                          <strong>{failures}</strong>
-                        </div>
-                        <h3>Unavailable data sources</h3>
-                        <p>{failures ? "The integration contract is temporarily unavailable; setup tabs remain isolated." : "The initial integration sources responded."}</p>
-                        <small>Inactive tabs make no API requests until opened.</small>
-                      </article>
-                    </div>
-
-                    {contractMap ? (
-                      <div className="wr-data-list">
-                        {Object.entries(contractMap.source_modules).map(([name, source]) => (
-                          <article className="wr-data-row" key={name}>
-                            <div><strong>{name.replace(/_/g, " ")}</strong><small>{source}</small></div>
-                            <StatusPill value="SOURCE OF TRUTH" />
-                          </article>
-                        ))}
-                      </div>
-                    ) : (
-                      <SectionFailure title="Integration contract" error={queries.find((query) => query.error)?.error} />
-                    )}
-                  </section>
-                );
-              }
-
-              ''')
-              text = text[:integration_start] + integration + text[integration_end:]
-              path.write_text(text, encoding="utf-8")
+          ''')
+          text = text[:integration_start] + integration + text[integration_end:]
+          path.write_text(text, encoding="utf-8")
           PY
       - name: Validate optimized frontend
         working-directory: frontend
