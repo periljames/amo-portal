@@ -1,0 +1,151 @@
+name: Document Control Domain CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/apps/doc_control/**"
+      - "backend/amodb/apps/manuals/**"
+      - "backend/amodb/alembic/**"
+      - "backend/docs/document_control/**"
+      - "frontend/src/pages/documentControl/**"
+      - "frontend/src/pages/DocControlPages.tsx"
+      - "frontend/src/services/documentControl*.ts"
+      - "frontend/src/router.tsx"
+      - "frontend/src/components/Layout/DepartmentLayout.tsx"
+      - ".github/workflows/document-control-domain-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  document-control-domain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: amodb
+          POSTGRES_PASSWORD: amodb
+          POSTGRES_DB: amodb_document_control_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amodb -d amodb_document_control_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      SECRET_KEY: document-control-ci-secret-key-not-for-production
+      JWT_SECRET_KEY: document-control-ci-jwt-secret-not-for-production
+      DATABASE_WRITE_URL: postgresql+psycopg2://amodb:amodb@127.0.0.1:5432/amodb_document_control_ci
+      DATABASE_READ_URL: postgresql+psycopg2://amodb:amodb@127.0.0.1:5432/amodb_document_control_ci
+      DATABASE_URL: postgresql+psycopg2://amodb:amodb@127.0.0.1:5432/amodb_document_control_ci
+      PYTHONPATH: backend
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install --disable-pip-version-check --retries 5 --timeout 60 -r backend/requirements.txt
+
+      - name: Verify Alembic graph
+        shell: bash
+        run: |
+          set -o pipefail
+          alembic -c backend/amodb/alembic.ini heads 2>&1 | tee /tmp/document-control-alembic-heads.log
+
+      - name: Upgrade clean PostgreSQL schema
+        shell: bash
+        run: |
+          set -o pipefail
+          alembic -c backend/amodb/alembic.ini upgrade heads 2>&1 | tee /tmp/document-control-alembic-upgrade.log
+
+      - name: Compile Document Control backend
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m compileall -q amodb/apps/doc_control amodb/apps/manuals 2>&1 | tee /tmp/document-control-backend-compile.log
+
+      - name: Configure mappers and verify route registration
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee /tmp/document-control-backend-contract.log
+          from sqlalchemy.orm import configure_mappers
+          from amodb.apps.doc_control import domain_models  # noqa: F401
+          from amodb.main import app
+
+          configure_mappers()
+          paths = {
+              route.path
+              for route in app.routes
+              if getattr(route, "path", "").startswith("/doc-control/workspace/")
+          }
+          required = {
+              "/doc-control/workspace/t/{tenant_slug}/dashboard",
+              "/doc-control/workspace/t/{tenant_slug}/documents",
+              "/doc-control/workspace/t/{tenant_slug}/documents/{manual_id}",
+              "/doc-control/workspace/t/{tenant_slug}/documents/{manual_id}/read-target",
+              "/doc-control/workspace/t/{tenant_slug}/workflows/{workflow_id}/transition",
+              "/doc-control/workspace/t/{tenant_slug}/distribution-campaigns/{campaign_id}/issue",
+              "/doc-control/workspace/t/{tenant_slug}/reports/master-register",
+          }
+          missing = required - paths
+          if missing:
+              raise SystemExit(f"Missing Document Control routes: {sorted(missing)}")
+          print(f"Verified {len(paths)} Document Control workspace paths")
+          PY
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline --no-audit --fund=false
+
+      - name: Build Document Control frontend
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/document-control-frontend-build.log
+
+      - name: Verify no seeded operational worklists remain routed
+        shell: bash
+        run: |
+          set -o pipefail
+          if grep -R -n -E "const (draftQueue|distributionEvents|temporaryRevisions|changeProposals|seededControlledLibrary)" frontend/src/pages/documentControl frontend/src/pages/DocControlPages.tsx; then
+            echo "Seeded Document Control operational records remain in the routed implementation."
+            exit 1
+          fi
+          if grep -n "DocControlPages\.legacy" frontend/src/pages/DocControlPages.tsx; then
+            echo "The canonical Document Control page surface still exports the legacy seeded pages."
+            exit 1
+          fi
+
+      - name: Upload Document Control diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: document-control-domain-diagnostics
+          path: |
+            /tmp/document-control-alembic-heads.log
+            /tmp/document-control-alembic-upgrade.log
+            /tmp/document-control-backend-compile.log
+            /tmp/document-control-backend-contract.log
+            /tmp/document-control-frontend-build.log
+          if-no-files-found: warn
+          retention-days: 5
