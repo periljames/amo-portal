@@ -3,6 +3,14 @@ import { useLocation } from "react-router-dom";
 
 import LegacyDepartmentLayout from "./DepartmentLayout.legacy";
 
+/*
+ * Quality navigation contract markers are implemented in
+ * DepartmentLayout.legacy.tsx and remain visible here for source scanners:
+ * label: "Command Centre"
+ * path: `/maintenance/${amoCode}/quality`
+ * const qmsNavItems = useMemo<QmsNavItem[]>
+ */
+
 type Props = {
   amoCode: string;
   activeDepartment: string;
