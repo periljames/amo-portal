@@ -13,7 +13,7 @@ const contextualHelpSource = readSource("../../components/UI/ContextualHelp.tsx"
 const prerequisiteSource = readSource("../../components/UI/PrerequisiteDialog.tsx");
 const operatingStructureSource = readSource("../AdminOperatingStructurePage.tsx");
 const adminAssetsRouteSource = readSource("../AdminAmoAssetsPage.tsx");
-const foundationServicesSource = readSource("../../../backend/amodb/apps/foundations/services.py");
+const foundationServicesSource = readSource("../../../../backend/amodb/apps/foundations/services.py");
 
 describe("guided rostering setup", () => {
   it("removes the permanent read-only commitment board", () => {
