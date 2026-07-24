@@ -21,17 +21,23 @@ const permissionSource = readSource("../../../../backend/amodb/apps/workforce/pe
 describe("guided rostering setup", () => {
   it("removes the permanent read-only commitment board", () => {
     expect(unifiedPlannerSource).not.toContain("RosterCommitmentBoard");
-    expect(unifiedPlannerSource).toContain("ContextualHelp");
-    expect(unifiedPlannerSource).toContain('topic="rostering-source-commitments"');
+    expect(unifiedPlannerSource).toContain("PlannerCommitmentHelp");
+    expect(unifiedPlannerSource).toContain('HELP_TOPIC = "rostering-source-commitments"');
     expect(unifiedPlannerSource).toContain("Use the help icon whenever this explanation is needed again");
+  });
+
+  it("keeps planner guidance lightweight instead of importing the broad shared component", () => {
+    expect(unifiedPlannerSource).not.toContain('import { ContextualHelp }');
+    expect(unifiedPlannerSource).toContain("guidanceAcknowledged");
+    expect(unifiedPlannerSource).toContain("acknowledgeGuidance");
   });
 
   it("persists help by tenant, user, topic and version with an offline fallback", () => {
     expect(contextualGuidanceSource).toContain("amo_portal_help_seen:");
     expect(contextualGuidanceSource).toContain("tenantId");
     expect(contextualGuidanceSource).toContain("userId");
-    expect(contextualGuidanceSource).toContain("getPlannerPreferences");
-    expect(contextualGuidanceSource).toContain("updatePlannerPreferences");
+    expect(contextualGuidanceSource).toContain("getPlannerPreferencesLite");
+    expect(contextualGuidanceSource).toContain("updatePlannerPreferencesLite");
     expect(contextualHelpSource).toContain("acknowledgeGuidance");
   });
 
@@ -39,6 +45,7 @@ describe("guided rostering setup", () => {
     expect(contextualHelpSource).toContain('onClick={() => setOpen(false)}');
     expect(contextualHelpSource).toContain("Close help without acknowledging");
     expect(contextualHelpSource).toContain("onClick={() => void acknowledge()}");
+    expect(unifiedPlannerSource).toContain("Close help without acknowledging");
   });
 
   it("provides blocking direct prerequisite actions instead of a dead empty state", () => {
