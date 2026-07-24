@@ -44,6 +44,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re
+          import subprocess
           import textwrap
 
           catalog = Path('backend/amodb/apps/rostering/catalog.py')
@@ -60,6 +61,36 @@ jobs:
 
           validation = Path('backend/amodb/apps/rostering/validation.py')
           validation_text = validation.read_text(encoding='utf-8')
+          malformed_seed = '''        if row:
+          if not row.rule_set_id:
+              row.rule_set_id = rule_set.id
+              db.add(row)
+          continue
+        db.add(models.RosterRule(
+          amo_id=amo_id,
+          rule_set_id=rule_set.id,
+          scope=models.RosterRuleScope.AMO,
+          created_by_user_id=actor_user_id,
+          updated_by_user_id=actor_user_id,
+          **definition,
+        ))'''.replace('          ', '  ')
+          clean_seed = '''        if row:
+              if not row.rule_set_id:
+              row.rule_set_id = rule_set.id
+              db.add(row)
+              continue
+              db.add(models.RosterRule(
+              amo_id=amo_id,
+              rule_set_id=rule_set.id,
+              scope=models.RosterRuleScope.AMO,
+              created_by_user_id=actor_user_id,
+              updated_by_user_id=actor_user_id,
+              **definition,
+              ))'''.replace('              ', '    ')
+          if malformed_seed not in validation_text:
+              raise SystemExit('Malformed seeded rule block was not found')
+          validation_text = validation_text.replace(malformed_seed, clean_seed, 1)
+
           start = validation_text.find('def find_rules(')
           end = validation_text.find('def _assignment_minutes', start)
           if start < 0 or end < 0:
@@ -98,14 +129,15 @@ jobs:
           ''').lstrip()
           validation.write_text(validation_text[:start] + find_rules + validation_text[end:], encoding='utf-8')
 
-          for root in (Path('backend'), Path('frontend')):
-              for path in root.rglob('*'):
-                  if not path.is_file() or path.suffix not in {'.py', '.ts', '.tsx', '.css', '.yml', '.yaml'}:
-                      continue
-                  text = path.read_text(encoding='utf-8')
-                  normalized = '\n'.join(line.rstrip() for line in text.splitlines()).rstrip() + '\n'
-                  if normalized != text:
-                      path.write_text(normalized, encoding='utf-8')
+          changed = subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines()
+          for raw_path in changed:
+              path = Path(raw_path)
+              if not path.is_file() or path.suffix not in {'.py', '.ts', '.tsx', '.css', '.yml', '.yaml'}:
+                  continue
+              text = path.read_text(encoding='utf-8')
+              normalized = '\n'.join(line.rstrip() for line in text.splitlines()).rstrip() + '\n'
+              if normalized != text:
+                  path.write_text(normalized, encoding='utf-8')
           PY
       - name: Capture fixed-source validation
         shell: bash
