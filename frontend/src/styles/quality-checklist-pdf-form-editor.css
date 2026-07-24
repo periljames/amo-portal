@@ -287,6 +287,99 @@
   font-weight: 800;
 }
 
+.quality-workflow-integrity-blocker {
+  position: fixed;
+  z-index: 1080;
+  inset: 92px 18px 18px 258px;
+  display: grid;
+  place-items: center;
+  padding: clamp(14px, 3vw, 34px);
+  background: rgba(241, 245, 249, 0.72);
+  backdrop-filter: blur(5px);
+}
+
+.quality-workflow-integrity-blocker > section {
+  width: min(660px, 100%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px 16px;
+  align-items: start;
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 16px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  padding: clamp(18px, 3vw, 28px);
+  box-shadow: 0 26px 74px rgba(15, 23, 42, 0.28);
+}
+
+.quality-workflow-integrity-blocker > section > svg {
+  color: #b91c1c;
+}
+
+.quality-workflow-integrity-blocker p,
+.quality-workflow-integrity-blocker h2,
+.quality-workflow-integrity-blocker span {
+  margin: 0;
+}
+
+.quality-workflow-integrity-blocker p {
+  color: #b91c1c;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.quality-workflow-integrity-blocker h2 {
+  margin-top: 4px;
+  font-size: clamp(1.15rem, 2vw, 1.55rem);
+  line-height: 1.25;
+}
+
+.quality-workflow-integrity-blocker span {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.quality-workflow-integrity-blocker__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  padding-left: 44px;
+}
+
+.quality-workflow-integrity-blocker__actions button,
+.quality-workflow-integrity-blocker__actions a {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.quality-workflow-integrity-blocker__actions button {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+  color: #fff;
+}
+
+html.quality-workflow-is-degraded .quality-pdf-form-launcher {
+  display: none;
+}
+
 .is-spinning {
   animation: quality-pdf-form-spin 0.9s linear infinite;
 }
@@ -328,5 +421,19 @@
   .quality-pdf-form-launcher {
     top: auto;
     bottom: 18px;
+  }
+
+  .quality-workflow-integrity-blocker {
+    inset: 64px 6px 6px;
+    padding: 10px;
+  }
+
+  .quality-workflow-integrity-blocker > section {
+    grid-template-columns: 1fr;
+  }
+
+  .quality-workflow-integrity-blocker__actions {
+    grid-column: auto;
+    padding-left: 0;
   }
 }
