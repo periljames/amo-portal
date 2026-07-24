@@ -12,6 +12,7 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from .workspace_service import (
     can_read_manual,
+    is_control_user,
     readable_revision,
     resolve_tenant,
     serialize_manual,
@@ -36,13 +37,12 @@ def list_visible_documents(
 ):
     """Return a correctly paginated, access-filtered Document Control library.
 
-    The first workspace implementation paginated manuals before applying document
-    class and restricted-document access rules. That could produce short pages,
-    inaccurate totals, and skip permitted documents on later pages. This route is
-    intentionally registered before the compatibility endpoint and keeps the same
-    response contract while filtering before pagination.
+    Filtering happens before pagination so totals and page lengths remain truthful.
+    Reader personas receive only the effective/readable revision and no controller
+    workflow, aggregate acknowledgement, change-count, or access-scope internals.
     """
     tenant = resolve_tenant(db, tenant_slug, current_user)
+    controller = is_control_user(current_user)
     query = (
         db.query(manual_models.Manual, dm.DocumentControlProfile)
         .outerjoin(
@@ -95,59 +95,73 @@ def list_visible_documents(
     for revision in revisions:
         latest_by_manual.setdefault(revision.manual_id, revision)
 
-    workflows = {
-        row.revision_id: row
-        for row in db.query(dm.DocumentWorkflowInstance)
-        .filter(
-            dm.DocumentWorkflowInstance.tenant_id == tenant.amo_id,
-            dm.DocumentWorkflowInstance.manual_id.in_(manual_ids or ["-"]),
+    if controller:
+        workflows = {
+            row.revision_id: row
+            for row in db.query(dm.DocumentWorkflowInstance)
+            .filter(
+                dm.DocumentWorkflowInstance.tenant_id == tenant.amo_id,
+                dm.DocumentWorkflowInstance.manual_id.in_(manual_ids or ["-"]),
+            )
+            .all()
+        }
+        open_change_counts = dict(
+            db.query(
+                dm.DocumentChangeRequest.manual_id,
+                func.count(dm.DocumentChangeRequest.id),
+            )
+            .filter(
+                dm.DocumentChangeRequest.tenant_id == tenant.amo_id,
+                dm.DocumentChangeRequest.manual_id.in_(manual_ids or ["-"]),
+                dm.DocumentChangeRequest.status.in_(OPEN_CHANGE_STATUSES),
+            )
+            .group_by(dm.DocumentChangeRequest.manual_id)
+            .all()
         )
-        .all()
-    }
-    open_change_counts = dict(
-        db.query(
-            dm.DocumentChangeRequest.manual_id,
-            func.count(dm.DocumentChangeRequest.id),
+        pending_ack_counts = dict(
+            db.query(
+                dm.DocumentDistributionCampaign.manual_id,
+                func.count(dm.DocumentDistributionRecipient.id),
+            )
+            .join(
+                dm.DocumentDistributionRecipient,
+                dm.DocumentDistributionRecipient.campaign_id
+                == dm.DocumentDistributionCampaign.id,
+            )
+            .filter(
+                dm.DocumentDistributionCampaign.tenant_id == tenant.amo_id,
+                dm.DocumentDistributionCampaign.manual_id.in_(manual_ids or ["-"]),
+                dm.DocumentDistributionRecipient.status == "PENDING",
+            )
+            .group_by(dm.DocumentDistributionCampaign.manual_id)
+            .all()
         )
-        .filter(
-            dm.DocumentChangeRequest.tenant_id == tenant.amo_id,
-            dm.DocumentChangeRequest.manual_id.in_(manual_ids or ["-"]),
-            dm.DocumentChangeRequest.status.in_(OPEN_CHANGE_STATUSES),
-        )
-        .group_by(dm.DocumentChangeRequest.manual_id)
-        .all()
-    )
-    pending_ack_counts = dict(
-        db.query(
-            dm.DocumentDistributionCampaign.manual_id,
-            func.count(dm.DocumentDistributionRecipient.id),
-        )
-        .join(
-            dm.DocumentDistributionRecipient,
-            dm.DocumentDistributionRecipient.campaign_id
-            == dm.DocumentDistributionCampaign.id,
-        )
-        .filter(
-            dm.DocumentDistributionCampaign.tenant_id == tenant.amo_id,
-            dm.DocumentDistributionCampaign.manual_id.in_(manual_ids or ["-"]),
-            dm.DocumentDistributionRecipient.status == "PENDING",
-        )
-        .group_by(dm.DocumentDistributionCampaign.manual_id)
-        .all()
-    )
+    else:
+        workflows = {}
+        open_change_counts = {}
+        pending_ack_counts = {}
 
     items: list[dict] = []
     for manual in manuals:
         profile = profiles.get(manual.id)
         target, target_kind = readable_revision(db, manual, current_user)
-        latest = latest_by_manual.get(manual.id)
+        latest = latest_by_manual.get(manual.id) if controller else target
         payload = serialize_manual(manual, profile, target, target_kind, latest)
-        workflow = workflows.get(latest.id) if latest else None
-        payload["workflow"] = serialize_workflow(workflow) if workflow else None
-        payload["open_change_requests"] = int(open_change_counts.get(manual.id, 0))
-        payload["pending_acknowledgements"] = int(
-            pending_ack_counts.get(manual.id, 0)
-        )
+        if not controller:
+            profile_payload = payload.get("profile")
+            if isinstance(profile_payload, dict):
+                profile_payload["access_scope"] = {}
+                profile_payload["metadata"] = {}
+            payload["workflow"] = None
+            payload["open_change_requests"] = 0
+            payload["pending_acknowledgements"] = 0
+        else:
+            workflow = workflows.get(latest.id) if latest else None
+            payload["workflow"] = serialize_workflow(workflow) if workflow else None
+            payload["open_change_requests"] = int(open_change_counts.get(manual.id, 0))
+            payload["pending_acknowledgements"] = int(
+                pending_ack_counts.get(manual.id, 0)
+            )
         items.append(payload)
 
     return {
