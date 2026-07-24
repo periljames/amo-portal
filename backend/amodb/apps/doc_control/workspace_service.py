@@ -14,13 +14,15 @@ from amodb.security import get_current_actor_id
 from . import domain_models
 
 
+# Use only roles that exist in the authoritative AccountRole enum. AUDITOR is
+# intentionally read-only and cannot mutate document governance. A future dedicated
+# Document Control Officer role must be introduced through the shared RBAC/capability
+# model and migration rather than accepted here as an unprovisioned string.
 CONTROL_ROLES = {
     "SUPERUSER",
     "AMO_ADMIN",
     "QUALITY_MANAGER",
     "QUALITY_INSPECTOR",
-    "AUDITOR",
-    "DOCUMENT_CONTROL_OFFICER",
 }
 
 APPROVER_ROLES = {
@@ -181,12 +183,12 @@ def profile_defaults(manual: manual_models.Manual) -> dict[str, Any]:
         "document_class": "INTERNAL",
         "owner_department": manual.owner_role or "DOCUMENT_CONTROL",
         "owner_user_id": None,
-        "language": "English",
+        "language": "en",
         "criticality": "STANDARD",
         "regulated_flag": False,
         "restricted_flag": False,
         "requires_authority_approval": False,
-        "acknowledgement_required": True,
+        "acknowledgement_required": False,
         "review_interval_months": 24,
         "next_review_due": None,
         "access_scope": {},
@@ -227,18 +229,19 @@ def can_read_manual(
     user: account_models.User,
     profile: domain_models.DocumentControlProfile | None,
 ) -> bool:
-    if not profile or not profile.restricted_flag or is_control_user(user):
+    if not profile or not profile.restricted_flag:
+        return True
+    if is_control_user(user):
         return True
     scope = dict(profile.access_scope_json or {})
-    allowed_users = {str(item) for item in scope.get("user_ids", [])}
-    allowed_roles = {str(item).upper() for item in scope.get("roles", [])}
-    allowed_departments = {str(item).upper() for item in scope.get("departments", [])}
-    department = getattr(user, "department", None)
-    department_code = str(getattr(department, "code", "") or "").upper()
+    allowed_user_ids = {str(value) for value in scope.get("user_ids", [])}
+    allowed_roles = {str(value).upper() for value in scope.get("roles", [])}
+    allowed_departments = {str(value).upper() for value in scope.get("departments", [])}
+    department = getattr(getattr(user, "department", None), "code", None)
     return bool(
-        str(user.id) in allowed_users
+        str(user.id) in allowed_user_ids
         or role_value(user) in allowed_roles
-        or (department_code and department_code in allowed_departments)
+        or (department and str(department).upper() in allowed_departments)
     )
 
 
@@ -247,7 +250,7 @@ def require_manual_access(
     profile: domain_models.DocumentControlProfile | None,
 ) -> None:
     if not can_read_manual(user, profile):
-        raise HTTPException(status_code=403, detail="The document is restricted by its access policy")
+        raise HTTPException(status_code=403, detail="This document is restricted")
 
 
 def readable_revision(
@@ -256,35 +259,32 @@ def readable_revision(
     user: account_models.User,
 ) -> tuple[manual_models.ManualRevision | None, str]:
     if manual.current_published_rev_id:
-        revision = (
+        published = (
             db.query(manual_models.ManualRevision)
             .filter(
                 manual_models.ManualRevision.id == manual.current_published_rev_id,
                 manual_models.ManualRevision.manual_id == manual.id,
+                manual_models.ManualRevision.status_enum == manual_models.ManualRevisionStatus.PUBLISHED,
             )
             .first()
         )
-        if revision:
-            return revision, "PUBLISHED"
+        if published:
+            return published, "PUBLISHED"
     if is_control_user(user):
-        revision = latest_revision(db, manual)
-        if revision:
-            return revision, "UNCONTROLLED"
+        draft = latest_revision(db, manual)
+        if draft:
+            return draft, "UNCONTROLLED"
     return None, "NONE"
 
 
-def status_value(revision: manual_models.ManualRevision | None) -> str | None:
-    if not revision:
-        return None
-    status = revision.status_enum
-    return str(getattr(status, "value", status or ""))
+def source_type_value(revision: manual_models.ManualRevision) -> str | None:
+    value = getattr(revision, "source_type", None)
+    return str(getattr(value, "value", value)) if value is not None else None
 
 
-def source_type_value(revision: manual_models.ManualRevision | None) -> str | None:
-    if not revision:
-        return None
-    value = revision.source_type_enum
-    return str(getattr(value, "value", value or "")) if value else None
+def status_value(revision: manual_models.ManualRevision) -> str:
+    value = revision.status_enum
+    return str(getattr(value, "value", value))
 
 
 def serialize_revision(revision: manual_models.ManualRevision | None) -> dict[str, Any] | None:
