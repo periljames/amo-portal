@@ -1,0 +1,84 @@
+.publication-control-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border-top: 1px solid color-mix(in srgb, #b42318 34%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, #b42318 34%, transparent);
+  background: color-mix(in srgb, #b42318 9%, var(--surface, #ffffff));
+  color: var(--text-primary, #26110f);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.publication-control-banner svg {
+  flex: 0 0 auto;
+  margin-top: 0.08rem;
+  color: #b42318;
+}
+
+.publication-control-banner strong {
+  display: block;
+  margin-bottom: 0.12rem;
+  color: #b42318;
+}
+
+.publication-acknowledgement-action {
+  border-color: color-mix(in srgb, #027a48 55%, transparent) !important;
+  background: color-mix(in srgb, #027a48 10%, var(--surface, #ffffff)) !important;
+  color: #027a48 !important;
+}
+
+.publication-acknowledgement-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  flex-wrap: wrap;
+}
+
+.publication-acknowledgement-state--complete {
+  color: #027a48;
+  font-weight: 650;
+}
+
+.publication-acknowledgement-state--pending {
+  color: #9a6700;
+  font-weight: 650;
+}
+
+.publication-acknowledgement-error {
+  display: block;
+  margin-top: 0.3rem;
+  color: #b42318;
+  font-size: 0.78rem;
+}
+
+.publication-control-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.45rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.publication-control-status--controlled {
+  color: #027a48;
+  background: color-mix(in srgb, #027a48 8%, transparent);
+}
+
+.publication-control-status--uncontrolled {
+  color: #b42318;
+  background: color-mix(in srgb, #b42318 8%, transparent);
+}
+
+@media (max-width: 720px) {
+  .publication-control-banner {
+    padding-inline: 0.8rem;
+  }
+}
