@@ -15,18 +15,31 @@ const workspaceNames = [
   "UnifiedRosterPlanner",
   "UnifiedRosterSettings",
 ];
+const profile = {
+  name: "synthetic-edge-2g",
+  latencyMs: 700,
+  downloadBytesPerSecond: 30 * 1024,
+  uploadBytesPerSecond: 15 * 1024,
+};
 
 function writeReport(report) {
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 }
 
-if (!fs.existsSync(manifestPath)) {
-  writeReport({
+function failureReport(failures, extra = {}) {
+  return {
     generatedAt: new Date().toISOString(),
+    baseUrl,
+    profile,
     passed: false,
-    failures: ["Vite manifest not found. Run npm run build first."],
-  });
+    failures,
+    ...extra,
+  };
+}
+
+if (!fs.existsSync(manifestPath)) {
+  writeReport(failureReport(["Vite manifest not found. Run npm run build first."]));
   process.exit(1);
 }
 
@@ -63,26 +76,33 @@ if (!routeEntry || missingWorkspaces.length) {
   const failures = [];
   if (!routeEntry) failures.push("Rostering route shell could not be identified from the Vite manifest.");
   if (missingWorkspaces.length) failures.push(`Missing workspace chunks: ${missingWorkspaces.join(", ")}.`);
-  writeReport({
-    generatedAt: new Date().toISOString(),
-    manifestEntryCount: entries.length,
-    passed: false,
-    failures,
-  });
+  writeReport(failureReport(failures, { manifestEntryCount: entries.length }));
   process.exit(1);
 }
 
-const moduleFiles = [
-  routeEntry[1].file,
-  ...workspaceEntries.map(({ entry }) => entry?.[1]?.file).filter(Boolean),
-];
-const moduleUrls = [...new Set(moduleFiles)]
-  .map((file) => new URL(`/${file}`, baseUrl).href);
-const profile = {
-  name: "synthetic-edge-2g",
-  latencyMs: 700,
-  downloadBytesPerSecond: 30 * 1024,
-  uploadBytesPerSecond: 15 * 1024,
+function collectDependencyFiles(seedKeys) {
+  const visited = new Set();
+  const files = new Set();
+  const visit = (key) => {
+    if (!key || visited.has(key)) return;
+    visited.add(key);
+    const record = manifest[key];
+    if (!record) return;
+    if (record.file) files.add(record.file);
+    for (const cssFile of record.css || []) files.add(cssFile);
+    for (const assetFile of record.assets || []) files.add(assetFile);
+    for (const importKey of record.imports || []) visit(importKey);
+  };
+  for (const key of seedKeys) visit(key);
+  return [...files].sort();
+}
+
+const workspaceMap = new Map(workspaceEntries.map(({ name, entry }) => [name, entry]));
+const routeKey = routeEntry[0];
+const scenarios = {
+  planner: collectDependencyFiles([routeKey, workspaceMap.get("UnifiedRosterPlanner")[0]]),
+  setup: collectDependencyFiles([routeKey, workspaceMap.get("UnifiedRosterSettings")[0]]),
+  myRoster: collectDependencyFiles([routeKey, workspaceMap.get("MyRosterWorkspace")[0]]),
 };
 
 async function applyNetworkProfile(context, page) {
@@ -99,90 +119,112 @@ async function applyNetworkProfile(context, page) {
   return client;
 }
 
-async function measure(context, label) {
-  const page = await context.newPage();
-  await page.goto(`${baseUrl}/perf-shell.html`, { waitUntil: "domcontentloaded" });
-  const client = await applyNetworkProfile(context, page);
-  const result = await page.evaluate(async ({ urls, phase }) => {
-    performance.clearResourceTimings();
-    const moduleTimings = [];
-    const phaseStart = performance.now();
-    for (const url of urls) {
-      const startedAt = performance.now();
-      await import(url);
-      moduleTimings.push({
-        url,
-        durationMs: Number((performance.now() - startedAt).toFixed(2)),
-      });
-    }
-    const totalMs = Number((performance.now() - phaseStart).toFixed(2));
-    const resources = performance.getEntriesByType("resource")
-      .filter((entry) => entry.name.includes("/assets/"))
-      .map((entry) => ({
-        name: entry.name,
-        initiatorType: entry.initiatorType,
-        startTimeMs: Number(entry.startTime.toFixed(2)),
-        durationMs: Number(entry.duration.toFixed(2)),
-        transferSize: entry.transferSize,
-        encodedBodySize: entry.encodedBodySize,
-        decodedBodySize: entry.decodedBodySize,
-      }))
-      .sort((left, right) => left.startTimeMs - right.startTimeMs);
-    return { phase, totalMs, moduleTimings, resources };
-  }, { urls: moduleUrls, phase: label });
-  await client.detach();
-  await page.close();
-  return result;
-}
+async function measureScenario(browser, name, files) {
+  const context = await browser.newContext({ serviceWorkers: "block" });
+  const urls = files.map((file) => new URL(`/${file}`, baseUrl).href);
 
-const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ serviceWorkers: "block" });
-let cold;
-let warm;
-try {
-  cold = await measure(context, "cold-cache");
-  warm = await measure(context, "warm-http-cache");
-} finally {
-  await context.close();
-  await browser.close();
+  async function measurePhase(phase) {
+    const page = await context.newPage();
+    await page.goto(`${baseUrl}/perf-shell.html`, { waitUntil: "domcontentloaded" });
+    const client = await applyNetworkProfile(context, page);
+    const result = await page.evaluate(async ({ assetUrls, scenario, label }) => {
+      performance.clearResourceTimings();
+      const startedAt = performance.now();
+      const responses = await Promise.all(assetUrls.map(async (url) => {
+        const response = await fetch(url, { cache: "default", credentials: "same-origin" });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${url}`);
+        await response.arrayBuffer();
+        return { url, status: response.status };
+      }));
+      const totalMs = Number((performance.now() - startedAt).toFixed(2));
+      const resources = performance.getEntriesByType("resource")
+        .filter((entry) => assetUrls.includes(entry.name))
+        .map((entry) => ({
+          name: entry.name,
+          initiatorType: entry.initiatorType,
+          startTimeMs: Number(entry.startTime.toFixed(2)),
+          durationMs: Number(entry.duration.toFixed(2)),
+          transferSize: entry.transferSize,
+          encodedBodySize: entry.encodedBodySize,
+          decodedBodySize: entry.decodedBodySize,
+        }))
+        .sort((left, right) => left.startTimeMs - right.startTimeMs);
+      return { scenario, phase: label, totalMs, responses, resources };
+    }, { assetUrls: urls, scenario: name, label: phase });
+    await client.detach();
+    await page.close();
+    return result;
+  }
+
+  try {
+    const cold = await measurePhase("cold-cache");
+    const warm = await measurePhase("warm-http-cache");
+    return {
+      name,
+      files,
+      assetCount: files.length,
+      cold,
+      warm,
+      warmSpeedup: cold.totalMs && warm.totalMs
+        ? Number((cold.totalMs / warm.totalMs).toFixed(2))
+        : null,
+    };
+  } finally {
+    await context.close();
+  }
 }
 
 const budgets = {
-  coldRouteActivationMs: 70_000,
-  warmRouteActivationMs: 5_000,
-  maximumColdAssetRequests: 80,
+  coldRouteAssetsMs: 70_000,
+  warmRouteAssetsMs: 5_000,
+  maximumRouteAssetRequests: 80,
 };
-const failures = [];
-if (cold.totalMs > budgets.coldRouteActivationMs) {
-  failures.push(`Cold route module activation ${cold.totalMs}ms exceeds ${budgets.coldRouteActivationMs}ms.`);
-}
-if (warm.totalMs > budgets.warmRouteActivationMs) {
-  failures.push(`Warm route module activation ${warm.totalMs}ms exceeds ${budgets.warmRouteActivationMs}ms.`);
-}
-if (cold.resources.length > budgets.maximumColdAssetRequests) {
-  failures.push(`Cold route activation made ${cold.resources.length} asset requests; maximum is ${budgets.maximumColdAssetRequests}.`);
-}
+let browser;
+try {
+  browser = await chromium.launch({ headless: true });
+  const measurements = [];
+  for (const [name, files] of Object.entries(scenarios)) {
+    measurements.push(await measureScenario(browser, name, files));
+  }
 
-const report = {
-  generatedAt: new Date().toISOString(),
-  baseUrl,
-  profile,
-  routeSource: routeEntry[1].src || routeEntry[0],
-  workspaces: workspaceEntries.map(({ name, entry }) => ({
-    name,
-    source: entry[1].src || entry[0],
-    file: entry[1].file,
-  })),
-  moduleUrls,
-  cold,
-  warm,
-  warmSpeedup: cold.totalMs && warm.totalMs
-    ? Number((cold.totalMs / warm.totalMs).toFixed(2))
-    : null,
-  budgets,
-  passed: failures.length === 0,
-  failures,
-};
+  const failures = [];
+  for (const measurement of measurements) {
+    if (measurement.cold.totalMs > budgets.coldRouteAssetsMs) {
+      failures.push(`${measurement.name} cold assets ${measurement.cold.totalMs}ms exceed ${budgets.coldRouteAssetsMs}ms.`);
+    }
+    if (measurement.warm.totalMs > budgets.warmRouteAssetsMs) {
+      failures.push(`${measurement.name} warm assets ${measurement.warm.totalMs}ms exceed ${budgets.warmRouteAssetsMs}ms.`);
+    }
+    if (measurement.assetCount > budgets.maximumRouteAssetRequests) {
+      failures.push(`${measurement.name} requires ${measurement.assetCount} route assets; maximum is ${budgets.maximumRouteAssetRequests}.`);
+    }
+  }
 
-writeReport(report);
-if (failures.length) process.exit(1);
+  const report = {
+    generatedAt: new Date().toISOString(),
+    baseUrl,
+    profile,
+    routeSource: routeEntry[1].src || routeEntry[0],
+    workspaces: workspaceEntries.map(({ name, entry }) => ({
+      name,
+      source: entry[1].src || entry[0],
+      file: entry[1].file,
+    })),
+    measurements,
+    budgets,
+    passed: failures.length === 0,
+    failures,
+  };
+  writeReport(report);
+  if (failures.length) process.exitCode = 1;
+} catch (error) {
+  writeReport(failureReport([
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+  ], {
+    routeSource: routeEntry[1].src || routeEntry[0],
+    scenarios,
+  }));
+  process.exitCode = 1;
+} finally {
+  if (browser) await browser.close();
+}
