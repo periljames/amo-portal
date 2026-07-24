@@ -107,7 +107,23 @@ def _create_tables_without_indexes(bind, metadata: sa.MetaData) -> None:
         table = metadata.tables[table_name]
         if table_name in existing_tables:
             continue
-        bind.execute(sa.schema.CreateTable(table, include_foreign_key_constraints=[]))
+
+        # PostgreSQL uses the same schema-level relation namespace for indexes and
+        # UNIQUE-constraint backing indexes. Temporarily omit UNIQUE constraints
+        # from CREATE TABLE so a legacy collision can be resolved with the same
+        # bounded, table-specific naming policy used for normal indexes below.
+        unique_constraints = [
+            constraint
+            for constraint in list(table.constraints)
+            if isinstance(constraint, sa.UniqueConstraint)
+        ]
+        for constraint in unique_constraints:
+            table.constraints.remove(constraint)
+        try:
+            bind.execute(sa.schema.CreateTable(table, include_foreign_key_constraints=[]))
+        finally:
+            for constraint in unique_constraints:
+                table.append_constraint(constraint)
         existing_tables.add(table_name)
 
 
@@ -234,6 +250,30 @@ def _restore_deferred_foreign_keys(bind, metadata: sa.MetaData) -> None:
         )
 
 
+def _create_unique_constraints_safely(bind, metadata: sa.MetaData) -> None:
+    for table_name in NEW_TABLES:
+        table = metadata.tables[table_name]
+        constraints = sorted(
+            (
+                constraint
+                for constraint in table.constraints
+                if isinstance(constraint, sa.UniqueConstraint)
+            ),
+            key=lambda item: str(item.name or ""),
+        )
+        for constraint in constraints:
+            columns = [str(column.name) for column in constraint.columns]
+            if not columns:
+                raise RuntimeError(f"Unique constraint without columns on {table_name}")
+            desired_name = str(constraint.name or "").strip() or _bounded_identifier(
+                f"uq_{table_name}_{'_'.join(columns)}"
+            )
+            actual_name = _available_index_name(bind, desired_name, table_name)
+            if actual_name is None:
+                continue
+            op.create_index(actual_name, table_name, columns, unique=True)
+
+
 def _create_indexes_safely(bind, metadata: sa.MetaData) -> None:
     for table_name in NEW_TABLES:
         table = metadata.tables[table_name]
@@ -255,6 +295,7 @@ def upgrade() -> None:
     metadata = _application_metadata()
     _create_tables_without_indexes(bind, metadata)
     _restore_deferred_foreign_keys(bind, metadata)
+    _create_unique_constraints_safely(bind, metadata)
     _create_indexes_safely(bind, metadata)
 
 
