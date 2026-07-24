@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BookOpen, FilePlus2, Search, ShieldAlert, UploadCloud, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -116,7 +116,7 @@ export default function DocumentControlLibraryPage() {
       navigate(`${readerBasePath}/${document.id}/rev/${document.read_target.revision_id}/read`);
       return;
     }
-    navigate(`${basePath}/library/${document.id}`);
+    if (canControl) navigate(`${basePath}/library/${document.id}`);
   };
 
   const inspectFile = async (file: File | null) => {
@@ -183,7 +183,7 @@ export default function DocumentControlLibraryPage() {
   return (
     <DocumentControlShell
       title="Library"
-      subtitle="One searchable register for internal manuals, external technical data, and controlled records. The primary action always opens the permitted revision directly."
+      subtitle="One searchable register for internal manuals, external technical data, and controlled records. Select a row to open the permitted revision directly."
       canControl={canControl}
       actions={canControl ? <button type="button" className="dc-button dc-button--primary" onClick={() => setIntakeOpen(true)}><FilePlus2 size={15} /> Register or upload</button> : undefined}
     >
@@ -204,7 +204,7 @@ export default function DocumentControlLibraryPage() {
       {!loading && !error && documents.length ? (
         <div className="dc-table-wrap">
           <table className="dc-table">
-            <thead><tr><th>Code</th><th>Document</th><th>Revision available</th><th>Governance</th><th>Work</th><th>Action</th></tr></thead>
+            <thead><tr><th>Code</th><th>Document</th><th>Revision available</th><th>Governance</th>{canControl ? <th>Work</th> : null}<th>Action</th></tr></thead>
             <tbody>{documents.map((document) => (
               <tr key={document.id} className="dc-row--clickable" tabIndex={0} onClick={() => openPrimary(document)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPrimary(document); }}>
                 <td><strong>{document.code}</strong><small>{document.profile.document_class.replaceAll("_", " ")}</small></td>
@@ -220,12 +220,12 @@ export default function DocumentControlLibraryPage() {
                   />
                   <small>{document.profile.regulated_flag ? "Regulated" : "Internal control"}{document.profile.restricted_flag ? " · Restricted" : ""}</small>
                 </td>
-                <td><strong>{document.open_change_requests} changes</strong><small>{document.pending_acknowledgements} acknowledgements pending</small></td>
+                {canControl ? <td><strong>{document.open_change_requests} changes</strong><small>{document.pending_acknowledgements} acknowledgements pending</small></td> : null}
                 <td>
-                  <button type="button" className="dc-button dc-button--primary" onClick={(event) => { event.stopPropagation(); openPrimary(document); }}>
+                  <button type="button" className="dc-button dc-button--primary" disabled={!document.read_target.revision_id && !canControl} onClick={(event) => { event.stopPropagation(); openPrimary(document); }}>
                     <BookOpen size={14} /> {document.read_target.label}
                   </button>
-                  <button type="button" className="dc-button" style={{ marginTop: "0.35rem" }} onClick={(event) => { event.stopPropagation(); navigate(`${basePath}/library/${document.id}`); }}>View record</button>
+                  {canControl ? <button type="button" className="dc-button" style={{ marginTop: "0.35rem" }} onClick={(event) => { event.stopPropagation(); navigate(`${basePath}/library/${document.id}`); }}>View control record</button> : null}
                 </td>
               </tr>
             ))}</tbody>
@@ -237,7 +237,7 @@ export default function DocumentControlLibraryPage() {
         <DocumentControlEmpty
           icon={query || classFilter ? Search : ShieldAlert}
           title={query || classFilter ? "No document matches the current search" : "No document has been registered"}
-          message={query || classFilter ? "Clear the search or select another document class." : "A Document Control user must upload or register the first document before staff can read it."}
+          message={query || classFilter ? "Clear the search or select another document class." : canControl ? "Upload or register the first document before it can be governed or read." : "No effective publication is currently available within your access scope."}
           action={(query || classFilter) ? <button type="button" className="dc-button" onClick={() => { setQuery(""); setClassFilter(""); }}>Clear filters</button> : canControl ? <button type="button" className="dc-button dc-button--primary" onClick={() => setIntakeOpen(true)}>Register first document</button> : undefined}
         />
       ) : null}
