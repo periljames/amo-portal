@@ -37,7 +37,7 @@ jobs:
           extract('Repair generated source blocks', '/tmp/repair-governance.sh')
           PY
           bash /tmp/reproduce-governance.sh
-      - name: Capture repair failure
+      - name: Capture repair result
         shell: bash
         run: |
           set +e
@@ -54,4 +54,6 @@ jobs:
           path: |
             /tmp/rostering-governance-repair.log
             /tmp/rostering-governance-repair.exit-code
+            backend/amodb/apps/rostering/validation.py
+            backend/amodb/apps/rostering/catalog.py
           retention-days: 1
