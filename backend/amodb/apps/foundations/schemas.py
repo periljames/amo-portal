@@ -1,10 +1,9 @@
-# backend/amodb/apps/foundations/schemas.py
 from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .models import BaseAssignmentKind, BaseStationType
 
@@ -68,6 +67,21 @@ class UserBaseAssignmentCreate(BaseModel):
     effective_from: date = Field(default_factory=date.today)
     effective_to: Optional[date] = None
     is_primary: bool = True
+    note: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.effective_to and self.effective_to < self.effective_from:
+            raise ValueError("effective_to must be on or after effective_from")
+        return self
+
+
+class UserBaseAssignmentUpdate(BaseModel):
+    base_station_id: Optional[str] = None
+    assignment_kind: Optional[BaseAssignmentKind] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    is_primary: Optional[bool] = None
     note: Optional[str] = None
 
 

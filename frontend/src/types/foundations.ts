@@ -54,6 +54,8 @@ export interface UserBaseAssignmentCreate {
   note?: string | null;
 }
 
+export type UserBaseAssignmentUpdate = Partial<Omit<UserBaseAssignmentCreate, "user_id">>;
+
 export interface UserBaseAssignmentRead extends Required<Omit<UserBaseAssignmentCreate, "effective_to" | "note">> {
   id: string;
   amo_id: string;
