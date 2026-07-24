@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  BadgeCheck,
   Bookmark,
   ChevronDown,
   ChevronRight,
@@ -16,16 +17,26 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
-import { getRevisionRead, getRevisionWorkflow, type ManualReadPayload, type ManualWorkflowPayload } from "../../services/manuals";
+import {
+  acknowledgeRevision,
+  emitManualsUpdated,
+  getRevisionRead,
+  getRevisionWorkflow,
+  type ManualReadPayload,
+  type ManualWorkflowPayload,
+} from "../../services/manuals";
 import {
   downloadBlob,
   fetchPublicationBlob,
   formatFileSize,
+  getPublicationAcknowledgement,
   getPublicationReaderMetadata,
+  type PublicationAcknowledgement,
   type PublicationReaderMetadata,
 } from "../../services/publications";
 import { useManualRouteContext } from "./context";
 import "./manualReader.css";
+import "./publicationReaderGovernance.css";
 
 type ReaderTab = "detail" | "history" | "citations" | "subsidiary";
 type NavigationTab = "toc" | "search";
@@ -54,6 +65,7 @@ type ExtendedReadPayload = Omit<ManualReadPayload, "sections"> & {
 };
 
 const TAB_VALUES = new Set<ReaderTab>(["detail", "history", "citations", "subsidiary"]);
+const ACKNOWLEDGEMENT_TEXT = "I acknowledge that I have read and understood this controlled publication revision.";
 
 function formatDate(value?: string | null): string {
   if (!value) return "Not recorded";
@@ -82,12 +94,15 @@ function ReaderStatus({ message }: { message: string }) {
 }
 
 export default function PublicationsReaderPage() {
-  const { tenant, amoCode, manualId, revId, basePath } = useManualRouteContext();
+  const { tenant, amoCode, manualId, revId } = useManualRouteContext();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [payload, setPayload] = useState<ExtendedReadPayload | null>(null);
   const [metadata, setMetadata] = useState<PublicationReaderMetadata | null>(null);
   const [workflow, setWorkflow] = useState<ManualWorkflowPayload | null>(null);
+  const [acknowledgement, setAcknowledgement] = useState<PublicationAcknowledgement | null>(null);
+  const [acknowledgementBusy, setAcknowledgementBusy] = useState(false);
+  const [acknowledgementError, setAcknowledgementError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [navigationTab, setNavigationTab] = useState<NavigationTab>("toc");
@@ -105,6 +120,7 @@ export default function PublicationsReaderPage() {
 
   const requestedTab = searchParams.get("tab") as ReaderTab | null;
   const activeTab: ReaderTab = requestedTab && TAB_VALUES.has(requestedTab) ? requestedTab : "detail";
+  const isPublished = Boolean(metadata?.is_published && !payload?.not_published);
 
   useEffect(() => {
     if (!tenant || !manualId || !revId) {
@@ -115,16 +131,19 @@ export default function PublicationsReaderPage() {
     let active = true;
     setLoading(true);
     setError("");
+    setAcknowledgementError("");
     Promise.all([
       getRevisionRead(tenant, manualId, revId) as Promise<ExtendedReadPayload>,
       getPublicationReaderMetadata(tenant, manualId, revId),
       getRevisionWorkflow(tenant, manualId, revId).catch(() => null),
+      getPublicationAcknowledgement(tenant, manualId, revId).catch(() => ({ required: false, pending: false })),
     ])
-      .then(([readPayload, readerMetadata, workflowPayload]) => {
+      .then(([readPayload, readerMetadata, workflowPayload, acknowledgementPayload]) => {
         if (!active) return;
         setPayload(readPayload);
         setMetadata(readerMetadata);
         setWorkflow(workflowPayload);
+        setAcknowledgement(acknowledgementPayload);
         const firstAnchor = readPayload.sections[0]?.anchor_slug || "";
         setActiveSection(firstAnchor);
         setViewMode(readerMetadata.reader_mode === "pdf" ? "pdf" : "html");
@@ -261,6 +280,36 @@ export default function PublicationsReaderPage() {
     }
   };
 
+  const acknowledgePublication = async () => {
+    if (!tenant || !manualId || !revId || !acknowledgement?.pending || !isPublished) return;
+    const confirmed = window.confirm(
+      "Confirm that you have read and understood this controlled publication revision.",
+    );
+    if (!confirmed) return;
+
+    setAcknowledgementBusy(true);
+    setAcknowledgementError("");
+    try {
+      await acknowledgeRevision(tenant, manualId, revId, ACKNOWLEDGEMENT_TEXT);
+      const acknowledgedAt = new Date().toISOString();
+      setAcknowledgement((current) => ({
+        ...(current || { required: true }),
+        required: true,
+        pending: false,
+        status: "ACKNOWLEDGED",
+        acknowledged_at: acknowledgedAt,
+        acknowledgement_text: ACKNOWLEDGEMENT_TEXT,
+      }));
+      emitManualsUpdated(tenant, "revision-acknowledged");
+      const refreshedWorkflow = await getRevisionWorkflow(tenant, manualId, revId).catch(() => null);
+      if (refreshedWorkflow) setWorkflow(refreshedWorkflow);
+    } catch (caught: unknown) {
+      setAcknowledgementError(caught instanceof Error ? caught.message : "The acknowledgement could not be recorded.");
+    } finally {
+      setAcknowledgementBusy(false);
+    }
+  };
+
   const toggleCollapsed = (anchor: string) => {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -358,19 +407,37 @@ export default function PublicationsReaderPage() {
             <div className="publication-document-header__title">
               <button type="button" className="publication-mobile-nav-button" onClick={() => setMobileNavigationOpen(true)} aria-label="Open table of contents"><Menu size={18} /></button>
               <div>
-                <p>{metadata.manual_type || "Controlled publication"}</p>
+                <p>{metadata.manual_type || "Publication"}</p>
                 <h1>{metadata.title}</h1>
                 <span>{metadata.code} · Issue {metadata.issue_number || "—"} · Revision {metadata.revision_number || "—"}</span>
+                <span className={`publication-control-status ${isPublished ? "publication-control-status--controlled" : "publication-control-status--uncontrolled"}`}>
+                  {isPublished ? "Controlled publication" : "Uncontrolled draft"}
+                </span>
               </div>
             </div>
             <div className="publication-document-header__actions">
               <button type="button" className={saved ? "active" : ""} onClick={toggleSaved}><Bookmark size={16} fill={saved ? "currentColor" : "none"} /> {saved ? "Saved" : "Save document"}</button>
               <button type="button" onClick={() => void copyCitation()}><ClipboardCopy size={16} /> {copied ? "Copied" : "Copy citation"}</button>
-              <button type="button" className="primary" disabled={downloadBusy} onClick={() => void downloadPdf()}><Download size={16} /> {downloadBusy ? "Preparing…" : `Download PDF (${formatFileSize(metadata.rendered_pdf_size_bytes)})`}</button>
-              <button type="button" onClick={() => void openPrintablePdf()}><Printer size={16} /> Print PDF</button>
+              {isPublished && acknowledgement?.required && acknowledgement.pending ? (
+                <button type="button" className="publication-acknowledgement-action" disabled={acknowledgementBusy} onClick={() => void acknowledgePublication()}>
+                  <BadgeCheck size={16} /> {acknowledgementBusy ? "Recording…" : "Acknowledge revision"}
+                </button>
+              ) : null}
+              <button type="button" className="primary" disabled={downloadBusy} onClick={() => void downloadPdf()}><Download size={16} /> {downloadBusy ? "Preparing…" : `${isPublished ? "Download PDF" : "Download uncontrolled PDF"} (${formatFileSize(metadata.rendered_pdf_size_bytes)})`}</button>
+              <button type="button" onClick={() => void openPrintablePdf()}><Printer size={16} /> {isPublished ? "Print PDF" : "Print uncontrolled PDF"}</button>
               <button type="button" onClick={() => navigate(`/maintenance/${amoCode || tenant}/document-control/change-proposals?publication=${encodeURIComponent(manualId || "")}&revision=${encodeURIComponent(revId || "")}`)}>Report a problem</button>
             </div>
           </header>
+
+          {!isPublished ? (
+            <div className="publication-control-banner" role="status">
+              <TriangleAlert size={18} />
+              <div>
+                <strong>Uncontrolled draft</strong>
+                This revision has not been published. Every PDF view, download, and printed copy is visibly marked as uncontrolled and must not be used for operational work or controlled distribution.
+              </div>
+            </div>
+          ) : null}
 
           <div className="publication-floating-header">
             <button type="button" onClick={() => setMobileNavigationOpen(true)} aria-label="Open document navigation"><Menu size={17} /></button>
@@ -378,7 +445,7 @@ export default function PublicationsReaderPage() {
             <span>{activeSection ? sections.find((section) => section.anchor_slug === activeSection)?.heading || activeSection : "Document detail"}</span>
             <div>
               <button type="button" className={viewMode === "html" ? "active" : ""} disabled={!sections.length} onClick={() => setViewMode("html")}>Readable text</button>
-              <button type="button" className={viewMode === "pdf" ? "active" : ""} onClick={() => setViewMode("pdf")}>Original PDF</button>
+              <button type="button" className={viewMode === "pdf" ? "active" : ""} onClick={() => setViewMode("pdf")}>PDF view</button>
             </div>
           </div>
 
@@ -395,8 +462,27 @@ export default function PublicationsReaderPage() {
                 <dl>
                   <div><dt>Date</dt><dd>{formatDate(metadata.date)}</dd></div>
                   <div><dt>Language</dt><dd>{metadata.language || "Not recorded"}</dd></div>
-                  <div><dt>Original Issue</dt><dd><button type="button" onClick={() => void downloadPdf()}>Download original issue (PDF)</button> <span>({formatFileSize(metadata.rendered_pdf_size_bytes)})</span></dd></div>
+                  <div><dt>Status</dt><dd>{metadata.status || payload.status} · {isPublished ? "Controlled" : "Uncontrolled"}</dd></div>
+                  <div><dt>Original Issue</dt><dd><button type="button" onClick={() => void downloadPdf()}>{isPublished ? "Download original issue (PDF)" : "Download uncontrolled draft (PDF)"}</button> <span>({formatFileSize(metadata.rendered_pdf_size_bytes)})</span></dd></div>
                   <div><dt>Source</dt><dd>{metadata.source_filename || metadata.source_type || "Not recorded"}{metadata.source_size_bytes ? ` (${formatFileSize(metadata.source_size_bytes)})` : ""}</dd></div>
+                  {acknowledgement?.required ? (
+                    <div>
+                      <dt>Acknowledgement</dt>
+                      <dd>
+                        {acknowledgement.pending ? (
+                          <span className="publication-acknowledgement-state publication-acknowledgement-state--pending">
+                            Pending{acknowledgement.due_at ? ` · due ${formatDate(acknowledgement.due_at)}` : ""}
+                            {isPublished ? <button type="button" disabled={acknowledgementBusy} onClick={() => void acknowledgePublication()}>{acknowledgementBusy ? "Recording…" : "Acknowledge now"}</button> : null}
+                          </span>
+                        ) : (
+                          <span className="publication-acknowledgement-state publication-acknowledgement-state--complete">
+                            <BadgeCheck size={16} /> Acknowledged{acknowledgement.acknowledged_at ? ` on ${formatDate(acknowledgement.acknowledged_at)}` : ""}
+                          </span>
+                        )}
+                        {acknowledgementError ? <span className="publication-acknowledgement-error">{acknowledgementError}</span> : null}
+                      </dd>
+                    </div>
+                  ) : null}
                 </dl>
               </section>
 
@@ -404,7 +490,7 @@ export default function PublicationsReaderPage() {
                 {navigation}
                 <main className="publication-document-canvas" id="publication-document-content">
                   {metadata.image_only ? (
-                    <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF contains no dependable text layer. The reader has switched to the original PDF view instead of presenting inaccurate OCR text.</span></div>
+                    <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF contains no dependable text layer. The reader has switched to the PDF view instead of presenting inaccurate OCR text.</span></div>
                   ) : null}
                   {viewMode === "pdf" ? (
                     <div className="publication-pdf-viewer">
@@ -433,7 +519,7 @@ export default function PublicationsReaderPage() {
                           {!(blocksBySection[section.id] || []).length ? <p className="publication-empty-section">No searchable text was extracted for this section.</p> : null}
                         </section>
                       )) : (
-                        <div className="publication-empty-reader"><h2>No readable text is available</h2><p>Open the Original PDF view to read this publication.</p></div>
+                        <div className="publication-empty-reader"><h2>No readable text is available</h2><p>Open the PDF view to read this publication.</p></div>
                       )}
                     </article>
                   )}
