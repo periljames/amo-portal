@@ -1,9 +1,9 @@
 """Focused public CAR invitation extensions.
 
 This module is imported after the main Quality compatibility router has finished
-loading.  It prepends a stricter token route so existing public invite URLs gain
-an audit-report link without editing or duplicating the large compatibility
-router.  The underlying CAR payload and state machine remain authoritative.
+loading. It replaces the original token-read route so existing public invite
+URLs gain an audit-report link while retaining the same CAR payload and state
+machine.
 """
 from __future__ import annotations
 
@@ -121,7 +121,17 @@ def download_invited_audit_report(
     )
 
 
-# Route matching is order-sensitive. Insert the enriched token route before the
-# compatibility route already registered by router.py. Other public CAR routes
-# retain their original handlers and state-machine behaviour.
+# Remove only the original token-read operation. The extension preserves its
+# behaviour and adds report metadata, while all update/upload/history routes stay
+# on their established handlers. Avoiding duplicate path+method registrations is
+# important for deterministic routing and OpenAPI generation.
+_original_token_path = "/quality/cars/invite/{invite_token}"
+public_router.routes[:] = [
+    route
+    for route in public_router.routes
+    if not (
+        str(getattr(route, "path", "")) == _original_token_path
+        and "GET" in (getattr(route, "methods", None) or set())
+    )
+]
 public_router.routes[0:0] = list(_extension_router.routes)
