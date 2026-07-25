@@ -47,12 +47,12 @@ def validate_authority_update(
         if payload.evidence is not None
         else list(row.evidence_json or [])
     )
-    response_summary = str(
+    raw_response_summary = (
         payload.response_summary
         if "response_summary" in payload.model_fields_set
         else row.response_summary
-        or ""
-    ).strip()
+    )
+    response_summary = str(raw_response_summary or "").strip()
 
     if payload.status == "SUBMITTED" and not resulting_evidence:
         raise HTTPException(
