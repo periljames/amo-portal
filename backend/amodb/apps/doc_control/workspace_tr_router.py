@@ -76,21 +76,28 @@ def validate_temporary_revision_create(
             status_code=422,
             detail="Temporary revision filing instructions are required",
         )
-    if source_revision:
-        if source_revision.id == base_revision.id:
-            raise HTTPException(
-                status_code=409,
-                detail="The temporary revision source cannot be the unchanged base revision",
-            )
-        if source_revision.immutable_locked or status_value(source_revision) in {
-            "PUBLISHED",
-            "SUPERSEDED",
-            "ARCHIVED",
-        }:
-            raise HTTPException(
-                status_code=409,
-                detail="Temporary revision source content must remain an editable uncontrolled revision until approved",
-            )
+    if source_revision is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "TR_SOURCE_REVISION_REQUIRED",
+                "message": "Upload an uncontrolled revision containing the temporary amendment before creating its TR record.",
+            },
+        )
+    if source_revision.id == base_revision.id:
+        raise HTTPException(
+            status_code=409,
+            detail="The temporary revision source cannot be the unchanged base revision",
+        )
+    if source_revision.immutable_locked or status_value(source_revision) in {
+        "PUBLISHED",
+        "SUPERSEDED",
+        "ARCHIVED",
+    }:
+        raise HTTPException(
+            status_code=409,
+            detail="Temporary revision source content must remain an editable uncontrolled revision until approved",
+        )
 
 
 def _validate_campaign(
