@@ -16,8 +16,12 @@ const LazyRosterReports = lazy(() => import("./components/RosterReports")
   .then((module) => ({ default: module.RosterReports })));
 const LazyUnifiedRosterPlanner = lazy(() => import("./components/UnifiedRosterPlanner")
   .then((module) => ({ default: module.UnifiedRosterPlanner })));
-const LazyRosterSetupWorkspace = lazy(() => import("./components/RosterSetupWorkspace")
-  .then((module) => ({ default: module.RosterSetupWorkspace })));
+const LazyRosterPeriodQuickActions = lazy(() => import("./components/RosterPeriodQuickActions")
+  .then((module) => ({ default: module.RosterPeriodQuickActions })));
+const LazyRosterRuleQuickEditor = lazy(() => import("./components/RosterRuleQuickEditor")
+  .then((module) => ({ default: module.RosterRuleQuickEditor })));
+const LazyUnifiedRosterSettings = lazy(() => import("./components/UnifiedRosterSettings")
+  .then((module) => ({ default: module.UnifiedRosterSettings })));
 
 function DeferredWorkspace({ label, children }: { label: string; children: ReactNode }) {
   return <Suspense fallback={<RosterLoading label={label} />}>{children}</Suspense>;
@@ -100,7 +104,13 @@ export function RosterSettingsPage() {
       title="Roster and workforce setup"
       description="Periods, shifts, work patterns, contracts, rules and approvals."
     >
-      <DeferredWorkspace label="Opening roster setup…"><LazyRosterSetupWorkspace /></DeferredWorkspace>
+      <DeferredWorkspace label="Opening roster setup…">
+        <div className="wr-setup-workspace">
+          <LazyRosterPeriodQuickActions />
+          <LazyRosterRuleQuickEditor />
+          <LazyUnifiedRosterSettings />
+        </div>
+      </DeferredWorkspace>
     </RosterShell>
   );
 }
