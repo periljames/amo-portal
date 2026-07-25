@@ -15,6 +15,7 @@ from .workspace_reports_router import router as workspace_reports_router
 from .workspace_router import router as workspace_router
 from .workspace_tr_router import router as workspace_tr_router
 from .workspace_workflow_authority_router import router as workspace_workflow_authority_router
+from .workspace_workflow_create_router import router as workspace_workflow_create_router
 from .workspace_workflow_router import router as workspace_workflow_router
 
 
@@ -23,9 +24,9 @@ router.include_router(legacy_router)
 # These narrow overrides preserve existing endpoint contracts while correcting
 # access filtering, pagination, reader/controller payload separation, source-module
 # verification, controlled change assessment, authority evidence, controlled-copy
-# custody, temporary-revision custody, and release safeguards. They must be
-# registered before the compatibility workspace router because Starlette resolves
-# matching routes in declaration order.
+# custody, temporary-revision custody, server-derived workflow impact, and release
+# safeguards. They must be registered before the compatibility workspace router
+# because Starlette resolves matching routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
@@ -51,6 +52,11 @@ router.include_router(
 )
 router.include_router(
     workspace_tr_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    workspace_workflow_create_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
