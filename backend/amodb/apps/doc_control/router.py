@@ -9,6 +9,7 @@ from .workspace_change_router import router as workspace_change_router
 from .workspace_copy_router import router as workspace_copy_router
 from .workspace_dashboard_router import router as workspace_dashboard_router
 from .workspace_distribution_router import router as workspace_distribution_router
+from .workspace_external_router import router as workspace_external_router
 from .workspace_integration_router import router as workspace_integration_router
 from .workspace_library_router import router as workspace_library_router
 from .workspace_record_router import router as workspace_record_router
@@ -26,10 +27,10 @@ router.include_router(legacy_router)
 # These narrow overrides preserve existing endpoint contracts while correcting
 # access filtering, pagination, reader/controller payload separation, source-module
 # verification, controlled change assessment, authority evidence, controlled-copy
-# custody, distribution integrity, periodic-review follow-up, temporary-revision
-# custody, server-derived workflow impact, and release safeguards. They must be
-# registered before the compatibility workspace router because Starlette resolves
-# matching routes in declaration order.
+# custody, distribution integrity, external-source currency, periodic-review
+# follow-up, temporary-revision custody, server-derived workflow impact, and release
+# safeguards. They must be registered before the compatibility workspace router
+# because Starlette resolves matching routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
@@ -55,6 +56,11 @@ router.include_router(
 )
 router.include_router(
     workspace_distribution_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    workspace_external_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
