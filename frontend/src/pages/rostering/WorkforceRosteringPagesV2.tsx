@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { CalendarDays, Download, RefreshCw, Settings2 } from "lucide-react";
+import { CalendarDays, Download, Settings2 } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
 import { RosterLoading, RosterShell } from "./components/RosterShell";
@@ -16,8 +16,8 @@ const LazyRosterReports = lazy(() => import("./components/RosterReports")
   .then((module) => ({ default: module.RosterReports })));
 const LazyUnifiedRosterPlanner = lazy(() => import("./components/UnifiedRosterPlanner")
   .then((module) => ({ default: module.UnifiedRosterPlanner })));
-const LazyUnifiedRosterSettings = lazy(() => import("./components/UnifiedRosterSettings")
-  .then((module) => ({ default: module.UnifiedRosterSettings })));
+const LazyRosterSetupWorkspace = lazy(() => import("./components/RosterSetupWorkspace")
+  .then((module) => ({ default: module.RosterSetupWorkspace })));
 
 function DeferredWorkspace({ label, children }: { label: string; children: ReactNode }) {
   return <Suspense fallback={<RosterLoading label={label} />}>{children}</Suspense>;
@@ -96,12 +96,11 @@ export function RosterReportsPage() {
 export function RosterSettingsPage() {
   return (
     <RosterShell
-      eyebrow="Module configuration"
+      eyebrow="Setup"
       title="Roster and workforce setup"
-      description="Manage periods, shift templates, work patterns, employment contracts, leave policy, rules, approvals and planner preferences without duplicating tenant personnel data."
-      actions={<span className="wr-header-badge"><RefreshCw size={15} /> Source-aware</span>}
+      description="Periods, shifts, work patterns, contracts, rules and approvals."
     >
-      <DeferredWorkspace label="Opening roster setup…"><LazyUnifiedRosterSettings /></DeferredWorkspace>
+      <DeferredWorkspace label="Opening roster setup…"><LazyRosterSetupWorkspace /></DeferredWorkspace>
     </RosterShell>
   );
 }
