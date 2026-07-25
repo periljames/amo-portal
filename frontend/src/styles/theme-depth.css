@@ -1,0 +1,190 @@
+/* Portal-wide depth layer.
+   Loaded last so every module receives the same dark-surface hierarchy without
+   overriding status, severity or tenant-brand colours. */
+
+body:not([data-color-scheme="light"]) {
+  --bg-base: #07111f;
+  --bg-base-alt: #030712;
+  --bg-accent: rgba(34, 211, 238, 0.15);
+  --bg-accent-2: rgba(16, 185, 129, 0.12);
+
+  --surface: rgba(10, 22, 39, 0.93);
+  --surface-elevated: rgba(19, 34, 55, 0.97);
+  --surface-soft: rgba(7, 17, 31, 0.84);
+  --surface-border: rgba(126, 151, 181, 0.34);
+
+  --text-primary: #f4f7fb;
+  --text-secondary: #c5d0df;
+  --text-muted: #8ea0b8;
+  --border-subtle: rgba(126, 151, 181, 0.25);
+  --panel-divider: rgba(126, 151, 181, 0.18);
+
+  --input-bg: rgba(7, 18, 33, 0.95);
+  --input-bg-focus: rgba(14, 28, 47, 0.99);
+  --input-border: rgba(126, 151, 181, 0.42);
+  --input-placeholder: #8294ac;
+
+  --shadow-soft:
+    0 22px 54px rgba(0, 0, 0, 0.34),
+    0 1px 0 rgba(255, 255, 255, 0.025);
+  --portal-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.28),
+    0 1px 0 rgba(255, 255, 255, 0.025);
+
+  background:
+    radial-gradient(circle at 8% -8%, rgba(34, 211, 238, 0.13), transparent 32rem),
+    radial-gradient(circle at 95% 105%, rgba(16, 185, 129, 0.1), transparent 36rem),
+    linear-gradient(145deg, #07111f 0%, #081426 48%, #030712 100%);
+  background-attachment: fixed;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .app-shell__topbar,
+  .app-shell-v2__topbar,
+  .app-shell__sidebar,
+  .app-shell-v2__sidebar,
+  .glass-panel,
+  .section-card,
+  .admin-panel,
+  .admin-page-header,
+  .admin-card,
+  .qms-panel,
+  .qms-card,
+  .training-panel,
+  .training-card,
+  .dashboard-card,
+  .cockpit-card,
+  .planning-panel,
+  .production-panel,
+  .wr-panel,
+  .wr-planner-panel,
+  .wr-issue-rail
+) {
+  border-color: color-mix(in srgb, var(--border-subtle) 88%, transparent);
+  background-image:
+    linear-gradient(145deg,
+      color-mix(in srgb, var(--surface-elevated) 94%, rgba(255, 255, 255, 0.025)),
+      color-mix(in srgb, var(--surface) 97%, transparent));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 14px 34px rgba(0, 0, 0, 0.2);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .admin-card,
+  .qms-card,
+  .training-card,
+  .dashboard-card,
+  .cockpit-card,
+  .wr-setup-card,
+  .wr-capacity-card,
+  .wr-metric,
+  .wr-command-link
+) {
+  border-color: color-mix(in srgb, var(--border-subtle) 82%, transparent);
+  background-image:
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--surface-elevated) 84%, transparent),
+      color-mix(in srgb, var(--surface-soft) 94%, transparent));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 7px 18px rgba(0, 0, 0, 0.13);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .admin-card,
+  .qms-card,
+  .training-card,
+  .dashboard-card,
+  .cockpit-card,
+  .wr-setup-card,
+  .wr-capacity-card,
+  .wr-command-link
+):hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 24%, var(--border-subtle));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea
+) {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea
+):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-primary) 22%, var(--input-border));
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .data-table,
+  .aum-table,
+  .admin-table,
+  .qms-table,
+  .wr-table
+) tbody tr {
+  transition: background-color 120ms ease;
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .data-table,
+  .aum-table,
+  .admin-table,
+  .qms-table,
+  .wr-table
+) tbody tr:hover {
+  background: color-mix(in srgb, var(--surface-elevated) 84%, var(--accent-primary) 4%);
+}
+
+body:not([data-color-scheme="light"]) :where(
+  .drawer,
+  .modal,
+  .popover,
+  .dropdown-menu,
+  .context-menu,
+  .menu-surface,
+  .wr-drawer
+) {
+  background-image:
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--surface-elevated) 98%, rgba(255, 255, 255, 0.02)),
+      color-mix(in srgb, var(--surface) 98%, transparent));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 24px 60px rgba(0, 0, 0, 0.38);
+}
+
+body[data-color-scheme="light"] :where(
+  .glass-panel,
+  .section-card,
+  .admin-panel,
+  .admin-card,
+  .qms-panel,
+  .qms-card,
+  .training-panel,
+  .training-card,
+  .dashboard-card,
+  .cockpit-card,
+  .planning-panel,
+  .production-panel,
+  .wr-panel,
+  .wr-planner-panel,
+  .wr-issue-rail
+) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 10px 26px rgba(15, 23, 42, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body :where(.admin-card, .qms-card, .training-card, .dashboard-card, .cockpit-card, .wr-setup-card, .wr-capacity-card, .wr-command-link) {
+    transition: none;
+  }
+}

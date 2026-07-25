@@ -1,5 +1,7 @@
+import "./components/roster-setup-refinement.css";
+
 import { lazy, Suspense, type ReactNode } from "react";
-import { CalendarDays, Download, RefreshCw, Settings2 } from "lucide-react";
+import { CalendarDays, Download, Settings2 } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
 import { RosterLoading, RosterShell } from "./components/RosterShell";
@@ -16,6 +18,10 @@ const LazyRosterReports = lazy(() => import("./components/RosterReports")
   .then((module) => ({ default: module.RosterReports })));
 const LazyUnifiedRosterPlanner = lazy(() => import("./components/UnifiedRosterPlanner")
   .then((module) => ({ default: module.UnifiedRosterPlanner })));
+const LazyRosterPeriodQuickActions = lazy(() => import("./components/RosterPeriodQuickActions")
+  .then((module) => ({ default: module.RosterPeriodQuickActions })));
+const LazyRosterRuleQuickEditor = lazy(() => import("./components/RosterRuleQuickEditor")
+  .then((module) => ({ default: module.RosterRuleQuickEditor })));
 const LazyUnifiedRosterSettings = lazy(() => import("./components/UnifiedRosterSettings")
   .then((module) => ({ default: module.UnifiedRosterSettings })));
 
@@ -96,12 +102,17 @@ export function RosterReportsPage() {
 export function RosterSettingsPage() {
   return (
     <RosterShell
-      eyebrow="Module configuration"
+      eyebrow="Setup"
       title="Roster and workforce setup"
-      description="Manage periods, shift templates, work patterns, employment contracts, leave policy, rules, approvals and planner preferences without duplicating tenant personnel data."
-      actions={<span className="wr-header-badge"><RefreshCw size={15} /> Source-aware</span>}
+      description="Periods, shifts, work patterns, contracts, rules and approvals."
     >
-      <DeferredWorkspace label="Opening roster setup…"><LazyUnifiedRosterSettings /></DeferredWorkspace>
+      <DeferredWorkspace label="Opening roster setup…">
+        <div className="wr-setup-workspace">
+          <LazyRosterPeriodQuickActions />
+          <LazyRosterRuleQuickEditor />
+          <LazyUnifiedRosterSettings />
+        </div>
+      </DeferredWorkspace>
     </RosterShell>
   );
 }
