@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Archive, CheckCircle2, Copy, FileClock, Landmark, Play, Plus, Send, ShieldCheck } from "lucide-react";
+import { Archive, CheckCircle2, Copy, FileClock, Landmark, Play, Plus, ShieldCheck } from "lucide-react";
 
 import {
   completeDocumentReview,
@@ -14,7 +14,7 @@ import {
   updateAuthoritySubmission,
   type DocumentDetailResponse,
 } from "../../services/documentControl";
-import { DocumentControlEmpty, DocumentControlStatus } from "./DocumentControlShell";
+import { DocumentControlEmpty } from "./DocumentControlShell";
 
 export type LifecycleView = "workflow" | "authority" | "temporary-revisions" | "copies" | "reviews";
 
@@ -40,11 +40,6 @@ const WORKFLOW_ACTIONS: Record<string, ActionOption[]> = {
     { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
   ],
   QUALITY_APPROVED: [{ action: "SUBMIT_ACCOUNTABLE_MANAGER", label: "Submit to Accountable Manager" }],
-  ACCOUNTABLE_MANAGER_APPROVAL: [
-    { action: "APPROVE_ACCOUNTABLE_MANAGER", label: "Approve and schedule" },
-    { action: "MARK_AUTHORITY_SUBMITTED", label: "Confirm authority submission" },
-    { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
-  ],
   AUTHORITY_SUBMITTED: [
     { action: "MARK_AUTHORITY_APPROVED", label: "Confirm authority approval" },
     { action: "REQUEST_CORRECTIONS", label: "Return for corrections", danger: true },
@@ -87,8 +82,11 @@ function evidenceFrom(value: string): Array<{ asset_id: string }> {
     .map((asset_id) => ({ asset_id }));
 }
 
-function idsFrom(value: string): string[] {
-  return value.split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean);
+function statementsFrom(value: string): string[] {
+  return value
+    .split(/[\n;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function useMutation(onChanged: () => void) {
@@ -133,20 +131,33 @@ function WorkflowActions({ detail, tenant, onChanged }: Omit<Props, "activeView"
 
   if (!latest) return <DocumentControlEmpty title="No revision exists" message="Upload a source revision before creating a controlled workflow." />;
   if (!workflow) {
-    return <div className="dc-form"><div className="dc-callout"><Play size={17} /><div><strong>Start controlled review.</strong> The workflow is tied to revision {latest.revision_number} and inherits the document's authority requirement.</div></div><div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={mutation.busy || latest.immutable} onClick={() => void mutation.run(() => createDocumentWorkflow(tenant, { manual_id: detail.document.id, revision_id: latest.id, requires_authority: detail.document.profile.requires_authority_approval, training_impact_required: false, training_readiness_status: "NOT_REQUIRED", qms_readiness_status: "NOT_REQUIRED", distribution_readiness_status: "NOT_REQUIRED" }))}><Play size={14} /> Start revision workflow</button></div><ErrorMessage message={mutation.error} /></div>;
+    return <div className="dc-form">
+      <div className="dc-callout"><Play size={17} /><div><strong>Start controlled review.</strong><div>Impact and readiness are derived from the profile, open changes, and live module links for revision {latest.revision_number}.</div></div></div>
+      <div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={mutation.busy || latest.immutable} onClick={() => void mutation.run(() => createDocumentWorkflow(tenant, { manual_id: detail.document.id, revision_id: latest.id }))}><Play size={14} /> Start revision workflow</button></div>
+      <ErrorMessage message={mutation.error} />
+    </div>;
   }
 
-  const actions = WORKFLOW_ACTIONS[workflow.state] || [];
+  let actions = WORKFLOW_ACTIONS[workflow.state] || [];
+  if (workflow.state === "ACCOUNTABLE_MANAGER_APPROVAL") {
+    actions = workflow.requires_authority
+      ? [
+          { action: "MARK_AUTHORITY_SUBMITTED", label: "Confirm authority submission" },
+          { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
+        ]
+      : [
+          { action: "APPROVE_ACCOUNTABLE_MANAGER", label: "Approve and schedule" },
+          { action: "REQUEST_CORRECTIONS", label: "Request corrections", danger: true },
+        ];
+  }
   const transition = (item: ActionOption) => mutation.run(() => transitionDocumentWorkflow(tenant, workflow.id, {
     action: item.action,
     comments: comments.trim() || null,
     evidence: evidenceFrom(evidence),
     expected_version: workflow.version,
     effective_at: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
-    training_readiness_status: training,
-    qms_readiness_status: qms,
-    // Distribution readiness is managed only by campaign issuance on the server.
-    distribution_readiness_status: workflow.distribution_readiness_status,
+    training_readiness_status: training !== workflow.training_readiness_status ? training : undefined,
+    qms_readiness_status: qms !== workflow.qms_readiness_status ? qms : undefined,
   }));
 
   return <div className="dc-form">
@@ -182,8 +193,15 @@ function AuthorityActions({ detail, tenant, onChanged }: Omit<Props, "activeView
     void mutation.run(() => createAuthoritySubmission(tenant, { manual_id: detail.document.id, revision_id: revision.id, workflow_id: workflow?.id || null, authority_name: authorityName, submission_reference: reference, response_due_at: responseDue ? new Date(responseDue).toISOString() : null, evidence: [] }));
   };
   const update = () => {
-    if (!selected) return;
+    if (!selected || !nextStatus) return;
     void mutation.run(() => updateAuthoritySubmission(tenant, selected.id, { status: nextStatus, response_summary: summary.trim() || null, response_due_at: responseDue ? new Date(responseDue).toISOString() : null, evidence: evidenceFrom(evidence) }));
+  };
+  const selectSubmission = (id: string) => {
+    setSelectedId(id);
+    const row = detail.authority_submissions.find((item) => item.id === id);
+    setNextStatus(row ? (AUTHORITY_NEXT[row.status] || [])[0] || "" : "");
+    setSummary("");
+    setEvidence("");
   };
 
   return <div className="dc-grid">
@@ -195,7 +213,7 @@ function AuthorityActions({ detail, tenant, onChanged }: Omit<Props, "activeView
       <div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || !revision}><Plus size={14} /> Create draft submission</button></div>
     </form>
     {selected ? <div className="dc-form">
-      <label className="wide"><span>Submission to update</span><select value={selected.id} onChange={(event) => { setSelectedId(event.target.value); setNextStatus(""); }}>{detail.authority_submissions.map((row) => <option key={row.id} value={row.id}>{row.authority_name} · {row.submission_reference} · {row.status}</option>)}</select></label>
+      <label className="wide"><span>Submission to update</span><select value={selected.id} onChange={(event) => selectSubmission(event.target.value)}>{detail.authority_submissions.map((row) => <option key={row.id} value={row.id}>{row.authority_name} · {row.submission_reference} · {row.status}</option>)}</select></label>
       <label><span>Next authority status</span><select value={nextStatus} onChange={(event) => setNextStatus(event.target.value)}>{available.map((status) => <option key={status}>{status}</option>)}</select></label>
       <label className="wide"><span>Authority response, approval reference, or disposition reason</span><textarea value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
       <label className="wide"><span>Submission or response evidence asset IDs</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} placeholder="One evidence asset ID per line" /></label>
@@ -205,11 +223,15 @@ function AuthorityActions({ detail, tenant, onChanged }: Omit<Props, "activeView
 }
 
 function TemporaryRevisionActions({ detail, tenant, onChanged }: Omit<Props, "activeView">) {
-  const current = detail.document.latest_revision;
+  const publishedRevisionId = detail.document.current_published_revision_id;
+  const latest = detail.document.latest_revision;
+  const sourceRevisionId = latest && latest.id !== publishedRevisionId && !latest.immutable ? latest.id : "";
   const mutation = useMutation(onChanged);
   const [number, setNumber] = useState("");
   const [title, setTitle] = useState("");
   const [reason, setReason] = useState("");
+  const [affectedSections, setAffectedSections] = useState("");
+  const [filingInstructions, setFilingInstructions] = useState("");
   const [effective, setEffective] = useState("");
   const [expiry, setExpiry] = useState("");
   const [selectedId, setSelectedId] = useState(detail.temporary_revisions[0]?.id || "");
@@ -221,17 +243,56 @@ function TemporaryRevisionActions({ detail, tenant, onChanged }: Omit<Props, "ac
 
   const create = (event: FormEvent) => {
     event.preventDefault();
-    if (!current) return;
-    void mutation.run(() => createTemporaryRevision(tenant, { manual_id: detail.document.id, base_revision_id: current.id, tr_number: number, title, reason, affected_sections: [], effective_date: effective, expiry_date: expiry }));
+    if (!publishedRevisionId || !sourceRevisionId) return;
+    void mutation.run(() => createTemporaryRevision(tenant, {
+      manual_id: detail.document.id,
+      base_revision_id: publishedRevisionId,
+      revision_id: sourceRevisionId,
+      tr_number: number,
+      title,
+      reason,
+      affected_sections: statementsFrom(affectedSections).map((section) => ({ section })),
+      filing_instructions: filingInstructions,
+      effective_date: effective,
+      expiry_date: expiry,
+    }));
   };
   const transition = () => {
-    if (!selected) return;
+    if (!selected || !nextStatus) return;
     void mutation.run(() => transitionTemporaryRevision(tenant, selected.id, { status: nextStatus, approval_status: nextStatus === "APPROVED" ? "APPROVED" : undefined, distribution_campaign_id: campaignId || null, incorporated_revision_id: incorporatedRevisionId || null }));
   };
+  const selectTemporaryRevision = (id: string) => {
+    setSelectedId(id);
+    const row = detail.temporary_revisions.find((item) => item.id === id);
+    setNextStatus(row ? (TR_NEXT[row.status] || [])[0] || "" : "");
+    setCampaignId("");
+    setIncorporatedRevisionId("");
+  };
+  const sourceError = !publishedRevisionId
+    ? "A published revision is required before creating a temporary revision."
+    : !sourceRevisionId
+      ? "Upload an uncontrolled source revision containing the temporary amendment before creating the TR record."
+      : "";
 
   return <div className="dc-grid">
-    <form className="dc-form" onSubmit={create}><label><span>TR number</span><input value={number} onChange={(event) => setNumber(event.target.value)} required /></label><label><span>Effective date</span><input type="date" value={effective} onChange={(event) => setEffective(event.target.value)} required /></label><label className="wide"><span>Subject</span><input value={title} onChange={(event) => setTitle(event.target.value)} required /></label><label className="wide"><span>Reason and filing instruction</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} required /></label><label><span>Expiry or incorporation due</span><input type="date" value={expiry} onChange={(event) => setExpiry(event.target.value)} required /></label><ErrorMessage message={mutation.error} /><div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || !current}><Plus size={14} /> Create temporary revision</button></div></form>
-    {selected ? <div className="dc-form"><label className="wide"><span>Temporary revision</span><select value={selected.id} onChange={(event) => { setSelectedId(event.target.value); setNextStatus(""); }}>{detail.temporary_revisions.map((row) => <option key={row.id} value={row.id}>{row.tr_number} · {row.status} · expires {row.expiry_date}</option>)}</select></label><label><span>Next status</span><select value={nextStatus} onChange={(event) => setNextStatus(event.target.value)}>{nextStates.map((status) => <option key={status}>{status}</option>)}</select></label><label><span>Issued campaign ID</span><input value={campaignId} onChange={(event) => setCampaignId(event.target.value)} placeholder="Required before IN_FORCE" /></label><label className="wide"><span>Incorporating permanent revision ID</span><input value={incorporatedRevisionId} onChange={(event) => setIncorporatedRevisionId(event.target.value)} placeholder="Required before INCORPORATED" /></label><div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={mutation.busy || !nextStatus} onClick={transition}><FileClock size={14} /> Apply temporary revision transition</button></div></div> : <DocumentControlEmpty title="No temporary revision" message="Create a temporary revision against an existing source revision." />}
+    <form className="dc-form" onSubmit={create}>
+      <label><span>TR number</span><input value={number} onChange={(event) => setNumber(event.target.value)} required /></label>
+      <label><span>Effective date</span><input type="date" value={effective} onChange={(event) => setEffective(event.target.value)} required /></label>
+      <label className="wide"><span>Subject</span><input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
+      <label className="wide"><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} required /></label>
+      <label className="wide"><span>Affected sections or insertion points</span><textarea value={affectedSections} onChange={(event) => setAffectedSections(event.target.value)} placeholder="One section or insertion point per line" required /></label>
+      <label className="wide"><span>Filing instructions</span><textarea value={filingInstructions} onChange={(event) => setFilingInstructions(event.target.value)} placeholder="State where and how the temporary revision must be filed and removed" required /></label>
+      <label><span>Expiry or incorporation due</span><input type="date" value={expiry} onChange={(event) => setExpiry(event.target.value)} required /></label>
+      <ErrorMessage message={mutation.error || sourceError} />
+      <div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || Boolean(sourceError)}><Plus size={14} /> Create temporary revision</button></div>
+    </form>
+    {selected ? <div className="dc-form">
+      <label className="wide"><span>Temporary revision</span><select value={selected.id} onChange={(event) => selectTemporaryRevision(event.target.value)}>{detail.temporary_revisions.map((row) => <option key={row.id} value={row.id}>{row.tr_number} · {row.status} · expires {row.expiry_date}</option>)}</select></label>
+      <label><span>Next status</span><select value={nextStatus} onChange={(event) => setNextStatus(event.target.value)}>{nextStates.map((status) => <option key={status}>{status}</option>)}</select></label>
+      <label><span>Issued campaign ID</span><input value={campaignId} onChange={(event) => setCampaignId(event.target.value)} placeholder="Required before IN_FORCE" /></label>
+      <label className="wide"><span>Incorporating permanent revision ID</span><input value={incorporatedRevisionId} onChange={(event) => setIncorporatedRevisionId(event.target.value)} placeholder="Required before INCORPORATED" /></label>
+      <div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={mutation.busy || !nextStatus} onClick={transition}><FileClock size={14} /> Apply temporary revision transition</button></div>
+    </div> : <DocumentControlEmpty title="No temporary revision" message="Upload temporary amendment content, then create its controlled TR record." />}
   </div>;
 }
 
@@ -256,13 +317,22 @@ function ControlledCopyActions({ detail, tenant, onChanged }: Omit<Props, "activ
     void mutation.run(() => createControlledCopy(tenant, { manual_id: detail.document.id, revision_id: published.id, copy_number: copyNumber, format: "HARDCOPY", holder_name: holderName || null, location_text: location, metadata: {} }));
   };
   const addEvent = () => {
-    if (!selected) return;
+    if (!selected || !eventType) return;
     void mutation.run(() => createControlledCopyEvent(tenant, selected.id, { event_type: eventType, to_holder_user_id: holderId || null, to_location: toLocation || null, reason: reason.trim() || null, evidence: evidenceFrom(evidence) }));
+  };
+  const selectCopy = (id: string) => {
+    setSelectedId(id);
+    const row = detail.controlled_copies.find((item) => item.id === id);
+    setEventType(row ? (COPY_EVENTS[row.status] || [])[0] || "" : "");
+    setHolderId("");
+    setToLocation("");
+    setReason("");
+    setEvidence("");
   };
 
   return <div className="dc-grid">
     <form className="dc-form" onSubmit={create}><label><span>Copy number</span><input value={copyNumber} onChange={(event) => setCopyNumber(event.target.value)} required /></label><label><span>Holder name</span><input value={holderName} onChange={(event) => setHolderName(event.target.value)} /></label><label className="wide"><span>Physical location</span><input value={location} onChange={(event) => setLocation(event.target.value)} required /></label><ErrorMessage message={mutation.error || (!published ? "A published revision is required before issuing a controlled copy." : "")} /><div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || !published}><Copy size={14} /> Issue controlled copy</button></div></form>
-    {selected ? <div className="dc-form"><label className="wide"><span>Controlled copy</span><select value={selected.id} onChange={(event) => { setSelectedId(event.target.value); setEventType(""); }}>{detail.controlled_copies.map((row) => <option key={row.id} value={row.id}>{row.copy_number} · {row.status} · {row.location_text}</option>)}</select></label><label><span>Custody event</span><select value={eventType} onChange={(event) => setEventType(event.target.value)}>{events.map((value) => <option key={value}>{value}</option>)}</select></label><label><span>New active tenant holder ID</span><input value={holderId} onChange={(event) => setHolderId(event.target.value)} /></label><label><span>New controlled location</span><input value={toLocation} onChange={(event) => setToLocation(event.target.value)} /></label><label className="wide"><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label><label className="wide"><span>Disposition evidence asset IDs</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} /></label><div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={mutation.busy || !eventType} onClick={addEvent}><Archive size={14} /> Record custody event</button></div></div> : <DocumentControlEmpty title="No numbered copy" message="Issue a copy only from the effective published revision." />}
+    {selected ? <div className="dc-form"><label className="wide"><span>Controlled copy</span><select value={selected.id} onChange={(event) => selectCopy(event.target.value)}>{detail.controlled_copies.map((row) => <option key={row.id} value={row.id}>{row.copy_number} · {row.status} · {row.location_text}</option>)}</select></label><label><span>Custody event</span><select value={eventType} onChange={(event) => setEventType(event.target.value)}>{events.map((value) => <option key={value}>{value}</option>)}</select></label><label><span>New active tenant holder ID</span><input value={holderId} onChange={(event) => setHolderId(event.target.value)} /></label><label><span>New controlled location</span><input value={toLocation} onChange={(event) => setToLocation(event.target.value)} /></label><label className="wide"><span>Reason</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label><label className="wide"><span>Disposition evidence asset IDs</span><textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} /></label><div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={mutation.busy || !eventType} onClick={addEvent}><Archive size={14} /> Record custody event</button></div></div> : <DocumentControlEmpty title="No numbered copy" message="Issue a copy only from the effective published revision." />}
   </div>;
 }
 
@@ -278,15 +348,16 @@ function ReviewActions({ detail, tenant, onChanged }: Omit<Props, "activeView">)
 
   const create = (event: FormEvent) => {
     event.preventDefault();
-    void mutation.run(() => createDocumentReview(tenant, { manual_id: detail.document.id, revision_id: detail.document.current_published_revision_id || detail.document.latest_revision?.id || null, owner_user_id: ownerId || null, due_at: new Date(dueAt).toISOString() }));
+    if (!dueAt) return;
+    void mutation.run(() => createDocumentReview(tenant, { manual_id: detail.document.id, revision_id: detail.document.current_published_revision_id || null, owner_user_id: ownerId || null, due_at: new Date(dueAt).toISOString() }));
   };
   const complete = () => {
     if (!selectedId) return;
-    void mutation.run(() => completeDocumentReview(tenant, selectedId, { outcome, findings: idsFrom(findingText).map((value) => ({ finding: value })), actions: idsFrom(actionText).map((value) => ({ action: value })) }));
+    void mutation.run(() => completeDocumentReview(tenant, selectedId, { outcome, findings: statementsFrom(findingText).map((value) => ({ finding: value })), actions: statementsFrom(actionText).map((value) => ({ action: value })) }));
   };
 
   return <div className="dc-grid">
-    <form className="dc-form" onSubmit={create}><label><span>Review due</span><input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} required /></label><label><span>Owner active tenant user ID</span><input value={ownerId} onChange={(event) => setOwnerId(event.target.value)} /></label><ErrorMessage message={mutation.error} /><div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || !dueAt}><Plus size={14} /> Schedule review</button></div></form>
-    {openReviews.length ? <div className="dc-form"><label className="wide"><span>Review to complete</span><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{openReviews.map((row) => <option key={row.id} value={row.id}>{row.due_at} · {row.owner_user_id || "Unassigned"} · {row.status}</option>)}</select></label><label><span>Outcome</span><select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option>CONTINUE</option><option>CHANGE_REQUIRED</option><option>WITHDRAW</option><option>SUPERSEDE</option></select></label><label className="wide"><span>Findings</span><textarea value={findingText} onChange={(event) => setFindingText(event.target.value)} placeholder="Separate findings with commas, semicolons, or new lines" /></label><label className="wide"><span>Resulting actions</span><textarea value={actionText} onChange={(event) => setActionText(event.target.value)} placeholder="Separate actions with commas, semicolons, or new lines" /></label><div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={mutation.busy} onClick={complete}><CheckCircle2 size={14} /> Complete periodic review</button></div></div> : <DocumentControlEmpty title="No open review" message="Schedule the next periodic applicability review." />}
+    <form className="dc-form" onSubmit={create}><label><span>Review due</span><input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} required /></label><label><span>Owner active tenant user ID</span><input value={ownerId} onChange={(event) => setOwnerId(event.target.value)} /></label><ErrorMessage message={mutation.error} /><div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || !dueAt || !detail.document.current_published_revision_id}><Plus size={14} /> Schedule review</button></div></form>
+    {openReviews.length ? <div className="dc-form"><label className="wide"><span>Review to complete</span><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{openReviews.map((row) => <option key={row.id} value={row.id}>{row.due_at} · {row.owner_user_id || "Unassigned"} · {row.status}</option>)}</select></label><label><span>Outcome</span><select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option>CONTINUE</option><option>CHANGE_REQUIRED</option><option>WITHDRAW</option><option>SUPERSEDE</option></select></label><label className="wide"><span>Findings</span><textarea value={findingText} onChange={(event) => setFindingText(event.target.value)} placeholder="One finding per line" /></label><label className="wide"><span>Resulting actions</span><textarea value={actionText} onChange={(event) => setActionText(event.target.value)} placeholder="One resulting action per line" /></label><div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={mutation.busy} onClick={complete}><CheckCircle2 size={14} /> Complete periodic review</button></div></div> : <DocumentControlEmpty title="No open review" message="Schedule the next periodic applicability review." />}
   </div>;
 }
