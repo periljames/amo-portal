@@ -1,0 +1,146 @@
+.wr-rule-control {
+  padding: 0;
+  overflow: hidden;
+}
+
+.wr-rule-control > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.wr-rule-control > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wr-rule-control > summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wr-rule-control > summary svg {
+  color: var(--wr-accent);
+}
+
+.wr-rule-control > summary small {
+  color: var(--wr-muted);
+  font-size: .66rem;
+}
+
+.wr-rule-control[open] > summary {
+  border-bottom: 1px solid var(--wr-border);
+  background: var(--wr-surface-soft);
+}
+
+.wr-rule-control > .wr-inline-error {
+  margin: 9px 11px 0;
+}
+
+.wr-rule-control__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px;
+  padding: 10px 11px;
+}
+
+.wr-rule-control__list article {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--wr-border);
+  border-radius: 9px;
+  background: var(--wr-surface-soft);
+}
+
+.wr-rule-control__list article.is-inactive {
+  opacity: .58;
+}
+
+.wr-rule-control__list article > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.wr-rule-control__list strong,
+.wr-rule-control__list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-rule-control__list strong {
+  font-size: .7rem;
+}
+
+.wr-rule-control__list small {
+  color: var(--wr-muted);
+  font-size: .61rem;
+}
+
+.wr-rule-control__editor {
+  display: grid;
+  gap: 10px;
+  margin: 0 11px 11px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--wr-accent) 34%, var(--wr-border));
+  border-radius: 11px;
+  background: var(--wr-surface-strong);
+}
+
+.wr-rule-control__editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wr-rule-control__fields {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.4fr) repeat(3, minmax(130px, .7fr)) repeat(2, minmax(170px, .8fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.wr-rule-control__fields label {
+  display: grid;
+  gap: 4px;
+}
+
+.wr-rule-control__fields label > span {
+  color: var(--wr-muted);
+  font-size: .64rem;
+  font-weight: 760;
+}
+
+.wr-rule-control__check {
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+}
+
+.wr-rule-control__check input {
+  width: auto;
+}
+
+@media (max-width: 1200px) {
+  .wr-rule-control__fields {
+    grid-template-columns: repeat(3, minmax(140px, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .wr-rule-control__fields {
+    grid-template-columns: 1fr;
+  }
+}
