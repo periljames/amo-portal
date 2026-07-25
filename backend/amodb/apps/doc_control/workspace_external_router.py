@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -42,6 +43,13 @@ def validate_external_receipt(
             status_code=422,
             detail="External revision publication date cannot be in the future",
         )
+    if payload.checksum_sha256 and not re.fullmatch(
+        r"[0-9a-fA-F]{64}", payload.checksum_sha256
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="External revision checksum must be a 64-character SHA-256 hexadecimal digest",
+        )
 
     retained_evidence = bool(payload.evidence or payload.checksum_sha256)
     if payload.currency_status == "CURRENT" and not retained_evidence:
@@ -52,7 +60,11 @@ def validate_external_receipt(
                 "message": "A checksum or retained source evidence is required before an external revision is marked current.",
             },
         )
-    if payload.applicability_status in {"APPLICABLE", "NOT_APPLICABLE", "PARTIAL"} and not payload.evidence:
+    if payload.applicability_status in {
+        "APPLICABLE",
+        "NOT_APPLICABLE",
+        "PARTIAL",
+    } and not payload.evidence:
         raise HTTPException(
             status_code=422,
             detail={
@@ -118,6 +130,10 @@ def create_evidenced_external_revision_receipt(
     if not source:
         raise HTTPException(status_code=404, detail="External document source not found")
     validate_external_receipt(source, payload)
+    if payload.checksum_sha256:
+        payload = payload.model_copy(
+            update={"checksum_sha256": payload.checksum_sha256.lower()}
+        )
 
     duplicate = (
         db.query(dm.ExternalRevisionReceipt)
