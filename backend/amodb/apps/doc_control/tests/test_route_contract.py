@@ -16,6 +16,8 @@ def test_document_control_override_routes_are_registered_first() -> None:
         "/doc-control/workspace/t/{tenant_slug}/distribution-campaigns": "amodb.apps.doc_control.workspace_distribution_router",
         "/doc-control/workspace/t/{tenant_slug}/distribution-campaigns/{campaign_id}/issue": "amodb.apps.doc_control.workspace_distribution_router",
         "/doc-control/workspace/t/{tenant_slug}/distribution-campaigns/{campaign_id}/acknowledge": "amodb.apps.doc_control.workspace_distribution_router",
+        "/doc-control/workspace/t/{tenant_slug}/external-sources": "amodb.apps.doc_control.workspace_external_router",
+        "/doc-control/workspace/t/{tenant_slug}/external-sources/{source_id}/receipts": "amodb.apps.doc_control.workspace_external_router",
         "/doc-control/workspace/t/{tenant_slug}/reviews": "amodb.apps.doc_control.workspace_review_router",
         "/doc-control/workspace/t/{tenant_slug}/reviews/{review_id}/complete": "amodb.apps.doc_control.workspace_review_router",
         "/doc-control/workspace/t/{tenant_slug}/temporary-revisions/{tr_id}/transition": "amodb.apps.doc_control.workspace_tr_router",
