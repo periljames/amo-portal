@@ -1,3 +1,5 @@
+import "./roster-rule-control.css";
+
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Save, ShieldCheck, X } from "lucide-react";
