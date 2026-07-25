@@ -1,0 +1,328 @@
+.wr-setup-workspace {
+  display: grid;
+  gap: 10px;
+}
+
+.wr-period-quick {
+  overflow: hidden;
+  background-image:
+    linear-gradient(135deg, color-mix(in srgb, var(--wr-accent) 5%, transparent), transparent 42%),
+    linear-gradient(155deg, color-mix(in srgb, var(--wr-surface-strong) 94%, transparent), var(--wr-surface));
+}
+
+.wr-period-quick__header,
+.wr-period-editor__heading,
+.wr-period-current,
+.wr-period-quick__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wr-period-quick__header {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.wr-period-quick__header h2 {
+  margin: 3px 0 0;
+  font-size: 1rem;
+}
+
+.wr-period-quick__actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wr-period-current {
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--wr-accent) 22%, var(--wr-border));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--wr-surface-strong) 91%, var(--wr-accent) 3%);
+}
+
+.wr-period-current.is-empty {
+  border-style: dashed;
+}
+
+.wr-period-current__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 9px;
+  color: var(--wr-accent);
+  background: var(--wr-accent-soft);
+}
+
+.wr-period-current > div:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.wr-period-current strong,
+.wr-period-quick__row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-period-current span,
+.wr-period-quick__row span,
+.wr-period-quick__row small {
+  color: var(--wr-muted);
+  font-size: .68rem;
+}
+
+.wr-period-current > span:last-child {
+  white-space: nowrap;
+}
+
+.wr-period-editor {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--wr-accent) 35%, var(--wr-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--wr-surface-strong) 96%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent);
+}
+
+.wr-period-editor__heading {
+  justify-content: space-between;
+}
+
+.wr-period-editor__grid {
+  display: grid;
+  grid-template-columns: minmax(120px, .7fr) minmax(180px, 1.35fr) repeat(2, minmax(145px, .8fr)) minmax(220px, 1.35fr) minmax(135px, .65fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.wr-period-editor__grid label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wr-period-editor__grid label > span {
+  color: var(--wr-muted);
+  font-size: .65rem;
+  font-weight: 760;
+}
+
+.wr-period-editor__timezone small {
+  color: var(--wr-faint);
+  font-size: .58rem;
+  line-height: 1.25;
+}
+
+.wr-period-editor__notes {
+  grid-column: 1 / -1;
+}
+
+.wr-period-quick__list {
+  display: grid;
+  gap: 0;
+  margin-top: 8px;
+}
+
+.wr-period-quick__row {
+  min-height: 44px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--wr-border);
+}
+
+.wr-period-quick__row:last-child {
+  border-bottom: 0;
+}
+
+.wr-period-quick__row > div:first-child {
+  display: grid;
+  grid-template-columns: minmax(80px, auto) minmax(150px, 1fr);
+  gap: 1px 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.wr-period-quick__row > div:first-child small {
+  grid-column: 1 / -1;
+}
+
+.wr-period-quick__readonly {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--wr-muted);
+  font-size: .68rem;
+}
+
+.wr-policy-compact {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.4fr) repeat(3, minmax(110px, .45fr)) minmax(170px, .65fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.wr-policy-compact__identity {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.wr-policy-compact__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--wr-accent);
+  background: var(--wr-accent-soft);
+}
+
+.wr-policy-compact__identity > div:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wr-policy-compact__identity h2 {
+  margin: 0;
+  font-size: .9rem;
+}
+
+.wr-policy-compact__identity p {
+  overflow: hidden;
+  margin: 0;
+  color: var(--wr-muted);
+  font-size: .66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-policy-compact__metric {
+  display: grid;
+  gap: 2px;
+  min-height: 38px;
+  padding-left: 10px;
+  border-left: 1px solid var(--wr-border);
+}
+
+.wr-policy-compact__metric strong {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.wr-policy-compact__metric span {
+  color: var(--wr-muted);
+  font-size: .62rem;
+}
+
+.wr-policy-compact__reference {
+  justify-self: end;
+  min-width: 0;
+}
+
+.wr-policy-compact__reference summary {
+  cursor: pointer;
+  color: var(--wr-muted);
+  font-size: .68rem;
+  font-weight: 760;
+}
+
+.wr-policy-compact__reference p {
+  margin: 7px 0 0;
+  max-width: 42ch;
+  color: var(--wr-muted);
+  font-size: .64rem;
+  line-height: 1.35;
+}
+
+.wr-governance-stack > .wr-panel:not(.wr-policy-compact) .wr-section-heading {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 1450px) {
+  .wr-period-editor__grid {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+
+  .wr-period-editor__notes {
+    grid-column: span 2;
+  }
+
+  .wr-policy-compact {
+    grid-template-columns: minmax(240px, 1.4fr) repeat(3, minmax(100px, .45fr));
+  }
+
+  .wr-policy-compact__reference {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 900px) {
+  .wr-period-editor__grid {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
+  .wr-period-editor__notes {
+    grid-column: 1 / -1;
+  }
+
+  .wr-policy-compact {
+    grid-template-columns: repeat(3, minmax(90px, 1fr));
+  }
+
+  .wr-policy-compact__identity,
+  .wr-policy-compact__reference {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .wr-period-quick__header,
+  .wr-period-current,
+  .wr-period-quick__row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .wr-period-quick__actions,
+  .wr-period-quick__row .wr-actions {
+    justify-content: stretch;
+  }
+
+  .wr-period-quick__actions .wr-button,
+  .wr-period-quick__row .wr-button {
+    flex: 1;
+  }
+
+  .wr-period-editor__grid,
+  .wr-policy-compact {
+    grid-template-columns: 1fr;
+  }
+
+  .wr-period-editor__notes,
+  .wr-policy-compact__identity,
+  .wr-policy-compact__reference {
+    grid-column: auto;
+  }
+
+  .wr-policy-compact__metric {
+    padding: 7px 0 0;
+    border-top: 1px solid var(--wr-border);
+    border-left: 0;
+  }
+}
