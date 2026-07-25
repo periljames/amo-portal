@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -9,13 +11,11 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
-from .workspace_router import (
-    complete_review as _complete_review,
-    create_review as _create_review,
-)
+from .workspace_router import _event, _review_payload, create_review as _create_review
 from .workspace_service import (
     audit,
     get_manual,
+    get_profile,
     get_revision,
     require_control_user,
     resolve_tenant,
@@ -137,9 +137,7 @@ def _create_review_follow_up(
         source_entity_type="PERIODIC_REVIEW",
         source_entity_id=row.id,
         title=f"Periodic review outcome: {payload.outcome.replace('_', ' ').title()}",
-        description=(
-            f"Findings: {finding_text}\nRequired actions: {action_text}"
-        ),
+        description=f"Findings: {finding_text}\nRequired actions: {action_text}",
         priority="HIGH" if payload.outcome in {"WITHDRAW", "SUPERSEDE"} else "NORMAL",
         status="OPEN",
         proposer_user_id=current_user.id,
@@ -188,6 +186,7 @@ def complete_review_with_follow_up(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    """Complete the review and create any mandatory follow-up in one transaction."""
     require_control_user(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = (
@@ -196,20 +195,29 @@ def complete_review_with_follow_up(
             dm.DocumentReviewPlan.tenant_id == tenant.amo_id,
             dm.DocumentReviewPlan.id == review_id,
         )
+        .with_for_update()
         .first()
     )
     if not row:
         raise HTTPException(status_code=404, detail="Review plan not found")
     validate_review_completion(row, payload)
 
-    result = _complete_review(
-        tenant_slug=tenant_slug,
-        review_id=review_id,
-        payload=payload,
-        request=request,
-        db=db,
-        current_user=current_user,
-    )
+    completed_at = utcnow()
+    row.status = "COMPLETED"
+    row.outcome = payload.outcome
+    row.findings_json = list(payload.findings)
+    row.actions_json = list(payload.actions)
+    row.completed_at = completed_at
+    row.completed_by_user_id = current_user.id
+    row.updated_at = completed_at
+
+    profile = get_profile(db, tenant, row.manual_id)
+    if profile:
+        profile.next_review_due = (
+            completed_at + timedelta(days=30 * profile.review_interval_months)
+        ).date()
+        profile.version += 1
+
     follow_up = _create_review_follow_up(
         db,
         tenant=tenant,
@@ -218,7 +226,30 @@ def complete_review_with_follow_up(
         current_user=current_user,
         request=request,
     )
+    result = _review_payload(row)
     if follow_up:
-        db.commit()
         result["follow_up_change_request_id"] = follow_up.id
+    audit(
+        db,
+        tenant,
+        request,
+        "document.review.completed",
+        "document_review_plan",
+        row.id,
+        result,
+    )
+    db.commit()
+    _event(
+        event_type="doc_control.review_completed",
+        entity_type="document_review_plan",
+        entity_id=row.id,
+        action="completed",
+        user=current_user,
+        tenant_id=tenant.amo_id,
+        metadata={
+            "manual_id": row.manual_id,
+            "outcome": row.outcome,
+            "follow_up_change_request_id": follow_up.id if follow_up else None,
+        },
+    )
     return result
