@@ -12,8 +12,18 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
-from .workspace_router import transition_temporary_revision as _transition_temporary_revision
-from .workspace_service import require_approver, resolve_tenant
+from .workspace_router import (
+    create_temporary_revision as _create_temporary_revision,
+    transition_temporary_revision as _transition_temporary_revision,
+)
+from .workspace_service import (
+    get_manual,
+    get_revision,
+    require_approver,
+    require_control_user,
+    resolve_tenant,
+    status_value,
+)
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Temporary Revisions"])
@@ -27,6 +37,60 @@ _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "WITHDRAWN": set(),
     "INCORPORATED": set(),
 }
+
+
+def validate_temporary_revision_create(
+    manual: manual_models.Manual,
+    base_revision: manual_models.ManualRevision,
+    payload: schemas.TemporaryRevisionCreate,
+    source_revision: manual_models.ManualRevision | None,
+) -> None:
+    if manual.current_published_rev_id != base_revision.id:
+        raise HTTPException(
+            status_code=409,
+            detail="A temporary revision must be raised against the current published revision",
+        )
+    if status_value(base_revision) != "PUBLISHED" or not base_revision.immutable_locked:
+        raise HTTPException(
+            status_code=409,
+            detail="The temporary revision base must be the immutable published issue",
+        )
+    if payload.effective_date < date.today():
+        raise HTTPException(
+            status_code=422,
+            detail="Temporary revision effective date cannot be in the past",
+        )
+    meaningful_sections = [
+        item
+        for item in payload.affected_sections
+        if isinstance(item, dict)
+        and any(str(value or "").strip() for value in item.values())
+    ]
+    if not meaningful_sections:
+        raise HTTPException(
+            status_code=422,
+            detail="At least one affected section or insertion point is required",
+        )
+    if not str(payload.filing_instructions or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Temporary revision filing instructions are required",
+        )
+    if source_revision:
+        if source_revision.id == base_revision.id:
+            raise HTTPException(
+                status_code=409,
+                detail="The temporary revision source cannot be the unchanged base revision",
+            )
+        if source_revision.immutable_locked or status_value(source_revision) in {
+            "PUBLISHED",
+            "SUPERSEDED",
+            "ARCHIVED",
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail="Temporary revision source content must remain an editable uncontrolled revision until approved",
+            )
 
 
 def _validate_campaign(
@@ -96,6 +160,49 @@ def _validate_incorporating_revision(
             status_code=409,
             detail="The temporary or base revision cannot be used as its own incorporating revision",
         )
+
+
+@router.post("/t/{tenant_slug}/temporary-revisions", include_in_schema=False)
+def create_guarded_temporary_revision(
+    tenant_slug: str,
+    payload: schemas.TemporaryRevisionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    manual = get_manual(db, tenant, payload.manual_id)
+    base_revision = get_revision(db, manual, payload.base_revision_id)
+    source_revision = (
+        get_revision(db, manual, payload.revision_id)
+        if payload.revision_id
+        else None
+    )
+    validate_temporary_revision_create(
+        manual,
+        base_revision,
+        payload,
+        source_revision,
+    )
+    guarded = payload.model_copy(
+        update={
+            "filing_instructions": str(payload.filing_instructions).strip(),
+            "affected_sections": [
+                item
+                for item in payload.affected_sections
+                if isinstance(item, dict)
+                and any(str(value or "").strip() for value in item.values())
+            ],
+        }
+    )
+    return _create_temporary_revision(
+        tenant_slug=tenant_slug,
+        payload=guarded,
+        request=request,
+        db=db,
+        current_user=current_user,
+    )
 
 
 @router.post(
