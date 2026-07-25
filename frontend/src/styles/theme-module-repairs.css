@@ -1,3 +1,5 @@
+@import "./theme-depth.css";
+
 /* Legacy module adapters.
  * These selectors are intentionally namespaced. They translate old literal-light
  * modules to the semantic theme contract without flattening status/severity tones.
