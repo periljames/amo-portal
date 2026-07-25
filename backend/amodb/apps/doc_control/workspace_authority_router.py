@@ -9,8 +9,8 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
-from .workspace_router import update_authority_submission as _update_authority_submission
-from .workspace_service import require_approver, resolve_tenant
+from .workspace_router import _authority_payload, _event
+from .workspace_service import audit, require_approver, resolve_tenant, utcnow
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Authority"])
@@ -47,7 +47,12 @@ def validate_authority_update(
         if payload.evidence is not None
         else list(row.evidence_json or [])
     )
-    response_summary = str(payload.response_summary or row.response_summary or "").strip()
+    response_summary = str(
+        payload.response_summary
+        if "response_summary" in payload.model_fields_set
+        else row.response_summary
+        or ""
+    ).strip()
 
     if payload.status == "SUBMITTED" and not resulting_evidence:
         raise HTTPException(
@@ -95,6 +100,13 @@ def update_authority_submission_with_guards(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    """Update the authority record without silently advancing the workflow.
+
+    Authority evidence and workflow approval are separate controlled decisions.
+    Recording an authority response makes it available to the explicit workflow
+    transition, which then records the approver, comments, evidence, state change,
+    and optimistic workflow version in one decision trail.
+    """
     require_approver(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = (
@@ -109,11 +121,38 @@ def update_authority_submission_with_guards(
         raise HTTPException(status_code=404, detail="Authority submission not found")
 
     validate_authority_update(row, payload)
-    return _update_authority_submission(
-        tenant_slug=tenant_slug,
-        submission_id=submission_id,
-        payload=payload,
-        request=request,
-        db=db,
-        current_user=current_user,
+    before = _authority_payload(row)
+    row.status = payload.status
+    if "response_summary" in payload.model_fields_set:
+        row.response_summary = payload.response_summary
+    if "response_due_at" in payload.model_fields_set:
+        row.response_due_at = payload.response_due_at
+    if "evidence" in payload.model_fields_set and payload.evidence is not None:
+        row.evidence_json = list(payload.evidence)
+    if payload.status == "SUBMITTED":
+        row.submitted_at = row.submitted_at or utcnow()
+        row.submitted_by_user_id = row.submitted_by_user_id or current_user.id
+    if payload.status == "APPROVED":
+        row.approved_at = row.approved_at or utcnow()
+    row.updated_at = utcnow()
+    after = _authority_payload(row)
+    audit(
+        db,
+        tenant,
+        request,
+        "document.authority.updated",
+        "document_authority_submission",
+        row.id,
+        {"before": before, "after": after},
     )
+    db.commit()
+    _event(
+        event_type="doc_control.authority_updated",
+        entity_type="document_authority_submission",
+        entity_id=row.id,
+        action=row.status.lower(),
+        user=current_user,
+        tenant_id=tenant.amo_id,
+        metadata={"manual_id": row.manual_id, "revision_id": row.revision_id},
+    )
+    return after
