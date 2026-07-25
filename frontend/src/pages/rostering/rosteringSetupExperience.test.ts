@@ -8,6 +8,10 @@ const quickActionsSource = readFileSync(
   new URL("./components/RosterPeriodQuickActions.tsx", import.meta.url),
   "utf8",
 );
+const ruleEditorSource = readFileSync(
+  new URL("./components/RosterRuleQuickEditor.tsx", import.meta.url),
+  "utf8",
+);
 const governanceSource = readFileSync(
   new URL("./components/RosterGovernancePanel.tsx", import.meta.url),
   "utf8",
@@ -37,6 +41,13 @@ describe("rostering setup experience", () => {
     expect(quickActionsSource).toContain("detected");
   });
 
+  it("lets authorised administrators change active rule values without exposing them to everyone", () => {
+    expect(ruleEditorSource).toContain("roster.manage_rules");
+    expect(ruleEditorSource).toContain("updateRosterRule");
+    expect(ruleEditorSource).toContain("Save rule");
+    expect(ruleEditorSource).toContain("<details");
+  });
+
   it("does not repeat every rule severity in the approval workspace", () => {
     expect(governanceSource).toContain("wr-policy-compact");
     expect(governanceSource).toContain("active checks");
@@ -45,8 +56,10 @@ describe("rostering setup experience", () => {
     expect(governanceSource).not.toContain("controlled override");
   });
 
-  it("uses concise setup page copy and the refined workspace", () => {
-    expect(setupPageSource).toContain("LazyRosterSetupWorkspace");
+  it("uses concise setup copy while preserving the required lazy settings chunk", () => {
+    expect(setupPageSource).toContain("LazyRosterPeriodQuickActions");
+    expect(setupPageSource).toContain("LazyRosterRuleQuickEditor");
+    expect(setupPageSource).toContain("LazyUnifiedRosterSettings");
     expect(setupPageSource).toContain('eyebrow="Setup"');
     expect(setupPageSource).toContain('description="Periods, shifts, work patterns, contracts, rules and approvals."');
     expect(setupPageSource).not.toContain("Source-aware");
