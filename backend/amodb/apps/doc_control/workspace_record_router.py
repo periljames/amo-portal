@@ -16,6 +16,7 @@ from .workspace_service import (
     readable_revision,
     require_manual_access,
     resolve_tenant,
+    role_value,
     serialize_manual,
     serialize_revision,
 )
@@ -87,6 +88,30 @@ def _controller_history(
     ]
 
 
+def _active_tenant_people(db: Session, amo_id: str) -> list[dict]:
+    rows = (
+        db.query(account_models.User)
+        .filter(
+            account_models.User.amo_id == amo_id,
+            account_models.User.is_active.is_(True),
+            account_models.User.is_system_account.is_(False),
+        )
+        .order_by(account_models.User.full_name.asc(), account_models.User.email.asc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "name": row.full_name,
+            "email": row.email,
+            "role": role_value(row),
+            "department": getattr(getattr(row, "department", None), "code", None),
+            "active": True,
+        }
+        for row in rows
+    ]
+
+
 def _reader_detail(
     db: Session,
     *,
@@ -118,6 +143,7 @@ def _reader_detail(
         "applicability": [],
         "integrations": [],
         "history": [],
+        "active_users": [],
         "capabilities": {"control": False},
     }
 
@@ -146,4 +172,5 @@ def get_role_appropriate_document_detail(
     )
     tenant = resolve_tenant(db, tenant_slug, current_user)
     detail["history"] = _controller_history(db, tenant.id, detail)
+    detail["active_users"] = _active_tenant_people(db, tenant.amo_id)
     return detail
