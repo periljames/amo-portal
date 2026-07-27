@@ -1,7 +1,7 @@
 import { Settings2 } from "lucide-react";
 
 import type { DocumentDetailResponse } from "../../services/documentControl";
-import DocumentControlLifecycleActions, { type LifecycleView } from "./DocumentControlLifecycleActions";
+import DocumentControlLifecycleActions, { type LifecycleView } from "./DocumentControlLifecycleActionsGuarded";
 import DocumentControlRecordActionsBase from "./DocumentControlRecordActionsBase";
 import { DocumentControlSection, useDocumentControlRoute } from "./DocumentControlShell";
 
