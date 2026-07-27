@@ -8,6 +8,7 @@ def test_document_control_override_routes_are_registered_first() -> None:
         "/doc-control/workspace/t/{tenant_slug}/dashboard": "amodb.apps.doc_control.workspace_dashboard_router",
         "/doc-control/workspace/t/{tenant_slug}/documents": "amodb.apps.doc_control.workspace_library_router",
         "/doc-control/workspace/t/{tenant_slug}/documents/{manual_id}": "amodb.apps.doc_control.workspace_record_router",
+        "/doc-control/workspace/t/{tenant_slug}/documents/{manual_id}/profile": "amodb.apps.doc_control.workspace_profile_router",
         "/doc-control/workspace/t/{tenant_slug}/integration-links": "amodb.apps.doc_control.workspace_integration_router",
         "/doc-control/workspace/t/{tenant_slug}/change-requests": "amodb.apps.doc_control.workspace_change_router",
         "/doc-control/workspace/t/{tenant_slug}/change-requests/{change_id}": "amodb.apps.doc_control.workspace_change_router",
@@ -21,9 +22,9 @@ def test_document_control_override_routes_are_registered_first() -> None:
         "/doc-control/workspace/t/{tenant_slug}/reviews": "amodb.apps.doc_control.workspace_review_router",
         "/doc-control/workspace/t/{tenant_slug}/reviews/{review_id}/complete": "amodb.apps.doc_control.workspace_review_router",
         "/doc-control/workspace/t/{tenant_slug}/temporary-revisions": "amodb.apps.doc_control.workspace_tr_router",
-        "/doc-control/workspace/t/{tenant_slug}/temporary-revisions/{tr_id}/transition": "amodb.apps.doc_control.workspace_tr_router",
+        "/doc-control/workspace/t/{tenant_slug}/temporary-revisions/{tr_id}/transition": "amodb.apps.doc_control.workspace_tr_terminal_router",
         "/doc-control/workspace/t/{tenant_slug}/workflows": "amodb.apps.doc_control.workspace_workflow_create_router",
-        "/doc-control/workspace/t/{tenant_slug}/workflows/{workflow_id}/transition": "amodb.apps.doc_control.workspace_workflow_authority_router",
+        "/doc-control/workspace/t/{tenant_slug}/workflows/{workflow_id}/transition": "amodb.apps.doc_control.workspace_workflow_review_router",
     }
     routes = [
         route
