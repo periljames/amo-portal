@@ -9,8 +9,9 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
+from .workspace_decision_policy import require_decision_approver
 from .workspace_router import _authority_payload, _event
-from .workspace_service import audit, require_approver, resolve_tenant, utcnow
+from .workspace_service import audit, resolve_tenant, utcnow
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Authority"])
@@ -107,7 +108,7 @@ def update_authority_submission_with_guards(
     transition, which then records the approver, comments, evidence, state change,
     and optimistic workflow version in one decision trail.
     """
-    require_approver(current_user)
+    require_decision_approver(current_user)
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = (
         db.query(dm.DocumentAuthoritySubmission)
