@@ -12,13 +12,16 @@ from .workspace_distribution_router import router as workspace_distribution_rout
 from .workspace_external_router import router as workspace_external_router
 from .workspace_integration_router import router as workspace_integration_router
 from .workspace_library_router import router as workspace_library_router
+from .workspace_profile_router import router as workspace_profile_router
 from .workspace_record_router import router as workspace_record_router
 from .workspace_reports_router import router as workspace_reports_router
 from .workspace_review_router import router as workspace_review_router
 from .workspace_router import router as workspace_router
 from .workspace_tr_router import router as workspace_tr_router
+from .workspace_tr_terminal_router import router as workspace_tr_terminal_router
 from .workspace_workflow_authority_router import router as workspace_workflow_authority_router
 from .workspace_workflow_create_router import router as workspace_workflow_create_router
+from .workspace_workflow_review_router import router as workspace_workflow_review_router
 from .workspace_workflow_router import router as workspace_workflow_router
 
 
@@ -28,12 +31,19 @@ router.include_router(legacy_router)
 # access filtering, pagination, reader/controller payload separation, source-module
 # verification, controlled change assessment, authority evidence, controlled-copy
 # custody, distribution integrity, external-source currency, periodic-review
-# follow-up, temporary-revision custody, server-derived workflow impact, and release
-# safeguards. They must be registered before the compatibility workspace router
-# because Starlette resolves matching routes in declaration order.
+# follow-up, profile-owner tenancy, terminal temporary-revision immutability,
+# accountable approval authority, decision evidence, active-recipient publication,
+# server-derived workflow impact, and release safeguards. They must be registered
+# before the compatibility workspace router because Starlette resolves matching
+# routes in declaration order.
 router.include_router(workspace_dashboard_router, prefix="/doc-control")
 router.include_router(workspace_library_router, prefix="/doc-control")
 router.include_router(workspace_record_router, prefix="/doc-control")
+router.include_router(
+    workspace_profile_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
 router.include_router(
     workspace_integration_router,
     prefix="/doc-control",
@@ -70,12 +80,22 @@ router.include_router(
     dependencies=[Depends(enforce_workspace_access)],
 )
 router.include_router(
+    workspace_tr_terminal_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
     workspace_tr_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
 router.include_router(
     workspace_workflow_create_router,
+    prefix="/doc-control",
+    dependencies=[Depends(enforce_workspace_access)],
+)
+router.include_router(
+    workspace_workflow_review_router,
     prefix="/doc-control",
     dependencies=[Depends(enforce_workspace_access)],
 )
