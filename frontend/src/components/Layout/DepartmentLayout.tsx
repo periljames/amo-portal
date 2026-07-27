@@ -18,38 +18,80 @@ type Props = {
   showPollingErrorBanner?: boolean;
 };
 
-function applyPublicationsNavigationLabel(isPublicationsRoute: boolean): void {
-  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label="Manuals"], button[title="Manuals"]'));
+function textOf(button: HTMLButtonElement): string {
+  return String(
+    button.getAttribute("aria-label") ||
+    button.getAttribute("title") ||
+    button.querySelector<HTMLElement>(".sidebar__item-label")?.textContent ||
+    button.textContent ||
+    "",
+  ).trim().toLowerCase();
+}
+
+function setVisible(button: HTMLButtonElement, visible: boolean): void {
+  button.hidden = !visible;
+  button.tabIndex = visible ? 0 : -1;
+  if (visible) button.removeAttribute("aria-hidden");
+  else button.setAttribute("aria-hidden", "true");
+  const container = button.closest<HTMLElement>("li, .sidebar__item-wrapper");
+  if (container) container.hidden = !visible;
+}
+
+function applyDocumentControlNavigation(isDocumentControlDomain: boolean): void {
+  const sidebar = document.querySelector<HTMLElement>(".app-shell__sidebar, .sidebar");
+  if (!sidebar) return;
+  const buttons = Array.from(sidebar.querySelectorAll<HTMLButtonElement>("button"));
+  const compatibilityEntry = buttons.find((button) => {
+    const label = textOf(button);
+    return button.dataset.documentControlEntry === "true" || label === "manuals" || label === "publications";
+  });
+
+  if (compatibilityEntry) {
+    compatibilityEntry.dataset.documentControlEntry = "true";
+    const labelNode = compatibilityEntry.querySelector<HTMLElement>(".sidebar__item-label");
+    if (labelNode && labelNode.textContent !== "Document Control") labelNode.textContent = "Document Control";
+    compatibilityEntry.setAttribute("aria-label", "Document Control");
+    compatibilityEntry.setAttribute("title", "Document Control");
+    compatibilityEntry.setAttribute("aria-current", isDocumentControlDomain ? "page" : "false");
+    compatibilityEntry.classList.toggle("sidebar__item--active", isDocumentControlDomain);
+    setVisible(compatibilityEntry, true);
+  }
+
   for (const button of buttons) {
-    if (button.getAttribute("aria-label") !== "Publications") button.setAttribute("aria-label", "Publications");
-    if (button.getAttribute("title") !== "Publications") button.setAttribute("title", "Publications");
-    const label = button.querySelector<HTMLElement>(".sidebar__item-label");
-    if (label && label.textContent !== "Publications") label.textContent = "Publications";
-    button.classList.toggle("sidebar__item--active", isPublicationsRoute);
+    if (button === compatibilityEntry) continue;
+    const nativeWorkspaceEntry = button.getAttribute("aria-label") === "Document Control workspace";
+    if (nativeWorkspaceEntry && compatibilityEntry) {
+      setVisible(button, false);
+    }
   }
 }
 
 /**
  * Shared shell compatibility bridge.
  *
- * The full shell remains isolated in DepartmentLayout.legacy.tsx so concurrent
- * module work is not rebased through a 2,000+ line layout file. This wrapper
- * upgrades the historical Manuals navigation affordance to Publications and
- * keeps its active state correct on the canonical route.
+ * Publications is now the Library workspace inside Document Control. The legacy
+ * Manuals button is retained as the single global entry because its historical
+ * route redirects safely to the Library. Its accessible label and active state are
+ * updated in place; the department-only duplicate is suppressed. Publication
+ * reader routes are treated as part of the Document Control department so their
+ * subnavigation remains available.
  */
 const DepartmentLayout: React.FC<Props> = (props) => {
   const location = useLocation();
-  const isPublicationsRoute = location.pathname.includes("/publications");
+  const isDocumentControlDomain = location.pathname.includes("/document-control") || location.pathname.includes("/publications") || location.pathname.includes("/manuals");
+  const effectiveDepartment = isDocumentControlDomain ? "document-control" : props.activeDepartment;
 
   useEffect(() => {
-    const apply = () => applyPublicationsNavigationLabel(isPublicationsRoute);
+    const apply = () => applyDocumentControlNavigation(isDocumentControlDomain);
     apply();
+    const sidebar = document.querySelector<HTMLElement>(".app-shell__sidebar, .sidebar");
+    if (!sidebar) return undefined;
     const observer = new MutationObserver(apply);
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(sidebar, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [isPublicationsRoute]);
+  }, [isDocumentControlDomain]);
 
-  return <LegacyDepartmentLayout {...props} />;
+  return <LegacyDepartmentLayout {...props} activeDepartment={effectiveDepartment} />;
 };
 
 export default DepartmentLayout;

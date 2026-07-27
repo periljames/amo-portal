@@ -43,6 +43,7 @@ NEW_TABLES = {
 QUALITY_PARENT = "qual_20260705_merge_heads"
 ROSTER_PARENT = "phase2_14a_20260615"
 TARGET_REVISION = "workforce_20260721_complete"
+ROSTER_GOVERNANCE_REVISION = "rostering_20260724_governance"
 
 
 def _load_metadata() -> None:
@@ -191,6 +192,34 @@ def _version_rows(engine: sa.Engine) -> set[str]:
         }
 
 
+def _head_contains_revision(script: ScriptDirectory, head: str, revision: str) -> bool:
+    """Return true when a current head contains the required released revision."""
+    return any(
+        str(item.revision) == revision
+        for item in script.iterate_revisions(head, "base")
+    )
+
+
+def _terminal_version_rows(script: ScriptDirectory) -> set[str]:
+    """Return the non-overlapping version-table frontier for all graph heads.
+
+    ``ScriptDirectory.get_heads`` may include a dependency branch head that is
+    already contained by another head through ``depends_on``. Recording both rows
+    creates an invalid overlapping current state. A real fully upgraded database
+    stores only the terminal descendants, so the legacy probe must model that
+    database state rather than blindly inserting every graph label.
+    """
+    heads = set(script.get_heads())
+    return {
+        candidate
+        for candidate in heads
+        if not any(
+            candidate != other and _head_contains_revision(script, other, candidate)
+            for other in heads
+        )
+    }
+
+
 def _verify_redundant_phase2_overlap_repair(engine: sa.Engine) -> None:
     """Reproduce the released overlapping-head state and run real Alembic commands."""
     with engine.begin() as connection:
@@ -207,20 +236,25 @@ def _verify_redundant_phase2_overlap_repair(engine: sa.Engine) -> None:
     assert _version_rows(engine) == {TARGET_REVISION}
 
     script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
-    expected_heads = set(script.get_heads())
-    assert "rostering_20260724_governance" in expected_heads
+    expected_rows = _terminal_version_rows(script)
+    assert expected_rows, script.get_heads()
+    assert script.get_revision(ROSTER_GOVERNANCE_REVISION) is not None
+    assert any(
+        _head_contains_revision(script, head, ROSTER_GOVERNANCE_REVISION)
+        for head in expected_rows
+    ), expected_rows
 
-    # Reproduce the exact `upgrade heads` overlap at a fully-stamped installation:
-    # all legitimate heads plus the now-redundant historical Phase 2 marker.
+    # Reproduce the exact `upgrade heads` overlap at a fully-upgraded installation:
+    # all legitimate terminal rows plus the now-redundant historical Phase 2 marker.
     with engine.begin() as connection:
         connection.execute(text("DELETE FROM alembic_version"))
         connection.execute(
             text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
-            [{"revision": revision} for revision in sorted(expected_heads | {ROSTER_PARENT})],
+            [{"revision": revision} for revision in sorted(expected_rows | {ROSTER_PARENT})],
         )
 
     _run_alembic("upgrade", "heads")
-    assert _version_rows(engine) == expected_heads
+    assert _version_rows(engine) == expected_rows
 
 
 def main() -> None:
