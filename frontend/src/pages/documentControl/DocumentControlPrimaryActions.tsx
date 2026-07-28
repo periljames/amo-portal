@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { FileUp, Pencil, Rocket, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -16,6 +16,7 @@ import {
 
 
 type EnhancedCapabilities = DocumentDetailResponse["capabilities"] & {
+  approve?: boolean;
   edit_properties?: boolean;
   upload_revision?: boolean;
   publish?: boolean;
@@ -83,7 +84,7 @@ export default function DocumentControlPrimaryActions({
   </>;
 }
 
-function DialogShell({ title, description, busy, onClose, children }: { title: string; description: string; busy: boolean; onClose: () => void; children: React.ReactNode }) {
+function DialogShell({ title, description, busy, onClose, children }: { title: string; description: string; busy: boolean; onClose: () => void; children: ReactNode }) {
   return <div className="publications-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
     <section className="publications-upload-dialog" role="dialog" aria-modal="true" aria-label={title}>
       <header><div><h2>{title}</h2><p>{description}</p></div><button type="button" onClick={onClose} disabled={busy} aria-label="Close"><X size={18} /></button></header>
