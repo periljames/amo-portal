@@ -2,7 +2,7 @@ import "./components/roster-setup-refinement.css";
 
 import { lazy, Suspense, type ReactNode } from "react";
 import { CalendarDays, Download, Settings2, UsersRound } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 
 import { RosterLoading, RosterShell } from "./components/RosterShell";
 
@@ -51,7 +51,7 @@ export function RosterCalendarPage() {
       eyebrow="Planner workspace"
       title="Duty roster planner"
       description="Build controlled duty versions while seeing approved leave, training, unavailability and Quality commitments from their source records."
-      actions={<Link className="wr-button wr-button--secondary" to={`${root}/settings`}><Settings2 size={16} /> Setup</Link>}
+      actions={<Link className="wr-button wr-button--secondary" to={`${root}/settings?section=overview`}><Settings2 size={16} /> Setup</Link>}
     >
       <DeferredWorkspace label="Opening duty planner…"><LazyUnifiedRosterPlanner /></DeferredWorkspace>
     </RosterShell>
@@ -113,6 +113,9 @@ export function RosterReportsPage() {
 }
 
 export function RosterSettingsPage() {
+  const location = useLocation();
+  const workforce = new URLSearchParams(location.search).get("section") === "workforce";
+  if (workforce) return <WorkforceHrPage />;
   return (
     <RosterShell
       eyebrow="Guided setup"
