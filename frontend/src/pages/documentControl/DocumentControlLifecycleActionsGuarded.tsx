@@ -7,6 +7,7 @@ import {
   type DocumentDetailResponse,
   type PersonSummary,
 } from "../../services/documentControl";
+import DocumentControlControllerLifecycleActions from "./DocumentControlControllerLifecycleActions";
 import DocumentControlLifecycleActions, {
   type LifecycleView,
 } from "./DocumentControlLifecycleActions";
@@ -22,6 +23,7 @@ type Props = {
 
 type DetailWithPeople = DocumentDetailResponse & {
   active_users?: PersonSummary[];
+  capabilities: DocumentDetailResponse["capabilities"] & { approve?: boolean };
 };
 
 const COPY_EVENTS: Record<string, string[]> = {
@@ -30,6 +32,12 @@ const COPY_EVENTS: Record<string, string[]> = {
   RETURNED: ["WITHDRAW", "DESTROY"],
   WITHDRAWN: ["DESTROY"],
 };
+
+const DECISION_SEPARATED_VIEWS = new Set<LifecycleView>([
+  "workflow",
+  "authority",
+  "temporary-revisions",
+]);
 
 function evidenceFrom(value: string): Array<{ asset_id: string }> {
   return value
@@ -152,8 +160,12 @@ function ControlledCopyCanonicalActions({ detail, tenant, onChanged }: Omit<Prop
 export type { LifecycleView };
 
 export default function DocumentControlLifecycleActionsGuarded(props: Props) {
+  const canApprove = Boolean((props.detail as DetailWithPeople).capabilities?.approve);
   if (props.activeView === "copies") {
     return <ControlledCopyCanonicalActions detail={props.detail} tenant={props.tenant} onChanged={props.onChanged} />;
+  }
+  if (!canApprove && DECISION_SEPARATED_VIEWS.has(props.activeView)) {
+    return <DocumentControlControllerLifecycleActions {...props} />;
   }
   return <DocumentControlLifecycleActions {...props} />;
 }
