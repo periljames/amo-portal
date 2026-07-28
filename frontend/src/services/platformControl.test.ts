@@ -12,7 +12,7 @@ vi.mock("./config", () => ({
   getApiBaseUrl: () => "https://api.example.test",
 }));
 
-import { shouldServePlatformSpa } from "./devProxyRouting";
+import { shouldProxyDevApi, shouldServePlatformSpa } from "./devProxyRouting";
 import { platformApi } from "./platformControl";
 
 describe("platform SaaS control API", () => {
@@ -34,6 +34,13 @@ describe("platform SaaS control API", () => {
     expect(shouldServePlatformSpa("GET", "/platform/integrations/summary", "application/json")).toBe(false);
     expect(shouldServePlatformSpa("POST", "/platform/commands", "text/html")).toBe(false);
     expect(shouldServePlatformSpa("GET", "/api/chat/threads", "text/html")).toBe(false);
+  });
+
+  it("proxies canonical Document Control workspace requests to FastAPI", () => {
+    expect(shouldProxyDevApi("/doc-control/workspace/t/safarilink/documents?per_page=100")).toBe(true);
+    expect(shouldProxyDevApi("/doc-control/workspace/t/safarilink/dashboard")).toBe(true);
+    expect(shouldProxyDevApi("/manuals/t/safarilink/manual-1/rev/rev-1/reader-metadata")).toBe(true);
+    expect(shouldProxyDevApi("/maintenance/safarilink/document-control/library")).toBe(false);
   });
 
   it("encodes tenant identifiers and sends module updates as one audited batch", async () => {
