@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import inspect
 from types import SimpleNamespace
 
-from amodb.apps.rostering import automation_service
+from amodb.apps.rostering import automation_router, automation_service
 from amodb.apps.rostering.automation_models import RosterAutomationFrequency
+from amodb.jobs import rostering_automation
 
 
 def policy(**overrides):
@@ -66,3 +68,17 @@ def test_automation_models_keep_tenant_and_idempotency_boundaries():
     assert "idempotency_key" in RosterGenerationRun.__table__.columns
     constraints = {constraint.name for constraint in RosterGenerationRun.__table__.constraints}
     assert "uq_roster_generation_run_idempotency" in constraints
+
+
+def test_manual_failure_evidence_is_written_only_after_rollback():
+    source = inspect.getsource(automation_router._record_failed_run)
+    assert source.index("db.rollback()") < source.index("RosterGenerationRun(")
+    assert '"operational_changes_committed": False' in source
+    assert '"failure_recorded_after_rollback": True' in source
+
+
+def test_scheduled_failure_evidence_is_written_only_after_rollback():
+    source = inspect.getsource(rostering_automation._record_failed_scheduled_run)
+    assert source.index("db.rollback()") < source.index("RosterGenerationRun(")
+    assert '"operational_changes_committed": False' in source
+    assert '"scheduled_cycle_advanced": True' in source
