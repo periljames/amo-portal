@@ -55,8 +55,11 @@ class HrPersonReadiness(HrSchema):
 class HrDashboardResponse(HrSchema):
     generated_at: datetime
     can_manage_contracts: bool
-    can_manage_leave: bool
-    can_approve_time: bool
+    can_manage_leave_balances: bool
+    can_review_leave: bool
+    can_approve_leave: bool
+    can_approve_timesheet_supervisor: bool
+    can_approve_timesheet_hr: bool
     can_export_payroll: bool
     active_employee_count: int
     onboarding_employee_count: int
