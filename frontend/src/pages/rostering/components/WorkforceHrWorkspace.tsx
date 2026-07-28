@@ -13,11 +13,12 @@ import {
   Clock3,
   Download,
   FileClock,
+  Plus,
   RefreshCw,
+  Save,
   Search,
   ShieldCheck,
   UserRoundCheck,
-  UsersRound,
   X,
   XCircle,
 } from "lucide-react";
@@ -31,10 +32,14 @@ import {
   rejectLeaveRequest,
   supervisorApproveLeave,
 } from "../../../services/workforce";
-import { getWorkforceHrDashboard } from "../../../services/workforceHr";
+import {
+  assignWorkforceHrPattern,
+  getWorkforceHrDashboard,
+  listWorkforceHrPatterns,
+} from "../../../services/workforceHr";
 import type { HrActionItem, HrPersonReadiness } from "../../../types/workforceHr";
-import type { LeaveRequestRead, TimesheetRead } from "../../../types/workforce";
-import { errorMessage } from "../rosterUi";
+import type { LeaveRequestRead, TimesheetRead, WorkPatternRead } from "../../../types/workforce";
+import { errorMessage, isoDate } from "../rosterUi";
 import { EmptyState, RosterLoading, StatusPill } from "./RosterShell";
 
 type HrSection = "overview" | "people" | "leave" | "time" | "patterns";
@@ -76,6 +81,12 @@ export function WorkforceHrWorkspace() {
     queryFn: () => listTimesheets({ page_size: 200 }),
     enabled: section === "time",
     staleTime: 30_000,
+  });
+  const patternsQuery = useQuery({
+    queryKey: ["workforce", "hr", "patterns"],
+    queryFn: () => listWorkforceHrPatterns(false),
+    enabled: section === "patterns",
+    staleTime: 5 * 60_000,
   });
 
   const dashboard = dashboardQuery.data;
@@ -136,7 +147,16 @@ export function WorkforceHrWorkspace() {
       {section === "people" ? <PeoplePanel people={people} search={search} onSearch={setSearch} amoCode={amoCode} /> : null}
       {section === "leave" ? <LeavePanel dashboard={dashboard} requests={leaveQuery.data?.items || []} loading={leaveQuery.isPending} onDecision={setDecision} /> : null}
       {section === "time" ? <TimePanel dashboard={dashboard} timesheets={timesheetsQuery.data?.items || []} loading={timesheetsQuery.isPending} onDecision={setDecision} onPayroll={() => void downloadPayrollExport({})} /> : null}
-      {section === "patterns" ? <PatternsPanel dashboard={dashboard} amoCode={amoCode} /> : null}
+      {section === "patterns" ? (
+        <PatternsPanel
+          dashboard={dashboard}
+          amoCode={amoCode}
+          patterns={patternsQuery.data || []}
+          loading={patternsQuery.isPending}
+          busy={busy}
+          runAction={runAction}
+        />
+      ) : null}
 
       {decision ? (
         <div className="hr-decision" role="dialog" aria-modal="true" aria-label="Record controlled decision">
@@ -167,7 +187,7 @@ function HrOverview({ dashboard, amoCode, onOpen, onRefresh }: { dashboard: Awai
       <div className="hr-overview-grid">
         <section className="wr-panel">
           <div className="wr-section-heading"><div><span className="wr-eyebrow">HR action queue</span><h2>What needs attention</h2></div><button type="button" className="wr-icon-button" onClick={onRefresh}><RefreshCw size={16} /></button></div>
-          <ActionQueue items={dashboard.action_queue.slice(0, 12)} amoCode={amoCode} />
+          <ActionQueue items={dashboard.action_queue.slice(0, 12)} amoCode={amoCode} onOpen={onOpen} />
         </section>
         <section className="wr-panel">
           <div className="wr-section-heading"><div><span className="wr-eyebrow">Workforce readiness</span><h2>Operational eligibility</h2></div></div>
@@ -182,15 +202,21 @@ function HrOverview({ dashboard, amoCode, onOpen, onRefresh }: { dashboard: Awai
       <section className="wr-panel hr-ownership">
         <ShieldCheck size={20} />
         <div><strong>Canonical Workforce ownership</strong><p>Contracts, leave, attendance, timesheets, overtime, payroll readiness and employee work-pattern assignments are managed here. Rostering consumes these records and cannot silently manufacture replacements.</p></div>
-        <Link className="wr-button wr-button--secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings`}>Open roster setup <ArrowRight size={14} /></Link>
+        <Link className="wr-button wr-button--secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings?section=overview`}>Open roster setup <ArrowRight size={14} /></Link>
       </section>
     </div>
   );
 }
 
-function ActionQueue({ items, amoCode }: { items: HrActionItem[]; amoCode: string }) {
+function ActionQueue({ items, amoCode, onOpen }: { items: HrActionItem[]; amoCode: string; onOpen: (section: HrSection) => void }) {
   if (!items.length) return <EmptyState title="No urgent HR actions" description="Contract, pattern, base, leave and time records are currently clear." />;
-  return <div className="hr-action-list">{items.map((item) => <article key={item.id} className={`is-${item.severity.toLowerCase()}`}><span className="hr-action-list__icon">{item.severity === "BLOCKER" ? <AlertTriangle size={17} /> : <BadgeCheck size={17} />}</span><div><strong>{item.title}</strong><p>{item.user_name ? `${item.user_name} · ` : ""}{item.detail}</p></div><StatusPill value={item.category} />{item.user_id ? <Link to={`/maintenance/${encodeURIComponent(amoCode)}/admin/users/${encodeURIComponent(item.user_id)}`}>{item.action_label || "Open"} <ArrowRight size={13} /></Link> : null}</article>)}</div>;
+  const action = (item: HrActionItem) => {
+    if (item.category === "WORK_PATTERN") return <button type="button" className="hr-action-link" onClick={() => onOpen("patterns")}>{item.action_label || "Assign pattern"} <ArrowRight size={13} /></button>;
+    if (item.category === "LEAVE") return <button type="button" className="hr-action-link" onClick={() => onOpen("leave")}>{item.action_label || "Review leave"} <ArrowRight size={13} /></button>;
+    if (item.category === "TIMESHEET") return <button type="button" className="hr-action-link" onClick={() => onOpen("time")}>{item.action_label || "Review time"} <ArrowRight size={13} /></button>;
+    return item.user_id ? <Link to={`/maintenance/${encodeURIComponent(amoCode)}/admin/users/${encodeURIComponent(item.user_id)}`}>{item.action_label || "Open"} <ArrowRight size={13} /></Link> : null;
+  };
+  return <div className="hr-action-list">{items.map((item) => <article key={item.id} className={`is-${item.severity.toLowerCase()}`}><span className="hr-action-list__icon">{item.severity === "BLOCKER" ? <AlertTriangle size={17} /> : <BadgeCheck size={17} />}</span><div><strong>{item.title}</strong><p>{item.user_name ? `${item.user_name} · ` : ""}{item.detail}</p></div><StatusPill value={item.category} />{action(item)}</article>)}</div>;
 }
 
 function PeoplePanel({ people, search, onSearch, amoCode }: { people: HrPersonReadiness[]; search: string; onSearch: (value: string) => void; amoCode: string }) {
@@ -212,7 +238,7 @@ function LeavePanel({ dashboard, requests, loading, onDecision }: { dashboard: A
     <section className="wr-panel">
       <div className="wr-section-heading"><div><span className="wr-eyebrow">Leave workflow</span><h2>Leave requests and approvals</h2><p>Leave remains Workforce-owned and automatically becomes a protected Rostering commitment after approval.</p></div><span className="wr-header-badge"><CalendarDays size={15} /> {pending.length} pending</span></div>
       {loading ? <RosterLoading label="Loading leave workflow…" /> : null}
-      <div className="hr-approval-list">{pending.map((request) => <article key={request.id}><div><strong>{request.user_full_name || request.user_staff_code}</strong><span>{request.leave_type_name} · {request.starts_at.slice(0, 10)} → {request.ends_at.slice(0, 10)}</span>{request.published_roster_conflicts.length ? <small className="is-danger">Published roster conflict requires a controlled amendment.</small> : null}</div><StatusPill value={request.status} /><div className="wr-actions">{request.status === "SUBMITTED" ? <button type="button" className="wr-button wr-button--small" onClick={() => onDecision({ kind: "leave-supervisor", record: request })}>Supervisor review</button> : null}{request.status === "SUPERVISOR_APPROVED" && dashboard.can_manage_leave ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "leave-hr", record: request })}>HR approve</button> : null}<button type="button" className="wr-icon-button is-danger" onClick={() => onDecision({ kind: "leave-reject", record: request })} aria-label="Reject leave"><XCircle size={15} /></button></div></article>)}</div>
+      <div className="hr-approval-list">{pending.map((request) => <article key={request.id}><div><strong>{request.user_full_name || request.user_staff_code}</strong><span>{request.leave_type_name} · {request.starts_at.slice(0, 10)} → {request.ends_at.slice(0, 10)}</span>{request.published_roster_conflicts.length ? <small className="is-danger">Published roster conflict requires a controlled amendment.</small> : null}</div><StatusPill value={request.status} /><div className="wr-actions">{request.status === "SUBMITTED" && dashboard.can_review_leave ? <button type="button" className="wr-button wr-button--small" onClick={() => onDecision({ kind: "leave-supervisor", record: request })}>Supervisor review</button> : null}{request.status === "SUPERVISOR_APPROVED" && dashboard.can_approve_leave ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "leave-hr", record: request })}>HR approve</button> : null}{dashboard.can_review_leave || dashboard.can_approve_leave ? <button type="button" className="wr-icon-button is-danger" onClick={() => onDecision({ kind: "leave-reject", record: request })} aria-label="Reject leave"><XCircle size={15} /></button> : null}</div></article>)}</div>
       {!loading && !pending.length ? <EmptyState title="No pending leave" description="Submitted and supervisor-approved requests will appear here." /> : null}
     </section>
   );
@@ -225,7 +251,7 @@ function TimePanel({ dashboard, timesheets, loading, onDecision, onPayroll }: { 
       <section className="wr-panel">
         <div className="wr-section-heading"><div><span className="wr-eyebrow">Time control</span><h2>Timesheet approvals</h2><p>Attendance and productive work are reconciled before HR approval and payroll export.</p></div>{dashboard.can_export_payroll ? <button type="button" className="wr-button wr-button--secondary" onClick={onPayroll}><Download size={15} /> Payroll export</button> : null}</div>
         {loading ? <RosterLoading label="Loading time approvals…" /> : null}
-        <div className="hr-approval-list">{pending.map((sheet) => <article key={sheet.id}><div><strong>{sheet.user_full_name || sheet.user_id}</strong><span>{sheet.period_start} → {sheet.period_end} · {Math.round(sheet.attendance_minutes / 60)}h attendance</span></div><StatusPill value={sheet.status} /><div className="wr-actions">{sheet.status === "SUBMITTED" && dashboard.can_approve_time ? <button type="button" className="wr-button wr-button--small" onClick={() => onDecision({ kind: "timesheet-supervisor", record: sheet })}>Supervisor review</button> : null}{sheet.status === "SUPERVISOR_APPROVED" && dashboard.can_approve_time ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "timesheet-hr", record: sheet })}>HR approve</button> : null}</div></article>)}</div>
+        <div className="hr-approval-list">{pending.map((sheet) => <article key={sheet.id}><div><strong>{sheet.user_full_name || sheet.user_id}</strong><span>{sheet.period_start} → {sheet.period_end} · {Math.round(sheet.attendance_minutes / 60)}h attendance</span></div><StatusPill value={sheet.status} /><div className="wr-actions">{sheet.status === "SUBMITTED" && dashboard.can_approve_timesheet_supervisor ? <button type="button" className="wr-button wr-button--small" onClick={() => onDecision({ kind: "timesheet-supervisor", record: sheet })}>Supervisor review</button> : null}{sheet.status === "SUPERVISOR_APPROVED" && dashboard.can_approve_timesheet_hr ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "timesheet-hr", record: sheet })}>HR approve</button> : null}</div></article>)}</div>
         {!loading && !pending.length ? <EmptyState title="No timesheet approvals" description="Submitted timesheets will appear here." /> : null}
       </section>
       <section className="hr-mini-grid"><article><Clock3 size={19} /><strong>{dashboard.attendance_exception_count}</strong><span>attendance exceptions</span></article><article><FileClock size={19} /><strong>{dashboard.pending_timesheet_count}</strong><span>pending timesheets</span></article><article><UserRoundCheck size={19} /><strong>{dashboard.pending_overtime_count}</strong><span>overtime requests</span></article></section>
@@ -233,14 +259,65 @@ function TimePanel({ dashboard, timesheets, loading, onDecision, onPayroll }: { 
   );
 }
 
-function PatternsPanel({ dashboard, amoCode }: { dashboard: Awaited<ReturnType<typeof getWorkforceHrDashboard>>; amoCode: string }) {
+function PatternsPanel({
+  dashboard,
+  amoCode,
+  patterns,
+  loading,
+  busy,
+  runAction,
+}: {
+  dashboard: Awaited<ReturnType<typeof getWorkforceHrDashboard>>;
+  amoCode: string;
+  patterns: WorkPatternRead[];
+  loading: boolean;
+  busy: string | null;
+  runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
+}) {
   const withoutPattern = dashboard.people.filter((person) => !person.work_pattern_code);
+  const [assigning, setAssigning] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [patternId, setPatternId] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState(isoDate(new Date()));
+  const [effectiveTo, setEffectiveTo] = useState("");
+  const effectiveUserId = userId || withoutPattern[0]?.user_id || dashboard.people[0]?.user_id || "";
+  const effectivePatternId = patternId || patterns[0]?.id || "";
+
+  const assign = () => runAction("hr-pattern-assignment", async () => {
+    await assignWorkforceHrPattern({
+      user_id: effectiveUserId,
+      work_pattern_id: effectivePatternId,
+      effective_from: effectiveFrom,
+      effective_to: effectiveTo || null,
+      cycle_anchor_date: effectiveFrom,
+    });
+    setAssigning(false);
+    setUserId("");
+    setPatternId("");
+    setEffectiveTo("");
+  });
+
   return (
     <section className="wr-panel">
-      <div className="wr-section-heading"><div><span className="wr-eyebrow">Employee rotation assignments</span><h2>Work-pattern readiness</h2><p>Pattern templates are designed in Rostering. Effective employee assignments and dates are controlled here by Workforce and HR.</p></div><Link className="wr-button wr-button--secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings?section=patterns`}>Open pattern builder <ArrowRight size={14} /></Link></div>
-      <div className="hr-pattern-list">{dashboard.people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.primary_base_code || "No base"}</span></div><div><strong>{person.work_pattern_code || "No pattern"}</strong><span>{person.work_pattern_name || "Automatic duty generation will skip this employee"}</span></div><StatusPill value={person.work_pattern_code ? "ASSIGNED" : "MISSING"} /><Link className="wr-icon-button" to={`/maintenance/${encodeURIComponent(amoCode)}/admin/users/${encodeURIComponent(person.user_id)}`}><ArrowRight size={15} /></Link></article>)}</div>
+      <div className="wr-section-heading"><div><span className="wr-eyebrow">Employee rotation assignments</span><h2>Work-pattern readiness</h2><p>Pattern templates are designed in Rostering. Effective employee assignments and dates are controlled here by Workforce and HR.</p></div><div className="wr-actions"><Link className="wr-button wr-button--secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/rostering/settings?section=patterns`}>Open pattern builder <ArrowRight size={14} /></Link>{dashboard.can_manage_contracts ? <button type="button" className="wr-button wr-button--primary" onClick={() => setAssigning(true)}><Plus size={15} /> Assign pattern</button> : null}</div></div>
+      {loading ? <RosterLoading label="Loading approved work patterns…" /> : null}
+      <div className="hr-pattern-list">{dashboard.people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.primary_base_code || "No base"}</span></div><div><strong>{person.work_pattern_code || "No pattern"}</strong><span>{person.work_pattern_name || "Automatic duty generation will skip this employee"}</span></div><StatusPill value={person.work_pattern_code ? "ASSIGNED" : "MISSING"} /><button type="button" className="wr-icon-button" aria-label={`Assign pattern to ${person.full_name}`} disabled={!dashboard.can_manage_contracts} onClick={() => { setUserId(person.user_id); setAssigning(true); }}><ArrowRight size={15} /></button></article>)}</div>
       {!dashboard.people.length ? <EmptyState title="No employees" description="Create effective employment contracts before assigning work patterns." /> : null}
       {withoutPattern.length ? <div className="hr-warning"><AlertTriangle size={17} /><span>{withoutPattern.length} employee{withoutPattern.length === 1 ? "" : "s"} will be omitted from automatic rotation until a pattern is assigned.</span></div> : null}
+
+      {assigning ? (
+        <div className="hr-decision" role="dialog" aria-modal="true" aria-label="Assign work pattern">
+          <div className="hr-decision__head"><div><span className="wr-eyebrow">Effective assignment</span><h3>Assign employee work pattern</h3></div><button type="button" className="wr-icon-button" onClick={() => setAssigning(false)}><X size={16} /></button></div>
+          <div className="hr-assignment-grid">
+            <label><span>Employee</span><select value={effectiveUserId} onChange={(event) => setUserId(event.target.value)}>{dashboard.people.map((person) => <option key={person.user_id} value={person.user_id}>{person.staff_code} · {person.full_name}</option>)}</select></label>
+            <label><span>Approved pattern</span><select value={effectivePatternId} onChange={(event) => setPatternId(event.target.value)}>{patterns.map((pattern) => <option key={pattern.id} value={pattern.id}>{pattern.code} · {pattern.name}</option>)}</select></label>
+            <label><span>Effective from</span><input type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label>
+            <label><span>Effective to</span><input type="date" value={effectiveTo} onChange={(event) => setEffectiveTo(event.target.value)} /></label>
+          </div>
+          {!patterns.length ? <div className="hr-warning"><AlertTriangle size={16} /><span>No active pattern is available. Create and approve a pattern in Rostering first.</span></div> : null}
+          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={() => setAssigning(false)}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || !effectiveUserId || !effectivePatternId || !effectiveFrom} onClick={() => void assign()}><Save size={15} /> Save assignment</button></div>
+        </div>
+      ) : null}
     </section>
   );
 }
