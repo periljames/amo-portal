@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from amodb.apps.doc_control import workspace_schemas as schemas
 from amodb.apps.doc_control.workspace_copy_router import _ALLOWED_EVENTS, validate_copy_event
@@ -28,6 +29,26 @@ def _event(event_type: str, **values):
     }
     payload.update(values)
     return schemas.ControlledCopyEventCreate(**payload)
+
+
+def test_controlled_copy_requires_canonical_holder_user() -> None:
+    with pytest.raises(ValidationError):
+        schemas.ControlledCopyCreate(
+            manual_id="manual-1",
+            revision_id="revision-1",
+            copy_number="COPY-001",
+            holder_name="Free text holder",
+            location_text="Nairobi Base Library",
+        )
+
+    with pytest.raises(ValidationError):
+        schemas.ControlledCopyCreate(
+            manual_id="manual-1",
+            revision_id="revision-1",
+            copy_number="COPY-001",
+            holder_user_id="",
+            location_text="Nairobi Base Library",
+        )
 
 
 def test_destroyed_copy_is_terminal() -> None:
