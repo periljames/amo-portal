@@ -12,6 +12,7 @@ vi.mock("./config", () => ({
   getApiBaseUrl: () => "https://api.example.test",
 }));
 
+import { shouldServePlatformSpa } from "./devProxyRouting";
 import { platformApi } from "./platformControl";
 
 describe("platform SaaS control API", () => {
@@ -22,6 +23,17 @@ describe("platform SaaS control API", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("keeps direct platform page navigation in the SPA", () => {
+    expect(shouldServePlatformSpa("GET", "/platform/integrations", "text/html,application/xhtml+xml")).toBe(true);
+    expect(shouldServePlatformSpa("HEAD", "/platform/security?tab=alerts", "text/html")).toBe(true);
+  });
+
+  it("continues proxying platform API fetches", () => {
+    expect(shouldServePlatformSpa("GET", "/platform/integrations/summary", "application/json")).toBe(false);
+    expect(shouldServePlatformSpa("POST", "/platform/commands", "text/html")).toBe(false);
+    expect(shouldServePlatformSpa("GET", "/api/chat/threads", "text/html")).toBe(false);
   });
 
   it("encodes tenant identifiers and sends module updates as one audited batch", async () => {
