@@ -179,7 +179,7 @@ function ControllerAuthorityActions({ detail, tenant, onChanged }: Omit<Props, "
         <label><span>Submission reference</span><input value={reference} onChange={(event) => setReference(event.target.value)} required /></label>
         <label><span>Response due</span><input type="datetime-local" value={responseDue} onChange={(event) => setResponseDue(event.target.value)} /></label>
         <ErrorMessage message={mutation.error} />
-        <div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || !revision}><Plus size={14} /> Create draft submission</button></div>
+        <div className="dc-form__actions"><button type="submit" className="dc-button" disabled={mutation.busy || !revision}><Landmark size={14} /> Create draft submission</button></div>
       </form>
       <DocumentControlEmpty
         title="Authority decisions are approver-only"
