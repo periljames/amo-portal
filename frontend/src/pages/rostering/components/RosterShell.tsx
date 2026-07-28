@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { NavLink, useLocation, useParams } from "react-router-dom";
 import {
   Building2,
@@ -12,7 +13,8 @@ import {
 
 import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../../../services/auth";
-import { canViewFeature, getUserCapabilities, type ModuleFeature, type RoleCapability } from "../../../utils/roleAccess";
+import { getCurrentWorkforcePermissions } from "../../../services/workforce";
+import { canViewFeature, type ModuleFeature } from "../../../utils/roleAccess";
 import "../../../styles/rostering-workforce.css";
 import "../../../styles/rostering-workforce-layout.css";
 
@@ -30,7 +32,7 @@ type NavItem = {
   label: string;
   icon: typeof Gauge;
   feature?: ModuleFeature;
-  capabilities?: RoleCapability[];
+  requiredPermissions?: string[];
 };
 
 const NAV: NavItem[] = [
@@ -39,17 +41,30 @@ const NAV: NavItem[] = [
   { suffix: "planning-board", label: "Operations", icon: UsersRound, feature: "rostering.planning-board" },
   { suffix: "training-impact", label: "Compliance", icon: GraduationCap, feature: "rostering.training-impact" },
   { suffix: "my-roster", label: "My duty", icon: ClipboardCheck, feature: "rostering.my-roster" },
-  { suffix: "settings?section=workforce", label: "Workforce", icon: Building2, capabilities: ["admin", "hr"] },
-  { suffix: "settings?section=overview", label: "Setup", icon: Settings2, capabilities: ["admin", "planner", "supervisor"] },
+  { suffix: "settings?section=workforce", label: "Workforce", icon: Building2, requiredPermissions: ["workforce.view_sensitive"] },
+  {
+    suffix: "settings?section=overview",
+    label: "Setup",
+    icon: Settings2,
+    requiredPermissions: ["roster.create", "roster.manage_shift_templates", "roster.manage_patterns", "roster.manage_rules"],
+  },
 ];
 
 export function RosterShell({ title, eyebrow, description, actions, children, context }: Props) {
   const { amoCode = "UNKNOWN" } = useParams();
   const location = useLocation();
   const user = getCachedUser();
-  const capabilities = getUserCapabilities(user);
+  const permissionsQuery = useQuery({
+    queryKey: ["rostering", "shell", "workforce-permissions"],
+    queryFn: getCurrentWorkforcePermissions,
+    staleTime: 5 * 60_000,
+    networkMode: "offlineFirst",
+  });
+  const livePermissions = permissionsQuery.data?.permissions || [];
   const visibleNav = NAV.filter((item) => {
-    if (item.capabilities) return item.capabilities.some((capability) => capabilities.includes(capability));
+    if (item.requiredPermissions) {
+      return item.requiredPermissions.some((permission) => livePermissions.includes(permission));
+    }
     return item.feature ? canViewFeature(user, item.feature) : false;
   });
   const root = `/maintenance/${encodeURIComponent(amoCode)}/rostering`;
