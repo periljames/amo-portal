@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import {
-  BarChart3,
+  Building2,
   CalendarDays,
   ClipboardCheck,
   Gauge,
@@ -26,10 +26,10 @@ type Props = {
 const NAV = [
   { suffix: "dashboard", label: "Command", icon: Gauge },
   { suffix: "calendar", label: "Planner", icon: CalendarDays },
-  { suffix: "planning-board", label: "Capacity", icon: UsersRound },
-  { suffix: "my-roster", label: "My duty", icon: ClipboardCheck },
+  { suffix: "planning-board", label: "Operations", icon: UsersRound },
   { suffix: "training-impact", label: "Compliance", icon: GraduationCap },
-  { suffix: "reports", label: "Reports", icon: BarChart3 },
+  { suffix: "my-roster", label: "My duty", icon: ClipboardCheck },
+  { suffix: "workforce", label: "Workforce", icon: Building2 },
   { suffix: "settings", label: "Setup", icon: Settings2 },
 ] as const;
 
