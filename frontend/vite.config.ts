@@ -1,8 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ServerOptions } from 'node:https'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+
+import { shouldServePlatformSpa } from './src/services/devProxyRouting'
 
 // https://vite.dev/config/
 const truthyValues = new Set(['1', 'true', 'yes', 'on'])
@@ -20,6 +22,18 @@ const resolveAllowedHosts = (env: Record<string, string>): true | string[] => {
   // Allow Tailscale HTTPS hostnames (e.g. <device>.<tailnet>.ts.net) during dev.
   return ['.ts.net']
 }
+
+const platformSpaNavigationPlugin = (): Plugin => ({
+  name: 'platform-spa-navigation-before-api-proxy',
+  configureServer(server) {
+    server.middlewares.use((req, _res, next) => {
+      if (shouldServePlatformSpa(req.method, req.url, req.headers.accept)) {
+        req.url = '/index.html'
+      }
+      next()
+    })
+  },
+})
 
 const resolveDevProxy = (env: Record<string, string>) => {
   const target = env.VITE_API_PROXY_TARGET?.trim() || env.VITE_API_BASE_URL?.trim() || 'http://127.0.0.1:8080'
@@ -68,7 +82,7 @@ export default defineConfig(({ mode }) => {
   const proxy = resolveDevProxy(env)
 
   return {
-    plugins: [react()],
+    plugins: [platformSpaNavigationPlugin(), react()],
     server: {
       https,
       allowedHosts,
