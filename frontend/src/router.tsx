@@ -69,6 +69,12 @@ function isDocumentControlPath(pathname: string): boolean {
   );
 }
 
+function rosteringWorkforceRedirect(pathname: string): string | null {
+  const parts = pathSegments(pathname);
+  if (parts[0] !== "maintenance" || !parts[1] || parts[2] !== "rostering" || parts[3] !== "workforce") return null;
+  return `/maintenance/${encodeURIComponent(parts[1])}/rostering/settings?section=workforce`;
+}
+
 function canonicaliseManualsPath(pathname: string): string {
   const parts = pathname.split("/");
   const index = parts.findIndex((part, partIndex) => part === "manuals" && (partIndex === 2 || partIndex === 3));
@@ -196,7 +202,11 @@ function PublicationsRouteSurface() {
 
 export const AppRouter: React.FC = () => {
   const location = useLocation();
+  const workforceTarget = rosteringWorkforceRedirect(location.pathname);
 
+  if (workforceTarget) {
+    return <Navigate to={`${workforceTarget}${location.hash}`} replace state={location.state} />;
+  }
   if (isSegmentPath(location.pathname, "manuals")) {
     return <Navigate to={`${canonicaliseManualsPath(location.pathname)}${location.search}${location.hash}`} replace state={location.state} />;
   }
