@@ -7,7 +7,7 @@ export type WorkforceHrPatternAssignmentCreate = {
   work_pattern_id: string;
   effective_from: string;
   effective_to?: string | null;
-  cycle_anchor_date?: string | null;
+  cycle_anchor_date: string;
 };
 
 export function getWorkforceHrDashboard(peopleLimit = 200): Promise<HrDashboard> {
