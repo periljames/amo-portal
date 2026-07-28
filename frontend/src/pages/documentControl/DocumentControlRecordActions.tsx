@@ -1,7 +1,9 @@
 import { Settings2 } from "lucide-react";
 
 import type { DocumentDetailResponse } from "../../services/documentControl";
+import DocumentControlDistributionActions from "./DocumentControlDistributionActions";
 import DocumentControlLifecycleActions, { type LifecycleView } from "./DocumentControlLifecycleActionsGuarded";
+import DocumentControlPrimaryActions from "./DocumentControlPrimaryActions";
 import DocumentControlRecordActionsBase from "./DocumentControlRecordActionsBase";
 import { DocumentControlSection, useDocumentControlRoute } from "./DocumentControlShell";
 
@@ -40,17 +42,33 @@ export default function DocumentControlRecordActions({
   compact?: boolean;
   activeView?: ActiveView;
 }) {
-  const { tenant } = useDocumentControlRoute();
+  const { tenant, basePath } = useDocumentControlRoute();
 
   if (compact) {
-    return (
+    return <>
+      <DocumentControlPrimaryActions detail={detail} tenant={tenant} basePath={basePath} onChanged={onChanged} />
       <button
         type="button"
         className="dc-button"
         onClick={() => document.getElementById("document-control-record-actions")?.scrollIntoView({ behavior: "smooth", block: "start" })}
       >
-        <Settings2 size={14} /> Manage document
+        <Settings2 size={14} /> More controls
       </button>
+    </>;
+  }
+
+  if (activeView === "distribution") {
+    return (
+      <div id="document-control-record-actions">
+        <DocumentControlSection
+          title="Distribution controls"
+          description="Issue this revision to eligible active tenant users, create acknowledgement obligations, and notify recipients automatically."
+        >
+          <div className="dc-section__body">
+            <DocumentControlDistributionActions detail={detail} tenant={tenant} onChanged={onChanged} />
+          </div>
+        </DocumentControlSection>
+      </div>
     );
   }
 
