@@ -48,6 +48,19 @@ def _validate_timezone(name: str) -> str:
     return name
 
 
+def _validate_run_day(frequency, run_day: int) -> int:
+    normalized = _enum_value(frequency)
+    if normalized in {
+        RosterAutomationFrequency.WEEKLY.value,
+        RosterAutomationFrequency.FORTNIGHTLY.value,
+    }:
+        if not 1 <= int(run_day) <= 7:
+            raise ValueError("Weekly and fortnightly automation run_day must be an ISO weekday from 1 to 7")
+    elif not 1 <= int(run_day) <= 28:
+        raise ValueError("Monthly automation run_day must be from 1 to 28")
+    return int(run_day)
+
+
 def _add_months(value: date, months: int) -> date:
     month_index = value.year * 12 + value.month - 1 + months
     year, zero_month = divmod(month_index, 12)
@@ -103,24 +116,25 @@ def _render_pattern(pattern: str, target_from: date, target_to: date) -> str:
 def _next_run(policy: RosterGenerationPolicy, *, now: Optional[datetime] = None) -> Optional[datetime]:
     if not policy.enabled or _enum_value(policy.frequency) == RosterAutomationFrequency.MANUAL.value:
         return None
+    run_day = _validate_run_day(policy.frequency, policy.run_day)
     zone = ZoneInfo(policy.timezone_name)
     current = (now or _utcnow()).astimezone(zone)
     if _enum_value(policy.frequency) == RosterAutomationFrequency.MONTHLY.value:
         candidate = datetime.combine(
-            date(current.year, current.month, min(policy.run_day, 28)),
+            date(current.year, current.month, run_day),
             time(policy.run_hour_local, 0),
             tzinfo=zone,
         )
         if candidate <= current:
             next_month = _add_months(candidate.date().replace(day=1), 1)
             candidate = datetime.combine(
-                date(next_month.year, next_month.month, min(policy.run_day, 28)),
+                date(next_month.year, next_month.month, run_day),
                 time(policy.run_hour_local, 0),
                 tzinfo=zone,
             )
     else:
         cadence_days = 7 if _enum_value(policy.frequency) == RosterAutomationFrequency.WEEKLY.value else 14
-        days_ahead = (policy.run_day - current.isoweekday()) % 7
+        days_ahead = (run_day - current.isoweekday()) % 7
         candidate = datetime.combine(
             current.date() + timedelta(days=days_ahead),
             time(policy.run_hour_local, 0),
@@ -173,6 +187,7 @@ def update_policy(
         values["timezone_name"] = _validate_timezone(str(values["timezone_name"]))
     for key, value in values.items():
         setattr(row, key, value)
+    _validate_run_day(row.frequency, row.run_day)
     row.updated_by_user_id = actor_user_id
     row.updated_reason = reason
     row.state_revision += 1
@@ -374,6 +389,11 @@ def run(
 ) -> RosterGenerationRun:
     replay = _existing_run(db, amo_id=amo_id, idempotency_key=payload.idempotency_key)
     if replay:
+        replay_status = _enum_value(replay.status)
+        if replay_status == RosterAutomationRunStatus.FAILED.value:
+            raise RuntimeError(f"ROSTER_AUTOMATION_PREVIOUS_FAILURE:{replay.id}")
+        if replay_status == RosterAutomationRunStatus.RUNNING.value:
+            raise RuntimeError(f"ROSTER_AUTOMATION_ALREADY_RUNNING:{replay.id}")
         return replay
 
     policy = get_or_create_policy(db, amo_id=amo_id, actor_user_id=actor_user_id)
@@ -397,123 +417,115 @@ def run(
     db.add(run_row)
     db.flush()
 
-    try:
-        period = _period_for_window(
+    period = _period_for_window(
+        db,
+        amo_id=amo_id,
+        target_from=preview_result.target_from,
+        target_to=preview_result.target_to,
+    )
+    if not period:
+        if not payload.create_missing_period:
+            raise ValueError("The selected roster period does not exist")
+        period = roster_services.create_period(
             db,
             amo_id=amo_id,
-            target_from=preview_result.target_from,
-            target_to=preview_result.target_to,
+            actor_user_id=actor_user_id,
+            payload=roster_schemas.RosterPeriodCreate(
+                period_code=preview_result.period_code,
+                name=preview_result.period_name,
+                starts_on=preview_result.target_from,
+                ends_on=preview_result.target_to,
+                notes="Created by controlled roster automation",
+                timezone_name=policy.timezone_name,
+            ),
         )
-        if not period:
-            if not payload.create_missing_period:
-                raise ValueError("The selected roster period does not exist")
-            period = roster_services.create_period(
-                db,
-                amo_id=amo_id,
-                actor_user_id=actor_user_id,
-                payload=roster_schemas.RosterPeriodCreate(
-                    period_code=preview_result.period_code,
-                    name=preview_result.period_name,
-                    starts_on=preview_result.target_from,
-                    ends_on=preview_result.target_to,
-                    notes="Created by controlled roster automation",
-                    timezone_name=policy.timezone_name,
-                ),
-            )
-        run_row.period_id = period.id
+    run_row.period_id = period.id
 
-        drafts = [
-            row for row in (period.versions or [])
-            if _enum_value(row.status) == roster_models.RosterVersionStatus.DRAFT.value
-        ]
-        draft = sorted(drafts, key=lambda row: row.version_no, reverse=True)[0] if drafts else None
-        should_create_draft = (
-            payload.create_initial_draft
-            if payload.create_initial_draft is not None
-            else policy.create_initial_draft
+    drafts = [
+        row for row in (period.versions or [])
+        if _enum_value(row.status) == roster_models.RosterVersionStatus.DRAFT.value
+    ]
+    draft = sorted(drafts, key=lambda row: row.version_no, reverse=True)[0] if drafts else None
+    should_create_draft = (
+        payload.create_initial_draft
+        if payload.create_initial_draft is not None
+        else policy.create_initial_draft
+    )
+    should_generate = (
+        payload.generate_from_patterns
+        if payload.generate_from_patterns is not None
+        else policy.generate_from_patterns
+    )
+    if not draft and (should_create_draft or should_generate):
+        draft = roster_services.create_version(
+            db,
+            period=period,
+            actor_user_id=actor_user_id,
+            payload=roster_schemas.RosterVersionCreate(
+                title=f"Automated draft for {period.period_code}",
+                change_summary="Generated from effective Workforce work patterns; requires planner review.",
+                idempotency_key=f"{payload.idempotency_key}:version",
+            ),
         )
-        should_generate = (
-            payload.generate_from_patterns
-            if payload.generate_from_patterns is not None
-            else policy.generate_from_patterns
+    if not draft:
+        raise ValueError("No draft roster version is available for generation")
+    run_row.version_id = draft.id
+
+    generated_count = 0
+    skipped_count = 0
+    conflicts: list[dict] = []
+    if should_generate:
+        generation = roster_services.generate_from_patterns(
+            db,
+            version=draft,
+            actor_user_id=actor_user_id,
+            payload=roster_schemas.PatternGenerationRequest(
+                from_date=preview_result.target_from,
+                to_date=preview_result.target_to,
+                user_ids=payload.user_ids,
+                idempotency_key=f"{payload.idempotency_key}:pattern",
+                skip_duplicates=True,
+                expected_version_revision=draft.state_revision,
+            ),
         )
-        if not draft and (should_create_draft or should_generate):
-            draft = roster_services.create_version(
-                db,
-                period=period,
-                actor_user_id=actor_user_id,
-                payload=roster_schemas.RosterVersionCreate(
-                    title=f"Automated draft for {period.period_code}",
-                    change_summary="Generated from effective Workforce work patterns; requires planner review.",
-                    idempotency_key=f"{payload.idempotency_key}:version",
-                ),
-            )
-        if not draft:
-            raise ValueError("No draft roster version is available for generation")
-        run_row.version_id = draft.id
+        generated_count = len(generation.created)
+        skipped_count = len(generation.skipped)
+        conflicts = list(generation.conflicts)
 
-        generated_count = 0
-        skipped_count = 0
-        conflicts: list[dict] = []
-        if should_generate:
-            generation = roster_services.generate_from_patterns(
-                db,
-                version=draft,
-                actor_user_id=actor_user_id,
-                payload=roster_schemas.PatternGenerationRequest(
-                    from_date=preview_result.target_from,
-                    to_date=preview_result.target_to,
-                    user_ids=payload.user_ids,
-                    idempotency_key=f"{payload.idempotency_key}:pattern",
-                    skip_duplicates=True,
-                    expected_version_revision=draft.state_revision,
-                ),
-            )
-            generated_count = len(generation.created)
-            skipped_count = len(generation.skipped)
-            conflicts = list(generation.conflicts)
-
-        blocker_count = 0
-        warning_count = 0
-        if policy.validate_after_generation:
-            validation = roster_services.validate_version(
-                db,
-                version=draft,
-                actor_user_id=actor_user_id,
-            )
-            blocker_count = int(validation.blocker_count)
-            warning_count = int(validation.warning_count)
-
-        run_row.generated_count = generated_count
-        run_row.skipped_count = skipped_count
-        run_row.conflict_count = len(conflicts)
-        run_row.validation_blocker_count = blocker_count
-        run_row.validation_warning_count = warning_count
-        run_row.summary_json = {
-            "preview": preview_result.model_dump(mode="json"),
-            "conflicts": conflicts,
-            "review_required": True,
-            "publication_performed": False,
-        }
-        run_row.status = (
-            RosterAutomationRunStatus.COMPLETED_WITH_CONFLICTS
-            if conflicts or blocker_count
-            else RosterAutomationRunStatus.COMPLETED
+    blocker_count = 0
+    warning_count = 0
+    if policy.validate_after_generation:
+        validation = roster_services.validate_version(
+            db,
+            version=draft,
+            actor_user_id=actor_user_id,
         )
-        run_row.completed_at = _utcnow()
-        policy.last_run_at = run_row.completed_at
-        policy.next_run_at = _next_run(policy, now=run_row.completed_at)
-        db.add(policy)
-        db.add(run_row)
-        db.flush()
-        return run_row
-    except Exception as exc:
-        run_row.status = RosterAutomationRunStatus.FAILED
-        run_row.error_message = str(exc)
-        run_row.completed_at = _utcnow()
-        db.add(run_row)
-        db.flush()
-        raise
+        blocker_count = int(validation.blocker_count)
+        warning_count = int(validation.warning_count)
+
+    run_row.generated_count = generated_count
+    run_row.skipped_count = skipped_count
+    run_row.conflict_count = len(conflicts)
+    run_row.validation_blocker_count = blocker_count
+    run_row.validation_warning_count = warning_count
+    run_row.summary_json = {
+        "preview": preview_result.model_dump(mode="json"),
+        "conflicts": conflicts,
+        "review_required": True,
+        "publication_performed": False,
+    }
+    run_row.status = (
+        RosterAutomationRunStatus.COMPLETED_WITH_CONFLICTS
+        if conflicts or blocker_count
+        else RosterAutomationRunStatus.COMPLETED
+    )
+    run_row.completed_at = _utcnow()
+    policy.last_run_at = run_row.completed_at
+    policy.next_run_at = _next_run(policy, now=run_row.completed_at)
+    db.add(policy)
+    db.add(run_row)
+    db.flush()
+    return run_row
 
 
 def list_runs(db: Session, *, amo_id: str, limit: int = 20) -> list[RosterGenerationRun]:
@@ -586,7 +598,7 @@ def readiness(
                 else "No current or future roster period is available."
             ),
             action_label="Manage calendar",
-            action_path="periods",
+            action_path="calendar",
         ),
         RosterSetupReadinessItem(
             key="automation",
@@ -612,9 +624,7 @@ def readiness(
             key="patterns",
             label="Work patterns",
             state="READY" if active_pattern_count and not missing_pattern_count else "NEEDS_ATTENTION",
-            detail=(
-                f"{active_pattern_count} active pattern(s); {missing_pattern_count} employee(s) need an assignment."
-            ),
+            detail=f"{active_pattern_count} active pattern(s); {missing_pattern_count} employee(s) need an assignment.",
             action_label="Manage patterns",
             action_path="patterns",
         ),
