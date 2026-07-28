@@ -42,8 +42,11 @@ export type HrPersonReadiness = {
 export type HrDashboard = {
   generated_at: string;
   can_manage_contracts: boolean;
-  can_manage_leave: boolean;
-  can_approve_time: boolean;
+  can_manage_leave_balances: boolean;
+  can_review_leave: boolean;
+  can_approve_leave: boolean;
+  can_approve_timesheet_supervisor: boolean;
+  can_approve_timesheet_hr: boolean;
   can_export_payroll: boolean;
   active_employee_count: number;
   onboarding_employee_count: number;
