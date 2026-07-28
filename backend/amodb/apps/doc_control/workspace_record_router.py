@@ -8,7 +8,7 @@ from amodb.apps.manuals import models as manual_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
-from .workspace_decision_policy import is_decision_approver
+from .workspace_capabilities import document_control_capabilities, reader_capabilities
 from .workspace_router import get_document_detail as _get_full_document_detail
 from .workspace_service import (
     get_manual,
@@ -55,13 +55,7 @@ def _controller_history(
     tenant_id: str,
     detail: dict,
 ) -> list[dict]:
-    """Collect all domain events belonging to this unified document record.
-
-    Governance actions use their own immutable entity IDs, so filtering audit rows
-    only by the manual and revision IDs omits workflow, authority, distribution,
-    TR, copy, review, and integration events. The controller record already loaded
-    those tenant-scoped entities; use that exact ID set to build a complete timeline.
-    """
+    """Collect all domain events belonging to this unified document record."""
     entity_ids = _entity_ids_for_document(detail)
     if not entity_ids:
         return []
@@ -145,7 +139,7 @@ def _reader_detail(
         "integrations": [],
         "history": [],
         "active_users": [],
-        "capabilities": {"read": True, "control": False, "approve": False},
+        "capabilities": reader_capabilities(),
     }
 
 
@@ -174,8 +168,5 @@ def get_role_appropriate_document_detail(
     tenant = resolve_tenant(db, tenant_slug, current_user)
     detail["history"] = _controller_history(db, tenant.id, detail)
     detail["active_users"] = _active_tenant_people(db, tenant.amo_id)
-    capabilities = detail.setdefault("capabilities", {})
-    capabilities["read"] = True
-    capabilities["control"] = True
-    capabilities["approve"] = is_decision_approver(current_user)
+    detail["capabilities"] = document_control_capabilities(current_user)
     return detail

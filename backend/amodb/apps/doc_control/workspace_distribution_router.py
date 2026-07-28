@@ -9,6 +9,12 @@ from amodb.security import get_current_active_user
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
+from .workspace_publication_distribution import (
+    AUTO_AUDIENCE,
+    SELECTED_AUDIENCE,
+    notify_distribution_recipients,
+    resolve_distribution_users,
+)
 from .workspace_router import (
     acknowledge_distribution_campaign as _acknowledge_distribution_campaign,
     create_distribution_campaign as _create_distribution_campaign,
@@ -26,6 +32,11 @@ from .workspace_service import (
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Distribution"])
+
+
+def _audience_mode(value: dict | None) -> str:
+    mode = str((value or {}).get("mode") or SELECTED_AUDIENCE).upper()
+    return AUTO_AUDIENCE if mode == AUTO_AUDIENCE else SELECTED_AUDIENCE
 
 
 @router.post("/t/{tenant_slug}/distribution-campaigns", include_in_schema=False)
@@ -67,12 +78,26 @@ def create_guarded_distribution_campaign(
                 },
             )
 
+    mode = _audience_mode(dict(payload.audience))
+    users = resolve_distribution_users(
+        db,
+        tenant=tenant,
+        profile=profile,
+        audience_mode=mode,
+        requested_user_ids=payload.recipient_user_ids,
+    )
+    if not users:
+        raise HTTPException(status_code=409, detail="At least one active eligible tenant recipient is required")
+    audience = dict(payload.audience)
+    audience.update({"mode": mode, "resolved_count": len(users)})
     guarded_payload = payload.model_copy(
         update={
+            "audience": audience,
+            "recipient_user_ids": [str(user.id) for user in users],
             "acknowledgement_required": bool(
                 payload.acknowledgement_required
                 or (profile and profile.acknowledgement_required)
-            )
+            ),
         }
     )
     return _create_distribution_campaign(
@@ -133,10 +158,18 @@ def issue_guarded_distribution_campaign(
             },
         )
     existing_ids = [str(row.recipient_user_id) for row in existing_rows]
-    active_tenant_users(
+    mode = _audience_mode(dict(campaign.audience_json or {}))
+    users = resolve_distribution_users(
         db,
-        tenant,
-        list(dict.fromkeys(existing_ids + list(payload.recipient_user_ids))),
+        tenant=tenant,
+        profile=profile,
+        audience_mode=mode,
+        requested_user_ids=list(dict.fromkeys(existing_ids + list(payload.recipient_user_ids))),
+    )
+    if mode == SELECTED_AUDIENCE:
+        active_tenant_users(db, tenant, [str(user.id) for user in users])
+    guarded_payload = payload.model_copy(
+        update={"recipient_user_ids": [str(user.id) for user in users]}
     )
 
     if campaign.temporary_revision_id:
@@ -163,34 +196,47 @@ def issue_guarded_distribution_campaign(
     result = _issue_distribution_campaign(
         tenant_slug=tenant_slug,
         campaign_id=campaign_id,
-        payload=payload,
+        payload=guarded_payload,
         request=request,
         db=db,
         current_user=current_user,
     )
 
-    if not campaign.acknowledgement_required:
-        campaign = (
-            db.query(dm.DocumentDistributionCampaign)
-            .filter(
-                dm.DocumentDistributionCampaign.tenant_id == tenant.amo_id,
-                dm.DocumentDistributionCampaign.id == campaign_id,
-            )
-            .first()
+    campaign = (
+        db.query(dm.DocumentDistributionCampaign)
+        .filter(
+            dm.DocumentDistributionCampaign.tenant_id == tenant.amo_id,
+            dm.DocumentDistributionCampaign.id == campaign_id,
         )
-        if campaign and campaign.status == "ISSUED":
-            campaign.status = "COMPLETED"
-            audit(
-                db,
-                tenant,
-                request,
-                "document.distribution.completed",
-                "document_distribution_campaign",
-                campaign.id,
-                {"reason": "Acknowledgement not required"},
-            )
-            db.commit()
-            result["status"] = "COMPLETED"
+        .first()
+    )
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Distribution campaign not found after issue")
+    manual = get_manual(db, tenant, campaign.manual_id)
+    revision = get_revision(db, manual, campaign.revision_id)
+    notification_count = notify_distribution_recipients(
+        db,
+        tenant_slug=tenant_slug,
+        tenant_id=tenant.amo_id,
+        campaign=campaign,
+        manual=manual,
+        revision=revision,
+    )
+
+    if not campaign.acknowledgement_required and campaign.status == "ISSUED":
+        campaign.status = "COMPLETED"
+        audit(
+            db,
+            tenant,
+            request,
+            "document.distribution.completed",
+            "document_distribution_campaign",
+            campaign.id,
+            {"reason": "Acknowledgement not required"},
+        )
+        result["status"] = "COMPLETED"
+    result["notification_count"] = notification_count
+    db.commit()
     return result
 
 

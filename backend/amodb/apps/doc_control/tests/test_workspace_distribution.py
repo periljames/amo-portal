@@ -98,6 +98,11 @@ def test_profile_requirement_cannot_be_disabled_when_campaign_is_created(monkeyp
         lambda *args, **kwargs: SimpleNamespace(acknowledgement_required=True),
     )
     monkeypatch.setattr(distribution, "require_control_user", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        distribution,
+        "resolve_distribution_users",
+        lambda *args, **kwargs: [SimpleNamespace(id="user-1")],
+    )
 
     def capture(**kwargs):
         captured["payload"] = kwargs["payload"]
@@ -120,6 +125,41 @@ def test_profile_requirement_cannot_be_disabled_when_campaign_is_created(monkeyp
     )
 
     assert captured["payload"].acknowledgement_required is True
+    assert captured["payload"].recipient_user_ids == ["user-1"]
+
+
+def test_all_eligible_audience_is_resolved_server_side(monkeypatch) -> None:
+    captured = {}
+    monkeypatch.setattr(distribution, "resolve_tenant", lambda *args, **kwargs: _tenant())
+    monkeypatch.setattr(distribution, "get_manual", lambda *args, **kwargs: SimpleNamespace(id="manual-1"))
+    monkeypatch.setattr(distribution, "get_revision", lambda *args, **kwargs: SimpleNamespace(id="revision-1"))
+    monkeypatch.setattr(distribution, "get_profile", lambda *args, **kwargs: SimpleNamespace(acknowledgement_required=False))
+    monkeypatch.setattr(distribution, "require_control_user", lambda *args, **kwargs: None)
+
+    def resolve(*args, **kwargs):
+        captured["mode"] = kwargs["audience_mode"]
+        return [SimpleNamespace(id="user-1"), SimpleNamespace(id="user-2")]
+
+    monkeypatch.setattr(distribution, "resolve_distribution_users", resolve)
+    monkeypatch.setattr(distribution, "_create_distribution_campaign", lambda **kwargs: captured.setdefault("payload", kwargs["payload"]) or {"status": "DRAFT"})
+    payload = schemas.DistributionCampaignCreate(
+        manual_id="manual-1",
+        revision_id="revision-1",
+        title="All staff issue",
+        audience={"mode": "ALL_ELIGIBLE_USERS"},
+    )
+
+    distribution.create_guarded_distribution_campaign(
+        tenant_slug="safarilink",
+        payload=payload,
+        request=_request(),
+        db=SimpleNamespace(),
+        current_user=SimpleNamespace(),
+    )
+
+    assert captured["mode"] == "ALL_ELIGIBLE_USERS"
+    assert captured["payload"].recipient_user_ids == ["user-1", "user-2"]
+    assert captured["payload"].audience["resolved_count"] == 2
 
 
 def test_draft_campaign_cannot_be_acknowledged(monkeypatch) -> None:
