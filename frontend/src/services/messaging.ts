@@ -1,5 +1,5 @@
 import { getApiBaseUrl } from "./config";
-import { getToken } from "./auth";
+import { getCachedUser, getToken, type PortalUser } from "./auth";
 
 export type ChatThreadKind = "DIRECT" | "DEPARTMENT" | "GROUP";
 
@@ -86,9 +86,19 @@ export class MessagingHttpError extends Error {
   }
 }
 
+export function hasTenantMessagingContext(
+  user: Pick<PortalUser, "id" | "amo_id"> | null | undefined = getCachedUser(),
+  token: string | null = getToken(),
+): boolean {
+  return Boolean(token && user?.id && user.amo_id);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
-  if (!token) throw new MessagingHttpError("Messaging requires an authenticated session", 401);
+  const user = getCachedUser();
+  if (!hasTenantMessagingContext(user, token)) {
+    throw new MessagingHttpError("Messaging requires an active AMO tenant session", 403);
+  }
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort("timeout"), 15_000);
   try {
