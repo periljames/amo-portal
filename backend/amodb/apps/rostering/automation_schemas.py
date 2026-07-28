@@ -62,6 +62,19 @@ class RosterGenerationPolicyUpdate(AutomationSchema):
     expected_state_revision: int = Field(ge=1)
     reason: str = Field(min_length=5, max_length=2000)
 
+    @model_validator(mode="after")
+    def validate_frequency_day(self):
+        if (
+            self.frequency in {
+                RosterAutomationFrequency.WEEKLY,
+                RosterAutomationFrequency.FORTNIGHTLY,
+            }
+            and self.run_day is not None
+            and self.run_day > 7
+        ):
+            raise ValueError("Weekly and fortnightly run_day must be an ISO weekday from 1 to 7")
+        return self
+
 
 class RosterAutomationPreviewRequest(AutomationSchema):
     target_from: Optional[date] = None
