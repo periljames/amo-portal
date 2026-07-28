@@ -8,6 +8,7 @@ from amodb.apps.manuals import models as manual_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
+from .workspace_decision_policy import is_decision_approver
 from .workspace_router import get_document_detail as _get_full_document_detail
 from .workspace_service import (
     get_manual,
@@ -144,7 +145,7 @@ def _reader_detail(
         "integrations": [],
         "history": [],
         "active_users": [],
-        "capabilities": {"control": False},
+        "capabilities": {"read": True, "control": False, "approve": False},
     }
 
 
@@ -173,4 +174,8 @@ def get_role_appropriate_document_detail(
     tenant = resolve_tenant(db, tenant_slug, current_user)
     detail["history"] = _controller_history(db, tenant.id, detail)
     detail["active_users"] = _active_tenant_people(db, tenant.amo_id)
+    capabilities = detail.setdefault("capabilities", {})
+    capabilities["read"] = True
+    capabilities["control"] = True
+    capabilities["approve"] = is_decision_approver(current_user)
     return detail
