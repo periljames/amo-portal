@@ -10,11 +10,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy.exc import PendingRollbackError
+from sqlalchemy.exc import IntegrityError
 
 from amodb.database import WriteSessionLocal
 from amodb.apps.rostering import automation_service
 from amodb.apps.rostering.automation_models import (
+    RosterAutomationRunStatus,
     RosterAutomationTrigger,
     RosterGenerationPolicy,
     RosterGenerationRun,
@@ -44,19 +45,72 @@ def _due_policy_ids(*, as_of: datetime, limit: int) -> list[str]:
         db.close()
 
 
-def _commit_failed_run_if_present(db, *, amo_id: str, idempotency_key: str) -> bool:
+def _record_failed_scheduled_run(
+    db,
+    *,
+    policy_id: str,
+    actor_user_id: str,
+    idempotency_key: str,
+    message: str,
+    as_of: datetime,
+) -> bool:
+    """Roll back generated work, then record one failed scheduled attempt.
+
+    The operational transaction is discarded before evidence is inserted. The
+    policy advances to its next scheduled occurrence so a deterministic failed
+    idempotency key cannot leave the hourly worker replaying the same failed
+    cycle forever.
+    """
+    db.rollback()
     try:
-        row = db.query(RosterGenerationRun).filter(
-            RosterGenerationRun.amo_id == amo_id,
+        policy = db.query(RosterGenerationPolicy).filter(
+            RosterGenerationPolicy.id == policy_id,
+        ).with_for_update().first()
+        if policy is None:
+            return False
+
+        existing = db.query(RosterGenerationRun).filter(
+            RosterGenerationRun.amo_id == policy.amo_id,
             RosterGenerationRun.idempotency_key == idempotency_key,
         ).first()
-        if row is not None and str(getattr(row.status, "value", row.status)) == "FAILED":
-            db.commit()
-            return True
-    except PendingRollbackError:
-        pass
-    db.rollback()
-    return False
+        if existing is None:
+            target_from, target_to = automation_service._target_window(policy)
+            row = RosterGenerationRun(
+                amo_id=policy.amo_id,
+                policy_id=policy.id,
+                trigger=RosterAutomationTrigger.SCHEDULED,
+                status=RosterAutomationRunStatus.FAILED,
+                idempotency_key=idempotency_key,
+                dry_run=False,
+                target_from=target_from.isoformat(),
+                target_to=target_to.isoformat(),
+                generated_count=0,
+                skipped_count=0,
+                conflict_count=0,
+                validation_blocker_count=0,
+                validation_warning_count=0,
+                summary_json={
+                    "operational_changes_committed": False,
+                    "failure_recorded_after_rollback": True,
+                    "scheduled_cycle_advanced": True,
+                },
+                error_message=message,
+                requested_by_user_id=actor_user_id,
+                started_at=as_of,
+                completed_at=as_of,
+                created_at=as_of,
+            )
+            db.add(row)
+
+        policy.last_run_at = as_of
+        policy.next_run_at = automation_service._next_run(policy, now=as_of)
+        policy.updated_reason = "Scheduled automation failed; all generated changes were rolled back."
+        db.add(policy)
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        return False
 
 
 def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
@@ -78,12 +132,13 @@ def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
             db.commit()
             return {"policy_id": policy_id, "outcome": "skipped_no_owner"}
 
+        amo_id = policy.amo_id
         due_key = policy.next_run_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         idempotency_key = f"scheduled:{policy.id}:{due_key}"
         try:
             row = automation_service.run(
                 db,
-                amo_id=policy.amo_id,
+                amo_id=amo_id,
                 actor_user_id=actor_user_id,
                 trigger=RosterAutomationTrigger.SCHEDULED,
                 payload=RosterAutomationRunRequest(
@@ -95,26 +150,31 @@ def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
                 ),
             )
             db.commit()
+            outcome = str(getattr(row.status, "value", row.status))
             return {
                 "policy_id": policy.id,
-                "amo_id": policy.amo_id,
+                "amo_id": amo_id,
                 "run_id": row.id,
-                "outcome": str(getattr(row.status, "value", row.status)),
+                "outcome": outcome,
                 "generated_count": row.generated_count,
                 "conflict_count": row.conflict_count,
             }
-        except (ValueError, RuntimeError) as exc:
-            retained = _commit_failed_run_if_present(
+        except (ValueError, RuntimeError, IntegrityError) as exc:
+            message = str(exc)
+            retained = _record_failed_scheduled_run(
                 db,
-                amo_id=policy.amo_id,
+                policy_id=policy_id,
+                actor_user_id=actor_user_id,
                 idempotency_key=idempotency_key,
+                message=message,
+                as_of=as_of,
             )
             return {
-                "policy_id": policy.id,
-                "amo_id": policy.amo_id,
+                "policy_id": policy_id,
+                "amo_id": amo_id,
                 "outcome": "failed",
                 "evidence_retained": retained,
-                "error": str(exc),
+                "error": message,
             }
     finally:
         db.close()
