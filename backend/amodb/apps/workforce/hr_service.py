@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload
 
 from ..accounts import models as account_models
 from . import hr_schemas, models, permissions
@@ -318,11 +318,20 @@ def dashboard(
     can_manage_contracts = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS
     )
-    can_manage_leave = permissions.has_permission(
+    can_manage_leave_balances = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.LEAVE_MANAGE_BALANCES
     )
-    can_approve_time = permissions.has_permission(
+    can_review_leave = permissions.has_permission(
+        db, user=current_user, permission=permissions.PermissionCode.LEAVE_REVIEW
+    )
+    can_approve_leave = permissions.has_permission(
+        db, user=current_user, permission=permissions.PermissionCode.LEAVE_APPROVE
+    )
+    can_approve_timesheet_supervisor = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.TIMESHEET_APPROVE
+    )
+    can_approve_timesheet_hr = can_approve_timesheet_supervisor and permissions.has_permission(
+        db, user=current_user, permission=permissions.PermissionCode.ATTENDANCE_APPROVE
     )
     can_export_payroll = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.PAYROLL_EXPORT
@@ -341,8 +350,11 @@ def dashboard(
     return hr_schemas.HrDashboardResponse(
         generated_at=now,
         can_manage_contracts=can_manage_contracts,
-        can_manage_leave=can_manage_leave,
-        can_approve_time=can_approve_time,
+        can_manage_leave_balances=can_manage_leave_balances,
+        can_review_leave=can_review_leave,
+        can_approve_leave=can_approve_leave,
+        can_approve_timesheet_supervisor=can_approve_timesheet_supervisor,
+        can_approve_timesheet_hr=can_approve_timesheet_hr,
         can_export_payroll=can_export_payroll,
         active_employee_count=active_count,
         onboarding_employee_count=onboarding_count,
