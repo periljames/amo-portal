@@ -11,7 +11,8 @@ from amodb.security import get_current_active_user
 from . import domain_models as dm
 from . import workspace_schemas as schemas
 from .workspace_decision_policy import require_decision_approver
-from .workspace_service import resolve_tenant
+from .workspace_publication_distribution import ensure_automatic_publication_distribution
+from .workspace_service import get_manual, get_revision, resolve_tenant
 from .workspace_workflow_authority_router import (
     transition_workflow_with_authority_alignment as _transition,
 )
@@ -210,6 +211,18 @@ def transition_workflow_with_codex_review_guards(
         require_decision_approver(current_user)
         validate_decision_evidence(payload)
     if payload.action == "PUBLISH":
+        manual = get_manual(db, tenant, workflow.manual_id)
+        revision = get_revision(db, manual, workflow.revision_id)
+        ensure_automatic_publication_distribution(
+            db,
+            tenant_slug=tenant_slug,
+            tenant=tenant,
+            workflow=workflow,
+            manual=manual,
+            revision=revision,
+            current_user=current_user,
+            request=request,
+        )
         validate_active_publication_recipients(
             db,
             tenant_id=tenant.amo_id,
