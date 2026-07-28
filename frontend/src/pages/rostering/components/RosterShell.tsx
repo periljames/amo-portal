@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 
 import DepartmentLayout from "../../../components/Layout/DepartmentLayout";
+import { getCachedUser } from "../../../services/auth";
+import { canViewFeature, getUserCapabilities, type ModuleFeature, type RoleCapability } from "../../../utils/roleAccess";
 import "../../../styles/rostering-workforce.css";
 import "../../../styles/rostering-workforce-layout.css";
 
@@ -23,19 +25,33 @@ type Props = {
   context?: ReactNode;
 };
 
-const NAV = [
-  { suffix: "dashboard", label: "Command", icon: Gauge },
-  { suffix: "calendar", label: "Planner", icon: CalendarDays },
-  { suffix: "planning-board", label: "Operations", icon: UsersRound },
-  { suffix: "training-impact", label: "Compliance", icon: GraduationCap },
-  { suffix: "my-roster", label: "My duty", icon: ClipboardCheck },
-  { suffix: "settings?section=workforce", label: "Workforce", icon: Building2 },
-  { suffix: "settings?section=overview", label: "Setup", icon: Settings2 },
-] as const;
+type NavItem = {
+  suffix: string;
+  label: string;
+  icon: typeof Gauge;
+  feature?: ModuleFeature;
+  capabilities?: RoleCapability[];
+};
+
+const NAV: NavItem[] = [
+  { suffix: "dashboard", label: "Command", icon: Gauge, feature: "rostering.dashboard" },
+  { suffix: "calendar", label: "Planner", icon: CalendarDays, feature: "rostering.calendar" },
+  { suffix: "planning-board", label: "Operations", icon: UsersRound, feature: "rostering.planning-board" },
+  { suffix: "training-impact", label: "Compliance", icon: GraduationCap, feature: "rostering.training-impact" },
+  { suffix: "my-roster", label: "My duty", icon: ClipboardCheck, feature: "rostering.my-roster" },
+  { suffix: "settings?section=workforce", label: "Workforce", icon: Building2, capabilities: ["admin", "hr"] },
+  { suffix: "settings?section=overview", label: "Setup", icon: Settings2, capabilities: ["admin", "planner", "supervisor"] },
+];
 
 export function RosterShell({ title, eyebrow, description, actions, children, context }: Props) {
   const { amoCode = "UNKNOWN" } = useParams();
   const location = useLocation();
+  const user = getCachedUser();
+  const capabilities = getUserCapabilities(user);
+  const visibleNav = NAV.filter((item) => {
+    if (item.capabilities) return item.capabilities.some((capability) => capabilities.includes(capability));
+    return item.feature ? canViewFeature(user, item.feature) : false;
+  });
   const root = `/maintenance/${encodeURIComponent(amoCode)}/rostering`;
   const selectedSection = new URLSearchParams(location.search).get("section");
 
@@ -52,7 +68,7 @@ export function RosterShell({ title, eyebrow, description, actions, children, co
         </header>
 
         <nav className="wr-tabs" aria-label="Duty rostering sections">
-          {NAV.map(({ suffix, label, icon: Icon }) => (
+          {visibleNav.map(({ suffix, label, icon: Icon }) => (
             <NavLink
               key={`${suffix}:${label}`}
               to={`${root}/${suffix}`}
