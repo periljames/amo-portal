@@ -29,6 +29,31 @@ _DECISION_EVIDENCE_ACTIONS = {
     "PUBLISH",
     "ARCHIVE",
 }
+_EVIDENCE_REFERENCE_KEYS = {
+    "asset_id",
+    "attachment_id",
+    "document_id",
+    "evidence_id",
+    "file_id",
+    "reference",
+    "reference_id",
+    "submission_reference",
+    "url",
+    "checksum",
+    "checksum_sha256",
+}
+
+
+def _has_retained_reference(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+    for key in _EVIDENCE_REFERENCE_KEYS:
+        value = item.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        if str(value).strip():
+            return True
+    return False
 
 
 def validate_decision_evidence(payload: schemas.WorkflowTransitionRequest) -> None:
@@ -36,15 +61,62 @@ def validate_decision_evidence(payload: schemas.WorkflowTransitionRequest) -> No
         return
     comments = str(payload.comments or "").strip()
     evidence = list(payload.evidence or [])
-    if not comments or not evidence:
+    invalid_indexes = [
+        index
+        for index, item in enumerate(evidence)
+        if not _has_retained_reference(item)
+    ]
+    if not comments or not evidence or invalid_indexes:
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "DECISION_EVIDENCE_REQUIRED",
                 "message": (
                     "Approval, authority, publication, and archive decisions require "
-                    "a recorded reason and retained evidence."
+                    "a recorded reason and retained evidence with an identifiable reference."
                 ),
+                "invalid_evidence_indexes": invalid_indexes,
+            },
+        )
+
+
+def validate_publication_recipient_counts(
+    *,
+    total_recipients: int,
+    active_recipients: int,
+) -> None:
+    if total_recipients <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Publication is blocked",
+                "blockers": [
+                    {
+                        "code": "DISTRIBUTION_HAS_NO_ACTIVE_RECIPIENTS",
+                        "message": (
+                            "The issued campaign has no active, non-system tenant recipients. "
+                            "Reissue distribution before publication."
+                        ),
+                    }
+                ],
+            },
+        )
+    if active_recipients != total_recipients:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Publication is blocked",
+                "blockers": [
+                    {
+                        "code": "DISTRIBUTION_HAS_INVALID_RECIPIENTS",
+                        "message": (
+                            "Every issued campaign recipient must remain an active, non-system "
+                            "user in the same tenant. Reissue distribution before publication."
+                        ),
+                        "total_recipients": total_recipients,
+                        "active_recipients": active_recipients,
+                    }
+                ],
             },
         )
 
@@ -79,6 +151,15 @@ def validate_active_publication_recipients(
     if not campaign:
         return
 
+    total_recipients = (
+        db.query(func.count(dm.DocumentDistributionRecipient.id))
+        .filter(
+            dm.DocumentDistributionRecipient.tenant_id == tenant_id,
+            dm.DocumentDistributionRecipient.campaign_id == campaign.id,
+        )
+        .scalar()
+        or 0
+    )
     active_recipients = (
         db.query(func.count(dm.DocumentDistributionRecipient.id))
         .join(
@@ -95,22 +176,10 @@ def validate_active_publication_recipients(
         .scalar()
         or 0
     )
-    if active_recipients == 0:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": "Publication is blocked",
-                "blockers": [
-                    {
-                        "code": "DISTRIBUTION_HAS_NO_ACTIVE_RECIPIENTS",
-                        "message": (
-                            "The issued campaign has no active, non-system tenant recipients. "
-                            "Reissue distribution before publication."
-                        ),
-                    }
-                ],
-            },
-        )
+    validate_publication_recipient_counts(
+        total_recipients=int(total_recipients),
+        active_recipients=int(active_recipients),
+    )
 
 
 @router.post(
