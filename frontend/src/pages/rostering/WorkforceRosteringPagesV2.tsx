@@ -1,10 +1,12 @@
 import "./components/roster-setup-refinement.css";
 
 import { lazy, Suspense, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, Download, Settings2, UsersRound } from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
-import { RosterLoading, RosterShell } from "./components/RosterShell";
+import { getCurrentWorkforcePermissions } from "../../services/workforce";
+import { RosterError, RosterLoading, RosterShell } from "./components/RosterShell";
 
 const LazyComplianceImpact = lazy(() => import("./components/ComplianceImpact")
   .then((module) => ({ default: module.ComplianceImpact })));
@@ -87,6 +89,14 @@ export function TrainingImpactPage() {
 }
 
 export function WorkforceHrPage() {
+  const permissionsQuery = useQuery({
+    queryKey: ["workforce", "hr", "access"],
+    queryFn: getCurrentWorkforcePermissions,
+    staleTime: 5 * 60_000,
+    networkMode: "offlineFirst",
+  });
+  const canView = (permissionsQuery.data?.permissions || []).includes("workforce.view_sensitive");
+
   return (
     <RosterShell
       eyebrow="Canonical Workforce ownership"
@@ -94,7 +104,13 @@ export function WorkforceHrPage() {
       description="Manage employment readiness, leave, attendance, timesheets, payroll controls and employee work-pattern assignments without duplicating records in Rostering."
       actions={<span className="wr-header-badge"><UsersRound size={15} /> HR · Workforce · Time</span>}
     >
-      <DeferredWorkspace label="Opening Workforce and HR…"><LazyWorkforceHrWorkspace /></DeferredWorkspace>
+      {permissionsQuery.isPending ? <RosterLoading label="Checking Workforce access…" /> : null}
+      {!permissionsQuery.isPending && !canView ? (
+        <RosterError message="This workspace requires the workforce.view_sensitive permission. Ask an AMO administrator to grant the correct Workforce scope." />
+      ) : null}
+      {!permissionsQuery.isPending && canView ? (
+        <DeferredWorkspace label="Opening Workforce and HR…"><LazyWorkforceHrWorkspace /></DeferredWorkspace>
+      ) : null}
     </RosterShell>
   );
 }
