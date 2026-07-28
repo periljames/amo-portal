@@ -173,7 +173,7 @@ class ControlledCopyCreate(BaseModel):
     revision_id: str
     copy_number: str = Field(min_length=1, max_length=64)
     format: Literal["HARDCOPY", "OFFLINE_MEDIA"] = "HARDCOPY"
-    holder_user_id: str | None = None
+    holder_user_id: str = Field(min_length=1)
     holder_name: str | None = None
     location_text: str = Field(min_length=2, max_length=255)
     due_back_at: datetime | None = None
