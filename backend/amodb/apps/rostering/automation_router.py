@@ -232,8 +232,20 @@ def run_roster_automation(
         db.refresh(row)
         return row
     except IntegrityError as exc:
-        db.rollback()
-        raise _error(str(exc), code="ROSTER_AUTOMATION_DATABASE_CONFLICT", status_code=409) from exc
+        message = str(exc)
+        evidence_retained = _record_failed_run(
+            db,
+            amo_id=amo_id,
+            actor_user_id=current_user.id,
+            payload=payload,
+            message=message,
+        )
+        raise _error(
+            message,
+            code="ROSTER_AUTOMATION_DATABASE_CONFLICT",
+            status_code=status.HTTP_409_CONFLICT,
+            conflicts=[{"failure_evidence_retained": evidence_retained}],
+        ) from exc
     except (ValueError, RuntimeError) as exc:
         message = str(exc)
         evidence_retained = _record_failed_run(
