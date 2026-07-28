@@ -36,6 +36,32 @@ def _has_fk(table_name: str, constraint_name: str) -> bool:
     return constraint_name in {fk.get("name") for fk in inspector.get_foreign_keys(table_name)}
 
 
+def _column_type_name(table_name: str, column_name: str) -> str | None:
+    """Return a stable SQLAlchemy type name for guarded cross-branch FKs."""
+    inspector = sa.inspect(op.get_bind())
+    if not inspector.has_table(table_name):
+        return None
+    for column in inspector.get_columns(table_name):
+        if column.get("name") == column_name:
+            return column.get("type").__class__.__name__.lower()
+    return None
+
+
+def _scope_fk_compatible(child_table: str) -> bool:
+    """Only create the FK when both sides are the canonical UUID shape.
+
+    Historical clean installs can encounter an artifact-shaped
+    ``qms_audit_scopes`` table with a VARCHAR primary key before the separate
+    scope-reference repair branch replaces it with the canonical UUID table.
+    Creating the FK in that intermediate state is invalid PostgreSQL DDL. The
+    later convergence migration adds any missing FK after both branches have
+    completed.
+    """
+    child_type = _column_type_name(child_table, "audit_scope_id")
+    parent_type = _column_type_name("qms_audit_scopes", "id")
+    return child_type == "uuid" and parent_type == "uuid"
+
+
 def upgrade() -> None:
     if _has_table("qms_audits"):
         if not _has_column("qms_audits", "audit_scope_id"):
@@ -45,10 +71,13 @@ def upgrade() -> None:
         op.create_index("ix_qms_audits_audit_scope_id", "qms_audits", ["audit_scope_id"], unique=False, if_not_exists=True)
         op.create_index("ix_qms_audits_audit_scope_code", "qms_audits", ["audit_scope_code"], unique=False, if_not_exists=True)
         # Historical clean installs reach this revision before the separate
-        # reference-family migration creates qms_audit_scopes. Add the columns
-        # now and let that later migration add the FK; existing databases where
-        # the scope table is already present receive the FK immediately.
-        if _has_table("qms_audit_scopes") and not _has_fk("qms_audits", "fk_qms_audits_audit_scope"):
+        # reference-family migration creates the canonical UUID scope table.
+        # Add the FK only when the actual database types are compatible.
+        if (
+            _has_table("qms_audit_scopes")
+            and _scope_fk_compatible("qms_audits")
+            and not _has_fk("qms_audits", "fk_qms_audits_audit_scope")
+        ):
             op.create_foreign_key(
                 "fk_qms_audits_audit_scope",
                 "qms_audits",
@@ -65,7 +94,11 @@ def upgrade() -> None:
             op.add_column("qms_audit_schedules", sa.Column("audit_scope_code", sa.String(length=16), nullable=True))
         op.create_index("ix_qms_audit_schedules_audit_scope_id", "qms_audit_schedules", ["audit_scope_id"], unique=False, if_not_exists=True)
         op.create_index("ix_qms_audit_schedules_audit_scope_code", "qms_audit_schedules", ["audit_scope_code"], unique=False, if_not_exists=True)
-        if _has_table("qms_audit_scopes") and not _has_fk("qms_audit_schedules", "fk_qms_audit_schedules_audit_scope"):
+        if (
+            _has_table("qms_audit_scopes")
+            and _scope_fk_compatible("qms_audit_schedules")
+            and not _has_fk("qms_audit_schedules", "fk_qms_audit_schedules_audit_scope")
+        ):
             op.create_foreign_key(
                 "fk_qms_audit_schedules_audit_scope",
                 "qms_audit_schedules",

@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import {
   fetchOnboardingStatus,
@@ -18,21 +18,54 @@ import { AppRouter as LegacyAppRouter } from "./router.legacy";
  * /maintenance/:amoCode/admin/email-settings
  */
 
-const PublicationsDashboardPage = lazy(() => import("./pages/manuals/ManualsDashboardPage"));
-const PublicationMasterListPage = lazy(() => import("./pages/manuals/ManualMasterListPage"));
-const PublicationOverviewPage = lazy(() => import("./pages/manuals/ManualOverviewPage"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
 const PublicationDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
 const PublicationWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
 const PublicationExportsPage = lazy(() => import("./pages/manuals/ManualExportsPage"));
 
+const DocControlDashboardPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDashboardPage })));
+const DocControlLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLibraryPage })));
+const DocControlDocumentDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDocumentDetailPage })));
+const DocControlDraftsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDraftsPage })));
+const DocControlDraftDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDraftDetailPage })));
+const DocControlChangeProposalPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangeProposalPage })));
+const DocControlChangeProposalDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangeProposalDetailPage })));
+const DocControlRevisionsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlRevisionsPage })));
+const DocControlLEPPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLEPPage })));
+const DocControlAuthorityPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocumentControlAuthorityPage })));
+const DocControlTRPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlTRPage })));
+const DocControlTRDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlTRDetailPage })));
+const DocControlDistributionPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDistributionPage })));
+const DocControlDistributionDetailPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDistributionDetailPage })));
+const DocControlArchivePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlArchivePage })));
+const DocControlReviewsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlReviewsPage })));
+const DocControlRegistersPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlRegistersPage })));
+const DocControlSettingsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlSettingsPage })));
+const DocumentControlCopiesPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocumentControlCopiesPage })));
+const DocumentControlExternalSourcesPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocumentControlExternalSourcesPage })));
+const DocumentControlIntegrationsPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocumentControlIntegrationsPage })));
+
 type GuardProps = { children: React.ReactElement };
 
+function pathSegments(pathname: string): string[] {
+  return pathname.split("/").filter(Boolean);
+}
+
 function isSegmentPath(pathname: string, segment: "manuals" | "publications"): boolean {
-  const parts = pathname.split("/").filter(Boolean);
+  const parts = pathSegments(pathname);
   return (
     (parts[0] === "maintenance" && parts[2] === segment) ||
     (parts[0] === "t" && parts[2] === segment)
+  );
+}
+
+function isDocumentControlPath(pathname: string): boolean {
+  const parts = pathSegments(pathname);
+  return Boolean(
+    parts[0] === "maintenance" && parts[1] && (
+      parts[2] === "document-control" ||
+      (parts[3] === "doc-control" && parts[2])
+    )
   );
 }
 
@@ -44,32 +77,15 @@ function canonicaliseManualsPath(pathname: string): string {
 }
 
 function workspaceSlugFromPath(pathname: string): string {
-  const parts = pathname.split("/").filter(Boolean);
+  const parts = pathSegments(pathname);
   if ((parts[0] === "maintenance" || parts[0] === "t") && parts[1]) return parts[1];
   return "system";
 }
 
-function publicationsRootFromPath(pathname: string): string {
-  const parts = pathname.split("/").filter(Boolean);
-  if (parts[0] === "maintenance" && parts[1]) return `/maintenance/${parts[1]}/publications`;
-  if (parts[0] === "t" && parts[1]) return `/t/${parts[1]}/publications`;
-  return "/login";
-}
-
-/**
- * Applies the same authentication and mandatory-onboarding contract used by the
- * rest of the portal. Canonical Publications routes must not create a shortcut
- * around workspace setup merely because they are composed outside the legacy
- * route table.
- */
-function PublicationsRequireAuth({ children }: GuardProps) {
+function WorkspaceRequireAuth({ children }: GuardProps) {
   const location = useLocation();
-  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(
-    getCachedOnboardingStatus(),
-  );
-  const [onboardingChecked, setOnboardingChecked] = useState(
-    Boolean(getCachedOnboardingStatus()),
-  );
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(getCachedOnboardingStatus());
+  const [onboardingChecked, setOnboardingChecked] = useState(Boolean(getCachedOnboardingStatus()));
   const isAuthed = isAuthenticated();
   const isOnboardingRoute = location.pathname.includes("/onboarding");
 
@@ -85,27 +101,17 @@ function PublicationsRequireAuth({ children }: GuardProps) {
       .catch(() => {
         if (active) setOnboardingChecked(true);
       });
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [isAuthed, onboardingChecked]);
 
   if (!isAuthed) {
-    const parts = location.pathname.split("/").filter(Boolean);
+    const parts = pathSegments(location.pathname);
     const amoCode = parts[0] === "maintenance" ? parts[1] : "";
-    const loginPath = amoCode ? `/maintenance/${amoCode}/login` : "/login";
-    return <Navigate to={loginPath} replace state={{ from: location.pathname + location.search }} />;
+    return <Navigate to={amoCode ? `/maintenance/${amoCode}/login` : "/login"} replace state={{ from: location.pathname + location.search }} />;
   }
 
   if (!onboardingChecked && !isOnboardingRoute) {
-    return (
-      <div className="page-loading" role="status" aria-live="polite">
-        <div className="page-loading__card">
-          <div className="page-loading__spinner" />
-          <div className="page-loading__label">Preparing workspace…</div>
-        </div>
-      </div>
-    );
+    return <div className="page-loading" role="status" aria-live="polite"><div className="page-loading__card"><div className="page-loading__spinner" /><div className="page-loading__label">Preparing workspace…</div></div></div>;
   }
 
   if (onboardingStatus && !onboardingStatus.is_complete && !isOnboardingRoute) {
@@ -115,62 +121,87 @@ function PublicationsRequireAuth({ children }: GuardProps) {
   return children;
 }
 
-function PublicationsNotFoundRedirect() {
+function PublicationsWorkspaceRedirect({ record = false, register = false }: { record?: boolean; register?: boolean }) {
   const location = useLocation();
-  return <Navigate to={publicationsRootFromPath(location.pathname)} replace />;
+  const params = useParams<{ amoCode?: string; tenantSlug?: string; manualId?: string }>();
+  const tenant = params.amoCode || params.tenantSlug || "system";
+  const suffix = register ? "/registers" : record && params.manualId ? `/library/${params.manualId}` : "/library";
+  return <Navigate to={`/maintenance/${tenant}/document-control${suffix}${location.search}${location.hash}`} replace />;
 }
 
-function PublicationsRouteSurface() {
+function CanonicalDocumentControlRedirect() {
+  const location = useLocation();
+  const parts = pathSegments(location.pathname);
+  if (parts[0] !== "maintenance" || !parts[1] || parts[3] !== "doc-control") return <Navigate to="/login" replace />;
+  const suffix = parts.slice(4).join("/");
+  return <Navigate to={`/maintenance/${parts[1]}/document-control${suffix ? `/${suffix}` : ""}${location.search}${location.hash}`} replace />;
+}
+
+function DocumentControlRouteSurface() {
   return (
-    <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Publications…</div></div>}>
+    <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading Document Control…</div></div>}>
       <Routes>
-        <Route path="/maintenance/:amoCode/publications" element={<PublicationsRequireAuth><PublicationsDashboardPage /></PublicationsRequireAuth>} />
-        <Route path="/maintenance/:amoCode/publications/master-list" element={<PublicationsRequireAuth><PublicationMasterListPage /></PublicationsRequireAuth>} />
-        <Route path="/maintenance/:amoCode/publications/:manualId" element={<PublicationsRequireAuth><PublicationOverviewPage /></PublicationsRequireAuth>} />
-        <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/read" element={<PublicationsRequireAuth><PublicationReaderPage /></PublicationsRequireAuth>} />
-        <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/diff" element={<PublicationsRequireAuth><PublicationDiffPage /></PublicationsRequireAuth>} />
-        <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/workflow" element={<PublicationsRequireAuth><PublicationWorkflowPage /></PublicationsRequireAuth>} />
-        <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/exports" element={<PublicationsRequireAuth><PublicationExportsPage /></PublicationsRequireAuth>} />
-
-        <Route path="/t/:tenantSlug/publications" element={<PublicationsRequireAuth><PublicationsDashboardPage /></PublicationsRequireAuth>} />
-        <Route path="/t/:tenantSlug/publications/master-list" element={<PublicationsRequireAuth><PublicationMasterListPage /></PublicationsRequireAuth>} />
-        <Route path="/t/:tenantSlug/publications/:manualId" element={<PublicationsRequireAuth><PublicationOverviewPage /></PublicationsRequireAuth>} />
-        <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/read" element={<PublicationsRequireAuth><PublicationReaderPage /></PublicationsRequireAuth>} />
-        <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/diff" element={<PublicationsRequireAuth><PublicationDiffPage /></PublicationsRequireAuth>} />
-        <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/workflow" element={<PublicationsRequireAuth><PublicationWorkflowPage /></PublicationsRequireAuth>} />
-        <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/exports" element={<PublicationsRequireAuth><PublicationExportsPage /></PublicationsRequireAuth>} />
-
-        <Route path="*" element={<PublicationsNotFoundRedirect />} />
+        <Route path="/maintenance/:amoCode/:department/doc-control/*" element={<CanonicalDocumentControlRedirect />} />
+        <Route path="/maintenance/:amoCode/document-control" element={<WorkspaceRequireAuth><DocControlDashboardPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/drafts" element={<WorkspaceRequireAuth><DocControlDraftsPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/drafts/:draftId" element={<WorkspaceRequireAuth><DocControlDraftDetailPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/change-proposals" element={<WorkspaceRequireAuth><DocControlChangeProposalPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/change-proposals/:proposalId" element={<WorkspaceRequireAuth><DocControlChangeProposalDetailPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/revisions/:docId" element={<WorkspaceRequireAuth><DocControlRevisionsPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/lep/:docId" element={<WorkspaceRequireAuth><DocControlLEPPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/authority" element={<WorkspaceRequireAuth><DocControlAuthorityPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/tr" element={<WorkspaceRequireAuth><DocControlTRPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/tr/:trId" element={<WorkspaceRequireAuth><DocControlTRDetailPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/distribution" element={<WorkspaceRequireAuth><DocControlDistributionPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/distribution/:eventId" element={<WorkspaceRequireAuth><DocControlDistributionDetailPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/reviews" element={<WorkspaceRequireAuth><DocControlReviewsPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/controlled-copies" element={<WorkspaceRequireAuth><DocumentControlCopiesPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/external-sources" element={<WorkspaceRequireAuth><DocumentControlExternalSourcesPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/integrations" element={<WorkspaceRequireAuth><DocumentControlIntegrationsPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/archive" element={<WorkspaceRequireAuth><DocControlArchivePage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/registers" element={<WorkspaceRequireAuth><DocControlRegistersPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/settings" element={<WorkspaceRequireAuth><DocControlSettingsPage /></WorkspaceRequireAuth>} />
+        <Route path="*" element={<Navigate to="." replace />} />
       </Routes>
     </Suspense>
   );
 }
 
-/**
- * Canonical application router.
- *
- * The existing route surface is kept byte-for-byte in router.legacy.tsx to
- * minimise conflicts with concurrent module work. Publications routes are
- * composed here and every historical /manuals URL is upgraded to the canonical
- * /publications URL while preserving its suffix, query string, and hash.
- */
+function PublicationsRouteSurface() {
+  return (
+    <Suspense fallback={<div className="page-loading" role="status"><div className="page-loading__card">Loading publication…</div></div>}>
+      <Routes>
+        <Route path="/maintenance/:amoCode/publications" element={<PublicationsWorkspaceRedirect />} />
+        <Route path="/maintenance/:amoCode/publications/master-list" element={<PublicationsWorkspaceRedirect register />} />
+        <Route path="/maintenance/:amoCode/publications/:manualId" element={<PublicationsWorkspaceRedirect record />} />
+        <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/read" element={<WorkspaceRequireAuth><PublicationReaderPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/diff" element={<WorkspaceRequireAuth><PublicationDiffPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/workflow" element={<WorkspaceRequireAuth><PublicationWorkflowPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/publications/:manualId/rev/:revId/exports" element={<WorkspaceRequireAuth><PublicationExportsPage /></WorkspaceRequireAuth>} />
+
+        <Route path="/t/:tenantSlug/publications" element={<PublicationsWorkspaceRedirect />} />
+        <Route path="/t/:tenantSlug/publications/master-list" element={<PublicationsWorkspaceRedirect register />} />
+        <Route path="/t/:tenantSlug/publications/:manualId" element={<PublicationsWorkspaceRedirect record />} />
+        <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/read" element={<WorkspaceRequireAuth><PublicationReaderPage /></WorkspaceRequireAuth>} />
+        <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/diff" element={<WorkspaceRequireAuth><PublicationDiffPage /></WorkspaceRequireAuth>} />
+        <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/workflow" element={<WorkspaceRequireAuth><PublicationWorkflowPage /></WorkspaceRequireAuth>} />
+        <Route path="/t/:tenantSlug/publications/:manualId/rev/:revId/exports" element={<WorkspaceRequireAuth><PublicationExportsPage /></WorkspaceRequireAuth>} />
+        <Route path="*" element={<PublicationsWorkspaceRedirect />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
 export const AppRouter: React.FC = () => {
   const location = useLocation();
 
   if (isSegmentPath(location.pathname, "manuals")) {
-    return (
-      <Navigate
-        to={`${canonicaliseManualsPath(location.pathname)}${location.search}${location.hash}`}
-        replace
-        state={location.state}
-      />
-    );
+    return <Navigate to={`${canonicaliseManualsPath(location.pathname)}${location.search}${location.hash}`} replace state={location.state} />;
   }
-
-  if (isSegmentPath(location.pathname, "publications")) {
-    return <PublicationsRouteSurface />;
-  }
-
+  if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
+  if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;
   return <LegacyAppRouter />;
 };
 
