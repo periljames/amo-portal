@@ -1,8 +1,10 @@
 """Rostering setup-readiness and controlled automation endpoints."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.exc import IntegrityError, PendingRollbackError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -10,13 +12,21 @@ from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..workforce import permissions as workforce_permissions
 from . import automation_schemas, automation_service, services
-from .automation_models import RosterGenerationRun
+from .automation_models import (
+    RosterAutomationRunStatus,
+    RosterAutomationTrigger,
+    RosterGenerationRun,
+)
 
 router = APIRouter(prefix="/rostering", tags=["rostering-automation"])
 
 
 def _amo(user: account_models.User) -> str:
     return services.effective_amo_id(user)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _error(
@@ -43,29 +53,71 @@ def _require(db: Session, user: account_models.User, permission: workforce_permi
     workforce_permissions.require_permission(db, user=user, permission=permission)
 
 
-def _commit_failed_run_if_present(
+def _record_failed_run(
     db: Session,
     *,
     amo_id: str,
-    idempotency_key: str,
-) -> None:
-    """Retain an immutable failed-run record when the service reached execution.
+    actor_user_id: str,
+    payload: automation_schemas.RosterAutomationRunRequest,
+    message: str,
+) -> bool:
+    """Roll back all work, then retain failure evidence in a new transaction.
 
-    Preflight failures happen before a run row is created and are rolled back.
-    Execution failures update the run row to FAILED before raising; commit that
-    evidence rather than erasing the attempted controlled action.
+    The period, draft, assignment and validation work performed by an automation
+    attempt is one atomic unit. A failure must never commit a partially generated
+    roster merely to preserve the failure record. This helper first rolls back
+    that entire unit, then records the failed attempt separately.
     """
-    try:
-        row = db.query(RosterGenerationRun).filter(
-            RosterGenerationRun.amo_id == amo_id,
-            RosterGenerationRun.idempotency_key == idempotency_key,
-        ).first()
-        if row is not None and str(getattr(row.status, "value", row.status)) == "FAILED":
-            db.commit()
-            return
-    except PendingRollbackError:
-        pass
     db.rollback()
+    try:
+        existing = db.query(RosterGenerationRun).filter(
+            RosterGenerationRun.amo_id == amo_id,
+            RosterGenerationRun.idempotency_key == payload.idempotency_key,
+        ).first()
+        if existing is not None:
+            return str(getattr(existing.status, "value", existing.status)) == RosterAutomationRunStatus.FAILED.value
+
+        policy = automation_service.get_or_create_policy(
+            db,
+            amo_id=amo_id,
+            actor_user_id=actor_user_id,
+        )
+        if payload.target_from and payload.target_to:
+            target_from, target_to = payload.target_from, payload.target_to
+        else:
+            target_from, target_to = automation_service._target_window(policy)
+
+        now = _utcnow()
+        row = RosterGenerationRun(
+            amo_id=amo_id,
+            policy_id=policy.id,
+            trigger=RosterAutomationTrigger.MANUAL,
+            status=RosterAutomationRunStatus.FAILED,
+            idempotency_key=payload.idempotency_key,
+            dry_run=False,
+            target_from=target_from.isoformat(),
+            target_to=target_to.isoformat(),
+            generated_count=0,
+            skipped_count=0,
+            conflict_count=0,
+            validation_blocker_count=0,
+            validation_warning_count=0,
+            summary_json={
+                "operational_changes_committed": False,
+                "failure_recorded_after_rollback": True,
+            },
+            error_message=message,
+            requested_by_user_id=actor_user_id,
+            started_at=now,
+            completed_at=now,
+            created_at=now,
+        )
+        db.add(row)
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        return False
 
 
 @router.get("/setup/readiness", response_model=automation_schemas.RosterSetupReadinessResponse)
@@ -183,12 +235,19 @@ def run_roster_automation(
         db.rollback()
         raise _error(str(exc), code="ROSTER_AUTOMATION_DATABASE_CONFLICT", status_code=409) from exc
     except (ValueError, RuntimeError) as exc:
-        _commit_failed_run_if_present(
+        message = str(exc)
+        evidence_retained = _record_failed_run(
             db,
             amo_id=amo_id,
-            idempotency_key=payload.idempotency_key,
+            actor_user_id=current_user.id,
+            payload=payload,
+            message=message,
         )
-        raise _error(str(exc), code="ROSTER_AUTOMATION_RUN_FAILED") from exc
+        raise _error(
+            message,
+            code="ROSTER_AUTOMATION_RUN_FAILED",
+            conflicts=[{"failure_evidence_retained": evidence_retained}],
+        ) from exc
 
 
 @router.get("/automation/runs", response_model=list[automation_schemas.RosterGenerationRunRead])
