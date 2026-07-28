@@ -84,11 +84,14 @@ def test_terminal_temporary_revision_states_are_immutable() -> None:
 
 
 def test_controller_ui_uses_server_approval_capability() -> None:
-    guarded_source = Path(
-        "../frontend/src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx"
+    repository_root = Path(__file__).resolve().parents[5]
+    guarded_source = (
+        repository_root
+        / "frontend/src/pages/documentControl/DocumentControlLifecycleActionsGuarded.tsx"
     ).read_text(encoding="utf-8")
-    controller_source = Path(
-        "../frontend/src/pages/documentControl/DocumentControlControllerLifecycleActions.tsx"
+    controller_source = (
+        repository_root
+        / "frontend/src/pages/documentControl/DocumentControlControllerLifecycleActions.tsx"
     ).read_text(encoding="utf-8")
     assert "capabilities?.approve" in guarded_source
     assert "DECISION_SEPARATED_VIEWS" in guarded_source
