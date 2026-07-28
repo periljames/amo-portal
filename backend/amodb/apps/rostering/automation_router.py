@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, PendingRollbackError
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -10,6 +10,7 @@ from ...security import get_current_active_user
 from ..accounts import models as account_models
 from ..workforce import permissions as workforce_permissions
 from . import automation_schemas, automation_service, services
+from .automation_models import RosterGenerationRun
 
 router = APIRouter(prefix="/rostering", tags=["rostering-automation"])
 
@@ -40,6 +41,31 @@ def _error(
 
 def _require(db: Session, user: account_models.User, permission: workforce_permissions.PermissionCode) -> None:
     workforce_permissions.require_permission(db, user=user, permission=permission)
+
+
+def _commit_failed_run_if_present(
+    db: Session,
+    *,
+    amo_id: str,
+    idempotency_key: str,
+) -> None:
+    """Retain an immutable failed-run record when the service reached execution.
+
+    Preflight failures happen before a run row is created and are rolled back.
+    Execution failures update the run row to FAILED before raising; commit that
+    evidence rather than erasing the attempted controlled action.
+    """
+    try:
+        row = db.query(RosterGenerationRun).filter(
+            RosterGenerationRun.amo_id == amo_id,
+            RosterGenerationRun.idempotency_key == idempotency_key,
+        ).first()
+        if row is not None and str(getattr(row.status, "value", row.status)) == "FAILED":
+            db.commit()
+            return
+    except PendingRollbackError:
+        pass
+    db.rollback()
 
 
 @router.get("/setup/readiness", response_model=automation_schemas.RosterSetupReadinessResponse)
@@ -142,18 +168,26 @@ def run_roster_automation(
 ):
     _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_CREATE)
     _require(db, current_user, workforce_permissions.PermissionCode.ROSTER_MANAGE_PATTERNS)
+    amo_id = _amo(current_user)
     try:
         row = automation_service.run(
             db,
-            amo_id=_amo(current_user),
+            amo_id=amo_id,
             actor_user_id=current_user.id,
             payload=payload,
         )
         db.commit()
         db.refresh(row)
         return row
-    except (ValueError, RuntimeError, IntegrityError) as exc:
+    except IntegrityError as exc:
         db.rollback()
+        raise _error(str(exc), code="ROSTER_AUTOMATION_DATABASE_CONFLICT", status_code=409) from exc
+    except (ValueError, RuntimeError) as exc:
+        _commit_failed_run_if_present(
+            db,
+            amo_id=amo_id,
+            idempotency_key=payload.idempotency_key,
+        )
         raise _error(str(exc), code="ROSTER_AUTOMATION_RUN_FAILED") from exc
 
 
