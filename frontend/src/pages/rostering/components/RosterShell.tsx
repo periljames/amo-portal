@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { NavLink, useParams } from "react-router-dom";
+import { NavLink, useLocation, useParams } from "react-router-dom";
 import {
   Building2,
   CalendarDays,
@@ -29,13 +29,15 @@ const NAV = [
   { suffix: "planning-board", label: "Operations", icon: UsersRound },
   { suffix: "training-impact", label: "Compliance", icon: GraduationCap },
   { suffix: "my-roster", label: "My duty", icon: ClipboardCheck },
-  { suffix: "workforce", label: "Workforce", icon: Building2 },
-  { suffix: "settings", label: "Setup", icon: Settings2 },
+  { suffix: "settings?section=workforce", label: "Workforce", icon: Building2 },
+  { suffix: "settings?section=overview", label: "Setup", icon: Settings2 },
 ] as const;
 
 export function RosterShell({ title, eyebrow, description, actions, children, context }: Props) {
   const { amoCode = "UNKNOWN" } = useParams();
+  const location = useLocation();
   const root = `/maintenance/${encodeURIComponent(amoCode)}/rostering`;
+  const selectedSection = new URLSearchParams(location.search).get("section");
 
   return (
     <DepartmentLayout amoCode={amoCode || "UNKNOWN"} activeDepartment="rostering">
@@ -52,9 +54,14 @@ export function RosterShell({ title, eyebrow, description, actions, children, co
         <nav className="wr-tabs" aria-label="Duty rostering sections">
           {NAV.map(({ suffix, label, icon: Icon }) => (
             <NavLink
-              key={suffix}
+              key={`${suffix}:${label}`}
               to={`${root}/${suffix}`}
-              className={({ isActive }) => `wr-tab${isActive ? " wr-tab--active" : ""}`}
+              className={({ isActive }) => {
+                const workforceActive = label === "Workforce" && location.pathname.endsWith("/rostering/settings") && selectedSection === "workforce";
+                const setupActive = label === "Setup" && location.pathname.endsWith("/rostering/settings") && selectedSection !== "workforce";
+                const active = label === "Workforce" ? workforceActive : label === "Setup" ? setupActive : isActive;
+                return `wr-tab${active ? " wr-tab--active" : ""}`;
+              }}
             >
               <Icon aria-hidden="true" size={16} strokeWidth={1.9} />
               <span>{label}</span>
