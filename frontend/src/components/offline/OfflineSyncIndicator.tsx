@@ -10,6 +10,8 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { MessagingHub } from "../messaging/MessagingHub";
+import { getCachedUser, getToken } from "../../services/auth";
+import { hasTenantMessagingContext } from "../../services/messaging";
 import {
   discardOfflineMutation,
   getOfflineOutboxSummary,
@@ -132,8 +134,9 @@ export function OfflineSyncIndicator() {
     if (summary.queued > 0) return "queued";
     return "online";
   }, [manualSync, online, summary]);
+  const showMessaging = hasTenantMessagingContext(getCachedUser(), getToken());
 
-  if (state === "online") return <MessagingHub />;
+  if (state === "online") return showMessaging ? <MessagingHub /> : null;
 
   const pending = summary.queued + summary.syncing + summary.conflict + summary.failed;
   const title = state === "offline"
@@ -162,7 +165,7 @@ export function OfflineSyncIndicator() {
 
   return (
     <>
-      <MessagingHub />
+      {showMessaging ? <MessagingHub /> : null}
       <button
         type="button"
         className="portal-offline-indicator"

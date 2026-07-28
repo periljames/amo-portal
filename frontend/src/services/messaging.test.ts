@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { currentUser } = vi.hoisted(() => ({
+  currentUser: { value: { id: "me", amo_id: "amo-1" } as { id: string; amo_id: string | null } | null },
+}));
+
 vi.mock("./auth", () => ({
+  getCachedUser: () => currentUser.value,
   getToken: () => "messaging-token",
 }));
 
@@ -8,7 +13,7 @@ vi.mock("./config", () => ({
   getApiBaseUrl: () => "https://api.example.test",
 }));
 
-import { messagingApi } from "./messaging";
+import { hasTenantMessagingContext, messagingApi } from "./messaging";
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -20,6 +25,22 @@ function jsonResponse(payload: unknown, status = 200): Response {
 describe("messaging API", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    currentUser.value = { id: "me", amo_id: "amo-1" };
+  });
+
+  it("requires both a token and an AMO-scoped user", () => {
+    expect(hasTenantMessagingContext({ id: "tenant-user", amo_id: "amo-1" }, "token")).toBe(true);
+    expect(hasTenantMessagingContext({ id: "platform-root", amo_id: null }, "token")).toBe(false);
+    expect(hasTenantMessagingContext({ id: "tenant-user", amo_id: "amo-1" }, null)).toBe(false);
+  });
+
+  it("does not call tenant messaging endpoints for a platform session", async () => {
+    currentUser.value = { id: "platform-root", amo_id: null };
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(messagingApi.unreadCount())
+      .rejects.toThrow("Messaging requires an active AMO tenant session");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("opens a direct conversation with an encoded same-tenant user id", async () => {
