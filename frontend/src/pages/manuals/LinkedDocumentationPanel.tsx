@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   Save,
   ShieldCheck,
+  Upload,
   X,
 } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -69,6 +70,7 @@ export default function LinkedDocumentationPanel({
   onClose: () => void;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const [detail, setDetail] = useState<LinkedResourceDetail | null>(null);
   const [pdf, setPdf] = useState<PdfHandle | null>(null);
   const [pageCount, setPageCount] = useState(1);
@@ -76,6 +78,7 @@ export default function LinkedDocumentationPanel({
   const [pageWidth, setPageWidth] = useState(520);
   const [fieldCount, setFieldCount] = useState(0);
   const [hasJavaScript, setHasJavaScript] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -88,6 +91,8 @@ export default function LinkedDocumentationPanel({
     setError("");
     setDetail(null);
     setRecord(null);
+    setUploadFile(null);
+    setDirty(false);
     getLinkedResource(tenant, referenceId)
       .then((value) => { if (active) setDetail(value); })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "The linked controlled resource could not be opened."); })
@@ -114,15 +119,22 @@ export default function LinkedDocumentationPanel({
     && fieldCount > 0
     && !hasJavaScript,
   );
+  const canUpload = Boolean(
+    detail?.capabilities.execute
+    && execution?.submission_mode === "DOWNLOAD_AND_UPLOAD",
+  );
+  const canSubmit = canExecute || canUpload;
   const readOnlyReason = !detail?.capabilities.execute
     ? "This linked item is controlled for reference or download only."
-    : execution?.execution_type !== "PDF_ACROFORM"
-      ? "This template is not configured as an interactive PDF form."
-      : hasJavaScript
-        ? "This PDF contains scripted actions. The portal keeps it read-only for safety."
-        : fieldCount === 0
-          ? "No interactive AcroForm fields were detected."
-          : null;
+    : canUpload
+      ? null
+      : execution?.execution_type !== "PDF_ACROFORM"
+        ? "This template is not configured as an interactive PDF form."
+        : hasJavaScript
+          ? "This PDF contains scripted actions. The portal keeps it read-only for safety."
+          : fieldCount === 0
+            ? "No interactive AcroForm fields were detected."
+            : null;
 
   const onPdfLoad = async (document: PdfHandle) => {
     setPdf(document);
@@ -160,18 +172,41 @@ export default function LinkedDocumentationPanel({
     }
   };
 
-  const submit = async () => {
-    if (!detail || !canExecute || !pdf?.saveDocument) return;
-    if (!window.confirm(`Submit the completed ${detail.target.code} as an immutable controlled record?`)) return;
-    setBusy(true);
+  const selectUpload = (file: File | null) => {
+    if (!file) return;
+    const looksLikePdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!looksLikePdf) {
+      setUploadFile(null);
+      setError("Select the completed PDF version of this controlled template.");
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+      return;
+    }
     setError("");
-    try {
+    setUploadFile(file);
+    setDirty(true);
+  };
+
+  const submit = async () => {
+    if (!detail || !canSubmit) return;
+    let file: File | null = null;
+    if (canExecute && pdf?.saveDocument) {
       const bytes = await pdf.saveDocument();
-      const file = new File(
+      file = new File(
         [copyBytes(bytes)],
         safeFilename(detail.target.source_filename || "", `${detail.target.code}.pdf`),
         { type: "application/pdf" },
       );
+    } else if (canUpload) {
+      file = uploadFile;
+    }
+    if (!file) {
+      setError("Select the completed PDF before submitting this controlled record.");
+      return;
+    }
+    if (!window.confirm(`Submit the completed ${detail.target.code} as an immutable controlled record?`)) return;
+    setBusy(true);
+    setError("");
+    try {
       const created = await submitLinkedPdfResource(tenant, referenceId, file, {
         source_manual_id: detail.reference.source_manual_id,
         source_revision_id: detail.reference.source_revision_id,
@@ -179,6 +214,8 @@ export default function LinkedDocumentationPanel({
         relationship_type: detail.reference.relationship_type,
       });
       setRecord(created);
+      setUploadFile(null);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
       setDirty(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The completed form could not be submitted.");
@@ -196,7 +233,7 @@ export default function LinkedDocumentationPanel({
           {detail ? <span>{detail.target.code} · Issue {detail.target.issue_number || "—"} · Rev {detail.target.revision_number}</span> : null}
         </div>
         <button type="button" onClick={() => {
-          if (dirty && !window.confirm("Close and discard unsaved form entries?")) return;
+          if (dirty && !window.confirm("Close and discard unsaved form entries or the selected completed file?")) return;
           onClose();
         }} aria-label="Close linked resource"><X size={18} /></button>
       </header>
@@ -215,12 +252,25 @@ export default function LinkedDocumentationPanel({
         <div className="linked-documentation-panel__actions">
           <button type="button" onClick={() => void download()} disabled={busy || !detail.capabilities.download}><Download size={15} /> Download</button>
           <a href={detail.target.reader_url} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open full reader</a>
-          {canExecute ? <button type="button" className="primary" onClick={() => void submit()} disabled={busy}><Save size={15} /> {busy ? "Submitting…" : "Submit completed form"}</button> : null}
+          {canUpload ? <>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              hidden
+              onChange={(event) => selectUpload(event.target.files?.[0] || null)}
+            />
+            <button type="button" onClick={() => uploadInputRef.current?.click()} disabled={busy}>
+              <Upload size={15} /> {uploadFile ? "Replace completed PDF" : "Choose completed PDF"}
+            </button>
+          </> : null}
+          {canSubmit ? <button type="button" className="primary" onClick={() => void submit()} disabled={busy || (canUpload && !uploadFile)}><Save size={15} /> {busy ? "Submitting…" : canUpload ? "Submit completed PDF" : "Submit completed form"}</button> : null}
         </div>
 
         {record ? <div className="linked-documentation-panel__success" role="status"><CheckCircle2 size={19} /><div><strong>Controlled record created</strong><span>{record.record_number} · {record.status.replaceAll("_", " ")}</span><a href={record.download_url} target="_blank" rel="noreferrer">Open retained copy</a></div></div> : null}
         {!record && readOnlyReason ? <div className="linked-documentation-panel__notice"><ShieldCheck size={18} /><div><strong>Read-only controlled resource</strong><span>{readOnlyReason}</span></div></div> : null}
         {!record && canExecute ? <div className="linked-documentation-panel__notice linked-documentation-panel__notice--editable"><FileCheck2 size={18} /><div><strong>Executable AcroForm</strong><span>{fieldCount} field{fieldCount === 1 ? "" : "s"} detected. Entries remain local until submitted as a retained record.</span></div></div> : null}
+        {!record && canUpload ? <div className="linked-documentation-panel__notice linked-documentation-panel__notice--editable"><Upload size={18} /><div><strong>Completed PDF upload</strong><span>{uploadFile ? `${uploadFile.name} selected. Submit it to create the retained record.` : "Download and complete the controlled template, then choose the completed PDF for submission."}</span></div></div> : null}
 
         <div
           className="linked-documentation-panel__viewport"
