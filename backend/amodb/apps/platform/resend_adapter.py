@@ -136,7 +136,11 @@ def verify_webhook(*, payload: bytes, headers: Mapping[str, str], signing_secret
     secret = str(signing_secret or "").strip()
     if not secret:
         raise ValueError("Resend webhook signing secret is not configured.")
-    verified = Webhook(secret).verify(payload, dict(headers))
+    try:
+        raw_payload = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Resend webhook payload must be valid UTF-8 JSON.") from exc
+    verified = Webhook(secret).verify(raw_payload, dict(headers))
     if not isinstance(verified, dict):
         raise ValueError("Resend webhook payload must be a JSON object.")
     return verified
