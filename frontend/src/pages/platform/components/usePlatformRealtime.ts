@@ -56,10 +56,16 @@ export function usePlatformRealtime() {
   const [snapshot, setSnapshot] = useState<PlatformConsoleSnapshot | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [lastEvent, setLastEvent] = useState<PlatformConsoleEvent | null>(null);
+  const statusRef = useRef<PlatformLiveStatus>("connecting");
   const controllerRef = useRef<AbortController | null>(null);
   const reconnectRef = useRef<number | null>(null);
   const retryRef = useRef(0);
   const connectRef = useRef<() => void>(() => undefined);
+
+  const updateStatus = useCallback((next: PlatformLiveStatus) => {
+    statusRef.current = next;
+    setStatus(next);
+  }, []);
 
   const publish = useCallback((event: PlatformConsoleEvent) => {
     setLastEvent(event);
@@ -74,13 +80,13 @@ export function usePlatformRealtime() {
     if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
     const token = getToken();
     if (!token || (typeof navigator !== "undefined" && !navigator.onLine)) {
-      setStatus("offline");
+      updateStatus("offline");
       return;
     }
 
     const controller = new AbortController();
     controllerRef.current = controller;
-    setStatus("connecting");
+    updateStatus("connecting");
     const cursor = window.localStorage.getItem(LAST_EVENT_KEY);
 
     void (async () => {
@@ -98,7 +104,7 @@ export function usePlatformRealtime() {
         if (!response.ok || !response.body) throw new Error(`Platform live stream failed: ${response.status}`);
 
         retryRef.current = 0;
-        setStatus("live");
+        updateStatus("live");
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -125,13 +131,13 @@ export function usePlatformRealtime() {
         if (!controller.signal.aborted) throw new Error("Platform live stream closed");
       } catch {
         if (controller.signal.aborted) return;
-        setStatus("offline");
+        updateStatus("offline");
         const delay = Math.min(30_000, 1_500 * 2 ** retryRef.current);
         retryRef.current += 1;
         reconnectRef.current = window.setTimeout(() => connectRef.current(), delay);
       }
     })();
-  }, [publish]);
+  }, [publish, updateStatus]);
 
   const reconnect = useCallback(() => {
     retryRef.current = 0;
@@ -144,10 +150,10 @@ export function usePlatformRealtime() {
     const online = () => reconnect();
     const offline = () => {
       controllerRef.current?.abort();
-      setStatus("offline");
+      updateStatus("offline");
     };
     const visible = () => {
-      if (document.visibilityState === "visible" && status !== "live") reconnect();
+      if (document.visibilityState === "visible" && statusRef.current !== "live") reconnect();
     };
     window.addEventListener("online", online);
     window.addEventListener("offline", offline);
@@ -159,7 +165,7 @@ export function usePlatformRealtime() {
       window.removeEventListener("offline", offline);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [connect, reconnect, status]);
+  }, [connect, reconnect, updateStatus]);
 
   return { status, snapshot, lastUpdated, lastEvent, reconnect };
 }
