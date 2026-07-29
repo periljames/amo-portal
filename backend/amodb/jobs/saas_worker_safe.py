@@ -107,10 +107,27 @@ def run_once(*, batch_size: int = 1, worker_id: str | None = None) -> dict[str, 
         close_session_safely(db)
 
 
+def _health_interval_seconds() -> int:
+    requested = int(os.getenv("RESEND_HEALTH_INTERVAL_SECONDS", "3600"))
+    return max(300, min(requested, 86400))
+
+
+def _run_periodic_health(last_run: float | None) -> float:
+    now = time.monotonic()
+    if last_run is not None and now - last_run < _health_interval_seconds():
+        return last_run
+    from amodb.jobs import platform_integration_health
+
+    platform_integration_health.run_once()
+    return now
+
+
 def run_forever(*, poll_seconds: float = 1.0, batch_size: int = 1) -> None:
     worker_id = _worker_id()
+    last_health_run: float | None = None
     while True:
         result = run_once(batch_size=batch_size, worker_id=worker_id)
+        last_health_run = _run_periodic_health(last_health_run)
         if result["claimed"] == 0:
             time.sleep(max(0.25, min(poll_seconds, 30.0)))
 
