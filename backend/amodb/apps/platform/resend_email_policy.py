@@ -148,7 +148,7 @@ def install_resend_email_provider() -> None:
             actor_user_id=actor_user_id,
             tenant_id=tenant_id,
         )
-        if normalized == "resend" and secret_changed:
+        if normalized == "resend":
             row = saas_services.get_provider_credential(
                 db,
                 provider="resend",
@@ -159,7 +159,11 @@ def install_resend_email_provider() -> None:
                 row.status = "CONFIGURED"
                 row.last_checked_at = None
                 row.last_latency_ms = None
-                row.last_health_detail = "API key changed; run a new health check and test email."
+                row.last_health_detail = (
+                    "API key changed; run a new health check and test email."
+                    if secret_changed
+                    else "Configuration changed; run a new health check and test email."
+                )
                 db.commit()
                 db.refresh(row)
                 return saas_services.provider_payload(row)
