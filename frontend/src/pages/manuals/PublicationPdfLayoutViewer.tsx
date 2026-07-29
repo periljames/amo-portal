@@ -214,25 +214,14 @@ export default function PublicationPdfLayoutViewer({
           {hasAcroForm ? <span className="publication-native-pdf__form-state">AcroForm · read-only</span> : null}
         </div>
         <div className="publication-native-pdf__zoom" aria-label="Document zoom controls">
-          <button type="button" onClick={() => setZoom((value) => clamp(Number((value - 0.1).toFixed(2)), 0.65, 1.8))} aria-label="Zoom out">
-            <Minus size={16} />
-          </button>
+          <button type="button" onClick={() => setZoom((value) => clamp(Number((value - 0.1).toFixed(2)), 0.65, 1.8))} aria-label="Zoom out"><Minus size={16} /></button>
           <span>{Math.round(zoom * 100)}%</span>
-          <button type="button" onClick={() => setZoom((value) => clamp(Number((value + 0.1).toFixed(2)), 0.65, 1.8))} aria-label="Zoom in">
-            <Plus size={16} />
-          </button>
-          <button type="button" onClick={() => setZoom(1)} aria-label="Fit document to available width">
-            <Maximize2 size={15} /> Fit width
-          </button>
+          <button type="button" onClick={() => setZoom((value) => clamp(Number((value + 0.1).toFixed(2)), 0.65, 1.8))} aria-label="Zoom in"><Plus size={16} /></button>
+          <button type="button" onClick={() => setZoom(1)} aria-label="Fit document to available width"><Maximize2 size={15} /> Fit width</button>
         </div>
       </div>
 
-      {loadError ? (
-        <div className="publication-native-pdf__error" role="alert">
-          <strong>The original layout could not be rendered.</strong>
-          <span>{loadError}</span>
-        </div>
-      ) : null}
+      {loadError ? <div className="publication-native-pdf__error" role="alert"><strong>The original layout could not be rendered.</strong><span>{loadError}</span></div> : null}
 
       <PdfDocument
         file={pdfSource}
@@ -243,7 +232,9 @@ export default function PublicationPdfLayoutViewer({
           setCurrentPage(restoredPage);
           setLoadError("");
           onPageChangeRef.current?.(restoredPage);
-          const fieldObjects = await documentProxy.getFieldObjects?.().catch(() => null);
+          const fieldObjects = typeof documentProxy.getFieldObjects === "function"
+            ? await documentProxy.getFieldObjects().catch(() => null)
+            : null;
           const formsDetected = Boolean(fieldObjects && Object.keys(fieldObjects).length);
           setHasAcroForm(formsDetected);
           onAcroFormDetected?.(formsDetected);
@@ -269,48 +260,39 @@ export default function PublicationPdfLayoutViewer({
               "--publication-native-page-height": `${Math.round(pageWidth * ratio)}px`,
             } as CSSProperties;
             const shouldRender = renderedPages.has(pageNumber);
-            return (
-              <div
-                key={pageNumber}
-                ref={(element) => {
-                  if (element) pageRefs.current.set(pageNumber, element);
-                  else pageRefs.current.delete(pageNumber);
+            return <div
+              key={pageNumber}
+              ref={(element) => { if (element) pageRefs.current.set(pageNumber, element); else pageRefs.current.delete(pageNumber); }}
+              className={`publication-native-pdf__page ${currentPage === pageNumber ? "is-current" : ""}`}
+              data-page-number={pageNumber}
+              style={style}
+            >
+              <span className="publication-native-pdf__page-label">{pageNumber}</span>
+              {uncontrolled ? <span className="publication-native-pdf__watermark" aria-hidden="true">UNCONTROLLED DRAFT</span> : null}
+              {shouldRender ? <PdfPage
+                pageNumber={pageNumber}
+                width={pageWidth}
+                renderMode="canvas"
+                renderTextLayer
+                renderAnnotationLayer
+                renderForms={false}
+                externalLinkTarget="_blank"
+                devicePixelRatio={Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, 1.6)}
+                loading={<div className="publication-native-pdf__placeholder">Rendering page {pageNumber}…</div>}
+                onGetAnnotationsSuccess={(annotations: any[]) => {
+                  if (!hasAcroForm && annotations.some((annotation) => annotation?.subtype === "Widget" || annotation?.fieldType)) {
+                    setHasAcroForm(true);
+                    onAcroFormDetected?.(true);
+                  }
                 }}
-                className={`publication-native-pdf__page ${currentPage === pageNumber ? "is-current" : ""}`}
-                data-page-number={pageNumber}
-                style={style}
-              >
-                <span className="publication-native-pdf__page-label">{pageNumber}</span>
-                {uncontrolled ? <span className="publication-native-pdf__watermark" aria-hidden="true">UNCONTROLLED DRAFT</span> : null}
-                {shouldRender ? (
-                  <PdfPage
-                    pageNumber={pageNumber}
-                    width={pageWidth}
-                    renderMode="canvas"
-                    renderTextLayer
-                    renderAnnotationLayer
-                    renderForms={false}
-                    externalLinkTarget="_blank"
-                    devicePixelRatio={Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, 1.6)}
-                    loading={<div className="publication-native-pdf__placeholder">Rendering page {pageNumber}…</div>}
-                    onGetAnnotationsSuccess={(annotations: any[]) => {
-                      if (!hasAcroForm && annotations.some((annotation) => annotation?.subtype === "Widget" || annotation?.fieldType)) {
-                        setHasAcroForm(true);
-                        onAcroFormDetected?.(true);
-                      }
-                    }}
-                    onLoadSuccess={(page: any) => {
-                      const width = Number(page?.originalWidth || page?.view?.[2] || 1);
-                      const height = Number(page?.originalHeight || page?.view?.[3] || width * 1.414);
-                      const nextRatio = width > 0 && height > 0 ? height / width : 1.414;
-                      setPageRatios((current) => Math.abs((current[pageNumber] || 0) - nextRatio) < 0.001 ? current : { ...current, [pageNumber]: nextRatio });
-                    }}
-                  />
-                ) : (
-                  <div className="publication-native-pdf__placeholder" aria-label={`Page ${pageNumber} is ready to render`} />
-                )}
-              </div>
-            );
+                onLoadSuccess={(page: any) => {
+                  const width = Number(page?.originalWidth || page?.view?.[2] || 1);
+                  const height = Number(page?.originalHeight || page?.view?.[3] || width * 1.414);
+                  const nextRatio = width > 0 && height > 0 ? height / width : 1.414;
+                  setPageRatios((current) => Math.abs((current[pageNumber] || 0) - nextRatio) < 0.001 ? current : { ...current, [pageNumber]: nextRatio });
+                }}
+              /> : <div className="publication-native-pdf__placeholder" aria-label={`Page ${pageNumber} is ready to render`} />}
+            </div>;
           })}
         </div>
       </PdfDocument>
