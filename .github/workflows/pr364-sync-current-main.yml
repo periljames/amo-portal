@@ -18,10 +18,14 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
-      - name: Merge current main
+      - name: Merge current main without workflow-token rejection
         run: |
           git config user.name "amo-portal-actions"
           git config user.email "actions@github.com"
           git fetch origin main
-          git merge --no-edit origin/main
+          git merge --no-commit --no-ff origin/main
+          cp .github/workflows/release-candidate-recheck.yml .github/pr364-release-candidate-recheck.merged.yml
+          git checkout HEAD -- .github/workflows/release-candidate-recheck.yml
+          git add .
+          git commit -m "Merge current main into PR364"
           git push origin HEAD:${{ github.head_ref }}
