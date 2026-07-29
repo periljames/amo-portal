@@ -1,11 +1,9 @@
-import type { DocumentInitParameters } from "pdfjs-dist/types/src/display/api";
-
 /**
  * React-PDF compares the options object by identity. Keep one immutable object
  * for the lifetime of the application so reader state updates never cause the
  * underlying PDFDocumentLoadingTask to be destroyed and recreated.
  */
-export const PDF_DOCUMENT_OPTIONS: Readonly<DocumentInitParameters> = Object.freeze({
+export const PDF_DOCUMENT_OPTIONS = Object.freeze({
   isEvalSupported: false,
   enableXfa: true,
 });
