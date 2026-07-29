@@ -9,6 +9,7 @@ from .resend_adapter import check_api_key
 
 LEGACY_EMAIL_PROVIDERS = frozenset({"smtp", "sendgrid", "ses", "mailgun", "postmark", "custom_http"})
 PRODUCTION_CONFIRMATION = "ENABLE RESEND PRODUCTION"
+RESEND_API_URL = "https://api.resend.com"
 RESEND_DEFINITION = saas_providers.ProviderDefinition(
     "resend",
     "Resend",
@@ -43,8 +44,11 @@ def _normalise_resend_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if mode not in {"DISABLED", "SANDBOX", "PRODUCTION"}:
         raise ValueError("sending_mode must be DISABLED, SANDBOX or PRODUCTION")
 
+    api_base_url = str(config.get("api_base_url") or RESEND_API_URL).strip().rstrip("/")
+    if api_base_url != RESEND_API_URL:
+        raise ValueError("Resend API calls are pinned to https://api.resend.com")
+    config["api_base_url"] = RESEND_API_URL
     config["sending_mode"] = mode
-    config["api_base_url"] = str(config.get("api_base_url") or "https://api.resend.com").strip().rstrip("/")
     config["from_name"] = str(config.get("from_name") or "AMO Portal").strip()
     config["per_minute_limit"] = int(config.get("per_minute_limit") or 10)
     config["daily_limit"] = int(config.get("daily_limit") or 500)
@@ -115,7 +119,7 @@ def install_resend_email_provider() -> None:
         if normalized == "resend":
             return check_api_key(
                 api_key=str(secret.get("api_key") or ""),
-                api_url=str(config.get("api_base_url") or "https://api.resend.com"),
+                api_url=str(config.get("api_base_url") or RESEND_API_URL),
             )
         return original_check(normalized, secret=secret, config=config)
 
