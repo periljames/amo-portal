@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import {
@@ -33,8 +33,8 @@ type TenantDetailView = {
 };
 
 export default function PlatformTenantsPage() {
-  const [searchParams] = useSearchParams();
-  const [q, setQ] = useState(() => searchParams.get("q") ?? "");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get("q") ?? "";
   const [status, setStatus] = useState("");
   const [dataMode, setDataMode] = useState("REAL");
   const [offset, setOffset] = useState(0);
@@ -51,12 +51,6 @@ export default function PlatformTenantsPage() {
     owner_email: "",
     reason: "Initial tenant provisioning",
   });
-
-  useEffect(() => {
-    const next = searchParams.get("q") ?? "";
-    setQ((current) => current === next ? current : next);
-    setOffset(0);
-  }, [searchParams]);
 
   const tenants = usePlatformData(
     () => platformApi.tenants({ q, status, data_mode: dataMode, limit: PAGE_SIZE, offset }),
@@ -95,6 +89,14 @@ export default function PlatformTenantsPage() {
   const integrationSetupPath = selected && tenantRecord?.amo_code
     ? `/maintenance/${encodeURIComponent(String(tenantRecord.amo_code))}/admin/email-settings?tenant_id=${encodeURIComponent(selected)}`
     : null;
+
+  const updateTenantQuery = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value.trim()) next.set("q", value);
+    else next.delete("q");
+    setOffset(0);
+    setSearchParams(next, { replace: true });
+  };
 
   const execute = async (action: () => Promise<unknown>, success: string) => {
     setActionError(null);
@@ -162,7 +164,7 @@ export default function PlatformTenantsPage() {
         <div className="platform-card">
           <div className="platform-section-title"><div><h2>Tenant register</h2><p>Search and select a tenant to open its operational controls.</p></div><StatusBadge value={`${tenantTotal} TOTAL`} /></div>
           <div className="platform-toolbar">
-            <input placeholder="Search tenants" value={q} onChange={(event) => { setQ(event.target.value); setOffset(0); }} />
+            <input placeholder="Search tenants" value={q} onChange={(event) => updateTenantQuery(event.target.value)} />
             <select value={status} onChange={(event) => { setStatus(event.target.value); setOffset(0); }}><option value="">All states</option><option value="active">Active</option><option value="inactive">Inactive</option></select>
             <select value={dataMode} onChange={(event) => { setDataMode(event.target.value); setOffset(0); }}><option value="REAL">Real tenants</option><option value="DEMO">Demo tenants</option><option value="ALL">All data</option></select>
           </div>
