@@ -1,4 +1,4 @@
-import { authHeaders } from "./auth";
+import { authHeaders, getCachedUser } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { apiPostForm } from "./crs";
 import type { ManualReadPayload } from "./manuals";
@@ -154,14 +154,11 @@ function extensionOf(file: File): "docx" | "pdf" {
 }
 
 function readerCacheKey(tenantSlug: string, manualId: string, revisionId: string): string {
-  return `${READER_CACHE_PREFIX}:${tenantSlug}:${manualId}:${revisionId}`;
+  const userId = getCachedUser()?.id || "anonymous";
+  return `${READER_CACHE_PREFIX}:${userId}:${tenantSlug}:${manualId}:${revisionId}`;
 }
 
-export function readCachedPublicationBootstrap(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-): PublicationReaderBootstrap | null {
+export function readCachedPublicationBootstrap(tenantSlug: string, manualId: string, revisionId: string): PublicationReaderBootstrap | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(readerCacheKey(tenantSlug, manualId, revisionId));
@@ -177,18 +174,10 @@ export function readCachedPublicationBootstrap(
   }
 }
 
-export function cachePublicationBootstrap(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-  payload: PublicationReaderBootstrap,
-): void {
+export function cachePublicationBootstrap(tenantSlug: string, manualId: string, revisionId: string, payload: PublicationReaderBootstrap): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(
-      readerCacheKey(tenantSlug, manualId, revisionId),
-      JSON.stringify({ cached_at: Date.now(), payload }),
-    );
+    window.localStorage.setItem(readerCacheKey(tenantSlug, manualId, revisionId), JSON.stringify({ cached_at: Date.now(), payload }));
   } catch {
     // Storage may be unavailable or full. HTTP caching still remains active.
   }
@@ -198,17 +187,10 @@ export async function previewPublicationUpload(tenantSlug: string, file: File): 
   const extension = extensionOf(file);
   const body = new FormData();
   body.append("file", file);
-  return apiPostForm<PublicationUploadPreview>(
-    `/manuals/t/${encodeURIComponent(tenantSlug)}/upload-${extension}/preview`,
-    body,
-    { headers: authHeaders() },
-  );
+  return apiPostForm<PublicationUploadPreview>(`/manuals/t/${encodeURIComponent(tenantSlug)}/upload-${extension}/preview`, body, { headers: authHeaders() });
 }
 
-export async function uploadPublicationRevision(
-  tenantSlug: string,
-  payload: PublicationUploadPayload,
-): Promise<PublicationUploadResult> {
+export async function uploadPublicationRevision(tenantSlug: string, payload: PublicationUploadPayload): Promise<PublicationUploadResult> {
   const extension = extensionOf(payload.file);
   const body = new FormData();
   body.append("code", payload.code);
@@ -220,22 +202,14 @@ export async function uploadPublicationRevision(
   if (payload.owner_role) body.append("owner_role", payload.owner_role);
   if (payload.change_log) body.append("change_log", payload.change_log);
   body.append("file", payload.file);
-  return apiPostForm<PublicationUploadResult>(
-    `/manuals/t/${encodeURIComponent(tenantSlug)}/upload-${extension}`,
-    body,
-    { headers: authHeaders() },
-  );
+  return apiPostForm<PublicationUploadResult>(`/manuals/t/${encodeURIComponent(tenantSlug)}/upload-${extension}`, body, { headers: authHeaders() });
 }
 
 async function authenticatedFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(authHeaders());
   if (init.body !== undefined && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (init.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...init,
-    headers,
-    credentials: "same-origin",
-  });
+  const response = await fetch(`${getApiBaseUrl()}${path}`, { ...init, headers, credentials: "same-origin" });
   if (!response.ok) {
     let detail = `Request failed (${response.status})`;
     try {
@@ -250,11 +224,7 @@ async function authenticatedFetch(path: string, init: RequestInit = {}): Promise
   return response;
 }
 
-export async function getPublicationReaderBootstrap(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-): Promise<PublicationReaderBootstrap> {
+export async function getPublicationReaderBootstrap(tenantSlug: string, manualId: string, revisionId: string): Promise<PublicationReaderBootstrap> {
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-bootstrap`;
   const response = await authenticatedFetch(path);
   const payload = await response.json() as PublicationReaderBootstrap;
@@ -262,21 +232,12 @@ export async function getPublicationReaderBootstrap(
   return payload;
 }
 
-export function prefetchPublicationReader(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-): void {
+export function prefetchPublicationReader(tenantSlug: string, manualId: string, revisionId: string): void {
   if (readCachedPublicationBootstrap(tenantSlug, manualId, revisionId)) return;
   void getPublicationReaderBootstrap(tenantSlug, manualId, revisionId).catch(() => undefined);
 }
 
-export async function getPublicationReaderContent(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-  sectionIds: string[],
-): Promise<PublicationReaderContent> {
+export async function getPublicationReaderContent(tenantSlug: string, manualId: string, revisionId: string, sectionIds: string[]): Promise<PublicationReaderContent> {
   const query = new URLSearchParams();
   for (const sectionId of [...new Set(sectionIds.filter(Boolean))]) query.append("section_id", sectionId);
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-content?${query.toString()}`;
@@ -284,36 +245,16 @@ export async function getPublicationReaderContent(
   return response.json() as Promise<PublicationReaderContent>;
 }
 
-export async function searchPublicationReader(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-  query: string,
-): Promise<PublicationSearchResult[]> {
+export async function searchPublicationReader(tenantSlug: string, manualId: string, revisionId: string, query: string): Promise<PublicationSearchResult[]> {
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-search?q=${encodeURIComponent(query)}`;
   const response = await authenticatedFetch(path);
   const payload = await response.json() as { items: PublicationSearchResult[] };
   return payload.items || [];
 }
 
-export function updatePublicationReaderPosition(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-  payload: {
-    page_number?: number | null;
-    anchor_slug?: string | null;
-    section_id?: string | null;
-    scroll_percent?: number;
-    zoom_percent?: number;
-  },
-): Promise<void> {
+export function updatePublicationReaderPosition(tenantSlug: string, manualId: string, revisionId: string, payload: { page_number?: number | null; anchor_slug?: string | null; section_id?: string | null; scroll_percent?: number; zoom_percent?: number }): Promise<void> {
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-position`;
-  return authenticatedFetch(path, {
-    method: "POST",
-    body: JSON.stringify(payload),
-    keepalive: true,
-  }).then(() => undefined);
+  return authenticatedFetch(path, { method: "POST", body: JSON.stringify(payload), keepalive: true }).then(() => undefined);
 }
 
 export function publicationPdfSource(path: string): {
@@ -326,8 +267,11 @@ export function publicationPdfSource(path: string): {
   disableStream: boolean;
 } {
   const headers = new Headers(authHeaders());
+  const userId = getCachedUser()?.id;
+  const separator = path.includes("?") ? "&" : "?";
+  const partitionedPath = userId ? `${path}${separator}reader_user=${encodeURIComponent(userId)}` : path;
   return {
-    url: `${getApiBaseUrl()}${path}`,
+    url: `${getApiBaseUrl()}${partitionedPath}`,
     httpHeaders: Object.fromEntries(headers),
     withCredentials: true,
     rangeChunkSize: 512 * 1024,
@@ -337,32 +281,19 @@ export function publicationPdfSource(path: string): {
   };
 }
 
-export async function approvePublicationIntake(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-  payload: ApprovedPublicationIntakePayload,
-): Promise<{ status: string; campaign_id?: string | null; notifications_issued?: boolean }> {
+export async function approvePublicationIntake(tenantSlug: string, manualId: string, revisionId: string, payload: ApprovedPublicationIntakePayload): Promise<{ status: string; campaign_id?: string | null; notifications_issued?: boolean }> {
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/approved-intake`;
   const response = await authenticatedFetch(path, { method: "POST", body: JSON.stringify(payload) });
   return response.json();
 }
 
-export async function getPublicationReaderMetadata(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-): Promise<PublicationReaderMetadata> {
+export async function getPublicationReaderMetadata(tenantSlug: string, manualId: string, revisionId: string): Promise<PublicationReaderMetadata> {
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-metadata`;
   const response = await authenticatedFetch(path);
   return response.json() as Promise<PublicationReaderMetadata>;
 }
 
-export async function getPublicationAcknowledgement(
-  tenantSlug: string,
-  manualId: string,
-  revisionId: string,
-): Promise<PublicationAcknowledgement> {
+export async function getPublicationAcknowledgement(tenantSlug: string, manualId: string, revisionId: string): Promise<PublicationAcknowledgement> {
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/acknowledgement`;
   const response = await authenticatedFetch(path);
   return response.json() as Promise<PublicationAcknowledgement>;
@@ -396,10 +327,7 @@ export function formatFileSize(bytes?: number | null): string {
   const units = ["KB", "MB", "GB"];
   let current = value / 1024;
   let index = 0;
-  while (current >= 1024 && index < units.length - 1) {
-    current /= 1024;
-    index += 1;
-  }
+  while (current >= 1024 && index < units.length - 1) { current /= 1024; index += 1; }
   const digits = current >= 10 ? 1 : 2;
   return `${current.toFixed(digits)} ${units[index]}`;
 }
