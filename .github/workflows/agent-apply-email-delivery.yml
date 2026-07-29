@@ -57,30 +57,34 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re
+          import textwrap
 
           service_path = Path('backend/amodb/apps/notifications/service.py')
           service = service_path.read_text(encoding='utf-8')
-          signature = '''    *,
+          signature = """    *,
               amo_id: Optional[str] = None,
               db: Optional[Session] = None,
-          ) -> models.EmailLog:'''.replace('              ', '    ')
-          replacement = '''    *,
+          ) -> models.EmailLog:"""
+          signature = textwrap.dedent(signature)
+          replacement = """    *,
               amo_id: Optional[str] = None,
               db: Optional[Session] = None,
               email_class: policy.EmailClass | str = policy.EmailClass.ROUTINE,
               recipient_user_id: Optional[str] = None,
               audit_context: Optional[dict] = None,
-          ) -> models.EmailLog:'''.replace('              ', '    ')
+          ) -> models.EmailLog:"""
+          replacement = textwrap.dedent(replacement)
           if 'email_class: policy.EmailClass' not in service:
               if signature not in service:
                   raise RuntimeError('notification service signature anchor was not found')
               service = service.replace(signature, replacement, 1)
 
-          success_anchor = '''            log.error = None
+          success_anchor = """            log.error = None
           except providers.EmailDeliveryBlocked as exc:
               log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
-              log.error = str(exc)'''.replace('          ', '        ')
-          success_replacement = '''            log.error = None
+              log.error = str(exc)"""
+          success_anchor = textwrap.dedent(success_anchor)
+          success_replacement = """            log.error = None
               log.provider = str(result.get("provider") or "resend")
               log.provider_message_id = str(result.get("message_id") or "").strip() or None
               log.delivery_status = "ACCEPTED"
@@ -88,7 +92,8 @@ jobs:
               log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
               log.error = str(exc)
               log.provider = "resend"
-              log.delivery_status = "BLOCKED"'''.replace('          ', '        ')
+              log.delivery_status = "BLOCKED""""
+          success_replacement = textwrap.dedent(success_replacement)
           if 'log.provider_message_id' not in service:
               if success_anchor not in service:
                   raise RuntimeError('notification success-state anchor was not found')
@@ -103,7 +108,8 @@ jobs:
                   'from amodb.apps.audit import schemas as audit_schemas\nfrom amodb.apps.notifications import service as notification_service\n',
                   1,
               )
-          helper = '''def _maybe_send_email(
+          helper = textwrap.dedent('''
+          def _maybe_send_email(
               background_tasks: BackgroundTasks,
               to_email: str | None,
               subject: str,
@@ -132,7 +138,7 @@ jobs:
                   amo_id=amo_id,
                   db=db,
               )
-          '''.replace('          ', '')
+          ''').lstrip()
           pattern = re.compile(r'def _maybe_send_email\([\s\S]*?\n\ndef _maybe_send_whatsapp\(')
           if 'Deliver an essential account message through the central Resend path.' not in public:
               public, count = pattern.subn(helper + '\n\ndef _maybe_send_whatsapp(', public, count=1)
