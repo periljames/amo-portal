@@ -23,6 +23,35 @@ jobs:
       - name: Validate and apply patch
         run: |
           test -f .github/agent/complete-email-delivery.patch || exit 0
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('.github/agent/complete-email-delivery.patch')
+          lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+          header = re.compile(r'^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$')
+          output = []
+          index = 0
+          while index < len(lines):
+              match = header.match(lines[index].rstrip('\n'))
+              if not match:
+                  output.append(lines[index])
+                  index += 1
+                  continue
+              end = index + 1
+              while end < len(lines):
+                  if lines[end].startswith('@@ ') or lines[end].startswith('diff --git '):
+                      break
+                  end += 1
+              body = lines[index + 1:end]
+              old_count = sum(1 for line in body if line.startswith((' ', '-')))
+              new_count = sum(1 for line in body if line.startswith((' ', '+')))
+              suffix = match.group(3)
+              output.append(f'@@ -{match.group(1)},{old_count} +{match.group(2)},{new_count} @@{suffix}\n')
+              output.extend(body)
+              index = end
+          path.write_text(''.join(output), encoding='utf-8')
+          PY
           patch --batch --forward --fuzz=3 -p1 --dry-run < .github/agent/complete-email-delivery.patch
           patch --batch --forward --fuzz=3 -p1 < .github/agent/complete-email-delivery.patch
           rm .github/agent/complete-email-delivery.patch
