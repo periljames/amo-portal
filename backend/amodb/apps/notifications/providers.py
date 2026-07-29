@@ -107,9 +107,10 @@ def _fallback_content(template_key: str, subject: str, context: dict[str, Any]) 
 
 
 class ResendProvider(EmailProvider):
-    def __init__(self, *, secret: dict[str, Any], config: dict[str, Any]):
+    def __init__(self, *, secret: dict[str, Any], config: dict[str, Any], credential_status: str):
         self.secret = dict(secret or {})
         self.config = dict(config or {})
+        self.credential_status = str(credential_status or "").strip().upper()
 
     def send(
         self,
@@ -125,6 +126,10 @@ class ResendProvider(EmailProvider):
         mode = str(self.config.get("sending_mode") or "DISABLED").strip().upper()
         if mode == "DISABLED":
             raise EmailDeliveryBlocked("Outbound email is disabled in the Resend configuration")
+        if self.credential_status != "HEALTHY":
+            raise EmailDeliveryBlocked(
+                "Automatic Resend delivery is blocked until the current API key passes a health check or explicit test email"
+            )
         if mode == "PRODUCTION" and _environment() not in {"production", "prod"}:
             raise EmailDeliveryBlocked("Production email is blocked outside a production deployment")
 
@@ -191,4 +196,11 @@ def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvide
     )
     if row is None or str(row.status or "").strip().upper() == "DISABLED":
         return NoopProvider(), False
-    return ResendProvider(secret=saas_services.provider_secrets(row), config=row.config_json or {}), True
+    return (
+        ResendProvider(
+            secret=saas_services.provider_secrets(row),
+            config=row.config_json or {},
+            credential_status=str(row.status or ""),
+        ),
+        True,
+    )
