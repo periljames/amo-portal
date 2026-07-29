@@ -152,10 +152,30 @@ class NotificationPreference(Base):
     desktop_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     sound_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     email_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    receipt_email_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    marketing_email_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
     chat_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     quiet_hours_start = Column(String(5), nullable=True)
     quiet_hours_end = Column(String(5), nullable=True)
     timezone_name = Column(String(64), nullable=False, default="UTC", server_default="UTC")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class NotificationTenantPreference(Base):
+    __tablename__ = "notification_tenant_preferences"
+    __table_args__ = (UniqueConstraint("amo_id", name="uq_notification_tenant_preferences_amo"),)
+
+    id = Column(String(36), primary_key=True, default=generate_uuid7)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    routine_email_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    receipt_email_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    marketing_email_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    updated_by_user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 

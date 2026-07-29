@@ -12,6 +12,7 @@ from amodb.apps.notifications import models as notification_models
 from amodb.apps.notifications import service as notification_service
 from amodb.apps.notifications import providers as notification_providers
 
+from amodb.apps.realtime import models as realtime_models
 
 @pytest.fixture()
 def db_session():
@@ -21,7 +22,10 @@ def db_session():
         tables=[
             account_models.AMO.__table__,
             account_models.User.__table__,
+            realtime_models.NotificationPreference.__table__,
+            realtime_models.NotificationTenantPreference.__table__,
             notification_models.EmailLog.__table__,
+            notification_models.EmailDeliveryEvent.__table__,
         ],
     )
     TestingSession = sessionmaker(
@@ -83,6 +87,7 @@ def test_send_email_no_provider_marks_skipped(db_session, monkeypatch):
         "Reminder",
         {"task_id": "1"},
         correlation_id="task:1:reminder",
+        email_class="ESSENTIAL",
         amo_id=amo.id,
         db=db_session,
     )
@@ -122,6 +127,7 @@ def test_send_email_provider_success(db_session, monkeypatch):
         "Reminder",
         {"task_id": "1"},
         correlation_id="task:1:reminder",
+        email_class="ESSENTIAL",
         amo_id=amo.id,
         db=db_session,
     )
@@ -161,6 +167,7 @@ def test_send_email_reuses_successful_correlation_id(db_session, monkeypatch):
         "Reminder",
         {},
         correlation_id="same-correlation",
+        email_class="ESSENTIAL",
         amo_id=amo.id,
         db=db_session,
     )
@@ -171,6 +178,7 @@ def test_send_email_reuses_successful_correlation_id(db_session, monkeypatch):
         "Reminder",
         {},
         correlation_id="same-correlation",
+        email_class="ESSENTIAL",
         amo_id=amo.id,
         db=db_session,
     )
@@ -201,6 +209,7 @@ def test_send_email_provider_failure_best_effort(db_session, monkeypatch):
         "Reminder",
         {"task_id": "1"},
         correlation_id="task:1:reminder",
+        email_class="ESSENTIAL",
         amo_id=amo.id,
         db=db_session,
     )
@@ -233,7 +242,100 @@ def test_send_email_provider_failure_critical_raises(db_session, monkeypatch):
             "Escalation",
             {"task_id": "1"},
             correlation_id="task:1:escalation",
+            email_class="CRITICAL",
             amo_id=amo.id,
             critical=True,
             db=db_session,
         )
+
+
+def test_routine_email_requires_tenant_and_user_opt_in(db_session, monkeypatch):
+    amo = _create_amo(db_session)
+    user = _create_user(db_session, amo.id)
+    monkeypatch.setattr(
+        notification_providers,
+        "get_email_provider",
+        lambda **_: (notification_providers.NoopProvider(), True),
+    )
+
+    first = notification_service.send_email(
+        "routine-update",
+        user.email,
+        "Routine update",
+        {},
+        correlation_id="routine:first",
+        email_class="ROUTINE",
+        recipient_user_id=user.id,
+        amo_id=amo.id,
+        db=db_session,
+    )
+    assert first.status == notification_models.EmailStatus.SKIPPED_BY_PREFERENCE
+
+    db_session.add(
+        realtime_models.NotificationTenantPreference(
+            amo_id=amo.id,
+            routine_email_enabled=True,
+        )
+    )
+    db_session.add(
+        realtime_models.NotificationPreference(
+            amo_id=amo.id,
+            user_id=user.id,
+            email_enabled=True,
+        )
+    )
+    db_session.commit()
+
+    second = notification_service.send_email(
+        "routine-update",
+        user.email,
+        "Routine update",
+        {},
+        correlation_id="routine:second",
+        email_class="ROUTINE",
+        recipient_user_id=user.id,
+        amo_id=amo.id,
+        db=db_session,
+    )
+    assert second.status != notification_models.EmailStatus.SKIPPED_BY_PREFERENCE
+
+
+def test_critical_email_cannot_be_disabled(db_session, monkeypatch):
+    amo = _create_amo(db_session)
+    user = _create_user(db_session, amo.id)
+    db_session.add(
+        realtime_models.NotificationTenantPreference(
+            amo_id=amo.id,
+            routine_email_enabled=False,
+            receipt_email_enabled=False,
+            marketing_email_enabled=False,
+        )
+    )
+    db_session.add(
+        realtime_models.NotificationPreference(
+            amo_id=amo.id,
+            user_id=user.id,
+            email_enabled=False,
+            receipt_email_enabled=False,
+            marketing_email_enabled=False,
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        notification_providers,
+        "get_email_provider",
+        lambda **_: (notification_providers.NoopProvider(), False),
+    )
+
+    log = notification_service.send_email(
+        "corrective-action-overdue",
+        user.email,
+        "Corrective action overdue",
+        {},
+        correlation_id="critical:one",
+        email_class="CRITICAL",
+        recipient_user_id=user.id,
+        amo_id=amo.id,
+        db=db_session,
+    )
+    assert log.status == notification_models.EmailStatus.SKIPPED_NO_PROVIDER

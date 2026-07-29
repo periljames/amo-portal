@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from amodb.database import get_db, get_read_db
 from amodb.apps.audit import services as audit_services
 from amodb.apps.audit import schemas as audit_schemas
+from amodb.apps.notifications import service as notification_service
 from amodb.security import get_current_active_user
 from . import models, schemas, services
 from ..training import compliance as training_compliance
@@ -131,43 +132,30 @@ def _maybe_send_email(
     to_email: str | None,
     subject: str,
     body: str,
+    *,
+    db: Session,
+    amo_id: str,
+    user_id: str,
+    action_url: str | None,
 ) -> None:
-    """
-    Optional email hook (safe-by-default).
-    If SMTP env vars are not set, this does nothing.
+    """Deliver an essential account message through the central Resend path."""
 
-    Env expected:
-      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
-    """
+    del background_tasks
     if not to_email or not isinstance(to_email, str) or "@" not in to_email:
         return
-
-    host = os.getenv("SMTP_HOST")
-    port = os.getenv("SMTP_PORT")
-    user = os.getenv("SMTP_USER")
-    pwd = os.getenv("SMTP_PASS")
-    sender = os.getenv("SMTP_FROM")
-
-    if not (host and port and sender):
-        return
-
-    def _send() -> None:
-        import smtplib
-        from email.message import EmailMessage
-
-        msg = EmailMessage()
-        msg["From"] = sender
-        msg["To"] = to_email
-        msg["Subject"] = subject
-        msg.set_content(body)
-
-        with smtplib.SMTP(host, int(port)) as s:
-            s.starttls()
-            if user and pwd:
-                s.login(user, pwd)
-            s.send_message(msg)
-
-    background_tasks.add_task(_send)
+    notification_service.send_email(
+        template_key="password-reset",
+        recipient=to_email,
+        subject=subject,
+        context={"message": body, "action_url": action_url},
+        audit_context={"purpose": "password-reset", "user_id": user_id},
+        correlation_id=f"password-reset:{user_id}:{int(time.time())}",
+        critical=False,
+        email_class="ESSENTIAL",
+        recipient_user_id=user_id,
+        amo_id=amo_id,
+        db=db,
+    )
 
 
 def _maybe_send_whatsapp(
@@ -513,8 +501,8 @@ def request_password_reset(
     Request a password reset.
 
     - We do NOT reveal whether the account exists.
-    - For now, the raw token is returned in the response for testing.
-    - In production you would email the token or a reset link.
+    - Reset tokens and links are never returned in the public response.
+    - Email delivery uses the platform Resend integration.
     """
     payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
 
@@ -555,14 +543,20 @@ def request_password_reset(
     )
 
     if delivery in {"email", "both"}:
-        _maybe_send_email(background_tasks, getattr(user, "email", None), subject, message)
+        _maybe_send_email(
+            background_tasks,
+            getattr(user, "email", None),
+            subject,
+            message,
+            db=db,
+            amo_id=str(amo.id),
+            user_id=str(user.id),
+            action_url=reset_link,
+        )
 
     if delivery in {"whatsapp", "both"}:
         _maybe_send_whatsapp(background_tasks, getattr(user, "phone", None), message)
-    return {
-        "message": "If the account exists, a reset link will be sent.",
-        "reset_link": reset_link,
-    }
+    return {"message": "If the account exists, a reset link will be sent."}
 
 
 @router.post(

@@ -290,34 +290,12 @@ const UserProfilePage: React.FC = () => {
           </SectionCard>
 
           <SectionCard
-            title="Notifications and alert behavior"
-            subtitle="Keep sounds, popups, and polling frequency consistent across the portal."
-            eyebrow="Preferences"
+            title="Device and evidence behavior"
+            subtitle="Control browser polling and evidence upload capabilities for this device. Notification channels are managed from the Inbox settings."
+            eyebrow="Device preferences"
             actions={<Bell size={16} />}
           >
             <div className="profile-preferences">
-              <label className="profile-toggle-row">
-                <span>
-                  <strong>Audio alerts</strong>
-                  <small>Play a chirp when attention-worthy portal notifications arrive.</small>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={notificationPrefs.audioEnabled}
-                  onChange={(event) => updatePreference("audioEnabled", event.target.checked)}
-                />
-              </label>
-              <label className="profile-toggle-row">
-                <span>
-                  <strong>Desktop notifications</strong>
-                  <small>Allow browser popups for alerts when the tab is not front-most.</small>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={notificationPrefs.desktopEnabled}
-                  onChange={(event) => updatePreference("desktopEnabled", event.target.checked)}
-                />
-              </label>
               <label className="profile-toggle-row">
                 <span>
                   <strong>Evidence photo uploads</strong>
