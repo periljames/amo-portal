@@ -202,13 +202,6 @@ def _next_run(
                 time(policy.run_hour_local, 0),
                 tzinfo=zone,
             )
-            while candidate <= current:
-                next_month = _add_months(candidate.date().replace(day=1), 1)
-                candidate = datetime.combine(
-                    date(next_month.year, next_month.month, run_day),
-                    time(policy.run_hour_local, 0),
-                    tzinfo=zone,
-                )
         else:
             cadence_days = 7 if frequency == RosterAutomationFrequency.WEEKLY.value else 14
             candidate = datetime.combine(
@@ -216,12 +209,9 @@ def _next_run(
                 time(policy.run_hour_local, 0),
                 tzinfo=zone,
             )
-            while candidate <= current:
-                candidate = datetime.combine(
-                    candidate.date() + timedelta(days=cadence_days),
-                    time(policy.run_hour_local, 0),
-                    tzinfo=zone,
-                )
+        # Advance exactly one recorded occurrence. If the resulting
+        # timestamp is still overdue, the next scheduler pass must
+        # process it and retain its own target period and run evidence.
         return candidate.astimezone(timezone.utc)
 
     if frequency == RosterAutomationFrequency.MONTHLY.value:

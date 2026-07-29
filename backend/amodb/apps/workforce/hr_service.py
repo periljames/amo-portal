@@ -223,8 +223,24 @@ def decide_overtime(
     ).with_for_update().first()
     if row is None:
         raise ValueError("Overtime request not found")
+    if str(actor_user_id) == str(row.user_id):
+        raise ValueError("Overtime requesters cannot approve their own claims")
     stage = models.LeaveApprovalStage(payload.stage)
     decision = models.ApprovalDecision(payload.decision)
+    if stage == models.LeaveApprovalStage.SUPERVISOR:
+        work_date = row.starts_at.date()
+        contract = db.query(models.EmploymentContract).filter(
+            models.EmploymentContract.amo_id == amo_id,
+            models.EmploymentContract.user_id == row.user_id,
+            models.EmploymentContract.employment_status == models.EmploymentStatus.ACTIVE,
+            models.EmploymentContract.effective_from <= work_date,
+            or_(
+                models.EmploymentContract.effective_to.is_(None),
+                models.EmploymentContract.effective_to >= work_date,
+            ),
+        ).order_by(models.EmploymentContract.effective_from.desc()).first()
+        if contract is None or str(contract.supervisor_user_id or "") != str(actor_user_id):
+            raise ValueError("Only the assigned supervisor may decide the supervisor overtime stage")
     expected = (
         models.OvertimeRequestStatus.SUBMITTED
         if stage == models.LeaveApprovalStage.SUPERVISOR
@@ -315,6 +331,46 @@ def _person_readiness(
     )
 
 
+
+def _pending_queue_counts(db: Session, *, amo_id: str) -> dict[str, int]:
+    """Return uncapped queue totals independently from dashboard samples."""
+
+    pending_leave = int(db.query(func.count(models.LeaveRequest.id)).filter(
+        models.LeaveRequest.amo_id == amo_id,
+        models.LeaveRequest.status.in_([
+            models.LeaveRequestStatus.SUBMITTED,
+            models.LeaveRequestStatus.SUPERVISOR_APPROVED,
+        ]),
+    ).scalar() or 0)
+    pending_timesheet = int(db.query(func.count(models.Timesheet.id)).filter(
+        models.Timesheet.amo_id == amo_id,
+        models.Timesheet.status.in_([
+            models.TimesheetStatus.SUBMITTED,
+            models.TimesheetStatus.SUPERVISOR_APPROVED,
+        ]),
+    ).scalar() or 0)
+    pending_overtime = int(db.query(func.count(models.OvertimeRequest.id)).filter(
+        models.OvertimeRequest.amo_id == amo_id,
+        models.OvertimeRequest.status.in_([
+            models.OvertimeRequestStatus.SUBMITTED,
+            models.OvertimeRequestStatus.SUPERVISOR_APPROVED,
+        ]),
+    ).scalar() or 0)
+    attendance_exception = int(db.query(func.count(models.RosterActualVariance.id)).filter(
+        models.RosterActualVariance.amo_id == amo_id,
+        or_(
+            models.RosterActualVariance.classification != "MATCHED",
+            func.abs(models.RosterActualVariance.variance_minutes) >= 30,
+        ),
+    ).scalar() or 0)
+    return {
+        "leave": pending_leave,
+        "timesheet": pending_timesheet,
+        "overtime": pending_overtime,
+        "attendance_exception": attendance_exception,
+    }
+
+
 def dashboard(
     db: Session,
     *,
@@ -347,6 +403,7 @@ def dashboard(
     ]
     without_pattern = [row for row in selected_contracts if row.user_id not in patterns]
     without_base = [row for row in selected_contracts if not row.primary_base_station_id]
+    pending_counts = _pending_queue_counts(db, amo_id=amo_id)
 
     pending_leave_rows = db.query(models.LeaveRequest).options(
         joinedload(models.LeaveRequest.user),
@@ -534,10 +591,10 @@ def dashboard(
         contracts_expiring_soon_count=len(expiring_rows),
         employees_without_pattern_count=len(without_pattern),
         employees_without_base_count=len(without_base),
-        pending_leave_count=len(pending_leave_rows),
-        pending_timesheet_count=len(pending_timesheet_rows),
-        pending_overtime_count=len(pending_overtime_rows),
-        attendance_exception_count=len(attendance_exception_rows),
+        pending_leave_count=pending_counts["leave"],
+        pending_timesheet_count=pending_counts["timesheet"],
+        pending_overtime_count=pending_counts["overtime"],
+        attendance_exception_count=pending_counts["attendance_exception"],
         metrics=metrics,
         action_queue=actions[:100],
         pending_overtime=[serialize_overtime(row) for row in pending_overtime_rows],
