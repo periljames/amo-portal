@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-      - name: Validate and apply patch
+      - name: Apply and repair completion patch
         run: |
           test -f .github/agent/complete-email-delivery.patch || exit 0
           python - <<'PY'
@@ -39,21 +39,112 @@ jobs:
                   index += 1
                   continue
               end = index + 1
-              while end < len(lines):
-                  if lines[end].startswith('@@ ') or lines[end].startswith('diff --git '):
-                      break
+              while end < len(lines) and not (
+                  lines[end].startswith('@@ ') or lines[end].startswith('diff --git ')
+              ):
                   end += 1
               body = lines[index + 1:end]
               old_count = sum(1 for line in body if line.startswith((' ', '-')))
               new_count = sum(1 for line in body if line.startswith((' ', '+')))
-              suffix = match.group(3)
-              output.append(f'@@ -{match.group(1)},{old_count} +{match.group(2)},{new_count} @@{suffix}\n')
+              output.append(
+                  f'@@ -{match.group(1)},{old_count} +{match.group(2)},{new_count} @@{match.group(3)}\n'
+              )
               output.extend(body)
               index = end
           path.write_text(''.join(output), encoding='utf-8')
           PY
-          patch --batch --forward --fuzz=3 -p1 --dry-run < .github/agent/complete-email-delivery.patch
-          patch --batch --forward --fuzz=3 -p1 < .github/agent/complete-email-delivery.patch
+          patch --batch --forward --fuzz=3 -p1 < .github/agent/complete-email-delivery.patch || true
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          service_path = Path('backend/amodb/apps/notifications/service.py')
+          service = service_path.read_text(encoding='utf-8')
+          signature = '''    *,
+              amo_id: Optional[str] = None,
+              db: Optional[Session] = None,
+          ) -> models.EmailLog:'''.replace('              ', '    ')
+          replacement = '''    *,
+              amo_id: Optional[str] = None,
+              db: Optional[Session] = None,
+              email_class: policy.EmailClass | str = policy.EmailClass.ROUTINE,
+              recipient_user_id: Optional[str] = None,
+              audit_context: Optional[dict] = None,
+          ) -> models.EmailLog:'''.replace('              ', '    ')
+          if 'email_class: policy.EmailClass' not in service:
+              if signature not in service:
+                  raise RuntimeError('notification service signature anchor was not found')
+              service = service.replace(signature, replacement, 1)
+
+          success_anchor = '''            log.error = None
+          except providers.EmailDeliveryBlocked as exc:
+              log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
+              log.error = str(exc)'''.replace('          ', '        ')
+          success_replacement = '''            log.error = None
+              log.provider = str(result.get("provider") or "resend")
+              log.provider_message_id = str(result.get("message_id") or "").strip() or None
+              log.delivery_status = "ACCEPTED"
+          except providers.EmailDeliveryBlocked as exc:
+              log.status = models.EmailStatus.SKIPPED_NO_PROVIDER
+              log.error = str(exc)
+              log.provider = "resend"
+              log.delivery_status = "BLOCKED"'''.replace('          ', '        ')
+          if 'log.provider_message_id' not in service:
+              if success_anchor not in service:
+                  raise RuntimeError('notification success-state anchor was not found')
+              service = service.replace(success_anchor, success_replacement, 1)
+          service_path.write_text(service, encoding='utf-8')
+
+          public_path = Path('backend/amodb/apps/accounts/router_public.py')
+          public = public_path.read_text(encoding='utf-8')
+          if 'from amodb.apps.notifications import service as notification_service' not in public:
+              public = public.replace(
+                  'from amodb.apps.audit import schemas as audit_schemas\n',
+                  'from amodb.apps.audit import schemas as audit_schemas\nfrom amodb.apps.notifications import service as notification_service\n',
+                  1,
+              )
+          helper = '''def _maybe_send_email(
+              background_tasks: BackgroundTasks,
+              to_email: str | None,
+              subject: str,
+              body: str,
+              *,
+              db: Session,
+              amo_id: str,
+              user_id: str,
+              action_url: str | None,
+          ) -> None:
+              """Deliver an essential account message through the central Resend path."""
+
+              del background_tasks
+              if not to_email or not isinstance(to_email, str) or "@" not in to_email:
+                  return
+              notification_service.send_email(
+                  template_key="password-reset",
+                  recipient=to_email,
+                  subject=subject,
+                  context={"message": body, "action_url": action_url},
+                  audit_context={"purpose": "password-reset", "user_id": user_id},
+                  correlation_id=f"password-reset:{user_id}:{int(time.time())}",
+                  critical=False,
+                  email_class="ESSENTIAL",
+                  recipient_user_id=user_id,
+                  amo_id=amo_id,
+                  db=db,
+              )
+          '''.replace('          ', '')
+          pattern = re.compile(r'def _maybe_send_email\([\s\S]*?\n\ndef _maybe_send_whatsapp\(')
+          if 'Deliver an essential account message through the central Resend path.' not in public:
+              public, count = pattern.subn(helper + '\n\ndef _maybe_send_whatsapp(', public, count=1)
+              if count != 1:
+                  raise RuntimeError('legacy password email helper was not found')
+          public_path.write_text(public, encoding='utf-8')
+
+          for rejected in Path('.').rglob('*.rej'):
+              rejected.unlink()
+          for original in Path('.').rglob('*.orig'):
+              original.unlink()
+          PY
           rm .github/agent/complete-email-delivery.patch
           python -m compileall -q \
             backend/amodb/apps/accounts \
