@@ -1,0 +1,41 @@
+name: PR364 Publish Role Acceptance Gate
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.event.pull_request.head.ref == 'agent/rostering-automation-workforce-hr-overhaul' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/rostering-automation-workforce-hr-overhaul
+          fetch-depth: 0
+
+      - name: Wire authenticated role browser acceptance into the release gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/release-candidate-recheck.yml')
+          text = path.read_text(encoding='utf-8')
+          old = '''      - name: Install Chromium for constrained-network measurement\n        working-directory: frontend\n        run: npm exec -- playwright install --with-deps chromium\n      - name: Measure cold and warm synthetic 2G rostering waterfall\n'''
+          new = '''      - name: Install Chromium for Rostering browser validation\n        working-directory: frontend\n        run: npm exec -- playwright install --with-deps chromium\n      - name: Run authenticated Rostering role acceptance\n        working-directory: frontend\n        shell: bash\n        run: |\n          npm exec -- vite preview --host 127.0.0.1 --port 4173 > /tmp/rostering-role-preview.log 2>&1 &\n          preview_pid=$!\n          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT\n          for attempt in $(seq 1 60); do\n            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then\n              break\n            fi\n            if [ "$attempt" -eq 60 ]; then\n              cat /tmp/rostering-role-preview.log\n              exit 1\n            fi\n            sleep 1\n          done\n          npm exec -- playwright test tests/e2e/rostering-role-access.spec.ts\n      - name: Measure cold and warm synthetic 2G rostering waterfall\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'release gate insertion point drifted: {text.count(old)} matches')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          git diff --check
+          git rm .github/workflows/pr364-role-acceptance-publisher.yml
+          git add .github/workflows/release-candidate-recheck.yml frontend/tests/e2e/rostering-role-access.spec.ts
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Enforce authenticated Rostering role acceptance"
+          git push origin HEAD:agent/rostering-automation-workforce-hr-overhaul
