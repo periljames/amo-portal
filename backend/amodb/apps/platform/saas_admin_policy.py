@@ -9,6 +9,9 @@ from . import saas_providers, saas_secrets, saas_services
 
 _INSTALLED = False
 _ORIGINAL_UPSERT: Callable[..., dict[str, Any]] | None = None
+_OPTIONAL_SECRET_FIELDS: dict[str, frozenset[str]] = {
+    "resend": frozenset({"webhook_signing_secret"}),
+}
 
 
 def _submitted_secret(payload: dict[str, Any]) -> dict[str, Any]:
@@ -33,7 +36,7 @@ def prepare_provider_payload(
     rotation must therefore merge submitted fields with the exact scoped secret
     on the server; replacing the encrypted mapping with only the visible fields
     would silently delete credentials. First-time enabled configurations must
-    provide every secret field declared by the provider definition.
+    provide every required secret field declared by the provider definition.
     """
 
     normalized = str(provider or "").strip().lower()
@@ -85,10 +88,11 @@ def prepare_provider_payload(
             "Tenant-specific secret values are required before overriding an inherited platform credential."
         )
 
+    optional_fields = _OPTIONAL_SECRET_FIELDS.get(normalized, frozenset())
     missing = [
         field
         for field in definition.secret_fields
-        if not str(merged_secret.get(field) or "").strip()
+        if field not in optional_fields and not str(merged_secret.get(field) or "").strip()
     ]
     if missing:
         raise ValueError(
