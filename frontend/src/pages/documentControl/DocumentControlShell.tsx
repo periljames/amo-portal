@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   ClipboardList,
   Copy,
+  Database,
   FileClock,
   FileCog,
   FileDiff,
@@ -27,6 +28,7 @@ export type DocumentControlWorkspaceId =
   | "desk"
   | "library"
   | "structure"
+  | "records"
   | "changes"
   | "revisions"
   | "authority"
@@ -50,6 +52,7 @@ const WORKSPACES: Array<{
   { id: "desk", label: "Control desk", path: "", icon: Gauge, controlOnly: true },
   { id: "library", label: "Library", path: "/library", icon: BookOpen },
   { id: "structure", label: "Structure", path: "/structure", icon: FolderTree },
+  { id: "records", label: "Generated records", path: "/records", icon: Database, controlOnly: true },
   { id: "changes", label: "Changes", path: "/change-proposals", icon: ClipboardList, controlOnly: true },
   { id: "revisions", label: "Revisions", path: "/drafts", icon: GitPullRequestArrow, controlOnly: true },
   { id: "authority", label: "Authority", path: "/authority", icon: Landmark, controlOnly: true },
@@ -85,6 +88,7 @@ export function useDocumentControlRoute() {
 }
 
 function workspaceForPath(pathname: string): DocumentControlWorkspaceId {
+  if (pathname.includes("/records")) return "records";
   if (pathname.includes("/structure")) return "structure";
   if (pathname.includes("/library")) return "library";
   if (pathname.includes("/change-proposals")) return "changes";
