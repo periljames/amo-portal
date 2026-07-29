@@ -1,0 +1,1 @@
+This temporary directory is removed automatically after the completion patch is applied.
