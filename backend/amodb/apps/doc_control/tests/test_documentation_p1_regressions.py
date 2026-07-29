@@ -7,6 +7,7 @@ import pytest
 
 from amodb.apps.doc_control import knowledge_hardening
 from amodb.apps.doc_control.knowledge_artifact_transactions import (
+    _cleanup_if_outer_transaction_ended,
     _cleanup_pending_artifacts,
     _track_pending_artifact,
 )
@@ -16,6 +17,10 @@ from amodb.apps.doc_control.knowledge_hardening import (
     _new_record_number,
     _restore_verified_resolution,
     _verified_resolution_snapshot,
+)
+from amodb.apps.doc_control.knowledge_hierarchy_identity import (
+    _ensure_node_with_stable_manual_less_identity,
+    _select_stable_manual_less_node,
 )
 from amodb.apps.manuals import models as manual_models
 from amodb.main import app
@@ -112,6 +117,29 @@ def test_pending_artifact_is_removed_when_outer_transaction_rolls_back(tmp_path)
     assert session.info == {}
 
 
+def test_pending_artifact_is_removed_when_session_close_ends_outer_transaction(tmp_path) -> None:
+    path = tmp_path / "implicit-close.pdf"
+    path.write_bytes(b"%PDF-1.7\nrecord")
+    session = SimpleNamespace(info={})
+    _track_pending_artifact(session, str(path))
+
+    _cleanup_if_outer_transaction_ended(session, SimpleNamespace(parent=None))
+
+    assert not path.exists()
+    assert session.info == {}
+
+
+def test_nested_transaction_end_does_not_remove_pending_outer_artifact(tmp_path) -> None:
+    path = tmp_path / "nested.pdf"
+    path.write_bytes(b"%PDF-1.7\nrecord")
+    session = SimpleNamespace(info={})
+    _track_pending_artifact(session, str(path))
+
+    _cleanup_if_outer_transaction_ended(session, SimpleNamespace(parent=object()))
+
+    assert path.exists()
+
+
 def test_reconciliation_detects_controller_governed_hierarchy_changes() -> None:
     row = SimpleNamespace(
         code="QWI-01",
@@ -128,6 +156,65 @@ def test_reconciliation_detects_controller_governed_hierarchy_changes() -> None:
         parent=SimpleNamespace(id="heuristic-parent"),
         order_index=1,
     )
+
+
+def test_renamed_record_series_is_selected_by_stable_template_relationship() -> None:
+    renamed = SimpleNamespace(
+        id="series-1",
+        manual_id=None,
+        code="CONTROLLER-RENAMED-SERIES",
+        metadata_json={"template_manual_id": "manual-1", "hierarchy_management": "GOVERNED"},
+    )
+    unrelated = SimpleNamespace(
+        id="series-2",
+        manual_id=None,
+        code="REC-OTHER",
+        metadata_json={"template_manual_id": "manual-2"},
+    )
+    selected = _select_stable_manual_less_node(
+        [unrelated, renamed],
+        node_type="RECORD_SERIES",
+        metadata={"template_manual_id": "manual-1"},
+    )
+    assert selected is renamed
+
+
+def test_reconciliation_reuses_renamed_record_series_instead_of_allocating_duplicate() -> None:
+    renamed = SimpleNamespace(
+        id="series-1",
+        manual_id=None,
+        code="CONTROLLER-RENAMED-SERIES",
+        metadata_json={"template_manual_id": "manual-1"},
+    )
+
+    class FakeQuery:
+        def filter(self, *_criteria):
+            return self
+
+        def all(self):
+            return [renamed]
+
+    class FakeDb:
+        def query(self, _model):
+            return FakeQuery()
+
+    result = _ensure_node_with_stable_manual_less_identity(
+        FakeDb(),
+        tenant_id="amo-1",
+        code="REC-QAM-51",
+        title="QAM 51 completed records",
+        node_type="RECORD_SERIES",
+        parent=SimpleNamespace(id="records-group"),
+        manual_id=None,
+        order_index=1,
+        metadata={"template_manual_id": "manual-1", "source_node_id": "node-1"},
+        actor_id="controller-1",
+    )
+
+    assert result is renamed
+    assert result.code == "CONTROLLER-RENAMED-SERIES"
+    assert result.metadata_json["hierarchy_management"] == "GOVERNED"
+    assert result.metadata_json["source_node_id"] == "node-1"
 
 
 def test_reader_hierarchy_omits_restricted_nodes_records_and_descendants() -> None:
