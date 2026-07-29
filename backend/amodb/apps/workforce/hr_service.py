@@ -1045,6 +1045,7 @@ def bootstrap_default_day_pattern(
     ).with_for_update().one()
     timezone_name = str(amo.time_zone or "UTC")
     today = datetime.now(_amo_zone(db, amo_id=amo_id)).date()
+    week_monday = today - timedelta(days=today.weekday())
 
     shift = db.query(roster_models.ShiftTemplate).filter(
         roster_models.ShiftTemplate.amo_id == amo_id,
@@ -1159,15 +1160,10 @@ def bootstrap_default_day_pattern(
     skipped_conflict = 0
     for user in eligible_users:
         current = occupied.get(str(user.id))
-        if current is not None:
-            if current.work_pattern and current.work_pattern.is_active:
-                already_assigned += 1
-            else:
-                current.work_pattern_id = pattern.id
-                current.cycle_anchor_date = today
-                db.add(current)
-                assigned += 1
+        if current is not None and current.work_pattern and current.work_pattern.is_active:
+            already_assigned += 1
             continue
+
         future = db.query(models.EmployeeWorkPatternAssignment).filter(
             models.EmployeeWorkPatternAssignment.amo_id == amo_id,
             models.EmployeeWorkPatternAssignment.user_id == user.id,
@@ -1177,13 +1173,26 @@ def bootstrap_default_day_pattern(
         if effective_to is not None and effective_to < today:
             skipped_conflict += 1
             continue
+
+        if current is not None:
+            # Never rewrite an historical pattern assignment in place. Close the
+            # prior interval before the tenant-local work date and create a new
+            # default assignment. A same-day invalid row has no historical span,
+            # so remove it before inserting the canonical replacement.
+            if current.effective_from < today:
+                current.effective_to = today - timedelta(days=1)
+                db.add(current)
+            else:
+                db.delete(current)
+                db.flush()
+
         db.add(models.EmployeeWorkPatternAssignment(
             amo_id=amo_id,
             user_id=user.id,
             work_pattern_id=pattern.id,
             effective_from=today,
             effective_to=effective_to,
-            cycle_anchor_date=today,
+            cycle_anchor_date=week_monday,
             created_by_user_id=actor_user_id,
         ))
         assigned += 1

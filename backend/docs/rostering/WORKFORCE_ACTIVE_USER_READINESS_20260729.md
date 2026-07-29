@@ -14,7 +14,9 @@ The Workforce and HR employee register previously started from effective employm
 6. An authorized manager may explicitly create or repair the reserved `DEFAULT-DAY` shift and `DEFAULT-DAY-5X2` Monday-to-Friday pattern.
 7. The default pattern is assigned only to active or onboarding employees with effective contracts who do not already have a valid active pattern. Existing active patterns are preserved.
 8. All effective-date decisions use the tenant timezone.
-9. The default baseline creates draft roster input only. A planner must still review, validate, submit, approve and publish the roster.
+9. Replacing an inactive current pattern closes the historical assignment and creates a new row effective on the tenant-local current date; historical records are never rewritten.
+10. The `DEFAULT-DAY-5X2` cycle is anchored to the tenant-local week's Monday, regardless of the day the bootstrap is run.
+11. The default baseline creates draft roster input only. A planner must still review, validate, submit, approve and publish the roster.
 
 ## Acceptance coverage
 

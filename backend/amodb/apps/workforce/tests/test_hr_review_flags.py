@@ -52,7 +52,11 @@ def test_default_day_bootstrap_is_explicit_and_canonical():
     assert "datetime.now(_amo_zone" in source
     assert "days_by_index" in source
     assert "range(7)" in source
-    assert "current.work_pattern_id = pattern.id" in source
+    assert "week_monday = today - timedelta(days=today.weekday())" in source
+    assert "cycle_anchor_date=week_monday" in source
+    assert "current.effective_to = today - timedelta(days=1)" in source
+    assert "db.delete(current)" in source
+    assert "current.work_pattern_id = pattern.id" not in source
 
 
 def test_active_user_readiness_uses_tenant_local_date():
