@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Link2, List, Maximize2, Minus, Plus, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FC } from "react";
+import { AlertTriangle, Link2, List, Maximize2, Minus, Plus, X } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 
 import {
@@ -9,14 +9,15 @@ import {
 } from "../../services/documentation";
 import { publicationPdfSource } from "../../services/publications";
 import LinkedDocumentationPanel from "./LinkedDocumentationPanel";
+import { PDF_DOCUMENT_OPTIONS, pdfDevicePixelRatio } from "./pdfReaderConfig";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import "./publicationReaderZoom.css";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
-const PdfDocument = Document as unknown as React.FC<any>;
-const PdfPage = Page as unknown as React.FC<any>;
+const PdfDocument = Document as unknown as FC<any>;
+const PdfPage = Page as unknown as FC<any>;
 
 export type PdfOutlineItem = {
   id: string;
@@ -52,15 +53,24 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+function humanize(value: unknown, fallback = "Pending review"): string {
+  const text = String(value ?? "").trim();
+  return text ? text.replaceAll("_", " ") : fallback;
+}
+
 function sourceIdentity(fileUrl: string): SourceIdentity | null {
   const path = fileUrl.split("?", 1)[0];
   const match = path.match(/\/manuals\/t\/([^/]+)\/([^/]+)\/rev\/([^/]+)\//i);
   if (!match) return null;
-  return {
-    tenant: decodeURIComponent(match[1]),
-    manualId: decodeURIComponent(match[2]),
-    revisionId: decodeURIComponent(match[3]),
-  };
+  try {
+    return {
+      tenant: decodeURIComponent(match[1]),
+      manualId: decodeURIComponent(match[2]),
+      revisionId: decodeURIComponent(match[3]),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function pagesAround(pageNumber: number, pageCount: number): Set<number> {
@@ -116,7 +126,7 @@ async function resolveOutline(documentProxy: any): Promise<PdfOutlineItem[]> {
 }
 
 function hotspotStyle(reference: DocumentationReference): CSSProperties | null {
-  const box = reference.source.bbox || {};
+  const box = reference.source?.bbox || {};
   const x = Number(box.x);
   const y = Number(box.y);
   const width = Number(box.width);
@@ -153,6 +163,9 @@ export default function PublicationPdfLayoutViewer({
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const onPageChangeRef = useRef(onPageChange);
   const onZoomChangeRef = useRef(onZoomChange);
+  const onAcroFormDetectedRef = useRef(onAcroFormDetected);
+  const onOutlineReadyRef = useRef(onOutlineReady);
+  const inspectionGenerationRef = useRef(0);
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
   const [hostWidth, setHostWidth] = useState(960);
@@ -169,6 +182,16 @@ export default function PublicationPdfLayoutViewer({
   const pdfSource = useMemo(() => publicationPdfSource(fileUrl), [fileUrl]);
   const allReferences = references.length ? references : automaticReferences;
   const effectiveActiveReferenceId = activeReferenceId || selectedReferenceId;
+
+  useEffect(() => {
+    inspectionGenerationRef.current += 1;
+    setPageCount(0);
+    setCurrentPage(Math.max(1, initialPage));
+    setPageRatios({});
+    setLoadError("");
+    setHasAcroForm(false);
+    onAcroFormDetectedRef.current?.(false);
+  }, [fileUrl, initialPage]);
 
   useEffect(() => {
     if (!identity || references.length) return;
@@ -197,7 +220,7 @@ export default function PublicationPdfLayoutViewer({
   const referencesByPage = useMemo(() => {
     const grouped = new Map<number, DocumentationReference[]>();
     for (const reference of allReferences) {
-      const page = Number(reference.source.page_number || 0);
+      const page = Number(reference.source?.page_number || 0);
       if (!page) continue;
       grouped.set(page, [...(grouped.get(page) || []), reference]);
     }
@@ -216,12 +239,18 @@ export default function PublicationPdfLayoutViewer({
 
   useEffect(() => { onPageChangeRef.current = onPageChange; }, [onPageChange]);
   useEffect(() => { onZoomChangeRef.current = onZoomChange; }, [onZoomChange]);
+  useEffect(() => { onAcroFormDetectedRef.current = onAcroFormDetected; }, [onAcroFormDetected]);
+  useEffect(() => { onOutlineReadyRef.current = onOutlineReady; }, [onOutlineReady]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const updateWidth = () => setHostWidth(Math.max(360, host.clientWidth));
     updateWidth();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWidth);
+      return () => window.removeEventListener("resize", updateWidth);
+    }
     const observer = new ResizeObserver(updateWidth);
     observer.observe(host);
     return () => observer.disconnect();
@@ -241,7 +270,7 @@ export default function PublicationPdfLayoutViewer({
   }, [currentPage, navigationRequest, pageCount]);
 
   useEffect(() => {
-    if (!pageCount) return;
+    if (!pageCount || typeof IntersectionObserver === "undefined") return;
     const root = readerScroller();
     const observer = new IntersectionObserver(
       (entries) => {
@@ -269,7 +298,7 @@ export default function PublicationPdfLayoutViewer({
     return () => observer.disconnect();
   }, [pageCount, pageWidth]);
 
-  const jumpToPage = (requestedPage: number, behavior: ScrollBehavior = "smooth") => {
+  const jumpToPage = useCallback((requestedPage: number, behavior: ScrollBehavior = "smooth") => {
     if (!pageCount) return;
     const pageNumber = clamp(requestedPage, 1, pageCount);
     setCurrentPage(pageNumber);
@@ -278,12 +307,52 @@ export default function PublicationPdfLayoutViewer({
       const element = pageRefs.current.get(pageNumber);
       if (element) scrollElementPrecisely(element, behavior);
     });
-  };
+  }, [pageCount]);
 
   useEffect(() => {
     if (!navigationRequest || !pageCount) return;
     jumpToPage(navigationRequest.page);
-  }, [navigationRequest, pageCount]);
+  }, [jumpToPage, navigationRequest, pageCount]);
+
+  const handleDocumentLoadSuccess = useCallback((documentProxy: any) => {
+    const nextPageCount = Math.max(1, Number(documentProxy?.numPages || 1));
+    const restoredPage = clamp(initialPage || 1, 1, nextPageCount);
+    setPageCount(nextPageCount);
+    setCurrentPage(restoredPage);
+    setLoadError("");
+    onPageChangeRef.current?.(restoredPage);
+
+    window.requestAnimationFrame(() => {
+      const element = pageRefs.current.get(restoredPage);
+      if (element && restoredPage > 1) scrollElementPrecisely(element, "auto");
+    });
+
+    const generation = ++inspectionGenerationRef.current;
+    const fieldsPromise = typeof documentProxy?.getFieldObjects === "function"
+      ? documentProxy.getFieldObjects().catch(() => null)
+      : Promise.resolve(null);
+    void Promise.all([
+      fieldsPromise,
+      resolveOutline(documentProxy).catch(() => []),
+    ]).then(([fieldObjects, outline]) => {
+      if (generation !== inspectionGenerationRef.current) return;
+      const formsDetected = Boolean(fieldObjects && Object.keys(fieldObjects).length);
+      setHasAcroForm(formsDetected);
+      onAcroFormDetectedRef.current?.(formsDetected);
+      if (outline.length) onOutlineReadyRef.current?.(outline);
+    }).catch(() => {
+      if (generation === inspectionGenerationRef.current) {
+        setHasAcroForm(false);
+        onAcroFormDetectedRef.current?.(false);
+      }
+    });
+  }, [initialPage]);
+
+  const handleDocumentLoadError = useCallback((caught: unknown) => {
+    inspectionGenerationRef.current += 1;
+    setPageCount(0);
+    setLoadError(caught instanceof Error ? caught.message : "Unable to load PDF document.");
+  }, []);
 
   const pageNumbers = useMemo(() => Array.from({ length: pageCount }, (_, index) => index + 1), [pageCount]);
 
@@ -307,36 +376,21 @@ export default function PublicationPdfLayoutViewer({
           {referenceListOpen ? <div className="publication-page-links-popover">
             <header><strong>Linked items on page {currentPage}</strong><button type="button" onClick={() => setReferenceListOpen(false)} aria-label="Close linked items"><X size={14} /></button></header>
             {currentReferences.map((reference) => <button type="button" key={reference.id} disabled={!reference.target} onClick={() => openReference(reference)}>
-              <List size={14} /><span><strong>{reference.raw_token}</strong><small>{reference.target ? `${reference.target.code} · ${reference.target.title}` : `${reference.status.replaceAll("_", " ")} · awaiting Document Control`}</small></span>
+              <List size={14} /><span><strong>{reference.raw_token}</strong><small>{reference.target ? `${reference.target.code} · ${reference.target.title}` : `${humanize(reference.status)} · awaiting Document Control`}</small></span>
             </button>)}
           </div> : null}
         </div>
 
-        {loadError ? <div className="publication-native-pdf__error" role="alert"><strong>The original layout could not be rendered.</strong><span>{loadError}</span></div> : null}
+        {loadError ? <div className="publication-native-pdf__error" role="alert"><AlertTriangle size={18} /><div><strong>The original layout could not be rendered.</strong><span>{loadError}</span></div></div> : null}
 
         <PdfDocument
           file={pdfSource}
           loading={<div className="publication-native-pdf__loading">Opening the first available pages…</div>}
-          onLoadSuccess={async (documentProxy: any) => {
-            setPageCount(documentProxy.numPages);
-            const restoredPage = clamp(initialPage || 1, 1, documentProxy.numPages);
-            setCurrentPage(restoredPage);
-            setLoadError("");
-            onPageChangeRef.current?.(restoredPage);
-            const fieldObjects = typeof documentProxy.getFieldObjects === "function" ? await documentProxy.getFieldObjects().catch(() => null) : null;
-            const formsDetected = Boolean(fieldObjects && Object.keys(fieldObjects).length);
-            setHasAcroForm(formsDetected);
-            onAcroFormDetected?.(formsDetected);
-            const outline = await resolveOutline(documentProxy);
-            if (outline.length) onOutlineReady?.(outline);
-            window.requestAnimationFrame(() => {
-              const element = pageRefs.current.get(restoredPage);
-              if (element && restoredPage > 1) scrollElementPrecisely(element, "auto");
-            });
-          }}
-          onLoadError={(caught: unknown) => setLoadError(caught instanceof Error ? caught.message : "Unable to load PDF document.")}
+          error={<div className="publication-native-pdf__error" role="alert"><AlertTriangle size={18} /><div><strong>The PDF reader could not open this controlled copy.</strong><span>Reload the page or use the Download action while the reader is recovered.</span></div></div>}
+          onLoadSuccess={handleDocumentLoadSuccess}
+          onLoadError={handleDocumentLoadError}
           onItemClick={(item: any) => { const pageNumber = Number(item?.pageNumber || 0); if (pageNumber > 0) jumpToPage(pageNumber); }}
-          options={{ isEvalSupported: false, enableXfa: true }}
+          options={PDF_DOCUMENT_OPTIONS}
         >
           <div className="publication-native-pdf__pages">
             {pageNumbers.map((pageNumber) => {
@@ -363,12 +417,13 @@ export default function PublicationPdfLayoutViewer({
                   renderAnnotationLayer
                   renderForms={false}
                   externalLinkTarget="_blank"
-                  devicePixelRatio={Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, 1.6)}
+                  devicePixelRatio={pdfDevicePixelRatio()}
                   loading={<div className="publication-native-pdf__placeholder">Rendering page {pageNumber}…</div>}
+                  error={<div className="publication-native-pdf__placeholder">Page {pageNumber} could not be rendered.</div>}
                   onGetAnnotationsSuccess={(annotations: any[]) => {
                     if (!hasAcroForm && annotations.some((annotation) => annotation?.subtype === "Widget" || annotation?.fieldType)) {
                       setHasAcroForm(true);
-                      onAcroFormDetected?.(true);
+                      onAcroFormDetectedRef.current?.(true);
                     }
                   }}
                   onLoadSuccess={(page: any) => {
