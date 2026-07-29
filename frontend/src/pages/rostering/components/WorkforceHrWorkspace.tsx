@@ -37,11 +37,13 @@ import {
 } from "../../../services/workforce";
 import {
   assignWorkforceHrPattern,
+  decideWorkforceHrOvertime,
   getWorkforceHrDashboard,
+  listWorkforceHrOvertime,
   listWorkforceHrPatterns,
 } from "../../../services/workforceHr";
 import type { BaseStationRead } from "../../../types/foundations";
-import type { HrActionItem, HrPersonReadiness } from "../../../types/workforceHr";
+import type { HrActionItem, HrOvertimeRequest, HrPersonReadiness } from "../../../types/workforceHr";
 import type { ContractType, EmploymentStatus, LeaveRequestRead, TimesheetRead, WorkPatternRead } from "../../../types/workforce";
 import { errorMessage, isoDate } from "../rosterUi";
 import { EmptyState, RosterLoading, StatusPill } from "./RosterShell";
@@ -49,7 +51,8 @@ import { EmptyState, RosterLoading, StatusPill } from "./RosterShell";
 type HrSection = "overview" | "people" | "leave" | "time" | "patterns";
 type DecisionTarget =
   | { kind: "leave-supervisor" | "leave-hr" | "leave-reject"; record: LeaveRequestRead }
-  | { kind: "timesheet-supervisor" | "timesheet-hr"; record: TimesheetRead };
+  | { kind: "timesheet-supervisor" | "timesheet-hr"; record: TimesheetRead }
+  | { kind: "overtime-supervisor" | "overtime-hr" | "overtime-reject"; record: HrOvertimeRequest };
 
 type ContractDraft = {
   contract_type: ContractType;
@@ -99,6 +102,12 @@ export function WorkforceHrWorkspace() {
   const timesheetsQuery = useQuery({
     queryKey: ["workforce", "hr", "timesheets"],
     queryFn: () => listTimesheets({ page_size: 200 }),
+    enabled: section === "time",
+    staleTime: 30_000,
+  });
+  const overtimeQuery = useQuery({
+    queryKey: ["workforce", "hr", "overtime"],
+    queryFn: () => listWorkforceHrOvertime(true),
     enabled: section === "time",
     staleTime: 30_000,
   });
@@ -158,6 +167,13 @@ export function WorkforceHrWorkspace() {
       if (kind === "leave-reject") await rejectLeaveRequest(record.id, decisionComment.trim());
       if (kind === "timesheet-supervisor") await approveTimesheet(record.id, "SUPERVISOR", decisionComment.trim());
       if (kind === "timesheet-hr") await approveTimesheet(record.id, "HR", decisionComment.trim());
+      if (kind === "overtime-supervisor") await decideWorkforceHrOvertime(record.id, { stage: "SUPERVISOR", decision: "APPROVED", comment: decisionComment.trim() });
+      if (kind === "overtime-hr") await decideWorkforceHrOvertime(record.id, { stage: "HR", decision: "APPROVED", comment: decisionComment.trim() });
+      if (kind === "overtime-reject") await decideWorkforceHrOvertime(record.id, {
+        stage: record.status === "SUPERVISOR_APPROVED" ? "HR" : "SUPERVISOR",
+        decision: "REJECTED",
+        comment: decisionComment.trim(),
+      });
       setDecision(null);
       setDecisionComment("");
     });
@@ -188,7 +204,7 @@ export function WorkforceHrWorkspace() {
         />
       ) : null}
       {section === "leave" ? <LeavePanel dashboard={dashboard} requests={leaveQuery.data?.items || []} loading={leaveQuery.isPending} onDecision={setDecision} /> : null}
-      {section === "time" ? <TimePanel dashboard={dashboard} timesheets={timesheetsQuery.data?.items || []} loading={timesheetsQuery.isPending} onDecision={setDecision} onPayroll={() => void downloadPayrollExport({})} /> : null}
+      {section === "time" ? <TimePanel dashboard={dashboard} timesheets={timesheetsQuery.data?.items || []} overtimeRequests={overtimeQuery.data || dashboard.pending_overtime} loading={timesheetsQuery.isPending || overtimeQuery.isPending} onDecision={setDecision} onPayroll={() => void downloadPayrollExport({})} /> : null}
       {section === "patterns" ? (
         <PatternsPanel
           dashboard={dashboard}
@@ -217,8 +233,12 @@ function decisionLabel(kind: DecisionTarget["kind"]): string {
   if (kind === "leave-hr") return "HR leave approval";
   if (kind === "leave-reject") return "Reject leave request";
   if (kind === "timesheet-supervisor") return "Supervisor timesheet approval";
-  return "HR timesheet approval";
+  if (kind === "timesheet-hr") return "HR timesheet approval";
+  if (kind === "overtime-supervisor") return "Supervisor overtime approval";
+  if (kind === "overtime-hr") return "HR overtime approval";
+  return "Reject overtime request";
 }
+
 
 function HrOverview({ dashboard, amoCode, onOpen, onRefresh }: { dashboard: Awaited<ReturnType<typeof getWorkforceHrDashboard>>; amoCode: string; onOpen: (section: HrSection, searchValue?: string) => void; onRefresh: () => void }) {
   return (
@@ -255,7 +275,7 @@ function ActionQueue({ items, onOpen }: { items: HrActionItem[]; onOpen: (sectio
   const action = (item: HrActionItem) => {
     if (item.category === "WORK_PATTERN") return <button type="button" className="hr-action-link" onClick={() => onOpen("patterns")}>{item.action_label || "Assign pattern"} <ArrowRight size={13} /></button>;
     if (item.category === "LEAVE") return <button type="button" className="hr-action-link" onClick={() => onOpen("leave")}>{item.action_label || "Review leave"} <ArrowRight size={13} /></button>;
-    if (item.category === "TIMESHEET") return <button type="button" className="hr-action-link" onClick={() => onOpen("time")}>{item.action_label || "Review time"} <ArrowRight size={13} /></button>;
+    if (item.category === "TIMESHEET" || item.category === "OVERTIME") return <button type="button" className="hr-action-link" onClick={() => onOpen("time")}>{item.action_label || "Review time"} <ArrowRight size={13} /></button>;
     return item.user_id ? <button type="button" className="hr-action-link" onClick={() => onOpen("people", item.user_name || "")}>{item.action_label || "Open employment record"} <ArrowRight size={13} /></button> : null;
   };
   return <div className="hr-action-list">{items.map((item) => <article key={item.id} className={`is-${item.severity.toLowerCase()}`}><span className="hr-action-list__icon">{item.severity === "BLOCKER" ? <AlertTriangle size={17} /> : <BadgeCheck size={17} />}</span><div><strong>{item.title}</strong><p>{item.user_name ? `${item.user_name} · ` : ""}{item.detail}</p></div><StatusPill value={item.category} />{action(item)}</article>)}</div>;
@@ -376,8 +396,9 @@ function LeavePanel({ dashboard, requests, loading, onDecision }: { dashboard: A
   );
 }
 
-function TimePanel({ dashboard, timesheets, loading, onDecision, onPayroll }: { dashboard: Awaited<ReturnType<typeof getWorkforceHrDashboard>>; timesheets: TimesheetRead[]; loading: boolean; onDecision: (value: DecisionTarget) => void; onPayroll: () => void }) {
+function TimePanel({ dashboard, timesheets, overtimeRequests, loading, onDecision, onPayroll }: { dashboard: Awaited<ReturnType<typeof getWorkforceHrDashboard>>; timesheets: TimesheetRead[]; overtimeRequests: HrOvertimeRequest[]; loading: boolean; onDecision: (value: DecisionTarget) => void; onPayroll: () => void }) {
   const pending = timesheets.filter((sheet) => ["SUBMITTED", "SUPERVISOR_APPROVED"].includes(sheet.status));
+  const pendingOvertime = overtimeRequests.filter((request) => ["SUBMITTED", "SUPERVISOR_APPROVED"].includes(request.status));
   return (
     <div className="hr-stack">
       <section className="wr-panel">
@@ -386,10 +407,20 @@ function TimePanel({ dashboard, timesheets, loading, onDecision, onPayroll }: { 
         <div className="hr-approval-list">{pending.map((sheet) => <article key={sheet.id}><div><strong>{sheet.user_full_name || sheet.user_id}</strong><span>{sheet.period_start} → {sheet.period_end} · {Math.round(sheet.attendance_minutes / 60)}h attendance</span></div><StatusPill value={sheet.status} /><div className="wr-actions">{sheet.status === "SUBMITTED" && dashboard.can_approve_timesheet_supervisor ? <button type="button" className="wr-button wr-button--small" onClick={() => onDecision({ kind: "timesheet-supervisor", record: sheet })}>Supervisor review</button> : null}{sheet.status === "SUPERVISOR_APPROVED" && dashboard.can_approve_timesheet_hr ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "timesheet-hr", record: sheet })}>HR approve</button> : null}</div></article>)}</div>
         {!loading && !pending.length ? <EmptyState title="No timesheet approvals" description="Submitted timesheets will appear here." /> : null}
       </section>
+      <section className="wr-panel">
+        <div className="wr-section-heading"><div><span className="wr-eyebrow">Overtime control</span><h2>Overtime requests</h2><p>Supervisors and HR can complete the two-stage approval workflow without leaving Workforce.</p></div><span className="wr-header-badge"><UserRoundCheck size={15} /> {pendingOvertime.length} pending</span></div>
+        {loading ? <RosterLoading label="Loading overtime requests…" /> : null}
+        <div className="hr-approval-list">{pendingOvertime.map((request) => {
+          const canReject = request.status === "SUBMITTED" ? dashboard.can_approve_overtime_supervisor : dashboard.can_approve_overtime_hr;
+          return <article key={request.id}><div><strong>{request.user_full_name || request.user_id}</strong><span>{request.starts_at.slice(0, 16).replace("T", " ")} → {request.ends_at.slice(0, 16).replace("T", " ")} · {Math.round(request.requested_minutes / 60 * 10) / 10}h</span><small>{request.reason}</small></div><StatusPill value={request.status} /><div className="wr-actions">{request.status === "SUBMITTED" && dashboard.can_approve_overtime_supervisor ? <button type="button" className="wr-button wr-button--small" onClick={() => onDecision({ kind: "overtime-supervisor", record: request })}>Supervisor approve</button> : null}{request.status === "SUPERVISOR_APPROVED" && dashboard.can_approve_overtime_hr ? <button type="button" className="wr-button wr-button--small wr-button--success" onClick={() => onDecision({ kind: "overtime-hr", record: request })}>HR approve</button> : null}{canReject ? <button type="button" className="wr-icon-button is-danger" onClick={() => onDecision({ kind: "overtime-reject", record: request })} aria-label="Reject overtime"><XCircle size={15} /></button> : null}</div></article>;
+        })}</div>
+        {!loading && !pendingOvertime.length ? <EmptyState title="No overtime approvals" description="Submitted and supervisor-approved overtime requests will appear here." /> : null}
+      </section>
       <section className="hr-mini-grid"><article><Clock3 size={19} /><strong>{dashboard.attendance_exception_count}</strong><span>attendance exceptions</span></article><article><FileClock size={19} /><strong>{dashboard.pending_timesheet_count}</strong><span>pending timesheets</span></article><article><UserRoundCheck size={19} /><strong>{dashboard.pending_overtime_count}</strong><span>overtime requests</span></article></section>
     </div>
   );
 }
+
 
 function PatternsPanel({
   dashboard,

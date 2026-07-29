@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,6 +62,28 @@ class HrPersonReadiness(HrSchema):
     readiness_reasons: list[str] = Field(default_factory=list)
 
 
+class HrOvertimeRequestRead(HrSchema):
+    id: str
+    amo_id: str
+    user_id: str
+    user_full_name: Optional[str] = None
+    roster_assignment_id: Optional[str] = None
+    starts_at: datetime
+    ends_at: datetime
+    requested_minutes: int
+    reason: str
+    status: str
+    created_by_user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class HrOvertimeDecisionRequest(HrSchema):
+    stage: Literal["SUPERVISOR", "HR"]
+    decision: Literal["APPROVED", "REJECTED"]
+    comment: str = Field(min_length=5, max_length=2000)
+
+
 class HrDashboardResponse(HrSchema):
     generated_at: datetime
     can_manage_contracts: bool
@@ -70,6 +92,8 @@ class HrDashboardResponse(HrSchema):
     can_approve_leave: bool
     can_approve_timesheet_supervisor: bool
     can_approve_timesheet_hr: bool
+    can_approve_overtime_supervisor: bool
+    can_approve_overtime_hr: bool
     can_export_payroll: bool
     active_employee_count: int
     onboarding_employee_count: int
@@ -83,4 +107,5 @@ class HrDashboardResponse(HrSchema):
     attendance_exception_count: int
     metrics: list[HrMetric]
     action_queue: list[HrActionItem]
+    pending_overtime: list[HrOvertimeRequestRead]
     people: list[HrPersonReadiness]

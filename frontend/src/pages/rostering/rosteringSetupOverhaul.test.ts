@@ -52,6 +52,11 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(setupSource).not.toContain('timezone_name: "Africa/Nairobi"');
   });
 
+  it("requires both create and pattern permissions before generation", () => {
+    expect(setupSource).toContain('can("roster.create") && can("roster.manage_patterns")');
+    expect(setupSource).toContain("previewEnabled={canGenerate}");
+  });
+
   it("keeps HR-owned records out of roster setup", () => {
     expect(setupSource).not.toContain("createEmploymentContract");
     expect(setupSource).not.toContain("createLeaveType");
@@ -66,6 +71,10 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(hrSource).toContain("Attendance & time");
     expect(hrSource).toContain("Work patterns");
     expect(hrSource).toContain("Reason or decision note");
+    expect(hrSource).toContain("Overtime requests");
+    expect(hrSource).toContain("Supervisor approve");
+    expect(hrSource).toContain("HR approve");
+    expect(hrSource).toContain("decideWorkforceHrOvertime");
   });
 
   it("lets live Workforce permission holders reach the permission-aware workspace", () => {

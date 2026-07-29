@@ -13,7 +13,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ..accounts import models as account_models
-from . import hr_schemas, models, permissions
+from . import hr_schemas, models, permissions, schemas, services
 
 
 def _utcnow() -> datetime:
@@ -115,6 +115,147 @@ def _active_leave(
     for row in rows:
         result.setdefault(row.user_id, row)
     return result
+
+
+def serialize_overtime(row: models.OvertimeRequest) -> hr_schemas.HrOvertimeRequestRead:
+    return hr_schemas.HrOvertimeRequestRead(
+        id=row.id,
+        amo_id=row.amo_id,
+        user_id=row.user_id,
+        user_full_name=_display_name(row.user),
+        roster_assignment_id=row.roster_assignment_id,
+        starts_at=row.starts_at,
+        ends_at=row.ends_at,
+        requested_minutes=row.requested_minutes,
+        reason=row.reason,
+        status=_value(row.status),
+        created_by_user_id=row.created_by_user_id,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def list_overtime_requests(
+    db: Session,
+    *,
+    amo_id: str,
+    pending_only: bool = True,
+    limit: int = 200,
+) -> list[hr_schemas.HrOvertimeRequestRead]:
+    query = db.query(models.OvertimeRequest).options(
+        joinedload(models.OvertimeRequest.user),
+    ).filter(models.OvertimeRequest.amo_id == amo_id)
+    if pending_only:
+        query = query.filter(models.OvertimeRequest.status.in_([
+            models.OvertimeRequestStatus.SUBMITTED,
+            models.OvertimeRequestStatus.SUPERVISOR_APPROVED,
+        ]))
+    rows = query.order_by(models.OvertimeRequest.starts_at.asc(), models.OvertimeRequest.id.asc()).limit(limit).all()
+    return [serialize_overtime(row) for row in rows]
+
+
+def create_overtime_request(
+    db: Session,
+    *,
+    amo_id: str,
+    actor_user_id: str,
+    payload: schemas.OvertimeRequestCreate,
+) -> models.OvertimeRequest:
+    user_id = payload.user_id or actor_user_id
+    services._require_user(db, amo_id=amo_id, user_id=user_id, active_only=True)
+    on_date = payload.starts_at.date()
+    contract = db.query(models.EmploymentContract).filter(
+        models.EmploymentContract.amo_id == amo_id,
+        models.EmploymentContract.user_id == user_id,
+        models.EmploymentContract.employment_status == models.EmploymentStatus.ACTIVE,
+        models.EmploymentContract.effective_from <= on_date,
+        or_(models.EmploymentContract.effective_to.is_(None), models.EmploymentContract.effective_to >= on_date),
+    ).order_by(models.EmploymentContract.effective_from.desc()).first()
+    if contract is None:
+        raise ValueError("An active employment contract is required for overtime")
+    if not contract.overtime_eligible:
+        raise ValueError("The employee is not eligible for overtime under the active contract")
+    actual_minutes = int((payload.ends_at - payload.starts_at).total_seconds() // 60)
+    requested_minutes = payload.requested_minutes or actual_minutes
+    if requested_minutes < 1 or requested_minutes > actual_minutes:
+        raise ValueError("requested_minutes must be within the requested overtime window")
+    duplicate = db.query(models.OvertimeRequest.id).filter(
+        models.OvertimeRequest.amo_id == amo_id,
+        models.OvertimeRequest.user_id == user_id,
+        models.OvertimeRequest.starts_at == payload.starts_at,
+        models.OvertimeRequest.ends_at == payload.ends_at,
+        models.OvertimeRequest.status.notin_([
+            models.OvertimeRequestStatus.REJECTED,
+            models.OvertimeRequestStatus.CANCELLED,
+        ]),
+    ).first()
+    if duplicate:
+        raise ValueError("An active overtime request already exists for this window")
+    row = models.OvertimeRequest(
+        amo_id=amo_id,
+        user_id=user_id,
+        roster_assignment_id=payload.roster_assignment_id,
+        starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
+        requested_minutes=requested_minutes,
+        reason=payload.reason.strip(),
+        status=models.OvertimeRequestStatus.SUBMITTED,
+        created_by_user_id=actor_user_id,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def decide_overtime(
+    db: Session,
+    *,
+    amo_id: str,
+    actor_user_id: str,
+    request_id: str,
+    payload: hr_schemas.HrOvertimeDecisionRequest,
+) -> models.OvertimeRequest:
+    row = db.query(models.OvertimeRequest).options(
+        joinedload(models.OvertimeRequest.user),
+    ).filter(
+        models.OvertimeRequest.amo_id == amo_id,
+        models.OvertimeRequest.id == request_id,
+    ).with_for_update().first()
+    if row is None:
+        raise ValueError("Overtime request not found")
+    stage = models.LeaveApprovalStage(payload.stage)
+    decision = models.ApprovalDecision(payload.decision)
+    expected = (
+        models.OvertimeRequestStatus.SUBMITTED
+        if stage == models.LeaveApprovalStage.SUPERVISOR
+        else models.OvertimeRequestStatus.SUPERVISOR_APPROVED
+    )
+    if row.status != expected:
+        raise ValueError(f"Overtime request is not awaiting {stage.value.lower()} review")
+    existing = db.query(models.OvertimeApproval.id).filter(
+        models.OvertimeApproval.amo_id == amo_id,
+        models.OvertimeApproval.overtime_request_id == row.id,
+        models.OvertimeApproval.stage == stage,
+    ).first()
+    if existing:
+        raise ValueError(f"The {stage.value.lower()} overtime decision is already recorded")
+    db.add(models.OvertimeApproval(
+        amo_id=amo_id,
+        overtime_request_id=row.id,
+        stage=stage,
+        decision=decision,
+        actor_user_id=actor_user_id,
+        comment=payload.comment.strip(),
+    ))
+    if decision == models.ApprovalDecision.REJECTED:
+        row.status = models.OvertimeRequestStatus.REJECTED
+    elif stage == models.LeaveApprovalStage.SUPERVISOR:
+        row.status = models.OvertimeRequestStatus.SUPERVISOR_APPROVED
+    else:
+        row.status = models.OvertimeRequestStatus.HR_APPROVED
+    db.add(row)
+    db.flush()
+    return row
 
 
 def _person_readiness(
@@ -310,6 +451,19 @@ def dashboard(
             action_label="Review timesheet",
             action_path=f"time/timesheets/{row.id}",
         ))
+    for row in pending_overtime_rows[:20]:
+        actions.append(hr_schemas.HrActionItem(
+            id=f"overtime:{row.id}",
+            category="OVERTIME",
+            severity="ACTION",
+            title="Overtime approval required",
+            detail=f"{row.requested_minutes} minutes from {row.starts_at.isoformat()}.",
+            user_id=row.user_id,
+            user_name=_display_name(row.user),
+            due_on=row.starts_at.date(),
+            action_label="Review overtime",
+            action_path=f"time/overtime/{row.id}",
+        ))
     actions.sort(key=lambda item: (
         0 if item.severity == "BLOCKER" else 1 if item.severity == "ACTION" else 2,
         item.due_on or date.max,
@@ -343,6 +497,12 @@ def dashboard(
     can_approve_timesheet_hr = can_approve_timesheet_supervisor and permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.ATTENDANCE_APPROVE
     )
+    can_approve_overtime_supervisor = permissions.has_permission(
+        db, user=current_user, permission=permissions.PermissionCode.OVERTIME_APPROVE
+    )
+    can_approve_overtime_hr = can_approve_overtime_supervisor and permissions.has_permission(
+        db, user=current_user, permission=permissions.PermissionCode.ATTENDANCE_APPROVE
+    )
     can_export_payroll = permissions.has_permission(
         db, user=current_user, permission=permissions.PermissionCode.PAYROLL_EXPORT
     )
@@ -365,6 +525,8 @@ def dashboard(
         can_approve_leave=can_approve_leave,
         can_approve_timesheet_supervisor=can_approve_timesheet_supervisor,
         can_approve_timesheet_hr=can_approve_timesheet_hr,
+        can_approve_overtime_supervisor=can_approve_overtime_supervisor,
+        can_approve_overtime_hr=can_approve_overtime_hr,
         can_export_payroll=can_export_payroll,
         active_employee_count=active_count,
         onboarding_employee_count=onboarding_count,
@@ -378,5 +540,6 @@ def dashboard(
         attendance_exception_count=len(attendance_exception_rows),
         metrics=metrics,
         action_queue=actions[:100],
+        pending_overtime=[serialize_overtime(row) for row in pending_overtime_rows],
         people=people,
     )

@@ -90,6 +90,8 @@ function hrDashboardResponse(permissions: string[]) {
     can_approve_leave: permissions.includes("leave.approve"),
     can_approve_timesheet_supervisor: permissions.includes("timesheet.approve"),
     can_approve_timesheet_hr: permissions.includes("timesheet.approve") && permissions.includes("attendance.approve"),
+    can_approve_overtime_supervisor: permissions.includes("overtime.approve"),
+    can_approve_overtime_hr: permissions.includes("overtime.approve") && permissions.includes("attendance.approve"),
     can_export_payroll: permissions.includes("payroll.export"),
     active_employee_count: 0,
     onboarding_employee_count: 0,
@@ -103,6 +105,7 @@ function hrDashboardResponse(permissions: string[]) {
     attendance_exception_count: 0,
     metrics: [],
     action_queue: [],
+    pending_overtime: [],
     people: [],
   };
 }

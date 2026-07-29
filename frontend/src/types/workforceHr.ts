@@ -49,6 +49,22 @@ export type HrPersonReadiness = {
   readiness_reasons: string[];
 };
 
+export type HrOvertimeRequest = {
+  id: string;
+  amo_id: string;
+  user_id: string;
+  user_full_name?: string | null;
+  roster_assignment_id?: string | null;
+  starts_at: string;
+  ends_at: string;
+  requested_minutes: number;
+  reason: string;
+  status: "DRAFT" | "SUBMITTED" | "SUPERVISOR_APPROVED" | "HR_APPROVED" | "REJECTED" | "CANCELLED";
+  created_by_user_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type HrDashboard = {
   generated_at: string;
   can_manage_contracts: boolean;
@@ -57,6 +73,8 @@ export type HrDashboard = {
   can_approve_leave: boolean;
   can_approve_timesheet_supervisor: boolean;
   can_approve_timesheet_hr: boolean;
+  can_approve_overtime_supervisor: boolean;
+  can_approve_overtime_hr: boolean;
   can_export_payroll: boolean;
   active_employee_count: number;
   onboarding_employee_count: number;
@@ -70,5 +88,6 @@ export type HrDashboard = {
   attendance_exception_count: number;
   metrics: HrMetric[];
   action_queue: HrActionItem[];
+  pending_overtime: HrOvertimeRequest[];
   people: HrPersonReadiness[];
 };

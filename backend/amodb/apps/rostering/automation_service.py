@@ -133,6 +133,15 @@ def _target_window(policy: RosterGenerationPolicy, *, today: Optional[date] = No
     return _month_window(today, policy.lead_periods)
 
 
+def _target_window_for_occurrence(
+    policy: RosterGenerationPolicy,
+    scheduled_at: datetime,
+) -> tuple[date, date]:
+    """Derive a target window from the scheduled occurrence, not worker delay."""
+    local_date = scheduled_at.astimezone(ZoneInfo(policy.timezone_name)).date()
+    return _target_window(policy, today=local_date)
+
+
 def _render_pattern(pattern: str, target_from: date, target_to: date) -> str:
     tokens = {
         "{YYYY}": f"{target_from.year:04d}",
@@ -151,7 +160,7 @@ def _render_pattern(pattern: str, target_from: date, target_to: date) -> str:
 
 
 def _render_period_code(pattern: str, target_from: date, target_to: date) -> str:
-    """Render a stable period code that stays unique for sub-monthly windows."""
+    """Render a collision-safe code while preserving a stable date suffix."""
     rendered = _render_pattern(pattern, target_from, target_to) or "ROSTER"
     full_month = (
         target_from.day == 1
@@ -159,24 +168,63 @@ def _render_period_code(pattern: str, target_from: date, target_to: date) -> str
         and target_from.month == target_to.month
         and target_to.day == calendar.monthrange(target_from.year, target_from.month)[1]
     )
-    if full_month:
-        return rendered[:32]
-
-    boundary = f"{target_from:%Y%m%d}-{target_to:%Y%m%d}"
+    boundary = (
+        f"{target_from:%Y%m}"
+        if full_month
+        else f"{target_from:%Y%m%d}-{target_to:%Y%m%d}"
+    )
     if rendered.endswith(boundary) and len(rendered) <= 32:
         return rendered
-    prefix_length = 32 - len(boundary) - 1
+    prefix_length = max(0, 32 - len(boundary) - 1)
     prefix = rendered[:prefix_length].rstrip("- _")
     return f"{prefix}-{boundary}" if prefix else boundary
 
 
-def _next_run(policy: RosterGenerationPolicy, *, now: Optional[datetime] = None) -> Optional[datetime]:
+def _next_run(
+    policy: RosterGenerationPolicy,
+    *,
+    now: Optional[datetime] = None,
+    previous_scheduled_at: Optional[datetime] = None,
+) -> Optional[datetime]:
     if not policy.enabled or _enum_value(policy.frequency) == RosterAutomationFrequency.MANUAL.value:
         return None
     run_day = _validate_run_day(policy.frequency, policy.run_day)
     zone = ZoneInfo(policy.timezone_name)
     current = (now or _utcnow()).astimezone(zone)
-    if _enum_value(policy.frequency) == RosterAutomationFrequency.MONTHLY.value:
+    frequency = _enum_value(policy.frequency)
+
+    if previous_scheduled_at is not None:
+        previous = previous_scheduled_at.astimezone(zone)
+        if frequency == RosterAutomationFrequency.MONTHLY.value:
+            next_month = _add_months(previous.date().replace(day=1), 1)
+            candidate = datetime.combine(
+                date(next_month.year, next_month.month, run_day),
+                time(policy.run_hour_local, 0),
+                tzinfo=zone,
+            )
+            while candidate <= current:
+                next_month = _add_months(candidate.date().replace(day=1), 1)
+                candidate = datetime.combine(
+                    date(next_month.year, next_month.month, run_day),
+                    time(policy.run_hour_local, 0),
+                    tzinfo=zone,
+                )
+        else:
+            cadence_days = 7 if frequency == RosterAutomationFrequency.WEEKLY.value else 14
+            candidate = datetime.combine(
+                previous.date() + timedelta(days=cadence_days),
+                time(policy.run_hour_local, 0),
+                tzinfo=zone,
+            )
+            while candidate <= current:
+                candidate = datetime.combine(
+                    candidate.date() + timedelta(days=cadence_days),
+                    time(policy.run_hour_local, 0),
+                    tzinfo=zone,
+                )
+        return candidate.astimezone(timezone.utc)
+
+    if frequency == RosterAutomationFrequency.MONTHLY.value:
         candidate = datetime.combine(
             date(current.year, current.month, run_day),
             time(policy.run_hour_local, 0),
@@ -190,7 +238,7 @@ def _next_run(policy: RosterGenerationPolicy, *, now: Optional[datetime] = None)
                 tzinfo=zone,
             )
     else:
-        cadence_days = 7 if _enum_value(policy.frequency) == RosterAutomationFrequency.WEEKLY.value else 14
+        cadence_days = 7 if frequency == RosterAutomationFrequency.WEEKLY.value else 14
         days_ahead = (run_day - current.isoweekday()) % 7
         candidate = datetime.combine(
             current.date() + timedelta(days=days_ahead),
@@ -479,6 +527,7 @@ def run(
         return replay
 
     policy = get_or_create_policy(db, amo_id=amo_id, actor_user_id=actor_user_id)
+    scheduled_occurrence = policy.next_run_at if trigger == RosterAutomationTrigger.SCHEDULED else None
     preview_result = preview(db, amo_id=amo_id, actor_user_id=actor_user_id, payload=payload)
     if preview_result.blocking_issue_count:
         raise ValueError("Roster automation preview contains blocking issues")
@@ -616,7 +665,11 @@ def run(
     run_row.completed_at = _utcnow()
     if trigger == RosterAutomationTrigger.SCHEDULED:
         policy.last_run_at = run_row.completed_at
-        policy.next_run_at = _next_run(policy, now=run_row.completed_at)
+        policy.next_run_at = _next_run(
+            policy,
+            now=run_row.completed_at,
+            previous_scheduled_at=scheduled_occurrence,
+        )
         db.add(policy)
     db.add(run_row)
     db.flush()

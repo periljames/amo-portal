@@ -91,13 +91,91 @@ def hr_create_work_pattern_assignment(
             actor_user_id=current_user.id,
             payload=payload,
         )
+        created_id = row.id
         db.commit()
-        return services.list_pattern_assignments(
+        assignments = services.list_pattern_assignments(
             db,
             amo_id=_amo(current_user),
             user_id=row.user_id,
             pattern_id=row.work_pattern_id,
-        )[0]
+        )
+        return next(item for item in assignments if item.id == created_id)
     except ValueError as exc:
         db.rollback()
         raise _error(str(exc), code="HR_WORK_PATTERN_ASSIGNMENT_INVALID") from exc
+
+
+@router.get("/overtime-requests", response_model=list[hr_schemas.HrOvertimeRequestRead])
+def hr_overtime_requests(
+    pending_only: bool = Query(default=True),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    permissions.require_permission(
+        db, user=current_user, permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE
+    )
+    return hr_service.list_overtime_requests(
+        db, amo_id=_amo(current_user), pending_only=pending_only, limit=limit
+    )
+
+
+@router.post(
+    "/overtime-requests",
+    response_model=hr_schemas.HrOvertimeRequestRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def hr_create_overtime_request(
+    payload: schemas.OvertimeRequestCreate,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    target_user_id = payload.user_id or current_user.id
+    permission = (
+        permissions.PermissionCode.OVERTIME_REQUEST
+        if target_user_id == current_user.id
+        else permissions.PermissionCode.OVERTIME_APPROVE
+    )
+    permissions.require_permission(db, user=current_user, permission=permission)
+    try:
+        row = hr_service.create_overtime_request(
+            db, amo_id=_amo(current_user), actor_user_id=current_user.id, payload=payload
+        )
+        db.commit()
+        db.refresh(row)
+        return hr_service.serialize_overtime(row)
+    except ValueError as exc:
+        db.rollback()
+        raise _error(str(exc), code="HR_OVERTIME_REQUEST_INVALID") from exc
+
+
+@router.post(
+    "/overtime-requests/{request_id}/decision",
+    response_model=hr_schemas.HrOvertimeRequestRead,
+)
+def hr_decide_overtime_request(
+    request_id: str,
+    payload: hr_schemas.HrOvertimeDecisionRequest,
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    permissions.require_permission(
+        db, user=current_user, permission=permissions.PermissionCode.OVERTIME_APPROVE
+    )
+    if payload.stage == "HR":
+        permissions.require_permission(
+            db, user=current_user, permission=permissions.PermissionCode.ATTENDANCE_APPROVE
+        )
+    try:
+        row = hr_service.decide_overtime(
+            db,
+            amo_id=_amo(current_user),
+            actor_user_id=current_user.id,
+            request_id=request_id,
+            payload=payload,
+        )
+        db.commit()
+        return hr_service.serialize_overtime(row)
+    except ValueError as exc:
+        db.rollback()
+        raise _error(str(exc), code="HR_OVERTIME_DECISION_INVALID", status_code=status.HTTP_409_CONFLICT) from exc

@@ -54,6 +54,7 @@ def _record_failed_scheduled_run(
     actor_user_id: Optional[str],
     idempotency_key: str,
     message: str,
+    scheduled_occurrence: datetime,
     as_of: datetime,
     failure_kind: str = "EXECUTION_FAILED",
 ) -> bool:
@@ -78,7 +79,9 @@ def _record_failed_scheduled_run(
             RosterGenerationRun.idempotency_key == idempotency_key,
         ).first()
         if existing is None:
-            target_from, target_to = automation_service._target_window(policy)
+            target_from, target_to = automation_service._target_window_for_occurrence(
+                policy, scheduled_occurrence
+            )
             row = RosterGenerationRun(
                 amo_id=policy.amo_id,
                 policy_id=policy.id,
@@ -113,7 +116,11 @@ def _record_failed_scheduled_run(
             db.add(row)
 
         policy.last_run_at = as_of
-        policy.next_run_at = automation_service._next_run(policy, now=as_of)
+        policy.next_run_at = automation_service._next_run(
+            policy,
+            now=as_of,
+            previous_scheduled_at=scheduled_occurrence,
+        )
         policy.updated_reason = (
             "Scheduled run skipped because no accountable policy owner is recorded."
             if skipped
@@ -138,8 +145,12 @@ def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
         if not policy.enabled or policy.next_run_at is None or policy.next_run_at > as_of:
             return {"policy_id": policy_id, "outcome": "not_due"}
 
+        scheduled_occurrence = policy.next_run_at
+        target_from, target_to = automation_service._target_window_for_occurrence(
+            policy, scheduled_occurrence
+        )
         amo_id = policy.amo_id
-        due_key = policy.next_run_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        due_key = scheduled_occurrence.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         idempotency_key = f"scheduled:{policy.id}:{due_key}"
         actor_user_id: Optional[str] = policy.updated_by_user_id or policy.created_by_user_id
         if not actor_user_id:
@@ -150,6 +161,7 @@ def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
                 actor_user_id=None,
                 idempotency_key=idempotency_key,
                 message=message,
+                scheduled_occurrence=scheduled_occurrence,
                 as_of=as_of,
                 failure_kind="NO_ACCOUNTABLE_OWNER",
             )
@@ -169,6 +181,8 @@ def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
                 trigger=RosterAutomationTrigger.SCHEDULED,
                 payload=RosterAutomationRunRequest(
                     idempotency_key=idempotency_key,
+                    target_from=target_from,
+                    target_to=target_to,
                     confirm_preview=True,
                     create_missing_period=True,
                     create_initial_draft=policy.create_initial_draft,
@@ -193,6 +207,7 @@ def _run_policy(policy_id: str, *, as_of: datetime) -> dict:
                 actor_user_id=actor_user_id,
                 idempotency_key=idempotency_key,
                 message=message,
+                scheduled_occurrence=scheduled_occurrence,
                 as_of=as_of,
             )
             return {

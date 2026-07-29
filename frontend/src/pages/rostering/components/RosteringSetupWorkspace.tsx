@@ -137,6 +137,7 @@ export function RosteringSetupWorkspace() {
 
   const permissions = permissionsQuery.data?.permissions || [];
   const can = (permission: string) => permissions.includes(permission);
+  const canGenerate = can("roster.create") && can("roster.manage_patterns");
   const readiness = readinessQuery.data;
 
   const navigateSection = (next: Section) => {
@@ -195,7 +196,7 @@ export function RosteringSetupWorkspace() {
           periods={periodsQuery.data || []}
           loading={periodsQuery.isPending}
           error={periodsQuery.error}
-          previewEnabled={can("roster.manage_patterns")}
+          previewEnabled={canGenerate}
           busy={busy}
           runAction={runAction}
           onOpenAutomation={() => navigateSection("automation")}

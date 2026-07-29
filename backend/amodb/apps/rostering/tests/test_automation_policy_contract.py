@@ -183,7 +183,7 @@ def test_manual_runs_do_not_advance_scheduled_policy_timestamps():
     assert source.index("policy.last_run_at", marker) > marker
     assert source.index("policy.next_run_at", marker) > marker
     assert source.count("policy.last_run_at") == 1
-    assert source.count("policy.next_run_at") == 1
+    assert "scheduled_occurrence = policy.next_run_at" in source
 
 
 def test_concurrent_identical_manual_request_returns_the_winning_run():
@@ -210,11 +210,13 @@ def test_submonthly_period_codes_include_full_date_boundaries():
     assert first.endswith("20260803-20260809")
     assert second.endswith("20260810-20260816")
     assert len(first) <= 32
-    assert automation_service._render_period_code(
+    monthly = automation_service._render_period_code(
         "{YYYY}-{MM}",
         date(2026, 8, 1),
         date(2026, 8, 31),
-    ) == "2026-08"
+    )
+    assert monthly.endswith("202608")
+    assert len(monthly) <= 32
 
 
 def test_unrelated_policy_edits_do_not_change_the_schedule():
@@ -243,3 +245,40 @@ def test_default_compose_deployments_run_the_scheduler_continuously():
     assert 'parser.add_argument("--loop"' in worker_source
     assert "ROSTER_AUTOMATION_POLL_SECONDS" in worker_source
     assert "time_module.sleep" in worker_source
+
+
+def test_delayed_fortnightly_run_preserves_scheduled_parity():
+    due = datetime(2026, 7, 27, 6, tzinfo=timezone.utc)
+    executed = datetime(2026, 7, 28, 6, tzinfo=timezone.utc)
+    next_run = automation_service._next_run(
+        policy(frequency=RosterAutomationFrequency.FORTNIGHTLY, run_day=1, timezone_name="UTC"),
+        now=executed,
+        previous_scheduled_at=due,
+    )
+    assert next_run == datetime(2026, 8, 10, 6, tzinfo=timezone.utc)
+
+
+def test_monthly_period_codes_are_collision_safe_for_constant_and_long_patterns():
+    august = automation_service._render_period_code("ROSTER", date(2026, 8, 1), date(2026, 8, 31))
+    september = automation_service._render_period_code("ROSTER", date(2026, 9, 1), date(2026, 9, 30))
+    long_august = automation_service._render_period_code("CONTROLLED-ROSTER-CODE-WITH-LONG-PREFIX", date(2026, 8, 1), date(2026, 8, 31))
+    long_september = automation_service._render_period_code("CONTROLLED-ROSTER-CODE-WITH-LONG-PREFIX", date(2026, 9, 1), date(2026, 9, 30))
+    assert august != september
+    assert long_august != long_september
+    assert august.endswith("202608")
+    assert september.endswith("202609")
+    assert len(long_august) <= 32
+    assert len(long_september) <= 32
+
+
+def test_overdue_scheduled_target_is_anchored_to_due_occurrence():
+    monthly = policy(frequency=RosterAutomationFrequency.MONTHLY, timezone_name="UTC")
+    due = datetime(2026, 7, 15, 6, tzinfo=timezone.utc)
+    assert automation_service._target_window_for_occurrence(monthly, due) == (
+        date(2026, 8, 1),
+        date(2026, 8, 31),
+    )
+    worker_source = inspect.getsource(rostering_automation._run_policy)
+    assert "target_from=target_from" in worker_source
+    assert "target_to=target_to" in worker_source
+    assert "scheduled_occurrence" in worker_source

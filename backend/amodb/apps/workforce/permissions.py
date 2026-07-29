@@ -282,17 +282,26 @@ def require_permission(
 
 
 def permissions_for_user(db: Session, *, user: account_models.User) -> list[str]:
+    """Return globally effective permissions using the same rules as guards."""
     permissions = default_permissions_for(user)
     amo_id = getattr(user, "effective_amo_id", None) or user.amo_id
+    today = date.today()
     rows = db.query(models.WorkforcePermissionGrant).filter(
         models.WorkforcePermissionGrant.amo_id == amo_id,
         models.WorkforcePermissionGrant.user_id == user.id,
-    ).all()
+        or_(models.WorkforcePermissionGrant.effective_from.is_(None), models.WorkforcePermissionGrant.effective_from <= today),
+        or_(models.WorkforcePermissionGrant.effective_to.is_(None), models.WorkforcePermissionGrant.effective_to >= today),
+        models.WorkforcePermissionGrant.department_id.is_(None),
+        models.WorkforcePermissionGrant.base_station_id.is_(None),
+    ).order_by(models.WorkforcePermissionGrant.created_at.asc()).all()
+    effects: dict[str, set[models.PermissionEffect]] = {}
     for row in rows:
-        if row.effect == models.PermissionEffect.DENY:
-            permissions.discard(row.permission_code)
-        else:
-            permissions.add(row.permission_code)
+        effects.setdefault(row.permission_code, set()).add(row.effect)
+    for code, code_effects in effects.items():
+        if models.PermissionEffect.DENY in code_effects:
+            permissions.discard(code)
+        elif models.PermissionEffect.GRANT in code_effects:
+            permissions.add(code)
     return sorted(permissions)
 
 
