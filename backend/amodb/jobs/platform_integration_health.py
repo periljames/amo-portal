@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from datetime import datetime, timezone
 
 from sqlalchemy import text
 
@@ -24,8 +25,14 @@ def _elapsed_ms(started: float) -> int:
     return max(0, int(round((time.perf_counter() - started) * 1000)))
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _acquire_health_lock(db) -> bool:
-    """Allow one worker replica to run the periodic provider probe."""
+    """Allow one worker replica to decide whether the periodic probe is due."""
 
     bind = db.get_bind()
     if bind.dialect.name != "postgresql":
@@ -74,20 +81,38 @@ def _check_resend_credentials(db) -> dict[str, int]:
     return {"checked": checked, "healthy": healthy, "unhealthy": unhealthy}
 
 
-def run_once() -> dict:
+def run_once(*, min_interval_seconds: int = 0) -> dict:
     db = WriteSessionLocal()
     updated = 0
     try:
         if not _acquire_health_lock(db):
             db.rollback()
             return {"skipped": True, "reason": "another worker owns the health-check lock"}
+
+        now = services.now_utc()
+        tracker = (
+            db.query(models.PlatformIntegrationProvider)
+            .filter(models.PlatformIntegrationProvider.provider == "resend")
+            .first()
+        )
+        minimum = max(0, int(min_interval_seconds or 0))
+        if minimum and tracker and tracker.last_checked_at:
+            elapsed = (now - _as_utc(tracker.last_checked_at)).total_seconds()
+            if elapsed < minimum:
+                db.rollback()
+                return {
+                    "skipped": True,
+                    "reason": "health check is not due",
+                    "seconds_until_due": max(0, int(minimum - elapsed)),
+                }
+
         for provider, display_name in DEFAULT_PROVIDERS:
             row = db.query(models.PlatformIntegrationProvider).filter(models.PlatformIntegrationProvider.provider == provider).first()
             if not row:
                 row = models.PlatformIntegrationProvider(provider=provider, display_name=display_name, status="NOT_CONFIGURED")
                 db.add(row)
                 updated += 1
-            row.last_checked_at = services.now_utc()
+            row.last_checked_at = now
         resend = _check_resend_credentials(db)
         db.commit()
         return {"updated": updated, "resend": resend}
