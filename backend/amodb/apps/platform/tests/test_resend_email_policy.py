@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from amodb.apps.notifications import providers as notification_providers
 from amodb.apps.platform import resend_email_policy, saas_admin_policy, saas_services
+from amodb.jobs import saas_worker_safe
 
 
 def test_initial_resend_setup_requires_api_key_but_not_webhook_secret(monkeypatch: pytest.MonkeyPatch):
@@ -84,3 +86,52 @@ def test_automatic_delivery_requires_healthy_credential():
             context={},
             correlation_id="finding:1",
         )
+
+
+def test_non_sending_authentication_does_not_grant_delivery_health():
+    result = {"credential_status": "AUTHENTICATED"}
+
+    assert resend_email_policy.status_after_authentication("CONFIGURED", result) == "AUTHENTICATED"
+    assert resend_email_policy.status_after_authentication("UNHEALTHY", result) == "AUTHENTICATED"
+    assert resend_email_policy.status_after_authentication("HEALTHY", result) == "HEALTHY"
+
+
+def test_resend_authentication_job_never_requests_generic_health_mutation(monkeypatch: pytest.MonkeyPatch):
+    row = SimpleNamespace(id="resend-credential", status="CONFIGURED", tenant_id=None)
+    captured: dict = {}
+    monkeypatch.setattr(
+        saas_services,
+        "get_provider_credential",
+        lambda db, *, provider, tenant_id, allow_platform_fallback: row,
+    )
+
+    def fake_enqueue(db, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(id="job-1")
+
+    monkeypatch.setattr(resend_email_policy.saas_queue, "enqueue_job", fake_enqueue)
+
+    result = saas_services.enqueue_provider_health(
+        MagicMock(),
+        provider="resend",
+        tenant_id=None,
+        actor_user_id="superuser-1",
+    )
+
+    assert result.id == "job-1"
+    assert captured["payload"]["provider"] == "resend"
+    assert captured["payload"]["mutate_credential_status"] is False
+
+
+def test_safe_worker_routes_resend_health_to_resend_authentication_handler(monkeypatch: pytest.MonkeyPatch):
+    expected = {"credential_status": "AUTHENTICATED"}
+    handler = MagicMock(return_value=expected)
+    monkeypatch.setattr(resend_email_policy, "process_resend_authentication_job", handler)
+    db = MagicMock()
+    job = SimpleNamespace(
+        job_type="PROVIDER_HEALTH_CHECK",
+        payload_json={"provider": "resend", "credential_id": "credential-1"},
+    )
+
+    assert saas_worker_safe._process_job(db, job) == expected
+    handler.assert_called_once_with(db, job)
