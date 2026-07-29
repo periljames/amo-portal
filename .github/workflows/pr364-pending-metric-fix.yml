@@ -1,0 +1,50 @@
+name: PR364 Pending Metric Fix
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  fix-metrics:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'agent/rostering-automation-workforce-hr-overhaul'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Use uncapped totals in HR metric cards
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/amodb/apps/workforce/hr_service.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        hr_schemas.HrMetric(key="leave", label="Leave approvals", value=len(pending_leave_rows), detail="Supervisor or HR action", tone="warning" if pending_leave_rows else "neutral"),
+              hr_schemas.HrMetric(key="time", label="Time approvals", value=len(pending_timesheet_rows), detail="Submitted timesheets", tone="warning" if pending_timesheet_rows else "neutral"),
+          '''
+          new = '''        hr_schemas.HrMetric(key="leave", label="Leave approvals", value=pending_counts["leave"], detail="Supervisor or HR action", tone="warning" if pending_counts["leave"] else "neutral"),
+              hr_schemas.HrMetric(key="time", label="Time approvals", value=pending_counts["timesheet"], detail="Submitted timesheets", tone="warning" if pending_counts["timesheet"] else "neutral"),
+          '''
+          if old in text:
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          elif new not in text:
+              raise RuntimeError('HR metric count anchor not found')
+          PY
+          python -m compileall -q backend/amodb/apps/workforce/hr_service.py
+      - name: Commit metric correction
+        run: |
+          if git diff --quiet -- backend/amodb/apps/workforce/hr_service.py; then
+            echo "Metric correction already present"
+            exit 0
+          fi
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@github.com"
+          git add backend/amodb/apps/workforce/hr_service.py
+          git commit -m "Use uncapped HR dashboard metric totals"
+          git push origin HEAD:${{ github.head_ref }}
