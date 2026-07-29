@@ -248,6 +248,14 @@ def run_roster_automation(
         ) from exc
     except (ValueError, RuntimeError) as exc:
         message = str(exc)
+        if message.startswith("ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH:"):
+            db.rollback()
+            raise _error(
+                "This idempotency key was already used with a different automation request.",
+                code="ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH",
+                status_code=status.HTTP_409_CONFLICT,
+                conflicts=[{"idempotency_key": payload.idempotency_key}],
+            ) from exc
         evidence_retained = _record_failed_run(
             db,
             amo_id=amo_id,

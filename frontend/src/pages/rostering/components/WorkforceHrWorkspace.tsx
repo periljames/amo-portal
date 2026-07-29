@@ -144,7 +144,7 @@ export function WorkforceHrWorkspace() {
       {error ? <div className="wr-inline-error" role="alert">{error}</div> : null}
 
       {section === "overview" ? <HrOverview dashboard={dashboard} amoCode={amoCode} onOpen={setSection} onRefresh={() => void refresh()} /> : null}
-      {section === "people" ? <PeoplePanel people={people} search={search} onSearch={setSearch} amoCode={amoCode} /> : null}
+      {section === "people" ? <PeoplePanel people={people} search={search} onSearch={setSearch} /> : null}
       {section === "leave" ? <LeavePanel dashboard={dashboard} requests={leaveQuery.data?.items || []} loading={leaveQuery.isPending} onDecision={setDecision} /> : null}
       {section === "time" ? <TimePanel dashboard={dashboard} timesheets={timesheetsQuery.data?.items || []} loading={timesheetsQuery.isPending} onDecision={setDecision} onPayroll={() => void downloadPayrollExport({})} /> : null}
       {section === "patterns" ? (
@@ -187,7 +187,7 @@ function HrOverview({ dashboard, amoCode, onOpen, onRefresh }: { dashboard: Awai
       <div className="hr-overview-grid">
         <section className="wr-panel">
           <div className="wr-section-heading"><div><span className="wr-eyebrow">HR action queue</span><h2>What needs attention</h2></div><button type="button" className="wr-icon-button" onClick={onRefresh}><RefreshCw size={16} /></button></div>
-          <ActionQueue items={dashboard.action_queue.slice(0, 12)} amoCode={amoCode} onOpen={onOpen} />
+          <ActionQueue items={dashboard.action_queue.slice(0, 12)} onOpen={onOpen} />
         </section>
         <section className="wr-panel">
           <div className="wr-section-heading"><div><span className="wr-eyebrow">Workforce readiness</span><h2>Operational eligibility</h2></div></div>
@@ -208,24 +208,24 @@ function HrOverview({ dashboard, amoCode, onOpen, onRefresh }: { dashboard: Awai
   );
 }
 
-function ActionQueue({ items, amoCode, onOpen }: { items: HrActionItem[]; amoCode: string; onOpen: (section: HrSection) => void }) {
+function ActionQueue({ items, onOpen }: { items: HrActionItem[]; onOpen: (section: HrSection) => void }) {
   if (!items.length) return <EmptyState title="No urgent HR actions" description="Contract, pattern, base, leave and time records are currently clear." />;
   const action = (item: HrActionItem) => {
     if (item.category === "WORK_PATTERN") return <button type="button" className="hr-action-link" onClick={() => onOpen("patterns")}>{item.action_label || "Assign pattern"} <ArrowRight size={13} /></button>;
     if (item.category === "LEAVE") return <button type="button" className="hr-action-link" onClick={() => onOpen("leave")}>{item.action_label || "Review leave"} <ArrowRight size={13} /></button>;
     if (item.category === "TIMESHEET") return <button type="button" className="hr-action-link" onClick={() => onOpen("time")}>{item.action_label || "Review time"} <ArrowRight size={13} /></button>;
-    return item.user_id ? <Link to={`/maintenance/${encodeURIComponent(amoCode)}/admin/users/${encodeURIComponent(item.user_id)}`}>{item.action_label || "Open"} <ArrowRight size={13} /></Link> : null;
+    return item.user_id ? <button type="button" className="hr-action-link" onClick={() => onOpen("people")}>{item.action_label || "Open employment record"} <ArrowRight size={13} /></button> : null;
   };
   return <div className="hr-action-list">{items.map((item) => <article key={item.id} className={`is-${item.severity.toLowerCase()}`}><span className="hr-action-list__icon">{item.severity === "BLOCKER" ? <AlertTriangle size={17} /> : <BadgeCheck size={17} />}</span><div><strong>{item.title}</strong><p>{item.user_name ? `${item.user_name} · ` : ""}{item.detail}</p></div><StatusPill value={item.category} />{action(item)}</article>)}</div>;
 }
 
-function PeoplePanel({ people, search, onSearch, amoCode }: { people: HrPersonReadiness[]; search: string; onSearch: (value: string) => void; amoCode: string }) {
+function PeoplePanel({ people, search, onSearch }: { people: HrPersonReadiness[]; search: string; onSearch: (value: string) => void }) {
   return (
     <section className="wr-panel">
       <div className="wr-section-heading"><div><span className="wr-eyebrow">People and contracts</span><h2>Employee readiness register</h2><p>One row per effective employment record, with base and work-pattern readiness shown together.</p></div><label className="hr-search"><Search size={15} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search staff, role, base or department" /></label></div>
       <div className="hr-people-table">
-        <header><span>Employee</span><span>Contract</span><span>Base</span><span>Work pattern</span><span>Readiness</span><span /></header>
-        {people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.position_title || person.department_code || "No position"}</span></div><div><strong>{person.employment_status || "No contract"}</strong><span>{person.contract_type || "—"}{person.contract_effective_to ? ` · ends ${person.contract_effective_to}` : ""}</span></div><span>{person.primary_base_code || "Missing"}</span><div><strong>{person.work_pattern_code || "Unassigned"}</strong><span>{person.work_pattern_name || "Automatic rotation unavailable"}</span></div><div><StatusPill value={person.readiness_state} />{person.readiness_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div><Link className="wr-icon-button" to={`/maintenance/${encodeURIComponent(amoCode)}/admin/users/${encodeURIComponent(person.user_id)}`} aria-label={`Open ${person.full_name}`}><ArrowRight size={15} /></Link></article>)}
+        <header><span>Employee</span><span>Contract</span><span>Base</span><span>Work pattern</span><span>Readiness</span><span>Source</span></header>
+        {people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.position_title || person.department_code || "No position"}</span></div><div><strong>{person.employment_status || "No contract"}</strong><span>{person.contract_type || "—"}{person.contract_effective_to ? ` · ends ${person.contract_effective_to}` : ""}</span></div><span>{person.primary_base_code || "Missing"}</span><div><strong>{person.work_pattern_code || "Unassigned"}</strong><span>{person.work_pattern_name || "Automatic rotation unavailable"}</span></div><div><StatusPill value={person.readiness_state} />{person.readiness_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div><span className="hr-person-source">Workforce</span></article>)}
       </div>
       {!people.length ? <EmptyState title="No matching employees" description="Change the search or confirm effective employment contracts exist." /> : null}
     </section>

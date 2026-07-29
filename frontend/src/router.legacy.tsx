@@ -492,6 +492,9 @@ const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.R
   const location = useLocation();
   const currentUser = getCachedUser();
   const amoCode = inferAmoCodeFromPath(location.pathname) || getContext().amoSlug || getContext().amoCode || "system";
+  const workforceSettings = feature === "rostering.settings"
+    && new URLSearchParams(location.search).get("section") === "workforce";
+  if (workforceSettings) return children;
   if (!canViewFeature(currentUser, feature, getContext().department)) {
     return <Navigate to={getFirstAccessibleModuleRoute(amoCode, currentUser, getContext().department)} replace />;
   }

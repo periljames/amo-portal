@@ -143,3 +143,22 @@ def test_scheduled_no_owner_path_retains_immutable_evidence():
     assert "_record_failed_scheduled_run(" in no_owner
     assert 'failure_kind="NO_ACCOUNTABLE_OWNER"' in no_owner
     assert '"evidence_retained": retained' in no_owner
+
+def test_successful_idempotency_replay_rejects_changed_payloads():
+    source = inspect.getsource(automation_service.run)
+    assert "_request_fingerprint(payload, trigger)" in source
+    assert "ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH" in source
+    assert '"request_fingerprint": request_fingerprint' in source
+
+
+def test_first_policy_creation_recovers_the_unique_race():
+    source = inspect.getsource(automation_service.get_or_create_policy)
+    assert "with db.begin_nested():" in source
+    assert "except IntegrityError:" in source
+    assert "if winner is not None:" in source
+
+
+def test_no_owner_evidence_uses_skipped_status():
+    source = inspect.getsource(rostering_automation._record_failed_scheduled_run)
+    assert "RosterAutomationRunStatus.SKIPPED" in source
+    assert '"skip_recorded_after_rollback": skipped' in source

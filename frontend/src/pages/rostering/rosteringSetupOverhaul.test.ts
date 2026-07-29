@@ -13,6 +13,7 @@ const shellSource = readSource("./components/RosterShell.tsx");
 const setupSource = readSource("./components/RosteringSetupWorkspace.tsx");
 const hrSource = readSource("./components/WorkforceHrWorkspace.tsx");
 const automationServiceSource = readSource("../../services/rosteringAutomation.ts");
+const legacyRouterSource = readSource("../../router.legacy.tsx");
 
 
 describe("Rostering setup and Workforce ownership", () => {
@@ -65,6 +66,17 @@ describe("Rostering setup and Workforce ownership", () => {
     expect(hrSource).toContain("Attendance & time");
     expect(hrSource).toContain("Work patterns");
     expect(hrSource).toContain("Reason or decision note");
+  });
+
+  it("lets live Workforce permission holders reach the permission-aware workspace", () => {
+    expect(legacyRouterSource).toContain('feature === "rostering.settings"');
+    expect(legacyRouterSource).toContain('get("section") === "workforce"');
+  });
+
+  it("keeps HR remediation inside HR-accessible Workforce surfaces", () => {
+    expect(hrSource).not.toContain("/admin/users/");
+    expect(hrSource).toContain('onOpen("people")');
+    expect(hrSource).toContain("Open employment record");
   });
 
   it("simplifies primary navigation and combines reports with operations", () => {

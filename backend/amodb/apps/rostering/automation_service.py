@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import calendar
+import hashlib
+import json
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import distinct, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from ..accounts import models as account_models
@@ -38,6 +41,17 @@ def _utcnow() -> datetime:
 
 def _enum_value(value) -> str:
     return str(getattr(value, "value", value))
+
+
+def _request_fingerprint(
+    payload: RosterAutomationRunRequest,
+    trigger: RosterAutomationTrigger,
+) -> str:
+    values = payload.model_dump(mode="json", exclude={"idempotency_key"})
+    values["user_ids"] = sorted(set(values.get("user_ids") or []))
+    canonical = {"trigger": _enum_value(trigger), "payload": values}
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _validate_timezone(name: str) -> str:
@@ -157,16 +171,25 @@ def get_or_create_policy(
     amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).first()
     timezone_name = getattr(amo, "time_zone", None) or "UTC"
     _validate_timezone(timezone_name)
-    row = RosterGenerationPolicy(
+    candidate = RosterGenerationPolicy(
         amo_id=amo_id,
         timezone_name=timezone_name,
         created_by_user_id=actor_user_id,
         updated_by_user_id=actor_user_id,
     )
-    row.next_run_at = _next_run(row)
-    db.add(row)
-    db.flush()
-    return row
+    candidate.next_run_at = _next_run(candidate)
+    try:
+        with db.begin_nested():
+            db.add(candidate)
+            db.flush()
+        return candidate
+    except IntegrityError:
+        winner = db.query(RosterGenerationPolicy).filter(
+            RosterGenerationPolicy.amo_id == amo_id,
+        ).first()
+        if winner is not None:
+            return winner
+        raise
 
 
 def update_policy(
@@ -387,8 +410,12 @@ def run(
     payload: RosterAutomationRunRequest,
     trigger: RosterAutomationTrigger = RosterAutomationTrigger.MANUAL,
 ) -> RosterGenerationRun:
+    request_fingerprint = _request_fingerprint(payload, trigger)
     replay = _existing_run(db, amo_id=amo_id, idempotency_key=payload.idempotency_key)
     if replay:
+        stored_fingerprint = (replay.summary_json or {}).get("request_fingerprint")
+        if stored_fingerprint and stored_fingerprint != request_fingerprint:
+            raise RuntimeError(f"ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH:{replay.id}")
         replay_status = _enum_value(replay.status)
         if replay_status == RosterAutomationRunStatus.FAILED.value:
             raise RuntimeError(f"ROSTER_AUTOMATION_PREVIOUS_FAILURE:{replay.id}")
@@ -412,7 +439,7 @@ def run(
         target_from=preview_result.target_from.isoformat(),
         target_to=preview_result.target_to.isoformat(),
         requested_by_user_id=actor_user_id,
-        summary_json={"preview": preview_result.model_dump(mode="json")},
+        summary_json={"preview": preview_result.model_dump(mode="json"), "request_fingerprint": request_fingerprint},
     )
     db.add(run_row)
     db.flush()
@@ -510,6 +537,7 @@ def run(
     run_row.validation_warning_count = warning_count
     run_row.summary_json = {
         "preview": preview_result.model_dump(mode="json"),
+        "request_fingerprint": request_fingerprint,
         "conflicts": conflicts,
         "period_created_or_reused": True,
         "draft_created_or_reused": draft is not None,
