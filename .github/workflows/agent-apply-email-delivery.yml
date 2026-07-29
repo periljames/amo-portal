@@ -155,6 +155,8 @@ jobs:
           for original in Path('.').rglob('*.orig'):
               original.unlink()
           PY
+          python .github/agent/repair_worker.py
+          rm -f .github/agent/repair_worker.py sitecustomize.py
           rm .github/agent/complete-email-delivery.patch
           python -m compileall -q \
             backend/amodb/apps/accounts \
