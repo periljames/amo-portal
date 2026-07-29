@@ -1,4 +1,4 @@
-name: PR364 Publish Final Concurrency Fixes
+name: PR364 Publish Final Merge Blocker Fixes
 
 on:
   pull_request:
@@ -17,7 +17,7 @@ jobs:
           ref: agent/rostering-automation-workforce-hr-overhaul
           fetch-depth: 0
 
-      - name: Apply final concurrency and permission fixes
+      - name: Apply final schedule and idempotency fixes
         shell: bash
         run: |
           python - <<'PY'
@@ -28,47 +28,34 @@ jobs:
               text = file.read_text(encoding="utf-8")
               found = text.count(old)
               if found != count:
-                  raise SystemExit(f"{path}: expected {count}, found {found}: {old[:120]!r}")
+                  raise SystemExit(f"{path}: expected {count}, found {found}: {old[:140]!r}")
               file.write_text(text.replace(old, new, count), encoding="utf-8")
 
           service = "backend/amodb/apps/rostering/automation_service.py"
           replace(
               service,
-              '''    if payload.expected_state_revision != row.state_revision:\n        raise RuntimeError(f"ROSTER_AUTOMATION_REVISION_CONFLICT:{row.state_revision}")\n    values = payload.model_dump(exclude_unset=True)\n''',
-              '''    row = db.query(RosterGenerationPolicy).filter(\n        RosterGenerationPolicy.id == row.id,\n        RosterGenerationPolicy.amo_id == row.amo_id,\n    ).populate_existing().with_for_update().one()\n    if payload.expected_state_revision != row.state_revision:\n        raise RuntimeError(f"ROSTER_AUTOMATION_REVISION_CONFLICT:{row.state_revision}")\n    values = payload.model_dump(exclude_unset=True)\n''',
-          )
-          replace(
-              service,
-              '''    if not draft and (should_create_draft or should_generate):\n        raise ValueError("No draft roster version is available for generation")\n    run_row.version_id = draft.id if draft else None\n''',
-              '''    if not draft and (should_create_draft or should_generate):\n        raise ValueError("No draft roster version is available for generation")\n    if draft:\n        draft = db.query(roster_models.RosterVersion).filter(\n            roster_models.RosterVersion.id == draft.id,\n            roster_models.RosterVersion.amo_id == amo_id,\n        ).populate_existing().with_for_update().first()\n        if not draft or _enum_value(draft.status) != roster_models.RosterVersionStatus.DRAFT.value:\n            raise RuntimeError("ROSTER_AUTOMATION_DRAFT_NOT_EDITABLE")\n    run_row.version_id = draft.id if draft else None\n''',
+              '''    run_row.completed_at = _utcnow()\n    policy.last_run_at = run_row.completed_at\n    policy.next_run_at = _next_run(policy, now=run_row.completed_at)\n    db.add(policy)\n    db.add(run_row)\n''',
+              '''    run_row.completed_at = _utcnow()\n    if trigger == RosterAutomationTrigger.SCHEDULED:\n        policy.last_run_at = run_row.completed_at\n        policy.next_run_at = _next_run(policy, now=run_row.completed_at)\n        db.add(policy)\n    db.add(run_row)\n''',
           )
 
-          test = Path("backend/amodb/apps/rostering/tests/test_automation_policy_contract.py")
-          text = test.read_text(encoding="utf-8")
-          addition = '''\n\ndef test_policy_updates_lock_and_refresh_the_current_revision():\n    source = inspect.getsource(automation_service.update_policy)\n    assert ".populate_existing().with_for_update().one()" in source\n    assert source.index("with_for_update") < source.index("expected_state_revision")\n\n\ndef test_reused_draft_is_locked_before_generation_and_validation():\n    source = inspect.getsource(automation_service.run)\n    assert "roster_models.RosterVersion.id == draft.id" in source\n    assert ".populate_existing().with_for_update().first()" in source\n    assert "ROSTER_AUTOMATION_DRAFT_NOT_EDITABLE" in source\n    assert source.index("with_for_update") < source.index("generate_from_patterns(")\n'''
+          router = "backend/amodb/apps/rostering/automation_router.py"
+          replace(
+              router,
+              '''    except IntegrityError as exc:\n        message = str(exc)\n        evidence_retained = _record_failed_run(\n            db,\n            amo_id=amo_id,\n            actor_user_id=current_user.id,\n            payload=payload,\n            message=message,\n        )\n        raise _error(\n            message,\n            code="ROSTER_AUTOMATION_DATABASE_CONFLICT",\n            status_code=status.HTTP_409_CONFLICT,\n            conflicts=[{"failure_evidence_retained": evidence_retained}],\n        ) from exc\n''',
+              '''    except IntegrityError as exc:\n        db.rollback()\n        winner = automation_service._existing_run(\n            db,\n            amo_id=amo_id,\n            idempotency_key=payload.idempotency_key,\n        )\n        if winner is not None:\n            expected_fingerprint = automation_service._request_fingerprint(\n                payload,\n                RosterAutomationTrigger.MANUAL,\n            )\n            stored_fingerprint = (winner.summary_json or {}).get("request_fingerprint")\n            if stored_fingerprint == expected_fingerprint:\n                winner_status = str(getattr(winner.status, "value", winner.status))\n                if winner_status == RosterAutomationRunStatus.FAILED.value:\n                    raise _error(\n                        "This automation request previously failed.",\n                        code="ROSTER_AUTOMATION_PREVIOUS_FAILURE",\n                        status_code=status.HTTP_409_CONFLICT,\n                        conflicts=[{"run_id": winner.id}],\n                    ) from exc\n                if winner_status == RosterAutomationRunStatus.RUNNING.value:\n                    raise _error(\n                        "An identical automation request is still running.",\n                        code="ROSTER_AUTOMATION_ALREADY_RUNNING",\n                        status_code=status.HTTP_409_CONFLICT,\n                        conflicts=[{"run_id": winner.id}],\n                        retryable=True,\n                    ) from exc\n                return winner\n            if stored_fingerprint:\n                raise _error(\n                    "This idempotency key was already used with a different automation request.",\n                    code="ROSTER_AUTOMATION_IDEMPOTENCY_PAYLOAD_MISMATCH",\n                    status_code=status.HTTP_409_CONFLICT,\n                    conflicts=[{"idempotency_key": payload.idempotency_key}],\n                ) from exc\n\n        message = str(exc)\n        evidence_retained = _record_failed_run(\n            db,\n            amo_id=amo_id,\n            actor_user_id=current_user.id,\n            payload=payload,\n            message=message,\n        )\n        raise _error(\n            message,\n            code="ROSTER_AUTOMATION_DATABASE_CONFLICT",\n            status_code=status.HTTP_409_CONFLICT,\n            conflicts=[{"failure_evidence_retained": evidence_retained}],\n        ) from exc\n''',
+          )
+
+          tests = Path("backend/amodb/apps/rostering/tests/test_automation_policy_contract.py")
+          text = tests.read_text(encoding="utf-8")
+          addition = '''\n\ndef test_manual_runs_do_not_advance_scheduled_policy_timestamps():\n    source = inspect.getsource(automation_service.run)\n    marker = source.index("if trigger == RosterAutomationTrigger.SCHEDULED:")\n    assert source.index("policy.last_run_at", marker) > marker\n    assert source.index("policy.next_run_at", marker) > marker\n    assert source.count("policy.last_run_at") == 1\n    assert source.count("policy.next_run_at") == 1\n\n\ndef test_concurrent_identical_manual_request_returns_the_winning_run():\n    source = inspect.getsource(automation_router.run_roster_automation)\n    branch = source[source.index("except IntegrityError"):source.index("except (ValueError, RuntimeError)")]\n    assert "db.rollback()" in branch\n    assert "automation_service._existing_run(" in branch\n    assert "automation_service._request_fingerprint(" in branch\n    assert "return winner" in branch\n    assert branch.index("return winner") < branch.index("_record_failed_run(")\n'''
           if addition.strip() not in text:
-              test.write_text(text.rstrip() + addition.rstrip() + "\n", encoding="utf-8")
-
-          ui = "frontend/src/pages/rostering/components/WorkforceHrWorkspace.tsx"
-          replace(
-              ui,
-              '''{dashboard.can_review_leave || dashboard.can_approve_leave ? <button type="button" className="wr-icon-button is-danger" onClick={() => onDecision({ kind: "leave-reject", record: request })} aria-label="Reject leave"><XCircle size={15} /></button> : null}''',
-              '''{dashboard.can_review_leave ? <button type="button" className="wr-icon-button is-danger" onClick={() => onDecision({ kind: "leave-reject", record: request })} aria-label="Reject leave"><XCircle size={15} /></button> : null}''',
-          )
-
-          setup_test = Path("frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts")
-          source = setup_test.read_text(encoding="utf-8")
-          marker = '  it("makes contracts editable only for authorized Workforce managers", () => {'
-          gate_test = '''  it("shows leave rejection only to effective leave reviewers", () => {\n    expect(hrSource).toContain("dashboard.can_review_leave ?");\n    expect(hrSource).not.toContain("dashboard.can_review_leave || dashboard.can_approve_leave");\n  });\n\n'''
-          if gate_test.strip() not in source:
-              if source.count(marker) != 1:
-                  raise SystemExit("leave permission test insertion point drifted")
-              setup_test.write_text(source.replace(marker, gate_test + marker, 1), encoding="utf-8")
+              tests.write_text(text.rstrip() + addition.rstrip() + "\n", encoding="utf-8")
           PY
 
           git diff --check
-          git add backend/amodb/apps/rostering/automation_service.py backend/amodb/apps/rostering/tests/test_automation_policy_contract.py frontend/src/pages/rostering/components/WorkforceHrWorkspace.tsx frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts
+          git rm .github/workflows/pr364-final-concurrency-fixes.yml
+          git add backend/amodb/apps/rostering/automation_service.py backend/amodb/apps/rostering/automation_router.py backend/amodb/apps/rostering/tests/test_automation_policy_contract.py
           git config user.name "amo-portal-actions"
           git config user.email "actions@users.noreply.github.com"
-          git commit -m "Resolve final Rostering concurrency blockers"
+          git commit -m "Resolve final Rostering merge blockers"
           git push origin HEAD:agent/rostering-automation-workforce-hr-overhaul
