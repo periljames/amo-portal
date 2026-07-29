@@ -60,7 +60,7 @@ def _seed_internal_user(session_factory):
         last_name="Recipient",
         full_name="Internal Recipient",
         hashed_password="hash",
-        role=account_models.AccountRole.QUALITY_OFFICER,
+        role=account_models.AccountRole.QUALITY_MANAGER,
         is_active=True,
     )
     db.add(user)
