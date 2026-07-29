@@ -1,0 +1,115 @@
+name: PR364 Publish HR Contract Remediation
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.event.pull_request.head.ref == 'agent/rostering-automation-workforce-hr-overhaul' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/rostering-automation-workforce-hr-overhaul
+          fetch-depth: 0
+
+      - name: Add permission-aware contract remediation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              found = text.count(old)
+              if found != count:
+                  raise SystemExit(f"{path}: expected {count}, found {found}: {old[:120]!r}")
+              file.write_text(text.replace(old, new, count), encoding="utf-8")
+
+          service = "backend/amodb/apps/workforce/hr_service.py"
+          replace(
+              service,
+              '''    return hr_schemas.HrPersonReadiness(\n        user_id=contract.user_id,\n        staff_code=str(getattr(user, "staff_code", "") or ""),\n        full_name=_display_name(user) or contract.user_id,\n        position_title=getattr(user, "position_title", None),\n        department_code=_department_code(user),\n        employment_status=status_value,\n        contract_type=_value(contract.contract_type),\n        contract_effective_from=contract.effective_from,\n        contract_effective_to=contract.effective_to,\n        primary_base_code=getattr(contract.primary_base, "code", None),\n        supervisor_name=_display_name(contract.supervisor),\n''',
+              '''    return hr_schemas.HrPersonReadiness(\n        user_id=contract.user_id,\n        contract_id=contract.id,\n        staff_code=str(getattr(user, "staff_code", "") or ""),\n        full_name=_display_name(user) or contract.user_id,\n        position_title=getattr(user, "position_title", None),\n        department_code=_department_code(user),\n        employment_status=status_value,\n        contract_type=_value(contract.contract_type),\n        contract_effective_from=contract.effective_from,\n        contract_effective_to=contract.effective_to,\n        primary_base_station_id=contract.primary_base_station_id,\n        primary_base_code=getattr(contract.primary_base, "code", None),\n        supervisor_name=_display_name(contract.supervisor),\n        standard_weekly_minutes=contract.standard_weekly_minutes,\n        standard_daily_minutes=contract.standard_daily_minutes,\n        fte_percentage=float(contract.fte_percentage),\n        cost_centre=contract.cost_centre,\n        payroll_number=contract.payroll_number,\n        overtime_eligible=contract.overtime_eligible,\n        night_shift_eligible=contract.night_shift_eligible,\n        standby_eligible=contract.standby_eligible,\n''',
+          )
+
+          ui = "frontend/src/pages/rostering/components/WorkforceHrWorkspace.tsx"
+          replace(ui, 'import { Link, useParams } from "react-router-dom";\n', 'import { Link, useParams } from "react-router-dom";\n\nimport { listBaseStations } from "../../../services/foundations";\n')
+          replace(
+              ui,
+              '''  rejectLeaveRequest,\n  supervisorApproveLeave,\n} from "../../../services/workforce";''',
+              '''  rejectLeaveRequest,\n  supervisorApproveLeave,\n  updateEmploymentContract,\n} from "../../../services/workforce";''',
+          )
+          replace(
+              ui,
+              'import type { HrActionItem, HrPersonReadiness } from "../../../types/workforceHr";\nimport type { LeaveRequestRead, TimesheetRead, WorkPatternRead } from "../../../types/workforce";',
+              'import type { BaseStationRead } from "../../../types/foundations";\nimport type { HrActionItem, HrPersonReadiness } from "../../../types/workforceHr";\nimport type { ContractType, EmploymentStatus, LeaveRequestRead, TimesheetRead, WorkPatternRead } from "../../../types/workforce";',
+          )
+          replace(
+              ui,
+              '''type DecisionTarget =\n  | { kind: "leave-supervisor" | "leave-hr" | "leave-reject"; record: LeaveRequestRead }\n  | { kind: "timesheet-supervisor" | "timesheet-hr"; record: TimesheetRead };\n''',
+              '''type DecisionTarget =\n  | { kind: "leave-supervisor" | "leave-hr" | "leave-reject"; record: LeaveRequestRead }\n  | { kind: "timesheet-supervisor" | "timesheet-hr"; record: TimesheetRead };\n\ntype ContractDraft = {\n  contract_type: ContractType;\n  employment_status: EmploymentStatus;\n  effective_from: string;\n  effective_to: string;\n  primary_base_station_id: string;\n  standard_weekly_hours: string;\n  standard_daily_hours: string;\n  fte_percentage: string;\n  cost_centre: string;\n  payroll_number: string;\n  overtime_eligible: boolean;\n  night_shift_eligible: boolean;\n  standby_eligible: boolean;\n};\n''',
+          )
+          replace(
+              ui,
+              '''  const patternsQuery = useQuery({\n    queryKey: ["workforce", "hr", "patterns"],\n    queryFn: () => listWorkforceHrPatterns(false),\n    enabled: section === "patterns",\n    staleTime: 5 * 60_000,\n  });\n''',
+              '''  const patternsQuery = useQuery({\n    queryKey: ["workforce", "hr", "patterns"],\n    queryFn: () => listWorkforceHrPatterns(false),\n    enabled: section === "patterns",\n    staleTime: 5 * 60_000,\n  });\n  const basesQuery = useQuery({\n    queryKey: ["foundations", "base-stations", "active"],\n    queryFn: () => listBaseStations({ include_inactive: false }),\n    enabled: section === "people" && Boolean(dashboardQuery.data?.can_manage_contracts),\n    staleTime: 15 * 60_000,\n  });\n''',
+          )
+          replace(
+              ui,
+              '''  const refresh = async () => {\n    await queryClient.invalidateQueries({ queryKey: ["workforce"] });\n    await queryClient.invalidateQueries({ queryKey: ["rostering", "setup"] });\n  };\n''',
+              '''  const openSection = (next: HrSection, searchValue?: string) => {\n    setSection(next);\n    if (searchValue !== undefined) setSearch(searchValue);\n  };\n\n  const refresh = async () => {\n    await queryClient.invalidateQueries({ queryKey: ["workforce"] });\n    await queryClient.invalidateQueries({ queryKey: ["rostering", "setup"] });\n  };\n''',
+          )
+          replace(ui, 'onOpen={setSection}', 'onOpen={openSection}')
+          replace(
+              ui,
+              '''{section === "people" ? <PeoplePanel people={people} search={search} onSearch={setSearch} /> : null}''',
+              '''{section === "people" ? (\n        <PeoplePanel\n          people={people}\n          search={search}\n          onSearch={setSearch}\n          bases={basesQuery.data || []}\n          loadingBases={basesQuery.isPending}\n          canManage={dashboard.can_manage_contracts}\n          busy={busy}\n          runAction={runAction}\n        />\n      ) : null}''',
+          )
+          replace(
+              ui,
+              'function HrOverview({ dashboard, amoCode, onOpen, onRefresh }: { dashboard: Awaited<ReturnType<typeof getWorkforceHrDashboard>>; amoCode: string; onOpen: (section: HrSection) => void; onRefresh: () => void }) {',
+              'function HrOverview({ dashboard, amoCode, onOpen, onRefresh }: { dashboard: Awaited<ReturnType<typeof getWorkforceHrDashboard>>; amoCode: string; onOpen: (section: HrSection, searchValue?: string) => void; onRefresh: () => void }) {',
+          )
+          replace(
+              ui,
+              'function ActionQueue({ items, onOpen }: { items: HrActionItem[]; onOpen: (section: HrSection) => void }) {',
+              'function ActionQueue({ items, onOpen }: { items: HrActionItem[]; onOpen: (section: HrSection, searchValue?: string) => void }) {',
+          )
+          replace(
+              ui,
+              'return item.user_id ? <button type="button" className="hr-action-link" onClick={() => onOpen("people")}>{item.action_label || "Open employment record"} <ArrowRight size={13} /></button> : null;',
+              'return item.user_id ? <button type="button" className="hr-action-link" onClick={() => onOpen("people", item.user_name || "")}>{item.action_label || "Open employment record"} <ArrowRight size={13} /></button> : null;',
+          )
+
+          old_people = '''function PeoplePanel({ people, search, onSearch }: { people: HrPersonReadiness[]; search: string; onSearch: (value: string) => void }) {\n  return (\n    <section className="wr-panel">\n      <div className="wr-section-heading"><div><span className="wr-eyebrow">People and contracts</span><h2>Employee readiness register</h2><p>One row per effective employment record, with base and work-pattern readiness shown together.</p></div><label className="hr-search"><Search size={15} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search staff, role, base or department" /></label></div>\n      <div className="hr-people-table">\n        <header><span>Employee</span><span>Contract</span><span>Base</span><span>Work pattern</span><span>Readiness</span><span>Source</span></header>\n        {people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.position_title || person.department_code || "No position"}</span></div><div><strong>{person.employment_status || "No contract"}</strong><span>{person.contract_type || "—"}{person.contract_effective_to ? ` · ends ${person.contract_effective_to}` : ""}</span></div><span>{person.primary_base_code || "Missing"}</span><div><strong>{person.work_pattern_code || "Unassigned"}</strong><span>{person.work_pattern_name || "Automatic rotation unavailable"}</span></div><div><StatusPill value={person.readiness_state} />{person.readiness_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div><span className="hr-person-source">Workforce</span></article>)}\n      </div>\n      {!people.length ? <EmptyState title="No matching employees" description="Change the search or confirm effective employment contracts exist." /> : null}\n    </section>\n  );\n}\n'''
+          new_people = '''function PeoplePanel({\n  people, search, onSearch, bases, loadingBases, canManage, busy, runAction,\n}: {\n  people: HrPersonReadiness[];\n  search: string;\n  onSearch: (value: string) => void;\n  bases: BaseStationRead[];\n  loadingBases: boolean;\n  canManage: boolean;\n  busy: string | null;\n  runAction: (key: string, action: () => Promise<unknown>) => Promise<void>;\n}) {\n  const [editing, setEditing] = useState<HrPersonReadiness | null>(null);\n  const [draft, setDraft] = useState<ContractDraft | null>(null);\n\n  const beginEdit = (person: HrPersonReadiness) => {\n    setEditing(person);\n    setDraft({\n      contract_type: (person.contract_type || "PERMANENT") as ContractType,\n      employment_status: (person.employment_status || "ACTIVE") as EmploymentStatus,\n      effective_from: person.contract_effective_from || isoDate(new Date()),\n      effective_to: person.contract_effective_to || "",\n      primary_base_station_id: person.primary_base_station_id || "",\n      standard_weekly_hours: String(person.standard_weekly_minutes / 60),\n      standard_daily_hours: String(person.standard_daily_minutes / 60),\n      fte_percentage: String(person.fte_percentage),\n      cost_centre: person.cost_centre || "",\n      payroll_number: person.payroll_number || "",\n      overtime_eligible: person.overtime_eligible,\n      night_shift_eligible: person.night_shift_eligible,\n      standby_eligible: person.standby_eligible,\n    });\n  };\n  const close = () => { setEditing(null); setDraft(null); };\n  const save = () => {\n    if (!editing || !draft) return;\n    void runAction(`employment-contract:${editing.contract_id}`, async () => {\n      await updateEmploymentContract(editing.contract_id, {\n        contract_type: draft.contract_type,\n        employment_status: draft.employment_status,\n        effective_from: draft.effective_from,\n        effective_to: draft.effective_to || null,\n        primary_base_station_id: draft.primary_base_station_id,\n        standard_weekly_minutes: Math.round(Number(draft.standard_weekly_hours) * 60),\n        standard_daily_minutes: Math.round(Number(draft.standard_daily_hours) * 60),\n        fte_percentage: Number(draft.fte_percentage),\n        cost_centre: draft.cost_centre.trim() || null,\n        payroll_number: draft.payroll_number.trim() || null,\n        overtime_eligible: draft.overtime_eligible,\n        night_shift_eligible: draft.night_shift_eligible,\n        standby_eligible: draft.standby_eligible,\n      });\n      close();\n    });\n  };\n  const validDraft = Boolean(\n    draft?.effective_from\n    && draft.primary_base_station_id\n    && Number(draft.standard_weekly_hours) >= 0\n    && Number(draft.standard_daily_hours) >= 0\n    && Number(draft.fte_percentage) > 0\n    && Number(draft.fte_percentage) <= 100\n    && (!draft.effective_to || draft.effective_to >= draft.effective_from)\n  );\n\n  return (\n    <section className="wr-panel">\n      <div className="wr-section-heading"><div><span className="wr-eyebrow">People and contracts</span><h2>Employee readiness register</h2><p>Managers can correct effective contract, hours and home-base data here. Other users retain a read-only operational view.</p></div><label className="hr-search"><Search size={15} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search staff, role, base or department" /></label></div>\n      <div className="hr-people-table">\n        <header><span>Employee</span><span>Contract</span><span>Base</span><span>Work pattern</span><span>Readiness</span><span>Action</span></header>\n        {people.map((person) => <article key={person.user_id}><div><strong>{person.full_name}</strong><span>{person.staff_code} · {person.position_title || person.department_code || "No position"}</span></div><div><strong>{person.employment_status || "No contract"}</strong><span>{person.contract_type || "—"}{person.contract_effective_to ? ` · ends ${person.contract_effective_to}` : ""}</span></div><span>{person.primary_base_code || "Missing"}</span><div><strong>{person.work_pattern_code || "Unassigned"}</strong><span>{person.work_pattern_name || "Automatic rotation unavailable"}</span></div><div><StatusPill value={person.readiness_state} />{person.readiness_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div>{canManage ? <button type="button" className="wr-button wr-button--small" onClick={() => beginEdit(person)}><BriefcaseBusiness size={14} /> Edit</button> : <span className="hr-person-source">Read only</span>}</article>)}\n      </div>\n      {!people.length ? <EmptyState title="No matching employees" description="Change the search or confirm effective employment contracts exist." /> : null}\n\n      {editing && draft ? (\n        <div className="hr-decision hr-contract-editor" role="dialog" aria-modal="true" aria-label={`Edit employment contract for ${editing.full_name}`}>\n          <div className="hr-decision__head"><div><span className="wr-eyebrow">Controlled Workforce record</span><h3>{editing.full_name}</h3></div><button type="button" className="wr-icon-button" onClick={close}><X size={16} /></button></div>\n          <p>{editing.staff_code} · Changes are effective-dated and audited by the Workforce service.</p>\n          <div className="hr-contract-grid">\n            <label><span>Contract type</span><select value={draft.contract_type} onChange={(event) => setDraft({ ...draft, contract_type: event.target.value as ContractType })}>{["PERMANENT", "FIXED_TERM", "CASUAL", "CONTRACTOR", "INTERN", "SECONDMENT"].map((value) => <option key={value}>{value}</option>)}</select></label>\n            <label><span>Employment status</span><select value={draft.employment_status} onChange={(event) => setDraft({ ...draft, employment_status: event.target.value as EmploymentStatus })}>{["ONBOARDING", "ACTIVE", "SUSPENDED", "TERMINATED", "ENDED"].map((value) => <option key={value}>{value}</option>)}</select></label>\n            <label><span>Effective from</span><input type="date" value={draft.effective_from} onChange={(event) => setDraft({ ...draft, effective_from: event.target.value })} /></label>\n            <label><span>Effective to</span><input type="date" min={draft.effective_from} value={draft.effective_to} onChange={(event) => setDraft({ ...draft, effective_to: event.target.value })} /></label>\n            <label><span>Primary base</span><select value={draft.primary_base_station_id} disabled={loadingBases} onChange={(event) => setDraft({ ...draft, primary_base_station_id: event.target.value })}><option value="">Select canonical base</option>{bases.map((base) => <option key={base.id} value={base.id}>{base.code} · {base.name}</option>)}</select></label>\n            <label><span>FTE percentage</span><input type="number" min="1" max="100" step="0.1" value={draft.fte_percentage} onChange={(event) => setDraft({ ...draft, fte_percentage: event.target.value })} /></label>\n            <label><span>Weekly hours</span><input type="number" min="0" step="0.25" value={draft.standard_weekly_hours} onChange={(event) => setDraft({ ...draft, standard_weekly_hours: event.target.value })} /></label>\n            <label><span>Daily hours</span><input type="number" min="0" step="0.25" value={draft.standard_daily_hours} onChange={(event) => setDraft({ ...draft, standard_daily_hours: event.target.value })} /></label>\n            <label><span>Payroll number</span><input value={draft.payroll_number} onChange={(event) => setDraft({ ...draft, payroll_number: event.target.value })} /></label>\n            <label><span>Cost centre</span><input value={draft.cost_centre} onChange={(event) => setDraft({ ...draft, cost_centre: event.target.value })} /></label>\n          </div>\n          <div className="hr-contract-flags">\n            <label><input type="checkbox" checked={draft.overtime_eligible} onChange={(event) => setDraft({ ...draft, overtime_eligible: event.target.checked })} /> Overtime eligible</label>\n            <label><input type="checkbox" checked={draft.night_shift_eligible} onChange={(event) => setDraft({ ...draft, night_shift_eligible: event.target.checked })} /> Night duty eligible</label>\n            <label><input type="checkbox" checked={draft.standby_eligible} onChange={(event) => setDraft({ ...draft, standby_eligible: event.target.checked })} /> Standby eligible</label>\n          </div>\n          {!loadingBases && !bases.length ? <div className="hr-warning"><AlertTriangle size={16} /><span>No active canonical base exists. Create it in Operating Structure before saving this contract.</span></div> : null}\n          <div className="wr-actions wr-actions--end"><button type="button" className="wr-button wr-button--secondary" onClick={close}>Cancel</button><button type="button" className="wr-button wr-button--primary" disabled={Boolean(busy) || !validDraft} onClick={save}><Save size={15} /> Save contract</button></div>\n        </div>\n      ) : null}\n    </section>\n  );\n}\n'''
+          replace(ui, old_people, new_people)
+
+          css = Path("frontend/src/pages/rostering/components/workforce-hr-workspace.css")
+          css_text = css.read_text(encoding="utf-8")
+          addition = '''\n\n.hr-contract-grid {\n  display: grid;\n  grid-template-columns: repeat(2, minmax(0, 1fr));\n  gap: 10px;\n}\n\n.hr-contract-grid label,\n.hr-contract-flags label {\n  display: grid;\n  gap: 5px;\n  color: var(--text-muted, #64748b);\n  font-size: .7rem;\n  font-weight: 650;\n}\n\n.hr-contract-grid input,\n.hr-contract-grid select {\n  width: 100%;\n  min-height: 36px;\n  padding: 0 9px;\n  border: 1px solid var(--border-subtle, rgba(100, 116, 139, .28));\n  border-radius: 9px;\n  background: var(--surface-solid, #fff);\n  color: var(--text-strong, #0f172a);\n  font: inherit;\n}\n\n.hr-contract-flags {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 12px;\n  margin: 12px 0;\n}\n\n.hr-contract-flags label {\n  grid-template-columns: auto 1fr;\n  align-items: center;\n}\n\n[data-theme="dark"] .hr-contract-grid input,\n[data-theme="dark"] .hr-contract-grid select {\n  background: var(--surface-raised, #111827);\n}\n\n@media (max-width: 640px) {\n  .hr-contract-grid { grid-template-columns: 1fr; }\n}\n'''
+          if addition.strip() not in css_text:
+              css.write_text(css_text.rstrip() + addition, encoding="utf-8")
+
+          test = Path("frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts")
+          test_text = test.read_text(encoding="utf-8")
+          marker = '  it("keeps HR remediation inside HR-accessible Workforce surfaces", () => {'
+          contract_test = '''  it("makes contracts editable only for authorized Workforce managers", () => {\n    expect(hrSource).toContain("updateEmploymentContract");\n    expect(hrSource).toContain("listBaseStations");\n    expect(hrSource).toContain("dashboard.can_manage_contracts");\n    expect(hrSource).toContain("Save contract");\n    expect(hrSource).toContain("Read only");\n  });\n\n'''
+          if contract_test.strip() not in test_text:
+              if test_text.count(marker) != 1:
+                  raise SystemExit("HR contract test insertion point drifted")
+              test.write_text(test_text.replace(marker, contract_test + marker, 1), encoding="utf-8")
+          PY
+
+          git diff --check
+          git add backend/amodb/apps/workforce/hr_service.py frontend/src/pages/rostering/components/WorkforceHrWorkspace.tsx frontend/src/pages/rostering/components/workforce-hr-workspace.css frontend/src/pages/rostering/rosteringSetupOverhaul.test.ts
+          git config user.name "amo-portal-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Make HR contracts editable for authorized managers"
+          git push origin HEAD:agent/rostering-automation-workforce-hr-overhaul
