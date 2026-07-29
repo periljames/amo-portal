@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-# Bind the exact page-native indexer before reader/workspace modules import the
-# stable knowledge-service callables.
+# Bind hardened indexer, hierarchy, and retained-record implementations before
+# reader/workspace modules import stable knowledge-service callables.
 from amodb.apps.doc_control import knowledge_runtime as _knowledge_runtime  # noqa: F401
+from amodb.apps.doc_control.knowledge_access_router import publication_tree_router
 
 from . import router_legacy as _legacy
 from .approved_intake_router import router as _approved_intake_router
@@ -26,6 +27,7 @@ router = APIRouter()
 # order. Reader knowledge routes expose only tenant-scoped, access-checked targets.
 router.include_router(_upload_guard_router)
 router.include_router(_fast_reader_router)
+router.include_router(publication_tree_router)
 router.include_router(_knowledge_reader_router)
 router.include_router(_approved_intake_router)
 router.include_router(_legacy.router)
