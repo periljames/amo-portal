@@ -31,4 +31,30 @@ if "if payload.roster_assignment_id:" not in create_section:
     hr = hr[:duplicate_position] + assignment_block + hr[duplicate_position:]
 '''
 script = script[:block_start] + replacement + script[block_end:]
+
+pattern_block_start = script.index("old_query =", script.index("automation_path ="))
+pattern_block_end = script.index("write(automation_path, automation)", pattern_block_start)
+pattern_replacement = '''pattern_start = automation.index("def _pattern_assignments(")
+pattern_end = automation.index("def _estimated_assignments(", pattern_start)
+pattern_section = automation[pattern_start:pattern_end]
+if "WorkPattern.is_active.is_(True)" not in pattern_section:
+    query_anchor = "    return db.query(workforce_models.EmployeeWorkPatternAssignment).options("
+    joined_query = ''' + "'''" + '''    return db.query(workforce_models.EmployeeWorkPatternAssignment).join(
+        workforce_models.WorkPattern,
+        workforce_models.EmployeeWorkPatternAssignment.work_pattern_id == workforce_models.WorkPattern.id,
+    ).options(''' + "'''" + '''
+    if query_anchor not in pattern_section:
+        raise RuntimeError("Pattern readiness query start not found")
+    pattern_section = pattern_section.replace(query_anchor, joined_query, 1)
+    amo_anchor = "        workforce_models.EmployeeWorkPatternAssignment.amo_id == amo_id,\n"
+    active_filter = ''' + "'''" + '''        workforce_models.EmployeeWorkPatternAssignment.amo_id == amo_id,
+        workforce_models.WorkPattern.amo_id == amo_id,
+        workforce_models.WorkPattern.is_active.is_(True),
+''' + "'''" + '''
+    if amo_anchor not in pattern_section:
+        raise RuntimeError("Pattern readiness AMO filter not found")
+    pattern_section = pattern_section.replace(amo_anchor, active_filter, 1)
+    automation = automation[:pattern_start] + pattern_section + automation[pattern_end:]
+'''
+script = script[:pattern_block_start] + pattern_replacement + script[pattern_block_end:]
 exec(compile(script, "/tmp/pr364_integrity_pagination.py", "exec"))
