@@ -13,6 +13,7 @@ import {
   PlatformShell,
   StatusBadge,
 } from "./components/PlatformShared";
+import ResendEmailConfigPanel from "./components/ResendEmailConfigPanel";
 import { usePlatformData } from "./components/usePlatformData";
 
 function coerceField(value: string): string | number | boolean {
@@ -56,6 +57,10 @@ export default function PlatformIntegrationsPage() {
   const provider = useMemo(
     () => providers.data?.items?.find((item) => item.provider === selectedProvider) ?? null,
     [providers.data?.items, selectedProvider],
+  );
+  const nonEmailProviders = useMemo(
+    () => providers.data?.items?.filter((item) => item.category !== "EMAIL") ?? [],
+    [providers.data?.items],
   );
 
   const beginProviderEdit = (item: SaaSProvider) => {
@@ -146,7 +151,7 @@ export default function PlatformIntegrationsPage() {
   return (
     <PlatformShell
       title="Integrations, API & Support"
-      subtitle="Encrypted provider credentials, durable background jobs, API keys, webhooks, AI support, email, payments, tax adapters and the platform help desk."
+      subtitle="Encrypted provider credentials, durable background jobs, API keys, webhooks, AI support, Resend email, payments, tax adapters and the platform help desk."
       actions={<button className="platform-btn" onClick={() => { providers.reload(); jobs.reload(); summary.reload(); }}>Refresh</button>}
     >
       {summary.error ? <ErrorState error={summary.error} retry={summary.reload} /> : null}
@@ -157,10 +162,12 @@ export default function PlatformIntegrationsPage() {
         <MetricCard label="Configured providers" value={providers.data?.items?.filter((item) => item.status !== "NOT_CONFIGURED").length ?? 0} />
       </section>
 
+      <ResendEmailConfigPanel />
+
       <section className="platform-two">
         <div className="platform-card">
-          <h2>Provider registry</h2>
-          <p>Use a tenant ID only for an override. Leave it blank to configure the platform default.</p>
+          <h2>Non-email provider registry</h2>
+          <p>Outbound email is configured only through the Resend panel. Use a tenant ID here only for other provider overrides.</p>
           <div className="platform-form" style={{ gridTemplateColumns: "1fr auto", marginBottom: 12 }}>
             <input
               placeholder="Tenant ID for optional override"
@@ -170,11 +177,11 @@ export default function PlatformIntegrationsPage() {
             <button className="platform-btn" onClick={providers.reload}>Load scope</button>
           </div>
           {providers.error ? <ErrorState error={providers.error} retry={providers.reload} /> : null}
-          {providers.data?.items?.length ? (
+          {nonEmailProviders.length ? (
             <DataTable>
               <thead><tr><th>Provider</th><th>Category</th><th>Status</th><th>Health</th><th /></tr></thead>
               <tbody>
-                {providers.data.items.map((item) => (
+                {nonEmailProviders.map((item) => (
                   <tr key={`${item.provider}:${item.tenant_id ?? "platform"}`}>
                     <td><strong>{item.display_name}</strong><br /><small>{item.provider}</small></td>
                     <td>{item.category}</td>
@@ -185,7 +192,7 @@ export default function PlatformIntegrationsPage() {
                 ))}
               </tbody>
             </DataTable>
-          ) : <EmptyState label="No provider definitions were returned." />}
+          ) : <EmptyState label="No non-email provider definitions were returned." />}
         </div>
 
         <div className="platform-card">
@@ -216,7 +223,7 @@ export default function PlatformIntegrationsPage() {
               </div>
               <small>Secrets are encrypted on the backend and are never loaded back into this form.</small>
             </>
-          ) : <EmptyState label="Select a provider to configure." />}
+          ) : <EmptyState label="Select a non-email provider to configure." />}
         </div>
       </section>
 
