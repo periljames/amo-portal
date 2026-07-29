@@ -34,9 +34,12 @@ class HrActionItem(HrSchema):
 
 class HrPersonReadiness(HrSchema):
     user_id: str
-    contract_id: str
+    contract_id: Optional[str] = None
     staff_code: str
     full_name: str
+    email: Optional[str] = None
+    has_effective_contract: bool = False
+    uses_default_day_pattern: bool = False
     position_title: Optional[str] = None
     department_code: Optional[str] = None
     employment_status: Optional[str] = None
@@ -110,6 +113,7 @@ class HrOvertimeDecisionRequest(HrSchema):
 class HrDashboardResponse(HrSchema):
     generated_at: datetime
     can_manage_contracts: bool
+    can_initialize_default_day_pattern: bool = False
     can_manage_leave_balances: bool
     can_review_leave: bool
     can_approve_leave: bool
@@ -119,6 +123,7 @@ class HrDashboardResponse(HrSchema):
     can_approve_overtime_hr: bool
     can_export_payroll: bool
     active_employee_count: int
+    employees_without_contract_count: int = 0
     onboarding_employee_count: int
     suspended_employee_count: int
     contracts_expiring_soon_count: int
@@ -133,3 +138,11 @@ class HrDashboardResponse(HrSchema):
     pending_overtime: list[HrOvertimeRequestRead]
     attendance_exceptions: list[HrAttendanceExceptionRead] = Field(default_factory=list)
     people: list[HrPersonReadiness]
+
+class HrDefaultDayBootstrapResponse(HrSchema):
+    shift_template_id: str
+    work_pattern_id: str
+    eligible_user_count: int
+    assigned_user_count: int
+    already_assigned_count: int
+    skipped_conflict_count: int

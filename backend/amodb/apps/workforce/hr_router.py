@@ -40,7 +40,7 @@ def hr_dashboard(
         user=current_user,
         permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
     )
-    return hr_service.dashboard(
+    return hr_service.dashboard_v2(
         db,
         amo_id=_amo(current_user),
         current_user=current_user,
@@ -61,13 +61,35 @@ def hr_people(
         user=current_user,
         permission=permissions.PermissionCode.WORKFORCE_VIEW_SENSITIVE,
     )
-    return hr_service.list_people_page(
+    return hr_service.list_people_page_v2(
         db,
         amo_id=_amo(current_user),
         page=page,
         page_size=page_size,
         search=search,
     )
+
+
+@router.post("/default-day-pattern", response_model=hr_schemas.HrDefaultDayBootstrapResponse)
+def hr_bootstrap_default_day_pattern(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    for permission in (
+        permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS,
+        permissions.PermissionCode.ROSTER_MANAGE_PATTERNS,
+        permissions.PermissionCode.ROSTER_MANAGE_SHIFT_TEMPLATES,
+    ):
+        permissions.require_permission(db, user=current_user, permission=permission)
+    try:
+        result = hr_service.bootstrap_default_day_pattern(
+            db, amo_id=_amo(current_user), actor_user_id=current_user.id
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise _error(str(exc), code="HR_DEFAULT_DAY_PATTERN_INVALID") from exc
 
 
 @router.get("/work-patterns", response_model=list[schemas.WorkPatternRead])

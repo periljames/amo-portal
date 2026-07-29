@@ -21,9 +21,12 @@ export type HrActionItem = {
 
 export type HrPersonReadiness = {
   user_id: string;
-  contract_id: string;
+  contract_id?: string | null;
   staff_code: string;
   full_name: string;
+  email?: string | null;
+  has_effective_contract: boolean;
+  uses_default_day_pattern: boolean;
   position_title?: string | null;
   department_code?: string | null;
   employment_status?: string | null;
@@ -91,6 +94,7 @@ export type HrAttendanceException = {
 export type HrDashboard = {
   generated_at: string;
   can_manage_contracts: boolean;
+  can_initialize_default_day_pattern: boolean;
   can_manage_leave_balances: boolean;
   can_review_leave: boolean;
   can_approve_leave: boolean;
@@ -100,6 +104,7 @@ export type HrDashboard = {
   can_approve_overtime_hr: boolean;
   can_export_payroll: boolean;
   active_employee_count: number;
+  employees_without_contract_count: number;
   onboarding_employee_count: number;
   suspended_employee_count: number;
   contracts_expiring_soon_count: number;
@@ -114,4 +119,13 @@ export type HrDashboard = {
   pending_overtime: HrOvertimeRequest[];
   attendance_exceptions: HrAttendanceException[];
   people: HrPersonReadiness[];
+};
+
+export type HrDefaultDayBootstrap = {
+  shift_template_id: string;
+  work_pattern_id: string;
+  eligible_user_count: number;
+  assigned_user_count: number;
+  already_assigned_count: number;
+  skipped_conflict_count: number;
 };

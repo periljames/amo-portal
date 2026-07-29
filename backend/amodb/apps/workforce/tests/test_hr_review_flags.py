@@ -32,3 +32,20 @@ def test_overtime_workflow_is_listable_creatable_and_actionable():
     assert "OvertimeApproval" in service_source
     assert "SUPERVISOR_APPROVED" in service_source
     assert "HR_APPROVED" in service_source
+
+def test_hr_people_register_starts_from_active_tenant_users():
+    source = inspect.getsource(hr_service._active_tenant_users)
+    assert "User.is_active.is_(True)" in source
+    assert "User.is_system_account.is_(False)" in source
+    people_source = inspect.getsource(hr_service.list_people_page_v2)
+    assert "_active_tenant_users" in people_source
+    assert "_current_contracts_by_user" in people_source
+    assert "contract=contracts.get" in people_source
+
+
+def test_default_day_bootstrap_is_explicit_and_canonical():
+    source = inspect.getsource(hr_service.bootstrap_default_day_pattern)
+    assert 'code="DEFAULT-DAY"' in source
+    assert 'code="DEFAULT-DAY-5X2"' in source
+    assert "EmployeeWorkPatternAssignment" in source
+    assert "with_for_update" in source

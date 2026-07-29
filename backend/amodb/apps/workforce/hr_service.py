@@ -766,3 +766,408 @@ def dashboard(
         ],
         people=people,
     )
+
+def _active_tenant_users(db: Session, *, amo_id: str) -> list[account_models.User]:
+    """Return every active human tenant account, regardless of HR completeness."""
+    return db.query(account_models.User).options(
+        joinedload(account_models.User.department),
+    ).filter(
+        account_models.User.amo_id == amo_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    ).order_by(
+        account_models.User.full_name.asc(),
+        account_models.User.staff_code.asc(),
+        account_models.User.id.asc(),
+    ).all()
+
+
+def _current_contracts_by_user(
+    db: Session,
+    *,
+    amo_id: str,
+    on_date: date,
+) -> dict[str, models.EmploymentContract]:
+    result: dict[str, models.EmploymentContract] = {}
+    for row in _active_contracts(db, amo_id=amo_id, on_date=on_date):
+        result.setdefault(str(row.user_id), row)
+    return result
+
+
+def _person_readiness_for_user(
+    user: account_models.User,
+    *,
+    contract: Optional[models.EmploymentContract],
+    pattern: Optional[models.EmployeeWorkPatternAssignment],
+    leave: Optional[models.LeaveRequest],
+) -> hr_schemas.HrPersonReadiness:
+    reasons: list[str] = []
+    status_value = _value(contract.employment_status) if contract else None
+    if contract is None:
+        reasons.append("No effective employment contract exists.")
+    else:
+        if status_value != models.EmploymentStatus.ACTIVE.value:
+            reasons.append(f"Employment status is {status_value.replace('_', ' ').lower()}.")
+        if not contract.primary_base_station_id:
+            reasons.append("No primary base is assigned.")
+
+    work_pattern = pattern.work_pattern if pattern else None
+    if not work_pattern or not work_pattern.is_active:
+        reasons.append("No active work pattern is assigned.")
+    if leave and _value(leave.status) == models.LeaveRequestStatus.HR_APPROVED.value:
+        reasons.append("Employee is currently on approved leave.")
+
+    if status_value == models.EmploymentStatus.SUSPENDED.value:
+        state = "BLOCKED"
+    elif reasons:
+        state = "NEEDS_ATTENTION"
+    else:
+        state = "READY"
+
+    return hr_schemas.HrPersonReadiness(
+        user_id=str(user.id),
+        contract_id=contract.id if contract else None,
+        staff_code=str(getattr(user, "staff_code", "") or ""),
+        full_name=_display_name(user) or str(user.id),
+        email=getattr(user, "email", None),
+        has_effective_contract=contract is not None,
+        uses_default_day_pattern=bool(work_pattern and work_pattern.code == "DEFAULT-DAY-5X2"),
+        position_title=getattr(user, "position_title", None),
+        department_code=_department_code(user),
+        employment_status=status_value,
+        contract_type=_value(contract.contract_type) if contract else None,
+        contract_effective_from=contract.effective_from if contract else None,
+        contract_effective_to=contract.effective_to if contract else None,
+        primary_base_station_id=contract.primary_base_station_id if contract else None,
+        primary_base_code=getattr(contract.primary_base, "code", None) if contract else None,
+        supervisor_name=_display_name(contract.supervisor) if contract else None,
+        standard_weekly_minutes=contract.standard_weekly_minutes if contract else 2400,
+        standard_daily_minutes=contract.standard_daily_minutes if contract else 480,
+        fte_percentage=float(contract.fte_percentage) if contract else 100.0,
+        cost_centre=contract.cost_centre if contract else None,
+        payroll_number=contract.payroll_number if contract else None,
+        overtime_eligible=contract.overtime_eligible if contract else True,
+        night_shift_eligible=contract.night_shift_eligible if contract else True,
+        standby_eligible=contract.standby_eligible if contract else True,
+        work_pattern_code=getattr(work_pattern, "code", None),
+        work_pattern_name=getattr(work_pattern, "name", None),
+        work_pattern_effective_from=pattern.effective_from if pattern else None,
+        active_leave_status=_value(leave.status) if leave else None,
+        readiness_state=state,
+        readiness_reasons=reasons,
+    )
+
+
+def list_people_page_v2(
+    db: Session,
+    *,
+    amo_id: str,
+    page: int = 1,
+    page_size: int = 100,
+    search: Optional[str] = None,
+) -> hr_schemas.HrPeoplePage:
+    today = date.today()
+    now = _utcnow()
+    users = _active_tenant_users(db, amo_id=amo_id)
+    user_ids = [str(user.id) for user in users]
+    contracts = _current_contracts_by_user(db, amo_id=amo_id, on_date=today)
+    patterns = _effective_patterns(db, amo_id=amo_id, user_ids=user_ids, on_date=today)
+    leave_by_user = _active_leave(db, amo_id=amo_id, user_ids=user_ids, now=now)
+    items = [
+        _person_readiness_for_user(
+            user,
+            contract=contracts.get(str(user.id)),
+            pattern=patterns.get(str(user.id)),
+            leave=leave_by_user.get(str(user.id)),
+        )
+        for user in users
+    ]
+    needle = str(search or "").strip().lower()
+    if needle:
+        items = [
+            item for item in items
+            if any(
+                needle in str(value or "").lower()
+                for value in (
+                    item.full_name,
+                    item.email,
+                    item.staff_code,
+                    item.position_title,
+                    item.department_code,
+                    item.primary_base_code,
+                    item.payroll_number,
+                )
+            )
+        ]
+    items.sort(key=lambda item: (
+        item.has_effective_contract,
+        item.readiness_state == "READY",
+        item.full_name.lower(),
+        item.user_id,
+    ))
+    total = len(items)
+    safe_page_size = max(1, min(int(page_size), 200))
+    pages = (total + safe_page_size - 1) // safe_page_size if total else 0
+    safe_page = max(1, int(page))
+    start = (safe_page - 1) * safe_page_size
+    return hr_schemas.HrPeoplePage(
+        items=items[start:start + safe_page_size],
+        page=safe_page,
+        page_size=safe_page_size,
+        total=total,
+        pages=pages,
+    )
+
+
+def dashboard_v2(
+    db: Session,
+    *,
+    amo_id: str,
+    current_user: account_models.User,
+    people_limit: int = 200,
+) -> hr_schemas.HrDashboardResponse:
+    response = dashboard(
+        db,
+        amo_id=amo_id,
+        current_user=current_user,
+        people_limit=people_limit,
+    )
+    today = date.today()
+    now = _utcnow()
+    users = _active_tenant_users(db, amo_id=amo_id)
+    user_ids = [str(user.id) for user in users]
+    contracts = _current_contracts_by_user(db, amo_id=amo_id, on_date=today)
+    patterns = _effective_patterns(db, amo_id=amo_id, user_ids=user_ids, on_date=today)
+    leave_by_user = _active_leave(db, amo_id=amo_id, user_ids=user_ids, now=now)
+    people = [
+        _person_readiness_for_user(
+            user,
+            contract=contracts.get(str(user.id)),
+            pattern=patterns.get(str(user.id)),
+            leave=leave_by_user.get(str(user.id)),
+        )
+        for user in users
+    ]
+    people.sort(key=lambda item: (
+        item.has_effective_contract,
+        item.readiness_state == "READY",
+        item.full_name.lower(),
+        item.user_id,
+    ))
+    without_contract = [user for user in users if str(user.id) not in contracts]
+    without_pattern = [user for user in users if str(user.id) not in patterns]
+    without_base = [
+        user for user in users
+        if (contract := contracts.get(str(user.id))) is not None and not contract.primary_base_station_id
+    ]
+
+    response.active_employee_count = len(users)
+    response.employees_without_contract_count = len(without_contract)
+    response.onboarding_employee_count = sum(
+        1 for contract in contracts.values()
+        if _value(contract.employment_status) == models.EmploymentStatus.ONBOARDING.value
+    )
+    response.suspended_employee_count = sum(
+        1 for contract in contracts.values()
+        if _value(contract.employment_status) == models.EmploymentStatus.SUSPENDED.value
+    )
+    response.employees_without_pattern_count = len(without_pattern)
+    response.employees_without_base_count = len(without_base)
+    response.people = people[:people_limit]
+    response.can_initialize_default_day_pattern = all((
+        permissions.has_permission(
+            db,
+            user=current_user,
+            permission=permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS,
+        ),
+        permissions.has_permission(
+            db,
+            user=current_user,
+            permission=permissions.PermissionCode.ROSTER_MANAGE_PATTERNS,
+        ),
+        permissions.has_permission(
+            db,
+            user=current_user,
+            permission=permissions.PermissionCode.ROSTER_MANAGE_SHIFT_TEMPLATES,
+        ),
+    ))
+
+    metric_by_key = {metric.key: metric for metric in response.metrics}
+    if "active" in metric_by_key:
+        metric_by_key["active"].value = len(users)
+        metric_by_key["active"].detail = "Active tenant user accounts"
+    if "patterns" in metric_by_key:
+        metric_by_key["patterns"].value = len(without_pattern)
+        metric_by_key["patterns"].detail = "Active users without a current pattern"
+        metric_by_key["patterns"].tone = "danger" if without_pattern else "good"
+    response.metrics.insert(1, hr_schemas.HrMetric(
+        key="contract_gaps",
+        label="Contract gaps",
+        value=len(without_contract),
+        detail="Active users without an effective contract",
+        tone="danger" if without_contract else "good",
+    ))
+
+    missing_contract_actions = [
+        hr_schemas.HrActionItem(
+            id=f"contract-missing:{user.id}",
+            category="CONTRACT",
+            severity="BLOCKER",
+            title="Employment contract missing",
+            detail="This active tenant user cannot be rostered until an effective Workforce contract is created.",
+            user_id=str(user.id),
+            user_name=_display_name(user),
+            action_label="Create contract",
+            action_path=f"people/{user.id}?section=contract",
+        )
+        for user in without_contract[:50]
+    ]
+    response.action_queue = (missing_contract_actions + list(response.action_queue))[:100]
+    return response
+
+
+def bootstrap_default_day_pattern(
+    db: Session,
+    *,
+    amo_id: str,
+    actor_user_id: str,
+) -> hr_schemas.HrDefaultDayBootstrapResponse:
+    """Create one controlled day-shift baseline and assign it only where safe."""
+    from ..rostering import models as roster_models
+
+    amo = db.query(account_models.AMO).filter(
+        account_models.AMO.id == amo_id,
+    ).with_for_update().one()
+    today = date.today()
+    timezone_name = str(amo.time_zone or "UTC")
+
+    shift = db.query(roster_models.ShiftTemplate).filter(
+        roster_models.ShiftTemplate.amo_id == amo_id,
+        roster_models.ShiftTemplate.code == "DEFAULT-DAY",
+    ).first()
+    if shift is None:
+        shift = roster_models.ShiftTemplate(
+            amo_id=amo_id,
+            code="DEFAULT-DAY",
+            label="Default day shift",
+            kind=roster_models.ShiftTemplateKind.DAY,
+            default_start_time="08:00",
+            default_end_time="17:00",
+            duration_minutes=480,
+            counts_as_duty=True,
+            is_active=True,
+            display_order=10,
+            description="System baseline for active staff without an assigned work pattern; planner review remains required.",
+            icon_name="Sun",
+            created_by_user_id=actor_user_id,
+            updated_by_user_id=actor_user_id,
+        )
+        db.add(shift)
+        db.flush()
+    elif not shift.is_active:
+        shift.is_active = True
+        shift.updated_by_user_id = actor_user_id
+        db.add(shift)
+
+    pattern = db.query(models.WorkPattern).options(
+        joinedload(models.WorkPattern.days),
+    ).filter(
+        models.WorkPattern.amo_id == amo_id,
+        models.WorkPattern.code == "DEFAULT-DAY-5X2",
+    ).first()
+    if pattern is None:
+        pattern = models.WorkPattern(
+            amo_id=amo_id,
+            code="DEFAULT-DAY-5X2",
+            name="Default day shift · Monday to Friday",
+            description="Five default day duties followed by two days off. This is a visible baseline, not a published roster.",
+            cycle_length_days=7,
+            is_active=True,
+            timezone_name=timezone_name,
+            created_by_user_id=actor_user_id,
+            updated_by_user_id=actor_user_id,
+        )
+        db.add(pattern)
+        db.flush()
+        for day_index in range(7):
+            duty = day_index < 5
+            db.add(models.WorkPatternDay(
+                amo_id=amo_id,
+                work_pattern_id=pattern.id,
+                cycle_day_index=day_index,
+                shift_template_id=shift.id if duty else None,
+                status=models.PatternDayStatus.DUTY if duty else models.PatternDayStatus.OFF,
+                start_time_local="08:00" if duty else None,
+                end_time_local="17:00" if duty else None,
+                spans_next_day=False,
+                planned_minutes=480 if duty else 0,
+            ))
+    else:
+        if not pattern.is_active:
+            pattern.is_active = True
+        pattern.updated_by_user_id = actor_user_id
+        db.add(pattern)
+
+    users = _active_tenant_users(db, amo_id=amo_id)
+    contracts = _current_contracts_by_user(db, amo_id=amo_id, on_date=today)
+    eligible_users = [
+        user for user in users
+        if (contract := contracts.get(str(user.id))) is not None
+        and _value(contract.employment_status) in {
+            models.EmploymentStatus.ACTIVE.value,
+            models.EmploymentStatus.ONBOARDING.value,
+        }
+    ]
+    current_rows = db.query(models.EmployeeWorkPatternAssignment).options(
+        joinedload(models.EmployeeWorkPatternAssignment.work_pattern),
+    ).filter(
+        models.EmployeeWorkPatternAssignment.amo_id == amo_id,
+        models.EmployeeWorkPatternAssignment.user_id.in_([str(user.id) for user in eligible_users] or ["__none__"]),
+        models.EmployeeWorkPatternAssignment.effective_from <= today,
+        or_(
+            models.EmployeeWorkPatternAssignment.effective_to.is_(None),
+            models.EmployeeWorkPatternAssignment.effective_to >= today,
+        ),
+    ).all()
+    occupied = {str(row.user_id): row for row in current_rows}
+
+    assigned = 0
+    already_assigned = 0
+    skipped_conflict = 0
+    for user in eligible_users:
+        current = occupied.get(str(user.id))
+        if current is not None:
+            if current.work_pattern and current.work_pattern.is_active:
+                already_assigned += 1
+            else:
+                skipped_conflict += 1
+            continue
+        future = db.query(models.EmployeeWorkPatternAssignment).filter(
+            models.EmployeeWorkPatternAssignment.amo_id == amo_id,
+            models.EmployeeWorkPatternAssignment.user_id == user.id,
+            models.EmployeeWorkPatternAssignment.effective_from > today,
+        ).order_by(models.EmployeeWorkPatternAssignment.effective_from.asc()).first()
+        effective_to = future.effective_from - timedelta(days=1) if future else None
+        if effective_to is not None and effective_to < today:
+            skipped_conflict += 1
+            continue
+        db.add(models.EmployeeWorkPatternAssignment(
+            amo_id=amo_id,
+            user_id=user.id,
+            work_pattern_id=pattern.id,
+            effective_from=today,
+            effective_to=effective_to,
+            cycle_anchor_date=today,
+            created_by_user_id=actor_user_id,
+        ))
+        assigned += 1
+
+    db.flush()
+    return hr_schemas.HrDefaultDayBootstrapResponse(
+        shift_template_id=shift.id,
+        work_pattern_id=pattern.id,
+        eligible_user_count=len(eligible_users),
+        assigned_user_count=assigned,
+        already_assigned_count=already_assigned,
+        skipped_conflict_count=skipped_conflict,
+    )
