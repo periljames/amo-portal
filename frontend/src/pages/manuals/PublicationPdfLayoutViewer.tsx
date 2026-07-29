@@ -165,6 +165,7 @@ export default function PublicationPdfLayoutViewer({
   const onZoomChangeRef = useRef(onZoomChange);
   const onAcroFormDetectedRef = useRef(onAcroFormDetected);
   const onOutlineReadyRef = useRef(onOutlineReady);
+  const initialPageRef = useRef(initialPage);
   const inspectionGenerationRef = useRef(0);
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
@@ -183,15 +184,19 @@ export default function PublicationPdfLayoutViewer({
   const allReferences = references.length ? references : automaticReferences;
   const effectiveActiveReferenceId = activeReferenceId || selectedReferenceId;
 
+  useEffect(() => { initialPageRef.current = initialPage; }, [initialPage]);
+
+  // Only an actual source replacement may discard the loaded page list. A
+  // background progress refresh updates initialPage without reloading the PDF.
   useEffect(() => {
     inspectionGenerationRef.current += 1;
     setPageCount(0);
-    setCurrentPage(Math.max(1, initialPage));
+    setCurrentPage(1);
     setPageRatios({});
     setLoadError("");
     setHasAcroForm(false);
     onAcroFormDetectedRef.current?.(false);
-  }, [fileUrl, initialPage]);
+  }, [fileUrl]);
 
   useEffect(() => {
     if (!identity || references.length) return;
@@ -314,9 +319,14 @@ export default function PublicationPdfLayoutViewer({
     jumpToPage(navigationRequest.page);
   }, [jumpToPage, navigationRequest, pageCount]);
 
+  useEffect(() => {
+    if (!pageCount) return;
+    jumpToPage(initialPage || 1, "auto");
+  }, [initialPage, jumpToPage, pageCount]);
+
   const handleDocumentLoadSuccess = useCallback((documentProxy: any) => {
     const nextPageCount = Math.max(1, Number(documentProxy?.numPages || 1));
-    const restoredPage = clamp(initialPage || 1, 1, nextPageCount);
+    const restoredPage = clamp(initialPageRef.current || 1, 1, nextPageCount);
     setPageCount(nextPageCount);
     setCurrentPage(restoredPage);
     setLoadError("");
@@ -346,7 +356,7 @@ export default function PublicationPdfLayoutViewer({
         onAcroFormDetectedRef.current?.(false);
       }
     });
-  }, [initialPage]);
+  }, []);
 
   const handleDocumentLoadError = useCallback((caught: unknown) => {
     inspectionGenerationRef.current += 1;
