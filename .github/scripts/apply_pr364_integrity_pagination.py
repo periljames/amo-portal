@@ -46,7 +46,7 @@ if "WorkPattern.is_active.is_(True)" not in pattern_section:
     if query_anchor not in pattern_section:
         raise RuntimeError("Pattern readiness query start not found")
     pattern_section = pattern_section.replace(query_anchor, joined_query, 1)
-    amo_anchor = "        workforce_models.EmployeeWorkPatternAssignment.amo_id == amo_id,\n"
+    amo_anchor = "        workforce_models.EmployeeWorkPatternAssignment.amo_id == amo_id,\\n"
     active_filter = ''' + "'''" + '''        workforce_models.EmployeeWorkPatternAssignment.amo_id == amo_id,
         workforce_models.WorkPattern.amo_id == amo_id,
         workforce_models.WorkPattern.is_active.is_(True),
