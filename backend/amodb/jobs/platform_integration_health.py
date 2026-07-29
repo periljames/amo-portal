@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import time
+
+from sqlalchemy import text
 
 from amodb.database import WriteSessionLocal
 from amodb.apps.platform import models, saas_models, saas_providers, saas_services, services
@@ -19,6 +22,22 @@ DEFAULT_PROVIDERS = [
 
 def _elapsed_ms(started: float) -> int:
     return max(0, int(round((time.perf_counter() - started) * 1000)))
+
+
+def _acquire_health_lock(db) -> bool:
+    """Allow one worker replica to run the periodic provider probe."""
+
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return True
+    digest = hashlib.sha256(b"amo-portal:platform-integration-health").digest()
+    lock_key = int.from_bytes(digest[:8], byteorder="big", signed=False) & 0x7FFF_FFFF_FFFF_FFFF
+    return bool(
+        db.execute(
+            text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
+            {"lock_key": lock_key},
+        ).scalar()
+    )
 
 
 def _check_resend_credentials(db) -> dict[str, int]:
@@ -59,6 +78,9 @@ def run_once() -> dict:
     db = WriteSessionLocal()
     updated = 0
     try:
+        if not _acquire_health_lock(db):
+            db.rollback()
+            return {"skipped": True, "reason": "another worker owns the health-check lock"}
         for provider, display_name in DEFAULT_PROVIDERS:
             row = db.query(models.PlatformIntegrationProvider).filter(models.PlatformIntegrationProvider.provider == provider).first()
             if not row:
